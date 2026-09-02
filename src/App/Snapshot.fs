@@ -61,6 +61,12 @@ let private buildPlacement (spawn: ISpawn) : PlacementInfo =
 
 let private posOf (p: IRoomPosition) : Pos = { X = p.x; Y = p.y }
 
+/// Classify an engine STRUCTURE_* string into the Core's built kinds.
+let private builtKindOf structureType =
+    if structureType = structureSpawn then BuiltKind.Spawn
+    elif structureType = structureExtension then BuiltKind.Extension
+    else BuiltKind.Other
+
 let private buildSpatial (spawn: ISpawn) : SpatialInfo =
     let room = spawn.room
     let terrain = Game.map.getRoomTerrain room.name
@@ -97,6 +103,7 @@ let private buildSpatial (spawn: ISpawn) : SpatialInfo =
     let walkableStructures = [ structureRoad; structureContainer; structureRampart ]
 
     {
+        RoomName = Some room.name
         Terrain = tiles
         TargetPositions =
             Map.ofArray (
@@ -106,6 +113,20 @@ let private buildSpatial (spawn: ISpawn) : SpatialInfo =
                         structures |> Array.map (fun st -> st.id, posOf st.pos)
                         sites |> Array.map (fun site -> site.id, posOf site.pos)
                         controllers |> Array.map (fun c -> c.id, posOf c.pos)
+                    ]
+            )
+        // Same array order as TargetPositions, so a controller that also
+        // travels through FIND_STRUCTURES resolves to Controller both times.
+        TargetKinds =
+            Map.ofArray (
+                Array.concat
+                    [
+                        sources |> Array.map (fun s -> s.id, Source)
+                        structures
+                        |> Array.map (fun st -> st.id, Structure(builtKindOf st.structureType))
+                        sites
+                        |> Array.map (fun site -> site.id, Site(builtKindOf site.structureType))
+                        controllers |> Array.map (fun c -> c.id, Controller)
                     ]
             )
         CreepPositions =
@@ -143,6 +164,7 @@ let build () : Snapshot =
             |> Array.map (fun s ->
                 {
                     Name = s.name
+                    Id = s.id
                     EnergyAvailable = s.room.energyAvailable
                     EnergyCapacity = s.room.energyCapacityAvailable
                     IsSpawning = not (isNull s.spawning)

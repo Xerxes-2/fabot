@@ -159,6 +159,95 @@ let standingTests =
             }
         ]
 
+[<Tests>]
+let placementQueryTests =
+    testList
+        "atlas placement queries"
+        [
+            test "roomName passes the projection's room through, absent when empty" {
+                let named =
+                    { SpatialInfo.empty with
+                        RoomName = Some "W1N1"
+                    }
+                    |> snapshotWith []
+                    |> ofSnapshot
+
+                Expect.equal (roomName named) (Some "W1N1") "the projection names its room"
+
+                let bare = SpatialInfo.empty |> snapshotWith [] |> ofSnapshot
+                Expect.equal (roomName bare) None "an empty projection covers no room"
+            }
+
+            test "positionOf finds a projected target and misses an absent one" {
+                let atlas =
+                    spatial [ "spawn-1", { X = 25; Y = 25 } ] [] |> snapshotWith [] |> ofSnapshot
+
+                Expect.equal
+                    (positionOf atlas "spawn-1")
+                    (Some { X = 25; Y = 25 })
+                    "a projected target has a tile"
+
+                Expect.equal (positionOf atlas "ghost") None "an unprojected target has none"
+            }
+
+            test "buildableTiles excludes walls and every target's tile, in (X, Y) order" {
+                // Plain and swamp qualify; the wall, the structure's tile and
+                // the site's tile do not; a creep does not block placement.
+                let atlas =
+                    { spatial
+                          [ "ext-1", { X = 10; Y = 11 }; "site-1", { X = 11; Y = 10 } ]
+                          [
+                              { X = 10; Y = 10 }, Plain
+                              { X = 10; Y = 11 }, Plain
+                              { X = 11; Y = 10 }, Plain
+                              { X = 11; Y = 11 }, Swamp
+                              { X = 12; Y = 10 }, Wall
+                          ] with
+                        TargetKinds =
+                            Map.ofList
+                                [
+                                    "ext-1", Structure BuiltKind.Extension
+                                    "site-1", Site BuiltKind.Extension
+                                ]
+                        CreepPositions = Map.ofList [ "w", { X = 10; Y = 10 } ]
+                    }
+                    |> snapshotWith [ worker "w" ]
+                    |> ofSnapshot
+
+                Expect.equal
+                    (buildableTiles atlas)
+                    [ { X = 10; Y = 10 }; { X = 11; Y = 11 } ]
+                    "free plain and swamp tiles only, sorted by (X, Y)"
+            }
+
+            test "extension censuses count exactly the built and pending extensions" {
+                let atlas =
+                    { SpatialInfo.empty with
+                        TargetKinds =
+                            Map.ofList
+                                [
+                                    "spawn-1", Structure BuiltKind.Spawn
+                                    "ext-1", Structure BuiltKind.Extension
+                                    "ext-2", Structure BuiltKind.Extension
+                                    "road-1", Structure BuiltKind.Other
+                                    "site-1", Site BuiltKind.Extension
+                                    "site-2", Site BuiltKind.Other
+                                    "src-a", Source
+                                    "ctrl-1", Controller
+                                ]
+                    }
+                    |> snapshotWith []
+                    |> ofSnapshot
+
+                Expect.equal (builtExtensions atlas) 2 "only standing extensions are built"
+
+                Expect.equal
+                    (pendingExtensions atlas)
+                    1
+                    "only sites that will become extensions are pending"
+            }
+        ]
+
 /// Source at (10,12) on a wall; its Work Area is a swamp Seat at (10,13)
 /// and a plain Seat at (11,13). A plain lane runs down to (10,15).
 let corridor creeps =

@@ -10,6 +10,9 @@ type BodyPart =
 type SpawnInfo =
     {
         Name: string
+        /// Game-object id of the spawn structure — the key that locates
+        /// this spawn in the spatial projection's target maps.
+        Id: string
         /// Energy available for spawning in the spawn's room (spawn + extensions).
         EnergyAvailable: int
         /// Spawn-energy capacity of the room (spawn + built extensions).
@@ -62,16 +65,38 @@ type Terrain =
     | Swamp
     | Wall
 
+/// What a built structure is — or what a construction site will become
+/// once built. Projection vocabulary, distinct from the Intent vocabulary
+/// of placeable kinds (StructureKind).
+[<RequireQualifiedAccess>]
+type BuiltKind =
+    | Spawn
+    | Extension
+    /// Any structure kind the decision layer has no rules for yet.
+    | Other
+
+/// What kind of thing a projected target is.
+type TargetKind =
+    | Source
+    | Controller
+    | Structure of BuiltKind
+    | Site of BuiltKind
+
 /// The Snapshot's spatial projection: the spawn room's terrain plus
 /// positions of the entities decisions need to place on it.
 type SpatialInfo =
     {
+        /// Name of the room the projection covers. None when the
+        /// projection is empty — absence is per-entry (ADR 0004).
+        RoomName: string option
         /// Terrain per tile; a tile absent from the map lies outside the
         /// projected room and is impassable.
         Terrain: Map<Pos, Terrain>
         /// Task-target id (source, refillable structure, construction site,
         /// controller) -> that target's tile.
         TargetPositions: Map<string, Pos>
+        /// Task-target id -> what kind of thing stands (or will stand) there.
+        TargetKinds: Map<string, TargetKind>
         /// Creep name -> the tile the creep stands on.
         CreepPositions: Map<string, Pos>
         /// Tiles blocked by obstacle structures (spawn, extension,
@@ -81,11 +106,13 @@ type SpatialInfo =
 
 [<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
 module SpatialInfo =
-    /// The empty projection: no tiles, no entities — every entry absent.
+    /// The empty projection: no room, no tiles, no entities — every entry absent.
     let empty =
         {
+            RoomName = None
             Terrain = Map.empty
             TargetPositions = Map.empty
+            TargetKinds = Map.empty
             CreepPositions = Map.empty
             Obstacles = Set.empty
         }

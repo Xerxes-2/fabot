@@ -85,6 +85,7 @@ type IRoom =
 
 type ISpawn =
     abstract name: string
+    abstract id: string
     /// Null when the spawn is idle.
     abstract spawning: obj
     abstract room: IRoom

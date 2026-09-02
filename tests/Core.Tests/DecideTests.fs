@@ -8,6 +8,7 @@ open Fabot.Core.Decide
 let spawn energy capacity =
     {
         Name = "Spawn1"
+        Id = "spawn-1"
         EnergyAvailable = energy
         EnergyCapacity = capacity
         IsSpawning = false
@@ -335,11 +336,9 @@ let placementTests =
 /// positions; absent tiles are outside the projection (impassable). No
 /// creep positions and no obstacles — movement tests add those on top.
 let spatial targets tiles =
-    {
+    { SpatialInfo.empty with
         Terrain = Map.ofList tiles
         TargetPositions = Map.ofList targets
-        CreepPositions = Map.empty
-        Obstacles = Set.empty
     }
 
 /// The 8 tiles around a position, all Plain: an open-ground source site.

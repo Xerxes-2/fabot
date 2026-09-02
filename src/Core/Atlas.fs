@@ -108,6 +108,42 @@ let private flood (atlas: Atlas) (pos: Pos) =
 /// The creeps the projection places, in Snapshot creep order.
 let placedCreeps (atlas: Atlas) : (string * Pos) list = atlas.Placed
 
+/// Name of the room the projection covers; None when the projection is empty.
+let roomName (atlas: Atlas) : string option = atlas.Spatial.RoomName
+
+/// Tile of a projected target (source, structure, site, controller).
+let positionOf (atlas: Atlas) (targetId: string) : Pos option =
+    Map.tryFind targetId atlas.Spatial.TargetPositions
+
+/// Tiles a construction site may occupy: non-Wall terrain holding no
+/// projected target — anything standing (or being built) on a tile keeps a
+/// site off it; creeps do not. Deterministic (X, Y) order.
+let buildableTiles (atlas: Atlas) : Pos list =
+    let taken =
+        atlas.Spatial.TargetPositions |> Map.toList |> List.map snd |> Set.ofList
+
+    atlas.Spatial.Terrain
+    |> Map.toList
+    |> List.choose (fun (tile, terrain) ->
+        if terrain <> Wall && not (Set.contains tile taken) then
+            Some tile
+        else
+            None)
+
+/// Extensions already standing in the room.
+let builtExtensions (atlas: Atlas) : int =
+    atlas.Spatial.TargetKinds
+    |> Map.toList
+    |> List.filter (fun (_, kind) -> kind = Structure BuiltKind.Extension)
+    |> List.length
+
+/// Extension construction sites already placed in the room.
+let pendingExtensions (atlas: Atlas) : int =
+    atlas.Spatial.TargetKinds
+    |> Map.toList
+    |> List.filter (fun (_, kind) -> kind = Site BuiltKind.Extension)
+    |> List.length
+
 /// Walkable tiles adjacent to `pos`, in deterministic (X, Y) order.
 /// Standing respects obstacles, unlike Seat counting.
 let adjacentWalkable (atlas: Atlas) (pos: Pos) : Pos list =
