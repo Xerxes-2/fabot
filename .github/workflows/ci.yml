@@ -1,0 +1,35 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+  id-token: write # OIDC auth for flakehub-cache-action
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: DeterminateSystems/nix-installer-action@v16
+      - uses: DeterminateSystems/flakehub-cache-action@v2
+
+      - name: Restore dotnet tools
+        run: nix develop -c dotnet tool restore
+
+      - name: Install npm dependencies
+        run: nix develop -c npm ci
+
+      - name: Format check
+        run: nix develop -c npm run format:check
+
+      - name: Test
+        run: nix develop -c dotnet test
+
+      - name: Build bundle
+        run: nix develop -c npm run build

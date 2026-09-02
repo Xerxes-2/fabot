@@ -4,7 +4,19 @@ Screeps seasonal-server bot in F#, compiled to JS via [Fable](https://fable.io).
 
 ## Prerequisites
 
+With Nix (recommended — same toolchain as CI, pinned by `flake.lock`):
+
+- `nix develop` drops you into a shell with .NET SDK 10 and Node.js 22;
+  prefix any command with `nix develop -c` to run it without entering the
+  shell. (A committed `.envrc` enables `direnv` auto-activation if you have
+  direnv + nix-direnv installed.)
+
+Without Nix, install manually:
+
 - .NET SDK 10, Node.js >= 22
+
+Then in either case:
+
 - `dotnet tool restore` (installs Fable)
 - `npm install` (installs esbuild)
 - `cp .env.example .env` and fill in your Screeps auth token
