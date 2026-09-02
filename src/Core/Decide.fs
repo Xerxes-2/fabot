@@ -6,8 +6,8 @@ open Fabot.Core.Types
 /// harvest/refill loop running while one is in transit or being replaced.
 let minWorkforce = 2
 
-/// The MVP worker body and its energy cost.
-let workerBody = [ Work; Carry; Move ]
+/// The repeating unit worker bodies are built from.
+let workerUnit = [ Work; Carry; Move ]
 
 let bodyCost body =
     body
@@ -15,6 +15,12 @@ let bodyCost body =
         | Work -> 100
         | Carry -> 50
         | Move -> 50)
+
+/// Largest affordable repetition of the worker unit within `capacity`,
+/// never below one unit.
+let workerBodyFor capacity =
+    let units = max 1 (capacity / bodyCost workerUnit)
+    List.replicate units workerUnit |> List.concat
 
 /// Stable identity of a Task across ticks; what Assignments point at.
 let taskId =
@@ -47,13 +53,30 @@ let planTasks (snapshot: Snapshot) : Task list =
 let private planSpawns (snapshot: Snapshot) : Intent list =
     let deficit = minWorkforce - List.length snapshot.Creeps
 
+    // Disaster fallback: an empty colony can never refill extensions, so
+    // waiting for full capacity would wait forever — spawn a minimal unit
+    // from whatever energy is banked right now.
+    let bodyFor (s: SpawnInfo) =
+        if List.isEmpty snapshot.Creeps then
+            if s.EnergyAvailable >= bodyCost workerUnit then
+                Some workerUnit
+            else
+                None
+        elif s.EnergyAvailable >= s.EnergyCapacity then
+            Some(workerBodyFor s.EnergyCapacity)
+        else
+            None
+
     if deficit <= 0 then
         []
     else
         snapshot.Spawns
-        |> List.filter (fun s -> not s.IsSpawning && s.EnergyAvailable >= bodyCost workerBody)
+        |> List.filter (fun s -> not s.IsSpawning)
+        |> List.choose (fun s ->
+            bodyFor s
+            |> Option.map (fun body ->
+                SpawnCreep(s.Name, body, $"worker-{snapshot.Time}-{s.Name}")))
         |> List.truncate deficit
-        |> List.map (fun s -> SpawnCreep(s.Name, workerBody, $"worker-{snapshot.Time}-{s.Name}"))
 
 /// Extensions the controller level allows in the room (Screeps
 /// CONTROLLER_STRUCTURES for "extension").

@@ -4,17 +4,19 @@ open Expecto
 open Fabot.Core.Types
 open Fabot.Core.Decide
 
+/// A single idle spawn with the given banked energy and room capacity.
+let spawn energy capacity =
+    {
+        Name = "Spawn1"
+        EnergyAvailable = energy
+        EnergyCapacity = capacity
+        IsSpawning = false
+    }
+
 let bareRespawn =
     {
         Time = 42
-        Spawns =
-            [
-                {
-                    Name = "Spawn1"
-                    EnergyAvailable = 300
-                    IsSpawning = false
-                }
-            ]
+        Spawns = [ spawn 300 300 ]
         Refillables = [ { Id = "spawn-1"; FreeCapacity = 0 } ]
         Sources = [ { Id = "src-a" }; { Id = "src-b" } ]
         Controller = Some { Id = "ctrl-1"; Level = 1 }
@@ -293,14 +295,7 @@ let tests =
             test "no spawn Intent when energy is below a worker body cost" {
                 let snapshot =
                     { bareRespawn with
-                        Spawns =
-                            [
-                                {
-                                    Name = "Spawn1"
-                                    EnergyAvailable = 100
-                                    IsSpawning = false
-                                }
-                            ]
+                        Spawns = [ spawn 100 300 ]
                     }
 
                 let intents, _ = decide snapshot Map.empty
@@ -310,18 +305,84 @@ let tests =
             test "no spawn Intent while the spawn is already spawning" {
                 let snapshot =
                     { bareRespawn with
-                        Spawns =
-                            [
-                                {
-                                    Name = "Spawn1"
-                                    EnergyAvailable = 300
-                                    IsSpawning = true
-                                }
-                            ]
+                        Spawns = [ { spawn 300 300 with IsSpawning = true } ]
                     }
 
                 let intents, _ = decide snapshot Map.empty
                 Expect.isEmpty (spawnIntents intents) "spawn is busy"
+            }
+
+            test "at 550 capacity a 2x-unit body is spawned" {
+                let snapshot =
+                    { bareRespawn with
+                        Spawns = [ spawn 550 550 ]
+                        Creeps = [ worker "worker-1" 0 50 ]
+                    }
+
+                let intents, _ = decide snapshot Map.empty
+
+                match spawnIntents intents with
+                | [ (_, body, _) ] ->
+                    Expect.equal
+                        body
+                        [ Work; Carry; Move; Work; Carry; Move ]
+                        "body doubles at double capacity"
+                | other -> failtest $"expected exactly one SpawnCreep intent, got %A{other}"
+            }
+
+            test "at 300 capacity the 1x-unit body is spawned" {
+                let snapshot =
+                    { bareRespawn with
+                        Creeps = [ worker "worker-1" 0 50 ]
+                    }
+
+                let intents, _ = decide snapshot Map.empty
+
+                match spawnIntents intents with
+                | [ (_, body, _) ] ->
+                    Expect.equal body [ Work; Carry; Move ] "300 capacity affords one unit"
+                | other -> failtest $"expected exactly one SpawnCreep intent, got %A{other}"
+            }
+
+            test "below minimum workforce, spawning waits for full capacity" {
+                let snapshot =
+                    { bareRespawn with
+                        Spawns = [ spawn 400 550 ]
+                        Creeps = [ worker "worker-1" 0 50 ]
+                    }
+
+                let intents, _ = decide snapshot Map.empty
+
+                Expect.isEmpty
+                    (spawnIntents intents)
+                    "a living workforce can bank up to a bigger body"
+            }
+
+            test "with zero creeps a minimal body is spawned from available energy" {
+                let snapshot =
+                    { bareRespawn with
+                        Spawns = [ spawn 250 550 ]
+                    }
+
+                let intents, _ = decide snapshot Map.empty
+
+                match spawnIntents intents with
+                | [ (_, body, _) ] ->
+                    Expect.equal
+                        body
+                        [ Work; Carry; Move ]
+                        "an empty colony cannot wait for extensions it cannot refill"
+                | other -> failtest $"expected exactly one SpawnCreep intent, got %A{other}"
+            }
+
+            test "with zero creeps and unaffordable minimal body, no spawn Intent" {
+                let snapshot =
+                    { bareRespawn with
+                        Spawns = [ spawn 150 550 ]
+                    }
+
+                let intents, _ = decide snapshot Map.empty
+                Expect.isEmpty (spawnIntents intents) "even the fallback needs its unit cost"
             }
 
             test "one worker is below minimum: a second is spawned" {

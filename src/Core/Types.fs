@@ -12,6 +12,8 @@ type SpawnInfo =
         Name: string
         /// Energy available for spawning in the spawn's room (spawn + extensions).
         EnergyAvailable: int
+        /// Spawn-energy capacity of the room (spawn + built extensions).
+        EnergyCapacity: int
         IsSpawning: bool
     }
 

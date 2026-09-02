@@ -62,6 +62,7 @@ let build () : Snapshot =
                 {
                     Name = s.name
                     EnergyAvailable = s.room.energyAvailable
+                    EnergyCapacity = s.room.energyCapacityAvailable
                     IsSpawning = not (isNull s.spawning)
                 })
             |> Array.toList

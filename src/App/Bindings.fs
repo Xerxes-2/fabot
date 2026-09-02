@@ -62,6 +62,8 @@ type IRoom =
     abstract name: string
     /// Energy available for spawning in this room (spawn + extensions).
     abstract energyAvailable: int
+    /// Spawn-energy capacity of this room (spawn + built extensions).
+    abstract energyCapacityAvailable: int
     abstract find: findType: int -> obj[]
     /// Null in rooms without a controller.
     abstract controller: IController
