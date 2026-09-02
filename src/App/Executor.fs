@@ -6,6 +6,13 @@ open Fable.Core.JsInterop
 open Fabot.Bindings
 open Fabot.Core.Types
 
+/// What the engine said about one Intent's replay. Engine result codes are
+/// App vocabulary; Core never reads them.
+type Outcome =
+    | Ok
+    | Failed of code: int
+    | ActorMissing
+
 let private partName =
     function
     | Work -> "work"
@@ -16,59 +23,62 @@ let private structureName =
     function
     | Extension -> structureExtension
 
-let private execute (intent: Intent) =
+let private outcomeOf code = if code = 0 then Ok else Failed code
+
+// The null-guard written once. Actors and targets come from this tick's
+// Snapshot, so a missing one is an upstream bug worth reporting, never a
+// routine skip.
+let private withActor (actor: 'a) (act: 'a -> int) : Outcome =
+    if isNull (box actor) then
+        ActorMissing
+    else
+        outcomeOf (act actor)
+
+let private withCreep (name: string) (act: ICreep -> int) : Outcome =
+    withActor (Game.creeps?(name): ICreep) act
+
+let private withCreepTarget
+    (name: string)
+    (targetId: string)
+    (act: ICreep -> obj -> int)
+    : Outcome =
+    let target = Game.getObjectById targetId
+
+    if isNull target then
+        ActorMissing
+    else
+        withCreep name (fun creep -> act creep target)
+
+let private execute (intent: Intent) : Outcome =
     match intent with
     | SpawnCreep(spawnName, body, creepName) ->
-        let spawn: ISpawn = Game.spawns?(spawnName)
-
-        if not (isNull (box spawn)) then
-            let code = spawn.spawnCreep (body |> List.map partName |> List.toArray, creepName)
-
-            if code <> 0 then
-                JS.console.log ($"spawnCreep {creepName} at {spawnName} failed: {code}")
+        withActor (Game.spawns?(spawnName): ISpawn) (fun spawn ->
+            spawn.spawnCreep (body |> List.map partName |> List.toArray, creepName))
     | PlaceConstructionSite(roomName, pos, kind) ->
-        let room: IRoom = Game.rooms?(roomName)
-
-        if not (isNull (box room)) then
-            let code = room.createConstructionSite (pos.X, pos.Y, structureName kind)
-
-            if code <> 0 then
-                JS.console.log (
-                    $"createConstructionSite {structureName kind} at {roomName} ({pos.X},{pos.Y}) failed: {code}"
-                )
+        withActor (Game.rooms?(roomName): IRoom) (fun room ->
+            room.createConstructionSite (pos.X, pos.Y, structureName kind))
     | HarvestSource(creepName, sourceId) ->
-        let creep: ICreep = Game.creeps?(creepName)
-        let source = Game.getObjectById sourceId
-
-        if not (isNull (box creep)) && not (isNull source) then
-            creep.harvest source |> ignore
+        withCreepTarget creepName sourceId (fun c t -> c.harvest t)
     | TransferEnergyToStructure(creepName, structureId) ->
-        let creep: ICreep = Game.creeps?(creepName)
-        let structure = Game.getObjectById structureId
-
-        if not (isNull (box creep)) && not (isNull structure) then
-            creep.transfer (structure, "energy") |> ignore
-    | BuildSite(creepName, siteId) ->
-        let creep: ICreep = Game.creeps?(creepName)
-        let site = Game.getObjectById siteId
-
-        if not (isNull (box creep)) && not (isNull site) then
-            creep.build site |> ignore
+        withCreepTarget creepName structureId (fun c t -> c.transfer (t, "energy"))
+    | BuildSite(creepName, siteId) -> withCreepTarget creepName siteId (fun c t -> c.build t)
     | UpgradeController(creepName, controllerId) ->
-        let creep: ICreep = Game.creeps?(creepName)
-        let controller = Game.getObjectById controllerId
-
-        if not (isNull (box creep)) && not (isNull controller) then
-            creep.upgradeController controller |> ignore
+        withCreepTarget creepName controllerId (fun c t -> c.upgradeController t)
     | MoveCreep(creepName, direction) ->
-        let creep: ICreep = Game.creeps?(creepName)
+        withCreep creepName (fun c -> c.move (directionCode direction))
+    | SayCreep(creepName, message) -> withCreep creepName (fun c -> c.say message)
 
-        if not (isNull (box creep)) then
-            creep.move (directionCode direction) |> ignore
-    | SayCreep(creepName, message) ->
-        let creep: ICreep = Game.creeps?(creepName)
+/// Replay every Intent and answer back what the engine said. Failures are
+/// logged here, once and uniformly; the outcome list is the seam a future
+/// sim harness reads.
+let run (intents: Intent list) : (Intent * Outcome) list =
+    intents
+    |> List.map (fun intent ->
+        let outcome = execute intent
 
-        if not (isNull (box creep)) then
-            creep.say message |> ignore
+        match outcome with
+        | Ok -> ()
+        | Failed code -> JS.console.log $"%A{intent} failed: {code}"
+        | ActorMissing -> JS.console.log $"%A{intent}: actor or target not found"
 
-let run (intents: Intent list) = intents |> List.iter execute
+        intent, outcome)

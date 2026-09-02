@@ -49,4 +49,5 @@ let loop () =
     // must not discard the tick's anti-thrash state.
     saveAssignments assignments
     pruneDeadCreepMemory ()
-    Executor.run intents
+    // Outcomes go unread here; failures are already logged by the Executor.
+    Executor.run intents |> ignore
