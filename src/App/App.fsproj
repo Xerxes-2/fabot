@@ -5,7 +5,12 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="Bindings.fs" />
+    <Compile Include="Snapshot.fs" />
+    <Compile Include="Executor.fs" />
     <Compile Include="Main.fs" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="../Core/Core.fsproj" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="Fable.Core" Version="4.5.0" />
