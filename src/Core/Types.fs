@@ -8,37 +8,41 @@ type BodyPart =
 
 /// What the decision layer knows about one spawn this tick.
 type SpawnInfo =
-    { Name: string
-      /// Energy available for spawning in the spawn's room (spawn + extensions).
-      EnergyAvailable: int
-      /// Energy the spawn's own store can still take (0 = full).
-      FreeCapacity: int
-      IsSpawning: bool }
+    {
+        Name: string
+        /// Energy available for spawning in the spawn's room (spawn + extensions).
+        EnergyAvailable: int
+        /// Energy the spawn's own store can still take (0 = full).
+        FreeCapacity: int
+        IsSpawning: bool
+    }
 
 /// What the decision layer knows about one energy source this tick.
-type SourceInfo =
-    { Id: string }
+type SourceInfo = { Id: string }
 
 /// What the decision layer knows about the room controller this tick.
-type ControllerInfo =
-    { Id: string }
+type ControllerInfo = { Id: string }
 
 /// What the decision layer knows about one owned creep this tick.
 type CreepInfo =
-    { Name: string
-      /// Energy currently carried.
-      Energy: int
-      /// Carry capacity still free (0 = full).
-      FreeCapacity: int }
+    {
+        Name: string
+        /// Energy currently carried.
+        Energy: int
+        /// Carry capacity still free (0 = full).
+        FreeCapacity: int
+    }
 
 /// Immutable projection of the current tick's game state; only what decisions need.
 type Snapshot =
-    { Time: int
-      Spawns: SpawnInfo list
-      Sources: SourceInfo list
-      /// None when no spawn room has an owned controller (should not happen in practice).
-      Controller: ControllerInfo option
-      Creeps: CreepInfo list }
+    {
+        Time: int
+        Spawns: SpawnInfo list
+        Sources: SourceInfo list
+        /// None when no spawn room has an owned controller (should not happen in practice).
+        Controller: ControllerInfo option
+        Creeps: CreepInfo list
+    }
 
 /// A unit of work in this tick's Task pool; creeps are interchangeable
 /// executors that get matched to Tasks.

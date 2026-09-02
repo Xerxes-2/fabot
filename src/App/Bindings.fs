@@ -63,7 +63,7 @@ let Game: IGame = jsNative
 let Memory: obj = jsNative
 
 [<Emit("Object.values($0)")>]
-let objectValues<'T> (o: obj) : 'T[] = jsNative
+let objectValues<'T> (_o: obj) : 'T[] = jsNative
 
 [<Emit("Object.entries($0)")>]
-let objectEntries (o: obj) : (string * obj)[] = jsNative
+let objectEntries (_o: obj) : (string * obj)[] = jsNative

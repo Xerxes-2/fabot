@@ -22,25 +22,30 @@ let private actOrApproach (creep: ICreep) (target: obj) (act: obj -> int) =
 
 let private execute (intent: Intent) =
     match intent with
-    | SpawnCreep (spawnName, body, creepName) ->
+    | SpawnCreep(spawnName, body, creepName) ->
         let spawn: ISpawn = Game.spawns?(spawnName)
+
         if not (isNull (box spawn)) then
             let code = spawn.spawnCreep (body |> List.map partName |> List.toArray, creepName)
+
             if code <> 0 then
                 JS.console.log ($"spawnCreep {creepName} at {spawnName} failed: {code}")
-    | HarvestSource (creepName, sourceId) ->
+    | HarvestSource(creepName, sourceId) ->
         let creep: ICreep = Game.creeps?(creepName)
         let source = Game.getObjectById sourceId
+
         if not (isNull (box creep)) && not (isNull source) then
             actOrApproach creep source (fun t -> creep.harvest t)
-    | TransferEnergyToSpawn (creepName, spawnName) ->
+    | TransferEnergyToSpawn(creepName, spawnName) ->
         let creep: ICreep = Game.creeps?(creepName)
         let spawn: ISpawn = Game.spawns?(spawnName)
+
         if not (isNull (box creep)) && not (isNull (box spawn)) then
             actOrApproach creep (box spawn) (fun t -> creep.transfer (t, "energy"))
-    | UpgradeController (creepName, controllerId) ->
+    | UpgradeController(creepName, controllerId) ->
         let creep: ICreep = Game.creeps?(creepName)
         let controller = Game.getObjectById controllerId
+
         if not (isNull (box creep)) && not (isNull controller) then
             actOrApproach creep controller (fun t -> creep.upgradeController t)
 

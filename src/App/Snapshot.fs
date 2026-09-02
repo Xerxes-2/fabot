@@ -6,32 +6,43 @@ open Fabot.Core.Types
 
 let build () : Snapshot =
     let spawns = objectValues<ISpawn> Game.spawns
-    { Time = Game.time
-      Spawns =
-        spawns
-        |> Array.map (fun s ->
-            { Name = s.name
-              EnergyAvailable = s.room.energyAvailable
-              FreeCapacity = s.store.getFreeCapacity "energy"
-              IsSpawning = not (isNull s.spawning) })
-        |> Array.toList
-      Sources =
-        spawns
-        |> Array.collect (fun s -> s.room.find findSources)
-        |> Array.map (fun o -> ({ Id = (o :?> ISource).id }: SourceInfo))
-        |> Array.distinctBy (fun s -> s.Id)
-        |> Array.toList
-      Controller =
-        spawns
-        |> Array.tryPick (fun s ->
-            let c = s.room.controller
-            if not (isNull (box c)) && c.my then Some ({ Id = c.id }: ControllerInfo) else None)
-      Creeps =
-        objectValues<ICreep> Game.creeps
-        // A creep still inside the spawn cannot act; keep it out of the pool.
-        |> Array.filter (fun c -> not c.spawning)
-        |> Array.map (fun c ->
-            { Name = c.name
-              Energy = c.store.getUsedCapacity "energy"
-              FreeCapacity = c.store.getFreeCapacity "energy" })
-        |> Array.toList }
+
+    {
+        Time = Game.time
+        Spawns =
+            spawns
+            |> Array.map (fun s ->
+                {
+                    Name = s.name
+                    EnergyAvailable = s.room.energyAvailable
+                    FreeCapacity = s.store.getFreeCapacity "energy"
+                    IsSpawning = not (isNull s.spawning)
+                })
+            |> Array.toList
+        Sources =
+            spawns
+            |> Array.collect (fun s -> s.room.find findSources)
+            |> Array.map (fun o -> ({ Id = (o :?> ISource).id }: SourceInfo))
+            |> Array.distinctBy (fun s -> s.Id)
+            |> Array.toList
+        Controller =
+            spawns
+            |> Array.tryPick (fun s ->
+                let c = s.room.controller
+
+                if not (isNull (box c)) && c.my then
+                    Some({ Id = c.id }: ControllerInfo)
+                else
+                    None)
+        Creeps =
+            objectValues<ICreep> Game.creeps
+            // A creep still inside the spawn cannot act; keep it out of the pool.
+            |> Array.filter (fun c -> not c.spawning)
+            |> Array.map (fun c ->
+                {
+                    Name = c.name
+                    Energy = c.store.getUsedCapacity "energy"
+                    FreeCapacity = c.store.getFreeCapacity "energy"
+                })
+            |> Array.toList
+    }

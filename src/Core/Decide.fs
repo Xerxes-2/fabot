@@ -27,12 +27,15 @@ let taskId =
 /// from scratch every tick — Tasks are never persisted.
 let planTasks (snapshot: Snapshot) : Task list =
     let harvests = snapshot.Sources |> List.map (fun s -> Harvest s.Id)
+
     let refills =
         snapshot.Spawns
         |> List.filter (fun s -> s.FreeCapacity > 0)
         |> List.map (fun s -> Refill s.Name)
+
     let upgrades =
         snapshot.Controller |> Option.toList |> List.map (fun c -> Upgrade c.Id)
+
     harvests @ refills @ upgrades
 
 /// Pre-Task bootstrap step: spawn Intents needed to keep the workforce at
@@ -40,6 +43,7 @@ let planTasks (snapshot: Snapshot) : Task list =
 /// so it sits beside the Planner/Matcher pipeline rather than inside it.
 let private planSpawns (snapshot: Snapshot) : Intent list =
     let deficit = minWorkforce - List.length snapshot.Creeps
+
     if deficit <= 0 then
         []
     else
@@ -72,31 +76,44 @@ let private rank =
 
 /// Matcher: keep still-valid assignments (anti-thrash), greedily assign the
 /// rest, and emit one Intent per assigned creep.
-let private matchCreeps (snapshot: Snapshot) (tasks: Task list) (assignments: Assignments) : Intent list * Assignments =
+let private matchCreeps
+    (snapshot: Snapshot)
+    (tasks: Task list)
+    (assignments: Assignments)
+    : Intent list * Assignments =
     let byId = tasks |> List.map (fun t -> taskId t, t) |> Map.ofList
+
     let kept =
         assignments
         |> Map.filter (fun name tid ->
-            match snapshot.Creeps |> List.tryFind (fun c -> c.Name = name), Map.tryFind tid byId with
+            match
+                snapshot.Creeps |> List.tryFind (fun c -> c.Name = name), Map.tryFind tid byId
+            with
             | Some creep, Some task -> applicable creep task
             | _ -> false)
+
     let assignOne acc (creep: CreepInfo) =
         if Map.containsKey creep.Name acc then
             acc
         else
-            let load tid = acc |> Map.filter (fun _ assigned -> assigned = tid) |> Map.count
+            let load tid =
+                acc |> Map.filter (fun _ assigned -> assigned = tid) |> Map.count
+
             match tasks |> List.filter (applicable creep) with
             | [] -> acc
             | candidates ->
                 let task = candidates |> List.minBy (fun t -> rank t, load (taskId t))
                 Map.add creep.Name (taskId task) acc
+
     let final = snapshot.Creeps |> List.fold assignOne kept
+
     let intents =
         snapshot.Creeps
         |> List.choose (fun creep ->
             Map.tryFind creep.Name final
             |> Option.bind (fun tid -> Map.tryFind tid byId)
             |> Option.map (intentFor creep))
+
     intents, final
 
 /// The single seam: Snapshot in, Intents plus next tick's Assignments out.
