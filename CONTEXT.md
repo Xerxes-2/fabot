@@ -55,6 +55,9 @@ The repeating [Work; Carry; Move] block worker bodies are built from: 200 energy
 ### Fatigue parity
 The body-generation invariant (ADR 0003): a worker body padded beyond whole [[worker unit]]s never moves slower than the pure-unit body, empty or loaded. The remainder buys as much Carry as parity allows, then Move — never Work.
 
+### Chat bubble
+The glyph an assigned creep says over its head each tick, one fixed glyph per [[task]] (⛏ Harvest · 🔋 Refill · 🔨 Build · ⚡ Upgrade). Observability only, private to our own viewer; unassigned creeps show nothing.
+
 ### Disaster fallback
 The zero-creep spawning rule: an empty colony spawns one bare [[worker unit]] from whatever energy is banked right now, rather than waiting for a full capacity it can never refill. The one body-generation path that ignores the remainder — time-to-first-creep outranks spending the bank.
 
