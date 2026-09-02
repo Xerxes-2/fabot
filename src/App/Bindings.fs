@@ -12,6 +12,9 @@ let findSources = 105
 /// Screeps `FIND_MY_STRUCTURES` constant.
 let findMyStructures = 108
 
+/// Screeps `FIND_MY_CONSTRUCTION_SITES` constant.
+let findMyConstructionSites = 114
+
 /// Screeps `STRUCTURE_SPAWN` constant.
 let structureSpawn = "spawn"
 
@@ -30,6 +33,9 @@ type IStructure =
     /// Screeps STRUCTURE_* string, e.g. "spawn" or "extension".
     abstract structureType: string
     abstract store: IStore
+
+type IConstructionSite =
+    abstract id: string
 
 type IController =
     abstract id: string
@@ -58,6 +64,7 @@ type ICreep =
     abstract store: IStore
     abstract harvest: target: obj -> int
     abstract transfer: target: obj * resource: string -> int
+    abstract build: target: obj -> int
     abstract upgradeController: target: obj -> int
     abstract moveTo: target: obj -> int
 

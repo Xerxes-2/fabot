@@ -30,6 +30,9 @@ type SourceInfo = { Id: string }
 /// What the decision layer knows about the room controller this tick.
 type ControllerInfo = { Id: string }
 
+/// What the decision layer knows about one construction site this tick.
+type ConstructionSiteInfo = { Id: string }
+
 /// What the decision layer knows about one owned creep this tick.
 type CreepInfo =
     {
@@ -50,6 +53,7 @@ type Snapshot =
         Sources: SourceInfo list
         /// None when no spawn room has an owned controller (should not happen in practice).
         Controller: ControllerInfo option
+        ConstructionSites: ConstructionSiteInfo list
         Creeps: CreepInfo list
     }
 
@@ -58,6 +62,7 @@ type Snapshot =
 type Task =
     | Harvest of sourceId: string
     | Refill of structureId: string
+    | Build of siteId: string
     | Upgrade of controllerId: string
 
 /// A single described action to perform this tick; data only, never the game API.
@@ -65,6 +70,7 @@ type Intent =
     | SpawnCreep of spawnName: string * body: BodyPart list * creepName: string
     | HarvestSource of creepName: string * sourceId: string
     | TransferEnergyToStructure of creepName: string * structureId: string
+    | BuildSite of creepName: string * siteId: string
     | UpgradeController of creepName: string * controllerId: string
 
 /// Creep name -> task id. The only state remembered between ticks (anti-thrash).

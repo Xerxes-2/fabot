@@ -21,6 +21,7 @@ let taskId =
     function
     | Harvest sourceId -> $"harvest:{sourceId}"
     | Refill structureId -> $"refill:{structureId}"
+    | Build siteId -> $"build:{siteId}"
     | Upgrade controllerId -> $"upgrade:{controllerId}"
 
 /// Planner: rebuild this tick's full Task pool from the Snapshot. Pure and
@@ -33,10 +34,12 @@ let planTasks (snapshot: Snapshot) : Task list =
         |> List.filter (fun r -> r.FreeCapacity > 0)
         |> List.map (fun r -> Refill r.Id)
 
+    let builds = snapshot.ConstructionSites |> List.map (fun site -> Build site.Id)
+
     let upgrades =
         snapshot.Controller |> Option.toList |> List.map (fun c -> Upgrade c.Id)
 
-    harvests @ refills @ upgrades
+    harvests @ refills @ builds @ upgrades
 
 /// Pre-Task bootstrap step: spawn Intents needed to keep the workforce at
 /// minimum. Spawning is a colony-level need, not a Task creeps get matched to,
@@ -57,21 +60,25 @@ let private planSpawns (snapshot: Snapshot) : Intent list =
 let private applicable (creep: CreepInfo) task =
     match task with
     | Harvest _ -> creep.FreeCapacity > 0
-    | Refill _ -> creep.Energy > 0
+    | Refill _
+    | Build _
     | Upgrade _ -> creep.Energy > 0
 
 let private intentFor (creep: CreepInfo) task =
     match task with
     | Harvest sourceId -> HarvestSource(creep.Name, sourceId)
     | Refill structureId -> TransferEnergyToStructure(creep.Name, structureId)
+    | Build siteId -> BuildSite(creep.Name, siteId)
     | Upgrade controllerId -> UpgradeController(creep.Name, controllerId)
 
 /// Matching tier between applicable tasks (lower wins): feeding the economy
-/// (Harvest, Refill) outranks sinking surplus into the controller (Upgrade).
+/// (Harvest, Refill) outranks sinking surplus into construction (Build) or
+/// the controller (Upgrade).
 let private rank =
     function
     | Harvest _ -> 0
     | Refill _ -> 0
+    | Build _ -> 1
     | Upgrade _ -> 1
 
 /// Matcher: keep still-valid assignments (anti-thrash), greedily assign the

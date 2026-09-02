@@ -19,6 +19,9 @@ A unit of work in the task pool (e.g. "deliver 300 energy to spawn"). Creeps are
 ### Refill
 The Task of delivering energy to any structure that feeds spawning (spawn or extension). One generalized Task — spawn vs extension is not a domain distinction; the Planner filters by free capacity.
 
+### Build
+The Task of spending carried energy into a construction site. Surplus work: same rank tier as Upgrade, below Harvest/Refill — the economy is fed before anything is constructed.
+
 ## Avoided terms
 
 - **Role** — creeps are not born with roles; work is Task-based. Don't reintroduce role-based vocabulary.

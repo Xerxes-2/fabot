@@ -18,6 +18,7 @@ let bareRespawn =
         Refillables = [ { Id = "spawn-1"; FreeCapacity = 0 } ]
         Sources = [ { Id = "src-a" }; { Id = "src-b" } ]
         Controller = Some { Id = "ctrl-1" }
+        ConstructionSites = []
         Creeps = []
     }
 
@@ -74,6 +75,21 @@ let plannerTests =
                         | _ -> None)
 
                 Expect.isEmpty upgrades "nothing to upgrade"
+            }
+
+            test "each construction site yields a Build task" {
+                let snapshot =
+                    { bareRespawn with
+                        ConstructionSites = [ { Id = "site-1" }; { Id = "site-2" } ]
+                    }
+
+                let builds =
+                    planTasks snapshot
+                    |> List.choose (function
+                        | Build siteId -> Some siteId
+                        | _ -> None)
+
+                Expect.equal builds [ "site-1"; "site-2" ] "one Build task per construction site"
             }
 
             test "a structure missing energy gets a Refill task; a full structure gets none" {
@@ -357,6 +373,54 @@ let tests =
                         | _ -> true)
 
                 Expect.isEmpty creepIntents "idle creep emits nothing"
+            }
+
+            test "a full creep with a construction site and a full spawn goes building" {
+                let snapshot =
+                    { bareRespawn with
+                        ConstructionSites = [ { Id = "site-1" } ]
+                        Creeps = [ worker "w1" 50 0 ]
+                    }
+
+                let intents, kept = decide snapshot (Map.ofList [ "w1", "harvest:src-a" ])
+
+                Expect.equal
+                    (Map.tryFind "w1" kept)
+                    (Some "build:site-1")
+                    "surplus energy goes into construction"
+
+                Expect.contains intents (BuildSite("w1", "site-1")) "build intent emitted"
+            }
+
+            test "an empty creep is never matched to a Build task" {
+                let snapshot =
+                    { bareRespawn with
+                        ConstructionSites = [ { Id = "site-1" } ]
+                        Creeps = [ worker "w1" 0 50 ]
+                    }
+
+                let _, kept = decide snapshot (Map.ofList [ "w1", "build:site-1" ])
+
+                match Map.tryFind "w1" kept with
+                | Some tid ->
+                    Expect.stringStarts tid "harvest:" "empty creep goes harvesting instead"
+                | None -> failtest "creep should be reassigned, not idle"
+            }
+
+            test "a hungry structure beats a construction site for a delivering creep" {
+                let snapshot =
+                    { bareRespawn with
+                        Refillables = [ { Id = "spawn-1"; FreeCapacity = 50 } ]
+                        ConstructionSites = [ { Id = "site-1" } ]
+                        Creeps = [ worker "w1" 50 0 ]
+                    }
+
+                let _, kept = decide snapshot Map.empty
+
+                Expect.equal
+                    (Map.tryFind "w1" kept)
+                    (Some "refill:spawn-1")
+                    "refill outranks build while a structure is missing energy"
             }
 
             test "assignments of dead creeps are dropped" {

@@ -47,6 +47,12 @@ let build () : Snapshot =
                     Some({ Id = c.id }: ControllerInfo)
                 else
                     None)
+        ConstructionSites =
+            spawns
+            |> Array.collect (fun s -> s.room.find findMyConstructionSites)
+            |> Array.map (fun o -> ({ Id = (o :?> IConstructionSite).id }: ConstructionSiteInfo))
+            |> Array.distinctBy (fun site -> site.Id)
+            |> Array.toList
         Creeps =
             objectValues<ICreep> Game.creeps
             // A creep still inside the spawn cannot act; keep it out of the pool.
