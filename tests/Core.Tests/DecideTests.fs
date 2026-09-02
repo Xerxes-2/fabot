@@ -1348,6 +1348,88 @@ let workforceTests =
             }
         ]
 
+let sayIntents intents =
+    intents
+    |> List.choose (function
+        | SayCreep(name, message) -> Some(name, message)
+        | _ -> None)
+
+[<Tests>]
+let sayTests =
+    testList
+        "chat bubbles"
+        [
+            test "an assigned harvester says the Harvest glyph" {
+                let snapshot =
+                    { bareRespawn with
+                        Creeps = [ worker "w1" 0 50 ]
+                    }
+
+                let intents, _ = decide snapshot Map.empty
+
+                Expect.contains
+                    intents
+                    (SayCreep("w1", "⛏"))
+                    "the bubble shows the creep's current Task"
+            }
+
+            test "each Task has its own glyph: Refill, Build, Upgrade" {
+                let snapshot =
+                    { bareRespawn with
+                        Refillables = [ { Id = "spawn-1"; FreeCapacity = 50 } ]
+                        ConstructionSites = [ { Id = "site-1" } ]
+                        Creeps = [ worker "w1" 50 0; worker "w2" 50 0; worker "w3" 50 0 ]
+                    }
+
+                let sticky =
+                    Map.ofList
+                        [ "w1", "refill:spawn-1"; "w2", "build:site-1"; "w3", "upgrade:ctrl-1" ]
+
+                let intents, _ = decide snapshot sticky
+
+                Expect.equal
+                    (sayIntents intents)
+                    [ "w1", "🔋"; "w2", "🔨"; "w3", "⚡" ]
+                    "one bubble per assigned creep, glyph matched to its Task"
+            }
+
+            test "an unassigned creep says nothing" {
+                // Nothing applicable for a full creep: no refill need, no
+                // sites, no controller.
+                let snapshot =
+                    { bareRespawn with
+                        Controller = None
+                        Creeps = [ worker "w1" 50 0 ]
+                    }
+
+                let intents, _ = decide snapshot Map.empty
+                Expect.isEmpty (sayIntents intents) "no Task, no bubble"
+            }
+
+            test "a creep still walking toward its target says its glyph anyway" {
+                // Out of action range: no action Intent this tick, but the
+                // assignment holds — the bubble reports it every tick.
+                let corridor =
+                    [ for y in 9..15 -> { X = 10; Y = y }, Plain ] @ [ { X = 10; Y = 10 }, Wall ]
+
+                let snapshot =
+                    { bareRespawn with
+                        Sources = [ { Id = "src-a" } ]
+                        Creeps = [ worker "w1" 0 50 ]
+                        Spatial =
+                            Some
+                                { spatial [ "src-a", { X = 10; Y = 10 } ] corridor with
+                                    CreepPositions = Map.ofList [ "w1", { X = 10; Y = 14 } ]
+                                }
+                    }
+
+                let intents, _ = decide snapshot Map.empty
+
+                Expect.isEmpty (actionIntents intents) "out of range: no action Intent yet"
+                Expect.equal (sayIntents intents) [ "w1", "⛏" ] "the bubble still shows the Task"
+            }
+        ]
+
 [<Tests>]
 let tests =
     testList

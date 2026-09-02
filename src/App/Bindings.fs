@@ -105,6 +105,9 @@ type ICreep =
     /// Single-step move by direction constant (TOP = 1, clockwise). The
     /// only movement API the bot uses — moveTo is forbidden (ADR 0001).
     abstract move: direction: int -> int
+    /// Chat bubble above the creep. The omitted `public` argument defaults
+    /// to false: bubbles stay private to our own viewer.
+    abstract say: message: string -> int
 
 type ITerrain =
     /// 0 plain, TERRAIN_MASK_WALL wall, 2 swamp.

@@ -77,5 +77,10 @@ let private execute (intent: Intent) =
 
         if not (isNull (box creep)) then
             creep.move (directionCode direction) |> ignore
+    | SayCreep(creepName, message) ->
+        let creep: ICreep = Game.creeps?(creepName)
+
+        if not (isNull (box creep)) then
+            creep.say message |> ignore
 
 let run (intents: Intent list) = intents |> List.iter execute

@@ -141,6 +141,7 @@ type Intent =
     | BuildSite of creepName: string * siteId: string
     | UpgradeController of creepName: string * controllerId: string
     | MoveCreep of creepName: string * direction: Direction
+    | SayCreep of creepName: string * message: string
 
 /// Creep name -> task id. The only state remembered between ticks (anti-thrash).
 type Assignments = Map<string, string>

@@ -213,6 +213,15 @@ let private intentFor (creep: CreepInfo) task =
     | Build siteId -> BuildSite(creep.Name, siteId)
     | Upgrade controllerId -> UpgradeController(creep.Name, controllerId)
 
+/// Chat-bubble glyph of a Task: the whole colony's current matching is
+/// legible in the viewer at one glyph per creep.
+let private glyphFor =
+    function
+    | Harvest _ -> "⛏"
+    | Refill _ -> "🔋"
+    | Build _ -> "🔨"
+    | Upgrade _ -> "⚡"
+
 /// Matching tier between applicable tasks (lower wins): feeding the economy
 /// (Harvest, Refill) outranks sinking surplus into construction (Build) or
 /// the controller (Upgrade).
@@ -551,7 +560,7 @@ let private resolvedMoves (snapshot: Snapshot) (taskFor: string -> Task option) 
             |> Option.map (fun direction -> MoveCreep(name, direction)))
 
 /// Matcher: keep still-valid assignments (anti-thrash), greedily assign the
-/// rest, and emit one Intent per assigned creep.
+/// rest, and emit each assigned creep's Intents (action, chat bubble, move).
 let private matchCreeps
     (snapshot: Snapshot)
     (tasks: Task list)
@@ -662,7 +671,15 @@ let private matchCreeps
             | Some task -> actionIntents snapshot creep task
             | None -> [])
 
-    actions @ resolvedMoves snapshot taskFor, final
+    // Every assigned creep says its Task's glyph every tick; unassigned
+    // creeps say nothing.
+    let says =
+        snapshot.Creeps
+        |> List.choose (fun creep ->
+            taskFor creep.Name
+            |> Option.map (fun task -> SayCreep(creep.Name, glyphFor task)))
+
+    actions @ says @ resolvedMoves snapshot taskFor, final
 
 /// The single seam: Snapshot in, Intents plus next tick's Assignments out.
 let decide (snapshot: Snapshot) (assignments: Assignments) : Intent list * Assignments =
