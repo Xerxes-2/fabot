@@ -335,8 +335,7 @@ let placementTests =
             test "the controller's tile is never chosen" {
                 // The controller stands on a free same-colour tile the old
                 // Placement projection would have offered to a site.
-                let room =
-                    openRoom 3 |> withTargets [ "ctrl-1", { X = 24; Y = 24 }, Controller ]
+                let room = openRoom 3 |> withTargets [ "ctrl-1", { X = 24; Y = 24 }, Controller ]
 
                 let intents, _ = decide (atLevel 2 room) Map.empty
 

@@ -16,9 +16,12 @@ let private posOf (p: IRoomPosition) : Pos = { X = p.x; Y = p.y }
 
 /// Classify an engine STRUCTURE_* string into the Core's built kinds.
 let private builtKindOf structureType =
-    if structureType = structureSpawn then BuiltKind.Spawn
-    elif structureType = structureExtension then BuiltKind.Extension
-    else BuiltKind.Other
+    if structureType = structureSpawn then
+        BuiltKind.Spawn
+    elif structureType = structureExtension then
+        BuiltKind.Extension
+    else
+        BuiltKind.Other
 
 let private buildSpatial (spawn: ISpawn) : SpatialInfo =
     let room = spawn.room

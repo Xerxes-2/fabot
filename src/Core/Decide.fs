@@ -145,8 +145,7 @@ let private range a b = max (abs (a.X - b.X)) (abs (a.Y - b.Y))
 /// checkerboard around the first placed spawn, nearest tiles first. Sites
 /// are not creep work, so this emits Intents directly rather than Tasks.
 let private planConstructionSites (snapshot: Snapshot) atlas : Intent list =
-    let anchor =
-        snapshot.Spawns |> List.tryPick (fun s -> Atlas.positionOf atlas s.Id)
+    let anchor = snapshot.Spawns |> List.tryPick (fun s -> Atlas.positionOf atlas s.Id)
 
     match Atlas.roomName atlas, anchor, snapshot.Controller with
     | Some room, Some spawnPos, Some controller ->
