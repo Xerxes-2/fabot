@@ -816,6 +816,120 @@ let movementTests =
             }
         ]
 
+[<Tests>]
+let unreachableTests =
+    testList
+        "unreachable targets"
+        [
+            test
+                "a remembered assignment to an unreachable source is released and its Seat refilled" {
+                // src-a's one Seat connects only to w2; w1 sits on a walkable
+                // island with no path anywhere, remembering the source from
+                // before the wall closed in.
+                let terrain =
+                    [
+                        { X = 10; Y = 11 }, Plain
+                        { X = 10; Y = 12 }, Plain
+                        { X = 20; Y = 20 }, Plain
+                    ]
+
+                let snapshot =
+                    { bareRespawn with
+                        Sources = [ { Id = "src-a" } ]
+                        Creeps = [ worker "w1" 25 25; worker "w2" 0 50 ]
+                        Spatial =
+                            Some
+                                { spatial [ "src-a", { X = 10; Y = 10 } ] terrain with
+                                    CreepPositions =
+                                        Map.ofList
+                                            [ "w1", { X = 20; Y = 20 }; "w2", { X = 10; Y = 12 } ]
+                                }
+                    }
+
+                let sticky = Map.ofList [ "w1", "harvest:src-a" ]
+                let _, assignments = decide snapshot sticky
+
+                Expect.equal
+                    (harvesters assignments "src-a")
+                    [ "w2" ]
+                    "the freed Seat goes to the creep that can reach it"
+
+                Expect.equal
+                    (Map.tryFind "w1" assignments)
+                    (Some "upgrade:ctrl-1")
+                    "the walled-off creep falls through to the next applicable task"
+            }
+
+            test "a creep with no reachable applicable task is left unassigned and emits nothing" {
+                let terrain = [ { X = 10; Y = 11 }, Plain; { X = 20; Y = 20 }, Plain ]
+
+                let snapshot =
+                    { bareRespawn with
+                        Sources = [ { Id = "src-a" } ]
+                        Creeps = [ worker "w1" 0 50 ]
+                        Spatial =
+                            Some
+                                { spatial [ "src-a", { X = 10; Y = 10 } ] terrain with
+                                    CreepPositions = Map.ofList [ "w1", { X = 20; Y = 20 } ]
+                                }
+                    }
+
+                let sticky = Map.ofList [ "w1", "harvest:src-a" ]
+                let intents, assignments = decide snapshot sticky
+
+                Expect.equal
+                    (Map.tryFind "w1" assignments)
+                    None
+                    "the dead-end assignment is released"
+
+                Expect.isEmpty (actionIntents intents) "no action fires at an unreachable target"
+                Expect.isEmpty (moveIntents intents) "and no move Intent marches at the wall"
+            }
+
+            test "an empty Work Area releases a remembered assignment" {
+                // The controller is placed but every tile within upgrade
+                // range lies outside the projection: nowhere to stand at all.
+                let snapshot =
+                    { bareRespawn with
+                        Creeps = [ worker "w1" 50 0 ]
+                        Spatial =
+                            Some
+                                { spatial
+                                      [ "ctrl-1", { X = 10; Y = 10 } ]
+                                      [ { X = 20; Y = 20 }, Plain ] with
+                                    CreepPositions = Map.ofList [ "w1", { X = 20; Y = 20 } ]
+                                }
+                    }
+
+                let sticky = Map.ofList [ "w1", "upgrade:ctrl-1" ]
+                let _, assignments = decide snapshot sticky
+
+                Expect.equal (Map.tryFind "w1" assignments) None "no Work Area means no assignment"
+            }
+
+            test
+                "an unplaced creep keeps its assignment: no reachability filtering without geometry" {
+                // Same walled-off source, but the projection does not place
+                // the creep — nothing can be proven, so nothing is released.
+                let terrain = [ { X = 10; Y = 11 }, Plain; { X = 20; Y = 20 }, Plain ]
+
+                let snapshot =
+                    { bareRespawn with
+                        Sources = [ { Id = "src-a" } ]
+                        Creeps = [ worker "w1" 0 50 ]
+                        Spatial = Some(spatial [ "src-a", { X = 10; Y = 10 } ] terrain)
+                    }
+
+                let sticky = Map.ofList [ "w1", "harvest:src-a" ]
+                let _, assignments = decide snapshot sticky
+
+                Expect.equal
+                    (Map.tryFind "w1" assignments)
+                    (Some "harvest:src-a")
+                    "geometry the projection cannot price never releases an assignment"
+            }
+        ]
+
 /// The tile one step in `direction` from `pos` — mirrors the engine's move.
 let stepFrom pos direction =
     match direction with

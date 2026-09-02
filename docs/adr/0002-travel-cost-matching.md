@@ -10,6 +10,6 @@ A fresh creep was observed assigned to the farther of two sources, through swamp
 
 ## Consequences
 
-- One multi-goal Dijkstra flood per unassigned creep per tick, memoised only within the Snapshot (the function stays pure); sticky Assignments mean the flood runs mainly for fresh or reassigning creeps.
+- One multi-goal Dijkstra flood per creep per tick at most, memoised only within the Snapshot (the function stays pure). Reachability of remembered assignments is re-checked every tick — an assignment whose Work Area became unreachable is released — but a creep already standing inside its Work Area skips the flood, so it runs mainly for fresh, reassigning, or still-travelling creeps.
 - Same-rank creeps may now pile onto the nearest target up to its capacity instead of spreading; Seat caps (and future per-target capacities) are the intended counterweight.
 - Deferred, deliberately: cross-tick path caching, same-tick trade-up between assignees, lifetime-feasibility rejection (Winsley's `distance × 2 > ticksToLive` guard).

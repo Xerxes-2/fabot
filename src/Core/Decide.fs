@@ -514,45 +514,65 @@ let private matchCreeps
         | Some cap -> load acc tid < cap
         | None -> true
 
+    // Travel cost of each task for one creep (ADR 0002): one Dijkstra flood
+    // per creep, run lazily so it is paid at most once and only when a
+    // candidate is priced — a creep already inside the Work Area costs 0
+    // without flooding at all. None — a placed Work Area the creep cannot
+    // reach, or an empty one — makes the task inapplicable to this creep.
+    // Missing geometry (no projection, unplaced creep or unplaced target)
+    // prices as 0: without spatial data behaviour is unchanged, and geometry
+    // the projection cannot price never counts against a task.
+    let travelCostFor: CreepInfo -> Task -> int option =
+        let priced (creep: CreepInfo) : Task -> int option =
+            let placed =
+                snapshot.Spatial
+                |> Option.bind (fun spatial ->
+                    Map.tryFind creep.Name spatial.CreepPositions
+                    |> Option.map (fun pos -> spatial, pos, lazy (fst (floodFrom spatial pos))))
+
+            match placed with
+            | None -> fun _ -> Some 0
+            | Some(spatial, pos, dist) ->
+                fun task ->
+                    match Map.tryFind (targetOf task) spatial.TargetPositions with
+                    | None -> Some 0
+                    | Some _ ->
+                        let area = workArea spatial task
+
+                        if Set.contains pos area then
+                            Some 0
+                        else
+                            area
+                            |> Set.toList
+                            |> List.choose (fun tile -> Map.tryFind tile dist.Value)
+                            |> function
+                                | [] -> None
+                                | costs -> Some(List.min costs)
+
+        // One pricing closure per creep, shared by the sticky re-check and
+        // fresh matching so a released creep is not flooded twice.
+        let memo = snapshot.Creeps |> List.map (fun c -> c.Name, priced c) |> Map.ofList
+
+        fun creep -> Map.find creep.Name memo
+
     // Capacity applies to remembered assignments too: memory can carry an
-    // oversell from before a cap existed (e.g. across a redeploy).
+    // oversell from before a cap existed (e.g. across a redeploy). So does
+    // reachability: a Work Area the flood can no longer reach releases the
+    // assignment, freeing its capacity for creeps that can get there —
+    // deliberately with no range-based fallback (ADR 0002).
     let kept =
         (Map.empty, assignments)
         ||> Map.fold (fun acc name tid ->
             match
                 snapshot.Creeps |> List.tryFind (fun c -> c.Name = name), Map.tryFind tid byId
             with
-            | Some creep, Some task when applicable creep task && hasCapacity acc tid ->
+            | Some creep, Some task when
+                applicable creep task
+                && hasCapacity acc tid
+                && (travelCostFor creep task).IsSome
+                ->
                 Map.add name tid acc
             | _ -> acc)
-
-    // Travel cost of each task for one creep (ADR 0002): one Dijkstra flood
-    // per fresh creep, run lazily so it is paid at most once and only when a
-    // candidate is priced. None — a placed Work Area the creep cannot reach —
-    // makes the task inapplicable to this creep. Missing geometry (no
-    // projection, unplaced creep or unplaced target) prices as 0: without
-    // spatial data behaviour is unchanged, and geometry the projection
-    // cannot price never counts against a task.
-    let travelCostFor (creep: CreepInfo) : Task -> int option =
-        let placed =
-            snapshot.Spatial
-            |> Option.bind (fun spatial ->
-                Map.tryFind creep.Name spatial.CreepPositions
-                |> Option.map (fun pos -> spatial, lazy (fst (floodFrom spatial pos))))
-
-        match placed with
-        | None -> fun _ -> Some 0
-        | Some(spatial, dist) ->
-            fun task ->
-                match Map.tryFind (targetOf task) spatial.TargetPositions with
-                | None -> Some 0
-                | Some _ ->
-                    workArea spatial task
-                    |> Set.toList
-                    |> List.choose (fun tile -> Map.tryFind tile dist.Value)
-                    |> function
-                        | [] -> None
-                        | costs -> Some(List.min costs)
 
     let assignOne acc (creep: CreepInfo) =
         if Map.containsKey creep.Name acc then
