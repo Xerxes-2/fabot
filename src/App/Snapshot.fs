@@ -59,26 +59,78 @@ let private buildPlacement (spawn: ISpawn) : PlacementInfo =
             |> Array.length
     }
 
+let private posOf (p: IRoomPosition) : Pos = { X = p.x; Y = p.y }
+
 let private buildSpatial (spawn: ISpawn) : SpatialInfo =
     let room = spawn.room
     let terrain = Game.map.getRoomTerrain room.name
 
+    // Rows and columns 0/49 are exit tiles — stepping on one teleports the
+    // creep into the next room. They stay out of the projection: an absent
+    // tile is impassable, so no path or Work Area ever uses an exit.
     let tiles =
         Map.ofList
             [
-                for x in 0..49 do
-                    for y in 0..49 do
+                for x in 1..48 do
+                    for y in 1..48 do
                         { X = x; Y = y }, terrainAt terrain x y
             ]
 
+    let structures = room.find findStructures |> Array.map (fun o -> o :?> IStructure)
+
+    let sites =
+        room.find findMyConstructionSites
+        |> Array.map (fun o -> o :?> IConstructionSite)
+
+    let sources = room.find findSources |> Array.map (fun o -> o :?> ISource)
+
+    // The controller travels through FIND_STRUCTURES on live servers, but
+    // is projected explicitly so nothing depends on that detail.
+    let controllers =
+        if isNull (box room.controller) then
+            [||]
+        else
+            [| room.controller |]
+
+    // Structures a creep can stand on; every other kind blocks its tile
+    // (Screeps OBSTACLE_OBJECT_TYPES).
+    let walkableStructures = [ structureRoad; structureContainer; structureRampart ]
+
     {
         Terrain = tiles
-        SourcePositions =
-            room.find findSources
-            |> Array.map (fun o ->
-                let source = o :?> ISource
-                source.id, { X = source.pos.x; Y = source.pos.y })
+        TargetPositions =
+            Map.ofArray (
+                Array.concat
+                    [
+                        sources |> Array.map (fun s -> s.id, posOf s.pos)
+                        structures |> Array.map (fun st -> st.id, posOf st.pos)
+                        sites |> Array.map (fun site -> site.id, posOf site.pos)
+                        controllers |> Array.map (fun c -> c.id, posOf c.pos)
+                    ]
+            )
+        CreepPositions =
+            objectValues<ICreep> Game.creeps
+            |> Array.filter (fun c -> not c.spawning)
+            |> Array.map (fun c -> c.name, posOf c.pos)
             |> Map.ofArray
+        Obstacles =
+            Set.ofArray (
+                Array.concat
+                    [
+                        structures
+                        |> Array.filter (fun st ->
+                            not (List.contains st.structureType walkableStructures))
+                        |> Array.map (fun st -> posOf st.pos)
+                        // The engine refuses to move a creep onto its own
+                        // obstacle-type construction site, so those tiles
+                        // block exactly like the finished structure would.
+                        sites
+                        |> Array.filter (fun site ->
+                            not (List.contains site.structureType walkableStructures))
+                        |> Array.map (fun site -> posOf site.pos)
+                        controllers |> Array.map (fun c -> posOf c.pos)
+                    ]
+            )
     }
 
 let build () : Snapshot =

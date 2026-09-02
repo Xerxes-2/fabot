@@ -252,12 +252,15 @@ let placementTests =
             }
         ]
 
-/// Spatial projection holding exactly the given terrain tiles and source
-/// positions; absent tiles are outside the projection (impassable).
-let spatial sources tiles =
+/// Spatial projection holding exactly the given terrain tiles and target
+/// positions; absent tiles are outside the projection (impassable). No
+/// creep positions and no obstacles — movement tests add those on top.
+let spatial targets tiles =
     {
         Terrain = Map.ofList tiles
-        SourcePositions = Map.ofList sources
+        TargetPositions = Map.ofList targets
+        CreepPositions = Map.empty
+        Obstacles = Set.empty
     }
 
 /// The 8 tiles around a position, all Plain: an open-ground source site.
@@ -408,6 +411,221 @@ let seatTests =
                     (harvesters assignments "src-a")
                     3
                     "no terrain data means no cap — today's room behaviour"
+            }
+        ]
+
+/// A rectangle of Plain tiles, bounds inclusive.
+let plainRect x0 x1 y0 y1 =
+    [
+        for x in x0..x1 do
+            for y in y0..y1 -> { X = x; Y = y }, Plain
+    ]
+
+let moveIntents intents =
+    intents
+    |> List.choose (function
+        | MoveCreep(name, direction) -> Some(name, direction)
+        | _ -> None)
+
+/// Creep action Intents only — spawn and placement Intents filtered out.
+let actionIntents intents =
+    intents
+    |> List.filter (function
+        | HarvestSource _
+        | TransferEnergyToStructure _
+        | BuildSite _
+        | UpgradeController _ -> true
+        | _ -> false)
+
+[<Tests>]
+let movementTests =
+    testList
+        "movement"
+        [
+            test "a creep outside its Work Area steps toward the source, acting not yet" {
+                // A one-tile-wide plain corridor: x = 10, y = 9..15, with the
+                // source tile itself a wall (sources always sit on walls).
+                let corridor =
+                    [ for y in 9..15 -> { X = 10; Y = y }, Plain ] @ [ { X = 10; Y = 10 }, Wall ]
+
+                let snapshot =
+                    { bareRespawn with
+                        Sources = [ { Id = "src-a" } ]
+                        Creeps = [ worker "w1" 0 50 ]
+                        Spatial =
+                            Some
+                                { spatial [ "src-a", { X = 10; Y = 10 } ] corridor with
+                                    CreepPositions = Map.ofList [ "w1", { X = 10; Y = 14 } ]
+                                }
+                    }
+
+                let intents, _ = decide snapshot Map.empty
+
+                Expect.equal
+                    (moveIntents intents)
+                    [ "w1", Top ]
+                    "one single-step move Intent up the corridor"
+
+                Expect.isEmpty (actionIntents intents) "out of range: no action Intent yet"
+            }
+
+            test "a creep inside its Work Area acts and does not move" {
+                let snapshot =
+                    { bareRespawn with
+                        Sources = [ { Id = "src-a" } ]
+                        Creeps = [ worker "w1" 0 50 ]
+                        Spatial =
+                            Some
+                                { spatial
+                                      [ "src-a", { X = 10; Y = 10 } ]
+                                      (openSeats { X = 10; Y = 10 }) with
+                                    CreepPositions = Map.ofList [ "w1", { X = 10; Y = 11 } ]
+                                }
+                    }
+
+                let intents, _ = decide snapshot Map.empty
+
+                Expect.contains intents (HarvestSource("w1", "src-a")) "seated creep harvests"
+
+                Expect.isEmpty (moveIntents intents) "nowhere to go: no move Intent"
+            }
+
+            test "the approach detours around swamp when a plain lane is cheaper" {
+                // Straight lane x = 10 is swamp (cost 5 each); the lane at
+                // x = 11 is plain and reaches a Seat in as many steps.
+                let terrain =
+                    [
+                        { X = 10; Y = 10 }, Wall
+                        { X = 10; Y = 11 }, Plain
+                        { X = 10; Y = 12 }, Swamp
+                        { X = 10; Y = 13 }, Swamp
+                        { X = 10; Y = 14 }, Plain
+                        { X = 11; Y = 11 }, Plain
+                        { X = 11; Y = 12 }, Plain
+                        { X = 11; Y = 13 }, Plain
+                    ]
+
+                let snapshot =
+                    { bareRespawn with
+                        Sources = [ { Id = "src-a" } ]
+                        Creeps = [ worker "w1" 0 50 ]
+                        Spatial =
+                            Some
+                                { spatial [ "src-a", { X = 10; Y = 10 } ] terrain with
+                                    CreepPositions = Map.ofList [ "w1", { X = 10; Y = 14 } ]
+                                }
+                    }
+
+                let intents, _ = decide snapshot Map.empty
+
+                Expect.equal
+                    (moveIntents intents)
+                    [ "w1", TopRight ]
+                    "the first step leaves the swamp lane for the plain one"
+            }
+
+            test "a creep in range on a tile it may not keep acts and moves in one tick" {
+                // An obstacle structure now sits under the creep (built beneath
+                // it), so its tile is no longer Work Area — but the engine
+                // judges actions by the tick-start position, so upgrading
+                // this tick is still legal while stepping off.
+                let snapshot =
+                    { bareRespawn with
+                        Creeps = [ worker "w1" 50 0 ]
+                        Spatial =
+                            Some
+                                { spatial
+                                      [ "ctrl-1", { X = 10; Y = 10 } ]
+                                      [
+                                          { X = 10; Y = 10 }, Plain
+                                          { X = 10; Y = 11 }, Plain
+                                          { X = 10; Y = 12 }, Plain
+                                      ] with
+                                    CreepPositions = Map.ofList [ "w1", { X = 10; Y = 12 } ]
+                                    Obstacles =
+                                        Set.ofList [ { X = 10; Y = 10 }; { X = 10; Y = 12 } ]
+                                }
+                    }
+
+                let intents, _ = decide snapshot Map.empty
+
+                Expect.contains
+                    intents
+                    (UpgradeController("w1", "ctrl-1"))
+                    "in range at tick start: the action stays legal"
+
+                Expect.equal
+                    (moveIntents intents)
+                    [ "w1", Top ]
+                    "and the creep steps onto the one legal standing tile"
+            }
+
+            test "an unreachable Work Area yields no move Intent at all" {
+                // The source's Seat exists but the tiles between creep and
+                // Seat are outside the projection: no path, so the creep
+                // waits instead of thrashing.
+                let snapshot =
+                    { bareRespawn with
+                        Sources = [ { Id = "src-a" } ]
+                        Creeps = [ worker "w1" 0 50 ]
+                        Spatial =
+                            Some
+                                { spatial
+                                      [ "src-a", { X = 10; Y = 10 } ]
+                                      [ { X = 10; Y = 11 }, Plain; { X = 10; Y = 14 }, Plain ] with
+                                    CreepPositions = Map.ofList [ "w1", { X = 10; Y = 14 } ]
+                                }
+                    }
+
+                let intents, _ = decide snapshot Map.empty
+
+                Expect.isEmpty (moveIntents intents) "no path: standing still beats oscillating"
+                Expect.isEmpty (actionIntents intents) "and the target is out of range"
+            }
+
+            test "a builder works from range 3 without closing in" {
+                let snapshot =
+                    { bareRespawn with
+                        ConstructionSites = [ { Id = "site-1" } ]
+                        Creeps = [ worker "w1" 50 0 ]
+                        Spatial =
+                            Some
+                                { spatial
+                                      [ "site-1", { X = 10; Y = 10 } ]
+                                      [ for y in 10..13 -> { X = 10; Y = y }, Plain ] with
+                                    CreepPositions = Map.ofList [ "w1", { X = 10; Y = 13 } ]
+                                }
+                    }
+
+                let intents, _ = decide snapshot Map.empty
+
+                Expect.contains intents (BuildSite("w1", "site-1")) "range 3 is close enough"
+                Expect.isEmpty (moveIntents intents) "no reason to walk closer"
+            }
+
+            test "a refiller two tiles out still has to walk to the structure" {
+                let snapshot =
+                    { bareRespawn with
+                        Refillables = [ { Id = "spawn-1"; FreeCapacity = 50 } ]
+                        Creeps = [ worker "w1" 50 0 ]
+                        Spatial =
+                            Some
+                                { spatial
+                                      [ "spawn-1", { X = 10; Y = 10 } ]
+                                      [ for y in 10..12 -> { X = 10; Y = y }, Plain ] with
+                                    CreepPositions = Map.ofList [ "w1", { X = 10; Y = 12 } ]
+                                    Obstacles = Set.singleton { X = 10; Y = 10 }
+                                }
+                    }
+
+                let intents, _ = decide snapshot Map.empty
+
+                Expect.equal
+                    (moveIntents intents)
+                    [ "w1", Top ]
+                    "transfer needs range 1, so the creep closes in"
+
+                Expect.isEmpty (actionIntents intents) "no transfer from range 2"
             }
         ]
 

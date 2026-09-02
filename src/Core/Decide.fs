@@ -149,15 +149,18 @@ let private rank =
     | Build _ -> 1
     | Upgrade _ -> 1
 
-/// Seats of a source: walkable (non-wall) tiles adjacent to its position.
-/// Terrain only, per ADR 0001 — structures and creeps do not consume Seats.
-let private seatCount (spatial: SpatialInfo) (pos: Pos) =
+let private neighbours pos =
     [
         for dx in -1 .. 1 do
             for dy in -1 .. 1 do
                 if (dx, dy) <> (0, 0) then
                     { X = pos.X + dx; Y = pos.Y + dy }
     ]
+
+/// Seats of a source: walkable (non-wall) tiles adjacent to its position.
+/// Terrain only, per ADR 0001 — structures and creeps do not consume Seats.
+let private seatCount (spatial: SpatialInfo) (pos: Pos) =
+    neighbours pos
     |> List.filter (fun tile ->
         match Map.tryFind tile spatial.Terrain with
         | Some Plain
@@ -176,9 +179,164 @@ let private taskCapacities (snapshot: Snapshot) : Map<string, int> =
     | Some spatial ->
         snapshot.Sources
         |> List.choose (fun s ->
-            Map.tryFind s.Id spatial.SourcePositions
+            Map.tryFind s.Id spatial.TargetPositions
             |> Option.map (fun pos -> taskId (Harvest s.Id), seatCount spatial pos))
         |> Map.ofList
+
+/// Chebyshev range at which a Task's action reaches its target (Screeps:
+/// harvest and transfer act at range 1, build and upgrade at range 3).
+let private actionRange =
+    function
+    | Harvest _
+    | Refill _ -> 1
+    | Build _
+    | Upgrade _ -> 3
+
+/// Id of the game object a Task acts on.
+let private targetOf =
+    function
+    | Harvest id
+    | Refill id
+    | Build id
+    | Upgrade id -> id
+
+/// Cost of stepping onto a tile: plain 1, swamp 5; walls, obstacle
+/// structures and tiles outside the projection are impassable (ADR 0001).
+let private stepCost (spatial: SpatialInfo) tile =
+    if Set.contains tile spatial.Obstacles then
+        None
+    else
+        match Map.tryFind tile spatial.Terrain with
+        | Some Plain -> Some 1
+        | Some Swamp -> Some 5
+        | Some Wall
+        | None -> None
+
+/// Work Area of a Task: the tiles a creep may stand on while performing it —
+/// passable tiles within the action's range of its target. Derived fresh
+/// each tick, never persisted; empty when the projection cannot place the
+/// target.
+let private workArea (spatial: SpatialInfo) (task: Task) : Set<Pos> =
+    match Map.tryFind (targetOf task) spatial.TargetPositions with
+    | None -> Set.empty
+    | Some target ->
+        let r = actionRange task
+
+        Set.ofList
+            [
+                for x in target.X - r .. target.X + r do
+                    for y in target.Y - r .. target.Y + r do
+                        let tile = { X = x; Y = y }
+
+                        if (stepCost spatial tile).IsSome then
+                            tile
+            ]
+
+/// Dijkstra over the terrain: the first step of a cheapest path from
+/// `start` to any goal tile, None when no goal is reachable. A Set of
+/// (distance, tile) doubles as the priority queue; its ordering also makes
+/// tie-breaking deterministic.
+let private firstStepToward (spatial: SpatialInfo) (start: Pos) (goals: Set<Pos>) : Pos option =
+    let rec firstStepOf tile (parents: Map<Pos, Pos>) =
+        match Map.tryFind tile parents with
+        | Some parent when parent = start -> tile
+        | Some parent -> firstStepOf parent parents
+        | None -> tile
+
+    let rec search (frontier: Set<int * Pos>) (dist: Map<Pos, int>) (parents: Map<Pos, Pos>) =
+        if Set.isEmpty frontier then
+            None
+        else
+            let (d, tile) as entry = Set.minElement frontier
+            let frontier = Set.remove entry frontier
+
+            if Map.tryFind tile dist <> Some d then
+                // Stale queue entry: the tile was reached cheaper meanwhile.
+                search frontier dist parents
+            elif Set.contains tile goals then
+                Some(firstStepOf tile parents)
+            else
+                let step (frontier, dist, parents) next =
+                    match stepCost spatial next with
+                    | None -> frontier, dist, parents
+                    | Some cost ->
+                        let candidate = d + cost
+
+                        let improves =
+                            match Map.tryFind next dist with
+                            | Some best -> candidate < best
+                            | None -> true
+
+                        if improves then
+                            Set.add (candidate, next) frontier,
+                            Map.add next candidate dist,
+                            Map.add next tile parents
+                        else
+                            frontier, dist, parents
+
+                let frontier, dist, parents =
+                    ((frontier, dist, parents), neighbours tile) ||> List.fold step
+
+                search frontier dist parents
+
+    if Set.isEmpty goals || Set.contains start goals then
+        None
+    else
+        search (Set.singleton (0, start)) (Map.ofList [ start, 0 ]) Map.empty
+
+/// Direction of a single step between adjacent tiles.
+let private directionTo (from: Pos) (dest: Pos) : Direction option =
+    match sign (dest.X - from.X), sign (dest.Y - from.Y) with
+    | 0, -1 -> Some Top
+    | 1, -1 -> Some TopRight
+    | 1, 0 -> Some Right
+    | 1, 1 -> Some BottomRight
+    | 0, 1 -> Some Bottom
+    | -1, 1 -> Some BottomLeft
+    | -1, 0 -> Some Left
+    | -1, -1 -> Some TopLeft
+    | _ -> None
+
+/// Resolver, conflict-free case (ADR 0001): a creep in action range acts
+/// (the engine judges range by the tick-start position); one standing off
+/// its Work Area also gets a single-step move Intent along the cheapest
+/// path there — the two combine when the creep's own tile stopped being
+/// legal standing ground. An unreachable Work Area yields no move Intent
+/// at all (no thrash). Without a spatial fix on both creep and target the
+/// action is emitted unconditionally — no movement can be derived,
+/// matching the projection-less behaviour elsewhere.
+let private resolve (snapshot: Snapshot) (creep: CreepInfo) (task: Task) : Intent list =
+    let placed =
+        snapshot.Spatial
+        |> Option.bind (fun spatial ->
+            match
+                Map.tryFind creep.Name spatial.CreepPositions,
+                Map.tryFind (targetOf task) spatial.TargetPositions
+            with
+            | Some creepPos, Some targetPos -> Some(spatial, creepPos, targetPos)
+            | _ -> None)
+
+    match placed with
+    | None -> [ intentFor creep task ]
+    | Some(spatial, creepPos, targetPos) ->
+        let act =
+            if range creepPos targetPos <= actionRange task then
+                [ intentFor creep task ]
+            else
+                []
+
+        let area = workArea spatial task
+
+        let move =
+            if Set.contains creepPos area then
+                []
+            else
+                firstStepToward spatial creepPos area
+                |> Option.bind (directionTo creepPos)
+                |> Option.map (fun direction -> MoveCreep(creep.Name, direction))
+                |> Option.toList
+
+        act @ move
 
 /// Matcher: keep still-valid assignments (anti-thrash), greedily assign the
 /// rest, and emit one Intent per assigned creep.
@@ -226,10 +384,12 @@ let private matchCreeps
 
     let intents =
         snapshot.Creeps
-        |> List.choose (fun creep ->
-            Map.tryFind creep.Name final
-            |> Option.bind (fun tid -> Map.tryFind tid byId)
-            |> Option.map (intentFor creep))
+        |> List.collect (fun creep ->
+            match
+                Map.tryFind creep.Name final |> Option.bind (fun tid -> Map.tryFind tid byId)
+            with
+            | Some task -> resolve snapshot creep task
+            | None -> [])
 
     intents, final
 

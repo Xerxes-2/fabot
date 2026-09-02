@@ -30,6 +30,15 @@ let structureSpawn = "spawn"
 /// Screeps `STRUCTURE_EXTENSION` constant.
 let structureExtension = "extension"
 
+/// Screeps `STRUCTURE_ROAD` constant.
+let structureRoad = "road"
+
+/// Screeps `STRUCTURE_CONTAINER` constant.
+let structureContainer = "container"
+
+/// Screeps `STRUCTURE_RAMPART` constant.
+let structureRampart = "rampart"
+
 type IStore =
     abstract getFreeCapacity: resource: string -> int
     abstract getUsedCapacity: resource: string -> int
@@ -61,6 +70,7 @@ type IController =
     abstract my: bool
     /// Controller level (RCL).
     abstract level: int
+    abstract pos: IRoomPosition
 
 type IRoom =
     abstract name: string
@@ -87,11 +97,14 @@ type ICreep =
     /// True while the creep is still being built inside the spawn.
     abstract spawning: bool
     abstract store: IStore
+    abstract pos: IRoomPosition
     abstract harvest: target: obj -> int
     abstract transfer: target: obj * resource: string -> int
     abstract build: target: obj -> int
     abstract upgradeController: target: obj -> int
-    abstract moveTo: target: obj -> int
+    /// Single-step move by direction constant (TOP = 1, clockwise). The
+    /// only movement API the bot uses — moveTo is forbidden (ADR 0001).
+    abstract move: direction: int -> int
 
 type ITerrain =
     /// 0 plain, TERRAIN_MASK_WALL wall, 2 swamp.

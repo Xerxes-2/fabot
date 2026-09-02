@@ -16,13 +16,17 @@ let private structureName =
     function
     | Extension -> structureExtension
 
-/// Screeps `ERR_NOT_IN_RANGE`.
-let private errNotInRange = -9
-
-/// Act on a target if the creep is adjacent, otherwise walk toward it.
-let private actOrApproach (creep: ICreep) (target: obj) (act: obj -> int) =
-    if act target = errNotInRange then
-        creep.moveTo target |> ignore
+/// Screeps direction constants: TOP = 1, then clockwise.
+let private directionCode =
+    function
+    | Top -> 1
+    | TopRight -> 2
+    | Right -> 3
+    | BottomRight -> 4
+    | Bottom -> 5
+    | BottomLeft -> 6
+    | Left -> 7
+    | TopLeft -> 8
 
 let private execute (intent: Intent) =
     match intent with
@@ -49,24 +53,29 @@ let private execute (intent: Intent) =
         let source = Game.getObjectById sourceId
 
         if not (isNull (box creep)) && not (isNull source) then
-            actOrApproach creep source (fun t -> creep.harvest t)
+            creep.harvest source |> ignore
     | TransferEnergyToStructure(creepName, structureId) ->
         let creep: ICreep = Game.creeps?(creepName)
         let structure = Game.getObjectById structureId
 
         if not (isNull (box creep)) && not (isNull structure) then
-            actOrApproach creep structure (fun t -> creep.transfer (t, "energy"))
+            creep.transfer (structure, "energy") |> ignore
     | BuildSite(creepName, siteId) ->
         let creep: ICreep = Game.creeps?(creepName)
         let site = Game.getObjectById siteId
 
         if not (isNull (box creep)) && not (isNull site) then
-            actOrApproach creep site (fun t -> creep.build t)
+            creep.build site |> ignore
     | UpgradeController(creepName, controllerId) ->
         let creep: ICreep = Game.creeps?(creepName)
         let controller = Game.getObjectById controllerId
 
         if not (isNull (box creep)) && not (isNull controller) then
-            actOrApproach creep controller (fun t -> creep.upgradeController t)
+            creep.upgradeController controller |> ignore
+    | MoveCreep(creepName, direction) ->
+        let creep: ICreep = Game.creeps?(creepName)
+
+        if not (isNull (box creep)) then
+            creep.move (directionCode direction) |> ignore
 
 let run (intents: Intent list) = intents |> List.iter execute

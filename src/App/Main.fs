@@ -29,8 +29,8 @@ let private saveAssignments (assignments: Assignments) =
 
     Memory?fabot?assignments <- hash
 
-// The engine writes per-creep scratch (moveTo path cache) into Memory.creeps;
-// drop entries of dead creeps so nothing of ours outlives its creep.
+// Path caches from the moveTo era (or anything else) may linger in
+// Memory.creeps; drop entries of dead creeps so nothing outlives its creep.
 let private pruneDeadCreepMemory (snapshot: Snapshot) =
     let creepsMemory = Memory?creeps
 

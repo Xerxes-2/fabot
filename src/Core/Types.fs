@@ -69,8 +69,14 @@ type SpatialInfo =
         /// Terrain per tile; a tile absent from the map lies outside the
         /// projected room and is impassable.
         Terrain: Map<Pos, Terrain>
-        /// Source id -> the source's tile.
-        SourcePositions: Map<string, Pos>
+        /// Task-target id (source, refillable structure, construction site,
+        /// controller) -> that target's tile.
+        TargetPositions: Map<string, Pos>
+        /// Creep name -> the tile the creep stands on.
+        CreepPositions: Map<string, Pos>
+        /// Tiles blocked by obstacle structures (spawn, extension,
+        /// controller, ...); impassable regardless of terrain.
+        Obstacles: Set<Pos>
     }
 
 /// What the decision layer knows about one construction site this tick.
@@ -115,6 +121,17 @@ type Task =
 /// What kind of structure a placement Intent asks for.
 type StructureKind = | Extension
 
+/// One step of creep movement, engine vocabulary: Top decreases Y.
+type Direction =
+    | Top
+    | TopRight
+    | Right
+    | BottomRight
+    | Bottom
+    | BottomLeft
+    | Left
+    | TopLeft
+
 /// A single described action to perform this tick; data only, never the game API.
 type Intent =
     | SpawnCreep of spawnName: string * body: BodyPart list * creepName: string
@@ -123,6 +140,7 @@ type Intent =
     | TransferEnergyToStructure of creepName: string * structureId: string
     | BuildSite of creepName: string * siteId: string
     | UpgradeController of creepName: string * controllerId: string
+    | MoveCreep of creepName: string * direction: Direction
 
 /// Creep name -> task id. The only state remembered between ticks (anti-thrash).
 type Assignments = Map<string, string>
