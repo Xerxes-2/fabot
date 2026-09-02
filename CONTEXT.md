@@ -47,5 +47,8 @@ The pure step that arbitrates a room's Move Intents into actual single-step move
 ### Travel cost
 The cheapest-path cost from a creep to a Task's Work Area over the [[spatial projection]] (plain 1, swamp 5, impassable excluded). Breaks rank ties in the Matcher (ADR 0002); a Work Area with no travel cost — unreachable or empty — makes the Task inapplicable to that creep: never matched fresh, and a remembered assignment to it is released.
 
+### Workforce target
+The number of creeps the colony maintains: the total [[seat]] count across all sources, floored at 2. Derived fresh each tick from the Snapshot, never persisted. Spawning fills the gap between living creeps and the target; without a spatial projection only the floor applies. Seats count by terrain alone (ADR 0001), so an unreachable source still raises the target — the surplus flows to Upgrade.
+
 ### Spatial projection
 The Snapshot's map-shaped view of the spawn room: three-state terrain (plain / swamp / wall) plus entity positions. Introduced for Seat counting; grows toward the Resolver's needs (ADR 0001). A tile absent from the projection is outside the room and impassable.
