@@ -31,20 +31,22 @@ let private saveAssignments (assignments: Assignments) =
 
 // Path caches from the moveTo era (or anything else) may linger in
 // Memory.creeps; drop entries of dead creeps so nothing outlives its creep.
-let private pruneDeadCreepMemory (snapshot: Snapshot) =
+// Alive means present in Game.creeps: unlike the Snapshot, that includes
+// gestating creeps, whose memory must survive the spawn.
+let private pruneDeadCreepMemory () =
     let creepsMemory = Memory?creeps
 
     if not (isNull creepsMemory) then
-        let alive = snapshot.Creeps |> List.map (fun c -> c.Name) |> Set.ofList
-
         for (name, _) in objectEntries creepsMemory do
-            if not (Set.contains name alive) then
+            if isNull (Game.creeps?(name)) then
                 emitJsStatement (creepsMemory, name) "delete $0[$1]"
 
 // Exported as `loop` on the bundled `main` module; the engine calls it every tick.
 let loop () =
     let snapshot = Snapshot.build ()
     let intents, assignments = decide snapshot (loadAssignments ())
-    Executor.run intents
+    // Memory writes land before the engine calls: a throw inside Executor.run
+    // must not discard the tick's anti-thrash state.
     saveAssignments assignments
-    pruneDeadCreepMemory snapshot
+    pruneDeadCreepMemory ()
+    Executor.run intents
