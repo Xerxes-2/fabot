@@ -4,6 +4,7 @@
     <IsPackable>false</IsPackable>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="AtlasTests.fs" />
     <Compile Include="DecideTests.fs" />
   </ItemGroup>
   <ItemGroup>

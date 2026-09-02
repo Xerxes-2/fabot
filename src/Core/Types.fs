@@ -79,6 +79,17 @@ type SpatialInfo =
         Obstacles: Set<Pos>
     }
 
+[<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
+module SpatialInfo =
+    /// The empty projection: no tiles, no entities — every entry absent.
+    let empty =
+        {
+            Terrain = Map.empty
+            TargetPositions = Map.empty
+            CreepPositions = Map.empty
+            Obstacles = Set.empty
+        }
+
 /// What the decision layer knows about one construction site this tick.
 type ConstructionSiteInfo = { Id: string }
 
@@ -106,8 +117,9 @@ type Snapshot =
         Creeps: CreepInfo list
         /// None when there is no spawn to plan around.
         Placement: PlacementInfo option
-        /// None when there is no spawn room to project.
-        Spatial: SpatialInfo option
+        /// The spawn room's spatial projection. Always present, possibly
+        /// empty — absence is per-entry, never per-projection (ADR 0004).
+        Spatial: SpatialInfo
     }
 
 /// A unit of work in this tick's Task pool; creeps are interchangeable

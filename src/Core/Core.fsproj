@@ -5,6 +5,7 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="Types.fs" />
+    <Compile Include="Atlas.fs" />
     <Compile Include="Decide.fs" />
   </ItemGroup>
 </Project>

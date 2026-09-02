@@ -196,5 +196,9 @@ let build () : Snapshot =
             |> Array.toList
         // Single-colony assumption: only the first spawn's room gets planned.
         Placement = spawns |> Array.tryHead |> Option.map buildPlacement
-        Spatial = spawns |> Array.tryHead |> Option.map buildSpatial
+        Spatial =
+            spawns
+            |> Array.tryHead
+            |> Option.map buildSpatial
+            |> Option.defaultValue SpatialInfo.empty
     }

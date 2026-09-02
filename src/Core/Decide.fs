@@ -80,49 +80,20 @@ let planTasks (snapshot: Snapshot) : Task list =
 
     harvests @ refills @ builds @ upgrades
 
-let private neighbours pos =
-    [
-        for dx in -1 .. 1 do
-            for dy in -1 .. 1 do
-                if (dx, dy) <> (0, 0) then
-                    { X = pos.X + dx; Y = pos.Y + dy }
-    ]
-
-/// Seats of a source: walkable (non-wall) tiles adjacent to its position.
-/// Terrain only, per ADR 0001 — structures and creeps do not consume Seats.
-let private seatCount (spatial: SpatialInfo) (pos: Pos) =
-    neighbours pos
-    |> List.filter (fun tile ->
-        match Map.tryFind tile spatial.Terrain with
-        | Some Plain
-        | Some Swamp -> true
-        | Some Wall
-        | None -> false)
-    |> List.length
-
 /// Workforce target: how many creeps the colony maintains — the total Seat
 /// count across all sources, floored at minWorkforce. Derived fresh each
-/// tick; a source the projection does not place contributes no Seats, and
-/// without a projection only the floor applies.
-let private workforceTarget (snapshot: Snapshot) =
-    let seats =
-        match snapshot.Spatial with
-        | None -> 0
-        | Some spatial ->
-            snapshot.Sources
-            |> List.sumBy (fun s ->
-                Map.tryFind s.Id spatial.TargetPositions
-                |> Option.map (seatCount spatial)
-                |> Option.defaultValue 0)
-
-    max minWorkforce seats
+/// tick; a source the projection does not place contributes no Seats.
+let private workforceTarget (snapshot: Snapshot) atlas =
+    snapshot.Sources
+    |> List.sumBy (fun s -> Atlas.seats atlas s.Id |> Option.defaultValue 0)
+    |> max minWorkforce
 
 /// Pre-Task bootstrap step: spawn Intents needed to keep the workforce at
 /// the Workforce target. Spawning is a colony-level need, not a Task creeps
 /// get matched to, so it sits beside the Planner/Matcher pipeline rather
 /// than inside it.
-let private planSpawns (snapshot: Snapshot) : Intent list =
-    let deficit = workforceTarget snapshot - List.length snapshot.Creeps
+let private planSpawns (snapshot: Snapshot) atlas : Intent list =
+    let deficit = workforceTarget snapshot atlas - List.length snapshot.Creeps
 
     // Disaster fallback: an empty colony can never refill extensions, so
     // waiting for full capacity would wait forever — spawn a minimal unit
@@ -233,170 +204,22 @@ let private rank =
     | Upgrade _ -> 1
 
 /// Concurrent-worker cap per task id; tasks absent from the map are
-/// unbounded. Harvest is capped by its source's Seat count — a snapshot
-/// without a spatial projection (or a source it does not place) stays
-/// uncapped, so behaviour without terrain data is unchanged.
-let private taskCapacities (snapshot: Snapshot) : Map<string, int> =
-    match snapshot.Spatial with
-    | None -> Map.empty
-    | Some spatial ->
-        snapshot.Sources
-        |> List.choose (fun s ->
-            Map.tryFind s.Id spatial.TargetPositions
-            |> Option.map (fun pos -> taskId (Harvest s.Id), seatCount spatial pos))
-        |> Map.ofList
+/// unbounded. Harvest is capped by its source's Seat count — a source the
+/// projection does not place derives no cap, so behaviour without terrain
+/// data is unchanged.
+let private taskCapacities (snapshot: Snapshot) atlas : Map<string, int> =
+    snapshot.Sources
+    |> List.choose (fun s ->
+        Atlas.seats atlas s.Id |> Option.map (fun count -> taskId (Harvest s.Id), count))
+    |> Map.ofList
 
-/// Chebyshev range at which a Task's action reaches its target (Screeps:
-/// harvest and transfer act at range 1, build and upgrade at range 3).
-let private actionRange =
-    function
-    | Harvest _
-    | Refill _ -> 1
-    | Build _
-    | Upgrade _ -> 3
-
-/// Id of the game object a Task acts on.
-let private targetOf =
-    function
-    | Harvest id
-    | Refill id
-    | Build id
-    | Upgrade id -> id
-
-/// Cost of stepping onto a tile: plain 1, swamp 5; walls, obstacle
-/// structures and tiles outside the projection are impassable (ADR 0001).
-let private stepCost (spatial: SpatialInfo) tile =
-    if Set.contains tile spatial.Obstacles then
-        None
+/// Action Intent for one assigned creep: emitted when the Atlas judges the
+/// action reachable from the tick-start position.
+let private actionIntents atlas (creep: CreepInfo) (task: Task) : Intent list =
+    if Atlas.mayAct atlas creep.Name task then
+        [ intentFor creep task ]
     else
-        match Map.tryFind tile spatial.Terrain with
-        | Some Plain -> Some 1
-        | Some Swamp -> Some 5
-        | Some Wall
-        | None -> None
-
-/// Work Area of a Task: the tiles a creep may stand on while performing it —
-/// passable tiles within the action's range of its target. Derived fresh
-/// each tick, never persisted; empty when the projection cannot place the
-/// target.
-let private workArea (spatial: SpatialInfo) (task: Task) : Set<Pos> =
-    match Map.tryFind (targetOf task) spatial.TargetPositions with
-    | None -> Set.empty
-    | Some target ->
-        let r = actionRange task
-
-        Set.ofList
-            [
-                for x in target.X - r .. target.X + r do
-                    for y in target.Y - r .. target.Y + r do
-                        let tile = { X = x; Y = y }
-
-                        if (stepCost spatial tile).IsSome then
-                            tile
-            ]
-
-/// Dijkstra flood over the terrain from `start`: cheapest travel cost to
-/// every reachable tile, plus each tile's predecessor on a cheapest path.
-/// A Set of (distance, tile) doubles as the priority queue; its ordering
-/// also makes tie-breaking deterministic. The start tile costs 0 even when
-/// it cannot be stepped onto — the creep already stands there.
-let private floodFrom (spatial: SpatialInfo) (start: Pos) : Map<Pos, int> * Map<Pos, Pos> =
-    let rec search (frontier: Set<int * Pos>) (dist: Map<Pos, int>) (parents: Map<Pos, Pos>) =
-        if Set.isEmpty frontier then
-            dist, parents
-        else
-            let (d, tile) as entry = Set.minElement frontier
-            let frontier = Set.remove entry frontier
-
-            if Map.tryFind tile dist <> Some d then
-                // Stale queue entry: the tile was reached cheaper meanwhile.
-                search frontier dist parents
-            else
-                let step (frontier, dist, parents) next =
-                    match stepCost spatial next with
-                    | None -> frontier, dist, parents
-                    | Some cost ->
-                        let candidate = d + cost
-
-                        let improves =
-                            match Map.tryFind next dist with
-                            | Some best -> candidate < best
-                            | None -> true
-
-                        if improves then
-                            Set.add (candidate, next) frontier,
-                            Map.add next candidate dist,
-                            Map.add next tile parents
-                        else
-                            frontier, dist, parents
-
-                let frontier, dist, parents =
-                    ((frontier, dist, parents), neighbours tile) ||> List.fold step
-
-                search frontier dist parents
-
-    search (Set.singleton (0, start)) (Map.ofList [ start, 0 ]) Map.empty
-
-/// The first step of a cheapest path from `start` to any goal tile, None
-/// when no goal is reachable. Of equally cheap goals the lowest (cost,
-/// tile) wins, matching the flood's own tie-breaking.
-let private firstStepToward (spatial: SpatialInfo) (start: Pos) (goals: Set<Pos>) : Pos option =
-    let rec firstStepOf tile (parents: Map<Pos, Pos>) =
-        match Map.tryFind tile parents with
-        | Some parent when parent = start -> tile
-        | Some parent -> firstStepOf parent parents
-        | None -> tile
-
-    if Set.isEmpty goals || Set.contains start goals then
-        None
-    else
-        let dist, parents = floodFrom spatial start
-
-        goals
-        |> Set.toList
-        |> List.choose (fun goal -> Map.tryFind goal dist |> Option.map (fun d -> d, goal))
-        |> function
-            | [] -> None
-            | reachable ->
-                let _, goal = List.min reachable
-                Some(firstStepOf goal parents)
-
-/// Direction of a single step between adjacent tiles.
-let private directionTo (from: Pos) (dest: Pos) : Direction option =
-    match sign (dest.X - from.X), sign (dest.Y - from.Y) with
-    | 0, -1 -> Some Top
-    | 1, -1 -> Some TopRight
-    | 1, 0 -> Some Right
-    | 1, 1 -> Some BottomRight
-    | 0, 1 -> Some Bottom
-    | -1, 1 -> Some BottomLeft
-    | -1, 0 -> Some Left
-    | -1, -1 -> Some TopLeft
-    | _ -> None
-
-/// Action Intent for one assigned creep: emitted when the creep is within
-/// action range at tick start (the engine judges range by that position).
-/// Without a spatial fix on both creep and target the action is emitted
-/// unconditionally — no movement can be derived, matching the
-/// projection-less behaviour elsewhere.
-let private actionIntents (snapshot: Snapshot) (creep: CreepInfo) (task: Task) : Intent list =
-    let placed =
-        snapshot.Spatial
-        |> Option.bind (fun spatial ->
-            match
-                Map.tryFind creep.Name spatial.CreepPositions,
-                Map.tryFind (targetOf task) spatial.TargetPositions
-            with
-            | Some creepPos, Some targetPos -> Some(creepPos, targetPos)
-            | _ -> None)
-
-    match placed with
-    | None -> [ intentFor creep task ]
-    | Some(creepPos, targetPos) ->
-        if range creepPos targetPos <= actionRange task then
-            [ intentFor creep task ]
-        else
-            []
+        []
 
 /// A creep's Move Intent: candidate standing tiles for next tick in
 /// preference order, plus a priority (the task rank). Input to the
@@ -412,34 +235,25 @@ type private MoveIntent =
 /// Creeps with no Task rank below every task in arbitration.
 let private idleRank = System.Int32.MaxValue
 
-/// Walkable tiles adjacent to `pos`, in deterministic (X, Y) order.
-let private adjacentWalkable (spatial: SpatialInfo) pos =
-    neighbours pos |> List.filter (fun tile -> (stepCost spatial tile).IsSome)
-
 /// Register one creep's Move Intent — every creep gets one (ADR 0001).
 /// A creep travelling toward its Work Area wants exactly its next path
 /// step; one already inside is force-registered "stay put, displaceable
 /// within the Work Area"; one with no Task — or no way to reach its
 /// area, which is just as immobilising — is parked: stay put,
 /// displaceable to any adjacent walkable tile.
-let private moveIntentFor
-    (spatial: SpatialInfo)
-    (creep: string)
-    (pos: Pos)
-    (task: Task option)
-    : MoveIntent =
+let private moveIntentFor atlas (creep: string) (pos: Pos) (task: Task option) : MoveIntent =
     let parked rank =
         {
             Creep = creep
             Pos = pos
             Rank = rank
-            Candidates = pos :: adjacentWalkable spatial pos
+            Candidates = pos :: Atlas.adjacentWalkable atlas pos
         }
 
     match task with
     | None -> parked idleRank
     | Some task ->
-        let area = workArea spatial task
+        let area = Atlas.workArea atlas task
 
         if Set.contains pos area then
             {
@@ -447,10 +261,12 @@ let private moveIntentFor
                 Pos = pos
                 Rank = rank task
                 Candidates =
-                    pos :: (neighbours pos |> List.filter (fun tile -> Set.contains tile area))
+                    pos
+                    :: (Atlas.adjacentWalkable atlas pos
+                        |> List.filter (fun tile -> Set.contains tile area))
             }
         else
-            match firstStepToward spatial pos area with
+            match Atlas.firstStep atlas creep task with
             | Some step ->
                 {
                     Creep = creep
@@ -532,42 +348,49 @@ let private arbitrate
     let pending = moveIntents |> List.map (fun i -> i.Creep, i) |> Map.ofList
     settle pending [] Set.empty Map.empty
 
-/// Resolver, room pass: every creep the projection places registers a
-/// Move Intent, arbitration settles them into at most one single-step
-/// move per creep, and the settled standing tiles become move Intents in
-/// Snapshot creep order.
-let private resolvedMoves (snapshot: Snapshot) (taskFor: string -> Task option) : Intent list =
-    match snapshot.Spatial with
-    | None -> []
-    | Some spatial ->
-        let placed =
-            snapshot.Creeps
-            |> List.choose (fun creep ->
-                Map.tryFind creep.Name spatial.CreepPositions
-                |> Option.map (fun pos -> creep.Name, pos))
+/// Direction of a single step between adjacent tiles.
+let private directionTo (from: Pos) (dest: Pos) : Direction option =
+    match sign (dest.X - from.X), sign (dest.Y - from.Y) with
+    | 0, -1 -> Some Top
+    | 1, -1 -> Some TopRight
+    | 1, 0 -> Some Right
+    | 1, 1 -> Some BottomRight
+    | 0, 1 -> Some Bottom
+    | -1, 1 -> Some BottomLeft
+    | -1, 0 -> Some Left
+    | -1, -1 -> Some TopLeft
+    | _ -> None
 
-        let moveIntents =
-            placed
-            |> List.map (fun (name, pos) -> moveIntentFor spatial name pos (taskFor name))
+/// Resolver, room pass: every creep the Atlas places registers a Move
+/// Intent, arbitration settles them into at most one single-step move per
+/// creep, and the settled standing tiles become move Intents in Snapshot
+/// creep order.
+let private resolvedMoves atlas (taskFor: string -> Task option) : Intent list =
+    let placed = Atlas.placedCreeps atlas
 
-        let occupants = placed |> List.map (fun (name, pos) -> pos, name) |> Map.ofList
-        let standing = arbitrate occupants moveIntents
-
+    let moveIntents =
         placed
-        |> List.choose (fun (name, pos) ->
-            Map.tryFind name standing
-            |> Option.bind (directionTo pos)
-            |> Option.map (fun direction -> MoveCreep(name, direction)))
+        |> List.map (fun (name, pos) -> moveIntentFor atlas name pos (taskFor name))
+
+    let occupants = placed |> List.map (fun (name, pos) -> pos, name) |> Map.ofList
+    let standing = arbitrate occupants moveIntents
+
+    placed
+    |> List.choose (fun (name, pos) ->
+        Map.tryFind name standing
+        |> Option.bind (directionTo pos)
+        |> Option.map (fun direction -> MoveCreep(name, direction)))
 
 /// Matcher: keep still-valid assignments (anti-thrash), greedily assign the
 /// rest, and emit each assigned creep's Intents (action, chat bubble, move).
 let private matchCreeps
     (snapshot: Snapshot)
+    atlas
     (tasks: Task list)
     (assignments: Assignments)
     : Intent list * Assignments =
     let byId = tasks |> List.map (fun t -> taskId t, t) |> Map.ofList
-    let capacities = taskCapacities snapshot
+    let capacities = taskCapacities snapshot atlas
 
     let load (acc: Assignments) tid =
         acc |> Map.filter (fun _ assigned -> assigned = tid) |> Map.count
@@ -577,50 +400,9 @@ let private matchCreeps
         | Some cap -> load acc tid < cap
         | None -> true
 
-    // Travel cost of each task for one creep (ADR 0002): one Dijkstra flood
-    // per creep, run lazily so it is paid at most once and only when a
-    // candidate is priced — a creep already inside the Work Area costs 0
-    // without flooding at all. None — a placed Work Area the creep cannot
-    // reach, or an empty one — makes the task inapplicable to this creep.
-    // Missing geometry (no projection, unplaced creep or unplaced target)
-    // prices as 0: without spatial data behaviour is unchanged, and geometry
-    // the projection cannot price never counts against a task.
-    let travelCostFor: CreepInfo -> Task -> int option =
-        let priced (creep: CreepInfo) : Task -> int option =
-            let placed =
-                snapshot.Spatial
-                |> Option.bind (fun spatial ->
-                    Map.tryFind creep.Name spatial.CreepPositions
-                    |> Option.map (fun pos -> spatial, pos, lazy (fst (floodFrom spatial pos))))
-
-            match placed with
-            | None -> fun _ -> Some 0
-            | Some(spatial, pos, dist) ->
-                fun task ->
-                    match Map.tryFind (targetOf task) spatial.TargetPositions with
-                    | None -> Some 0
-                    | Some _ ->
-                        let area = workArea spatial task
-
-                        if Set.contains pos area then
-                            Some 0
-                        else
-                            area
-                            |> Set.toList
-                            |> List.choose (fun tile -> Map.tryFind tile dist.Value)
-                            |> function
-                                | [] -> None
-                                | costs -> Some(List.min costs)
-
-        // One pricing closure per creep, shared by the sticky re-check and
-        // fresh matching so a released creep is not flooded twice.
-        let memo = snapshot.Creeps |> List.map (fun c -> c.Name, priced c) |> Map.ofList
-
-        fun creep -> Map.find creep.Name memo
-
     // Capacity applies to remembered assignments too: memory can carry an
     // oversell from before a cap existed (e.g. across a redeploy). So does
-    // reachability: a Work Area the flood can no longer reach releases the
+    // reachability: a Work Area the Atlas can no longer reach releases the
     // assignment, freeing its capacity for creeps that can get there —
     // deliberately with no range-based fallback (ADR 0002).
     let kept =
@@ -632,7 +414,7 @@ let private matchCreeps
             | Some creep, Some task when
                 applicable creep task
                 && hasCapacity acc tid
-                && (travelCostFor creep task).IsSome
+                && (Atlas.travelCost atlas creep.Name task).IsSome
                 ->
                 Map.add name tid acc
             | _ -> acc)
@@ -641,13 +423,11 @@ let private matchCreeps
         if Map.containsKey creep.Name acc then
             acc
         else
-            let travelCost = travelCostFor creep
-
             let candidates =
                 tasks
                 |> List.choose (fun t ->
                     if applicable creep t && hasCapacity acc (taskId t) then
-                        travelCost t |> Option.map (fun cost -> t, cost)
+                        Atlas.travelCost atlas creep.Name t |> Option.map (fun cost -> t, cost)
                     else
                         None)
 
@@ -668,7 +448,7 @@ let private matchCreeps
         snapshot.Creeps
         |> List.collect (fun creep ->
             match taskFor creep.Name with
-            | Some task -> actionIntents snapshot creep task
+            | Some task -> actionIntents atlas creep task
             | None -> [])
 
     // Every assigned creep says its Task's glyph every tick; unassigned
@@ -679,11 +459,14 @@ let private matchCreeps
             taskFor creep.Name
             |> Option.map (fun task -> SayCreep(creep.Name, glyphFor task)))
 
-    actions @ says @ resolvedMoves snapshot taskFor, final
+    actions @ says @ resolvedMoves atlas taskFor, final
 
-/// The single seam: Snapshot in, Intents plus next tick's Assignments out.
+/// The decision seam: Snapshot in, Intents plus next tick's Assignments
+/// out. Geometry is consulted through one Atlas built here, so every step
+/// prices from the same flood (ADR 0004).
 let decide (snapshot: Snapshot) (assignments: Assignments) : Intent list * Assignments =
-    let spawnIntents = planSpawns snapshot
+    let atlas = Atlas.ofSnapshot snapshot
+    let spawnIntents = planSpawns snapshot atlas
     let siteIntents = planConstructionSites snapshot
-    let creepIntents, next = matchCreeps snapshot (planTasks snapshot) assignments
+    let creepIntents, next = matchCreeps snapshot atlas (planTasks snapshot) assignments
     spawnIntents @ siteIntents @ creepIntents, next

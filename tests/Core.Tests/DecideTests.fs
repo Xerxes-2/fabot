@@ -23,7 +23,7 @@ let bareRespawn =
         ConstructionSites = []
         Creeps = []
         Placement = None
-        Spatial = None
+        Spatial = SpatialInfo.empty
     }
 
 let worker name energy freeCapacity =
@@ -368,9 +368,9 @@ let seatTests =
                         Sources = [ { Id = "src-a" } ]
                         Creeps = [ worker "w1" 0 50; worker "w2" 0 50; worker "w3" 0 50 ]
                         Spatial =
-                            Some(
-                                spatial [ "src-a", { X = 10; Y = 10 } ] [ { X = 9; Y = 10 }, Plain ]
-                            )
+
+                            spatial [ "src-a", { X = 10; Y = 10 } ] [ { X = 9; Y = 10 }, Plain ]
+
                     }
 
                 let intents, assignments = decide snapshot Map.empty
@@ -394,11 +394,11 @@ let seatTests =
                     { bareRespawn with
                         Creeps = [ worker "w1" 0 50; worker "w2" 0 50; worker "w3" 0 50 ]
                         Spatial =
-                            Some(
-                                spatial
-                                    [ "src-a", { X = 10; Y = 10 }; "src-b", { X = 20; Y = 20 } ]
-                                    ([ { X = 9; Y = 10 }, Plain ] @ openSeats { X = 20; Y = 20 })
-                            )
+
+                            spatial
+                                [ "src-a", { X = 10; Y = 10 }; "src-b", { X = 20; Y = 20 } ]
+                                ([ { X = 9; Y = 10 }, Plain ] @ openSeats { X = 20; Y = 20 })
+
                     }
 
                 let _, assignments = decide snapshot Map.empty
@@ -417,9 +417,9 @@ let seatTests =
                         Sources = [ { Id = "src-a" } ]
                         Creeps = [ worker "w1" 25 25; worker "w2" 25 25 ]
                         Spatial =
-                            Some(
-                                spatial [ "src-a", { X = 10; Y = 10 } ] [ { X = 9; Y = 10 }, Plain ]
-                            )
+
+                            spatial [ "src-a", { X = 10; Y = 10 } ] [ { X = 9; Y = 10 }, Plain ]
+
                     }
 
                 let _, assignments = decide snapshot Map.empty
@@ -438,15 +438,15 @@ let seatTests =
                         Sources = [ { Id = "src-a" } ]
                         Creeps = [ worker "w1" 0 50; worker "w2" 0 50; worker "w3" 0 50 ]
                         Spatial =
-                            Some(
-                                spatial
-                                    [ "src-a", { X = 10; Y = 10 } ]
-                                    [
-                                        { X = 9; Y = 10 }, Plain
-                                        { X = 11; Y = 10 }, Swamp
-                                        { X = 10; Y = 9 }, Wall
-                                    ]
-                            )
+
+                            spatial
+                                [ "src-a", { X = 10; Y = 10 } ]
+                                [
+                                    { X = 9; Y = 10 }, Plain
+                                    { X = 11; Y = 10 }, Swamp
+                                    { X = 10; Y = 9 }, Wall
+                                ]
+
                     }
 
                 let _, assignments = decide snapshot Map.empty
@@ -463,9 +463,9 @@ let seatTests =
                         Sources = [ { Id = "src-a" } ]
                         Creeps = [ worker "w1" 0 50; worker "w2" 0 50 ]
                         Spatial =
-                            Some(
-                                spatial [ "src-a", { X = 10; Y = 10 } ] [ { X = 9; Y = 10 }, Plain ]
-                            )
+
+                            spatial [ "src-a", { X = 10; Y = 10 } ] [ { X = 9; Y = 10 }, Plain ]
+
                     }
 
                 let stale = Map.ofList [ "w1", "harvest:src-a"; "w2", "harvest:src-a" ]
@@ -518,7 +518,7 @@ let travelCostTests =
                     { bareRespawn with
                         Sources = sources
                         Creeps = [ worker "w1" 0 50 ]
-                        Spatial = Some(nearFarCorridor [ "w1", { X = 10; Y = 17 } ])
+                        Spatial = nearFarCorridor [ "w1", { X = 10; Y = 17 } ]
                     }
 
                 let far: SourceInfo = { Id = "src-far" }
@@ -555,15 +555,15 @@ let travelCostTests =
                         Sources = [ { Id = "src-swamp" }; { Id = "src-plain" } ]
                         Creeps = [ worker "w1" 0 50 ]
                         Spatial =
-                            Some
-                                { spatial
-                                      [
-                                          "src-swamp", { X = 10; Y = 12 }
-                                          "src-plain", { X = 10; Y = 20 }
-                                      ]
-                                      corridor with
-                                    CreepPositions = Map.ofList [ "w1", { X = 10; Y = 15 } ]
-                                }
+
+                            { spatial
+                                  [
+                                      "src-swamp", { X = 10; Y = 12 }
+                                      "src-plain", { X = 10; Y = 20 }
+                                  ]
+                                  corridor with
+                                CreepPositions = Map.ofList [ "w1", { X = 10; Y = 15 } ]
+                            }
                     }
 
                 let _, assignments = decide snapshot Map.empty
@@ -586,16 +586,13 @@ let travelCostTests =
                         ConstructionSites = [ { Id = "site-1" } ]
                         Creeps = [ worker "w1" 50 0 ]
                         Spatial =
-                            Some
-                                { spatial
-                                      [
-                                          "spawn-1", { X = 10; Y = 10 }
-                                          "site-1", { X = 10; Y = 16 }
-                                      ]
-                                      corridor with
-                                    CreepPositions = Map.ofList [ "w1", { X = 10; Y = 15 } ]
-                                    Obstacles = Set.singleton { X = 10; Y = 10 }
-                                }
+
+                            { spatial
+                                  [ "spawn-1", { X = 10; Y = 10 }; "site-1", { X = 10; Y = 16 } ]
+                                  corridor with
+                                CreepPositions = Map.ofList [ "w1", { X = 10; Y = 15 } ]
+                                Obstacles = Set.singleton { X = 10; Y = 10 }
+                            }
                     }
 
                 let _, assignments = decide snapshot Map.empty
@@ -613,7 +610,7 @@ let travelCostTests =
                     { bareRespawn with
                         Sources = [ { Id = "src-far" }; { Id = "src-near" } ]
                         Creeps = [ worker "w1" 0 50 ]
-                        Spatial = Some(nearFarCorridor [ "w1", { X = 10; Y = 17 } ])
+                        Spatial = nearFarCorridor [ "w1", { X = 10; Y = 17 } ]
                     }
 
                 let sticky = Map.ofList [ "w1", "harvest:src-far" ]
@@ -632,7 +629,7 @@ let travelCostTests =
                     { bareRespawn with
                         Sources = [ { Id = "src-far" }; { Id = "src-near" } ]
                         Creeps = [ worker "w1" 0 50 ]
-                        Spatial = Some(nearFarCorridor [])
+                        Spatial = nearFarCorridor []
                     }
 
                 let _, assignments = decide snapshot Map.empty
@@ -663,12 +660,12 @@ let travelCostTests =
                         Sources = [ { Id = "src-a" } ]
                         Creeps = [ worker "w1" 25 25 ]
                         Spatial =
-                            Some
-                                { spatial
-                                      [ "src-a", { X = 10; Y = 10 }; "ctrl-1", { X = 10; Y = 16 } ]
-                                      terrain with
-                                    CreepPositions = Map.ofList [ "w1", { X = 10; Y = 14 } ]
-                                }
+
+                            { spatial
+                                  [ "src-a", { X = 10; Y = 10 }; "ctrl-1", { X = 10; Y = 16 } ]
+                                  terrain with
+                                CreepPositions = Map.ofList [ "w1", { X = 10; Y = 14 } ]
+                            }
                     }
 
                 let _, assignments = decide snapshot Map.empty
@@ -719,10 +716,10 @@ let movementTests =
                         Sources = [ { Id = "src-a" } ]
                         Creeps = [ worker "w1" 0 50 ]
                         Spatial =
-                            Some
-                                { spatial [ "src-a", { X = 10; Y = 10 } ] corridor with
-                                    CreepPositions = Map.ofList [ "w1", { X = 10; Y = 14 } ]
-                                }
+
+                            { spatial [ "src-a", { X = 10; Y = 10 } ] corridor with
+                                CreepPositions = Map.ofList [ "w1", { X = 10; Y = 14 } ]
+                            }
                     }
 
                 let intents, _ = decide snapshot Map.empty
@@ -741,12 +738,10 @@ let movementTests =
                         Sources = [ { Id = "src-a" } ]
                         Creeps = [ worker "w1" 0 50 ]
                         Spatial =
-                            Some
-                                { spatial
-                                      [ "src-a", { X = 10; Y = 10 } ]
-                                      (openSeats { X = 10; Y = 10 }) with
-                                    CreepPositions = Map.ofList [ "w1", { X = 10; Y = 11 } ]
-                                }
+
+                            { spatial [ "src-a", { X = 10; Y = 10 } ] (openSeats { X = 10; Y = 10 }) with
+                                CreepPositions = Map.ofList [ "w1", { X = 10; Y = 11 } ]
+                            }
                     }
 
                 let intents, _ = decide snapshot Map.empty
@@ -776,10 +771,10 @@ let movementTests =
                         Sources = [ { Id = "src-a" } ]
                         Creeps = [ worker "w1" 0 50 ]
                         Spatial =
-                            Some
-                                { spatial [ "src-a", { X = 10; Y = 10 } ] terrain with
-                                    CreepPositions = Map.ofList [ "w1", { X = 10; Y = 14 } ]
-                                }
+
+                            { spatial [ "src-a", { X = 10; Y = 10 } ] terrain with
+                                CreepPositions = Map.ofList [ "w1", { X = 10; Y = 14 } ]
+                            }
                     }
 
                 let intents, _ = decide snapshot Map.empty
@@ -799,18 +794,17 @@ let movementTests =
                     { bareRespawn with
                         Creeps = [ worker "w1" 50 0 ]
                         Spatial =
-                            Some
-                                { spatial
-                                      [ "ctrl-1", { X = 10; Y = 10 } ]
-                                      [
-                                          { X = 10; Y = 10 }, Plain
-                                          { X = 10; Y = 11 }, Plain
-                                          { X = 10; Y = 12 }, Plain
-                                      ] with
-                                    CreepPositions = Map.ofList [ "w1", { X = 10; Y = 12 } ]
-                                    Obstacles =
-                                        Set.ofList [ { X = 10; Y = 10 }; { X = 10; Y = 12 } ]
-                                }
+
+                            { spatial
+                                  [ "ctrl-1", { X = 10; Y = 10 } ]
+                                  [
+                                      { X = 10; Y = 10 }, Plain
+                                      { X = 10; Y = 11 }, Plain
+                                      { X = 10; Y = 12 }, Plain
+                                  ] with
+                                CreepPositions = Map.ofList [ "w1", { X = 10; Y = 12 } ]
+                                Obstacles = Set.ofList [ { X = 10; Y = 10 }; { X = 10; Y = 12 } ]
+                            }
                     }
 
                 let intents, _ = decide snapshot Map.empty
@@ -835,12 +829,12 @@ let movementTests =
                         Sources = [ { Id = "src-a" } ]
                         Creeps = [ worker "w1" 0 50 ]
                         Spatial =
-                            Some
-                                { spatial
-                                      [ "src-a", { X = 10; Y = 10 } ]
-                                      [ { X = 10; Y = 11 }, Plain; { X = 10; Y = 14 }, Plain ] with
-                                    CreepPositions = Map.ofList [ "w1", { X = 10; Y = 14 } ]
-                                }
+
+                            { spatial
+                                  [ "src-a", { X = 10; Y = 10 } ]
+                                  [ { X = 10; Y = 11 }, Plain; { X = 10; Y = 14 }, Plain ] with
+                                CreepPositions = Map.ofList [ "w1", { X = 10; Y = 14 } ]
+                            }
                     }
 
                 let intents, _ = decide snapshot Map.empty
@@ -855,12 +849,12 @@ let movementTests =
                         ConstructionSites = [ { Id = "site-1" } ]
                         Creeps = [ worker "w1" 50 0 ]
                         Spatial =
-                            Some
-                                { spatial
-                                      [ "site-1", { X = 10; Y = 10 } ]
-                                      [ for y in 10..13 -> { X = 10; Y = y }, Plain ] with
-                                    CreepPositions = Map.ofList [ "w1", { X = 10; Y = 13 } ]
-                                }
+
+                            { spatial
+                                  [ "site-1", { X = 10; Y = 10 } ]
+                                  [ for y in 10..13 -> { X = 10; Y = y }, Plain ] with
+                                CreepPositions = Map.ofList [ "w1", { X = 10; Y = 13 } ]
+                            }
                     }
 
                 let intents, _ = decide snapshot Map.empty
@@ -875,13 +869,13 @@ let movementTests =
                         Refillables = [ { Id = "spawn-1"; FreeCapacity = 50 } ]
                         Creeps = [ worker "w1" 50 0 ]
                         Spatial =
-                            Some
-                                { spatial
-                                      [ "spawn-1", { X = 10; Y = 10 } ]
-                                      [ for y in 10..12 -> { X = 10; Y = y }, Plain ] with
-                                    CreepPositions = Map.ofList [ "w1", { X = 10; Y = 12 } ]
-                                    Obstacles = Set.singleton { X = 10; Y = 10 }
-                                }
+
+                            { spatial
+                                  [ "spawn-1", { X = 10; Y = 10 } ]
+                                  [ for y in 10..12 -> { X = 10; Y = y }, Plain ] with
+                                CreepPositions = Map.ofList [ "w1", { X = 10; Y = 12 } ]
+                                Obstacles = Set.singleton { X = 10; Y = 10 }
+                            }
                     }
 
                 let intents, _ = decide snapshot Map.empty
@@ -917,12 +911,12 @@ let unreachableTests =
                         Sources = [ { Id = "src-a" } ]
                         Creeps = [ worker "w1" 25 25; worker "w2" 0 50 ]
                         Spatial =
-                            Some
-                                { spatial [ "src-a", { X = 10; Y = 10 } ] terrain with
-                                    CreepPositions =
-                                        Map.ofList
-                                            [ "w1", { X = 20; Y = 20 }; "w2", { X = 10; Y = 12 } ]
-                                }
+
+                            { spatial [ "src-a", { X = 10; Y = 10 } ] terrain with
+                                CreepPositions =
+                                    Map.ofList
+                                        [ "w1", { X = 20; Y = 20 }; "w2", { X = 10; Y = 12 } ]
+                            }
                     }
 
                 let sticky = Map.ofList [ "w1", "harvest:src-a" ]
@@ -947,10 +941,10 @@ let unreachableTests =
                         Sources = [ { Id = "src-a" } ]
                         Creeps = [ worker "w1" 0 50 ]
                         Spatial =
-                            Some
-                                { spatial [ "src-a", { X = 10; Y = 10 } ] terrain with
-                                    CreepPositions = Map.ofList [ "w1", { X = 20; Y = 20 } ]
-                                }
+
+                            { spatial [ "src-a", { X = 10; Y = 10 } ] terrain with
+                                CreepPositions = Map.ofList [ "w1", { X = 20; Y = 20 } ]
+                            }
                     }
 
                 let sticky = Map.ofList [ "w1", "harvest:src-a" ]
@@ -972,12 +966,10 @@ let unreachableTests =
                     { bareRespawn with
                         Creeps = [ worker "w1" 50 0 ]
                         Spatial =
-                            Some
-                                { spatial
-                                      [ "ctrl-1", { X = 10; Y = 10 } ]
-                                      [ { X = 20; Y = 20 }, Plain ] with
-                                    CreepPositions = Map.ofList [ "w1", { X = 20; Y = 20 } ]
-                                }
+
+                            { spatial [ "ctrl-1", { X = 10; Y = 10 } ] [ { X = 20; Y = 20 }, Plain ] with
+                                CreepPositions = Map.ofList [ "w1", { X = 20; Y = 20 } ]
+                            }
                     }
 
                 let sticky = Map.ofList [ "w1", "upgrade:ctrl-1" ]
@@ -996,7 +988,7 @@ let unreachableTests =
                     { bareRespawn with
                         Sources = [ { Id = "src-a" } ]
                         Creeps = [ worker "w1" 0 50 ]
-                        Spatial = Some(spatial [ "src-a", { X = 10; Y = 10 } ] terrain)
+                        Spatial = spatial [ "src-a", { X = 10; Y = 10 } ] terrain
                     }
 
                 let sticky = Map.ofList [ "w1", "harvest:src-a" ]
@@ -1047,14 +1039,14 @@ let arbitrationTests =
                         Sources = [ { Id = "src-a" } ]
                         Creeps = [ worker "har" 0 50; worker "upg" 50 0 ]
                         Spatial =
-                            Some
-                                { spatial
-                                      [ "src-a", { X = 10; Y = 10 }; "ctrl-1", { X = 10; Y = 14 } ]
-                                      terrain with
-                                    CreepPositions =
-                                        Map.ofList
-                                            [ "har", { X = 10; Y = 12 }; "upg", { X = 10; Y = 11 } ]
-                                }
+
+                            { spatial
+                                  [ "src-a", { X = 10; Y = 10 }; "ctrl-1", { X = 10; Y = 14 } ]
+                                  terrain with
+                                CreepPositions =
+                                    Map.ofList
+                                        [ "har", { X = 10; Y = 12 }; "upg", { X = 10; Y = 11 } ]
+                            }
                     }
 
                 let sticky = Map.ofList [ "har", "harvest:src-a"; "upg", "upgrade:ctrl-1" ]
@@ -1097,14 +1089,14 @@ let arbitrationTests =
                         Sources = [ { Id = "src-a" }; { Id = "src-b" } ]
                         Creeps = [ worker "wa" 0 50; worker "wb" 0 50 ]
                         Spatial =
-                            Some
-                                { spatial
-                                      [ "src-a", { X = 10; Y = 10 }; "src-b", { X = 10; Y = 13 } ]
-                                      terrain with
-                                    CreepPositions =
-                                        Map.ofList
-                                            [ "wa", { X = 10; Y = 12 }; "wb", { X = 10; Y = 11 } ]
-                                }
+
+                            { spatial
+                                  [ "src-a", { X = 10; Y = 10 }; "src-b", { X = 10; Y = 13 } ]
+                                  terrain with
+                                CreepPositions =
+                                    Map.ofList
+                                        [ "wa", { X = 10; Y = 12 }; "wb", { X = 10; Y = 11 } ]
+                            }
                     }
 
                 let sticky = Map.ofList [ "wa", "harvest:src-a"; "wb", "harvest:src-b" ]
@@ -1133,12 +1125,12 @@ let arbitrationTests =
                         Controller = None
                         Creeps = [ worker "w1" 0 50; worker "w2" 50 0 ]
                         Spatial =
-                            Some
-                                { spatial [ "src-a", { X = 10; Y = 10 } ] terrain with
-                                    CreepPositions =
-                                        Map.ofList
-                                            [ "w1", { X = 10; Y = 13 }; "w2", { X = 10; Y = 12 } ]
-                                }
+
+                            { spatial [ "src-a", { X = 10; Y = 10 } ] terrain with
+                                CreepPositions =
+                                    Map.ofList
+                                        [ "w1", { X = 10; Y = 13 }; "w2", { X = 10; Y = 12 } ]
+                            }
                     }
 
                 let intents, _ = decide snapshot Map.empty
@@ -1172,14 +1164,13 @@ let arbitrationTests =
                         Sources = [ { Id = "src-a" } ]
                         Creeps = [ worker "h" 0 50; worker "u" 50 0 ]
                         Spatial =
-                            Some
-                                { spatial
-                                      [ "src-a", { X = 10; Y = 10 }; "ctrl-1", { X = 10; Y = 8 } ]
-                                      terrain with
-                                    CreepPositions =
-                                        Map.ofList
-                                            [ "h", { X = 10; Y = 13 }; "u", { X = 11; Y = 13 } ]
-                                }
+
+                            { spatial
+                                  [ "src-a", { X = 10; Y = 10 }; "ctrl-1", { X = 10; Y = 8 } ]
+                                  terrain with
+                                CreepPositions =
+                                    Map.ofList [ "h", { X = 10; Y = 13 }; "u", { X = 11; Y = 13 } ]
+                            }
                     }
 
                 let sticky = Map.ofList [ "h", "harvest:src-a"; "u", "upgrade:ctrl-1" ]
@@ -1208,12 +1199,11 @@ let arbitrationTests =
                         Sources = [ { Id = "src-a" } ]
                         Creeps = [ worker "h1" 0 50; worker "h2" 0 50 ]
                         Spatial =
-                            Some
-                                { spatial [ "src-a", { X = 10; Y = 10 } ] terrain with
-                                    CreepPositions =
-                                        Map.ofList
-                                            [ "h1", { X = 10; Y = 11 }; "h2", { X = 9; Y = 12 } ]
-                                }
+
+                            { spatial [ "src-a", { X = 10; Y = 10 } ] terrain with
+                                CreepPositions =
+                                    Map.ofList [ "h1", { X = 10; Y = 11 }; "h2", { X = 9; Y = 12 } ]
+                            }
                     }
 
                 let sticky = Map.ofList [ "h1", "harvest:src-a"; "h2", "harvest:src-a" ]
@@ -1249,14 +1239,14 @@ let arbitrationTests =
                         Sources = [ { Id = "src-a" } ]
                         Creeps = [ worker "har" 0 50; worker "upg" 50 0 ]
                         Spatial =
-                            Some
-                                { spatial
-                                      [ "src-a", { X = 11; Y = 12 }; "ctrl-1", { X = 13; Y = 12 } ]
-                                      terrain with
-                                    CreepPositions =
-                                        Map.ofList
-                                            [ "har", { X = 9; Y = 12 }; "upg", { X = 10; Y = 12 } ]
-                                }
+
+                            { spatial
+                                  [ "src-a", { X = 11; Y = 12 }; "ctrl-1", { X = 13; Y = 12 } ]
+                                  terrain with
+                                CreepPositions =
+                                    Map.ofList
+                                        [ "har", { X = 9; Y = 12 }; "upg", { X = 10; Y = 12 } ]
+                            }
                     }
 
                 let sticky = Map.ofList [ "har", "harvest:src-a"; "upg", "upgrade:ctrl-1" ]
@@ -1296,7 +1286,7 @@ let workforceTests =
                 let snapshot =
                     { bareRespawn with
                         Creeps = [ worker "w1" 0 50; worker "w2" 0 50 ]
-                        Spatial = Some fiveSeats
+                        Spatial = fiveSeats
                     }
 
                 let intents, _ = decide snapshot Map.empty
@@ -1311,7 +1301,7 @@ let workforceTests =
                 let snapshot =
                     { bareRespawn with
                         Creeps = [ for i in 1..5 -> worker $"w{i}" 0 50 ]
-                        Spatial = Some fiveSeats
+                        Spatial = fiveSeats
                     }
 
                 let intents, _ = decide snapshot Map.empty
@@ -1325,7 +1315,7 @@ let workforceTests =
                     { bareRespawn with
                         Sources = [ { Id = "src-a" } ]
                         Creeps = [ worker "w1" 0 50 ]
-                        Spatial = Some oneSeat
+                        Spatial = oneSeat
                     }
 
                 let intents, _ = decide snapshot Map.empty
@@ -1340,7 +1330,7 @@ let workforceTests =
                 let snapshot =
                     { bareRespawn with
                         Creeps = [ worker "w1" 0 50; worker "w2" 0 50 ]
-                        Spatial = Some(spatial [] [])
+                        Spatial = spatial [] []
                     }
 
                 let intents, _ = decide snapshot Map.empty
@@ -1417,10 +1407,10 @@ let sayTests =
                         Sources = [ { Id = "src-a" } ]
                         Creeps = [ worker "w1" 0 50 ]
                         Spatial =
-                            Some
-                                { spatial [ "src-a", { X = 10; Y = 10 } ] corridor with
-                                    CreepPositions = Map.ofList [ "w1", { X = 10; Y = 14 } ]
-                                }
+
+                            { spatial [ "src-a", { X = 10; Y = 10 } ] corridor with
+                                CreepPositions = Map.ofList [ "w1", { X = 10; Y = 14 } ]
+                            }
                     }
 
                 let intents, _ = decide snapshot Map.empty
