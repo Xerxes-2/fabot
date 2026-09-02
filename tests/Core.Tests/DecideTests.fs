@@ -629,6 +629,271 @@ let movementTests =
             }
         ]
 
+/// The tile one step in `direction` from `pos` — mirrors the engine's move.
+let stepFrom pos direction =
+    match direction with
+    | Top -> { pos with Y = pos.Y - 1 }
+    | TopRight -> { X = pos.X + 1; Y = pos.Y - 1 }
+    | Right -> { pos with X = pos.X + 1 }
+    | BottomRight -> { X = pos.X + 1; Y = pos.Y + 1 }
+    | Bottom -> { pos with Y = pos.Y + 1 }
+    | BottomLeft -> { X = pos.X - 1; Y = pos.Y + 1 }
+    | Left -> { pos with X = pos.X - 1 }
+    | TopLeft -> { X = pos.X - 1; Y = pos.Y - 1 }
+
+[<Tests>]
+let arbitrationTests =
+    testList
+        "yield arbitration"
+        [
+            test
+                "squatting regression: the upgrader on the sole Seat yields to the inbound harvester" {
+                // Source at (10,10) with (10,11) as its only Seat; controller
+                // at (10,14), so the Seat is also at upgrade range 3. The
+                // upgrader squats the Seat; the harvester stands one tile out.
+                let terrain =
+                    [
+                        { X = 10; Y = 10 }, Wall
+                        { X = 10; Y = 14 }, Wall
+                        { X = 10; Y = 11 }, Plain
+                        { X = 9; Y = 12 }, Plain
+                        { X = 10; Y = 12 }, Plain
+                        { X = 11; Y = 12 }, Plain
+                        { X = 10; Y = 13 }, Plain
+                    ]
+
+                let snapshot =
+                    { bareRespawn with
+                        Sources = [ { Id = "src-a" } ]
+                        Creeps = [ worker "har" 0 50; worker "upg" 50 0 ]
+                        Spatial =
+                            Some
+                                { spatial
+                                      [ "src-a", { X = 10; Y = 10 }; "ctrl-1", { X = 10; Y = 14 } ]
+                                      terrain with
+                                    CreepPositions =
+                                        Map.ofList
+                                            [ "har", { X = 10; Y = 12 }; "upg", { X = 10; Y = 11 } ]
+                                }
+                    }
+
+                let sticky = Map.ofList [ "har", "harvest:src-a"; "upg", "upgrade:ctrl-1" ]
+                let intents, _ = decide snapshot sticky
+
+                Expect.contains
+                    (moveIntents intents)
+                    ("har", Top)
+                    "the harvester steps onto the Seat"
+
+                Expect.contains
+                    intents
+                    (UpgradeController("upg", "ctrl-1"))
+                    "the displaced upgrader still upgrades this tick"
+
+                match moveIntents intents |> List.filter (fun (name, _) -> name = "upg") with
+                | [ (_, direction) ] ->
+                    let dest = stepFrom { X = 10; Y = 11 } direction
+
+                    Expect.isLessThanOrEqual
+                        (max (abs (dest.X - 10)) (abs (dest.Y - 14)))
+                        3
+                        "the upgrader is displaced to a tile still inside its Work Area"
+                | other -> failtest $"expected exactly one move for the upgrader, got %A{other}"
+            }
+
+            test "head-on swap: two creeps blocking each other exchange tiles" {
+                // Two single-Seat sources at the ends of a two-tile corridor;
+                // each creep stands on the other's Seat.
+                let terrain =
+                    [
+                        { X = 10; Y = 10 }, Wall
+                        { X = 10; Y = 11 }, Plain
+                        { X = 10; Y = 12 }, Plain
+                        { X = 10; Y = 13 }, Wall
+                    ]
+
+                let snapshot =
+                    { bareRespawn with
+                        Sources = [ { Id = "src-a" }; { Id = "src-b" } ]
+                        Creeps = [ worker "wa" 0 50; worker "wb" 0 50 ]
+                        Spatial =
+                            Some
+                                { spatial
+                                      [ "src-a", { X = 10; Y = 10 }; "src-b", { X = 10; Y = 13 } ]
+                                      terrain with
+                                    CreepPositions =
+                                        Map.ofList
+                                            [ "wa", { X = 10; Y = 12 }; "wb", { X = 10; Y = 11 } ]
+                                }
+                    }
+
+                let sticky = Map.ofList [ "wa", "harvest:src-a"; "wb", "harvest:src-b" ]
+                let intents, _ = decide snapshot sticky
+
+                Expect.equal
+                    (moveIntents intents |> List.sort)
+                    [ "wa", Top; "wb", Bottom ]
+                    "both creeps move: they swap instead of deadlocking"
+            }
+
+            test "an idle creep is displaced by a working creep passing through" {
+                // No controller and nothing to refill: the full creep w2 has
+                // no applicable task and idles astride the harvester's path.
+                let terrain =
+                    [
+                        { X = 10; Y = 10 }, Wall
+                        { X = 10; Y = 11 }, Plain
+                        { X = 10; Y = 12 }, Plain
+                        { X = 10; Y = 13 }, Plain
+                    ]
+
+                let snapshot =
+                    { bareRespawn with
+                        Sources = [ { Id = "src-a" } ]
+                        Controller = None
+                        Creeps = [ worker "w1" 0 50; worker "w2" 50 0 ]
+                        Spatial =
+                            Some
+                                { spatial [ "src-a", { X = 10; Y = 10 } ] terrain with
+                                    CreepPositions =
+                                        Map.ofList
+                                            [ "w1", { X = 10; Y = 13 }; "w2", { X = 10; Y = 12 } ]
+                                }
+                    }
+
+                let intents, _ = decide snapshot Map.empty
+
+                Expect.contains
+                    (moveIntents intents)
+                    ("w1", Top)
+                    "the working creep claims the idler's tile"
+
+                Expect.isTrue
+                    (moveIntents intents |> List.exists (fun (name, _) -> name = "w2"))
+                    "the idler is displaced out of the way"
+            }
+
+            test "a contested tile goes to the higher task rank" {
+                // One gap at (10,12): the harvester's and the upgrader's
+                // cheapest paths both step onto it. Harvest outranks Upgrade,
+                // so the upgrader waits in place.
+                let terrain =
+                    [
+                        { X = 10; Y = 10 }, Wall
+                        { X = 10; Y = 8 }, Wall
+                        { X = 10; Y = 11 }, Plain
+                        { X = 10; Y = 12 }, Plain
+                        { X = 10; Y = 13 }, Plain
+                        { X = 11; Y = 13 }, Plain
+                    ]
+
+                let snapshot =
+                    { bareRespawn with
+                        Sources = [ { Id = "src-a" } ]
+                        Creeps = [ worker "h" 0 50; worker "u" 50 0 ]
+                        Spatial =
+                            Some
+                                { spatial
+                                      [ "src-a", { X = 10; Y = 10 }; "ctrl-1", { X = 10; Y = 8 } ]
+                                      terrain with
+                                    CreepPositions =
+                                        Map.ofList
+                                            [ "h", { X = 10; Y = 13 }; "u", { X = 11; Y = 13 } ]
+                                }
+                    }
+
+                let sticky = Map.ofList [ "h", "harvest:src-a"; "u", "upgrade:ctrl-1" ]
+                let intents, _ = decide snapshot sticky
+
+                Expect.equal
+                    (moveIntents intents)
+                    [ "h", Top ]
+                    "the harvester takes the gap; the outranked upgrader waits"
+            }
+
+            test "within a rank the most-constrained creep places first" {
+                // Two Seats; h1 sits on the one h2's cheapest path targets.
+                // h2 (one candidate tile) outranks h1 (two) inside the same
+                // priority, so h1 shuffles along to the free Seat.
+                let terrain =
+                    [
+                        { X = 10; Y = 10 }, Wall
+                        { X = 10; Y = 11 }, Plain
+                        { X = 11; Y = 11 }, Plain
+                        { X = 9; Y = 12 }, Plain
+                    ]
+
+                let snapshot =
+                    { bareRespawn with
+                        Sources = [ { Id = "src-a" } ]
+                        Creeps = [ worker "h1" 0 50; worker "h2" 0 50 ]
+                        Spatial =
+                            Some
+                                { spatial [ "src-a", { X = 10; Y = 10 } ] terrain with
+                                    CreepPositions =
+                                        Map.ofList
+                                            [ "h1", { X = 10; Y = 11 }; "h2", { X = 9; Y = 12 } ]
+                                }
+                    }
+
+                let sticky = Map.ofList [ "h1", "harvest:src-a"; "h2", "harvest:src-a" ]
+                let intents, _ = decide snapshot sticky
+
+                Expect.equal
+                    (moveIntents intents |> List.sort)
+                    [ "h1", Right; "h2", TopRight ]
+                    "h2 claims the occupied Seat; h1 is displaced to the free one"
+
+                Expect.contains
+                    intents
+                    (HarvestSource("h1", "src-a"))
+                    "the displaced harvester still harvests this tick"
+            }
+
+            test "an occupant with no in-area alternative swaps with its displacer" {
+                // The upgrader's only in-area standing tile is the Seat
+                // itself: every adjacent walkable tile is outside upgrade
+                // range. Displaced, it swaps into the harvester's tile.
+                let terrain =
+                    [
+                        { X = 11; Y = 12 }, Wall
+                        { X = 13; Y = 12 }, Wall
+                        { X = 10; Y = 12 }, Plain
+                        { X = 9; Y = 11 }, Plain
+                        { X = 9; Y = 12 }, Plain
+                        { X = 9; Y = 13 }, Plain
+                    ]
+
+                let snapshot =
+                    { bareRespawn with
+                        Sources = [ { Id = "src-a" } ]
+                        Creeps = [ worker "har" 0 50; worker "upg" 50 0 ]
+                        Spatial =
+                            Some
+                                { spatial
+                                      [ "src-a", { X = 11; Y = 12 }; "ctrl-1", { X = 13; Y = 12 } ]
+                                      terrain with
+                                    CreepPositions =
+                                        Map.ofList
+                                            [ "har", { X = 9; Y = 12 }; "upg", { X = 10; Y = 12 } ]
+                                }
+                    }
+
+                let sticky = Map.ofList [ "har", "harvest:src-a"; "upg", "upgrade:ctrl-1" ]
+                let intents, _ = decide snapshot sticky
+
+                Expect.equal
+                    (moveIntents intents |> List.sort)
+                    [ "har", Right; "upg", Left ]
+                    "displacer and occupant exchange tiles"
+
+                Expect.contains
+                    intents
+                    (UpgradeController("upg", "ctrl-1"))
+                    "the swapped-out upgrader still upgrades from its tick-start tile"
+            }
+        ]
+
 [<Tests>]
 let tests =
     testList

@@ -297,15 +297,12 @@ let private directionTo (from: Pos) (dest: Pos) : Direction option =
     | -1, -1 -> Some TopLeft
     | _ -> None
 
-/// Resolver, conflict-free case (ADR 0001): a creep in action range acts
-/// (the engine judges range by the tick-start position); one standing off
-/// its Work Area also gets a single-step move Intent along the cheapest
-/// path there — the two combine when the creep's own tile stopped being
-/// legal standing ground. An unreachable Work Area yields no move Intent
-/// at all (no thrash). Without a spatial fix on both creep and target the
-/// action is emitted unconditionally — no movement can be derived,
-/// matching the projection-less behaviour elsewhere.
-let private resolve (snapshot: Snapshot) (creep: CreepInfo) (task: Task) : Intent list =
+/// Action Intent for one assigned creep: emitted when the creep is within
+/// action range at tick start (the engine judges range by that position).
+/// Without a spatial fix on both creep and target the action is emitted
+/// unconditionally — no movement can be derived, matching the
+/// projection-less behaviour elsewhere.
+let private actionIntents (snapshot: Snapshot) (creep: CreepInfo) (task: Task) : Intent list =
     let placed =
         snapshot.Spatial
         |> Option.bind (fun spatial ->
@@ -313,30 +310,177 @@ let private resolve (snapshot: Snapshot) (creep: CreepInfo) (task: Task) : Inten
                 Map.tryFind creep.Name spatial.CreepPositions,
                 Map.tryFind (targetOf task) spatial.TargetPositions
             with
-            | Some creepPos, Some targetPos -> Some(spatial, creepPos, targetPos)
+            | Some creepPos, Some targetPos -> Some(creepPos, targetPos)
             | _ -> None)
 
     match placed with
     | None -> [ intentFor creep task ]
-    | Some(spatial, creepPos, targetPos) ->
-        let act =
-            if range creepPos targetPos <= actionRange task then
-                [ intentFor creep task ]
-            else
-                []
+    | Some(creepPos, targetPos) ->
+        if range creepPos targetPos <= actionRange task then
+            [ intentFor creep task ]
+        else
+            []
 
+/// A creep's Move Intent: candidate standing tiles for next tick in
+/// preference order, plus a priority (the task rank). Input to the
+/// Resolver — not an Intent; the Resolver's output is what becomes one.
+type private MoveIntent =
+    {
+        Creep: string
+        Pos: Pos
+        Rank: int
+        Candidates: Pos list
+    }
+
+/// Creeps with no Task rank below every task in arbitration.
+let private idleRank = System.Int32.MaxValue
+
+/// Walkable tiles adjacent to `pos`, in deterministic (X, Y) order.
+let private adjacentWalkable (spatial: SpatialInfo) pos =
+    neighbours pos |> List.filter (fun tile -> (stepCost spatial tile).IsSome)
+
+/// Register one creep's Move Intent — every creep gets one (ADR 0001).
+/// A creep travelling toward its Work Area wants exactly its next path
+/// step; one already inside is force-registered "stay put, displaceable
+/// within the Work Area"; one with no Task — or no way to reach its
+/// area, which is just as immobilising — is parked: stay put,
+/// displaceable to any adjacent walkable tile.
+let private moveIntentFor
+    (spatial: SpatialInfo)
+    (creep: string)
+    (pos: Pos)
+    (task: Task option)
+    : MoveIntent =
+    let parked rank =
+        {
+            Creep = creep
+            Pos = pos
+            Rank = rank
+            Candidates = pos :: adjacentWalkable spatial pos
+        }
+
+    match task with
+    | None -> parked idleRank
+    | Some task ->
         let area = workArea spatial task
 
-        let move =
-            if Set.contains creepPos area then
-                []
-            else
-                firstStepToward spatial creepPos area
-                |> Option.bind (directionTo creepPos)
-                |> Option.map (fun direction -> MoveCreep(creep.Name, direction))
-                |> Option.toList
+        if Set.contains pos area then
+            {
+                Creep = creep
+                Pos = pos
+                Rank = rank task
+                Candidates =
+                    pos :: (neighbours pos |> List.filter (fun tile -> Set.contains tile area))
+            }
+        else
+            match firstStepToward spatial pos area with
+            | Some step ->
+                {
+                    Creep = creep
+                    Pos = pos
+                    Rank = rank task
+                    Candidates = [ step ]
+                }
+            | None -> parked (rank task)
 
-        act @ move
+/// Resolver core (per screeps-cartographer): claim tiles priority
+/// descending, most-constrained first within a priority. Claiming a tile
+/// somebody stands on displaces that occupant: the claimed tile leaves the
+/// occupant's candidates and the claimant's vacated tile joins them as a
+/// last resort, so an occupant that cannot stand elsewhere swaps with its
+/// displacer. An occupant left with fewer than two open candidates
+/// resolves immediately, ahead of every rank, locking the exchange in
+/// before the vacated tile is claimed by anyone else.
+let private arbitrate
+    (occupants: Map<Pos, string>)
+    (moveIntents: MoveIntent list)
+    : Map<string, Pos> =
+    let openCandidates (claimed: Set<Pos>) (intent: MoveIntent) =
+        intent.Candidates |> List.filter (fun tile -> not (Set.contains tile claimed))
+
+    let rec settle (pending: Map<string, MoveIntent>) urgent claimed resolved =
+        let next =
+            match urgent |> List.filter (fun name -> Map.containsKey name pending) with
+            | name :: rest -> Some(Map.find name pending, rest)
+            | [] ->
+                if Map.isEmpty pending then
+                    None
+                else
+                    pending
+                    |> Map.toList
+                    |> List.map snd
+                    |> List.minBy (fun i -> i.Rank, List.length (openCandidates claimed i), i.Creep)
+                    |> fun intent -> Some(intent, [])
+
+        match next with
+        | None -> resolved
+        | Some(intent, urgent) ->
+            let pending = Map.remove intent.Creep pending
+
+            let chosen =
+                match openCandidates claimed intent with
+                | tile :: _ -> tile
+                // Nowhere left to stand: stay put and let the engine fail
+                // whichever move contests this tile.
+                | [] -> intent.Pos
+
+            let claimed = Set.add chosen claimed
+            let resolved = Map.add intent.Creep chosen resolved
+
+            match Map.tryFind chosen occupants with
+            | Some other when Map.containsKey other pending ->
+                let occupant = Map.find other pending
+
+                let displaced =
+                    { occupant with
+                        Candidates =
+                            (occupant.Candidates |> List.filter ((<>) chosen))
+                            @ (if List.contains intent.Pos occupant.Candidates then
+                                   []
+                               else
+                                   [ intent.Pos ])
+                    }
+
+                let pending = Map.add other displaced pending
+
+                let urgent =
+                    if List.length (openCandidates claimed displaced) < 2 then
+                        other :: urgent
+                    else
+                        urgent
+
+                settle pending urgent claimed resolved
+            | _ -> settle pending urgent claimed resolved
+
+    let pending = moveIntents |> List.map (fun i -> i.Creep, i) |> Map.ofList
+    settle pending [] Set.empty Map.empty
+
+/// Resolver, room pass: every creep the projection places registers a
+/// Move Intent, arbitration settles them into at most one single-step
+/// move per creep, and the settled standing tiles become move Intents in
+/// Snapshot creep order.
+let private resolvedMoves (snapshot: Snapshot) (taskFor: string -> Task option) : Intent list =
+    match snapshot.Spatial with
+    | None -> []
+    | Some spatial ->
+        let placed =
+            snapshot.Creeps
+            |> List.choose (fun creep ->
+                Map.tryFind creep.Name spatial.CreepPositions
+                |> Option.map (fun pos -> creep.Name, pos))
+
+        let moveIntents =
+            placed
+            |> List.map (fun (name, pos) -> moveIntentFor spatial name pos (taskFor name))
+
+        let occupants = placed |> List.map (fun (name, pos) -> pos, name) |> Map.ofList
+        let standing = arbitrate occupants moveIntents
+
+        placed
+        |> List.choose (fun (name, pos) ->
+            Map.tryFind name standing
+            |> Option.bind (directionTo pos)
+            |> Option.map (fun direction -> MoveCreep(name, direction)))
 
 /// Matcher: keep still-valid assignments (anti-thrash), greedily assign the
 /// rest, and emit one Intent per assigned creep.
@@ -382,16 +526,17 @@ let private matchCreeps
 
     let final = snapshot.Creeps |> List.fold assignOne kept
 
-    let intents =
+    let taskFor name =
+        Map.tryFind name final |> Option.bind (fun tid -> Map.tryFind tid byId)
+
+    let actions =
         snapshot.Creeps
         |> List.collect (fun creep ->
-            match
-                Map.tryFind creep.Name final |> Option.bind (fun tid -> Map.tryFind tid byId)
-            with
-            | Some task -> resolve snapshot creep task
+            match taskFor creep.Name with
+            | Some task -> actionIntents snapshot creep task
             | None -> [])
 
-    intents, final
+    actions @ resolvedMoves snapshot taskFor, final
 
 /// The single seam: Snapshot in, Intents plus next tick's Assignments out.
 let decide (snapshot: Snapshot) (assignments: Assignments) : Intent list * Assignments =
