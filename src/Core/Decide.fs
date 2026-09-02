@@ -5,10 +5,10 @@ open Fabot.Core.Types
 /// The Workforce target's floor: the colony never plans below this many
 /// living creeps. Two keep the harvest/refill loop running while one is in
 /// transit or being replaced.
-let minWorkforce = 2
+let private minWorkforce = 2
 
 /// The repeating unit worker bodies are built from.
-let workerUnit = [ Work; Carry; Move ]
+let private workerUnit = [ Work; Carry; Move ]
 
 let bodyCost body =
     body
@@ -221,6 +221,28 @@ let private actionIntents atlas (creep: CreepInfo) (task: Task) : Intent list =
     else
         []
 
+/// Emitter: each assigned creep's action Intent, then every assigned
+/// creep's chat bubble, both in Snapshot creep order. Judges actions from
+/// tick-start geometry — it must run against the same Atlas the Matcher
+/// used, never against resolved positions.
+let emit (snapshot: Snapshot) atlas (assigned: Map<string, Task>) : Intent list =
+    let actions =
+        snapshot.Creeps
+        |> List.collect (fun creep ->
+            match Map.tryFind creep.Name assigned with
+            | Some task -> actionIntents atlas creep task
+            | None -> [])
+
+    // Every assigned creep says its Task's glyph every tick; unassigned
+    // creeps say nothing.
+    let says =
+        snapshot.Creeps
+        |> List.choose (fun creep ->
+            Map.tryFind creep.Name assigned
+            |> Option.map (fun task -> SayCreep(creep.Name, glyphFor task)))
+
+    actions @ says
+
 /// A creep's Move Intent: candidate standing tiles for next tick in
 /// preference order, plus a priority (the task rank). Input to the
 /// Resolver — not an Intent; the Resolver's output is what becomes one.
@@ -364,13 +386,14 @@ let private directionTo (from: Pos) (dest: Pos) : Direction option =
 /// Resolver, room pass: every creep the Atlas places registers a Move
 /// Intent, arbitration settles them into at most one single-step move per
 /// creep, and the settled standing tiles become move Intents in Snapshot
-/// creep order.
-let private resolvedMoves atlas (taskFor: string -> Task option) : Intent list =
+/// creep order. Takes the tick's assigned Task per creep as data; a creep
+/// absent from the map is idle.
+let resolve atlas (assigned: Map<string, Task>) : Intent list =
     let placed = Atlas.placedCreeps atlas
 
     let moveIntents =
         placed
-        |> List.map (fun (name, pos) -> moveIntentFor atlas name pos (taskFor name))
+        |> List.map (fun (name, pos) -> moveIntentFor atlas name pos (Map.tryFind name assigned))
 
     let occupants = placed |> List.map (fun (name, pos) -> pos, name) |> Map.ofList
     let standing = arbitrate occupants moveIntents
@@ -381,14 +404,15 @@ let private resolvedMoves atlas (taskFor: string -> Task option) : Intent list =
         |> Option.bind (directionTo pos)
         |> Option.map (fun direction -> MoveCreep(name, direction)))
 
-/// Matcher: keep still-valid assignments (anti-thrash), greedily assign the
-/// rest, and emit each assigned creep's Intents (action, chat bubble, move).
-let private matchCreeps
+/// Matcher: keep still-valid assignments (anti-thrash) and greedily assign
+/// the rest. Assignments in, Assignments out — emission belongs to the
+/// Emitter, movement to the Resolver.
+let matchCreeps
     (snapshot: Snapshot)
     atlas
     (tasks: Task list)
     (assignments: Assignments)
-    : Intent list * Assignments =
+    : Assignments =
     let byId = tasks |> List.map (fun t -> taskId t, t) |> Map.ofList
     let capacities = taskCapacities snapshot atlas
 
@@ -439,34 +463,33 @@ let private matchCreeps
 
                 Map.add creep.Name (taskId task) acc
 
-    let final = snapshot.Creeps |> List.fold assignOne kept
+    snapshot.Creeps |> List.fold assignOne kept
 
-    let taskFor name =
-        Map.tryFind name final |> Option.bind (fun tid -> Map.tryFind tid byId)
+/// Join the Matcher's Assignments back onto the Planner's pool: the tick's
+/// assigned Task per creep, as data for the Emitter and the Resolver.
+let private assignedTasks (tasks: Task list) (assignments: Assignments) : Map<string, Task> =
+    let byId = tasks |> List.map (fun t -> taskId t, t) |> Map.ofList
 
-    let actions =
-        snapshot.Creeps
-        |> List.collect (fun creep ->
-            match taskFor creep.Name with
-            | Some task -> actionIntents atlas creep task
-            | None -> [])
-
-    // Every assigned creep says its Task's glyph every tick; unassigned
-    // creeps say nothing.
-    let says =
-        snapshot.Creeps
-        |> List.choose (fun creep ->
-            taskFor creep.Name
-            |> Option.map (fun task -> SayCreep(creep.Name, glyphFor task)))
-
-    actions @ says @ resolvedMoves atlas taskFor, final
+    assignments
+    |> Map.toList
+    |> List.choose (fun (name, tid) -> Map.tryFind tid byId |> Option.map (fun t -> name, t))
+    |> Map.ofList
 
 /// The decision seam: Snapshot in, Intents plus next tick's Assignments
-/// out. Geometry is consulted through one Atlas built here, so every step
-/// prices from the same flood (ADR 0004).
+/// out. The tick's pipeline is visible here — plan, match, emit, resolve —
+/// beside the colony steps (spawns, sites), with geometry consulted
+/// through one Atlas built up front, so every step prices from the same
+/// flood (ADR 0004).
 let decide (snapshot: Snapshot) (assignments: Assignments) : Intent list * Assignments =
     let atlas = Atlas.ofSnapshot snapshot
     let spawnIntents = planSpawns snapshot atlas
     let siteIntents = planConstructionSites snapshot atlas
-    let creepIntents, next = matchCreeps snapshot atlas (planTasks snapshot) assignments
-    spawnIntents @ siteIntents @ creepIntents, next
+    let tasks = planTasks snapshot
+    let next = matchCreeps snapshot atlas tasks assignments
+    let assigned = assignedTasks tasks next
+
+    spawnIntents
+    @ siteIntents
+    @ emit snapshot atlas assigned
+    @ resolve atlas assigned,
+    next
