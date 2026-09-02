@@ -1196,6 +1196,80 @@ let arbitrationTests =
         ]
 
 [<Tests>]
+let workforceTests =
+    testList
+        "workforce target"
+        [
+            // Two sources spaced apart: src-a with three Seats, src-b with
+            // two — a Seat total of five.
+            let fiveSeats =
+                spatial
+                    [ "src-a", { X = 10; Y = 10 }; "src-b", { X = 30; Y = 30 } ]
+                    [
+                        { X = 9; Y = 10 }, Plain
+                        { X = 11; Y = 10 }, Plain
+                        { X = 10; Y = 9 }, Plain
+                        { X = 29; Y = 30 }, Plain
+                        { X = 31; Y = 30 }, Plain
+                    ]
+
+            test "the Seat total raises the target above the floor" {
+                let snapshot =
+                    { bareRespawn with
+                        Creeps = [ worker "w1" 0 50; worker "w2" 0 50 ]
+                        Spatial = Some fiveSeats
+                    }
+
+                let intents, _ = decide snapshot Map.empty
+
+                Expect.hasLength
+                    (spawnIntents intents)
+                    1
+                    "five Seats support five creeps; two living is a deficit"
+            }
+
+            test "no spawn Intent once the workforce matches the Seat total" {
+                let snapshot =
+                    { bareRespawn with
+                        Creeps = [ for i in 1..5 -> worker $"w{i}" 0 50 ]
+                        Spatial = Some fiveSeats
+                    }
+
+                let intents, _ = decide snapshot Map.empty
+                Expect.isEmpty (spawnIntents intents) "workforce already at target"
+            }
+
+            test "a Seat total below the floor leaves the floor in charge" {
+                let oneSeat = spatial [ "src-a", { X = 10; Y = 10 } ] [ { X = 9; Y = 10 }, Plain ]
+
+                let snapshot =
+                    { bareRespawn with
+                        Sources = [ { Id = "src-a" } ]
+                        Creeps = [ worker "w1" 0 50 ]
+                        Spatial = Some oneSeat
+                    }
+
+                let intents, _ = decide snapshot Map.empty
+
+                Expect.hasLength
+                    (spawnIntents intents)
+                    1
+                    "one Seat cannot lower the target below the floor of two"
+            }
+
+            test "an unplaced source contributes no Seats" {
+                let snapshot =
+                    { bareRespawn with
+                        Creeps = [ worker "w1" 0 50; worker "w2" 0 50 ]
+                        Spatial = Some(spatial [] [])
+                    }
+
+                let intents, _ = decide snapshot Map.empty
+                Expect.isEmpty (spawnIntents intents) "only the floor applies"
+            }
+        ]
+
+[<Tests>]
 let tests =
     testList
         "decide"

@@ -2,8 +2,9 @@ module Fabot.Core.Decide
 
 open Fabot.Core.Types
 
-/// Colony never plans below this many living creeps. Two keep the
-/// harvest/refill loop running while one is in transit or being replaced.
+/// The Workforce target's floor: the colony never plans below this many
+/// living creeps. Two keep the harvest/refill loop running while one is in
+/// transit or being replaced.
 let minWorkforce = 2
 
 /// The repeating unit worker bodies are built from.
@@ -47,11 +48,49 @@ let planTasks (snapshot: Snapshot) : Task list =
 
     harvests @ refills @ builds @ upgrades
 
+let private neighbours pos =
+    [
+        for dx in -1 .. 1 do
+            for dy in -1 .. 1 do
+                if (dx, dy) <> (0, 0) then
+                    { X = pos.X + dx; Y = pos.Y + dy }
+    ]
+
+/// Seats of a source: walkable (non-wall) tiles adjacent to its position.
+/// Terrain only, per ADR 0001 — structures and creeps do not consume Seats.
+let private seatCount (spatial: SpatialInfo) (pos: Pos) =
+    neighbours pos
+    |> List.filter (fun tile ->
+        match Map.tryFind tile spatial.Terrain with
+        | Some Plain
+        | Some Swamp -> true
+        | Some Wall
+        | None -> false)
+    |> List.length
+
+/// Workforce target: how many creeps the colony maintains — the total Seat
+/// count across all sources, floored at minWorkforce. Derived fresh each
+/// tick; a source the projection does not place contributes no Seats, and
+/// without a projection only the floor applies.
+let private workforceTarget (snapshot: Snapshot) =
+    let seats =
+        match snapshot.Spatial with
+        | None -> 0
+        | Some spatial ->
+            snapshot.Sources
+            |> List.sumBy (fun s ->
+                Map.tryFind s.Id spatial.TargetPositions
+                |> Option.map (seatCount spatial)
+                |> Option.defaultValue 0)
+
+    max minWorkforce seats
+
 /// Pre-Task bootstrap step: spawn Intents needed to keep the workforce at
-/// minimum. Spawning is a colony-level need, not a Task creeps get matched to,
-/// so it sits beside the Planner/Matcher pipeline rather than inside it.
+/// the Workforce target. Spawning is a colony-level need, not a Task creeps
+/// get matched to, so it sits beside the Planner/Matcher pipeline rather
+/// than inside it.
 let private planSpawns (snapshot: Snapshot) : Intent list =
-    let deficit = minWorkforce - List.length snapshot.Creeps
+    let deficit = workforceTarget snapshot - List.length snapshot.Creeps
 
     // Disaster fallback: an empty colony can never refill extensions, so
     // waiting for full capacity would wait forever — spawn a minimal unit
@@ -70,6 +109,9 @@ let private planSpawns (snapshot: Snapshot) : Intent list =
     if deficit <= 0 then
         []
     else
+        // Each spawn is gated against the shared room energy, so several
+        // idle spawns can emit intents the same energy only affords once;
+        // the engine fails the surplus and the deficit re-plans next tick.
         snapshot.Spawns
         |> List.filter (fun s -> not s.IsSpawning)
         |> List.choose (fun s ->
@@ -148,26 +190,6 @@ let private rank =
     | Refill _ -> 0
     | Build _ -> 1
     | Upgrade _ -> 1
-
-let private neighbours pos =
-    [
-        for dx in -1 .. 1 do
-            for dy in -1 .. 1 do
-                if (dx, dy) <> (0, 0) then
-                    { X = pos.X + dx; Y = pos.Y + dy }
-    ]
-
-/// Seats of a source: walkable (non-wall) tiles adjacent to its position.
-/// Terrain only, per ADR 0001 — structures and creeps do not consume Seats.
-let private seatCount (spatial: SpatialInfo) (pos: Pos) =
-    neighbours pos
-    |> List.filter (fun tile ->
-        match Map.tryFind tile spatial.Terrain with
-        | Some Plain
-        | Some Swamp -> true
-        | Some Wall
-        | None -> false)
-    |> List.length
 
 /// Concurrent-worker cap per task id; tasks absent from the map are
 /// unbounded. Harvest is capped by its source's Seat count — a snapshot
