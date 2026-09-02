@@ -16,10 +16,17 @@ type IStore =
 type ISource =
     abstract id: string
 
+type IController =
+    abstract id: string
+    /// True when this controller is owned by us.
+    abstract my: bool
+
 type IRoom =
     /// Energy available for spawning in this room (spawn + extensions).
     abstract energyAvailable: int
     abstract find: findType: int -> obj[]
+    /// Null in rooms without a controller.
+    abstract controller: IController
 
 type ISpawn =
     abstract name: string
@@ -36,6 +43,7 @@ type ICreep =
     abstract store: IStore
     abstract harvest: target: obj -> int
     abstract transfer: target: obj * resource: string -> int
+    abstract upgradeController: target: obj -> int
     abstract moveTo: target: obj -> int
 
 type IGame =

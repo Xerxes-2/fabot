@@ -21,6 +21,7 @@ let taskId =
     function
     | Harvest sourceId -> $"harvest:{sourceId}"
     | Refill spawnName -> $"refill:{spawnName}"
+    | Upgrade controllerId -> $"upgrade:{controllerId}"
 
 /// Planner: rebuild this tick's full Task pool from the Snapshot. Pure and
 /// from scratch every tick — Tasks are never persisted.
@@ -30,7 +31,9 @@ let planTasks (snapshot: Snapshot) : Task list =
         snapshot.Spawns
         |> List.filter (fun s -> s.FreeCapacity > 0)
         |> List.map (fun s -> Refill s.Name)
-    harvests @ refills
+    let upgrades =
+        snapshot.Controller |> Option.toList |> List.map (fun c -> Upgrade c.Id)
+    harvests @ refills @ upgrades
 
 /// Pre-Task bootstrap step: spawn Intents needed to keep the workforce at
 /// minimum. Spawning is a colony-level need, not a Task creeps get matched to,
@@ -51,11 +54,21 @@ let private applicable (creep: CreepInfo) task =
     match task with
     | Harvest _ -> creep.FreeCapacity > 0
     | Refill _ -> creep.Energy > 0
+    | Upgrade _ -> creep.Energy > 0
 
 let private intentFor (creep: CreepInfo) task =
     match task with
     | Harvest sourceId -> HarvestSource(creep.Name, sourceId)
     | Refill spawnName -> TransferEnergyToSpawn(creep.Name, spawnName)
+    | Upgrade controllerId -> UpgradeController(creep.Name, controllerId)
+
+/// Matching tier between applicable tasks (lower wins): feeding the economy
+/// (Harvest, Refill) outranks sinking surplus into the controller (Upgrade).
+let private rank =
+    function
+    | Harvest _ -> 0
+    | Refill _ -> 0
+    | Upgrade _ -> 1
 
 /// Matcher: keep still-valid assignments (anti-thrash), greedily assign the
 /// rest, and emit one Intent per assigned creep.
@@ -75,7 +88,7 @@ let private matchCreeps (snapshot: Snapshot) (tasks: Task list) (assignments: As
             match tasks |> List.filter (applicable creep) with
             | [] -> acc
             | candidates ->
-                let task = candidates |> List.minBy (taskId >> load)
+                let task = candidates |> List.minBy (fun t -> rank t, load (taskId t))
                 Map.add creep.Name (taskId task) acc
     let final = snapshot.Creeps |> List.fold assignOne kept
     let intents =

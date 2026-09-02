@@ -38,5 +38,10 @@ let private execute (intent: Intent) =
         let spawn: ISpawn = Game.spawns?(spawnName)
         if not (isNull (box creep)) && not (isNull (box spawn)) then
             actOrApproach creep (box spawn) (fun t -> creep.transfer (t, "energy"))
+    | UpgradeController (creepName, controllerId) ->
+        let creep: ICreep = Game.creeps?(creepName)
+        let controller = Game.getObjectById controllerId
+        if not (isNull (box creep)) && not (isNull controller) then
+            actOrApproach creep controller (fun t -> creep.upgradeController t)
 
 let run (intents: Intent list) = intents |> List.iter execute

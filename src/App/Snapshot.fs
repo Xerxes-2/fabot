@@ -18,9 +18,14 @@ let build () : Snapshot =
       Sources =
         spawns
         |> Array.collect (fun s -> s.room.find findSources)
-        |> Array.map (fun o -> { Id = (o :?> ISource).id })
+        |> Array.map (fun o -> ({ Id = (o :?> ISource).id }: SourceInfo))
         |> Array.distinctBy (fun s -> s.Id)
         |> Array.toList
+      Controller =
+        spawns
+        |> Array.tryPick (fun s ->
+            let c = s.room.controller
+            if not (isNull (box c)) && c.my then Some ({ Id = c.id }: ControllerInfo) else None)
       Creeps =
         objectValues<ICreep> Game.creeps
         // A creep still inside the spawn cannot act; keep it out of the pool.

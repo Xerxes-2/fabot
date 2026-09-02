@@ -8,6 +8,7 @@ let bareRespawn =
     { Time = 42
       Spawns = [ { Name = "Spawn1"; EnergyAvailable = 300; FreeCapacity = 0; IsSpawning = false } ]
       Sources = [ { Id = "src-a" }; { Id = "src-b" } ]
+      Controller = Some { Id = "ctrl-1" }
       Creeps = [] }
 
 let worker name energy freeCapacity =
@@ -23,6 +24,17 @@ let plannerTests =
             let tasks = planTasks bareRespawn
             let harvests = tasks |> List.choose (function Harvest sourceId -> Some sourceId | _ -> None)
             Expect.equal harvests [ "src-a"; "src-b" ] "each source gets exactly one Harvest task"
+        }
+
+        test "a controller yields an Upgrade task" {
+            let upgrades = planTasks bareRespawn |> List.choose (function Upgrade id -> Some id | _ -> None)
+            Expect.equal upgrades [ "ctrl-1" ] "the controller gets exactly one Upgrade task"
+        }
+
+        test "no Upgrade task without a controller" {
+            let tasks = planTasks { bareRespawn with Controller = None }
+            let upgrades = tasks |> List.choose (function Upgrade id -> Some id | _ -> None)
+            Expect.isEmpty upgrades "nothing to upgrade"
         }
 
         test "a spawn missing energy gets a Refill task; a full spawn gets none" {
@@ -140,8 +152,32 @@ let tests =
             | None -> failtest "creep should be reassigned, not idle"
         }
 
-        test "a full creep with a full spawn is left unassigned with no intent" {
+        test "surplus: a full creep with a full spawn switches to upgrading" {
             let snapshot = { bareRespawn with Creeps = [ worker "w1" 50 0 ] }
+            let intents, kept = decide snapshot (Map.ofList [ "w1", "harvest:src-a" ])
+            Expect.equal (Map.tryFind "w1" kept) (Some "upgrade:ctrl-1") "nothing to refill, so surplus goes to the controller"
+            Expect.contains intents (UpgradeController("w1", "ctrl-1")) "upgrade intent emitted"
+        }
+
+        test "a hungry spawn beats the controller for a delivering creep" {
+            let snapshot =
+                { bareRespawn with
+                    Spawns = [ { Name = "Spawn1"; EnergyAvailable = 250; FreeCapacity = 50; IsSpawning = false } ]
+                    Creeps = [ worker "w1" 50 0 ] }
+            let _, kept = decide snapshot Map.empty
+            Expect.equal (Map.tryFind "w1" kept) (Some "refill:Spawn1") "refill outranks upgrade while the spawn is missing energy"
+        }
+
+        test "an upgrading creep that empties goes back to harvest" {
+            let snapshot = { bareRespawn with Creeps = [ worker "w1" 0 50 ] }
+            let _, kept = decide snapshot (Map.ofList [ "w1", "upgrade:ctrl-1" ])
+            match Map.tryFind "w1" kept with
+            | Some tid -> Expect.stringStarts tid "harvest:" "spent creep returns to a source"
+            | None -> failtest "creep should be reassigned, not idle"
+        }
+
+        test "a full creep with a full spawn and no controller is left unassigned with no intent" {
+            let snapshot = { bareRespawn with Controller = None; Creeps = [ worker "w1" 50 0 ] }
             let intents, kept = decide snapshot (Map.ofList [ "w1", "harvest:src-a" ])
             Expect.isEmpty (Map.toList kept) "no applicable task"
             let creepIntents = intents |> List.filter (function SpawnCreep _ -> false | _ -> true)
