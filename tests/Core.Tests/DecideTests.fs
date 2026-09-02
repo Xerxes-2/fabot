@@ -1,6 +1,7 @@
 module Fabot.Core.Tests.DecideTests
 
 open Expecto
+open Fabot.Core
 open Fabot.Core.Types
 open Fabot.Core.Decide
 
@@ -1037,6 +1038,15 @@ let stepFrom pos direction =
     | Left -> { pos with X = pos.X - 1 }
     | TopLeft -> { X = pos.X - 1; Y = pos.Y - 1 }
 
+/// Run the Resolver at its own seam: assigned Tasks as data over the
+/// snapshot's Atlas; a creep absent from the list is idle.
+let resolveOn snapshot assigned =
+    resolve (Atlas.ofSnapshot snapshot) (Map.ofList assigned)
+
+/// Run the Emitter at its own seam, over the same tick-start Atlas.
+let emitOn snapshot assigned =
+    emit snapshot (Atlas.ofSnapshot snapshot) (Map.ofList assigned)
+
 [<Tests>]
 let arbitrationTests =
     testList
@@ -1073,20 +1083,17 @@ let arbitrationTests =
                             }
                     }
 
-                let sticky = Map.ofList [ "har", "harvest:src-a"; "upg", "upgrade:ctrl-1" ]
-                let intents, _ = decide snapshot sticky
+                let assigned = [ "har", Harvest "src-a"; "upg", Upgrade "ctrl-1" ]
+                let moves = resolveOn snapshot assigned |> moveIntents
+
+                Expect.contains moves ("har", Top) "the harvester steps onto the Seat"
 
                 Expect.contains
-                    (moveIntents intents)
-                    ("har", Top)
-                    "the harvester steps onto the Seat"
-
-                Expect.contains
-                    intents
+                    (emitOn snapshot assigned)
                     (UpgradeController("upg", "ctrl-1"))
                     "the displaced upgrader still upgrades this tick"
 
-                match moveIntents intents |> List.filter (fun (name, _) -> name = "upg") with
+                match moves |> List.filter (fun (name, _) -> name = "upg") with
                 | [ (_, direction) ] ->
                     let dest = stepFrom { X = 10; Y = 11 } direction
 
@@ -1097,9 +1104,9 @@ let arbitrationTests =
                 | other -> failtest $"expected exactly one move for the upgrader, got %A{other}"
             }
 
-            test "head-on swap: two creeps blocking each other exchange tiles" {
-                // Two single-Seat sources at the ends of a two-tile corridor;
-                // each creep stands on the other's Seat.
+            // Two single-Seat sources at the ends of a two-tile corridor;
+            // each creep stands on the other's Seat.
+            let headOnSwap =
                 let terrain =
                     [
                         { X = 10; Y = 10 }, Wall
@@ -1108,33 +1115,53 @@ let arbitrationTests =
                         { X = 10; Y = 13 }, Wall
                     ]
 
-                let snapshot =
-                    { bareRespawn with
-                        Sources = [ { Id = "src-a" }; { Id = "src-b" } ]
-                        Creeps = [ worker "wa" 0 50; worker "wb" 0 50 ]
-                        Spatial =
+                { bareRespawn with
+                    Sources = [ { Id = "src-a" }; { Id = "src-b" } ]
+                    Creeps = [ worker "wa" 0 50; worker "wb" 0 50 ]
+                    Spatial =
 
-                            { spatial
-                                  [ "src-a", { X = 10; Y = 10 }; "src-b", { X = 10; Y = 13 } ]
-                                  terrain with
-                                CreepPositions =
-                                    Map.ofList
-                                        [ "wa", { X = 10; Y = 12 }; "wb", { X = 10; Y = 11 } ]
-                            }
-                    }
+                        { spatial
+                              [ "src-a", { X = 10; Y = 10 }; "src-b", { X = 10; Y = 13 } ]
+                              terrain with
+                            CreepPositions =
+                                Map.ofList [ "wa", { X = 10; Y = 12 }; "wb", { X = 10; Y = 11 } ]
+                        }
+                }
 
-                let sticky = Map.ofList [ "wa", "harvest:src-a"; "wb", "harvest:src-b" ]
-                let intents, _ = decide snapshot sticky
+            test "head-on swap: two creeps blocking each other exchange tiles" {
+                let moves =
+                    resolveOn headOnSwap [ "wa", Harvest "src-a"; "wb", Harvest "src-b" ]
+                    |> moveIntents
 
                 Expect.equal
-                    (moveIntents intents |> List.sort)
+                    (moves |> List.sort)
                     [ "wa", Top; "wb", Bottom ]
                     "both creeps move: they swap instead of deadlocking"
             }
 
+            test "pipeline wiring: remembered assignments flow through match, emit, and resolve" {
+                // The one arbitration test that still runs the whole decide
+                // seam: sticky Assignments survive the Matcher, the Emitter
+                // says their glyphs, and the Resolver settles the swap.
+                let sticky = Map.ofList [ "wa", "harvest:src-a"; "wb", "harvest:src-b" ]
+                let intents, next = decide headOnSwap sticky
+
+                Expect.equal next sticky "the Matcher keeps both remembered assignments"
+
+                Expect.contains
+                    intents
+                    (SayCreep("wa", "⛏"))
+                    "the Emitter's bubbles reach decide's output"
+
+                Expect.equal
+                    (moveIntents intents |> List.sort)
+                    [ "wa", Top; "wb", Bottom ]
+                    "the Resolver's swap reaches decide's output"
+            }
+
             test "an idle creep is displaced by a working creep passing through" {
-                // No controller and nothing to refill: the full creep w2 has
-                // no applicable task and idles astride the harvester's path.
+                // w2 carries no assignment and idles astride the harvester's
+                // path.
                 let terrain =
                     [
                         { X = 10; Y = 10 }, Wall
@@ -1146,7 +1173,6 @@ let arbitrationTests =
                 let snapshot =
                     { bareRespawn with
                         Sources = [ { Id = "src-a" } ]
-                        Controller = None
                         Creeps = [ worker "w1" 0 50; worker "w2" 50 0 ]
                         Spatial =
 
@@ -1157,15 +1183,12 @@ let arbitrationTests =
                             }
                     }
 
-                let intents, _ = decide snapshot Map.empty
+                let moves = resolveOn snapshot [ "w1", Harvest "src-a" ] |> moveIntents
 
-                Expect.contains
-                    (moveIntents intents)
-                    ("w1", Top)
-                    "the working creep claims the idler's tile"
+                Expect.contains moves ("w1", Top) "the working creep claims the idler's tile"
 
                 Expect.isTrue
-                    (moveIntents intents |> List.exists (fun (name, _) -> name = "w2"))
+                    (moves |> List.exists (fun (name, _) -> name = "w2"))
                     "the idler is displaced out of the way"
             }
 
@@ -1197,11 +1220,12 @@ let arbitrationTests =
                             }
                     }
 
-                let sticky = Map.ofList [ "h", "harvest:src-a"; "u", "upgrade:ctrl-1" ]
-                let intents, _ = decide snapshot sticky
+                let moves =
+                    resolveOn snapshot [ "h", Harvest "src-a"; "u", Upgrade "ctrl-1" ]
+                    |> moveIntents
 
                 Expect.equal
-                    (moveIntents intents)
+                    moves
                     [ "h", Top ]
                     "the harvester takes the gap; the outranked upgrader waits"
             }
@@ -1230,16 +1254,15 @@ let arbitrationTests =
                             }
                     }
 
-                let sticky = Map.ofList [ "h1", "harvest:src-a"; "h2", "harvest:src-a" ]
-                let intents, _ = decide snapshot sticky
+                let assigned = [ "h1", Harvest "src-a"; "h2", Harvest "src-a" ]
 
                 Expect.equal
-                    (moveIntents intents |> List.sort)
+                    (resolveOn snapshot assigned |> moveIntents |> List.sort)
                     [ "h1", Right; "h2", TopRight ]
                     "h2 claims the occupied Seat; h1 is displaced to the free one"
 
                 Expect.contains
-                    intents
+                    (emitOn snapshot assigned)
                     (HarvestSource("h1", "src-a"))
                     "the displaced harvester still harvests this tick"
             }
@@ -1273,16 +1296,15 @@ let arbitrationTests =
                             }
                     }
 
-                let sticky = Map.ofList [ "har", "harvest:src-a"; "upg", "upgrade:ctrl-1" ]
-                let intents, _ = decide snapshot sticky
+                let assigned = [ "har", Harvest "src-a"; "upg", Upgrade "ctrl-1" ]
 
                 Expect.equal
-                    (moveIntents intents |> List.sort)
+                    (resolveOn snapshot assigned |> moveIntents |> List.sort)
                     [ "har", Right; "upg", Left ]
                     "displacer and occupant exchange tiles"
 
                 Expect.contains
-                    intents
+                    (emitOn snapshot assigned)
                     (UpgradeController("upg", "ctrl-1"))
                     "the swapped-out upgrader still upgrades from its tick-start tile"
             }
