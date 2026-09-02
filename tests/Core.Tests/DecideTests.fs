@@ -379,7 +379,7 @@ let openSeats pos =
 let harvesters assignments sourceId =
     assignments
     |> Map.toList
-    |> List.filter (fun (_, tid) -> tid = $"harvest:{sourceId}")
+    |> List.filter (fun (_, tid) -> tid = taskId (Harvest sourceId))
     |> List.map fst
 
 [<Tests>]
@@ -453,7 +453,7 @@ let seatTests =
 
                 Expect.contains
                     (assignments |> Map.toList |> List.map snd)
-                    "upgrade:ctrl-1"
+                    (taskId (Upgrade "ctrl-1"))
                     "the denied creep sinks its energy into the controller instead"
             }
 
@@ -493,7 +493,10 @@ let seatTests =
 
                     }
 
-                let stale = Map.ofList [ "w1", "harvest:src-a"; "w2", "harvest:src-a" ]
+                let stale =
+                    Map.ofList
+                        [ "w1", (taskId (Harvest "src-a")); "w2", (taskId (Harvest "src-a")) ]
+
                 let _, assignments = decide snapshot stale
 
                 Expect.equal
@@ -554,7 +557,7 @@ let travelCostTests =
 
                     Expect.equal
                         (Map.tryFind "w1" assignments)
-                        (Some "harvest:src-near")
+                        (Some(taskId (Harvest "src-near")))
                         "the cheaper-to-reach source wins the rank tie"
             }
 
@@ -595,7 +598,7 @@ let travelCostTests =
 
                 Expect.equal
                     (Map.tryFind "w1" assignments)
-                    (Some "harvest:src-plain")
+                    (Some(taskId (Harvest "src-plain")))
                     "true path cost decides, not Chebyshev range"
             }
 
@@ -624,7 +627,7 @@ let travelCostTests =
 
                 Expect.equal
                     (Map.tryFind "w1" assignments)
-                    (Some "refill:spawn-1")
+                    (Some(taskId (Refill "spawn-1")))
                     "travel cost breaks ties within a rank, never across ranks"
             }
 
@@ -638,12 +641,12 @@ let travelCostTests =
                         Spatial = nearFarCorridor [ "w1", { X = 10; Y = 17 } ]
                     }
 
-                let sticky = Map.ofList [ "w1", "harvest:src-far" ]
+                let sticky = Map.ofList [ "w1", (taskId (Harvest "src-far")) ]
                 let _, assignments = decide snapshot sticky
 
                 Expect.equal
                     (Map.tryFind "w1" assignments)
-                    (Some "harvest:src-far")
+                    (Some(taskId (Harvest "src-far")))
                     "sticky assignments are never re-evaluated for a closer target"
             }
 
@@ -661,7 +664,7 @@ let travelCostTests =
 
                 Expect.equal
                     (Map.tryFind "w1" assignments)
-                    (Some "harvest:src-far")
+                    (Some(taskId (Harvest "src-far")))
                     "without a creep position, behaviour is unchanged"
             }
 
@@ -697,7 +700,7 @@ let travelCostTests =
 
                 Expect.equal
                     (Map.tryFind "w1" assignments)
-                    (Some "upgrade:ctrl-1")
+                    (Some(taskId (Upgrade "ctrl-1")))
                     "the unreachable Harvest is not applicable to this creep at all"
             }
         ]
@@ -944,7 +947,7 @@ let unreachableTests =
                             }
                     }
 
-                let sticky = Map.ofList [ "w1", "harvest:src-a" ]
+                let sticky = Map.ofList [ "w1", (taskId (Harvest "src-a")) ]
                 let _, assignments = decide snapshot sticky
 
                 Expect.equal
@@ -954,7 +957,7 @@ let unreachableTests =
 
                 Expect.equal
                     (Map.tryFind "w1" assignments)
-                    (Some "upgrade:ctrl-1")
+                    (Some(taskId (Upgrade "ctrl-1")))
                     "the walled-off creep falls through to the next applicable task"
             }
 
@@ -972,7 +975,7 @@ let unreachableTests =
                             }
                     }
 
-                let sticky = Map.ofList [ "w1", "harvest:src-a" ]
+                let sticky = Map.ofList [ "w1", (taskId (Harvest "src-a")) ]
                 let intents, assignments = decide snapshot sticky
 
                 Expect.equal
@@ -997,7 +1000,7 @@ let unreachableTests =
                             }
                     }
 
-                let sticky = Map.ofList [ "w1", "upgrade:ctrl-1" ]
+                let sticky = Map.ofList [ "w1", (taskId (Upgrade "ctrl-1")) ]
                 let _, assignments = decide snapshot sticky
 
                 Expect.equal (Map.tryFind "w1" assignments) None "no Work Area means no assignment"
@@ -1016,12 +1019,12 @@ let unreachableTests =
                         Spatial = spatial [ "src-a", { X = 10; Y = 10 } ] terrain
                     }
 
-                let sticky = Map.ofList [ "w1", "harvest:src-a" ]
+                let sticky = Map.ofList [ "w1", (taskId (Harvest "src-a")) ]
                 let _, assignments = decide snapshot sticky
 
                 Expect.equal
                     (Map.tryFind "w1" assignments)
-                    (Some "harvest:src-a")
+                    (Some(taskId (Harvest "src-a")))
                     "geometry the projection cannot price never releases an assignment"
             }
         ]
@@ -1143,7 +1146,10 @@ let arbitrationTests =
                 // The one arbitration test that still runs the whole decide
                 // seam: sticky Assignments survive the Matcher, the Emitter
                 // says their glyphs, and the Resolver settles the swap.
-                let sticky = Map.ofList [ "wa", "harvest:src-a"; "wb", "harvest:src-b" ]
+                let sticky =
+                    Map.ofList
+                        [ "wa", (taskId (Harvest "src-a")); "wb", (taskId (Harvest "src-b")) ]
+
                 let intents, next = decide headOnSwap sticky
 
                 Expect.equal next sticky "the Matcher keeps both remembered assignments"
@@ -1419,7 +1425,11 @@ let sayTests =
 
                 let sticky =
                     Map.ofList
-                        [ "w1", "refill:spawn-1"; "w2", "build:site-1"; "w3", "upgrade:ctrl-1" ]
+                        [
+                            "w1", (taskId (Refill "spawn-1"))
+                            "w2", (taskId (Build "site-1"))
+                            "w3", (taskId (Upgrade "ctrl-1"))
+                        ]
 
                 let intents, _ = decide snapshot sticky
 
@@ -1482,7 +1492,7 @@ let tests =
 
                 Expect.equal
                     (Map.tryFind "w1" assignments)
-                    (Some "harvest:src-a")
+                    (Some(taskId (Harvest "src-a")))
                     "assignment is remembered"
             }
 
@@ -1634,7 +1644,7 @@ let tests =
 
                 Expect.equal
                     assigned
-                    [ "harvest:src-a"; "harvest:src-b" ]
+                    [ (taskId (Harvest "src-a")); (taskId (Harvest "src-b")) ]
                     "greedy matching balances load per task"
             }
 
@@ -1644,21 +1654,22 @@ let tests =
                         Creeps = [ worker "w1" 20 30; worker "w2" 0 50 ]
                     }
 
-                let _, assignments = decide snapshot (Map.ofList [ "w1", "harvest:src-a" ])
+                let _, assignments =
+                    decide snapshot (Map.ofList [ "w1", (taskId (Harvest "src-a")) ])
 
                 Expect.equal
                     (Map.tryFind "w1" assignments)
-                    (Some "harvest:src-a")
+                    (Some(taskId (Harvest "src-a")))
                     "w1 keeps its source"
 
                 Expect.equal
                     (Map.tryFind "w2" assignments)
-                    (Some "harvest:src-b")
+                    (Some(taskId (Harvest "src-b")))
                     "w2 avoids the occupied source"
             }
 
             test "assignments pass through unchanged when no creeps died" {
-                let assignments = Map.ofList [ "worker-1", "harvest:src-a" ]
+                let assignments = Map.ofList [ "worker-1", (taskId (Harvest "src-a")) ]
 
                 let snapshot =
                     { bareRespawn with
@@ -1675,12 +1686,12 @@ let tests =
                         Creeps = [ worker "w1" 20 30 ]
                     }
 
-                let assignments = Map.ofList [ "w1", "harvest:src-b" ]
+                let assignments = Map.ofList [ "w1", (taskId (Harvest "src-b")) ]
                 let intents, kept = decide snapshot assignments
 
                 Expect.equal
                     (Map.tryFind "w1" kept)
-                    (Some "harvest:src-b")
+                    (Some(taskId (Harvest "src-b")))
                     "no thrash: creep stays on its source"
 
                 Expect.contains
@@ -1696,11 +1707,12 @@ let tests =
                         Creeps = [ worker "w1" 50 0 ]
                     }
 
-                let intents, kept = decide snapshot (Map.ofList [ "w1", "harvest:src-a" ])
+                let intents, kept =
+                    decide snapshot (Map.ofList [ "w1", (taskId (Harvest "src-a")) ])
 
                 Expect.equal
                     (Map.tryFind "w1" kept)
-                    (Some "refill:spawn-1")
+                    (Some(taskId (Refill "spawn-1")))
                     "full creep switches to delivering"
 
                 Expect.contains
@@ -1716,10 +1728,14 @@ let tests =
                         Creeps = [ worker "w1" 0 50 ]
                     }
 
-                let _, kept = decide snapshot (Map.ofList [ "w1", "refill:spawn-1" ])
+                let _, kept = decide snapshot (Map.ofList [ "w1", (taskId (Refill "spawn-1")) ])
 
                 match Map.tryFind "w1" kept with
-                | Some tid -> Expect.stringStarts tid "harvest:" "empty creep goes back to a source"
+                | Some tid ->
+                    Expect.contains
+                        [ taskId (Harvest "src-a"); taskId (Harvest "src-b") ]
+                        tid
+                        "empty creep goes back to a source"
                 | None -> failtest "creep should be reassigned, not idle"
             }
 
@@ -1729,11 +1745,12 @@ let tests =
                         Creeps = [ worker "w1" 50 0 ]
                     }
 
-                let intents, kept = decide snapshot (Map.ofList [ "w1", "harvest:src-a" ])
+                let intents, kept =
+                    decide snapshot (Map.ofList [ "w1", (taskId (Harvest "src-a")) ])
 
                 Expect.equal
                     (Map.tryFind "w1" kept)
-                    (Some "upgrade:ctrl-1")
+                    (Some(taskId (Upgrade "ctrl-1")))
                     "nothing to refill, so surplus goes to the controller"
 
                 Expect.contains intents (UpgradeController("w1", "ctrl-1")) "upgrade intent emitted"
@@ -1750,7 +1767,7 @@ let tests =
 
                 Expect.equal
                     (Map.tryFind "w1" kept)
-                    (Some "refill:spawn-1")
+                    (Some(taskId (Refill "spawn-1")))
                     "refill outranks upgrade while a structure is missing energy"
             }
 
@@ -1760,10 +1777,14 @@ let tests =
                         Creeps = [ worker "w1" 0 50 ]
                     }
 
-                let _, kept = decide snapshot (Map.ofList [ "w1", "upgrade:ctrl-1" ])
+                let _, kept = decide snapshot (Map.ofList [ "w1", (taskId (Upgrade "ctrl-1")) ])
 
                 match Map.tryFind "w1" kept with
-                | Some tid -> Expect.stringStarts tid "harvest:" "spent creep returns to a source"
+                | Some tid ->
+                    Expect.contains
+                        [ taskId (Harvest "src-a"); taskId (Harvest "src-b") ]
+                        tid
+                        "spent creep returns to a source"
                 | None -> failtest "creep should be reassigned, not idle"
             }
 
@@ -1775,7 +1796,9 @@ let tests =
                         Creeps = [ worker "w1" 50 0 ]
                     }
 
-                let intents, kept = decide snapshot (Map.ofList [ "w1", "harvest:src-a" ])
+                let intents, kept =
+                    decide snapshot (Map.ofList [ "w1", (taskId (Harvest "src-a")) ])
+
                 Expect.isEmpty (Map.toList kept) "no applicable task"
 
                 let creepIntents =
@@ -1794,11 +1817,12 @@ let tests =
                         Creeps = [ worker "w1" 50 0 ]
                     }
 
-                let intents, kept = decide snapshot (Map.ofList [ "w1", "harvest:src-a" ])
+                let intents, kept =
+                    decide snapshot (Map.ofList [ "w1", (taskId (Harvest "src-a")) ])
 
                 Expect.equal
                     (Map.tryFind "w1" kept)
-                    (Some "build:site-1")
+                    (Some(taskId (Build "site-1")))
                     "surplus energy goes into construction"
 
                 Expect.contains intents (BuildSite("w1", "site-1")) "build intent emitted"
@@ -1811,11 +1835,14 @@ let tests =
                         Creeps = [ worker "w1" 0 50 ]
                     }
 
-                let _, kept = decide snapshot (Map.ofList [ "w1", "build:site-1" ])
+                let _, kept = decide snapshot (Map.ofList [ "w1", (taskId (Build "site-1")) ])
 
                 match Map.tryFind "w1" kept with
                 | Some tid ->
-                    Expect.stringStarts tid "harvest:" "empty creep goes harvesting instead"
+                    Expect.contains
+                        [ taskId (Harvest "src-a"); taskId (Harvest "src-b") ]
+                        tid
+                        "empty creep goes harvesting instead"
                 | None -> failtest "creep should be reassigned, not idle"
             }
 
@@ -1831,7 +1858,7 @@ let tests =
 
                 Expect.equal
                     (Map.tryFind "w1" kept)
-                    (Some "refill:spawn-1")
+                    (Some(taskId (Refill "spawn-1")))
                     "refill outranks build while a structure is missing energy"
             }
 
