@@ -55,6 +55,51 @@ let private planSpawns (snapshot: Snapshot) : Intent list =
         |> List.truncate deficit
         |> List.map (fun s -> SpawnCreep(s.Name, workerBody, $"worker-{snapshot.Time}-{s.Name}"))
 
+/// Extensions the controller level allows in the room (Screeps
+/// CONTROLLER_STRUCTURES for "extension").
+let private extensionAllowance level =
+    match level with
+    | 0
+    | 1 -> 0
+    | 2 -> 5
+    | 3 -> 10
+    | 4 -> 20
+    | 5 -> 30
+    | 6 -> 40
+    | 7 -> 50
+    | _ -> 60
+
+/// Screeps range: Chebyshev distance between two tiles.
+let private range a b = max (abs (a.X - b.X)) (abs (a.Y - b.Y))
+
+/// Colony-level planning step beside the Planner/Matcher pipeline: fill the
+/// controller level's extension allowance with construction sites on a
+/// checkerboard around the spawn, nearest tiles first. Sites are not creep
+/// work, so this emits Intents directly rather than Tasks.
+let private planConstructionSites (snapshot: Snapshot) : Intent list =
+    match snapshot.Placement, snapshot.Controller with
+    | Some plan, Some controller ->
+        let missing =
+            extensionAllowance controller.Level
+            - plan.BuiltExtensions
+            - plan.PendingExtensions
+
+        if missing <= 0 then
+            []
+        else
+            // Same checkerboard colour as the spawn: extensions cluster on the
+            // spawn's colour, leaving the other colour free for movement.
+            let parity = (plan.SpawnPos.X + plan.SpawnPos.Y) % 2
+
+            plan.Walkable
+            |> Set.toList
+            |> List.filter (fun tile ->
+                (tile.X + tile.Y) % 2 = parity && not (Set.contains tile plan.Occupied))
+            |> List.sortBy (fun tile -> range tile plan.SpawnPos, tile.X, tile.Y)
+            |> List.truncate missing
+            |> List.map (fun tile -> PlaceConstructionSite(plan.RoomName, tile, Extension))
+    | _ -> []
+
 /// Whether a creep can usefully work this Task right now. A full creep is
 /// done harvesting; an empty creep has nothing to deliver.
 let private applicable (creep: CreepInfo) task =
@@ -126,5 +171,6 @@ let private matchCreeps
 /// The single seam: Snapshot in, Intents plus next tick's Assignments out.
 let decide (snapshot: Snapshot) (assignments: Assignments) : Intent list * Assignments =
     let spawnIntents = planSpawns snapshot
+    let siteIntents = planConstructionSites snapshot
     let creepIntents, next = matchCreeps snapshot (planTasks snapshot) assignments
-    spawnIntents @ creepIntents, next
+    spawnIntents @ siteIntents @ creepIntents, next

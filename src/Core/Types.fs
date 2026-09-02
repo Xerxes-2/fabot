@@ -28,7 +28,31 @@ type RefillableInfo =
 type SourceInfo = { Id: string }
 
 /// What the decision layer knows about the room controller this tick.
-type ControllerInfo = { Id: string }
+type ControllerInfo =
+    {
+        Id: string
+        /// Controller level (RCL); gates how many extensions may exist.
+        Level: int
+    }
+
+/// A tile coordinate inside a room.
+type Pos = { X: int; Y: int }
+
+/// What the decision layer knows about the spawn room's local geography,
+/// sufficient for construction placement.
+type PlacementInfo =
+    {
+        RoomName: string
+        SpawnPos: Pos
+        /// Terrain-walkable tiles within the planning window around the spawn.
+        Walkable: Set<Pos>
+        /// Tiles already taken by structures or construction sites.
+        Occupied: Set<Pos>
+        /// Extensions already built in the room.
+        BuiltExtensions: int
+        /// Extension construction sites already placed.
+        PendingExtensions: int
+    }
 
 /// What the decision layer knows about one construction site this tick.
 type ConstructionSiteInfo = { Id: string }
@@ -55,6 +79,8 @@ type Snapshot =
         Controller: ControllerInfo option
         ConstructionSites: ConstructionSiteInfo list
         Creeps: CreepInfo list
+        /// None when there is no spawn to plan around.
+        Placement: PlacementInfo option
     }
 
 /// A unit of work in this tick's Task pool; creeps are interchangeable
@@ -65,9 +91,13 @@ type Task =
     | Build of siteId: string
     | Upgrade of controllerId: string
 
+/// What kind of structure a placement Intent asks for.
+type StructureKind = | Extension
+
 /// A single described action to perform this tick; data only, never the game API.
 type Intent =
     | SpawnCreep of spawnName: string * body: BodyPart list * creepName: string
+    | PlaceConstructionSite of roomName: string * pos: Pos * kind: StructureKind
     | HarvestSource of creepName: string * sourceId: string
     | TransferEnergyToStructure of creepName: string * structureId: string
     | BuildSite of creepName: string * siteId: string

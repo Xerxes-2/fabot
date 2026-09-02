@@ -12,6 +12,10 @@ let private partName =
     | Carry -> "carry"
     | Move -> "move"
 
+let private structureName =
+    function
+    | Extension -> structureExtension
+
 /// Screeps `ERR_NOT_IN_RANGE`.
 let private errNotInRange = -9
 
@@ -30,6 +34,16 @@ let private execute (intent: Intent) =
 
             if code <> 0 then
                 JS.console.log ($"spawnCreep {creepName} at {spawnName} failed: {code}")
+    | PlaceConstructionSite(roomName, pos, kind) ->
+        let room: IRoom = Game.rooms?(roomName)
+
+        if not (isNull (box room)) then
+            let code = room.createConstructionSite (pos.X, pos.Y, structureName kind)
+
+            if code <> 0 then
+                JS.console.log (
+                    $"createConstructionSite {structureName kind} at {roomName} ({pos.X},{pos.Y}) failed: {code}"
+                )
     | HarvestSource(creepName, sourceId) ->
         let creep: ICreep = Game.creeps?(creepName)
         let source = Game.getObjectById sourceId

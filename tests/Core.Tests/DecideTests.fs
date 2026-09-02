@@ -17,9 +17,10 @@ let bareRespawn =
             ]
         Refillables = [ { Id = "spawn-1"; FreeCapacity = 0 } ]
         Sources = [ { Id = "src-a" }; { Id = "src-b" } ]
-        Controller = Some { Id = "ctrl-1" }
+        Controller = Some { Id = "ctrl-1"; Level = 1 }
         ConstructionSites = []
         Creeps = []
+        Placement = None
     }
 
 let worker name energy freeCapacity =
@@ -113,6 +114,138 @@ let plannerTests =
                     refills
                     [ "spawn-1"; "ext-2" ]
                     "only structures with free capacity need a Refill"
+            }
+        ]
+
+/// Synthetic open terrain: every tile within `radius` of the spawn is
+/// walkable; only the spawn tile itself is occupied.
+let openTerrain radius =
+    let spawnPos = { X = 25; Y = 25 }
+
+    let walkable =
+        Set.ofList
+            [
+                for x in 25 - radius .. 25 + radius do
+                    for y in 25 - radius .. 25 + radius do
+                        { X = x; Y = y }
+            ]
+
+    {
+        RoomName = "W1N1"
+        SpawnPos = spawnPos
+        Walkable = walkable
+        Occupied = Set.singleton spawnPos
+        BuiltExtensions = 0
+        PendingExtensions = 0
+    }
+
+let placementIntents intents =
+    intents
+    |> List.choose (function
+        | PlaceConstructionSite(room, pos, kind) -> Some(room, pos, kind)
+        | _ -> None)
+
+let placedTiles intents =
+    placementIntents intents |> List.map (fun (_, pos, _) -> pos)
+
+let atLevel level placement =
+    { bareRespawn with
+        Controller = Some { Id = "ctrl-1"; Level = level }
+        Placement = Some placement
+    }
+
+[<Tests>]
+let placementTests =
+    testList
+        "placement"
+        [
+            test "RCL2 on open terrain places 5 extensions checkerboard, nearest first" {
+                let intents, _ = decide (atLevel 2 (openTerrain 3)) Map.empty
+
+                Expect.equal
+                    (placedTiles intents)
+                    [
+                        { X = 24; Y = 24 }
+                        { X = 24; Y = 26 }
+                        { X = 26; Y = 24 }
+                        { X = 26; Y = 26 }
+                        { X = 23; Y = 23 }
+                    ]
+                    "diagonal neighbours first, then the nearest rank-2 checkerboard tile"
+
+                for (room, _, kind) in placementIntents intents do
+                    Expect.equal room "W1N1" "sites go in the spawn's room"
+                    Expect.equal kind Extension "only extensions are placed"
+            }
+
+            test "below RCL2 no placement Intents are emitted" {
+                let intents, _ = decide (atLevel 1 (openTerrain 3)) Map.empty
+                Expect.isEmpty (placementIntents intents) "no extensions allowed at RCL1"
+            }
+
+            test "unwalkable tiles are skipped" {
+                let terrain = openTerrain 3
+
+                let holed =
+                    { terrain with
+                        Walkable = Set.remove { X = 24; Y = 24 } terrain.Walkable
+                    }
+
+                let intents, _ = decide (atLevel 2 holed) Map.empty
+
+                Expect.isFalse
+                    (List.contains { X = 24; Y = 24 } (placedTiles intents))
+                    "wall tile is never chosen"
+
+                Expect.hasLength (placementIntents intents) 5 "the cap is still reached elsewhere"
+            }
+
+            test "occupied tiles are skipped" {
+                let terrain = openTerrain 3
+
+                let blocked =
+                    { terrain with
+                        Occupied = Set.add { X = 24; Y = 24 } terrain.Occupied
+                    }
+
+                let intents, _ = decide (atLevel 2 blocked) Map.empty
+
+                Expect.isFalse
+                    (List.contains { X = 24; Y = 24 } (placedTiles intents))
+                    "occupied tile is never chosen"
+
+                Expect.hasLength (placementIntents intents) 5 "the cap is still reached elsewhere"
+            }
+
+            test "built extensions and pending sites count against the cap" {
+                let terrain =
+                    { openTerrain 3 with
+                        BuiltExtensions = 2
+                        PendingExtensions = 2
+                    }
+
+                let intents, _ = decide (atLevel 2 terrain) Map.empty
+                Expect.hasLength (placementIntents intents) 1 "only the shortfall is placed"
+            }
+
+            test "no placement Intents once the allowance is exhausted" {
+                let terrain =
+                    { openTerrain 3 with
+                        BuiltExtensions = 5
+                    }
+
+                let intents, _ = decide (atLevel 2 terrain) Map.empty
+                Expect.isEmpty (placementIntents intents) "allowance already used up"
+            }
+
+            test "no placement Intents without placement info" {
+                let snapshot =
+                    { bareRespawn with
+                        Controller = Some { Id = "ctrl-1"; Level = 2 }
+                    }
+
+                let intents, _ = decide snapshot Map.empty
+                Expect.isEmpty (placementIntents intents) "nothing to plan around"
             }
         ]
 
