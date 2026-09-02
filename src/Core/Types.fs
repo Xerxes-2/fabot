@@ -12,9 +12,16 @@ type SpawnInfo =
         Name: string
         /// Energy available for spawning in the spawn's room (spawn + extensions).
         EnergyAvailable: int
-        /// Energy the spawn's own store can still take (0 = full).
-        FreeCapacity: int
         IsSpawning: bool
+    }
+
+/// What the decision layer knows about one structure that feeds spawning
+/// (spawn or extension) this tick.
+type RefillableInfo =
+    {
+        Id: string
+        /// Energy the structure's store can still take (0 = full).
+        FreeCapacity: int
     }
 
 /// What the decision layer knows about one energy source this tick.
@@ -38,6 +45,8 @@ type Snapshot =
     {
         Time: int
         Spawns: SpawnInfo list
+        /// Structures that feed spawning, whether or not they currently have room.
+        Refillables: RefillableInfo list
         Sources: SourceInfo list
         /// None when no spawn room has an owned controller (should not happen in practice).
         Controller: ControllerInfo option
@@ -48,14 +57,14 @@ type Snapshot =
 /// executors that get matched to Tasks.
 type Task =
     | Harvest of sourceId: string
-    | Refill of spawnName: string
+    | Refill of structureId: string
     | Upgrade of controllerId: string
 
 /// A single described action to perform this tick; data only, never the game API.
 type Intent =
     | SpawnCreep of spawnName: string * body: BodyPart list * creepName: string
     | HarvestSource of creepName: string * sourceId: string
-    | TransferEnergyToSpawn of creepName: string * spawnName: string
+    | TransferEnergyToStructure of creepName: string * structureId: string
     | UpgradeController of creepName: string * controllerId: string
 
 /// Creep name -> task id. The only state remembered between ticks (anti-thrash).

@@ -12,10 +12,10 @@ let bareRespawn =
                 {
                     Name = "Spawn1"
                     EnergyAvailable = 300
-                    FreeCapacity = 0
                     IsSpawning = false
                 }
             ]
+        Refillables = [ { Id = "spawn-1"; FreeCapacity = 0 } ]
         Sources = [ { Id = "src-a" }; { Id = "src-b" } ]
         Controller = Some { Id = "ctrl-1" }
         Creeps = []
@@ -76,33 +76,27 @@ let plannerTests =
                 Expect.isEmpty upgrades "nothing to upgrade"
             }
 
-            test "a spawn missing energy gets a Refill task; a full spawn gets none" {
+            test "a structure missing energy gets a Refill task; a full structure gets none" {
                 let snapshot =
                     { bareRespawn with
-                        Spawns =
+                        Refillables =
                             [
-                                {
-                                    Name = "Spawn1"
-                                    EnergyAvailable = 250
-                                    FreeCapacity = 50
-                                    IsSpawning = false
-                                }
-                                {
-                                    Name = "Spawn2"
-                                    EnergyAvailable = 300
-                                    FreeCapacity = 0
-                                    IsSpawning = false
-                                }
+                                { Id = "spawn-1"; FreeCapacity = 50 }
+                                { Id = "ext-1"; FreeCapacity = 0 }
+                                { Id = "ext-2"; FreeCapacity = 50 }
                             ]
                     }
 
                 let refills =
                     planTasks snapshot
                     |> List.choose (function
-                        | Refill spawnName -> Some spawnName
+                        | Refill structureId -> Some structureId
                         | _ -> None)
 
-                Expect.equal refills [ "Spawn1" ] "only the spawn with free capacity needs a Refill"
+                Expect.equal
+                    refills
+                    [ "spawn-1"; "ext-2" ]
+                    "only structures with free capacity need a Refill"
             }
         ]
 
@@ -155,7 +149,6 @@ let tests =
                                 {
                                     Name = "Spawn1"
                                     EnergyAvailable = 100
-                                    FreeCapacity = 200
                                     IsSpawning = false
                                 }
                             ]
@@ -173,7 +166,6 @@ let tests =
                                 {
                                     Name = "Spawn1"
                                     EnergyAvailable = 300
-                                    FreeCapacity = 0
                                     IsSpawning = true
                                 }
                             ]
@@ -272,15 +264,7 @@ let tests =
             test "a creep that fills up is reassigned from Harvest to Refill" {
                 let snapshot =
                     { bareRespawn with
-                        Spawns =
-                            [
-                                {
-                                    Name = "Spawn1"
-                                    EnergyAvailable = 250
-                                    FreeCapacity = 50
-                                    IsSpawning = false
-                                }
-                            ]
+                        Refillables = [ { Id = "spawn-1"; FreeCapacity = 50 } ]
                         Creeps = [ worker "w1" 50 0 ]
                     }
 
@@ -288,31 +272,23 @@ let tests =
 
                 Expect.equal
                     (Map.tryFind "w1" kept)
-                    (Some "refill:Spawn1")
+                    (Some "refill:spawn-1")
                     "full creep switches to delivering"
 
                 Expect.contains
                     intents
-                    (TransferEnergyToSpawn("w1", "Spawn1"))
+                    (TransferEnergyToStructure("w1", "spawn-1"))
                     "delivery intent emitted"
             }
 
             test "a creep that empties is reassigned from Refill back to Harvest" {
                 let snapshot =
                     { bareRespawn with
-                        Spawns =
-                            [
-                                {
-                                    Name = "Spawn1"
-                                    EnergyAvailable = 250
-                                    FreeCapacity = 50
-                                    IsSpawning = false
-                                }
-                            ]
+                        Refillables = [ { Id = "spawn-1"; FreeCapacity = 50 } ]
                         Creeps = [ worker "w1" 0 50 ]
                     }
 
-                let _, kept = decide snapshot (Map.ofList [ "w1", "refill:Spawn1" ])
+                let _, kept = decide snapshot (Map.ofList [ "w1", "refill:spawn-1" ])
 
                 match Map.tryFind "w1" kept with
                 | Some tid -> Expect.stringStarts tid "harvest:" "empty creep goes back to a source"
@@ -335,18 +311,10 @@ let tests =
                 Expect.contains intents (UpgradeController("w1", "ctrl-1")) "upgrade intent emitted"
             }
 
-            test "a hungry spawn beats the controller for a delivering creep" {
+            test "a hungry structure beats the controller for a delivering creep" {
                 let snapshot =
                     { bareRespawn with
-                        Spawns =
-                            [
-                                {
-                                    Name = "Spawn1"
-                                    EnergyAvailable = 250
-                                    FreeCapacity = 50
-                                    IsSpawning = false
-                                }
-                            ]
+                        Refillables = [ { Id = "spawn-1"; FreeCapacity = 50 } ]
                         Creeps = [ worker "w1" 50 0 ]
                     }
 
@@ -354,8 +322,8 @@ let tests =
 
                 Expect.equal
                     (Map.tryFind "w1" kept)
-                    (Some "refill:Spawn1")
-                    "refill outranks upgrade while the spawn is missing energy"
+                    (Some "refill:spawn-1")
+                    "refill outranks upgrade while a structure is missing energy"
             }
 
             test "an upgrading creep that empties goes back to harvest" {

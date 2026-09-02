@@ -9,12 +9,27 @@ type ICpu =
 /// Screeps `FIND_SOURCES` constant.
 let findSources = 105
 
+/// Screeps `FIND_MY_STRUCTURES` constant.
+let findMyStructures = 108
+
+/// Screeps `STRUCTURE_SPAWN` constant.
+let structureSpawn = "spawn"
+
+/// Screeps `STRUCTURE_EXTENSION` constant.
+let structureExtension = "extension"
+
 type IStore =
     abstract getFreeCapacity: resource: string -> int
     abstract getUsedCapacity: resource: string -> int
 
 type ISource =
     abstract id: string
+
+type IStructure =
+    abstract id: string
+    /// Screeps STRUCTURE_* string, e.g. "spawn" or "extension".
+    abstract structureType: string
+    abstract store: IStore
 
 type IController =
     abstract id: string

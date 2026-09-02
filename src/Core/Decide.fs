@@ -20,7 +20,7 @@ let bodyCost body =
 let taskId =
     function
     | Harvest sourceId -> $"harvest:{sourceId}"
-    | Refill spawnName -> $"refill:{spawnName}"
+    | Refill structureId -> $"refill:{structureId}"
     | Upgrade controllerId -> $"upgrade:{controllerId}"
 
 /// Planner: rebuild this tick's full Task pool from the Snapshot. Pure and
@@ -29,9 +29,9 @@ let planTasks (snapshot: Snapshot) : Task list =
     let harvests = snapshot.Sources |> List.map (fun s -> Harvest s.Id)
 
     let refills =
-        snapshot.Spawns
-        |> List.filter (fun s -> s.FreeCapacity > 0)
-        |> List.map (fun s -> Refill s.Name)
+        snapshot.Refillables
+        |> List.filter (fun r -> r.FreeCapacity > 0)
+        |> List.map (fun r -> Refill r.Id)
 
     let upgrades =
         snapshot.Controller |> Option.toList |> List.map (fun c -> Upgrade c.Id)
@@ -63,7 +63,7 @@ let private applicable (creep: CreepInfo) task =
 let private intentFor (creep: CreepInfo) task =
     match task with
     | Harvest sourceId -> HarvestSource(creep.Name, sourceId)
-    | Refill spawnName -> TransferEnergyToSpawn(creep.Name, spawnName)
+    | Refill structureId -> TransferEnergyToStructure(creep.Name, structureId)
     | Upgrade controllerId -> UpgradeController(creep.Name, controllerId)
 
 /// Matching tier between applicable tasks (lower wins): feeding the economy

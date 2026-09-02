@@ -15,9 +15,22 @@ let build () : Snapshot =
                 {
                     Name = s.name
                     EnergyAvailable = s.room.energyAvailable
-                    FreeCapacity = s.store.getFreeCapacity "energy"
                     IsSpawning = not (isNull s.spawning)
                 })
+            |> Array.toList
+        Refillables =
+            spawns
+            |> Array.collect (fun s -> s.room.find findMyStructures)
+            |> Array.map (fun o -> o :?> IStructure)
+            |> Array.filter (fun st ->
+                st.structureType = structureSpawn || st.structureType = structureExtension)
+            |> Array.distinctBy (fun st -> st.id)
+            |> Array.map (fun st ->
+                {
+                    Id = st.id
+                    FreeCapacity = st.store.getFreeCapacity "energy"
+                }
+                : RefillableInfo)
             |> Array.toList
         Sources =
             spawns

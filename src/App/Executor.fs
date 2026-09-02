@@ -36,12 +36,12 @@ let private execute (intent: Intent) =
 
         if not (isNull (box creep)) && not (isNull source) then
             actOrApproach creep source (fun t -> creep.harvest t)
-    | TransferEnergyToSpawn(creepName, spawnName) ->
+    | TransferEnergyToStructure(creepName, structureId) ->
         let creep: ICreep = Game.creeps?(creepName)
-        let spawn: ISpawn = Game.spawns?(spawnName)
+        let structure = Game.getObjectById structureId
 
-        if not (isNull (box creep)) && not (isNull (box spawn)) then
-            actOrApproach creep (box spawn) (fun t -> creep.transfer (t, "energy"))
+        if not (isNull (box creep)) && not (isNull structure) then
+            actOrApproach creep structure (fun t -> creep.transfer (t, "energy"))
     | UpgradeController(creepName, controllerId) ->
         let creep: ICreep = Game.creeps?(creepName)
         let controller = Game.getObjectById controllerId

@@ -16,6 +16,9 @@ The thin imperative shell that turns Intents into Screeps API calls. The only la
 ### Task
 A unit of work in the task pool (e.g. "deliver 300 energy to spawn"). Creeps are interchangeable executors that get matched to Tasks; a creep has no fixed role.
 
+### Refill
+The Task of delivering energy to any structure that feeds spawning (spawn or extension). One generalized Task — spawn vs extension is not a domain distinction; the Planner filters by free capacity.
+
 ## Avoided terms
 
 - **Role** — creeps are not born with roles; work is Task-based. Don't reintroduce role-based vocabulary.
