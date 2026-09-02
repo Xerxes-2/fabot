@@ -26,7 +26,10 @@ The Task of spending carried energy into a construction site. Surplus work: same
 The pure step that reads a Snapshot and generates this tick's full Task pool. Runs every tick from scratch — Tasks are never persisted.
 
 ### Matcher
-The pure step that assigns creeps to Tasks (greedy matching) and emits Intents. Current assignments are the only thing remembered between ticks (anti-thrash).
+The pure step that assigns creeps to Tasks (greedy matching): Assignments in, Assignments out. Current assignments are the only thing remembered between ticks (anti-thrash).
+
+### Emitter
+The pure step that turns the tick's assigned Tasks into each assigned creep's action Intent and [[chat bubble]]. Judges actions from tick-start geometry — it consults the same [[atlas]] as the Matcher and Resolver, never resolved positions.
 
 ### Seat
 A walkable tile adjacent to a source. The capacity unit of Harvest: a source supports at most as many concurrent harvesters as it has Seats.
@@ -38,7 +41,7 @@ The set of tiles a creep may stand on while performing its current Task, derived
 A creep's movement desire for one tick: candidate standing tiles plus a priority. Input to the [[resolver]] — not an Intent; the Resolver's output (a single-step move) is what becomes an Intent.
 
 ### Resolver
-The pure step that arbitrates a room's Move Intents into actual single-step moves (priority first, most-constrained first, swap when contested). Third pure step beside Planner and Matcher; movement is never issued outside it.
+The pure step that arbitrates a room's Move Intents into actual single-step moves (priority first, most-constrained first, swap when contested). Fourth pure step beside Planner, Matcher, and [[emitter]]; movement is never issued outside it.
 
 ### Travel cost
 The cheapest-path cost from a creep to a Task's Work Area over the [[spatial projection]] (plain 1, swamp 5, impassable excluded). Breaks rank ties in the Matcher (ADR 0002); a Work Area with no travel cost — unreachable or empty — makes the Task inapplicable to that creep: never matched fresh, and a remembered assignment to it is released.
