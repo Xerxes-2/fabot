@@ -17,11 +17,43 @@ let bodyCost body =
         | Carry -> 50
         | Move -> 50)
 
-/// Largest affordable repetition of the worker unit within `capacity`,
-/// never below one unit.
+/// Worker body for an energy capacity: the largest affordable repetition
+/// of the worker unit (never below one), with the remainder spent on
+/// Carry/Move at fatigue parity — the padded body is never slower than
+/// the pure-unit body, empty or loaded, and within that buys as much
+/// Carry as possible (ADR 0003). Parts are grouped Work, Carry, Move so
+/// damage strips Work first and mobility last.
 let workerBodyFor capacity =
-    let units = max 1 (capacity / bodyCost workerUnit)
-    List.replicate units workerUnit |> List.concat
+    // Screeps MAX_CREEP_SIZE: the engine rejects bodies over 50 parts.
+    let maxBodyParts = 50
+    let unitSize = List.length workerUnit
+    let carryCost = bodyCost [ Carry ]
+    let moveCost = bodyCost [ Move ]
+
+    let units = capacity / bodyCost workerUnit |> max 1 |> min (maxBodyParts / unitSize)
+
+    // Loaded parity is work + carry <= 2 * move: a lone Carry is added
+    // only under that bound, a Carry+Move pair preserves it, and a lone
+    // Move (the trailing 50) only widens it.
+    let rec pad work carry move budget slots =
+        if slots >= 1 && budget >= carryCost && work + carry + 1 <= 2 * move then
+            pad work (carry + 1) move (budget - carryCost) (slots - 1)
+        elif slots >= 2 && budget >= carryCost + moveCost then
+            pad work (carry + 1) (move + 1) (budget - carryCost - moveCost) (slots - 2)
+        elif slots >= 1 && budget >= moveCost then
+            pad work carry (move + 1) (budget - moveCost) (slots - 1)
+        else
+            work, carry, move
+
+    let work, carry, move =
+        pad
+            units
+            units
+            units
+            (capacity - units * bodyCost workerUnit)
+            (maxBodyParts - units * unitSize)
+
+    List.replicate work Work @ List.replicate carry Carry @ List.replicate move Move
 
 /// Stable identity of a Task across ticks; what Assignments point at.
 let taskId =

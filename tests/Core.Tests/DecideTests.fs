@@ -40,6 +40,85 @@ let spawnIntents intents =
         | _ -> None)
 
 [<Tests>]
+let bodyTests =
+    testList
+        "worker body"
+        [
+            test "a 150 remainder buys two Carry and a Move" {
+                // 550 = 2 units + 150: the old whole-unit body stranded 150.
+                Expect.equal
+                    (workerBodyFor 550)
+                    [ Work; Work; Carry; Carry; Carry; Carry; Move; Move; Move ]
+                    "remainder is spent at parity: max Carry without moving slower than the pure-unit body"
+            }
+
+            test "a 50 remainder buys a Move, not a Carry" {
+                // A lone Carry would tip loaded fatigue past the pure-unit body's.
+                Expect.equal
+                    (workerBodyFor 250)
+                    [ Work; Carry; Move; Move ]
+                    "the trailing 50 goes to Move"
+            }
+
+            test "a 100 remainder buys a Carry/Move pair" {
+                Expect.equal
+                    (workerBodyFor 500)
+                    [ Work; Work; Carry; Carry; Carry; Move; Move; Move ]
+                    "a pair keeps parity and adds haul"
+            }
+
+            test "an exact multiple stays pure units" {
+                Expect.equal
+                    (workerBodyFor 800)
+                    (List.replicate 4 Work @ List.replicate 4 Carry @ List.replicate 4 Move)
+                    "no remainder, no pad"
+            }
+
+            test "below one unit cost the floor is one unit" {
+                Expect.equal (workerBodyFor 150) [ Work; Carry; Move ] "never below one unit"
+            }
+
+            test "every capacity is spent to within a part price, at fatigue parity" {
+                for capacity in 200..50..1300 do
+                    let body = workerBodyFor capacity
+
+                    let count part =
+                        body |> List.filter ((=) part) |> List.length
+
+                    let work, carry, move = count Work, count Carry, count Move
+
+                    Expect.isLessThanOrEqual
+                        (bodyCost body)
+                        capacity
+                        $"affordable at capacity {capacity}"
+
+                    Expect.isLessThan
+                        (capacity - bodyCost body)
+                        50
+                        $"nothing a part could buy is stranded at capacity {capacity}"
+
+                    Expect.isLessThanOrEqual
+                        (work + carry)
+                        (2 * move)
+                        $"loaded parity with the pure-unit body at capacity {capacity}"
+
+                    Expect.isLessThanOrEqual
+                        work
+                        move
+                        $"empty parity with the pure-unit body at capacity {capacity}"
+            }
+
+            test "the body never exceeds the 50-part engine cap" {
+                // RCL8 capacity: unbounded replication would emit 192 parts,
+                // which the engine rejects outright.
+                Expect.equal
+                    (workerBodyFor 12900)
+                    (List.replicate 16 Work @ List.replicate 17 Carry @ List.replicate 17 Move)
+                    "16 units plus a Carry/Move pair fill exactly 50 parts"
+            }
+        ]
+
+[<Tests>]
 let plannerTests =
     testList
         "planner"
@@ -1330,7 +1409,7 @@ let tests =
                 Expect.isEmpty (spawnIntents intents) "spawn is busy"
             }
 
-            test "at 550 capacity a 2x-unit body is spawned" {
+            test "at 550 capacity the whole capacity is spent" {
                 let snapshot =
                     { bareRespawn with
                         Spawns = [ spawn 550 550 ]
@@ -1343,12 +1422,12 @@ let tests =
                 | [ (_, body, _) ] ->
                     Expect.equal
                         body
-                        [ Work; Carry; Move; Work; Carry; Move ]
-                        "body doubles at double capacity"
+                        [ Work; Work; Carry; Carry; Carry; Carry; Move; Move; Move ]
+                        "two units plus the 150 remainder as Carry/Carry/Move"
                 | other -> failtest $"expected exactly one SpawnCreep intent, got %A{other}"
             }
 
-            test "at 300 capacity the 1x-unit body is spawned" {
+            test "at 300 capacity the remainder pads the single unit" {
                 let snapshot =
                     { bareRespawn with
                         Creeps = [ worker "worker-1" 0 50 ]
@@ -1358,7 +1437,10 @@ let tests =
 
                 match spawnIntents intents with
                 | [ (_, body, _) ] ->
-                    Expect.equal body [ Work; Carry; Move ] "300 capacity affords one unit"
+                    Expect.equal
+                        body
+                        [ Work; Carry; Carry; Move; Move ]
+                        "one unit plus the 100 remainder as a Carry/Move pair"
                 | other -> failtest $"expected exactly one SpawnCreep intent, got %A{other}"
             }
 
