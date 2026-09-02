@@ -18,6 +18,9 @@ let findStructures = 107
 /// Screeps `FIND_MY_CONSTRUCTION_SITES` constant.
 let findMyConstructionSites = 114
 
+/// Screeps `FIND_HOSTILE_CREEPS` constant.
+let findHostileCreeps = 103
+
 /// Screeps `TERRAIN_MASK_WALL` constant.
 let terrainMaskWall = 1
 
@@ -70,7 +73,14 @@ type IController =
     abstract my: bool
     /// Controller level (RCL).
     abstract level: int
+    /// Ticks left on the downgrade timer; undefined on unowned controllers.
+    abstract ticksToDowngrade: int
+    /// Safe-mode activations banked.
+    abstract safeModeAvailable: int
+    /// Ticks of safe mode remaining; undefined when safe mode is off.
+    abstract safeMode: int
     abstract pos: IRoomPosition
+    abstract activateSafeMode: unit -> int
 
 type IRoom =
     abstract name: string
@@ -93,12 +103,18 @@ type ISpawn =
     abstract pos: IRoomPosition
     abstract spawnCreep: body: string[] * name: string -> int
 
+/// One entry of a creep's `body` array.
+type IBodyPartDef =
+    /// Part-type string, e.g. "work" or "claim".
+    abstract ``type``: string
+
 type ICreep =
     abstract name: string
     /// True while the creep is still being built inside the spawn.
     abstract spawning: bool
     abstract store: IStore
     abstract pos: IRoomPosition
+    abstract body: IBodyPartDef[]
     abstract harvest: target: obj -> int
     abstract transfer: target: obj * resource: string -> int
     abstract build: target: obj -> int

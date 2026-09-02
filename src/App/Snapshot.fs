@@ -14,6 +14,14 @@ let private terrainAt (terrain: ITerrain) x y =
 
 let private posOf (p: IRoomPosition) : Pos = { X = p.x; Y = p.y }
 
+/// Classify an engine part-type string into the Core's body vocabulary:
+/// the reverse of the Core's one part-name table. The engine's part set
+/// is closed, so the fallback for an unmatched string is unreachable;
+/// Tough keeps the classification total without inventing a case.
+let private bodyPartOf =
+    let byName = allBodyParts |> List.map (fun p -> partName p, p) |> Map.ofList
+    fun partType -> byName |> Map.tryFind partType |> Option.defaultValue Tough
+
 /// Classify an engine STRUCTURE_* string into the Core's built kinds.
 let private builtKindOf structureType =
     if structureType = structureSpawn then
@@ -113,6 +121,9 @@ let private buildSpatial (spawn: ISpawn) : SpatialInfo =
 let build () : Snapshot =
     let spawns = objectValues<ISpawn> Game.spawns
 
+    let spawnRooms =
+        spawns |> Array.map (fun s -> s.room) |> Array.distinctBy (fun r -> r.name)
+
     {
         Time = Game.time
         Spawns =
@@ -126,9 +137,7 @@ let build () : Snapshot =
                 })
             |> Array.toList
         RoomEnergy =
-            spawns
-            |> Array.map (fun s -> s.room)
-            |> Array.distinctBy (fun r -> r.name)
+            spawnRooms
             |> Array.map (fun r ->
                 r.name,
                 {
@@ -162,7 +171,18 @@ let build () : Snapshot =
                 let c = s.room.controller
 
                 if not (isNull (box c)) && c.my then
-                    Some({ Id = c.id; Level = c.level }: ControllerInfo)
+                    Some(
+                        {
+                            Id = c.id
+                            Level = c.level
+                            TicksToDowngrade = c.ticksToDowngrade
+                            SafeModeAvailable = c.safeModeAvailable
+                            // `safeMode` is the tick count remaining,
+                            // undefined when safe mode is off.
+                            SafeModeActive = not (isNull (box c.safeMode))
+                        }
+                        : ControllerInfo
+                    )
                 else
                     None)
         ConstructionSites =
@@ -181,6 +201,17 @@ let build () : Snapshot =
                     Energy = c.store.getUsedCapacity "energy"
                     FreeCapacity = c.store.getFreeCapacity "energy"
                 })
+            |> Array.toList
+        Hostiles =
+            spawnRooms
+            |> Array.collect (fun r -> r.find findHostileCreeps)
+            |> Array.map (fun o ->
+                let c = o :?> ICreep
+
+                {
+                    Body = c.body |> Array.map (fun p -> bodyPartOf p.``type``) |> Array.toList
+                }
+                : HostileInfo)
             |> Array.toList
         // Single-colony assumption: only the first spawn's room is projected.
         Spatial =

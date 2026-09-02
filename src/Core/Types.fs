@@ -1,10 +1,17 @@
 module Fabot.Core.Types
 
-/// A creep body part, engine vocabulary kept minimal for the MVP worker.
+/// A creep body part, the engine's full vocabulary. Our own bodies use
+/// only Work/Carry/Move today; the rest arrive on hostile creeps, whose
+/// parts the Snapshot projects verbatim.
 type BodyPart =
     | Work
     | Carry
     | Move
+    | Attack
+    | RangedAttack
+    | Heal
+    | Claim
+    | Tough
 
 /// What the decision layer knows about one spawn this tick.
 type SpawnInfo =
@@ -47,6 +54,14 @@ type ControllerInfo =
         Id: string
         /// Controller level (RCL); gates how many extensions may exist.
         Level: int
+        /// Ticks left on the downgrade timer. A downgrade costs a level
+        /// AND zeroes the safe-mode stock, so this is a hard deadline.
+        TicksToDowngrade: int
+        /// Safe-mode activations banked (one is granted per level-up;
+        /// the stock is zeroed by any downgrade).
+        SafeModeAvailable: int
+        /// True while safe mode is running in the room.
+        SafeModeActive: bool
     }
 
 /// A tile coordinate inside a room.
@@ -113,6 +128,11 @@ module SpatialInfo =
 /// What the decision layer knows about one construction site this tick.
 type ConstructionSiteInfo = { Id: string }
 
+/// What the decision layer knows about one hostile creep in a spawn room
+/// this tick: its body parts, verbatim — what a hostile can do is decided
+/// from what it is made of.
+type HostileInfo = { Body: BodyPart list }
+
 /// What the decision layer knows about one owned creep this tick.
 type CreepInfo =
     {
@@ -138,6 +158,8 @@ type Snapshot =
         Controller: ControllerInfo option
         ConstructionSites: ConstructionSiteInfo list
         Creeps: CreepInfo list
+        /// Hostile creeps standing in the spawn rooms this tick.
+        Hostiles: HostileInfo list
         /// The spawn room's spatial projection. Always present, possibly
         /// empty — absence is per-entry, never per-projection (ADR 0004).
         Spatial: SpatialInfo
@@ -165,6 +187,23 @@ type Direction =
     | Left
     | TopLeft
 
+/// Every BodyPart — the closed set, for building tables over the vocabulary.
+let allBodyParts = [ Work; Carry; Move; Attack; RangedAttack; Heal; Claim; Tough ]
+
+/// Screeps body-part strings as the engine spells them, in `spawnCreep`
+/// bodies and `creep.body` entries alike — the one place the spelling
+/// lives (its reverse is derived from this table, never written twice).
+let partName =
+    function
+    | Work -> "work"
+    | Carry -> "carry"
+    | Move -> "move"
+    | Attack -> "attack"
+    | RangedAttack -> "ranged_attack"
+    | Heal -> "heal"
+    | Claim -> "claim"
+    | Tough -> "tough"
+
 /// Screeps direction constants as `Creep.move` expects them: TOP = 1, then clockwise.
 let directionCode =
     function
@@ -187,6 +226,7 @@ type Intent =
     | UpgradeController of creepName: string * controllerId: string
     | MoveCreep of creepName: string * direction: Direction
     | SayCreep of creepName: string * message: string
+    | ActivateSafeMode of controllerId: string
 
 /// Creep name -> task id. The only state remembered between ticks (anti-thrash).
 type Assignments = Map<string, string>

@@ -76,6 +76,15 @@ The body-generation invariant (ADR 0003): a worker body padded beyond whole [[wo
 ### Chat bubble
 The glyph an assigned creep says over its head each tick, one fixed glyph per [[task]] (⛏ Harvest · 🔋 Refill · 🔨 Build · ⚡ Upgrade). Observability only, private to our own viewer; unassigned creeps show nothing.
 
+### Safe-mode reflex
+The colony reflex (ADR 0007) that emits `ActivateSafeMode` the tick any CLAIM-part [[hostile]] stands in a spawn room — on sight, because the claim tap it is about to land would itself block activation for 1,000 ticks. Gated only on stock remaining and safe mode not already running; hostiles without CLAIM never spend the stock.
+
+### Hostile
+A hostile creep as the Snapshot projects it: its body parts, verbatim, and nothing else. What a hostile can do is decided from what it is made of — CLAIM is the only part that threatens the controller, and the controller is the only thing safe mode is spent on (ADR 0007).
+
+### Downgrade deadline
+The hard floor on the controller's downgrade timer: half the level's full timer (ADR 0007). Inside it, Upgrade stops being surplus work and outranks even the feeding tier — a downgrade costs a level and zeroes the safe-mode stock, and the engine refuses safe-mode activation below half minus 5,000, so escalating at half keeps the [[safe-mode reflex]] fireable with the engine's whole grace intact.
+
 ### Disaster fallback
 The zero-creep spawning rule: an empty colony spawns bare [[worker unit]]s from whatever [[room energy]] is banked right now — as many as the bank affords, up to the workforce deficit — rather than waiting for a full capacity it can never refill. The one body-generation path that ignores the remainder — time-to-first-creep outranks spending the bank.
 

@@ -16,6 +16,7 @@ let snapshotWith creeps spatial =
         Controller = None
         ConstructionSites = []
         Creeps = creeps
+        Hostiles = []
         Spatial = spatial
     }
 

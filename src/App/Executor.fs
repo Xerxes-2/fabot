@@ -13,12 +13,6 @@ type Outcome =
     | Failed of code: int
     | ActorMissing
 
-let private partName =
-    function
-    | Work -> "work"
-    | Carry -> "carry"
-    | Move -> "move"
-
 let private structureName =
     function
     | Extension -> structureExtension
@@ -67,6 +61,9 @@ let private execute (intent: Intent) : Outcome =
     | MoveCreep(creepName, direction) ->
         withCreep creepName (fun c -> c.move (directionCode direction))
     | SayCreep(creepName, message) -> withCreep creepName (fun c -> c.say message)
+    | ActivateSafeMode controllerId ->
+        withActor (Game.getObjectById controllerId :?> IController) (fun controller ->
+            controller.activateSafeMode ())
 
 /// Replay every Intent and answer back what the engine said. Failures are
 /// logged here, once and uniformly; the outcome list is the seam a future

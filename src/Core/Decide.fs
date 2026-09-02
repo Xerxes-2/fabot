@@ -30,7 +30,12 @@ let bodyCost body =
     |> List.sumBy (function
         | Work -> 100
         | Carry -> 50
-        | Move -> 50)
+        | Move -> 50
+        | Attack -> 80
+        | RangedAttack -> 150
+        | Heal -> 250
+        | Claim -> 600
+        | Tough -> 10)
 
 /// Body for a pattern at an energy capacity: the largest affordable
 /// repetition of the pattern's block (never below one repeat), with the
@@ -173,6 +178,23 @@ let private planSpawns (snapshot: Snapshot) atlas : Intent list =
 
         List.rev intents
 
+/// Colony reflex beside the pipeline: a CLAIM-part hostile is the one
+/// threat that can disarm safe mode itself — attackController blocks
+/// activation for 1,000 ticks — so the activation fires the tick such a
+/// hostile is seen, while firing is still possible. Fighters without
+/// CLAIM cannot touch the controller and never spend the stock: at RCL2
+/// safe mode outlasts any invader raid 13×, so it keeps for when the
+/// room is actually being taken (ADR 0007).
+let private planSafeMode (snapshot: Snapshot) : Intent list =
+    match snapshot.Controller with
+    | Some controller when
+        controller.SafeModeAvailable > 0
+        && not controller.SafeModeActive
+        && snapshot.Hostiles |> List.exists (fun h -> List.contains Claim h.Body)
+        ->
+        [ ActivateSafeMode controller.Id ]
+    | _ -> []
+
 /// Extensions the controller level allows in the room (Screeps
 /// CONTROLLER_STRUCTURES for "extension").
 let private extensionAllowance level =
@@ -243,15 +265,44 @@ let private glyphFor =
     | Build _ -> "🔨"
     | Upgrade _ -> "⚡"
 
+/// The full downgrade timer per controller level (Screeps
+/// CONTROLLER_DOWNGRADE).
+let private fullDowngradeTimer level =
+    match level with
+    | 1 -> 20000
+    | 2 -> 10000
+    | 3 -> 20000
+    | 4 -> 40000
+    | 5 -> 80000
+    | 6 -> 120000
+    | 7 -> 150000
+    | _ -> 200000
+
+/// The hard deadline on the controller's downgrade timer: half the
+/// level's full timer. The engine refuses activateSafeMode once the
+/// timer sinks below half minus 5,000 (its
+/// CONTROLLER_DOWNGRADE_SAFEMODE_THRESHOLD grace), so escalating at half
+/// keeps the safe-mode reflex fireable with the whole grace still banked
+/// — a downgrade costs a level and zeroes the stock, so neither line is
+/// ever approached (ADR 0007).
+let private downgradeDeadline level = fullDowngradeTimer level / 2
+
 /// Matching tier between applicable tasks (lower wins): feeding the economy
 /// (Harvest, Refill) outranks sinking surplus into construction (Build) or
-/// the controller (Upgrade).
-let private rank =
-    function
+/// the controller (Upgrade). One exception: a controller inside the
+/// downgrade deadline makes Upgrade the colony's most urgent work,
+/// outranking even the feeding tier (ADR 0007).
+let private rank (snapshot: Snapshot) task =
+    match task with
     | Harvest _ -> 0
     | Refill _ -> 0
     | Build _ -> 1
-    | Upgrade _ -> 1
+    | Upgrade _ ->
+        let urgent =
+            snapshot.Controller
+            |> Option.exists (fun c -> c.TicksToDowngrade <= downgradeDeadline c.Level)
+
+        if urgent then -1 else 1
 
 /// Concurrent-worker cap per task id; tasks absent from the map are
 /// unbounded. Harvest is capped by its source's Seat count — a source the
@@ -313,7 +364,13 @@ let private idleRank = System.Int32.MaxValue
 /// within the Work Area"; one with no Task — or no way to reach its
 /// area, which is just as immobilising — is parked: stay put,
 /// displaceable to any adjacent walkable tile.
-let private moveIntentFor atlas (creep: string) (pos: Pos) (task: Task option) : MoveIntent =
+let private moveIntentFor
+    (rankOf: Task -> int)
+    atlas
+    (creep: string)
+    (pos: Pos)
+    (task: Task option)
+    : MoveIntent =
     let parked rank =
         {
             Creep = creep
@@ -331,7 +388,7 @@ let private moveIntentFor atlas (creep: string) (pos: Pos) (task: Task option) :
             {
                 Creep = creep
                 Pos = pos
-                Rank = rank task
+                Rank = rankOf task
                 Candidates =
                     pos
                     :: (Atlas.adjacentWalkable atlas pos
@@ -343,10 +400,10 @@ let private moveIntentFor atlas (creep: string) (pos: Pos) (task: Task option) :
                 {
                     Creep = creep
                     Pos = pos
-                    Rank = rank task
+                    Rank = rankOf task
                     Candidates = [ step ]
                 }
-            | None -> parked (rank task)
+            | None -> parked (rankOf task)
 
 /// Resolver core (per screeps-cartographer): claim tiles priority
 /// descending, most-constrained first within a priority. Claiming a tile
@@ -438,12 +495,13 @@ let private directionTo (from: Pos) (dest: Pos) : Direction option =
 /// creep, and the settled standing tiles become move Intents in Snapshot
 /// creep order. Takes the tick's assigned Task per creep as data; a creep
 /// absent from the map is idle.
-let resolve atlas (assigned: Map<string, Task>) : Intent list =
+let resolve (snapshot: Snapshot) atlas (assigned: Map<string, Task>) : Intent list =
     let placed = Atlas.placedCreeps atlas
 
     let moveIntents =
         placed
-        |> List.map (fun (name, pos) -> moveIntentFor atlas name pos (Map.tryFind name assigned))
+        |> List.map (fun (name, pos) ->
+            moveIntentFor (rank snapshot) atlas name pos (Map.tryFind name assigned))
 
     let occupants = placed |> List.map (fun (name, pos) -> pos, name) |> Map.ofList
     let standing = arbitrate occupants moveIntents
@@ -509,7 +567,8 @@ let matchCreeps
             | [] -> acc
             | candidates ->
                 let task, _ =
-                    candidates |> List.minBy (fun (t, cost) -> rank t, cost, load acc (taskId t))
+                    candidates
+                    |> List.minBy (fun (t, cost) -> rank snapshot t, cost, load acc (taskId t))
 
                 Map.add creep.Name (taskId task) acc
 
@@ -532,14 +591,16 @@ let private assignedTasks (tasks: Task list) (assignments: Assignments) : Map<st
 /// flood (ADR 0004).
 let decide (snapshot: Snapshot) (assignments: Assignments) : Intent list * Assignments =
     let atlas = Atlas.ofSnapshot snapshot
+    let defenseIntents = planSafeMode snapshot
     let spawnIntents = planSpawns snapshot atlas
     let siteIntents = planConstructionSites snapshot atlas
     let tasks = planTasks snapshot
     let next = matchCreeps snapshot atlas tasks assignments
     let assigned = assignedTasks tasks next
 
-    spawnIntents
+    defenseIntents
+    @ spawnIntents
     @ siteIntents
     @ emit snapshot atlas assigned
-    @ resolve atlas assigned,
+    @ resolve snapshot atlas assigned,
     next

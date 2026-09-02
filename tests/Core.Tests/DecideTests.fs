@@ -25,6 +25,16 @@ let bank energy capacity =
             }
         ]
 
+/// A controller far from its downgrade deadline, stock intact.
+let controllerAt level =
+    {
+        Id = "ctrl-1"
+        Level = level
+        TicksToDowngrade = 20000
+        SafeModeAvailable = 1
+        SafeModeActive = false
+    }
+
 let bareRespawn =
     {
         Time = 42
@@ -32,9 +42,10 @@ let bareRespawn =
         RoomEnergy = bank 300 300
         Refillables = [ { Id = "spawn-1"; FreeCapacity = 0 } ]
         Sources = [ { Id = "src-a" }; { Id = "src-b" } ]
-        Controller = Some { Id = "ctrl-1"; Level = 1 }
+        Controller = Some(controllerAt 1)
         ConstructionSites = []
         Creeps = []
+        Hostiles = []
         Spatial = SpatialInfo.empty
     }
 
@@ -64,6 +75,22 @@ let directionCodeTests =
                      |> List.map directionCode)
                     [ 1; 2; 3; 4; 5; 6; 7; 8 ]
                     "each Direction maps to its Screeps constant"
+            }
+        ]
+
+[<Tests>]
+let partNameTests =
+    testList
+        "part names"
+        [
+            test "matches the engine's spelling, one name per part" {
+                // These strings leave the program in spawnCreep bodies and
+                // come back in hostile body arrays; the table is the engine's
+                // spec, restated so a swapped or misspelt case fails.
+                Expect.equal
+                    (allBodyParts |> List.map partName)
+                    [ "work"; "carry"; "move"; "attack"; "ranged_attack"; "heal"; "claim"; "tough" ]
+                    "each BodyPart maps to its Screeps string"
             }
         ]
 
@@ -306,7 +333,7 @@ let placedTiles intents =
 
 let atLevel level room =
     { bareRespawn with
-        Controller = Some { Id = "ctrl-1"; Level = level }
+        Controller = Some(controllerAt level)
         Spatial = room
     }
 
@@ -415,7 +442,7 @@ let placementTests =
             test "no placement Intents without a projected room" {
                 let snapshot =
                     { bareRespawn with
-                        Controller = Some { Id = "ctrl-1"; Level = 2 }
+                        Controller = Some(controllerAt 2)
                     }
 
                 let intents, _ = decide snapshot Map.empty
@@ -1109,7 +1136,7 @@ let stepFrom pos direction =
 /// Run the Resolver at its own seam: assigned Tasks as data over the
 /// snapshot's Atlas; a creep absent from the list is idle.
 let resolveOn snapshot assigned =
-    resolve (Atlas.ofSnapshot snapshot) (Map.ofList assigned)
+    resolve snapshot (Atlas.ofSnapshot snapshot) (Map.ofList assigned)
 
 /// Run the Emitter at its own seam, over the same tick-start Atlas.
 let emitOn snapshot assigned =
@@ -2013,5 +2040,169 @@ let tests =
                 let assignments = Map.ofList [ "ghost", "task-a" ]
                 let _, kept = decide bareRespawn assignments
                 Expect.isEmpty (Map.toList kept) "dead creep's assignment is released"
+            }
+        ]
+
+let activations intents =
+    intents
+    |> List.choose (function
+        | ActivateSafeMode id -> Some id
+        | _ -> None)
+
+[<Tests>]
+let safeModeTests =
+    testList
+        "safe-mode reflex"
+        [
+            test "a CLAIM-part hostile fires safe mode the tick it is seen" {
+                // A claim tap on the controller blocks activation for 1,000
+                // ticks — waiting until the hostile arrives is waiting too long.
+                let snapshot =
+                    { bareRespawn with
+                        Hostiles = [ { Body = [ Claim; Claim; Move; Move ] } ]
+                    }
+
+                let intents, _ = decide snapshot Map.empty
+                Expect.equal (activations intents) [ "ctrl-1" ] "safe mode fires immediately"
+            }
+
+            test "a hostile without CLAIM parts does not spend the activation" {
+                let snapshot =
+                    { bareRespawn with
+                        Hostiles =
+                            [
+                                {
+                                    Body = [ Tough; Attack; RangedAttack; Heal; Move ]
+                                }
+                            ]
+                    }
+
+                let intents, _ = decide snapshot Map.empty
+
+                Expect.isEmpty
+                    (activations intents)
+                    "fighters cannot touch the controller; the stock is kept"
+            }
+
+            test "an empty stock fires nothing" {
+                let snapshot =
+                    { bareRespawn with
+                        Controller =
+                            Some
+                                { controllerAt 1 with
+                                    SafeModeAvailable = 0
+                                }
+                        Hostiles = [ { Body = [ Claim; Move ] } ]
+                    }
+
+                let intents, _ = decide snapshot Map.empty
+                Expect.isEmpty (activations intents) "nothing to activate with"
+            }
+
+            test "safe mode already running is not re-fired" {
+                let snapshot =
+                    { bareRespawn with
+                        Controller =
+                            Some
+                                { controllerAt 1 with
+                                    SafeModeActive = true
+                                }
+                        Hostiles = [ { Body = [ Claim; Move ] } ]
+                    }
+
+                let intents, _ = decide snapshot Map.empty
+                Expect.isEmpty (activations intents) "the room is already protected"
+            }
+
+            test "a quiet room fires nothing" {
+                let intents, _ = decide bareRespawn Map.empty
+                Expect.isEmpty (activations intents) "no hostiles, no reflex"
+            }
+        ]
+
+[<Tests>]
+let downgradeDeadlineTests =
+    testList
+        "downgrade deadline"
+        [
+            test "a controller near downgrade outranks refill for a loaded creep" {
+                // A downgrade zeroes the safe-mode stock, so the timer is a
+                // hard deadline, not surplus-rank work.
+                let snapshot =
+                    { bareRespawn with
+                        Refillables = [ { Id = "spawn-1"; FreeCapacity = 50 } ]
+                        Creeps = [ worker "w1" 50 0 ]
+                        Controller =
+                            Some
+                                { controllerAt 1 with
+                                    TicksToDowngrade = 4000
+                                }
+                    }
+
+                let _, kept = decide snapshot Map.empty
+
+                Expect.equal
+                    (Map.tryFind "w1" kept)
+                    (Some(taskId (Upgrade "ctrl-1")))
+                    "the deadline escalates Upgrade above the feeding tier"
+            }
+
+            test "the deadline scales with level: RCL4 at 15,000 is already urgent" {
+                // The engine refuses activateSafeMode below half the level's
+                // full timer minus 5,000 — at RCL4 that is 15,000. Escalating
+                // at half (20,000) keeps the reflex's activation legal with
+                // the whole 5,000-tick grace intact.
+                let snapshot =
+                    { bareRespawn with
+                        Refillables = [ { Id = "spawn-1"; FreeCapacity = 50 } ]
+                        Creeps = [ worker "w1" 50 0 ]
+                        Controller =
+                            Some
+                                { controllerAt 4 with
+                                    TicksToDowngrade = 15000
+                                }
+                    }
+
+                let _, kept = decide snapshot Map.empty
+
+                Expect.equal
+                    (Map.tryFind "w1" kept)
+                    (Some(taskId (Upgrade "ctrl-1")))
+                    "a flat deadline would sleep through RCL4's refusal threshold"
+            }
+
+            test "RCL4 above half its timer is not urgent" {
+                let snapshot =
+                    { bareRespawn with
+                        Refillables = [ { Id = "spawn-1"; FreeCapacity = 50 } ]
+                        Creeps = [ worker "w1" 50 0 ]
+                        Controller =
+                            Some
+                                { controllerAt 4 with
+                                    TicksToDowngrade = 25000
+                                }
+                    }
+
+                let _, kept = decide snapshot Map.empty
+
+                Expect.equal
+                    (Map.tryFind "w1" kept)
+                    (Some(taskId (Refill "spawn-1")))
+                    "above half the timer, upgrade stays surplus work"
+            }
+
+            test "far from the deadline upgrade stays surplus work" {
+                let snapshot =
+                    { bareRespawn with
+                        Refillables = [ { Id = "spawn-1"; FreeCapacity = 50 } ]
+                        Creeps = [ worker "w1" 50 0 ]
+                    }
+
+                let _, kept = decide snapshot Map.empty
+
+                Expect.equal
+                    (Map.tryFind "w1" kept)
+                    (Some(taskId (Refill "spawn-1")))
+                    "a fresh timer changes nothing"
             }
         ]
