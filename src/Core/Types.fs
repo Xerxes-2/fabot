@@ -13,11 +13,20 @@ type SpawnInfo =
         /// Game-object id of the spawn structure — the key that locates
         /// this spawn in the spatial projection's target maps.
         Id: string
-        /// Energy available for spawning in the spawn's room (spawn + extensions).
-        EnergyAvailable: int
-        /// Spawn-energy capacity of the room (spawn + built extensions).
-        EnergyCapacity: int
+        /// Name of the room the spawn stands in — the key into the
+        /// Snapshot's RoomEnergy banks.
+        RoomName: string
         IsSpawning: bool
+    }
+
+/// One room's shared spawn-energy account this tick. Colony state, not
+/// spawn state: every spawn in the room draws from the same bank.
+type RoomEnergy =
+    {
+        /// Energy banked for spawning right now (spawn + extensions).
+        Available: int
+        /// Energy the room banks when every feeder is full (spawn + built extensions).
+        Capacity: int
     }
 
 /// What the decision layer knows about one structure that feeds spawning
@@ -119,6 +128,9 @@ type Snapshot =
     {
         Time: int
         Spawns: SpawnInfo list
+        /// Room name -> that room's shared spawn-energy bank. A room absent
+        /// from the map banks nothing: its spawns wait.
+        RoomEnergy: Map<string, RoomEnergy>
         /// Structures that feed spawning, whether or not they currently have room.
         Refillables: RefillableInfo list
         Sources: SourceInfo list

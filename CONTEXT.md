@@ -49,6 +49,9 @@ The cheapest-path cost from a creep to a Task's Work Area over the [[spatial pro
 ### Workforce target
 The number of creeps the colony maintains: the total [[seat]] count across all sources, floored at 2. Derived fresh each tick from the Snapshot, never persisted. Spawning fills the gap between living creeps and the target; a source the projection does not place contributes no Seats, so an empty projection leaves only the floor. Seats count by terrain alone (ADR 0001), so an unreachable source still raises the target — the surplus flows to Upgrade.
 
+### Room energy
+One room's shared spawn-energy account (spawn + extensions) — a colony fact, not spawn state. Spawn planning allocates bodies from it in spawn order, debiting as it goes, so the same energy is never committed twice; a spawn whose room banks nothing waits.
+
 ### Spatial projection
 The Snapshot's map-shaped view of the spawn room — the only one (ADR 0005): the room's name, three-state terrain (plain / swamp / wall), entity positions, and what kind of thing each target is (source, controller, a structure or a site of some built kind). Raw data, always present (possibly empty); decisions consult it only through the [[atlas]]. A tile absent from the projection is impassable — absence is per-entry, never per-projection (ADR 0004).
 
@@ -65,7 +68,7 @@ The body-generation invariant (ADR 0003): a worker body padded beyond whole [[wo
 The glyph an assigned creep says over its head each tick, one fixed glyph per [[task]] (⛏ Harvest · 🔋 Refill · 🔨 Build · ⚡ Upgrade). Observability only, private to our own viewer; unassigned creeps show nothing.
 
 ### Disaster fallback
-The zero-creep spawning rule: an empty colony spawns one bare [[worker unit]] from whatever energy is banked right now, rather than waiting for a full capacity it can never refill. The one body-generation path that ignores the remainder — time-to-first-creep outranks spending the bank.
+The zero-creep spawning rule: an empty colony spawns bare [[worker unit]]s from whatever [[room energy]] is banked right now — as many as the bank affords, up to the workforce deficit — rather than waiting for a full capacity it can never refill. The one body-generation path that ignores the remainder — time-to-first-creep outranks spending the bank.
 
 ## Avoided terms
 

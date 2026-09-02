@@ -10,6 +10,7 @@ let snapshotWith creeps spatial =
     {
         Time = 1
         Spawns = []
+        RoomEnergy = Map.empty
         Refillables = []
         Sources = []
         Controller = None

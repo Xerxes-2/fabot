@@ -121,11 +121,21 @@ let build () : Snapshot =
                 {
                     Name = s.name
                     Id = s.id
-                    EnergyAvailable = s.room.energyAvailable
-                    EnergyCapacity = s.room.energyCapacityAvailable
+                    RoomName = s.room.name
                     IsSpawning = not (isNull s.spawning)
                 })
             |> Array.toList
+        RoomEnergy =
+            spawns
+            |> Array.map (fun s -> s.room)
+            |> Array.distinctBy (fun r -> r.name)
+            |> Array.map (fun r ->
+                r.name,
+                {
+                    Available = r.energyAvailable
+                    Capacity = r.energyCapacityAvailable
+                })
+            |> Map.ofArray
         Refillables =
             spawns
             |> Array.collect (fun s -> s.room.find findMyStructures)

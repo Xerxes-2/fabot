@@ -5,20 +5,31 @@ open Fabot.Core
 open Fabot.Core.Types
 open Fabot.Core.Decide
 
-/// A single idle spawn with the given banked energy and room capacity.
-let spawn energy capacity =
+/// A single idle spawn standing in the default room.
+let spawn =
     {
         Name = "Spawn1"
         Id = "spawn-1"
-        EnergyAvailable = energy
-        EnergyCapacity = capacity
+        RoomName = "W1N1"
         IsSpawning = false
     }
+
+/// The default room's bank holding the given energy against the given capacity.
+let bank energy capacity =
+    Map.ofList
+        [
+            "W1N1",
+            {
+                Available = energy
+                Capacity = capacity
+            }
+        ]
 
 let bareRespawn =
     {
         Time = 42
-        Spawns = [ spawn 300 300 ]
+        Spawns = [ spawn ]
+        RoomEnergy = bank 300 300
         Refillables = [ { Id = "spawn-1"; FreeCapacity = 0 } ]
         Sources = [ { Id = "src-a" }; { Id = "src-b" } ]
         Controller = Some { Id = "ctrl-1"; Level = 1 }
@@ -1520,7 +1531,7 @@ let tests =
             test "no spawn Intent when energy is below a worker body cost" {
                 let snapshot =
                     { bareRespawn with
-                        Spawns = [ spawn 100 300 ]
+                        RoomEnergy = bank 100 300
                     }
 
                 let intents, _ = decide snapshot Map.empty
@@ -1530,17 +1541,99 @@ let tests =
             test "no spawn Intent while the spawn is already spawning" {
                 let snapshot =
                     { bareRespawn with
-                        Spawns = [ { spawn 300 300 with IsSpawning = true } ]
+                        Spawns = [ { spawn with IsSpawning = true } ]
                     }
 
                 let intents, _ = decide snapshot Map.empty
                 Expect.isEmpty (spawnIntents intents) "spawn is busy"
             }
 
+            // Three Seats around src-a: a target of three, so one worker
+            // leaves a deficit of two — enough demand for both spawns.
+            let threeSeats =
+                spatial
+                    [ "src-a", { X = 10; Y = 10 } ]
+                    [
+                        { X = 9; Y = 10 }, Plain
+                        { X = 11; Y = 10 }, Plain
+                        { X = 10; Y = 9 }, Plain
+                    ]
+
+            test "two idle spawns in one room spend the shared bank once" {
+                let snapshot =
+                    { bareRespawn with
+                        Spawns =
+                            [
+                                spawn
+                                { spawn with
+                                    Name = "Spawn2"
+                                    Id = "spawn-2"
+                                }
+                            ]
+                        Creeps = [ worker "w1" 0 50 ]
+                        Spatial = threeSeats
+                    }
+
+                let intents, _ = decide snapshot Map.empty
+
+                match spawnIntents intents with
+                | [ (spawnName, _, _) ] ->
+                    Expect.equal spawnName "Spawn1" "the first spawn in list order takes the budget"
+                | other -> failtest $"expected exactly one SpawnCreep intent, got %A{other}"
+            }
+
+            test "spawns in different rooms each draw their own bank" {
+                let snapshot =
+                    { bareRespawn with
+                        Spawns =
+                            [
+                                spawn
+                                { spawn with
+                                    Name = "Spawn2"
+                                    Id = "spawn-2"
+                                    RoomName = "W2N2"
+                                }
+                            ]
+                        RoomEnergy =
+                            bank 300 300 |> Map.add "W2N2" { Available = 300; Capacity = 300 }
+                        Creeps = [ worker "w1" 0 50 ]
+                        Spatial = threeSeats
+                    }
+
+                let intents, _ = decide snapshot Map.empty
+
+                Expect.equal
+                    (spawnIntents intents |> List.map (fun (name, _, _) -> name))
+                    [ "Spawn1"; "Spawn2" ]
+                    "full banks in separate rooms fund one body each"
+            }
+
+            test "with zero creeps one bank funds two minimal bodies at once" {
+                let snapshot =
+                    { bareRespawn with
+                        Spawns =
+                            [
+                                spawn
+                                { spawn with
+                                    Name = "Spawn2"
+                                    Id = "spawn-2"
+                                }
+                            ]
+                        RoomEnergy = bank 550 550
+                    }
+
+                let intents, _ = decide snapshot Map.empty
+
+                Expect.equal
+                    (spawnIntents intents |> List.map (fun (name, body, _) -> name, body))
+                    [ "Spawn1", [ Work; Carry; Move ]; "Spawn2", [ Work; Carry; Move ] ]
+                    "the fallback debits the bank per body instead of waiting on the engine"
+            }
+
             test "at 550 capacity the whole capacity is spent" {
                 let snapshot =
                     { bareRespawn with
-                        Spawns = [ spawn 550 550 ]
+                        RoomEnergy = bank 550 550
                         Creeps = [ worker "worker-1" 0 50 ]
                     }
 
@@ -1575,7 +1668,7 @@ let tests =
             test "below minimum workforce, spawning waits for full capacity" {
                 let snapshot =
                     { bareRespawn with
-                        Spawns = [ spawn 400 550 ]
+                        RoomEnergy = bank 400 550
                         Creeps = [ worker "worker-1" 0 50 ]
                     }
 
@@ -1589,7 +1682,7 @@ let tests =
             test "with zero creeps a minimal body is spawned from available energy" {
                 let snapshot =
                     { bareRespawn with
-                        Spawns = [ spawn 250 550 ]
+                        RoomEnergy = bank 250 550
                     }
 
                 let intents, _ = decide snapshot Map.empty
@@ -1606,7 +1699,7 @@ let tests =
             test "with zero creeps and unaffordable minimal body, no spawn Intent" {
                 let snapshot =
                     { bareRespawn with
-                        Spawns = [ spawn 150 550 ]
+                        RoomEnergy = bank 150 550
                     }
 
                 let intents, _ = decide snapshot Map.empty

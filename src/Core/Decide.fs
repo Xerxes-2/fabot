@@ -98,30 +98,46 @@ let private planSpawns (snapshot: Snapshot) atlas : Intent list =
     // Disaster fallback: an empty colony can never refill extensions, so
     // waiting for full capacity would wait forever — spawn a minimal unit
     // from whatever energy is banked right now.
-    let bodyFor (s: SpawnInfo) =
+    let bodyFor (bank: RoomEnergy) =
         if List.isEmpty snapshot.Creeps then
-            if s.EnergyAvailable >= bodyCost workerUnit then
+            if bank.Available >= bodyCost workerUnit then
                 Some workerUnit
             else
                 None
-        elif s.EnergyAvailable >= s.EnergyCapacity then
-            Some(workerBodyFor s.EnergyCapacity)
+        elif bank.Available >= bank.Capacity then
+            Some(workerBodyFor bank.Capacity)
         else
             None
 
     if deficit <= 0 then
         []
     else
-        // Each spawn is gated against the shared room energy, so several
-        // idle spawns can emit intents the same energy only affords once;
-        // the engine fails the surplus and the deficit re-plans next tick.
-        snapshot.Spawns
-        |> List.filter (fun s -> not s.IsSpawning)
-        |> List.choose (fun s ->
-            bodyFor s
-            |> Option.map (fun body ->
-                SpawnCreep(s.Name, body, $"worker-{snapshot.Time}-{s.Name}")))
-        |> List.truncate deficit
+        // Idle spawns draw from their room's one bank in list order — each
+        // body debits the budget the next spawn sees, so the same energy is
+        // never committed twice.
+        let intents, _ =
+            snapshot.Spawns
+            |> List.filter (fun s -> not s.IsSpawning)
+            |> List.fold
+                (fun (intents, banks: Map<string, RoomEnergy>) s ->
+                    let bank =
+                        banks
+                        |> Map.tryFind s.RoomName
+                        |> Option.defaultValue { Available = 0; Capacity = 0 }
+
+                    match bodyFor bank with
+                    | Some body when List.length intents < deficit ->
+                        SpawnCreep(s.Name, body, $"worker-{snapshot.Time}-{s.Name}") :: intents,
+                        banks
+                        |> Map.add
+                            s.RoomName
+                            { bank with
+                                Available = bank.Available - bodyCost body
+                            }
+                    | _ -> intents, banks)
+                ([], snapshot.RoomEnergy)
+
+        List.rev intents
 
 /// Extensions the controller level allows in the room (Screeps
 /// CONTROLLER_STRUCTURES for "extension").
