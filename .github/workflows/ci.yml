@@ -8,7 +8,7 @@ on:
 
 permissions:
   contents: read
-  id-token: write # OIDC auth for flakehub-cache-action
+  actions: write # cache-nix-action purges old caches via the API
 
 jobs:
   build-and-test:
@@ -16,8 +16,16 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: DeterminateSystems/nix-installer-action@v22
-      - uses: DeterminateSystems/flakehub-cache-action@v3
+      - uses: nixbuild/nix-quick-install-action@v35
+      - uses: nix-community/cache-nix-action@v7
+        with:
+          primary-key: nix-${{ runner.os }}-${{ hashFiles('**/*.nix', '**/flake.lock') }}
+          restore-prefixes-first-match: nix-${{ runner.os }}-
+          purge: true
+          purge-prefixes: nix-${{ runner.os }}-
+          purge-created: 0
+          purge-primary-key: never
+          gc-max-store-size-linux: 2G
 
       - name: Restore dotnet tools
         run: nix develop -c dotnet tool restore
