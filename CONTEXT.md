@@ -47,10 +47,10 @@ The cheapest-path cost from a creep to a Task's Work Area over the [[spatial pro
 The number of creeps the colony maintains: the total [[seat]] count across all sources, floored at 2. Derived fresh each tick from the Snapshot, never persisted. Spawning fills the gap between living creeps and the target; a source the projection does not place contributes no Seats, so an empty projection leaves only the floor. Seats count by terrain alone (ADR 0001), so an unreachable source still raises the target — the surplus flows to Upgrade.
 
 ### Spatial projection
-The Snapshot's map-shaped view of the spawn room: three-state terrain (plain / swamp / wall) plus entity positions. Raw data, always present (possibly empty); decisions consult it only through the [[atlas]]. A tile absent from the projection is impassable — absence is per-entry, never per-projection (ADR 0004).
+The Snapshot's map-shaped view of the spawn room — the only one (ADR 0005): the room's name, three-state terrain (plain / swamp / wall), entity positions, and what kind of thing each target is (source, controller, a structure or a site of some built kind). Raw data, always present (possibly empty); decisions consult it only through the [[atlas]]. A tile absent from the projection is impassable — absence is per-entry, never per-projection (ADR 0004).
 
 ### Atlas
-The per-tick, task-aware query interface over the [[spatial projection]]: Seats, Work Areas, travel costs, first steps, action permission, standing candidates, placed creeps. Total (ADR 0004): geometry the projection cannot place gets one documented answer per query — it never counts against a [[task]] and never blocks an action. Built fresh each tick; Matcher and Resolver consult the same one.
+The per-tick, task-aware query interface over the [[spatial projection]]: Seats, Work Areas, travel costs, first steps, action permission, standing candidates, placed creeps — and the placement queries construction planning derives from (room name, target positions, buildable tiles, extension censuses; ADR 0005). Total (ADR 0004): geometry the projection cannot place gets one documented answer per query — it never counts against a [[task]] and never blocks an action. Built fresh each tick; Matcher and Resolver consult the same one.
 
 ### Worker unit
 The repeating [Work; Carry; Move] block worker bodies are built from: 200 energy, full speed empty, half speed loaded. Capacity buys as many whole units as it can; what's left is remainder.

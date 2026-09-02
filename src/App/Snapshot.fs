@@ -4,10 +4,6 @@ module Fabot.Snapshot
 open Fabot.Bindings
 open Fabot.Core.Types
 
-/// How far from the spawn (Chebyshev) the placement projection looks.
-/// Room 6 covers the full RCL2/RCL3 extension checkerboard with slack.
-let private planningRadius = 6
-
 /// Classify one tile of engine terrain into the Core's three states.
 let private terrainAt (terrain: ITerrain) x y =
     let mask = terrain.get (x, y)
@@ -15,49 +11,6 @@ let private terrainAt (terrain: ITerrain) x y =
     if mask &&& terrainMaskWall <> 0 then Wall
     elif mask &&& terrainMaskSwamp <> 0 then Swamp
     else Plain
-
-let private buildPlacement (spawn: ISpawn) : PlacementInfo =
-    let room = spawn.room
-    let terrain = Game.map.getRoomTerrain room.name
-    let center = spawn.pos
-
-    let walkable =
-        Set.ofList
-            [
-                // Stay off row/column 0 and 49: exit tiles cannot hold structures.
-                for x in max 1 (center.x - planningRadius) .. min 48 (center.x + planningRadius) do
-                    for y in max 1 (center.y - planningRadius) .. min 48 (center.y + planningRadius) do
-                        if terrainAt terrain x y <> Wall then
-                            { X = x; Y = y }
-            ]
-
-    let structures = room.find findStructures |> Array.map (fun o -> o :?> IStructure)
-
-    let sites =
-        room.find findMyConstructionSites
-        |> Array.map (fun o -> o :?> IConstructionSite)
-
-    let occupied =
-        Set.ofArray (
-            Array.append
-                (structures |> Array.map (fun st -> { X = st.pos.x; Y = st.pos.y }))
-                (sites |> Array.map (fun site -> { X = site.pos.x; Y = site.pos.y }))
-        )
-
-    {
-        RoomName = room.name
-        SpawnPos = { X = center.x; Y = center.y }
-        Walkable = walkable
-        Occupied = occupied
-        BuiltExtensions =
-            structures
-            |> Array.filter (fun st -> st.structureType = structureExtension)
-            |> Array.length
-        PendingExtensions =
-            sites
-            |> Array.filter (fun site -> site.structureType = structureExtension)
-            |> Array.length
-    }
 
 let private posOf (p: IRoomPosition) : Pos = { X = p.x; Y = p.y }
 
@@ -216,8 +169,7 @@ let build () : Snapshot =
                     FreeCapacity = c.store.getFreeCapacity "energy"
                 })
             |> Array.toList
-        // Single-colony assumption: only the first spawn's room gets planned.
-        Placement = spawns |> Array.tryHead |> Option.map buildPlacement
+        // Single-colony assumption: only the first spawn's room is projected.
         Spatial =
             spawns
             |> Array.tryHead

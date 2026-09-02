@@ -43,22 +43,6 @@ type ControllerInfo =
 /// A tile coordinate inside a room.
 type Pos = { X: int; Y: int }
 
-/// What the decision layer knows about the spawn room's local geography,
-/// sufficient for construction placement.
-type PlacementInfo =
-    {
-        RoomName: string
-        SpawnPos: Pos
-        /// Terrain-walkable tiles within the planning window around the spawn.
-        Walkable: Set<Pos>
-        /// Tiles already taken by structures or construction sites.
-        Occupied: Set<Pos>
-        /// Extensions already built in the room.
-        BuiltExtensions: int
-        /// Extension construction sites already placed.
-        PendingExtensions: int
-    }
-
 /// Three-state terrain of one room tile.
 type Terrain =
     | Plain
@@ -142,8 +126,6 @@ type Snapshot =
         Controller: ControllerInfo option
         ConstructionSites: ConstructionSiteInfo list
         Creeps: CreepInfo list
-        /// None when there is no spawn to plan around.
-        Placement: PlacementInfo option
         /// The spawn room's spatial projection. Always present, possibly
         /// empty — absence is per-entry, never per-projection (ADR 0004).
         Spatial: SpatialInfo

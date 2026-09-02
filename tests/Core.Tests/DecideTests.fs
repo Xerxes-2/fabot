@@ -23,7 +23,6 @@ let bareRespawn =
         Controller = Some { Id = "ctrl-1"; Level = 1 }
         ConstructionSites = []
         Creeps = []
-        Placement = None
         Spatial = SpatialInfo.empty
     }
 

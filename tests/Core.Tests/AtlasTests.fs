@@ -15,7 +15,6 @@ let snapshotWith creeps spatial =
         Controller = None
         ConstructionSites = []
         Creeps = creeps
-        Placement = None
         Spatial = spatial
     }
 
