@@ -52,6 +52,22 @@ let spawnIntents intents =
         | _ -> None)
 
 [<Tests>]
+let directionCodeTests =
+    testList
+        "direction codes"
+        [
+            test "matches the engine's TOP = 1, then clockwise" {
+                // These constants leave the program as Creep.move arguments; the
+                // table here is the engine's spec, restated so a swapped case fails.
+                Expect.equal
+                    ([ Top; TopRight; Right; BottomRight; Bottom; BottomLeft; Left; TopLeft ]
+                     |> List.map directionCode)
+                    [ 1; 2; 3; 4; 5; 6; 7; 8 ]
+                    "each Direction maps to its Screeps constant"
+            }
+        ]
+
+[<Tests>]
 let bodyTests =
     testList
         "worker body"

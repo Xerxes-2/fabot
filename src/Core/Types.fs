@@ -165,6 +165,18 @@ type Direction =
     | Left
     | TopLeft
 
+/// Screeps direction constants as `Creep.move` expects them: TOP = 1, then clockwise.
+let directionCode =
+    function
+    | Top -> 1
+    | TopRight -> 2
+    | Right -> 3
+    | BottomRight -> 4
+    | Bottom -> 5
+    | BottomLeft -> 6
+    | Left -> 7
+    | TopLeft -> 8
+
 /// A single described action to perform this tick; data only, never the game API.
 type Intent =
     | SpawnCreep of spawnName: string * body: BodyPart list * creepName: string

@@ -16,18 +16,6 @@ let private structureName =
     function
     | Extension -> structureExtension
 
-/// Screeps direction constants: TOP = 1, then clockwise.
-let private directionCode =
-    function
-    | Top -> 1
-    | TopRight -> 2
-    | Right -> 3
-    | BottomRight -> 4
-    | Bottom -> 5
-    | BottomLeft -> 6
-    | Left -> 7
-    | TopLeft -> 8
-
 let private execute (intent: Intent) =
     match intent with
     | SpawnCreep(spawnName, body, creepName) ->
