@@ -43,3 +43,6 @@ A creep's movement desire for one tick: candidate standing tiles plus a priority
 
 ### Resolver
 The pure step that arbitrates a room's Move Intents into actual single-step moves (priority first, most-constrained first, swap when contested). Third pure step beside Planner and Matcher; movement is never issued outside it.
+
+### Spatial projection
+The Snapshot's map-shaped view of the spawn room: three-state terrain (plain / swamp / wall) plus entity positions. Introduced for Seat counting; grows toward the Resolver's needs (ADR 0001). A tile absent from the projection is outside the room and impassable.

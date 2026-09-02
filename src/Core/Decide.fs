@@ -149,6 +149,37 @@ let private rank =
     | Build _ -> 1
     | Upgrade _ -> 1
 
+/// Seats of a source: walkable (non-wall) tiles adjacent to its position.
+/// Terrain only, per ADR 0001 — structures and creeps do not consume Seats.
+let private seatCount (spatial: SpatialInfo) (pos: Pos) =
+    [
+        for dx in -1 .. 1 do
+            for dy in -1 .. 1 do
+                if (dx, dy) <> (0, 0) then
+                    { X = pos.X + dx; Y = pos.Y + dy }
+    ]
+    |> List.filter (fun tile ->
+        match Map.tryFind tile spatial.Terrain with
+        | Some Plain
+        | Some Swamp -> true
+        | Some Wall
+        | None -> false)
+    |> List.length
+
+/// Concurrent-worker cap per task id; tasks absent from the map are
+/// unbounded. Harvest is capped by its source's Seat count — a snapshot
+/// without a spatial projection (or a source it does not place) stays
+/// uncapped, so behaviour without terrain data is unchanged.
+let private taskCapacities (snapshot: Snapshot) : Map<string, int> =
+    match snapshot.Spatial with
+    | None -> Map.empty
+    | Some spatial ->
+        snapshot.Sources
+        |> List.choose (fun s ->
+            Map.tryFind s.Id spatial.SourcePositions
+            |> Option.map (fun pos -> taskId (Harvest s.Id), seatCount spatial pos))
+        |> Map.ofList
+
 /// Matcher: keep still-valid assignments (anti-thrash), greedily assign the
 /// rest, and emit one Intent per assigned creep.
 let private matchCreeps
@@ -157,27 +188,38 @@ let private matchCreeps
     (assignments: Assignments)
     : Intent list * Assignments =
     let byId = tasks |> List.map (fun t -> taskId t, t) |> Map.ofList
+    let capacities = taskCapacities snapshot
 
+    let load (acc: Assignments) tid =
+        acc |> Map.filter (fun _ assigned -> assigned = tid) |> Map.count
+
+    let hasCapacity acc tid =
+        match Map.tryFind tid capacities with
+        | Some cap -> load acc tid < cap
+        | None -> true
+
+    // Capacity applies to remembered assignments too: memory can carry an
+    // oversell from before a cap existed (e.g. across a redeploy).
     let kept =
-        assignments
-        |> Map.filter (fun name tid ->
+        (Map.empty, assignments)
+        ||> Map.fold (fun acc name tid ->
             match
                 snapshot.Creeps |> List.tryFind (fun c -> c.Name = name), Map.tryFind tid byId
             with
-            | Some creep, Some task -> applicable creep task
-            | _ -> false)
+            | Some creep, Some task when applicable creep task && hasCapacity acc tid ->
+                Map.add name tid acc
+            | _ -> acc)
 
     let assignOne acc (creep: CreepInfo) =
         if Map.containsKey creep.Name acc then
             acc
         else
-            let load tid =
-                acc |> Map.filter (fun _ assigned -> assigned = tid) |> Map.count
-
-            match tasks |> List.filter (applicable creep) with
+            match
+                tasks |> List.filter (fun t -> applicable creep t && hasCapacity acc (taskId t))
+            with
             | [] -> acc
             | candidates ->
-                let task = candidates |> List.minBy (fun t -> rank t, load (taskId t))
+                let task = candidates |> List.minBy (fun t -> rank t, load acc (taskId t))
                 Map.add creep.Name (taskId task) acc
 
     let final = snapshot.Creeps |> List.fold assignOne kept

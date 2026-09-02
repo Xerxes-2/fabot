@@ -23,6 +23,7 @@ let bareRespawn =
         ConstructionSites = []
         Creeps = []
         Placement = None
+        Spatial = None
     }
 
 let worker name energy freeCapacity =
@@ -248,6 +249,165 @@ let placementTests =
 
                 let intents, _ = decide snapshot Map.empty
                 Expect.isEmpty (placementIntents intents) "nothing to plan around"
+            }
+        ]
+
+/// Spatial projection holding exactly the given terrain tiles and source
+/// positions; absent tiles are outside the projection (impassable).
+let spatial sources tiles =
+    {
+        Terrain = Map.ofList tiles
+        SourcePositions = Map.ofList sources
+    }
+
+/// The 8 tiles around a position, all Plain: an open-ground source site.
+let openSeats pos =
+    [
+        for dx in -1 .. 1 do
+            for dy in -1 .. 1 do
+                if (dx, dy) <> (0, 0) then
+                    { X = pos.X + dx; Y = pos.Y + dy }, Plain
+    ]
+
+let harvesters assignments sourceId =
+    assignments
+    |> Map.toList
+    |> List.filter (fun (_, tid) -> tid = $"harvest:{sourceId}")
+    |> List.map fst
+
+[<Tests>]
+let seatTests =
+    testList
+        "seat capacity"
+        [
+            test "a single-Seat source gets exactly one of three empty creeps" {
+                let snapshot =
+                    { bareRespawn with
+                        Sources = [ { Id = "src-a" } ]
+                        Creeps = [ worker "w1" 0 50; worker "w2" 0 50; worker "w3" 0 50 ]
+                        Spatial =
+                            Some(
+                                spatial [ "src-a", { X = 10; Y = 10 } ] [ { X = 9; Y = 10 }, Plain ]
+                            )
+                    }
+
+                let intents, assignments = decide snapshot Map.empty
+
+                Expect.hasLength
+                    (harvesters assignments "src-a")
+                    1
+                    "one Seat supports exactly one harvester"
+
+                let harvestIntents =
+                    intents
+                    |> List.filter (function
+                        | HarvestSource _ -> true
+                        | _ -> false)
+
+                Expect.hasLength harvestIntents 1 "surplus creeps emit no Harvest intent"
+            }
+
+            test "creeps overflowing a single-Seat source are matched elsewhere" {
+                let snapshot =
+                    { bareRespawn with
+                        Creeps = [ worker "w1" 0 50; worker "w2" 0 50; worker "w3" 0 50 ]
+                        Spatial =
+                            Some(
+                                spatial
+                                    [ "src-a", { X = 10; Y = 10 }; "src-b", { X = 20; Y = 20 } ]
+                                    ([ { X = 9; Y = 10 }, Plain ] @ openSeats { X = 20; Y = 20 })
+                            )
+                    }
+
+                let _, assignments = decide snapshot Map.empty
+
+                Expect.hasLength (harvesters assignments "src-a") 1 "the one Seat is filled"
+
+                Expect.hasLength
+                    (harvesters assignments "src-b")
+                    2
+                    "overflow lands on the source with free Seats"
+            }
+
+            test "a creep denied a Seat falls through to a lower-rank task" {
+                let snapshot =
+                    { bareRespawn with
+                        Sources = [ { Id = "src-a" } ]
+                        Creeps = [ worker "w1" 25 25; worker "w2" 25 25 ]
+                        Spatial =
+                            Some(
+                                spatial [ "src-a", { X = 10; Y = 10 } ] [ { X = 9; Y = 10 }, Plain ]
+                            )
+                    }
+
+                let _, assignments = decide snapshot Map.empty
+
+                Expect.hasLength (harvesters assignments "src-a") 1 "the one Seat is filled"
+
+                Expect.contains
+                    (assignments |> Map.toList |> List.map snd)
+                    "upgrade:ctrl-1"
+                    "the denied creep sinks its energy into the controller instead"
+            }
+
+            test "Seats are counted from terrain: swamp is a Seat, wall and absent are not" {
+                let snapshot =
+                    { bareRespawn with
+                        Sources = [ { Id = "src-a" } ]
+                        Creeps = [ worker "w1" 0 50; worker "w2" 0 50; worker "w3" 0 50 ]
+                        Spatial =
+                            Some(
+                                spatial
+                                    [ "src-a", { X = 10; Y = 10 } ]
+                                    [
+                                        { X = 9; Y = 10 }, Plain
+                                        { X = 11; Y = 10 }, Swamp
+                                        { X = 10; Y = 9 }, Wall
+                                    ]
+                            )
+                    }
+
+                let _, assignments = decide snapshot Map.empty
+
+                Expect.hasLength
+                    (harvesters assignments "src-a")
+                    2
+                    "plain and swamp neighbours are Seats; wall and off-map are not"
+            }
+
+            test "oversold remembered assignments are trimmed back to the Seat count" {
+                let snapshot =
+                    { bareRespawn with
+                        Sources = [ { Id = "src-a" } ]
+                        Creeps = [ worker "w1" 0 50; worker "w2" 0 50 ]
+                        Spatial =
+                            Some(
+                                spatial [ "src-a", { X = 10; Y = 10 } ] [ { X = 9; Y = 10 }, Plain ]
+                            )
+                    }
+
+                let stale = Map.ofList [ "w1", "harvest:src-a"; "w2", "harvest:src-a" ]
+                let _, assignments = decide snapshot stale
+
+                Expect.equal
+                    (harvesters assignments "src-a")
+                    [ "w1" ]
+                    "the cap holds even against remembered oversell"
+            }
+
+            test "without a spatial projection Harvest stays uncapped" {
+                let snapshot =
+                    { bareRespawn with
+                        Sources = [ { Id = "src-a" } ]
+                        Creeps = [ worker "w1" 0 50; worker "w2" 0 50; worker "w3" 0 50 ]
+                    }
+
+                let _, assignments = decide snapshot Map.empty
+
+                Expect.hasLength
+                    (harvesters assignments "src-a")
+                    3
+                    "no terrain data means no cap — today's room behaviour"
             }
         ]
 

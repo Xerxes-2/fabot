@@ -56,6 +56,23 @@ type PlacementInfo =
         PendingExtensions: int
     }
 
+/// Three-state terrain of one room tile.
+type Terrain =
+    | Plain
+    | Swamp
+    | Wall
+
+/// The Snapshot's spatial projection: the spawn room's terrain plus
+/// positions of the entities decisions need to place on it.
+type SpatialInfo =
+    {
+        /// Terrain per tile; a tile absent from the map lies outside the
+        /// projected room and is impassable.
+        Terrain: Map<Pos, Terrain>
+        /// Source id -> the source's tile.
+        SourcePositions: Map<string, Pos>
+    }
+
 /// What the decision layer knows about one construction site this tick.
 type ConstructionSiteInfo = { Id: string }
 
@@ -83,6 +100,8 @@ type Snapshot =
         Creeps: CreepInfo list
         /// None when there is no spawn to plan around.
         Placement: PlacementInfo option
+        /// None when there is no spawn room to project.
+        Spatial: SpatialInfo option
     }
 
 /// A unit of work in this tick's Task pool; creeps are interchangeable

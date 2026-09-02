@@ -21,6 +21,9 @@ let findMyConstructionSites = 114
 /// Screeps `TERRAIN_MASK_WALL` constant.
 let terrainMaskWall = 1
 
+/// Screeps `TERRAIN_MASK_SWAMP` constant.
+let terrainMaskSwamp = 2
+
 /// Screeps `STRUCTURE_SPAWN` constant.
 let structureSpawn = "spawn"
 
@@ -31,12 +34,13 @@ type IStore =
     abstract getFreeCapacity: resource: string -> int
     abstract getUsedCapacity: resource: string -> int
 
-type ISource =
-    abstract id: string
-
 type IRoomPosition =
     abstract x: int
     abstract y: int
+
+type ISource =
+    abstract id: string
+    abstract pos: IRoomPosition
 
 type IStructure =
     abstract id: string

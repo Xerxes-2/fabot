@@ -8,6 +8,14 @@ open Fabot.Core.Types
 /// Room 6 covers the full RCL2/RCL3 extension checkerboard with slack.
 let private planningRadius = 6
 
+/// Classify one tile of engine terrain into the Core's three states.
+let private terrainAt (terrain: ITerrain) x y =
+    let mask = terrain.get (x, y)
+
+    if mask &&& terrainMaskWall <> 0 then Wall
+    elif mask &&& terrainMaskSwamp <> 0 then Swamp
+    else Plain
+
 let private buildPlacement (spawn: ISpawn) : PlacementInfo =
     let room = spawn.room
     let terrain = Game.map.getRoomTerrain room.name
@@ -19,7 +27,7 @@ let private buildPlacement (spawn: ISpawn) : PlacementInfo =
                 // Stay off row/column 0 and 49: exit tiles cannot hold structures.
                 for x in max 1 (center.x - planningRadius) .. min 48 (center.x + planningRadius) do
                     for y in max 1 (center.y - planningRadius) .. min 48 (center.y + planningRadius) do
-                        if terrain.get (x, y) <> terrainMaskWall then
+                        if terrainAt terrain x y <> Wall then
                             { X = x; Y = y }
             ]
 
@@ -49,6 +57,28 @@ let private buildPlacement (spawn: ISpawn) : PlacementInfo =
             sites
             |> Array.filter (fun site -> site.structureType = structureExtension)
             |> Array.length
+    }
+
+let private buildSpatial (spawn: ISpawn) : SpatialInfo =
+    let room = spawn.room
+    let terrain = Game.map.getRoomTerrain room.name
+
+    let tiles =
+        Map.ofList
+            [
+                for x in 0..49 do
+                    for y in 0..49 do
+                        { X = x; Y = y }, terrainAt terrain x y
+            ]
+
+    {
+        Terrain = tiles
+        SourcePositions =
+            room.find findSources
+            |> Array.map (fun o ->
+                let source = o :?> ISource
+                source.id, { X = source.pos.x; Y = source.pos.y })
+            |> Map.ofArray
     }
 
 let build () : Snapshot =
@@ -114,4 +144,5 @@ let build () : Snapshot =
             |> Array.toList
         // Single-colony assumption: only the first spawn's room gets planned.
         Placement = spawns |> Array.tryHead |> Option.map buildPlacement
+        Spatial = spawns |> Array.tryHead |> Option.map buildSpatial
     }
