@@ -31,3 +31,15 @@ The pure step that reads a Snapshot and generates this tick's full Task pool. Ru
 
 ### Matcher
 The pure step that assigns creeps to Tasks (greedy matching) and emits Intents. Current assignments are the only thing remembered between ticks (anti-thrash).
+
+### Seat
+A walkable tile adjacent to a source. The capacity unit of Harvest: a source supports at most as many concurrent harvesters as it has Seats.
+
+### Work Area
+The set of tiles a creep may stand on while performing its current Task, derived from the Task's target position and the action's range. Derived fresh each tick, never persisted.
+
+### Move Intent
+A creep's movement desire for one tick: candidate standing tiles plus a priority. Input to the [[resolver]] — not an Intent; the Resolver's output (a single-step move) is what becomes an Intent.
+
+### Resolver
+The pure step that arbitrates a room's Move Intents into actual single-step moves (priority first, most-constrained first, swap when contested). Third pure step beside Planner and Matcher; movement is never issued outside it.
