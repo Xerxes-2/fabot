@@ -147,6 +147,44 @@ let bodyTests =
         ]
 
 [<Tests>]
+let patternTableTests =
+    testList
+        "pattern table"
+        [
+            test "the worker unit is the table's only row" {
+                Expect.equal
+                    patternTable
+                    [
+                        {
+                            Name = "worker"
+                            Block = [ Work; Carry; Move ]
+                        }
+                    ]
+                    "every body the colony casts comes from this one row"
+            }
+
+            test "spawn planning casts from the pattern table's row" {
+                // An established colony at full capacity: the spawned body
+                // is the table row sized to capacity, and the creep name
+                // carries the row's name — not a hard-coded worker shape.
+                let snapshot =
+                    { bareRespawn with
+                        RoomEnergy = bank 550 550
+                        Creeps = [ worker "w1" 0 50 ]
+                    }
+
+                let intents, _ = decide snapshot Map.empty
+                let row = List.head patternTable
+
+                match spawnIntents intents with
+                | [ (_, body, creepName) ] ->
+                    Expect.equal body (bodyFor row 550) "body is the row repeated by capacity"
+                    Expect.stringStarts creepName $"{row.Name}-" "creep name carries the row's name"
+                | other -> failtest $"expected exactly one SpawnCreep intent, got %A{other}"
+            }
+        ]
+
+[<Tests>]
 let plannerTests =
     testList
         "planner"

@@ -7,8 +7,23 @@ open Fabot.Core.Types
 /// transit or being replaced.
 let private minWorkforce = 2
 
-/// The repeating unit worker bodies are built from.
-let private workerUnit = [ Work; Carry; Move ]
+/// A Body pattern: the repeating part block a body is generated from.
+/// Which pattern a spawn casts is a colony decision; the pattern shapes
+/// what a creep is good at, never what it is assigned (ADR 0006).
+type BodyPattern = { Name: string; Block: BodyPart list }
+
+/// The generalist pattern: 200 energy, full speed empty, half speed loaded.
+let workerPattern =
+    {
+        Name = "worker"
+        Block = [ Work; Carry; Move ]
+    }
+
+/// The pattern table: every body the colony casts is a row here repeated
+/// by energy. A future pattern is one more data row plus its own quota
+/// rule — a colony fact deciding when it is cast — never a new code path
+/// (ADR 0006).
+let patternTable = [ workerPattern ]
 
 let bodyCost body =
     body
@@ -17,20 +32,27 @@ let bodyCost body =
         | Carry -> 50
         | Move -> 50)
 
-/// Worker body for an energy capacity: the largest affordable repetition
-/// of the worker unit (never below one), with the remainder spent on
-/// Carry/Move at fatigue parity — the padded body is never slower than
-/// the pure-unit body, empty or loaded, and within that buys as much
-/// Carry as possible (ADR 0003). Parts are grouped Work, Carry, Move so
-/// damage strips Work first and mobility last.
-let workerBodyFor capacity =
+/// Body for a pattern at an energy capacity: the largest affordable
+/// repetition of the pattern's block (never below one repeat), with the
+/// remainder spent on Carry/Move at fatigue parity — the padded body is
+/// never slower than the pure-block body, empty or loaded, and within
+/// that buys as much Carry as possible. Fatigue parity is the worker
+/// pattern's padding policy (ADR 0003, narrowed to that pattern by ADR
+/// 0006); a future row arrives with its own padding rule alongside its
+/// quota rule. Parts are grouped Work, Carry, Move so damage strips Work
+/// first and mobility last.
+let bodyFor pattern capacity =
     // Screeps MAX_CREEP_SIZE: the engine rejects bodies over 50 parts.
     let maxBodyParts = 50
-    let unitSize = List.length workerUnit
+    let block = pattern.Block
+    let blockSize = List.length block
     let carryCost = bodyCost [ Carry ]
     let moveCost = bodyCost [ Move ]
 
-    let units = capacity / bodyCost workerUnit |> max 1 |> min (maxBodyParts / unitSize)
+    let blockCount part =
+        block |> List.filter ((=) part) |> List.length
+
+    let repeats = capacity / bodyCost block |> max 1 |> min (maxBodyParts / blockSize)
 
     // Loaded parity is work + carry <= 2 * move: a lone Carry is added
     // only under that bound, a Carry+Move pair preserves it, and a lone
@@ -47,13 +69,17 @@ let workerBodyFor capacity =
 
     let work, carry, move =
         pad
-            units
-            units
-            units
-            (capacity - units * bodyCost workerUnit)
-            (maxBodyParts - units * unitSize)
+            (repeats * blockCount Work)
+            (repeats * blockCount Carry)
+            (repeats * blockCount Move)
+            (capacity - repeats * bodyCost block)
+            (maxBodyParts - repeats * blockSize)
 
     List.replicate work Work @ List.replicate carry Carry @ List.replicate move Move
+
+/// The generalist body: the worker row of the pattern table, sized to
+/// capacity.
+let workerBodyFor capacity = bodyFor workerPattern capacity
 
 /// Stable identity of a Task across ticks; what Assignments point at.
 let taskId =
@@ -95,17 +121,24 @@ let private workforceTarget (snapshot: Snapshot) atlas =
 let private planSpawns (snapshot: Snapshot) atlas : Intent list =
     let deficit = workforceTarget snapshot atlas - List.length snapshot.Creeps
 
+    // Which row of the pattern table this colony casts: the first row
+    // whose quota admits another creep. The worker row's quota is the
+    // whole workforce target, so today it always wins; a future row
+    // arrives with its own quota rule deciding when it is chosen
+    // instead (ADR 0006).
+    let pattern = List.head patternTable
+
     // Disaster fallback: an empty colony can never refill extensions, so
     // waiting for full capacity would wait forever — spawn a minimal unit
     // from whatever energy is banked right now.
-    let bodyFor (bank: RoomEnergy) =
+    let bodyFromBank (bank: RoomEnergy) =
         if List.isEmpty snapshot.Creeps then
-            if bank.Available >= bodyCost workerUnit then
-                Some workerUnit
+            if bank.Available >= bodyCost pattern.Block then
+                Some pattern.Block
             else
                 None
         elif bank.Available >= bank.Capacity then
-            Some(workerBodyFor bank.Capacity)
+            Some(bodyFor pattern bank.Capacity)
         else
             None
 
@@ -125,9 +158,10 @@ let private planSpawns (snapshot: Snapshot) atlas : Intent list =
                         |> Map.tryFind s.RoomName
                         |> Option.defaultValue { Available = 0; Capacity = 0 }
 
-                    match bodyFor bank with
+                    match bodyFromBank bank with
                     | Some body when List.length intents < deficit ->
-                        SpawnCreep(s.Name, body, $"worker-{snapshot.Time}-{s.Name}") :: intents,
+                        SpawnCreep(s.Name, body, $"{pattern.Name}-{snapshot.Time}-{s.Name}")
+                        :: intents,
                         banks
                         |> Map.add
                             s.RoomName
