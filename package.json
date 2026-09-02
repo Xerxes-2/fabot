@@ -1,0 +1,12 @@
+{
+  "name": "fabot",
+  "private": true,
+  "scripts": {
+    "build": "rm -rf build dist && dotnet fable src/App -o build/fable && esbuild build/fable/Main.js --bundle --format=cjs --outfile=dist/main.js",
+    "upload": "node --env-file-if-exists=.env scripts/upload.mjs",
+    "deploy": "npm run build && npm run upload"
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.0"
+  }
+}
