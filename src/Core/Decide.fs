@@ -232,20 +232,15 @@ let private workArea (spatial: SpatialInfo) (task: Task) : Set<Pos> =
                             tile
             ]
 
-/// Dijkstra over the terrain: the first step of a cheapest path from
-/// `start` to any goal tile, None when no goal is reachable. A Set of
-/// (distance, tile) doubles as the priority queue; its ordering also makes
-/// tie-breaking deterministic.
-let private firstStepToward (spatial: SpatialInfo) (start: Pos) (goals: Set<Pos>) : Pos option =
-    let rec firstStepOf tile (parents: Map<Pos, Pos>) =
-        match Map.tryFind tile parents with
-        | Some parent when parent = start -> tile
-        | Some parent -> firstStepOf parent parents
-        | None -> tile
-
+/// Dijkstra flood over the terrain from `start`: cheapest travel cost to
+/// every reachable tile, plus each tile's predecessor on a cheapest path.
+/// A Set of (distance, tile) doubles as the priority queue; its ordering
+/// also makes tie-breaking deterministic. The start tile costs 0 even when
+/// it cannot be stepped onto — the creep already stands there.
+let private floodFrom (spatial: SpatialInfo) (start: Pos) : Map<Pos, int> * Map<Pos, Pos> =
     let rec search (frontier: Set<int * Pos>) (dist: Map<Pos, int>) (parents: Map<Pos, Pos>) =
         if Set.isEmpty frontier then
-            None
+            dist, parents
         else
             let (d, tile) as entry = Set.minElement frontier
             let frontier = Set.remove entry frontier
@@ -253,8 +248,6 @@ let private firstStepToward (spatial: SpatialInfo) (start: Pos) (goals: Set<Pos>
             if Map.tryFind tile dist <> Some d then
                 // Stale queue entry: the tile was reached cheaper meanwhile.
                 search frontier dist parents
-            elif Set.contains tile goals then
-                Some(firstStepOf tile parents)
             else
                 let step (frontier, dist, parents) next =
                     match stepCost spatial next with
@@ -279,10 +272,31 @@ let private firstStepToward (spatial: SpatialInfo) (start: Pos) (goals: Set<Pos>
 
                 search frontier dist parents
 
+    search (Set.singleton (0, start)) (Map.ofList [ start, 0 ]) Map.empty
+
+/// The first step of a cheapest path from `start` to any goal tile, None
+/// when no goal is reachable. Of equally cheap goals the lowest (cost,
+/// tile) wins, matching the flood's own tie-breaking.
+let private firstStepToward (spatial: SpatialInfo) (start: Pos) (goals: Set<Pos>) : Pos option =
+    let rec firstStepOf tile (parents: Map<Pos, Pos>) =
+        match Map.tryFind tile parents with
+        | Some parent when parent = start -> tile
+        | Some parent -> firstStepOf parent parents
+        | None -> tile
+
     if Set.isEmpty goals || Set.contains start goals then
         None
     else
-        search (Set.singleton (0, start)) (Map.ofList [ start, 0 ]) Map.empty
+        let dist, parents = floodFrom spatial start
+
+        goals
+        |> Set.toList
+        |> List.choose (fun goal -> Map.tryFind goal dist |> Option.map (fun d -> d, goal))
+        |> function
+            | [] -> None
+            | reachable ->
+                let _, goal = List.min reachable
+                Some(firstStepOf goal parents)
 
 /// Direction of a single step between adjacent tiles.
 let private directionTo (from: Pos) (dest: Pos) : Direction option =
@@ -512,16 +526,54 @@ let private matchCreeps
                 Map.add name tid acc
             | _ -> acc)
 
+    // Travel cost of each task for one creep (ADR 0002): one Dijkstra flood
+    // per fresh creep, run lazily so it is paid at most once and only when a
+    // candidate is priced. None — a placed Work Area the creep cannot reach —
+    // makes the task inapplicable to this creep. Missing geometry (no
+    // projection, unplaced creep or unplaced target) prices as 0: without
+    // spatial data behaviour is unchanged, and geometry the projection
+    // cannot price never counts against a task.
+    let travelCostFor (creep: CreepInfo) : Task -> int option =
+        let placed =
+            snapshot.Spatial
+            |> Option.bind (fun spatial ->
+                Map.tryFind creep.Name spatial.CreepPositions
+                |> Option.map (fun pos -> spatial, lazy (fst (floodFrom spatial pos))))
+
+        match placed with
+        | None -> fun _ -> Some 0
+        | Some(spatial, dist) ->
+            fun task ->
+                match Map.tryFind (targetOf task) spatial.TargetPositions with
+                | None -> Some 0
+                | Some _ ->
+                    workArea spatial task
+                    |> Set.toList
+                    |> List.choose (fun tile -> Map.tryFind tile dist.Value)
+                    |> function
+                        | [] -> None
+                        | costs -> Some(List.min costs)
+
     let assignOne acc (creep: CreepInfo) =
         if Map.containsKey creep.Name acc then
             acc
         else
-            match
-                tasks |> List.filter (fun t -> applicable creep t && hasCapacity acc (taskId t))
-            with
+            let travelCost = travelCostFor creep
+
+            let candidates =
+                tasks
+                |> List.choose (fun t ->
+                    if applicable creep t && hasCapacity acc (taskId t) then
+                        travelCost t |> Option.map (fun cost -> t, cost)
+                    else
+                        None)
+
+            match candidates with
             | [] -> acc
             | candidates ->
-                let task = candidates |> List.minBy (fun t -> rank t, load acc (taskId t))
+                let task, _ =
+                    candidates |> List.minBy (fun (t, cost) -> rank t, cost, load acc (taskId t))
+
                 Map.add creep.Name (taskId task) acc
 
     let final = snapshot.Creeps |> List.fold assignOne kept

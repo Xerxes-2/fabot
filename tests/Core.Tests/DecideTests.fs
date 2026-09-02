@@ -414,6 +414,193 @@ let seatTests =
             }
         ]
 
+/// Spatial projection of a plain corridor x = 10, y = 9..21 with a source
+/// at each end (source tiles are walls): "src-far" at (10, 10), "src-near"
+/// at (10, 20).
+let nearFarCorridor creepPositions =
+    { spatial
+          [ "src-far", { X = 10; Y = 10 }; "src-near", { X = 10; Y = 20 } ]
+          [
+              for y in 9..21 -> { X = 10; Y = y }, (if y = 10 || y = 20 then Wall else Plain)
+          ] with
+        CreepPositions = Map.ofList creepPositions
+    }
+
+[<Tests>]
+let travelCostTests =
+    testList
+        "travel-cost matching"
+        [
+            test
+                "live-bug regression: a fresh creep takes the near source regardless of Snapshot order" {
+                // The creep stands three steps from the near source, seven
+                // from the far one.
+                let snapshotWith (sources: SourceInfo list) =
+                    { bareRespawn with
+                        Sources = sources
+                        Creeps = [ worker "w1" 0 50 ]
+                        Spatial = Some(nearFarCorridor [ "w1", { X = 10; Y = 17 } ])
+                    }
+
+                let far: SourceInfo = { Id = "src-far" }
+                let near: SourceInfo = { Id = "src-near" }
+
+                for sources in [ [ far; near ]; [ near; far ] ] do
+                    let _, assignments = decide (snapshotWith sources) Map.empty
+
+                    Expect.equal
+                        (Map.tryFind "w1" assignments)
+                        (Some "harvest:src-near")
+                        "the cheaper-to-reach source wins the rank tie"
+            }
+
+            test "swamp prices the route: a range-nearer target loses to a longer plain path" {
+                // One corridor, a source at each end. src-swamp is 3 tiles
+                // away by range but behind two swamp tiles (cost 10);
+                // src-plain is 5 tiles away over plain ground (cost 4).
+                let corridor =
+                    [
+                        { X = 10; Y = 12 }, Wall
+                        { X = 10; Y = 13 }, Swamp
+                        { X = 10; Y = 14 }, Swamp
+                        { X = 10; Y = 15 }, Plain
+                        { X = 10; Y = 16 }, Plain
+                        { X = 10; Y = 17 }, Plain
+                        { X = 10; Y = 18 }, Plain
+                        { X = 10; Y = 19 }, Plain
+                        { X = 10; Y = 20 }, Wall
+                    ]
+
+                let snapshot =
+                    { bareRespawn with
+                        Sources = [ { Id = "src-swamp" }; { Id = "src-plain" } ]
+                        Creeps = [ worker "w1" 0 50 ]
+                        Spatial =
+                            Some
+                                { spatial
+                                      [
+                                          "src-swamp", { X = 10; Y = 12 }
+                                          "src-plain", { X = 10; Y = 20 }
+                                      ]
+                                      corridor with
+                                    CreepPositions = Map.ofList [ "w1", { X = 10; Y = 15 } ]
+                                }
+                    }
+
+                let _, assignments = decide snapshot Map.empty
+
+                Expect.equal
+                    (Map.tryFind "w1" assignments)
+                    (Some "harvest:src-plain")
+                    "true path cost decides, not Chebyshev range"
+            }
+
+            test "rank dominates: an adjacent Build never outbids a four-tiles-away Refill" {
+                // The hungry spawn sits at the top of the corridor, four
+                // steps from the creep; the construction site is close
+                // enough to build without moving at all.
+                let corridor = [ for y in 10..16 -> { X = 10; Y = y }, Plain ]
+
+                let snapshot =
+                    { bareRespawn with
+                        Refillables = [ { Id = "spawn-1"; FreeCapacity = 50 } ]
+                        ConstructionSites = [ { Id = "site-1" } ]
+                        Creeps = [ worker "w1" 50 0 ]
+                        Spatial =
+                            Some
+                                { spatial
+                                      [
+                                          "spawn-1", { X = 10; Y = 10 }
+                                          "site-1", { X = 10; Y = 16 }
+                                      ]
+                                      corridor with
+                                    CreepPositions = Map.ofList [ "w1", { X = 10; Y = 15 } ]
+                                    Obstacles = Set.singleton { X = 10; Y = 10 }
+                                }
+                    }
+
+                let _, assignments = decide snapshot Map.empty
+
+                Expect.equal
+                    (Map.tryFind "w1" assignments)
+                    (Some "refill:spawn-1")
+                    "travel cost breaks ties within a rank, never across ranks"
+            }
+
+            test "a sticky assignment is kept even when a cheaper task exists this tick" {
+                // Same corridor as the live-bug regression, but the creep
+                // already holds the far source from an earlier tick.
+                let snapshot =
+                    { bareRespawn with
+                        Sources = [ { Id = "src-far" }; { Id = "src-near" } ]
+                        Creeps = [ worker "w1" 0 50 ]
+                        Spatial = Some(nearFarCorridor [ "w1", { X = 10; Y = 17 } ])
+                    }
+
+                let sticky = Map.ofList [ "w1", "harvest:src-far" ]
+                let _, assignments = decide snapshot sticky
+
+                Expect.equal
+                    (Map.tryFind "w1" assignments)
+                    (Some "harvest:src-far")
+                    "sticky assignments are never re-evaluated for a closer target"
+            }
+
+            test "an unplaced creep is matched as today: Snapshot order decides the tie" {
+                // The projection places both sources but not the creep, so
+                // no flood can run — the pick falls back to (rank, load).
+                let snapshot =
+                    { bareRespawn with
+                        Sources = [ { Id = "src-far" }; { Id = "src-near" } ]
+                        Creeps = [ worker "w1" 0 50 ]
+                        Spatial = Some(nearFarCorridor [])
+                    }
+
+                let _, assignments = decide snapshot Map.empty
+
+                Expect.equal
+                    (Map.tryFind "w1" assignments)
+                    (Some "harvest:src-far")
+                    "without a creep position, behaviour is unchanged"
+            }
+
+            test "an unreachable Work Area makes the Task inapplicable: the creep sinks lower" {
+                // The source's one Seat is walled off from the creep; the
+                // controller is reachable. The half-full creep could do
+                // either, but Harvest is off the table entirely — no
+                // range-based fallback march at a wall.
+                let terrain =
+                    [
+                        { X = 10; Y = 10 }, Wall
+                        { X = 10; Y = 11 }, Plain
+                        { X = 10; Y = 12 }, Wall
+                        { X = 10; Y = 13 }, Plain
+                        { X = 10; Y = 14 }, Plain
+                        { X = 10; Y = 16 }, Wall
+                    ]
+
+                let snapshot =
+                    { bareRespawn with
+                        Sources = [ { Id = "src-a" } ]
+                        Creeps = [ worker "w1" 25 25 ]
+                        Spatial =
+                            Some
+                                { spatial
+                                      [ "src-a", { X = 10; Y = 10 }; "ctrl-1", { X = 10; Y = 16 } ]
+                                      terrain with
+                                    CreepPositions = Map.ofList [ "w1", { X = 10; Y = 14 } ]
+                                }
+                    }
+
+                let _, assignments = decide snapshot Map.empty
+
+                Expect.equal
+                    (Map.tryFind "w1" assignments)
+                    (Some "upgrade:ctrl-1")
+                    "the unreachable Harvest is not applicable to this creep at all"
+            }
+        ]
+
 /// A rectangle of Plain tiles, bounds inclusive.
 let plainRect x0 x1 y0 y1 =
     [
