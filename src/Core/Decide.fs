@@ -142,30 +142,31 @@ let private range a b = max (abs (a.X - b.X)) (abs (a.Y - b.Y))
 
 /// Colony-level planning step beside the Planner/Matcher pipeline: fill the
 /// controller level's extension allowance with construction sites on a
-/// checkerboard around the spawn, nearest tiles first. Sites are not creep
-/// work, so this emits Intents directly rather than Tasks.
-let private planConstructionSites (snapshot: Snapshot) : Intent list =
-    match snapshot.Placement, snapshot.Controller with
-    | Some plan, Some controller ->
+/// checkerboard around the first placed spawn, nearest tiles first. Sites
+/// are not creep work, so this emits Intents directly rather than Tasks.
+let private planConstructionSites (snapshot: Snapshot) atlas : Intent list =
+    let anchor =
+        snapshot.Spawns |> List.tryPick (fun s -> Atlas.positionOf atlas s.Id)
+
+    match Atlas.roomName atlas, anchor, snapshot.Controller with
+    | Some room, Some spawnPos, Some controller ->
         let missing =
             extensionAllowance controller.Level
-            - plan.BuiltExtensions
-            - plan.PendingExtensions
+            - Atlas.builtExtensions atlas
+            - Atlas.pendingExtensions atlas
 
         if missing <= 0 then
             []
         else
             // Same checkerboard colour as the spawn: extensions cluster on the
             // spawn's colour, leaving the other colour free for movement.
-            let parity = (plan.SpawnPos.X + plan.SpawnPos.Y) % 2
+            let parity = (spawnPos.X + spawnPos.Y) % 2
 
-            plan.Walkable
-            |> Set.toList
-            |> List.filter (fun tile ->
-                (tile.X + tile.Y) % 2 = parity && not (Set.contains tile plan.Occupied))
-            |> List.sortBy (fun tile -> range tile plan.SpawnPos, tile.X, tile.Y)
+            Atlas.buildableTiles atlas
+            |> List.filter (fun tile -> (tile.X + tile.Y) % 2 = parity)
+            |> List.sortBy (fun tile -> range tile spawnPos, tile.X, tile.Y)
             |> List.truncate missing
-            |> List.map (fun tile -> PlaceConstructionSite(plan.RoomName, tile, Extension))
+            |> List.map (fun tile -> PlaceConstructionSite(room, tile, Extension))
     | _ -> []
 
 /// Whether a creep can usefully work this Task right now. A full creep is
@@ -467,6 +468,6 @@ let private matchCreeps
 let decide (snapshot: Snapshot) (assignments: Assignments) : Intent list * Assignments =
     let atlas = Atlas.ofSnapshot snapshot
     let spawnIntents = planSpawns snapshot atlas
-    let siteIntents = planConstructionSites snapshot
+    let siteIntents = planConstructionSites snapshot atlas
     let creepIntents, next = matchCreeps snapshot atlas (planTasks snapshot) assignments
     spawnIntents @ siteIntents @ creepIntents, next

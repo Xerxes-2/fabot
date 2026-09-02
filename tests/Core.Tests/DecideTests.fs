@@ -200,26 +200,34 @@ let plannerTests =
             }
         ]
 
-/// Synthetic open terrain: every tile within `radius` of the spawn is
-/// walkable; only the spawn tile itself is occupied.
-let openTerrain radius =
+/// Synthetic open room: every tile within `radius` of (25,25) is Plain,
+/// with the spawn structure "spawn-1" standing at the centre.
+let openRoom radius =
     let spawnPos = { X = 25; Y = 25 }
 
-    let walkable =
-        Set.ofList
-            [
-                for x in 25 - radius .. 25 + radius do
-                    for y in 25 - radius .. 25 + radius do
-                        { X = x; Y = y }
-            ]
+    { SpatialInfo.empty with
+        RoomName = Some "W1N1"
+        Terrain =
+            Map.ofList
+                [
+                    for x in 25 - radius .. 25 + radius do
+                        for y in 25 - radius .. 25 + radius do
+                            { X = x; Y = y }, Plain
+                ]
+        TargetPositions = Map.ofList [ "spawn-1", spawnPos ]
+        TargetKinds = Map.ofList [ "spawn-1", Structure BuiltKind.Spawn ]
+        Obstacles = Set.singleton spawnPos
+    }
 
-    {
-        RoomName = "W1N1"
-        SpawnPos = spawnPos
-        Walkable = walkable
-        Occupied = Set.singleton spawnPos
-        BuiltExtensions = 0
-        PendingExtensions = 0
+/// The room with extra targets standing (or being built) on given tiles.
+let withTargets targets room =
+    { room with
+        TargetPositions =
+            (room.TargetPositions, targets)
+            ||> List.fold (fun acc (id, pos, _) -> Map.add id pos acc)
+        TargetKinds =
+            (room.TargetKinds, targets)
+            ||> List.fold (fun acc (id, _, kind) -> Map.add id kind acc)
     }
 
 let placementIntents intents =
@@ -231,10 +239,10 @@ let placementIntents intents =
 let placedTiles intents =
     placementIntents intents |> List.map (fun (_, pos, _) -> pos)
 
-let atLevel level placement =
+let atLevel level room =
     { bareRespawn with
         Controller = Some { Id = "ctrl-1"; Level = level }
-        Placement = Some placement
+        Spatial = room
     }
 
 [<Tests>]
@@ -243,7 +251,7 @@ let placementTests =
         "placement"
         [
             test "RCL2 on open terrain places 5 extensions checkerboard, nearest first" {
-                let intents, _ = decide (atLevel 2 (openTerrain 3)) Map.empty
+                let intents, _ = decide (atLevel 2 (openRoom 3)) Map.empty
 
                 Expect.equal
                     (placedTiles intents)
@@ -262,16 +270,16 @@ let placementTests =
             }
 
             test "below RCL2 no placement Intents are emitted" {
-                let intents, _ = decide (atLevel 1 (openTerrain 3)) Map.empty
+                let intents, _ = decide (atLevel 1 (openRoom 3)) Map.empty
                 Expect.isEmpty (placementIntents intents) "no extensions allowed at RCL1"
             }
 
             test "unwalkable tiles are skipped" {
-                let terrain = openTerrain 3
+                let room = openRoom 3
 
                 let holed =
-                    { terrain with
-                        Walkable = Set.remove { X = 24; Y = 24 } terrain.Walkable
+                    { room with
+                        Terrain = Map.add { X = 24; Y = 24 } Wall room.Terrain
                     }
 
                 let intents, _ = decide (atLevel 2 holed) Map.empty
@@ -284,12 +292,9 @@ let placementTests =
             }
 
             test "occupied tiles are skipped" {
-                let terrain = openTerrain 3
-
                 let blocked =
-                    { terrain with
-                        Occupied = Set.add { X = 24; Y = 24 } terrain.Occupied
-                    }
+                    openRoom 3
+                    |> withTargets [ "rock-1", { X = 24; Y = 24 }, Structure BuiltKind.Other ]
 
                 let intents, _ = decide (atLevel 2 blocked) Map.empty
 
@@ -301,27 +306,49 @@ let placementTests =
             }
 
             test "built extensions and pending sites count against the cap" {
-                let terrain =
-                    { openTerrain 3 with
-                        BuiltExtensions = 2
-                        PendingExtensions = 2
-                    }
+                let room =
+                    openRoom 3
+                    |> withTargets
+                        [
+                            "ext-1", { X = 24; Y = 24 }, Structure BuiltKind.Extension
+                            "ext-2", { X = 24; Y = 26 }, Structure BuiltKind.Extension
+                            "site-1", { X = 26; Y = 24 }, Site BuiltKind.Extension
+                            "site-2", { X = 26; Y = 26 }, Site BuiltKind.Extension
+                        ]
 
-                let intents, _ = decide (atLevel 2 terrain) Map.empty
+                let intents, _ = decide (atLevel 2 room) Map.empty
                 Expect.hasLength (placementIntents intents) 1 "only the shortfall is placed"
             }
 
             test "no placement Intents once the allowance is exhausted" {
-                let terrain =
-                    { openTerrain 3 with
-                        BuiltExtensions = 5
-                    }
+                let room =
+                    openRoom 3
+                    |> withTargets
+                        [
+                            for i in 1..5 ->
+                                $"ext-{i}", { X = 22 + i; Y = 22 }, Structure BuiltKind.Extension
+                        ]
 
-                let intents, _ = decide (atLevel 2 terrain) Map.empty
+                let intents, _ = decide (atLevel 2 room) Map.empty
                 Expect.isEmpty (placementIntents intents) "allowance already used up"
             }
 
-            test "no placement Intents without placement info" {
+            test "the controller's tile is never chosen" {
+                // The controller stands on a free same-colour tile the old
+                // Placement projection would have offered to a site.
+                let room =
+                    openRoom 3 |> withTargets [ "ctrl-1", { X = 24; Y = 24 }, Controller ]
+
+                let intents, _ = decide (atLevel 2 room) Map.empty
+
+                Expect.isFalse
+                    (List.contains { X = 24; Y = 24 } (placedTiles intents))
+                    "a target's tile is never chosen"
+
+                Expect.hasLength (placementIntents intents) 5 "the cap is still reached elsewhere"
+            }
+
+            test "no placement Intents without a projected room" {
                 let snapshot =
                     { bareRespawn with
                         Controller = Some { Id = "ctrl-1"; Level = 2 }
