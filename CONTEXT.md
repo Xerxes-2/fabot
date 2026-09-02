@@ -34,6 +34,9 @@ The pure step that turns the tick's assigned Tasks into each assigned creep's ac
 ### Seat
 A walkable tile adjacent to a source. The capacity unit of Harvest: a source supports at most as many concurrent harvesters as it has Seats.
 
+### Dual Seat
+A [[seat]] that also lies inside the controller's Upgrade [[work area]]. A creep standing on one can alternate Harvest and Upgrade without ever moving. Derived by the [[atlas]] each tick, never persisted.
+
 ### Work Area
 The set of tiles a creep may stand on while performing its current Task, derived from the Task's target position and the action's range. Derived fresh each tick, never persisted.
 
@@ -44,7 +47,7 @@ A creep's movement desire for one tick: candidate standing tiles plus a priority
 The pure step that arbitrates a room's Move Intents into actual single-step moves (priority first, most-constrained first, swap when contested). Fourth pure step beside Planner, Matcher, and [[emitter]]; movement is never issued outside it.
 
 ### Travel cost
-The cheapest-path cost from a creep to a Task's Work Area over the [[spatial projection]] (plain 1, swamp 5, impassable excluded). Breaks rank ties in the Matcher (ADR 0002); a Work Area with no travel cost — unreachable or empty — makes the Task inapplicable to that creep: never matched fresh, and a remembered assignment to it is released.
+The cheapest-path cost from a creep to a Task's Work Area over the [[spatial projection]], in ticks for that creep's body: terrain weights (plain 1, swamp 5, impassable excluded) scaled by the body's fatigue factor (ADR 0002, revised by ADR 0006). Breaks rank ties in the Matcher; a Work Area with no travel cost — unreachable or empty — makes the Task inapplicable to that creep: never matched fresh, and a remembered assignment to it is released.
 
 ### Workforce target
 The number of creeps the colony maintains: the total [[seat]] count across all sources, floored at 2. Derived fresh each tick from the Snapshot, never persisted. Spawning fills the gap between living creeps and the target; a source the projection does not place contributes no Seats, so an empty projection leaves only the floor. Seats count by terrain alone (ADR 0001), so an unreachable source still raises the target — the surplus flows to Upgrade.
@@ -58,8 +61,14 @@ The Snapshot's map-shaped view of the spawn room — the only one (ADR 0005): th
 ### Atlas
 The per-tick, task-aware query interface over the [[spatial projection]]: Seats, Work Areas, travel costs, first steps, action permission, standing candidates, placed creeps — and the placement queries construction planning derives from (room name, target positions, buildable tiles, extension censuses; ADR 0005). Total (ADR 0004): geometry the projection cannot place gets one documented answer per query — it never counts against a [[task]] and never blocks an action. Built fresh each tick; Matcher and Resolver consult the same one.
 
+### Anchor
+The heavy-WORK [[body pattern]] cast for a [[dual seat]]: many Work, one Carry, minimal Move. Its slowness is the point — body-aware [[travel cost]] pins it to the nearest high-value tile, where it harvests and upgrades in place. Exempt from [[fatigue parity]], which governs only the [[worker unit]] pattern (ADR 0006). One Anchor per Dual Seat is part of the [[workforce target]], not on top of it.
+
+### Body pattern
+The repeating part block a body is generated from; capacity buys as many whole repeats as it can. The [[worker unit]] is one pattern. Which pattern a spawn casts is a colony decision; a pattern shapes what a creep is good at, never what it is assigned — creeps stay interchangeable and matching stays Task-based.
+
 ### Worker unit
-The repeating [Work; Carry; Move] block worker bodies are built from: 200 energy, full speed empty, half speed loaded. Capacity buys as many whole units as it can; what's left is remainder.
+The repeating [Work; Carry; Move] block worker bodies are built from — the generalist [[body pattern]]: 200 energy, full speed empty, half speed loaded. Capacity buys as many whole units as it can; what's left is remainder.
 
 ### Fatigue parity
 The body-generation invariant (ADR 0003): a worker body padded beyond whole [[worker unit]]s never moves slower than the pure-unit body, empty or loaded. The remainder buys as much Carry as parity allows, then Move — never Work.
