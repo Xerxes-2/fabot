@@ -22,10 +22,6 @@ The Task of delivering energy to any structure that feeds spawning (spawn or ext
 ### Build
 The Task of spending carried energy into a construction site. Surplus work: same rank tier as Upgrade, below Harvest/Refill — the economy is fed before anything is constructed.
 
-## Avoided terms
-
-- **Role** — creeps are not born with roles; work is Task-based. Don't reintroduce role-based vocabulary.
-
 ### Planner
 The pure step that reads a Snapshot and generates this tick's full Task pool. Runs every tick from scratch — Tasks are never persisted.
 
@@ -52,3 +48,16 @@ The number of creeps the colony maintains: the total [[seat]] count across all s
 
 ### Spatial projection
 The Snapshot's map-shaped view of the spawn room: three-state terrain (plain / swamp / wall) plus entity positions. Introduced for Seat counting; grows toward the Resolver's needs (ADR 0001). A tile absent from the projection is outside the room and impassable.
+
+### Worker unit
+The repeating [Work; Carry; Move] block worker bodies are built from: 200 energy, full speed empty, half speed loaded. Capacity buys as many whole units as it can; what's left is remainder.
+
+### Fatigue parity
+The body-generation invariant (ADR 0003): a worker body padded beyond whole [[worker unit]]s never moves slower than the pure-unit body, empty or loaded. The remainder buys as much Carry as parity allows, then Move — never Work.
+
+### Disaster fallback
+The zero-creep spawning rule: an empty colony spawns one bare [[worker unit]] from whatever energy is banked right now, rather than waiting for a full capacity it can never refill. The one body-generation path that ignores the remainder — time-to-first-creep outranks spending the bank.
+
+## Avoided terms
+
+- **Role** — creeps are not born with roles; work is Task-based. Don't reintroduce role-based vocabulary.
