@@ -12,6 +12,14 @@ let private partName =
     | Carry -> "carry"
     | Move -> "move"
 
+/// Screeps `ERR_NOT_IN_RANGE`.
+let private errNotInRange = -9
+
+/// Act on a target if the creep is adjacent, otherwise walk toward it.
+let private actOrApproach (creep: ICreep) (target: obj) (act: obj -> int) =
+    if act target = errNotInRange then
+        creep.moveTo target |> ignore
+
 let private execute (intent: Intent) =
     match intent with
     | SpawnCreep (spawnName, body, creepName) ->
@@ -20,5 +28,15 @@ let private execute (intent: Intent) =
             let code = spawn.spawnCreep (body |> List.map partName |> List.toArray, creepName)
             if code <> 0 then
                 JS.console.log ($"spawnCreep {creepName} at {spawnName} failed: {code}")
+    | HarvestSource (creepName, sourceId) ->
+        let creep: ICreep = Game.creeps?(creepName)
+        let source = Game.getObjectById sourceId
+        if not (isNull (box creep)) && not (isNull source) then
+            actOrApproach creep source (fun t -> creep.harvest t)
+    | TransferEnergyToSpawn (creepName, spawnName) ->
+        let creep: ICreep = Game.creeps?(creepName)
+        let spawn: ISpawn = Game.spawns?(spawnName)
+        if not (isNull (box creep)) && not (isNull (box spawn)) then
+            actOrApproach creep (box spawn) (fun t -> creep.transfer (t, "energy"))
 
 let run (intents: Intent list) = intents |> List.iter execute

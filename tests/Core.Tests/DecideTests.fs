@@ -6,15 +6,46 @@ open Fabot.Core.Decide
 
 let bareRespawn =
     { Time = 42
-      Spawns = [ { Name = "Spawn1"; EnergyAvailable = 300; IsSpawning = false } ]
+      Spawns = [ { Name = "Spawn1"; EnergyAvailable = 300; FreeCapacity = 0; IsSpawning = false } ]
+      Sources = [ { Id = "src-a" }; { Id = "src-b" } ]
       Creeps = [] }
 
+let worker name energy freeCapacity =
+    { Name = name; Energy = energy; FreeCapacity = freeCapacity }
+
 let spawnIntents intents =
-    intents |> List.choose (function SpawnCreep (s, b, c) -> Some (s, b, c))
+    intents |> List.choose (function SpawnCreep (s, b, c) -> Some (s, b, c) | _ -> None)
+
+[<Tests>]
+let plannerTests =
+    testList "planner" [
+        test "one Harvest task per source" {
+            let tasks = planTasks bareRespawn
+            let harvests = tasks |> List.choose (function Harvest sourceId -> Some sourceId | _ -> None)
+            Expect.equal harvests [ "src-a"; "src-b" ] "each source gets exactly one Harvest task"
+        }
+
+        test "a spawn missing energy gets a Refill task; a full spawn gets none" {
+            let snapshot =
+                { bareRespawn with
+                    Spawns =
+                        [ { Name = "Spawn1"; EnergyAvailable = 250; FreeCapacity = 50; IsSpawning = false }
+                          { Name = "Spawn2"; EnergyAvailable = 300; FreeCapacity = 0; IsSpawning = false } ] }
+            let refills = planTasks snapshot |> List.choose (function Refill spawnName -> Some spawnName | _ -> None)
+            Expect.equal refills [ "Spawn1" ] "only the spawn with free capacity needs a Refill"
+        }
+    ]
 
 [<Tests>]
 let tests =
     testList "decide" [
+        test "an empty creep is matched to a Harvest task and remembered" {
+            let snapshot = { bareRespawn with Creeps = [ worker "w1" 0 50 ] }
+            let intents, assignments = decide snapshot Map.empty
+            Expect.contains intents (HarvestSource("w1", "src-a")) "empty creep goes harvesting"
+            Expect.equal (Map.tryFind "w1" assignments) (Some "harvest:src-a") "assignment is remembered"
+        }
+
         test "bare respawn yields exactly one spawn Intent" {
             let intents, _ = decide bareRespawn Map.empty
             match spawnIntents intents with
@@ -34,7 +65,7 @@ let tests =
         test "no spawn Intent when energy is below a worker body cost" {
             let snapshot =
                 { bareRespawn with
-                    Spawns = [ { Name = "Spawn1"; EnergyAvailable = 100; IsSpawning = false } ] }
+                    Spawns = [ { Name = "Spawn1"; EnergyAvailable = 100; FreeCapacity = 200; IsSpawning = false } ] }
             let intents, _ = decide snapshot Map.empty
             Expect.isEmpty (spawnIntents intents) "cannot afford a worker"
         }
@@ -42,22 +73,79 @@ let tests =
         test "no spawn Intent while the spawn is already spawning" {
             let snapshot =
                 { bareRespawn with
-                    Spawns = [ { Name = "Spawn1"; EnergyAvailable = 300; IsSpawning = true } ] }
+                    Spawns = [ { Name = "Spawn1"; EnergyAvailable = 300; FreeCapacity = 0; IsSpawning = true } ] }
             let intents, _ = decide snapshot Map.empty
             Expect.isEmpty (spawnIntents intents) "spawn is busy"
         }
 
+        test "one worker is below minimum: a second is spawned" {
+            let snapshot = { bareRespawn with Creeps = [ worker "worker-1" 0 50 ] }
+            let intents, _ = decide snapshot Map.empty
+            Expect.hasLength (spawnIntents intents) 1 "a lone worker cannot keep the loop going"
+        }
+
         test "no spawn Intent when workforce is at minimum" {
-            let snapshot = { bareRespawn with Creeps = [ { Name = "worker-1" } ] }
+            let snapshot = { bareRespawn with Creeps = [ worker "worker-1" 0 50; worker "worker-2" 0 50 ] }
             let intents, _ = decide snapshot Map.empty
             Expect.isEmpty (spawnIntents intents) "workforce already at minimum"
         }
 
+        test "empty creeps spread across sources instead of piling on one" {
+            let snapshot = { bareRespawn with Creeps = [ worker "w1" 0 50; worker "w2" 0 50 ] }
+            let _, assignments = decide snapshot Map.empty
+            let assigned = assignments |> Map.toList |> List.map snd |> List.sort
+            Expect.equal assigned [ "harvest:src-a"; "harvest:src-b" ] "greedy matching balances load per task"
+        }
+
+        test "greedy matching counts kept assignments as load" {
+            let snapshot = { bareRespawn with Creeps = [ worker "w1" 20 30; worker "w2" 0 50 ] }
+            let _, assignments = decide snapshot (Map.ofList [ "w1", "harvest:src-a" ])
+            Expect.equal (Map.tryFind "w1" assignments) (Some "harvest:src-a") "w1 keeps its source"
+            Expect.equal (Map.tryFind "w2" assignments) (Some "harvest:src-b") "w2 avoids the occupied source"
+        }
+
         test "assignments pass through unchanged when no creeps died" {
-            let assignments = Map.ofList [ "worker-1", "task-a" ]
-            let snapshot = { bareRespawn with Creeps = [ { Name = "worker-1" } ] }
+            let assignments = Map.ofList [ "worker-1", "harvest:src-a" ]
+            let snapshot = { bareRespawn with Creeps = [ worker "worker-1" 0 50 ] }
             let _, kept = decide snapshot assignments
             Expect.equal kept assignments "assignments survive the tick"
+        }
+
+        test "an assignment sticks across ticks even when greedy would rebalance" {
+            let snapshot = { bareRespawn with Creeps = [ worker "w1" 20 30 ] }
+            let assignments = Map.ofList [ "w1", "harvest:src-b" ]
+            let intents, kept = decide snapshot assignments
+            Expect.equal (Map.tryFind "w1" kept) (Some "harvest:src-b") "no thrash: creep stays on its source"
+            Expect.contains intents (HarvestSource("w1", "src-b")) "intent follows the sticky assignment"
+        }
+
+        test "a creep that fills up is reassigned from Harvest to Refill" {
+            let snapshot =
+                { bareRespawn with
+                    Spawns = [ { Name = "Spawn1"; EnergyAvailable = 250; FreeCapacity = 50; IsSpawning = false } ]
+                    Creeps = [ worker "w1" 50 0 ] }
+            let intents, kept = decide snapshot (Map.ofList [ "w1", "harvest:src-a" ])
+            Expect.equal (Map.tryFind "w1" kept) (Some "refill:Spawn1") "full creep switches to delivering"
+            Expect.contains intents (TransferEnergyToSpawn("w1", "Spawn1")) "delivery intent emitted"
+        }
+
+        test "a creep that empties is reassigned from Refill back to Harvest" {
+            let snapshot =
+                { bareRespawn with
+                    Spawns = [ { Name = "Spawn1"; EnergyAvailable = 250; FreeCapacity = 50; IsSpawning = false } ]
+                    Creeps = [ worker "w1" 0 50 ] }
+            let _, kept = decide snapshot (Map.ofList [ "w1", "refill:Spawn1" ])
+            match Map.tryFind "w1" kept with
+            | Some tid -> Expect.stringStarts tid "harvest:" "empty creep goes back to a source"
+            | None -> failtest "creep should be reassigned, not idle"
+        }
+
+        test "a full creep with a full spawn is left unassigned with no intent" {
+            let snapshot = { bareRespawn with Creeps = [ worker "w1" 50 0 ] }
+            let intents, kept = decide snapshot (Map.ofList [ "w1", "harvest:src-a" ])
+            Expect.isEmpty (Map.toList kept) "no applicable task"
+            let creepIntents = intents |> List.filter (function SpawnCreep _ -> false | _ -> true)
+            Expect.isEmpty creepIntents "idle creep emits nothing"
         }
 
         test "assignments of dead creeps are dropped" {

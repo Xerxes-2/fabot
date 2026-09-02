@@ -6,19 +6,37 @@ open Fable.Core
 type ICpu =
     abstract getUsed: unit -> float
 
+/// Screeps `FIND_SOURCES` constant.
+let findSources = 105
+
+type IStore =
+    abstract getFreeCapacity: resource: string -> int
+    abstract getUsedCapacity: resource: string -> int
+
+type ISource =
+    abstract id: string
+
 type IRoom =
     /// Energy available for spawning in this room (spawn + extensions).
     abstract energyAvailable: int
+    abstract find: findType: int -> obj[]
 
 type ISpawn =
     abstract name: string
     /// Null when the spawn is idle.
     abstract spawning: obj
     abstract room: IRoom
+    abstract store: IStore
     abstract spawnCreep: body: string[] * name: string -> int
 
 type ICreep =
     abstract name: string
+    /// True while the creep is still being built inside the spawn.
+    abstract spawning: bool
+    abstract store: IStore
+    abstract harvest: target: obj -> int
+    abstract transfer: target: obj * resource: string -> int
+    abstract moveTo: target: obj -> int
 
 type IGame =
     abstract time: int
@@ -27,6 +45,8 @@ type IGame =
     abstract spawns: obj
     /// Hash of creep name -> creep.
     abstract creeps: obj
+    /// Null when no object with that id exists (or it is out of sight).
+    abstract getObjectById: id: string -> obj
 
 [<Global("Game")>]
 let Game: IGame = jsNative

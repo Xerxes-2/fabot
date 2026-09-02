@@ -2,8 +2,9 @@ module Fabot.Core.Decide
 
 open Fabot.Core.Types
 
-/// Colony never plans below this many living creeps.
-let minWorkforce = 1
+/// Colony never plans below this many living creeps. Two keep the
+/// harvest/refill loop running while one is in transit or being replaced.
+let minWorkforce = 2
 
 /// The MVP worker body and its energy cost.
 let workerBody = [ Work; Carry; Move ]
@@ -14,6 +15,22 @@ let bodyCost body =
         | Work -> 100
         | Carry -> 50
         | Move -> 50)
+
+/// Stable identity of a Task across ticks; what Assignments point at.
+let taskId =
+    function
+    | Harvest sourceId -> $"harvest:{sourceId}"
+    | Refill spawnName -> $"refill:{spawnName}"
+
+/// Planner: rebuild this tick's full Task pool from the Snapshot. Pure and
+/// from scratch every tick — Tasks are never persisted.
+let planTasks (snapshot: Snapshot) : Task list =
+    let harvests = snapshot.Sources |> List.map (fun s -> Harvest s.Id)
+    let refills =
+        snapshot.Spawns
+        |> List.filter (fun s -> s.FreeCapacity > 0)
+        |> List.map (fun s -> Refill s.Name)
+    harvests @ refills
 
 /// Pre-Task bootstrap step: spawn Intents needed to keep the workforce at
 /// minimum. Spawning is a colony-level need, not a Task creeps get matched to,
@@ -28,15 +45,49 @@ let private planSpawns (snapshot: Snapshot) : Intent list =
         |> List.truncate deficit
         |> List.map (fun s -> SpawnCreep(s.Name, workerBody, $"worker-{snapshot.Time}-{s.Name}"))
 
-/// Matcher's anti-thrash half: keep only assignments of creeps still alive.
-/// (Task matching itself arrives with the first creep Tasks.)
-let private matchCreeps (snapshot: Snapshot) (assignments: Assignments) : Intent list * Assignments =
-    let alive = snapshot.Creeps |> List.map (fun c -> c.Name) |> Set.ofList
-    let surviving = assignments |> Map.filter (fun name _ -> Set.contains name alive)
-    [], surviving
+/// Whether a creep can usefully work this Task right now. A full creep is
+/// done harvesting; an empty creep has nothing to deliver.
+let private applicable (creep: CreepInfo) task =
+    match task with
+    | Harvest _ -> creep.FreeCapacity > 0
+    | Refill _ -> creep.Energy > 0
 
-/// The single seam: Snapshot in, Intents plus surviving Assignments out.
+let private intentFor (creep: CreepInfo) task =
+    match task with
+    | Harvest sourceId -> HarvestSource(creep.Name, sourceId)
+    | Refill spawnName -> TransferEnergyToSpawn(creep.Name, spawnName)
+
+/// Matcher: keep still-valid assignments (anti-thrash), greedily assign the
+/// rest, and emit one Intent per assigned creep.
+let private matchCreeps (snapshot: Snapshot) (tasks: Task list) (assignments: Assignments) : Intent list * Assignments =
+    let byId = tasks |> List.map (fun t -> taskId t, t) |> Map.ofList
+    let kept =
+        assignments
+        |> Map.filter (fun name tid ->
+            match snapshot.Creeps |> List.tryFind (fun c -> c.Name = name), Map.tryFind tid byId with
+            | Some creep, Some task -> applicable creep task
+            | _ -> false)
+    let assignOne acc (creep: CreepInfo) =
+        if Map.containsKey creep.Name acc then
+            acc
+        else
+            let load tid = acc |> Map.filter (fun _ assigned -> assigned = tid) |> Map.count
+            match tasks |> List.filter (applicable creep) with
+            | [] -> acc
+            | candidates ->
+                let task = candidates |> List.minBy (taskId >> load)
+                Map.add creep.Name (taskId task) acc
+    let final = snapshot.Creeps |> List.fold assignOne kept
+    let intents =
+        snapshot.Creeps
+        |> List.choose (fun creep ->
+            Map.tryFind creep.Name final
+            |> Option.bind (fun tid -> Map.tryFind tid byId)
+            |> Option.map (intentFor creep))
+    intents, final
+
+/// The single seam: Snapshot in, Intents plus next tick's Assignments out.
 let decide (snapshot: Snapshot) (assignments: Assignments) : Intent list * Assignments =
     let spawnIntents = planSpawns snapshot
-    let creepIntents, surviving = matchCreeps snapshot assignments
-    spawnIntents @ creepIntents, surviving
+    let creepIntents, next = matchCreeps snapshot (planTasks snapshot) assignments
+    spawnIntents @ creepIntents, next

@@ -11,7 +11,7 @@ The immutable projection of the current tick's game state that the decision laye
 A single described action the decision layer wants performed this tick (e.g. "creep X harvests source Y"). Intents are data; they do not touch the Screeps API.
 
 ### Executor
-The thin imperative shell that turns Intents into Screeps API calls. The only layer allowed to call game methods.
+The thin imperative shell that turns Intents into Screeps API calls. The only layer allowed to act on the game (mutating API calls); Snapshot may call read-only game methods to build its projection.
 
 ### Task
 A unit of work in the task pool (e.g. "deliver 300 energy to spawn"). Creeps are interchangeable executors that get matched to Tasks; a creep has no fixed role.
