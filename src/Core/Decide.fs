@@ -753,9 +753,12 @@ let private planPickups (snapshot: Snapshot) atlas : Intent list =
 /// One geometric widening (ADR 0012): a full creep standing on a built
 /// source container keeps Harvest — the engine drops the overflow into
 /// the container underfoot, so the creep effectively has capacity and the
-/// Post stays garrisoned. Body-blind like every gate here (ADR 0006):
-/// any full creep on the tile qualifies; travel-cost pinning and the
-/// workforce quotas are what keep the tile an Anchor's home.
+/// Post stays garrisoned. Gates read part arithmetic, never names or
+/// roles (ADR 0006) — including one comparative gate (ADR 0016): a body
+/// with more Work than Move never Withdraws, so its only feeding-tier
+/// candidate is Harvest and an unmanned Post wins it regardless of
+/// distance. Travel cost pins an Anchor that is at its Post; this gate
+/// is what walks one home past a nearer stocked container.
 let private applicable atlas (creep: CreepInfo) task =
     let has part =
         creep.Body |> Map.tryFind part |> Option.exists (fun n -> n > 0)
@@ -764,7 +767,7 @@ let private applicable atlas (creep: CreepInfo) task =
     | Harvest sourceId ->
         has Work
         && (creep.FreeCapacity > 0 || Atlas.catchesOverflow atlas creep.Name sourceId)
-    | Withdraw _ -> has Carry && creep.FreeCapacity > 0
+    | Withdraw _ -> has Carry && creep.FreeCapacity > 0 && not (isAnchorBody creep)
     | Refill _ -> has Carry && creep.Energy > 0
     | Build _
     | Repair _

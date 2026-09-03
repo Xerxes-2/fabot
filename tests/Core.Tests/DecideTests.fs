@@ -4687,6 +4687,64 @@ let logisticsTests =
                     "nearer the source, digging wins the same tie"
             }
 
+            test "a heavy-Work body never collects: the far Post's Harvest beats the near buffer" {
+                // Same geometry where the worker above picks Withdraw — at
+                // (15,10) the buffer is two steps, the nearest Seat four.
+                // Work > Move makes Withdraw inapplicable (ADR 0016), so
+                // the anchor's only feeding-tier candidate is Harvest and
+                // the unmanned Post wins regardless of distance.
+                let snapshot =
+                    { haulColony with
+                        Creeps = [ anchor "a1" 0 50 ]
+                        Spatial =
+                            { haulRoom with
+                                CreepPositions = Map.ofList [ "a1", { X = 15; Y = 10 } ]
+                            }
+                    }
+
+                let { Assignments = assignments } = decide snapshot Map.empty Set.empty
+
+                Expect.equal
+                    (Map.tryFind "a1" assignments)
+                    (Some(taskId (Harvest "src-a")))
+                    "the stocked buffer never outbids the Post for a Work-heavy body"
+            }
+
+            test "a kept Withdraw on a heavy-Work body releases as inapplicable and digs" {
+                // Deployment heals the live colony without a death: the
+                // remembered orbit breaks the first tick the gate lands.
+                let snapshot =
+                    { haulColony with
+                        Creeps = [ anchor "a1" 0 50 ]
+                        Spatial =
+                            { haulRoom with
+                                CreepPositions = Map.ofList [ "a1", { X = 15; Y = 10 } ]
+                            }
+                    }
+
+                let remembered = Map.ofList [ "a1", taskId (Withdraw "can-ctrl") ]
+
+                let {
+                        Assignments = assignments
+                        Verdicts = verdicts
+                    } =
+                    decide snapshot remembered Set.empty
+
+                Expect.contains
+                    verdicts
+                    (Verdict.Released(
+                        "a1",
+                        taskId (Withdraw "can-ctrl"),
+                        ReleaseReason.Inapplicable
+                    ))
+                    "the gate releases the remembered collection"
+
+                Expect.equal
+                    (Map.tryFind "a1" assignments)
+                    (Some(taskId (Harvest "src-a")))
+                    "the rematch walks the anchor home"
+            }
+
             test "alternation is emergent: a filled-up creep's Withdraw releases and rematches" {
                 // The creep filled up inside the buffer's Work Area — which
                 // is also the controller's. Withdraw loses applicability;
