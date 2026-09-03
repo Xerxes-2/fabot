@@ -287,6 +287,7 @@ let build () : Snapshot =
 
                 {
                     Id = c.id
+                    Owner = c.owner.username
                     Pos = posOf c.pos
                     Body = c.body |> Array.map (fun p -> bodyPartOf p.``type``) |> Array.toList
                 }

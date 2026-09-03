@@ -182,9 +182,6 @@ let private repairableKinds = [ BuiltKind.Road; BuiltKind.Container ]
 /// repaired back over the line. A tunable, not part of ADR 0010.
 let private repairTrigger = 0.5
 
-/// Screeps range: Chebyshev distance between two tiles.
-let private range a b = max (abs (a.X - b.X)) (abs (a.Y - b.Y))
-
 /// Screeps CONTAINER_CAPACITY: what a container's store can hold — the
 /// line past which the buffer needs no Refill.
 let private containerCapacity = 2000

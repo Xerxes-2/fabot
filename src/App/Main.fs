@@ -71,6 +71,17 @@ let loop () =
     |> Observe.fold Observe.capPerCreep snapshot.Time living decision.Verdicts
     |> ObserveMemory.save
 
+    // The Raid log's own channel (ADR 0028): colony-level and episodic,
+    // because the fold above prunes a creep's whole timeline the tick it
+    // dies — the one event a raid record has to keep. Written every tick
+    // whether or not the fold changed anything, so the leaf's presence is
+    // itself the signal that this bundle is live — which is what lets
+    // `observe.mjs raids` tell "no channel" from "no raids" instead of
+    // reporting a confident false negative against a stale deploy.
+    ObserveMemory.loadRaids ()
+    |> Observe.foldRaids Observe.capEpisodes Observe.quietGap snapshot
+    |> ObserveMemory.saveRaids
+
     pruneDeadCreepMemory living
     // Outcomes go unread here; failures are already logged by the Executor.
     Executor.run decision.Intents |> ignore

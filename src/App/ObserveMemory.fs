@@ -1,8 +1,9 @@
-/// Serialization shell for the Transition log (ADR 0009): read the prior
-/// observe state from `Memory.fabot.observe`, hand it to the pure Core
-/// fold, write the result back. The subtree is disposable by construction —
-/// absent or unreadable state is discarded, never repaired, so telemetry
-/// can never take the colony down.
+/// Serialization shell for the observe channel (ADR 0009, ADR 0028): read
+/// the prior Transition log and Raid log from `Memory.fabot.observe`, hand
+/// each to its pure Core fold, write the results back to their own leaves.
+/// The subtree is disposable by construction — absent or unreadable state
+/// is discarded, never repaired, so telemetry can never take the colony
+/// down.
 module Fabot.ObserveMemory
 
 open Fable.Core
@@ -89,6 +90,13 @@ let private rejectOf =
             RejectReason.Unreachable
             RejectReason.TooEarly
         ]
+
+// Body parts ride the Core's own part-name table in both directions, over
+// its own closed set. `allBodyParts` is a hand-written literal, so this
+// reverse can fall behind the union (#80); what is bounded here instead is
+// the damage — `loadRaids` decodes episode by episode, so a name this
+// table lacks costs that episode and not the ring.
+let private partOf = reverse partName allBodyParts
 
 // A Candidate on the wire: a scored row carries the full matching key, a
 // rejected row its reason — the presence of `reason` tells them apart.
@@ -221,6 +229,106 @@ let private decodeCreepLog creep (raw: obj) : CreepLog =
         LastMove = raw?lastMove |> unbox<obj[]> |> Array.map (decodeVerdict creep) |> Array.toList
     }
 
+// One raid episode on the wire: the window, the roster as an array of
+// rows (the id is a field here, not a key, so a roster reads in order),
+// the closest approach when one was measured, and the losses.
+let private encodeEpisode (episode: RaidEpisode) =
+    let o = createEmpty<obj>
+    o?opened <- episode.Opened
+    o?last <- episode.LastSeen
+
+    o?roster <-
+        episode.Roster
+        |> Map.toList
+        |> List.map (fun (id, row) ->
+            let r = createEmpty<obj>
+            r?id <- id
+            r?owner <- row.Owner
+            let body = createEmpty<obj>
+
+            for KeyValue(part, count) in row.Body do
+                body?(partName part) <- count
+
+            r?body <- body
+            r)
+        |> List.toArray
+
+    match episode.Closest with
+    | Some approach ->
+        let c = createEmpty<obj>
+        c?range <- approach.Range
+        c?x <- approach.Pos.X
+        c?y <- approach.Pos.Y
+        c?t <- approach.Tick
+        o?closest <- c
+    | None -> ()
+
+    o?losses <-
+        episode.Losses
+        |> List.map (fun loss ->
+            let d = createEmpty<obj>
+            d?creep <- loss.Creep
+            d?t <- loss.Tick
+            d)
+        |> List.toArray
+
+    o
+
+let private decodeEpisode (raw: obj) : RaidEpisode =
+    {
+        Opened = unbox<int> raw?opened
+        LastSeen = unbox<int> raw?last
+        Roster =
+            raw?roster
+            |> unbox<obj[]>
+            |> Array.map (fun row ->
+                string row?id,
+                {
+                    Owner = string row?owner
+                    Body =
+                        objectEntries row?body
+                        |> Array.map (fun (name, count) ->
+                            match Map.tryFind name partOf with
+                            | Some part -> part, unbox<int> count
+                            | None -> failwith "unknown wire name")
+                        |> Map.ofArray
+                })
+            |> Map.ofArray
+        Closest =
+            if isNull raw?closest then
+                None
+            else
+                Some
+                    {
+                        Range = unbox<int> raw?closest?range
+                        Pos =
+                            {
+                                X = unbox<int> raw?closest?x
+                                Y = unbox<int> raw?closest?y
+                            }
+                        Tick = unbox<int> raw?closest?t
+                    }
+        Losses =
+            raw?losses
+            |> unbox<obj[]>
+            |> Array.map (fun d ->
+                {
+                    Creep = string d?creep
+                    Tick = unbox<int> d?t
+                })
+            |> Array.toList
+    }
+
+// The observe subtree is created on demand and replaced whole only when
+// what stands there is not an object. Each writer then assigns its own
+// leaf, so `creeps`, `verbose` and `raids` never clobber one another.
+let private ensureObserve () =
+    if isNull Memory?fabot then
+        Memory?fabot <- createEmpty<obj>
+
+    if jsTypeof Memory?fabot?observe <> "object" || isNull Memory?fabot?observe then
+        Memory?fabot?observe <- createEmpty<obj>
+
 /// The verbose list from `Memory.fabot.observe.verbose`: creep names owed
 /// full candidate scoring this tick. Written by the CLI through the Memory
 /// HTTP API, read fresh each tick so a terminal flip takes effect on the
@@ -273,10 +381,45 @@ let save (state: ObserveState) =
     for KeyValue(name, log) in state do
         creeps?(name) <- encodeCreepLog log
 
-    if isNull Memory?fabot then
-        Memory?fabot <- createEmpty<obj>
-
-    if jsTypeof Memory?fabot?observe <> "object" || isNull Memory?fabot?observe then
-        Memory?fabot?observe <- createEmpty<obj>
-
+    ensureObserve ()
     Memory?fabot?observe?creeps <- creeps
+
+/// The prior Raid log, or empty when the subtree is absent, from an older
+/// bundle, or otherwise unreadable — a discarded log costs the episodes it
+/// held and nothing else. An episode that will not decode costs that
+/// episode alone: the ring degrades row by row rather than vanishing, so a
+/// hand-edit through the Memory HTTP API, or a rollback across a
+/// wire-shape change, leaves the rest of the history readable.
+let loadRaids () : RaidState =
+    try
+        let fabot = Memory?fabot
+        let observe = if isNull fabot then null else fabot?observe
+        let raids = if isNull observe then null else observe?raids
+
+        if isNull raids then
+            RaidState.empty
+        else
+            {
+                Episodes =
+                    raids?episodes
+                    |> unbox<obj[]>
+                    |> Array.choose (fun raw ->
+                        try
+                            Some(decodeEpisode raw)
+                        with _ ->
+                            None)
+                    |> Array.toList
+                Living = raids?living |> unbox<string[]> |> Set.ofArray
+            }
+    with _ ->
+        RaidState.empty
+
+/// Write the Raid log back under `Memory.fabot.observe.raids`, leaving the
+/// rest of the observe subtree — the Transition log and the verbose list —
+/// alone, the same way `save` leaves this leaf alone.
+let saveRaids (state: RaidState) =
+    let raids = createEmpty<obj>
+    raids?episodes <- state.Episodes |> List.map encodeEpisode |> List.toArray
+    raids?living <- state.Living |> Set.toArray
+    ensureObserve ()
+    Memory?fabot?observe?raids <- raids

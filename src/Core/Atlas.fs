@@ -738,9 +738,6 @@ let travelCost (atlas: Atlas) (creep: string) (task: Task) : int option =
                 | [] -> None
                 | costs -> Some(List.min costs)
 
-/// Screeps range: Chebyshev distance between two tiles.
-let private range a b = max (abs (a.X - b.X)) (abs (a.Y - b.Y))
-
 /// Whether a creep may perform its Task's action this tick: standing
 /// inside the Task's Work Area for its body at tick start (ADR 0020) — a
 /// creep acts only from where it may stand, which for every ordinary Task

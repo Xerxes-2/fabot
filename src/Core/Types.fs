@@ -99,6 +99,11 @@ type ControllerInfo =
 /// A tile coordinate inside a room.
 type Pos = { X: int; Y: int }
 
+/// Screeps range: Chebyshev distance between two tiles. The one
+/// definition — the Atlas's geometry, the two hostile reflexes and the
+/// Raid log's closest approach all measure with it.
+let range (a: Pos) (b: Pos) = max (abs (a.X - b.X)) (abs (a.Y - b.Y))
+
 /// Current and maximum hit points of a repairable structure — what the
 /// Repair trigger is judged from (ADR 0010).
 type HitsInfo = { Hits: int; HitsMax: int }
@@ -173,12 +178,19 @@ type ConstructionSiteInfo = { Id: string }
 
 /// What the decision layer knows about one hostile creep in a spawn room
 /// this tick: its id and tile — what the fire reflex aims at (ADR 0014) —
-/// and its body parts, verbatim — what a hostile can do is decided from
-/// what it is made of. Hostiles stay out of the spatial projection: they
+/// its body parts, verbatim, because what a hostile can do is decided
+/// from what it is made of, and its owner, which the Raid log's roster
+/// reads (ADR 0028). Hostiles stay out of the spatial projection: they
 /// block no tiles, price no paths, gate no tasks.
 type HostileInfo =
     {
         Id: string
+        /// Whose creep this is, as the engine spells the username
+        /// ("Invader" for the NPCs). The field the projection grew the
+        /// tick a reader for it existed (ADR 0007's rule, ADR 0028): the
+        /// Raid log's roster is attribution, and attribution is a name.
+        /// No reflex reads it.
+        Owner: string
         Pos: Pos
         Body: BodyPart list
     }
@@ -262,7 +274,12 @@ type Direction =
     | Left
     | TopLeft
 
-/// Every BodyPart — the closed set, for building tables over the vocabulary.
+/// Every BodyPart — the closed set, for building tables over the
+/// vocabulary. A literal, and so not compiler-checked: a part added to
+/// the union has to be added here by hand, which is issue #80's open
+/// hole. A successor chain does not close it — the compiler checks such a
+/// function for exhaustiveness, never for reachability, so a dangling
+/// `| NewPart -> None` compiles clean and still leaves the list short.
 let allBodyParts = [ Work; Carry; Move; Attack; RangedAttack; Heal; Claim; Tough ]
 
 /// Screeps body-part strings as the engine spells them, in `spawnCreep`

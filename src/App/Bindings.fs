@@ -139,9 +139,16 @@ type IBodyPartDef =
     /// Part-type string, e.g. "work" or "claim".
     abstract ``type``: string
 
+/// The `owner` sub-object every owned game object carries.
+type IOwner =
+    abstract username: string
+
 type ICreep =
     abstract id: string
     abstract name: string
+    /// Whose creep this is. Read only off hostiles, for the Raid log's
+    /// roster (ADR 0028); our own creeps' ownership is never in question.
+    abstract owner: IOwner
     /// True while the creep is still being built inside the spawn.
     abstract spawning: bool
     /// Ticks the creep has left to live; undefined only while it is still

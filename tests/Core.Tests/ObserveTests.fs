@@ -322,3 +322,438 @@ let pruneTests =
                     "the first tick simply appends"
             }
         ]
+
+/// A colony nobody is raiding: the Raid fold reads hostiles, our creeps
+/// and the tiles of what is ours, so everything else stays empty.
+let quiet: Snapshot =
+    {
+        Time = 100
+        Spawns = []
+        RoomEnergy = Map.empty
+        Refillables = []
+        Sources = []
+        Controller = None
+        ConstructionSites = []
+        Creeps = []
+        Hostiles = []
+        Spatial = SpatialInfo.empty
+    }
+
+/// A hostile creep of the given owner and body standing on a tile.
+let raider id owner pos body : HostileInfo =
+    {
+        Id = id
+        Owner = owner
+        Pos = pos
+        Body = body
+    }
+
+/// One of ours with a full life ahead of it; immaterial but for its name.
+/// Whatever becomes of it, its own clock is not what did it.
+let ours name : CreepInfo =
+    {
+        Name = name
+        TicksToLive = 500
+        Fatigue = 0
+        Energy = 0
+        FreeCapacity = 50
+        Body = Map.ofList [ Work, 1; Carry, 1; Move, 1 ]
+    }
+
+/// One of ours on the last tick of its life: the engine's counter runs out
+/// on it, so it is gone next tick whatever the raiders do.
+let spent name = { ours name with TicksToLive = 1 }
+
+/// The squad of #66, cut to the one creep the lifecycle tests need.
+let squad = [ raider "TWX" "giaco" { X = 38; Y = 47 } [ Tough; Attack; Move ] ]
+
+/// A colony holding just these hostiles.
+let raid hostiles = { quiet with Hostiles = hostiles }
+
+/// #66's room in miniature, with something of ours to measure against:
+/// the tower's spawn at (10,40) and one of our creeps out at (9,44).
+let placed =
+    { quiet with
+        Refillables =
+            [
+                {
+                    Id = "spawn-1"
+                    FreeCapacity = 0
+                    Kind = BuiltKind.Spawn
+                }
+            ]
+        Creeps = [ ours "w1" ]
+        Spatial =
+            { SpatialInfo.empty with
+                TargetPositions = Map.ofList [ "spawn-1", { X = 10; Y = 40 } ]
+                CreepPositions = Map.ofList [ "w1", { X = 9; Y = 44 } ]
+            }
+    }
+
+/// Fold one Raid-log tick over a colony at the given tick, with a small
+/// ring cap and a short quiet gap so both are exercised in a few ticks
+/// rather than a few hundred.
+let raidTick t (colony: Snapshot) state =
+    foldRaids 3 5 { colony with Time = t } state
+
+/// The recorded episodes as (opened, last-seen) windows, oldest first.
+let windows (state: RaidState) =
+    state.Episodes |> List.map (fun e -> e.Opened, e.LastSeen)
+
+/// Every episode's roster rows, oldest episode first.
+let rosters (state: RaidState) =
+    state.Episodes |> List.collect (fun e -> Map.toList e.Roster)
+
+/// Every episode's recorded losses, oldest episode first.
+let losses (state: RaidState) =
+    state.Episodes |> List.collect (fun e -> e.Losses)
+
+[<Tests>]
+let episodeTests =
+    testList
+        "raid fold: episodes"
+        [
+            test "a colony nobody is raiding records nothing" {
+                let state = RaidState.empty |> raidTick 10 quiet |> raidTick 11 quiet
+
+                Expect.equal
+                    state
+                    RaidState.empty
+                    "a tick with no hostile and no open episode leaves the log as it found it"
+            }
+
+            test "the first hostile opens an episode and the ticks that follow extend it" {
+                let state =
+                    RaidState.empty
+                    |> raidTick 10 (raid squad)
+                    |> raidTick 11 (raid squad)
+                    |> raidTick 12 (raid squad)
+
+                Expect.equal
+                    (windows state)
+                    [ 10, 12 ]
+                    "one episode, opened once and carried to the last tick a hostile stood there"
+            }
+
+            test "a squad that steps out and back inside the quiet gap is one episode" {
+                // #66's shape: the same creeps re-entering over and over.
+                // The gap is five ticks here, and t15 is exactly five ticks
+                // after the last sighting, so the return is still the raid
+                // that is already open.
+                let state =
+                    (RaidState.empty, [ 10..15 ])
+                    ||> List.fold (fun state t ->
+                        state |> raidTick t (if t = 10 || t = 15 then raid squad else quiet))
+
+                Expect.equal
+                    (windows state)
+                    [ 10, 15 ]
+                    "a re-entry inside the gap extends the raid rather than opening a second"
+            }
+
+            test "a return after the gap has elapsed opens a second episode" {
+                let state =
+                    (RaidState.empty, [ 10..16 ])
+                    ||> List.fold (fun state t ->
+                        state |> raidTick t (if t = 10 || t = 16 then raid squad else quiet))
+
+                Expect.equal
+                    (windows state)
+                    [ (10, 10); (16, 16) ]
+                    "a gap wider than the quiet gap is a departure, and the next visit is a new raid"
+            }
+
+            test "the ring keeps the newest episodes and drops the oldest" {
+                // Four raids, each well clear of the quiet gap; the cap is three.
+                let state =
+                    (RaidState.empty, [ 10; 20; 30; 40 ])
+                    ||> List.fold (fun state t -> state |> raidTick t (raid squad))
+
+                Expect.equal
+                    (windows state)
+                    [ (20, 20); (30, 30); (40, 40) ]
+                    "only the newest cap-many raids survive"
+            }
+
+            test "an empty log folds like a fresh boot" {
+                // What a discarded subtree costs: the episodes it held, and
+                // nothing else — the next hostile simply opens a raid.
+                let state = RaidState.empty |> raidTick 10 (raid squad)
+
+                Expect.equal (windows state) [ 10, 10 ] "the first sighting simply opens an episode"
+            }
+        ]
+
+[<Tests>]
+let rosterTests =
+    testList
+        "raid fold: roster"
+        [
+            test "one row per hostile id, with its owner and its part counts" {
+                let twx = raider "TWX" "giaco" { X = 38; Y = 47 } [ Tough; Tough; Attack; Move ]
+                let ccv = raider "Ccv" "giaco" { X = 39; Y = 47 } [ RangedAttack; Heal; Move ]
+
+                let state =
+                    RaidState.empty
+                    |> raidTick 10 (raid [ twx; ccv ])
+                    |> raidTick 11 quiet
+                    |> raidTick 12 (raid [ twx ])
+                    |> raidTick 13 (raid [ twx; ccv ])
+
+                Expect.equal
+                    (rosters state)
+                    [
+                        "Ccv",
+                        {
+                            Owner = "giaco"
+                            Body = Map.ofList [ Move, 1; RangedAttack, 1; Heal, 1 ]
+                        }
+                        "TWX",
+                        {
+                            Owner = "giaco"
+                            Body = Map.ofList [ Move, 1; Attack, 1; Tough, 2 ]
+                        }
+                    ]
+                    "a squad reads as one row a creep, however often it re-enters"
+            }
+
+            test "a row keeps the body that entered the room, not what the tower left of it" {
+                let whole = raider "TWX" "giaco" { X = 38; Y = 47 } [ Tough; Tough; Attack; Move ]
+                let chewed = raider "TWX" "giaco" { X = 38; Y = 48 } [ Attack; Move ]
+
+                let state =
+                    RaidState.empty |> raidTick 10 (raid [ whole ]) |> raidTick 11 (raid [ chewed ])
+
+                Expect.equal
+                    (rosters state)
+                    [
+                        "TWX",
+                        {
+                            Owner = "giaco"
+                            Body = Map.ofList [ Move, 1; Attack, 1; Tough, 2 ]
+                        }
+                    ]
+                    "the first sighting wins: the roster answers what came, not what survived"
+            }
+        ]
+
+[<Tests>]
+let approachTests =
+    testList
+        "raid fold: closest approach"
+        [
+            test
+                "the closest approach is the smallest range to anything of ours, with its tile and tick" {
+                // The bottom exit band is a non-event; the same squad at the
+                // left door is not, and the record must separate them.
+                let far = raider "TWX" "giaco" { X = 38; Y = 47 } [ Attack; Move ]
+                let near = raider "TWX" "giaco" { X = 12; Y = 42 } [ Attack; Move ]
+
+                let state =
+                    RaidState.empty
+                    |> raidTick 10 { placed with Hostiles = [ far ] }
+                    |> raidTick 11 { placed with Hostiles = [ near ] }
+                    |> raidTick 12 { placed with Hostiles = [ far ] }
+
+                Expect.equal
+                    (state.Episodes |> List.map (fun e -> e.Closest))
+                    [
+                        Some
+                            {
+                                Range = 2
+                                Pos = { X = 12; Y = 42 }
+                                Tick = 11
+                            }
+                    ]
+                    "the minimum over the episode, on the tile and the tick it was reached"
+            }
+
+            test "a tie keeps the tick the raid first reached its closest" {
+                // Both tiles sit at range 2 — (12,42) from the spawn, (8,42)
+                // from both. Nothing gets nearer, so the second sighting must
+                // not overwrite the first.
+                let first = raider "TWX" "giaco" { X = 12; Y = 42 } [ Attack; Move ]
+                let again = raider "TWX" "giaco" { X = 8; Y = 42 } [ Attack; Move ]
+
+                let state =
+                    RaidState.empty
+                    |> raidTick 10 { placed with Hostiles = [ first ] }
+                    |> raidTick 11 { placed with Hostiles = [ again ] }
+
+                Expect.equal
+                    (state.Episodes |> List.map (fun e -> e.Closest))
+                    [
+                        Some
+                            {
+                                Range = 2
+                                Pos = { X = 12; Y = 42 }
+                                Tick = 10
+                            }
+                    ]
+                    "an equal range is not a nearer one: the tile and tick already recorded stand"
+            }
+
+            test "an owned creep counts as much as an owned structure" {
+                let state =
+                    RaidState.empty
+                    |> raidTick
+                        10
+                        { placed with
+                            Hostiles = [ raider "TWX" "giaco" { X = 9; Y = 46 } [ Attack; Move ] ]
+                        }
+
+                Expect.equal
+                    (state.Episodes |> List.map (fun e -> e.Closest))
+                    [
+                        Some
+                            {
+                                Range = 2
+                                Pos = { X = 9; Y = 46 }
+                                Tick = 10
+                            }
+                    ]
+                    "the nearer of the two owned tiles wins, and here that one is a creep of ours"
+            }
+
+            test "a colony the projection cannot place records no approach" {
+                let state = RaidState.empty |> raidTick 10 (raid squad)
+
+                Expect.equal
+                    (state.Episodes |> List.map (fun e -> e.Closest))
+                    [ None ]
+                    "absence is per-entry: an unmeasurable approach is None, never a zero range"
+            }
+        ]
+
+[<Tests>]
+let lossTests =
+    testList
+        "raid fold: losses"
+        [
+            test "a creep that goes missing under a raider is stamped at the tick it was last alive" {
+                // A name is missing the tick after its creep died, so t11's
+                // reading is a death during t10 — and t10 is inside the
+                // window the episode records.
+                let state =
+                    RaidState.empty
+                    |> raidTick
+                        10
+                        { (raid squad) with
+                            Creeps = [ ours "w1"; ours "w2" ]
+                        }
+                    |> raidTick
+                        11
+                        { (raid squad) with
+                            Creeps = [ ours "w1" ]
+                        }
+
+                Expect.equal
+                    (losses state)
+                    [ { Creep = "w2"; Tick = 10 } ]
+                    "the loss the Transition log prunes is the one this channel exists to keep"
+            }
+
+            test "the kill read on the first quiet tick is still the raid's" {
+                // The poke-and-heal shape of #66: the squad kills and steps
+                // straight back out, so the name goes missing on a tick with
+                // no hostile in the room. It died under the last sighting.
+                let state =
+                    RaidState.empty
+                    |> raidTick
+                        10
+                        { (raid squad) with
+                            Creeps = [ ours "w1"; ours "w2" ]
+                        }
+                    |> raidTick 11 { quiet with Creeps = [ ours "w1" ] }
+
+                Expect.equal
+                    (losses state)
+                    [ { Creep = "w2"; Tick = 10 } ]
+                    "the reading lags the death by a tick, and the tick it lands on is the sighting"
+            }
+
+            test "a creep gone deeper into the quiet gap is not charged to the raid" {
+                // Two ticks after the last sighting: whatever took this creep,
+                // no hostile was standing there when it was last seen alive.
+                let state =
+                    RaidState.empty
+                    |> raidTick
+                        10
+                        { (raid squad) with
+                            Creeps = [ ours "w1"; ours "w2" ]
+                        }
+                    |> raidTick 12 { quiet with Creeps = [ ours "w1" ] }
+
+                Expect.equal
+                    (losses state)
+                    []
+                    "the window is opened-to-last-seen, and attrition outside it is not the raid's"
+            }
+
+            test "a creep whose own clock ran out is not a loss" {
+                // Ordinary old age lands inside a raid window often enough to
+                // pad it: a creep on 1,500-tick life, a raid over 200. The
+                // Snapshot's TicksToLive tells the two apart before the fact.
+                let state =
+                    RaidState.empty
+                    |> raidTick
+                        10
+                        { (raid squad) with
+                            Creeps = [ ours "w1"; spent "w2" ]
+                        }
+                    |> raidTick
+                        11
+                        { (raid squad) with
+                            Creeps = [ ours "w1" ]
+                        }
+
+                Expect.equal
+                    (losses state)
+                    []
+                    "the record answers what the raid cost, and this one the raiders never touched"
+            }
+
+            test "a creep gone on the seam between two raids is charged to neither" {
+                // The gap elapses on the very tick a fresh hostile arrives:
+                // the creep was last alive during the old raid's silence, and
+                // the episode opening now has not seen it at all.
+                let state =
+                    RaidState.empty
+                    |> raidTick
+                        10
+                        { (raid squad) with
+                            Creeps = [ ours "w1"; ours "w2" ]
+                        }
+                    |> raidTick
+                        16
+                        { (raid squad) with
+                            Creeps = [ ours "w1" ]
+                        }
+
+                Expect.equal
+                    (windows state)
+                    [ (10, 10); (16, 16) ]
+                    "the gap made this a second raid"
+
+                Expect.equal
+                    (losses state)
+                    []
+                    "a fresh episode has no baseline of its own, so it opens owing nothing"
+            }
+
+            test "a creep that dies of old age outside any episode is recorded nowhere" {
+                let state =
+                    RaidState.empty
+                    |> raidTick
+                        10
+                        { quiet with
+                            Creeps = [ ours "w1"; ours "w2" ]
+                        }
+                    |> raidTick 11 { quiet with Creeps = [ ours "w1" ] }
+
+                Expect.equal
+                    state
+                    RaidState.empty
+                    "peacetime attrition opens no episode and leaves no loss behind"
+            }
+        ]

@@ -1568,6 +1568,7 @@ let censusSignatureTests =
                             [
                                 {
                                     Id = "h1"
+                                    Owner = "raider"
                                     Pos = { X = 30; Y = 25 }
                                     Body = [ Attack; Move ]
                                 }
@@ -4775,8 +4776,16 @@ let activations intents =
         | ActivateSafeMode id -> Some id
         | _ -> None)
 
-/// A hostile creep of the given body standing on the given tile.
-let hostileAt id pos body : HostileInfo = { Id = id; Pos = pos; Body = body }
+/// A hostile creep of the given body standing on the given tile. Its
+/// owner is immaterial to both reflexes — the Raid log is the only reader
+/// of that field (ADR 0028).
+let hostileAt id pos body : HostileInfo =
+    {
+        Id = id
+        Owner = "raider"
+        Pos = pos
+        Body = body
+    }
 
 /// A hostile creep of the given body, position immaterial.
 let hostile body = hostileAt "h-1" { X = 25; Y = 25 } body

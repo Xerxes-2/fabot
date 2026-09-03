@@ -1,6 +1,7 @@
-// One-shot CLI over the Transition log (ADR 0009): pull the observe
-// subtree from `Memory.fabot.observe`, flip the verbose list remotely, or
-// watch the console for a bounded window. Config via .env (loaded by
+// One-shot CLI over the observe channels — the Transition log (ADR 0009)
+// and the Raid log (ADR 0028): pull the observe subtree from
+// `Memory.fabot.observe`, flip the verbose list remotely, or watch the
+// console for a bounded window. Config via .env (loaded by
 // `node --env-file-if-exists=.env`), same as upload.mjs:
 //   SCREEPS_TOKEN   - auth token (required)
 //   SCREEPS_API_URL - API base, default https://screeps.com/season (seasonal server)
@@ -10,6 +11,7 @@
 // Usage:
 //   observe.mjs tasks              every creep's current Task with its Verdict reason
 //   observe.mjs timeline <creep>   one creep's Transition log, oldest first
+//   observe.mjs raids              the Raid log's episodes, newest first
 //   observe.mjs verbose            the verbose list as stored
 //   observe.mjs verbose add <creep>     put a creep on the verbose list
 //   observe.mjs verbose remove <creep>  take a creep off the verbose list
@@ -27,7 +29,7 @@ const fail = (msg) => {
 };
 
 const usage =
-  "usage: observe.mjs tasks [--json] | timeline <creep> [--json] | " +
+  "usage: observe.mjs tasks [--json] | timeline <creep> [--json] | raids [--json] | " +
   "verbose [add <creep> | remove <creep> | clear] [--json] | console --seconds N";
 
 const rawArgs = process.argv.slice(2);
@@ -49,7 +51,7 @@ const [command, ...rest] = args;
 const creepArg = rest[0];
 const [action, actionName] = rest;
 
-if (!["tasks", "timeline", "verbose", "console"].includes(command)) fail(usage);
+if (!["tasks", "timeline", "raids", "verbose", "console"].includes(command)) fail(usage);
 if (command === "timeline" && !creepArg) fail(usage);
 if (command === "verbose" && action !== undefined) {
   if (!["add", "remove", "clear"].includes(action)) fail(usage);
@@ -145,6 +147,58 @@ if (command === "console") {
       await new Promise((r) => setTimeout(r, 1000));
     }
     console.log(`verbose list is now [${next.join(", ")}]`);
+  }
+} else if (command === "raids") {
+  // ---- raids: the Raid log, colony-level and episodic --------------------
+
+  // The wire shape written by ObserveMemory.fs:
+  //   { episodes: [{ opened, last, roster: [{ id, owner, body: { part: n } }],
+  //                  closest?: { range, x, y, t }, losses: [{ creep, t }] }],
+  //     living: [creep] }
+  // Stored oldest first like the Transition log's ring, printed newest
+  // first. `closest` is simply absent when nothing of ours could be placed.
+  // The bot writes this leaf every tick, raid or no raid, so an absent leaf
+  // is a missing channel and never an empty one — a missing leaf comes back
+  // with no data, a missing intermediate (fresh respawn, no Memory.fabot at
+  // all) as the string "Incorrect memory path", and both fail loudly rather
+  // than reporting no raids. `living` is the fold's own baseline, scratch
+  // state and not part of the record, so --json prints the episodes alone.
+  const stored = await memoryGet("fabot.observe.raids");
+  if (stored == null || typeof stored !== "object") {
+    fail(
+      "no Raid log at Memory.fabot.observe.raids — " +
+        "an old bundle is still running, or the colony respawned and hasn't written one yet.",
+    );
+  }
+  const episodes = Array.isArray(stored.episodes) ? [...stored.episodes].reverse() : [];
+
+  if (json) {
+    console.log(JSON.stringify(episodes, null, 2));
+  } else if (episodes.length === 0) {
+    console.log("no raids recorded");
+  } else {
+    for (const e of episodes) {
+      console.log(`t${e.opened}-${e.last}  (${e.last - e.opened + 1} ticks)`);
+      for (const r of e.roster ?? []) {
+        const body = Object.entries(r.body ?? {})
+          .map(([part, n]) => `${n} ${part}`)
+          .join(" / ");
+        console.log(`  ${r.owner}  ${r.id}  ${body}`);
+      }
+      console.log(
+        e.closest
+          ? `  closest approach: range ${e.closest.range} ` +
+              `at (${e.closest.x},${e.closest.y}) on t${e.closest.t}`
+          : "  closest approach: nothing of ours could be placed",
+      );
+      const losses = e.losses ?? [];
+      console.log(
+        losses.length === 0
+          ? "  lost nothing"
+          : `  lost: ${losses.map((l) => `${l.creep} (t${l.t})`).join(", ")}`,
+      );
+      console.log("");
+    }
   }
 } else {
   // ---- tasks / timeline: reads over the Transition log ------------------
