@@ -337,12 +337,14 @@ let adjacentWalkable (atlas: Atlas) (pos: Pos) : Pos list =
     neighbours pos |> List.filter (fun tile -> (stepCost atlas.Spatial tile).IsSome)
 
 /// Chebyshev range at which a Task's action reaches its target (Screeps:
-/// harvest and transfer act at range 1, build and upgrade at range 3).
+/// harvest and transfer act at range 1; build, repair and upgrade at
+/// range 3).
 let private actionRange =
     function
     | Harvest _
     | Refill _ -> 1
     | Build _
+    | Repair _
     | Upgrade _ -> 3
 
 /// Id of the game object a Task acts on.
@@ -351,6 +353,7 @@ let private targetOf =
     | Harvest id
     | Refill id
     | Build id
+    | Repair id
     | Upgrade id -> id
 
 /// Seat tiles of a placed source: walkable (non-wall) neighbours of its

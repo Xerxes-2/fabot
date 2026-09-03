@@ -130,6 +130,13 @@ let private buildSpatial (spawn: ISpawn) : SpatialInfo =
             |> Array.filter (fun st -> st.structureType = structureRoad)
             |> Array.map (fun st -> posOf st.pos)
             |> Set.ofArray
+        // Hits on repairable kinds only — roads today (ADR 0010): fields
+        // nobody decides on stay out of the projection.
+        Hits =
+            structures
+            |> Array.filter (fun st -> st.structureType = structureRoad)
+            |> Array.map (fun st -> st.id, { Hits = st.hits; HitsMax = st.hitsMax })
+            |> Map.ofArray
     }
 
 let build () : Snapshot =

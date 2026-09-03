@@ -58,6 +58,8 @@ let private execute (intent: Intent) : Outcome =
     | TransferEnergyToStructure(creepName, structureId) ->
         withCreepTarget creepName structureId (fun c t -> c.transfer (t, "energy"))
     | BuildSite(creepName, siteId) -> withCreepTarget creepName siteId (fun c t -> c.build t)
+    | RepairStructure(creepName, structureId) ->
+        withCreepTarget creepName structureId (fun c t -> c.repair t)
     | UpgradeController(creepName, controllerId) ->
         withCreepTarget creepName controllerId (fun c t -> c.upgradeController t)
     | MoveCreep(creepName, direction) ->

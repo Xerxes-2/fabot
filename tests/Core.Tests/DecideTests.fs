@@ -2346,6 +2346,161 @@ let sayTests =
             }
         ]
 
+/// Project one structure of the given built kind carrying the given hits
+/// onto a snapshot — position-less: unpriceable geometry never counts
+/// against a Task (ADR 0004), so the pool and matching are exercised
+/// without terrain.
+let withHits id kind hits hitsMax (snapshot: Snapshot) =
+    { snapshot with
+        Spatial =
+            { snapshot.Spatial with
+                TargetKinds = Map.add id (Structure kind) snapshot.Spatial.TargetKinds
+                Hits = Map.add id { Hits = hits; HitsMax = hitsMax } snapshot.Spatial.Hits
+            }
+    }
+
+let repairTasks tasks =
+    tasks
+    |> List.choose (function
+        | Repair structureId -> Some structureId
+        | _ -> None)
+
+[<Tests>]
+let repairTests =
+    testList
+        "repair"
+        [
+            test "a road below half hits yields a Repair task; at half it yields none" {
+                let low = bareRespawn |> withHits "road-1" BuiltKind.Road 2499 5000
+                let half = bareRespawn |> withHits "road-1" BuiltKind.Road 2500 5000
+
+                Expect.equal
+                    (repairTasks (planTasks low))
+                    [ "road-1" ]
+                    "below the trigger: one Repair per ailing road"
+
+                Expect.isEmpty (repairTasks (planTasks half)) "at half hits the road is left alone"
+            }
+
+            test "a repaired-whole road leaves the pool" {
+                let whole = bareRespawn |> withHits "road-1" BuiltKind.Road 5000 5000
+                Expect.isEmpty (repairTasks (planTasks whole)) "a whole road needs nothing"
+            }
+
+            test "non-repairable kinds never enter the pool on low hits" {
+                // The Snapshot projects hits on repairable kinds only, but the
+                // kind gate holds in the Planner regardless of what arrives.
+                let snapshot =
+                    bareRespawn
+                    |> withHits "spawn-1" BuiltKind.Spawn 1 5000
+                    |> withHits "ext-1" BuiltKind.Extension 1 5000
+                    |> withHits "tower-1" BuiltKind.Tower 1 5000
+
+                Expect.isEmpty
+                    (repairTasks (planTasks snapshot))
+                    "low hits on spawn, extension or tower are a tower's business, not Repair's"
+            }
+
+            test "a surplus creep is sent to repair: assignment, intent and bubble" {
+                // Feeding satisfied — the spawn is full, the creep can carry no
+                // more — so the surplus tier is all that is left, and the
+                // half-hit road is its only member.
+                let snapshot =
+                    { bareRespawn with
+                        Controller = None
+                        Creeps = [ worker "w1" 50 0 ]
+                    }
+                    |> withHits "road-1" BuiltKind.Road 100 5000
+
+                let {
+                        Intents = intents
+                        Assignments = assignments
+                    } =
+                    decide snapshot Map.empty Set.empty
+
+                Expect.equal
+                    (Map.tryFind "w1" assignments)
+                    (Some(taskId (Repair "road-1")))
+                    "the surplus creep is assigned to the Repair"
+
+                Expect.contains
+                    intents
+                    (RepairStructure("w1", "road-1"))
+                    "the assignment emits the repair intent"
+
+                Expect.equal (sayIntents intents) [ "w1", "🔧" ] "a repairing creep says 🔧"
+            }
+
+            test "Repair never poaches from the feeding tier" {
+                // A hungry spawn and an ailing road bid for the same loaded
+                // creep: the feeding tier wins on rank, not pool order.
+                let snapshot =
+                    { bareRespawn with
+                        Sources = []
+                        Controller = None
+                        Refillables = [ refillable "spawn-1" 50 BuiltKind.Spawn ]
+                        Creeps = [ worker "w1" 50 0 ]
+                    }
+                    |> withHits "road-1" BuiltKind.Road 100 5000
+
+                let { Verdicts = verdicts } = decide snapshot Map.empty Set.empty
+
+                Expect.equal
+                    verdicts
+                    [ Verdict.Matched("w1", taskId (Refill "spawn-1"), MatchFactor.Rank) ]
+                    "the colony feeds itself before it patches roads: rank decided"
+            }
+
+            test "Repair never poaches from Harvest either" {
+                // A half-loaded creep fits both tiers — room to harvest,
+                // energy to spend — and the feeding tier wins on rank.
+                let snapshot =
+                    { bareRespawn with
+                        Sources = [ { Id = "src-a" } ]
+                        Controller = None
+                        Creeps = [ worker "w1" 25 25 ]
+                    }
+                    |> withHits "road-1" BuiltKind.Road 100 5000
+
+                let { Verdicts = verdicts } = decide snapshot Map.empty Set.empty
+
+                Expect.equal
+                    verdicts
+                    [ Verdict.Matched("w1", taskId (Harvest "src-a"), MatchFactor.Rank) ]
+                    "the economy is fed before roads are patched: rank decided"
+            }
+
+            test "an empty creep is inapplicable to Repair" {
+                // Nothing to spend: no energy makes Repair unworkable, and the
+                // remembered assignment is released rather than kept.
+                let snapshot =
+                    { bareRespawn with
+                        Sources = []
+                        Controller = None
+                        Creeps = [ worker "w1" 0 50 ]
+                    }
+                    |> withHits "road-1" BuiltKind.Road 100 5000
+
+                let remembered = Map.ofList [ "w1", taskId (Repair "road-1") ]
+
+                let {
+                        Verdicts = verdicts
+                        Assignments = assignments
+                    } =
+                    decide snapshot remembered Set.empty
+
+                Expect.contains
+                    verdicts
+                    (Verdict.Released("w1", taskId (Repair "road-1"), ReleaseReason.Inapplicable))
+                    "the empty creep's remembered Repair is released"
+
+                Expect.equal
+                    (Map.tryFind "w1" assignments)
+                    None
+                    "nothing else fits an empty creep here"
+            }
+        ]
+
 [<Tests>]
 let verdictTests =
     testList

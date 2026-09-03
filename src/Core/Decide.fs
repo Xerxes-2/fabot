@@ -122,7 +122,18 @@ let taskId =
     | Harvest sourceId -> $"harvest:{sourceId}"
     | Refill structureId -> $"refill:{structureId}"
     | Build siteId -> $"build:{siteId}"
+    | Repair structureId -> $"repair:{structureId}"
     | Upgrade controllerId -> $"upgrade:{controllerId}"
+
+/// The built kinds Repair keeps whole (ADR 0010): roads today, containers
+/// when they enter. Non-repairable kinds (spawn, extension, tower) never
+/// enter the pool on low hits, whatever the projection carries.
+let private repairableKinds = [ BuiltKind.Road ]
+
+/// The Repair trigger: a repairable structure enters the pool when its
+/// hits sink strictly below this fraction of max, and leaves it once
+/// repaired back over the line. A tunable, not part of ADR 0010.
+let private repairTrigger = 0.5
 
 /// Planner: rebuild this tick's full Task pool from the Snapshot. Pure and
 /// from scratch every tick — Tasks are never persisted.
@@ -136,10 +147,23 @@ let planTasks (snapshot: Snapshot) : Task list =
 
     let builds = snapshot.ConstructionSites |> List.map (fun site -> Build site.Id)
 
+    // A Repair per repairable structure below the trigger, in id order.
+    // The projection carries hits on repairable kinds only, but the kind
+    // gate is judged here — the Planner owns what enters the pool.
+    let repairs =
+        snapshot.Spatial.Hits
+        |> Map.toList
+        |> List.filter (fun (id, hits) ->
+            match Map.tryFind id snapshot.Spatial.TargetKinds with
+            | Some(Structure kind) when List.contains kind repairableKinds ->
+                float hits.Hits < repairTrigger * float hits.HitsMax
+            | _ -> false)
+        |> List.map (fst >> Repair)
+
     let upgrades =
         snapshot.Controller |> Option.toList |> List.map (fun c -> Upgrade c.Id)
 
-    harvests @ refills @ builds @ upgrades
+    harvests @ refills @ builds @ repairs @ upgrades
 
 /// Workforce target: how many creeps the colony maintains — the total Seat
 /// count across all sources, floored at minWorkforce. Derived fresh each
@@ -389,6 +413,7 @@ let private applicable (creep: CreepInfo) task =
     | Harvest _ -> has Work && creep.FreeCapacity > 0
     | Refill _ -> has Carry && creep.Energy > 0
     | Build _
+    | Repair _
     | Upgrade _ -> has Work && creep.Energy > 0
 
 let private intentFor (creep: CreepInfo) task =
@@ -396,6 +421,7 @@ let private intentFor (creep: CreepInfo) task =
     | Harvest sourceId -> HarvestSource(creep.Name, sourceId)
     | Refill structureId -> TransferEnergyToStructure(creep.Name, structureId)
     | Build siteId -> BuildSite(creep.Name, siteId)
+    | Repair structureId -> RepairStructure(creep.Name, structureId)
     | Upgrade controllerId -> UpgradeController(creep.Name, controllerId)
 
 /// Chat-bubble glyph of a Task: the whole colony's current matching is
@@ -405,6 +431,7 @@ let private glyphFor =
     | Harvest _ -> "⛏"
     | Refill _ -> "🔋"
     | Build _ -> "🔨"
+    | Repair _ -> "🔧"
     | Upgrade _ -> "⚡"
 
 /// The full downgrade timer per controller level (Screeps
@@ -431,8 +458,9 @@ let private downgradeDeadline level = fullDowngradeTimer level / 2
 
 /// Matching tier between applicable tasks (lower wins): feeding the economy
 /// (Harvest, spawn-feeding Refill) outranks sinking surplus into
-/// construction (Build), the controller (Upgrade), or the guns — Refill is
-/// the one Task whose rank layers by target (ADR 0010): a tower Refill is
+/// construction (Build), upkeep (Repair), the controller (Upgrade), or
+/// the guns — Refill is the one Task whose rank layers by target (ADR
+/// 0010): a tower Refill is
 /// surplus-tier, because the colony feeds its own reproduction before its
 /// guns. One exception: a controller inside the downgrade deadline makes
 /// Upgrade the colony's most urgent work, outranking even the feeding tier
@@ -446,7 +474,8 @@ let private rank (snapshot: Snapshot) task =
             |> List.exists (fun r -> r.Id = structureId && r.Kind = BuiltKind.Tower)
 
         if isTower then 1 else 0
-    | Build _ -> 1
+    | Build _
+    | Repair _ -> 1
     | Upgrade _ ->
         let urgent =
             snapshot.Controller

@@ -63,6 +63,10 @@ type IStructure =
     abstract structureType: string
     abstract store: IStore
     abstract pos: IRoomPosition
+    /// Current hit points.
+    abstract hits: int
+    /// Maximum hit points.
+    abstract hitsMax: int
 
 type IConstructionSite =
     abstract id: string
@@ -123,6 +127,7 @@ type ICreep =
     abstract harvest: target: obj -> int
     abstract transfer: target: obj * resource: string -> int
     abstract build: target: obj -> int
+    abstract repair: target: obj -> int
     abstract upgradeController: target: obj -> int
     /// Single-step move by direction constant (TOP = 1, clockwise). The
     /// only movement API the bot uses — moveTo is forbidden (ADR 0001).

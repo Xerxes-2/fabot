@@ -83,6 +83,10 @@ type ControllerInfo =
 /// A tile coordinate inside a room.
 type Pos = { X: int; Y: int }
 
+/// Current and maximum hit points of a repairable structure — what the
+/// Repair trigger is judged from (ADR 0010).
+type HitsInfo = { Hits: int; HitsMax: int }
+
 /// Three-state terrain of one room tile.
 type Terrain =
     | Plain
@@ -119,6 +123,9 @@ type SpatialInfo =
         /// Tiles holding a built road — built structures only, a road
         /// construction site is not yet a road (ADR 0010).
         Roads: Set<Pos>
+        /// Target id -> current/max hits, repairable kinds only (roads
+        /// today) — fields nobody decides on stay out (ADR 0010).
+        Hits: Map<string, HitsInfo>
     }
 
 [<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
@@ -133,6 +140,7 @@ module SpatialInfo =
             CreepPositions = Map.empty
             Obstacles = Set.empty
             Roads = Set.empty
+            Hits = Map.empty
         }
 
 /// What the decision layer knows about one construction site this tick.
@@ -189,6 +197,7 @@ type Task =
     | Harvest of sourceId: string
     | Refill of structureId: string
     | Build of siteId: string
+    | Repair of structureId: string
     | Upgrade of controllerId: string
 
 /// What kind of structure a placement Intent asks for.
@@ -244,6 +253,7 @@ type Intent =
     | HarvestSource of creepName: string * sourceId: string
     | TransferEnergyToStructure of creepName: string * structureId: string
     | BuildSite of creepName: string * siteId: string
+    | RepairStructure of creepName: string * structureId: string
     | UpgradeController of creepName: string * controllerId: string
     | MoveCreep of creepName: string * direction: Direction
     | SayCreep of creepName: string * message: string

@@ -641,6 +641,25 @@ let mayActTests =
                     "upgrade reaches at range 3"
             }
 
+            test "repair reaches at range 3, like build and upgrade" {
+                let atlasAt creepPos =
+                    { spatial
+                          [ "road-1", { X = 10; Y = 10 } ]
+                          [ for y in 10..15 -> { X = 10; Y = y }, Plain ] with
+                        CreepPositions = Map.ofList [ "w", creepPos ]
+                    }
+                    |> snapshotWith [ worker "w" ]
+                    |> ofSnapshot
+
+                Expect.isTrue
+                    (mayAct (atlasAt { X = 10; Y = 13 }) "w" (Repair "road-1"))
+                    "repair reaches at range 3"
+
+                Expect.isFalse
+                    (mayAct (atlasAt { X = 10; Y = 14 }) "w" (Repair "road-1"))
+                    "repair does not reach at range 4"
+            }
+
             test "a creep or target the projection cannot place never blocks the action" {
                 let atlas =
                     corridor [ "w", { X = 10; Y = 15 } ]
