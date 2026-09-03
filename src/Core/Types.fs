@@ -186,6 +186,13 @@ type HostileInfo =
 type CreepInfo =
     {
         Name: string
+        /// Ticks the creep still has to live — the engine counts down from
+        /// CREEP_LIFE_TIME. A creep still spawning is outside the
+        /// projection, so a projected creep always carries a real count.
+        /// The fact, not the judgement: whether it is expiring is this
+        /// count measured against the lead its replacement needs
+        /// (ADR 0026).
+        TicksToLive: int
         /// Fatigue points still to pay off; a creep with any cannot step
         /// this tick — the engine's move answers ERR_TIRED.
         Fatigue: int

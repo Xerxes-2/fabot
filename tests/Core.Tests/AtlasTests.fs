@@ -23,6 +23,7 @@ let snapshotWith creeps spatial =
 let worker name =
     {
         Name = name
+        TicksToLive = 1500
         Fatigue = 0
         Energy = 0
         FreeCapacity = 50
@@ -33,6 +34,7 @@ let worker name =
 let creepWith name energy body =
     {
         Name = name
+        TicksToLive = 1500
         Fatigue = 0
         Energy = energy
         FreeCapacity = 50
@@ -1504,6 +1506,148 @@ let haulRoundTripTests =
                         { X = 20; Y = 10 })
                     None
                     "unpriceable geometry hires nobody"
+            }
+        ]
+
+[<Tests>]
+let castWalkTicksTests =
+    testList
+        "atlas castWalkTicks"
+        [
+            // Corridor y = 10, x = 10..20: the spawn structure standing at
+            // (20,10) — an obstacle, so the one tile a replacement can be
+            // born on is (19,10) — and the tile it must reach nine steps
+            // further on at (10,10).
+            let corridorWith roads creeps =
+                { spatial
+                      [ "spawn-1", { X = 20; Y = 10 } ]
+                      [ for x in 10..20 -> { X = x; Y = 10 }, Plain ] with
+                    Obstacles = Set.singleton { X = 20; Y = 10 }
+                    Roads = roads
+                    CreepPositions = Map.ofList creeps
+                }
+                |> snapshotWith []
+                |> ofSnapshot
+
+            /// The Anchor row's shape empty: four Work and a Carry over one
+            /// Move, so a plain step costs 8 units.
+            let anchorBody = [ Work; Work; Work; Work; Carry; Move ]
+
+            test "the walk is priced for the body given, not for any creep standing there" {
+                // The lead's whole point (ADR 0026): an empty Anchor body
+                // pays 8 units a plain step, so the nine steps out of the
+                // spawner cost 72 half-ticks, 36 ticks. A hauler unit over
+                // the same ground carries no fatigue empty and rides the
+                // one-unit floor: 9 half-ticks, rounded up to 5.
+                Expect.equal
+                    (castWalkTicks
+                        (corridorWith Set.empty [])
+                        anchorBody
+                        { X = 20; Y = 10 }
+                        { X = 10; Y = 10 })
+                    (Some 36)
+                    "a slow body earns a long lead"
+
+                Expect.equal
+                    (castWalkTicks
+                        (corridorWith Set.empty [])
+                        [ Carry; Carry; Move ]
+                        { X = 20; Y = 10 }
+                        { X = 10; Y = 10 })
+                    (Some 5)
+                    "a hauler on the same ground earns a short one"
+            }
+
+            test "the walk starts beside the spawner, on the tile the engine places the body on" {
+                // The step out of the spawner's own tile is one the
+                // replacement never walks: the engine puts a finished creep
+                // on a free neighbour. Charging it would buy the lead a
+                // whole plain step — 4 ticks for this body — and cast the
+                // successor that much too early to be admitted to the tile
+                // it is walking to.
+                Expect.equal
+                    (castWalkTicks
+                        (corridorWith Set.empty [])
+                        anchorBody
+                        { X = 20; Y = 10 }
+                        { X = 19; Y = 10 })
+                    (Some 0)
+                    "a replacement is born beside the spawner, not moved there"
+            }
+
+            test "a road under the walk discounts it, as it discounts travel cost" {
+                // Road weight 1 quarters the Anchor's step to 4 units over
+                // the eight paved tiles it steps onto; the last step onto
+                // the unpaved (10,10) still costs 8. 40 half-ticks, 20.
+                Expect.equal
+                    (castWalkTicks
+                        (corridorWith (Set.ofList [ for x in 11..19 -> { X = x; Y = 10 } ]) [])
+                        anchorBody
+                        { X = 20; Y = 10 }
+                        { X = 10; Y = 10 })
+                    (Some 20)
+                    "the trunk shortens a succession"
+            }
+
+            test "the pricing is traffic-blind: today's crowd never moves a succession" {
+                // A lead is planning, not routing — the same corridor with
+                // a creep parked mid-lane prices identically, with no
+                // occupancy surcharge.
+                Expect.equal
+                    (castWalkTicks
+                        (corridorWith Set.empty [ "w", { X = 15; Y = 10 } ])
+                        anchorBody
+                        { X = 20; Y = 10 }
+                        { X = 10; Y = 10 })
+                    (Some 36)
+                    "a standing creep is not a detour a replacement will still face"
+            }
+
+            test "an unreachable tile prices no walk" {
+                let gapped =
+                    { spatial
+                          [ "spawn-1", { X = 20; Y = 10 } ]
+                          [
+                              for x in 10..20 do
+                                  if x <> 15 then
+                                      { X = x; Y = 10 }, Plain
+                          ] with
+                        Obstacles = Set.singleton { X = 20; Y = 10 }
+                    }
+                    |> snapshotWith []
+                    |> ofSnapshot
+
+                Expect.equal
+                    (castWalkTicks
+                        gapped
+                        [ Work; Carry; Move ]
+                        { X = 20; Y = 10 }
+                        { X = 10; Y = 10 })
+                    None
+                    "unpriceable geometry leads nobody"
+            }
+
+            test "a spawner with no free neighbour prices no walk" {
+                // The other half of ADR 0004's totality: there is nowhere
+                // for the replacement to be born, so the walk is
+                // unpriceable and the row leads nobody.
+                let walled =
+                    { spatial
+                          [ "spawn-1", { X = 20; Y = 10 } ]
+                          [ for x in 10..20 -> { X = x; Y = 10 }, Plain ] with
+                        Obstacles = Set.ofList [ { X = 20; Y = 10 }; { X = 19; Y = 10 } ]
+                    }
+                    |> snapshotWith []
+                    |> ofSnapshot
+
+                Expect.equal
+                    (castWalkTicks
+                        walled
+                        [ Work; Carry; Move ]
+                        { X = 20; Y = 10 }
+                        { X = 10; Y = 10 })
+                    None
+                    "a spawner that can place nothing leads nobody"
             }
         ]
 

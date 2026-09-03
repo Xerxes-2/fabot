@@ -220,6 +220,7 @@ function buildWorld() {
       id: `creep-${name}`,
       name,
       spawning: false,
+      ticksToLive: 1500,
       fatigue: 0,
       pos,
       body: body(spec),

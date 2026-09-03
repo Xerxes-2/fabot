@@ -324,6 +324,11 @@ let private haulerQuota (snapshot: Snapshot) atlas : int =
 /// a body's replacement cost is amortized over.
 let private creepLifetime = 1500
 
+/// Screeps CREEP_SPAWN_TIME: the ticks a spawner spends per body part —
+/// the half of a lead that is paid before the replacement takes its first
+/// step.
+let private spawnTicksPerPart = 3
+
 /// Screeps UPGRADE_CONTROLLER_POWER's energy cost: what one Work part
 /// drains per upgrade tick — the rate an upgrade mouth eats income at.
 let private upgradeDrainPerWork = 1
@@ -390,6 +395,72 @@ let private isHaulerBody (creep: CreepInfo) =
 
     count Work = 0 && count Carry > 0
 
+/// The pattern row a living body was cast from, read off the parts alone
+/// (ADR 0006): more Work than Move is the anchor row, no Work beside a
+/// Carry is the hauler row, and every other body is the generalist. The
+/// row is what sizes the replacement a lead prices (ADR 0026), so the one
+/// rule serves every row and none of them needs a constant of its own.
+let private patternOf atlas (creep: CreepInfo) =
+    if Atlas.workHeavy atlas creep.Name then anchorPattern
+    elif isHaulerBody creep then haulerPattern
+    else workerPattern
+
+/// A creep's lead (ADR 0026): the ticks its replacement needs to stand
+/// where it stands — the successor body's cast time plus that body's walk
+/// out of the spawn, priced for the successor's own fatigue factor and not
+/// the incumbent's. The body is the creep's own row at the bank's
+/// capacity, so a slow Anchor earns a long lead and a hauler on a trunk a
+/// short one. The walk starts beside the spawner rather than on it, where
+/// the engine actually places the finished creep: a lead that charged the
+/// step out of the spawner's tile would cast the successor that much too
+/// early and leave it reading the incumbent's Post as full for the first
+/// ticks of its life — the mispricing ADR 0026 names NoneFree as the
+/// symptom of. Several spawns resolve as the hauler quota resolves them,
+/// at the cheapest: the shortest lead is the optimistic bound on when a
+/// replacement could stand there, and the row's quota is already read that
+/// way — which spawn the colony actually casts from is the spawn fold's
+/// own business. Geometry that prices nothing leads nobody (ADR 0004) — a
+/// creep the projection cannot place, a colony whose spawns it cannot
+/// place, and a tile no spawn can reach each answer 0, and a lead of 0
+/// leaves every living creep counted.
+let private leadOf (snapshot: Snapshot) atlas (creep: CreepInfo) : int =
+    let pattern = patternOf atlas creep
+
+    let tile =
+        Atlas.placedCreeps atlas
+        |> List.tryPick (fun (name, pos) -> if name = creep.Name then Some pos else None)
+
+    match tile with
+    | None -> 0
+    | Some tile ->
+        snapshot.Spawns
+        |> List.choose (fun s ->
+            match Atlas.positionOf atlas s.Id with
+            | None -> None
+            | Some spawnPos ->
+                let bank =
+                    snapshot.RoomEnergy
+                    |> Map.tryFind s.RoomName
+                    |> Option.defaultValue { Available = 0; Capacity = 0 }
+
+                let body = bodyFor pattern bank.Capacity
+
+                Atlas.castWalkTicks atlas body spawnPos tile
+                |> Option.map (fun walk -> spawnTicksPerPart * List.length body + walk))
+        |> function
+            | [] -> 0
+            | leads -> List.min leads
+
+/// Whether a creep is expiring (ADR 0026): its remaining life is at or
+/// under its lead, so it will be dead before a replacement cast now could
+/// stand where it stands. It leaves the workforce's living count and its
+/// row's gap, which is what casts the successor while it still works. It
+/// is never released for it — anti-thrash keeps it on its Task to the last
+/// tick, and the Post the two share for the lead's duration is the
+/// succession, not an oversell.
+let private expiring (snapshot: Snapshot) atlas (creep: CreepInfo) =
+    creep.TicksToLive <= leadOf snapshot atlas creep
+
 /// Pre-Task bootstrap step: spawn Intents needed to keep the workforce at
 /// the Workforce target. Spawning is a colony-level need, not a Task creeps
 /// get matched to, so it sits beside the Planner/Matcher pipeline rather
@@ -402,7 +473,18 @@ let private planSpawns (snapshot: Snapshot) atlas (haulerQuota: int) : Intent li
     // inside it by construction, never on top of it.
     let anchorQuota = Atlas.posts atlas |> Set.count
     let target = workforceTarget snapshot atlas anchorQuota haulerQuota
-    let deficit = target - List.length snapshot.Creeps
+
+    // The deficit and both row gaps count the creeps that will still be
+    // alive when a replacement could arrive: an expiring creep is already
+    // outside the count (ADR 0026), so its successor is cast while it
+    // still works rather than after it dies. The disaster fallback below
+    // still reads the creep list itself — an expiring creep can refill an
+    // extension, and a colony holding one is not the empty one.
+    let living =
+        snapshot.Creeps
+        |> List.filter (fun creep -> not (expiring snapshot atlas creep))
+
+    let deficit = target - List.length living
 
     // A body is sized to the bank's capacity and cast the tick the bank
     // holds its cost (ADR 0021) — a full bank for rows priced at
@@ -433,14 +515,13 @@ let private planSpawns (snapshot: Snapshot) atlas (haulerQuota: int) : Intent li
         // — and the worker row's quota is whatever the target has left.
         let anchorGap =
             anchorQuota
-            - (snapshot.Creeps
+            - (living
                |> List.filter (fun creep -> Atlas.workHeavy atlas creep.Name)
                |> List.length)
             |> max 0
 
         let haulerGap =
-            haulerQuota - (snapshot.Creeps |> List.filter isHaulerBody |> List.length)
-            |> max 0
+            haulerQuota - (living |> List.filter isHaulerBody |> List.length) |> max 0
 
         // Idle spawns draw from their room's one bank in list order — each
         // body debits the budget the next spawn sees, so the same energy is
@@ -1412,32 +1493,84 @@ let matchCreeps
     let capacities = taskCapacities snapshot atlas
     let postCaps = postCapacities snapshot atlas
 
+    // Each living creep's remaining life, hoisted for the tick as the two
+    // cap tables are: the capacity gate asks it once per holder per judged
+    // pair, and the answer is a Snapshot fact.
+    let lives =
+        snapshot.Creeps |> List.map (fun c -> c.Name, c.TicksToLive) |> Map.ofList
+
+    // The crowding component of the matching key (ADR 0002): every holder,
+    // counted at this tick. Arrival discounts what a Task's cap counts
+    // (ADR 0026), never what the key does — spreading creeps over Tasks is
+    // a judgement about now, and nothing in 0026 revises the key.
     let load (acc: Assignments) tid =
         acc |> Map.filter (fun _ assigned -> assigned = tid) |> Map.count
 
+    // The holders a candidate actually competes with, counted at arrival
+    // (ADR 0026): two creeps hold the same standing room against each
+    // other only while both are standing on it, so a holder counts against
+    // a candidate exactly when their two stays overlap. A holder dead
+    // before the candidate arrives has left the tile — which is what lets
+    // a successor leave the spawn while its predecessor still digs — and a
+    // holder still walking when the candidate dies never reaches it. The
+    // window is read from both ends, so the fold's creep-name order cannot
+    // decide which of a pair keeps the Task: ADR 0026 promises that for a
+    // succession, and a one-ended window would have kept it only there,
+    // letting a candidate a whole spawn-and-walk away evict a garrison
+    // that is nowhere near its own lead. A walk the Atlas cannot price has
+    // no arrival, and counts from now.
+    let holdersAt (acc: Assignments) (candidate: CreepInfo) task arrival =
+        let tid = taskId task
+
+        let overlaps name =
+            let alive =
+                match arrival with
+                | None -> true
+                | Some ticks -> Map.tryFind name lives |> Option.forall (fun life -> life >= ticks)
+
+            let arrived =
+                match Atlas.travelCost atlas name task with
+                | None -> true
+                | Some cost -> arrivalTicks cost <= candidate.TicksToLive
+
+            alive && arrived
+
+        acc
+        |> Map.toList
+        |> List.choose (fun (name, assigned) ->
+            if assigned = tid && overlaps name then Some name else None)
+
     // A heavy body is judged against both caps (ADR 0024): the Seat count
     // it shares with every other harvester, and the Post count only its own
-    // kind competes for.
-    let heavyLoad (acc: Assignments) tid =
-        acc
-        |> Map.filter (fun name assigned -> assigned = tid && Atlas.workHeavy atlas name)
-        |> Map.count
+    // kind competes for. Only Harvest is capped at all, so the holders are
+    // gathered inside the capped arms — the Refills, Withdraws and surplus
+    // work the pool is mostly made of never walk the assignment map.
+    let hasCapacity (creep: CreepInfo) acc task arrival =
+        let tid = taskId task
+        let seatCap = Map.tryFind tid capacities
 
-    let hasCapacity (creep: CreepInfo) acc tid =
-        let withinSeats =
-            match Map.tryFind tid capacities with
-            | Some cap -> load acc tid < cap
-            | None -> true
-
-        let withinPosts =
+        let postCap =
             if Atlas.workHeavy atlas creep.Name then
-                match Map.tryFind tid postCaps with
-                | Some cap -> heavyLoad acc tid < cap
-                | None -> true
+                Map.tryFind tid postCaps
             else
-                true
+                None
 
-        withinSeats && withinPosts
+        match seatCap, postCap with
+        | None, None -> true
+        | _ ->
+            let holders = holdersAt acc creep task arrival
+
+            let withinSeats =
+                match seatCap with
+                | Some cap -> List.length holders < cap
+                | None -> true
+
+            let withinPosts =
+                match postCap with
+                | Some cap -> (holders |> List.filter (Atlas.workHeavy atlas) |> List.length) < cap
+                | None -> true
+
+            withinSeats && withinPosts
 
     // Capacity applies to remembered assignments too: memory can carry an
     // oversell from before a cap existed (e.g. across a redeploy). So does
@@ -1449,6 +1582,11 @@ let matchCreeps
     // ADR 0013 got from the Task vanishing, now under its own reason. Each
     // failed gate names the release; a dead creep's assignment drops
     // silently — Verdicts attribute to living creeps only.
+    // One exemption, ADR 0026's own: an expiring creep is never released
+    // over capacity. Its successor is cast and matched while it still
+    // works, and where the two do overlap on the tile — a lead longer than
+    // the successor's walk — the exemption is what keeps the fold's
+    // creep-name order from deciding which of them holds the Post.
     let kept, released =
         ((Map.empty, []), assignments)
         ||> Map.fold (fun (acc, released) name tid ->
@@ -1462,19 +1600,33 @@ let matchCreeps
                 | None -> release ReleaseReason.TaskGone
                 | Some task when not (applicable atlas creep task) ->
                     release ReleaseReason.Inapplicable
-                | Some _ when not (hasCapacity creep acc tid) -> release ReleaseReason.OverCapacity
                 | Some task ->
-                    match Atlas.travelCost atlas creep.Name task with
-                    | None -> release ReleaseReason.Unreachable
-                    | Some cost when tooEarly snapshot atlas creep task cost ->
-                        release ReleaseReason.TooEarly
-                    | Some _ -> Map.add name tid acc, released)
+                    // The cost is read one gate before it is spent, exactly
+                    // as the fresh cascade below reads it: capacity counts
+                    // holders at this holder's own arrival (ADR 0026).
+                    let cost = Atlas.travelCost atlas creep.Name task
+
+                    if
+                        not (hasCapacity creep acc task (Option.map arrivalTicks cost))
+                        && not (expiring snapshot atlas creep)
+                    then
+                        release ReleaseReason.OverCapacity
+                    else
+                        match cost with
+                        | None -> release ReleaseReason.Unreachable
+                        | Some cost when tooEarly snapshot atlas creep task cost ->
+                            release ReleaseReason.TooEarly
+                        | Some _ -> Map.add name tid acc, released)
 
     // One gate cascade judges every (creep, Task) pair — rejected at the
     // first matching gate it fails (applicable, capacity, reachable, in
-    // time) or scored on the full key when none does. The arrival gate
-    // comes last of the four because it is priced from the travel cost the
-    // reachability gate computes. The Matcher's candidates and a verbose
+    // time) or scored on the full key when none does. The travel cost is
+    // priced once, above the capacity gate, because capacity counts
+    // holders at the candidate's arrival (ADR 0026) and the arrival gate
+    // below spends the very same number. The order of the gates is
+    // unchanged by that: a candidate the Atlas cannot price has no arrival
+    // to count holders at, every holder counts against it, and it reports
+    // the rejection it always did. The Matcher's candidates and a verbose
     // Scoring both read from here, so the narration can never drift from
     // what actually decided the match.
     let judge acc (creep: CreepInfo) task =
@@ -1482,14 +1634,17 @@ let matchCreeps
 
         if not (applicable atlas creep task) then
             Candidate.Rejected(tid, RejectReason.Inapplicable)
-        elif not (hasCapacity creep acc tid) then
-            Candidate.Rejected(tid, RejectReason.CapacityFull)
         else
-            match Atlas.travelCost atlas creep.Name task with
-            | None -> Candidate.Rejected(tid, RejectReason.Unreachable)
-            | Some cost when tooEarly snapshot atlas creep task cost ->
-                Candidate.Rejected(tid, RejectReason.TooEarly)
-            | Some cost -> Candidate.Scored(tid, rank snapshot task, cost, load acc tid)
+            let cost = Atlas.travelCost atlas creep.Name task
+
+            if not (hasCapacity creep acc task (Option.map arrivalTicks cost)) then
+                Candidate.Rejected(tid, RejectReason.CapacityFull)
+            else
+                match cost with
+                | None -> Candidate.Rejected(tid, RejectReason.Unreachable)
+                | Some cost when tooEarly snapshot atlas creep task cost ->
+                    Candidate.Rejected(tid, RejectReason.TooEarly)
+                | Some cost -> Candidate.Scored(tid, rank snapshot task, cost, load acc tid)
 
     let assignOne (acc, verdicts) (creep: CreepInfo) =
         let verdicts =

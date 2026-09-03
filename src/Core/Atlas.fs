@@ -36,6 +36,20 @@ type Atlas =
             /// flood. Each flood is a distance and a predecessor-index
             /// array over tile indices.
             Floods: Map<Pos * FatigueFactor, Lazy<int[] * int[]>>
+            /// Memoised traffic-blind flood out of a spawner's tile, per
+            /// (spawner tile, fatigue factor), for bodies the Snapshot does
+            /// not carry: a lead prices a replacement that has not been
+            /// cast yet (ADR 0026), so its factor is in no creep's entry
+            /// and the Floods memo cannot be laid for it in advance. One
+            /// flood per row per spawn a tick, however many creeps that row
+            /// is deriving a lead for. The hauler quota's round trip, the
+            /// other traffic-blind query, keeps its own uncached floods:
+            /// its origins are containers rather than spawners, so it
+            /// shares no key, and it is itself memoised on the census
+            /// signature (ADR 0017) — it runs only when the room changes.
+            /// A mutable table for the same reason WorkAreas is one, and
+            /// per-tick by the same construction.
+            Walks: System.Collections.Generic.Dictionary<Pos * FatigueFactor, int[]>
             /// Work Area per Task, built at most once per tick and shared
             /// by every query that stands a creep in one — the Floods memo
             /// on a key set the Snapshot does not carry, so a mutable
@@ -128,6 +142,21 @@ let private fatigueFactorOf (creep: CreepInfo) : FatigueFactor =
         MoveParts = count Move
     }
 
+/// The fatigue factor of a body list carrying nothing — the shape a body
+/// leaves the spawner in and comes back to a container in. Beside
+/// fatigueFactorOf, which reads a living creep's parts and the load it is
+/// carrying right now; this one reads a body the projection carries no
+/// creep for: the hauler quota's candidate body (ADR 0012) and the
+/// replacement a lead prices (ADR 0026).
+let private emptyFactorOf (body: BodyPart list) : FatigueFactor =
+    let count part =
+        body |> List.filter ((=) part) |> List.length
+
+    {
+        FatigueParts = List.length body - count Move - count Carry
+        MoveParts = count Move
+    }
+
 /// Cost units the body needs to step onto a tile of the given terrain
 /// weight (Screeps fatigue): the step generates weight fatigue per
 /// fatigue-generating part, each Move part pays off 2 per tick — so the
@@ -142,20 +171,24 @@ let private stepUnits (factor: FatigueFactor) weight =
     else
         Some(max 1 ((weight * factor.FatigueParts + factor.MoveParts - 1) / factor.MoveParts))
 
-/// Dijkstra flood over the weight grid from `start`, priced in cost units
-/// for one fatigue factor: cheapest travel cost to every reachable tile
-/// (`unreached` elsewhere), plus each tile's predecessor index on a
-/// cheapest path (-1 elsewhere). This is the tick's hottest loop, so it
-/// runs on flat arrays with a binary min-heap of dist-then-index keys —
-/// the key ordering also keeps tie-breaking deterministic. The start tile
-/// costs 0 even when it cannot be stepped onto — the creep already stands
-/// there. A tile some creep occupies costs occupancyPenalty extra, so
-/// paths detour around standing traffic when a detour is cheaper.
-let private floodFrom
+/// Dijkstra flood over the weight grid from every tile in `starts`,
+/// priced in cost units for one fatigue factor: cheapest travel cost to
+/// every reachable tile (`unreached` elsewhere), plus each tile's
+/// predecessor index on a cheapest path (-1 elsewhere). This is the tick's
+/// hottest loop, so it runs on flat arrays with a binary min-heap of
+/// dist-then-index keys — the key ordering also keeps tie-breaking
+/// deterministic. Every start tile costs 0 even when it cannot be stepped
+/// onto — a creep already stands there, or is about to be placed there.
+/// Several starts price a body that may begin anywhere in a set at no
+/// step's cost, which is how a spawner places a finished creep beside
+/// itself (ADR 0026). A tile some creep occupies costs occupancyPenalty
+/// extra, so paths detour around standing traffic when a detour is
+/// cheaper.
+let private floodFromAll
     (weights: int[])
     (occupied: bool[])
     (factor: FatigueFactor)
-    (start: Pos)
+    (starts: Pos list)
     : int[] * int[] =
     let dist = Array.create tileCount unreached
     let parents = Array.create tileCount -1
@@ -202,9 +235,12 @@ let private floodFrom
 
         top
 
-    let startIndex = indexOf start
-    dist.[startIndex] <- 0
-    push startIndex
+    for start in starts do
+        let startIndex = indexOf start
+
+        if dist.[startIndex] <> 0 then
+            dist.[startIndex] <- 0
+            push startIndex
 
     while heap.Count > 0 do
         let key = pop ()
@@ -239,6 +275,11 @@ let private floodFrom
                                     push (candidate * tileCount + next)
 
     dist, parents
+
+/// The one-origin flood every query but the lead's walk wants: a creep
+/// prices from the tile it stands on.
+let private floodFrom weights occupied factor (start: Pos) =
+    floodFromAll weights occupied factor [ start ]
 
 let ofSnapshot (snapshot: Snapshot) : Atlas =
     let spatial = snapshot.Spatial
@@ -277,6 +318,7 @@ let ofSnapshot (snapshot: Snapshot) : Atlas =
                 let factor = Map.find name factors
                 (pos, factor), lazy (floodFrom weights occupied factor pos))
             |> Map.ofList
+        Walks = System.Collections.Generic.Dictionary()
         WorkAreas = System.Collections.Generic.Dictionary()
         HeavyAreas = System.Collections.Generic.Dictionary()
         Heavy =
@@ -511,6 +553,23 @@ let private buildWorkArea (atlas: Atlas) (task: Task) : Set<Pos> =
                             tile
             ]
 
+/// Build-once-per-tick over one of the Atlas's mutable tables: the shape
+/// every key set the Snapshot does not carry is memoised through — Work
+/// Areas, their Work-heavy narrowing, and the lead's walks. No reader can
+/// observe whether the answer was built or recalled, and the Atlas is
+/// rebuilt every tick, so each table is per-tick by construction.
+let private memoised
+    (table: System.Collections.Generic.Dictionary<'key, 'value>)
+    (key: 'key)
+    (build: unit -> 'value)
+    : 'value =
+    match table.TryGetValue key with
+    | true, value -> value
+    | _ ->
+        let value = build ()
+        table.[key] <- value
+        value
+
 /// Work Area of a Task, body-blind: the passable tiles within the action's
 /// range of its target. The base geometry `posts` itself is derived from
 /// (through the controller's Upgrade area), so it stays a pure function of
@@ -518,20 +577,7 @@ let private buildWorkArea (atlas: Atlas) (task: Task) : Set<Pos> =
 /// for a Work-heavy harvester (ADR 0020). Empty when the
 /// projection cannot place the target. Memoised per Task for the tick: the
 /// same area is asked for once per creep the Matcher prices and again by
-/// the Emitter and Resolver, and none of those readers can observe whether
-/// the set was built or recalled.
-let private memoised
-    (table: System.Collections.Generic.Dictionary<Task, Set<Pos>>)
-    (task: Task)
-    (build: unit -> Set<Pos>)
-    : Set<Pos> =
-    match table.TryGetValue task with
-    | true, area -> area
-    | _ ->
-        let area = build ()
-        table.[task] <- area
-        area
-
+/// the Emitter and Resolver.
 let workArea (atlas: Atlas) (task: Task) : Set<Pos> =
     memoised atlas.WorkAreas task (fun () -> buildWorkArea atlas task)
 
@@ -813,16 +859,46 @@ let haulRoundTripTicks (atlas: Atlas) (body: BodyPart list) (from: Pos) (sink: P
                 MoveParts = count Move
             }
 
-    let empty =
-        legUnits
-            {
-                FatigueParts = List.length body - count Move - count Carry
-                MoveParts = count Move
-            }
+    let empty = legUnits (emptyFactorOf body)
 
     match loaded, empty with
     | Some out, Some back -> Some((out + back + 1) / 2)
     | _ -> None
+
+/// The walk in whole ticks a freshly cast body needs to stand on a tile
+/// (ADR 0026) — the half of a lead that is paid after the spawner is done.
+/// Keyed on a body rather than a creep name, because the body being priced
+/// has not been cast yet: nothing in the projection carries its factor,
+/// and travel cost would price an unknown name as a bare
+/// one-part-one-Move body. The body is priced empty, as a creep leaves the
+/// spawner. The walk starts on the tiles *beside* the spawner, not on the
+/// spawner's own tile: the engine places a finished creep on a free
+/// neighbour and it pays no step to get there, so charging that step would
+/// buy a lead ticks the replacement never walks — and, since the goal tile
+/// is the incumbent's, would sell the successor a cap its predecessor
+/// still reads as full. Over the same weights as travel cost — a road
+/// discounts the walk exactly as it discounts a creep's — but
+/// traffic-blind, like the hauler quota's round trip: a lead is planning,
+/// not routing, the walk it prices does not start until the body is cast,
+/// and the goal tile is the very tile the creep being replaced stands on —
+/// so the occupancy surcharge would add its own step to every lead, every
+/// tick, for a crowd of one that will be dead. Cost units are half-ticks
+/// and round up, the same halving arrival uses. None when the goal is
+/// unreachable, and none when the spawner has no free neighbour to be born
+/// on — unpriceable geometry leads nobody (ADR 0004).
+let castWalkTicks (atlas: Atlas) (body: BodyPart list) (spawn: Pos) (goal: Pos) : int option =
+    let factor = emptyFactorOf body
+
+    let dist =
+        memoised atlas.Walks (spawn, factor) (fun () ->
+            let dist, _ =
+                floodFromAll atlas.Weights noTraffic factor (adjacentWalkable atlas spawn)
+
+            dist)
+
+    match dist.[indexOf goal] with
+    | d when d = unreached -> None
+    | d -> Some((d + 1) / 2)
 
 /// Cheapest raw-terrain path for a trunk road (ADR 0011): plain 2, swamp
 /// 10 — no road discount and no occupancy surcharge, so the line neither

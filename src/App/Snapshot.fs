@@ -271,6 +271,7 @@ let build () : Snapshot =
             |> Array.map (fun c ->
                 {
                     Name = c.name
+                    TicksToLive = c.ticksToLive
                     Fatigue = c.fatigue
                     Energy = c.store.getUsedCapacity "energy"
                     FreeCapacity = c.store.getFreeCapacity "energy"

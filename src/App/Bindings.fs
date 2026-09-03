@@ -144,6 +144,9 @@ type ICreep =
     abstract name: string
     /// True while the creep is still being built inside the spawn.
     abstract spawning: bool
+    /// Ticks the creep has left to live; undefined only while it is still
+    /// spawning, which the projection filters out.
+    abstract ticksToLive: int
     /// Fatigue points outstanding; the creep cannot move while > 0.
     abstract fatigue: int
     abstract store: IStore
