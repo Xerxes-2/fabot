@@ -6,9 +6,11 @@
     "format": "dotnet fantomas src tests",
     "format:check": "dotnet fantomas --check src tests",
     "upload": "node --env-file-if-exists=.env scripts/upload.mjs",
+    "observe": "node --env-file-if-exists=.env scripts/observe.mjs",
     "deploy": "npm run build && npm run upload"
   },
   "devDependencies": {
-    "esbuild": "^0.25.0"
+    "esbuild": "^0.25.0",
+    "screeps-api": "^1.16.1"
   }
 }
