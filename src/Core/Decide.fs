@@ -166,7 +166,7 @@ let workerBodyFor capacity = bodyFor workerPattern capacity
 let taskId =
     function
     | Harvest sourceId -> $"harvest:{sourceId}"
-    | Withdraw containerId -> $"withdraw:{containerId}"
+    | Withdraw storeId -> $"withdraw:{storeId}"
     | Refill structureId -> $"refill:{structureId}"
     | Build siteId -> $"build:{siteId}"
     | Repair structureId -> $"repair:{structureId}"
@@ -255,6 +255,7 @@ let planTasks (snapshot: Snapshot) : Task list =
         |> List.choose (fun (id, k) -> if k = Structure kind then Some id else None)
 
     let containers = targetsOfKind BuiltKind.Container
+    let storages = targetsOfKind BuiltKind.Storage
 
     let withdraws =
         containers |> List.filter (fun id -> stored id > 0) |> List.map Withdraw
@@ -286,9 +287,32 @@ let planTasks (snapshot: Snapshot) : Task list =
     // Layout puts the one Storage on the cluster's first pick, so no
     // position rule could name it.
     let storageRefills =
-        targetsOfKind BuiltKind.Storage
+        storages
         |> List.filter (fun id -> stored id < storageCapacity)
         |> List.map Refill
+
+    // The stock's other half (ADR 0023): a stocked Storage is a Withdraw
+    // source too, but only while the pool holds a Refill whose target is
+    // not the stock itself — some sink other than it has room. Its own
+    // Refill is deliberately no such sink: counting it would gate the
+    // Storage open against itself for as long as it had room, and a hauler
+    // beside a store that is both its only intake and its only sink cycles
+    // energy in and out of it tick after tick — the ADR 0019 loop in the
+    // one shape that gate cannot cure, since the bodies that must feed the
+    // spawn from the stock are the ones with no Work part. The ADR 0013
+    // shape: the Task exists while the condition holds, so a holder
+    // mid-trip is released through task-gone the tick the last other sink
+    // fills. What the gate closes is the cycle with nowhere else to go —
+    // both halves can still be pooled on one tick, and a part-loaded
+    // hauler is applicable to both; there the tier gap is what carries the
+    // load away instead of putting it back, the draw shallower than every
+    // sink but the flow's own and the stock's Refill deeper than all of
+    // them.
+    let storageWithdraws =
+        if List.isEmpty refills && List.isEmpty containerRefills then
+            []
+        else
+            storages |> List.filter (fun id -> stored id > 0) |> List.map Withdraw
 
     harvests
     @ withdraws
@@ -298,6 +322,7 @@ let planTasks (snapshot: Snapshot) : Task list =
     @ upgrades
     @ containerRefills
     @ storageRefills
+    @ storageWithdraws
 
 /// Screeps CARRY_CAPACITY: energy one Carry part holds.
 let private carryPartCapacity = 50
@@ -1064,18 +1089,21 @@ let private tooEarly (snapshot: Snapshot) atlas (creep: CreepInfo) task cost =
 /// controller, so its Withdraw there is energy flowing back the way it
 /// came — and with every other sink full, the buffer is also its only
 /// Refill target, which cycled a hauler in and out of one container tick
-/// after tick. Source containers stay open to every carrier.
+/// after tick. Source containers stay open to every carrier, and so does
+/// the Storage: the gate is scoped to the buffer by id, and the stock's own
+/// in-and-out cycle is closed in the Planner instead (ADR 0023), because
+/// the bodies that must feed the spawn from it are the ones with no Work.
 let private applicable atlas (creep: CreepInfo) task =
     let has part =
         creep.Body |> Map.tryFind part |> Option.exists (fun n -> n > 0)
 
     match task with
     | Harvest sourceId -> has Work && (creep.FreeCapacity > 0 || garrisons atlas creep sourceId)
-    | Withdraw containerId ->
+    | Withdraw storeId ->
         has Carry
         && creep.FreeCapacity > 0
         && not (Atlas.workHeavy atlas creep.Name)
-        && (has Work || not (Set.contains containerId (Atlas.controllerContainers atlas)))
+        && (has Work || not (Set.contains storeId (Atlas.controllerContainers atlas)))
     | Refill _ -> has Carry && creep.Energy > 0
     | Build _
     | Repair _
@@ -1084,7 +1112,7 @@ let private applicable atlas (creep: CreepInfo) task =
 let private intentFor (creep: CreepInfo) task =
     match task with
     | Harvest sourceId -> HarvestSource(creep.Name, sourceId)
-    | Withdraw containerId -> WithdrawEnergyFromStructure(creep.Name, containerId)
+    | Withdraw storeId -> WithdrawEnergyFromStructure(creep.Name, storeId)
     | Refill structureId -> TransferEnergyToStructure(creep.Name, structureId)
     | Build siteId -> BuildSite(creep.Name, siteId)
     | Repair structureId -> RepairStructure(creep.Name, structureId)
@@ -1126,9 +1154,21 @@ let private downgradeDeadline level = fullDowngradeTimer level / 2
 /// The tier of work a Task belongs to, once its target is taken into
 /// account (ADR 0010, ADR 0012, ADR 0023) — what the matcher ranks by.
 type private Tier =
-    /// Feeding the economy: Harvest, Withdraw, and the Refill of a spawn
-    /// or an extension — the flow the colony's reproduction runs on.
+    /// Feeding the economy: Harvest, a container's Withdraw, and the
+    /// Refill of a spawn or an extension — the flow the colony's
+    /// reproduction runs on.
     | Feeding
+    /// The Storage's Withdraw (ADR 0023): the colony's stock as an
+    /// intake, one tier below the source containers the flow fills. An
+    /// empty creep empties those first and draws on the stock only when
+    /// they are dry, so a stock standing beside the spawn never wins the
+    /// travel-cost tie the containers have to win. Below the whole
+    /// feeding tier, not just its Withdraws: there is no rank between a
+    /// container's Withdraw and the spawn Refill it feeds, so a hungry
+    /// spawn outbids a stock underfoot too and a part-loaded hauler
+    /// delivers what it has rather than topping up first — the price of
+    /// ordering the stock under the flow it must never outbid.
+    | StockDraw
     /// Surplus work: a tower Refill (ADR 0010), Build, Repair and
     /// Upgrade. The colony feeds its own reproduction before its guns,
     /// and everything it merely spends energy on waits behind the flow.
@@ -1147,35 +1187,47 @@ type private Tier =
     | Stock
 
 /// The matcher's whole tier order, shallowest first — the one place the
-/// ordering lives (ADR 0010, ADR 0012, ADR 0023): the economy is fed,
-/// then surplus is spent, then whatever is left sinks into the upgrade
-/// buffer, and what even the buffer cannot hold is stocked. Exhaustive
-/// over Tier on purpose — a tier this sequence forgets is a build error,
-/// not a Task that silently ranks below every other. The downgrade
-/// deadline (ADR 0007) is the one thing above the sequence rather than in
-/// it; `rank` carries it.
+/// ordering lives (ADR 0010, ADR 0012, ADR 0023): the flow is fed, then
+/// the stock is drawn on, then surplus is spent, then whatever is left
+/// sinks into the upgrade buffer, and what even the buffer cannot hold is
+/// stocked. The stock's two roles sit on either side of the surplus work
+/// the colony does between them. Exhaustive over Tier on purpose — a tier
+/// this sequence forgets is a build error, not a Task that silently ranks
+/// below every other. The downgrade deadline (ADR 0007) is the one thing
+/// above the sequence rather than in it; `rank` carries it.
 let private rankOfTier =
     function
     | Feeding -> 0
-    | Surplus -> 1
-    | UpgradeBuffer -> 2
-    | Stock -> 3
+    | StockDraw -> 1
+    | Surplus -> 2
+    | UpgradeBuffer -> 3
+    | Stock -> 4
 
-/// The tier a Task sits in. Refill is the one Task whose tier layers by
-/// target (ADR 0010, ADR 0023): the Storage and the container are each one
-/// projected kind, and the projection holds one kind per id, so those two
-/// answers exclude each other by construction; a tower is read off the
+/// The tier a Task sits in. Refill and Withdraw are the two Tasks whose
+/// tier layers by target (ADR 0010, ADR 0023), and both read the layer off
+/// the projection's kind — the stock is recognised for what it is, never
+/// for where it stands. On Refill: the Storage and the container are each
+/// one projected kind, and the projection holds one kind per id, so those
+/// two answers exclude each other by construction; a tower is read off the
 /// Refillables census instead, which can overlap either. So the kind is
 /// asked first — deepest answer first — and the census only of what the
 /// kind leaves. Any container answers UpgradeBuffer, not the controller's
 /// alone; it is the Planner that pools only the controller's (range 3 of
 /// the controller, never a source container's tile), so no other container
 /// reaches here. Everything the three tests miss is a spawn or an
-/// extension: the flow.
+/// extension: the flow. On Withdraw the layering is the one line: the
+/// stock is drawn on a tier below every container, source and controller
+/// alike.
 let private tierOf (snapshot: Snapshot) task =
     match task with
-    | Harvest _
-    | Withdraw _ -> Feeding
+    | Harvest _ -> Feeding
+    | Withdraw storeId ->
+        let kind = Map.tryFind storeId snapshot.Spatial.TargetKinds
+
+        if kind = Some(Structure BuiltKind.Storage) then
+            StockDraw
+        else
+            Feeding
     | Refill structureId ->
         let isTower =
             snapshot.Refillables

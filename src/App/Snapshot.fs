@@ -165,9 +165,10 @@ let private buildSpatial (spawn: ISpawn) : SpatialInfo =
             |> Map.ofArray
         // Stored energy on the containers, the stock the logistics Tasks
         // judge one by (ADR 0012), and on the Storage, which the Planner
-        // reads the same way: ADR 0023's Refill tier pools a Storage with
-        // room and drops a full one. Its Withdraw tier, the field's other
-        // named consumer, is still ahead.
+        // reads the same way (ADR 0023): its Refill tier pools a Storage
+        // with room and drops a full one, and its Withdraw tier drops an
+        // empty one and pools a stocked one only while some sink other
+        // than the stock still has room to take the load.
         Stores =
             structures
             |> Array.filter (fun st -> List.contains st.structureType storedTypes)

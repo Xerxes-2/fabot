@@ -234,9 +234,10 @@ type Snapshot =
 /// executors that get matched to Tasks.
 type Task =
     | Harvest of sourceId: string
-    /// Take stored energy out of a stocked container (ADR 0012) — the
-    /// haul cycle's intake, judged over stores rather than energy's name.
-    | Withdraw of containerId: string
+    /// Take stored energy out of a stocked container (ADR 0012), or out of
+    /// the Storage a tier below them (ADR 0023) — the haul cycle's intake,
+    /// judged over stores rather than energy's name.
+    | Withdraw of storeId: string
     | Refill of structureId: string
     | Build of siteId: string
     | Repair of structureId: string
