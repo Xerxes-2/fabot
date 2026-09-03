@@ -110,6 +110,9 @@ type SpatialInfo =
         /// Tiles blocked by obstacle structures (spawn, extension,
         /// controller, ...); impassable regardless of terrain.
         Obstacles: Set<Pos>
+        /// Tiles holding a built road — built structures only, a road
+        /// construction site is not yet a road (ADR 0010).
+        Roads: Set<Pos>
     }
 
 [<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
@@ -123,6 +126,7 @@ module SpatialInfo =
             TargetKinds = Map.empty
             CreepPositions = Map.empty
             Obstacles = Set.empty
+            Roads = Set.empty
         }
 
 /// What the decision layer knows about one construction site this tick.

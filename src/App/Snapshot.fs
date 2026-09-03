@@ -116,6 +116,13 @@ let private buildSpatial (spawn: ISpawn) : SpatialInfo =
                         controllers |> Array.map (fun c -> posOf c.pos)
                     ]
             )
+        // Built roads only: a road construction site is not yet a road,
+        // so it never enters the pricing (ADR 0010).
+        Roads =
+            structures
+            |> Array.filter (fun st -> st.structureType = structureRoad)
+            |> Array.map (fun st -> posOf st.pos)
+            |> Set.ofArray
     }
 
 let build () : Snapshot =

@@ -290,8 +290,8 @@ let travelCostTests =
 
                 Expect.equal
                     (travelCost atlas "w" (Harvest "src-a"))
-                    (Some 2)
-                    "the plain Seat at cost 2 beats stepping into the swamp Seat at 6"
+                    (Some 4)
+                    "the plain Seat at cost 4 beats stepping into the swamp Seat at 12"
             }
 
             test "a creep already inside the Work Area costs 0" {
@@ -331,8 +331,8 @@ let travelCostTests =
 
             test "a standing creep prices its tile dearer: the free swamp Seat wins" {
                 // Another creep parks on the plain Seat at (11,13). Its
-                // occupancy surcharge makes that route cost 7, so the
-                // untouched swamp Seat at 6 is now the cheapest way in —
+                // occupancy surcharge makes that route cost 14, so the
+                // untouched swamp Seat at 12 is now the cheapest way in —
                 // dearer, but never inapplicable, unlike an obstacle.
                 let atlas =
                     corridor [ "w", { X = 10; Y = 15 }; "b", { X = 11; Y = 13 } ]
@@ -341,7 +341,7 @@ let travelCostTests =
 
                 Expect.equal
                     (travelCost atlas "w" (Harvest "src-a"))
-                    (Some 6)
+                    (Some 12)
                     "standing traffic re-prices the route without ever closing it"
             }
 
@@ -358,29 +358,92 @@ let travelCostTests =
             }
         ]
 
-/// Source at (10,10) whose only Seat is the swamp at (10,11); the creep
-/// stands one step below on plain — the cost is exactly one swamp step.
-let swampSeat creep =
+/// Source at (10,10) whose only Seat is at (10,11) with the given terrain
+/// and roads; the creep "w" stands one step below on plain — the cost is
+/// exactly one step onto that Seat.
+let seatPriced terrain roads =
     { spatial
           [ "src-a", { X = 10; Y = 10 } ]
           [
               { X = 10; Y = 10 }, Wall
-              { X = 10; Y = 11 }, Swamp
+              { X = 10; Y = 11 }, terrain
               { X = 10; Y = 12 }, Plain
           ] with
-        CreepPositions = Map.ofList [ creep, { X = 10; Y = 12 } ]
+        CreepPositions = Map.ofList [ "w", { X = 10; Y = 12 } ]
+        Roads = roads
     }
 
 [<Tests>]
-let travelTickTests =
+let roadPricingTests =
     testList
-        "atlas travel ticks"
+        "atlas road pricing"
         [
-            test "the same path costs more ticks for a body with fewer Move parts per part" {
+            test "a built road prices a step at 1: half a plain step, a tenth of a swamp step" {
+                let costOn terrain roads =
+                    let atlas =
+                        seatPriced terrain roads |> snapshotWith [ worker "w" ] |> ofSnapshot
+
+                    travelCost atlas "w" (Harvest "src-a")
+
+                let road = Set.singleton { X = 10; Y = 11 }
+
+                Expect.equal (costOn Plain Set.empty) (Some 2) "a plain step costs 2"
+                Expect.equal (costOn Swamp Set.empty) (Some 10) "a swamp step costs 10"
+                Expect.equal (costOn Plain road) (Some 1) "a road on plain costs 1: half"
+
+                Expect.equal
+                    (costOn Swamp road)
+                    (Some 1)
+                    "a road on swamp costs 1: the road overrides the terrain under it"
+            }
+
+            test "the occupancy surcharge is worth exactly one swamp step" {
+                // Another creep parks on the plain Seat: the step onto it
+                // costs its plain weight plus the surcharge — 2 + 10, the
+                // 10 being the same price as stepping into swamp (ADR 0010).
+                let atlas =
+                    { seatPriced Plain Set.empty with
+                        CreepPositions =
+                            Map.ofList [ "w", { X = 10; Y = 12 }; "b", { X = 10; Y = 11 } ]
+                    }
+                    |> snapshotWith [ worker "w"; worker "b" ]
+                    |> ofSnapshot
+
+                Expect.equal
+                    (travelCost atlas "w" (Harvest "src-a"))
+                    (Some 12)
+                    "plain weight 2 plus the one-swamp-step surcharge 10"
+            }
+
+            test "a road construction site is not yet a road: only Roads tiles price at 1" {
+                // A road site is projected as a target of Site kind, never
+                // into Roads — the tile keeps pricing by its terrain.
+                let atlas =
+                    { seatPriced Plain Set.empty with
+                        TargetPositions =
+                            Map.ofList [ "src-a", { X = 10; Y = 10 }; "site-1", { X = 10; Y = 11 } ]
+                        TargetKinds = Map.ofList [ "src-a", Source; "site-1", Site BuiltKind.Other ]
+                    }
+                    |> snapshotWith [ worker "w" ]
+                    |> ofSnapshot
+
+                Expect.equal
+                    (travelCost atlas "w" (Harvest "src-a"))
+                    (Some 2)
+                    "the unbuilt road's tile still prices as plain"
+            }
+        ]
+
+[<Tests>]
+let travelUnitTests =
+    testList
+        "atlas travel units"
+        [
+            test "the same path costs more units for a body with fewer Move parts per part" {
                 // The corridor's cheapest path is two plain steps. The
-                // worker unit (1 fatigue part per Move) walks it in 2 ticks;
+                // worker unit (1 fatigue part per Move) walks it in 4 units;
                 // a heavy body (5 fatigue parts per Move) needs
-                // ceil(1 × 5 / 1) = 5 ticks a step, 10 in all. The empty
+                // ceil(2 × 5 / 1) = 10 units a step, 20 in all. The empty
                 // Carry rides free in both bodies (engine fatigue rules).
                 let costFor creep =
                     let atlas =
@@ -388,29 +451,40 @@ let travelTickTests =
 
                     travelCost atlas "w" (Harvest "src-a")
 
-                Expect.equal (costFor (worker "w")) (Some 2) "the worker unit's ticks equal terrain"
+                Expect.equal (costFor (worker "w")) (Some 4) "the worker unit's cost equals terrain"
 
                 Expect.equal
                     (costFor (creepWith "w" 0 [ Work; Work; Work; Work; Work; Carry; Move ]))
-                    (Some 10)
-                    "five fatigue parts on one Move price each plain step at 5 ticks"
+                    (Some 20)
+                    "five fatigue parts on one Move price each plain step at 10 units"
             }
 
-            test "a Move surplus divides the weight, ceiled, never below one tick a step" {
-                // One swamp step (weight 5): the worker pays 5 ticks, two
-                // Moves under one Work pay ceil(5 × 1 / 2) = 3 — the ceil is
-                // visible — and on plain the same body still pays the
-                // 1-tick-per-step floor, never half a tick.
-                let costFor creep =
-                    let atlas = swampSeat "w" |> snapshotWith [ creep ] |> ofSnapshot
+            test "a Move surplus divides the weight, ceiled, never below one unit a step" {
+                // One step onto the only Seat: on swamp (weight 10) the
+                // worker pays 10 units, three Moves under one Work pay
+                // ceil(10 × 1 / 3) = 4 — the ceil is visible — and on plain
+                // (weight 2) the same surplus-Move body pays ceil(2 / 3) =
+                // 1: the one-unit floor, never a fraction of a unit.
+                let costOn terrain creep =
+                    let atlas = seatPriced terrain Set.empty |> snapshotWith [ creep ] |> ofSnapshot
                     travelCost atlas "w" (Harvest "src-a")
 
-                Expect.equal (costFor (worker "w")) (Some 5) "the worker unit's ticks equal terrain"
+                Expect.equal
+                    (costOn Swamp (worker "w"))
+                    (Some 10)
+                    "the worker unit's cost equals terrain"
+
+                let surplus = creepWith "w" 0 [ Work; Move; Move; Move ]
 
                 Expect.equal
-                    (costFor (creepWith "w" 0 [ Work; Move; Move ]))
-                    (Some 3)
-                    "ceil(5/2) = 3: the surplus Move cannot halve a step below whole ticks"
+                    (costOn Swamp surplus)
+                    (Some 4)
+                    "ceil(10/3) = 4: surplus Moves cannot divide a step below whole units"
+
+                Expect.equal
+                    (costOn Plain surplus)
+                    (Some 1)
+                    "ceil(2/3) = 1: the floor is one unit, never zero"
             }
 
             test "carried energy loads Carry parts into the fatigue count" {
@@ -418,7 +492,7 @@ let travelTickTests =
                 // the load the creep carries right now — the engine loads
                 // Carry parts 50 energy apiece, and an empty Carry generates
                 // no fatigue. The same worker walks the two-plain-step path
-                // in 2 ticks empty and 4 ticks with its Carry full.
+                // in 4 units empty and 8 units with its Carry full.
                 let costFor energy =
                     let atlas =
                         corridor [ "w", { X = 10; Y = 15 } ]
@@ -427,8 +501,8 @@ let travelTickTests =
 
                     travelCost atlas "w" (Harvest "src-a")
 
-                Expect.equal (costFor 0) (Some 2) "empty: only the Work part generates fatigue"
-                Expect.equal (costFor 50) (Some 4) "loaded: the full Carry part joins in"
+                Expect.equal (costFor 0) (Some 4) "empty: only the Work part generates fatigue"
+                Expect.equal (costFor 50) (Some 8) "loaded: the full Carry part joins in"
             }
 
             test "a body without Move parts reaches nothing beyond where it stands" {

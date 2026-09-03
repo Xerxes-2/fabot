@@ -4,7 +4,8 @@ open Fabot.Core.Types
 
 /// A body's fatigue factor (ADR 0006): the parts that generate fatigue
 /// when moving and the Move parts that pay it off. Terrain weight scales
-/// by their ratio to price travel in whole ticks.
+/// by their ratio to price travel in cost units — half-ticks under the
+/// engine-native weights (ADR 0010).
 type private FatigueFactor = { FatigueParts: int; MoveParts: int }
 
 /// The per-tick, task-aware query interface over the spatial projection
@@ -19,7 +20,7 @@ type Atlas =
             /// order for everything derived per creep.
             Placed: (string * Pos) list
             /// Each creep's fatigue factor — what turns terrain weight
-            /// into ticks for that body (ADR 0006).
+            /// into travel cost for that body (ADR 0006).
             Factors: Map<string, FatigueFactor>
             /// Step weight per tile index (stepCost flattened once for the
             /// flood's hot loop): -1 impassable, else the terrain weight.
@@ -50,11 +51,16 @@ let private posAt index =
 /// Unreached marker in a flood's distance array.
 let private unreached = System.Int32.MaxValue
 
-/// Extra ticks priced onto a step landing on a tile some creep occupies
-/// this tick: a crowd usually means waiting or displacing, so a modest
-/// detour is preferred over pushing through — yet the tile stays passable,
-/// unlike an obstacle, so traffic never makes a Task inapplicable.
-let private occupancyPenalty = 5
+/// Swamp's terrain weight — the dearest passable ground (ADR 0010).
+let private swampWeight = 10
+
+/// Extra cost priced onto a step landing on a tile some creep occupies
+/// this tick — one swamp step by definition (ADR 0008, re-expressed by
+/// ADR 0010): a crowd usually means waiting or displacing, so a modest
+/// detour is preferred over pushing through — yet the tile stays
+/// passable, unlike an obstacle, so traffic never makes a Task
+/// inapplicable.
+let private occupancyPenalty = swampWeight
 
 let private neighbours pos =
     [
@@ -64,15 +70,20 @@ let private neighbours pos =
                     { X = pos.X + dx; Y = pos.Y + dy }
     ]
 
-/// Cost of stepping onto a tile: plain 1, swamp 5; walls, obstacle
+/// Cost of stepping onto a tile — the engine's own per-part fatigue
+/// values (ADR 0010): road 1, plain 2, swamp 10; walls, obstacle
 /// structures and tiles outside the projection are impassable (ADR 0001).
+/// A built road overrides the terrain under it; a road on a wall (a
+/// tunnel) is not modeled and stays impassable.
 let private stepCost (spatial: SpatialInfo) tile =
     if Set.contains tile spatial.Obstacles then
         None
     else
         match Map.tryFind tile spatial.Terrain with
-        | Some Plain -> Some 1
-        | Some Swamp -> Some 5
+        | Some Plain
+        | Some Swamp when Set.contains tile spatial.Roads -> Some 1
+        | Some Plain -> Some 2
+        | Some Swamp -> Some swampWeight
         | Some Wall
         | None -> None
 
@@ -92,19 +103,22 @@ let private fatigueFactorOf (creep: CreepInfo) : FatigueFactor =
         MoveParts = count Move
     }
 
-/// Ticks the body needs to step onto a tile of the given terrain weight
-/// (Screeps fatigue): the step generates 2 × weight fatigue per
-/// fatigue-generating part, each Move part pays off 2 per tick, and no
-/// step takes less than one tick. A body without Move parts cannot step
-/// at all (the engine's move refuses with ERR_NO_BODYPART).
-let private tickCost (factor: FatigueFactor) weight =
+/// Cost units the body needs to step onto a tile of the given terrain
+/// weight (Screeps fatigue): the step generates weight fatigue per
+/// fatigue-generating part, each Move part pays off 2 per tick — so the
+/// unit is a half-tick (ADR 0010) — and no step prices below one unit.
+/// Deliberately priced at unit granularity, not whole ticks: a Move
+/// surplus may price a step below a whole tick, which keeps a road step
+/// cheaper than plain for every body. A body without Move parts cannot
+/// step at all (the engine's move refuses with ERR_NO_BODYPART).
+let private stepUnits (factor: FatigueFactor) weight =
     if factor.MoveParts = 0 then
         None
     else
         Some(max 1 ((weight * factor.FatigueParts + factor.MoveParts - 1) / factor.MoveParts))
 
-/// Dijkstra flood over the weight grid from `start`, priced in ticks for
-/// one fatigue factor: cheapest travel cost to every reachable tile
+/// Dijkstra flood over the weight grid from `start`, priced in cost units
+/// for one fatigue factor: cheapest travel cost to every reachable tile
 /// (`unreached` elsewhere), plus each tile's predecessor index on a
 /// cheapest path (-1 elsewhere). This is the tick's hottest loop, so it
 /// runs on flat arrays with a binary min-heap of dist-then-index keys —
@@ -188,11 +202,11 @@ let private floodFrom
                         let next = nx * roomSide + ny
 
                         if weights.[next] >= 0 then
-                            match tickCost factor weights.[next] with
+                            match stepUnits factor weights.[next] with
                             | None -> ()
-                            | Some ticks ->
+                            | Some units ->
                                 let candidate =
-                                    d + ticks + (if occupied.[next] then occupancyPenalty else 0)
+                                    d + units + (if occupied.[next] then occupancyPenalty else 0)
 
                                 if candidate < dist.[next] then
                                     dist.[next] <- candidate
@@ -376,8 +390,9 @@ let dualSeats (atlas: Atlas) : Set<Pos> =
 
     Set.intersect seatUnion upgradeArea
 
-/// Travel cost of a Task for a creep (ADR 0002, revised by ADR 0006): the
-/// ticks the creep's body needs along a cheapest path to any Work Area
+/// Travel cost of a Task for a creep (ADR 0002, revised by ADRs 0006 and
+/// 0010): the cost units — half-ticks — the creep's body needs along a
+/// cheapest path to any Work Area
 /// tile — terrain weights scaled by the body's fatigue factor, tiles
 /// under standing creeps priced occupancyPenalty dearer — 0 for a creep
 /// already inside. None — a placed Work Area the creep cannot reach
@@ -462,7 +477,7 @@ let private firstStepVia
                     Some(posAt (firstStepOf (indexOf goal) (indexOf pos) parents))
 
 /// The first step of a cheapest path from a creep to its Task's Work Area,
-/// priced in the creep's own ticks — a slow body may detour differently
+/// priced in the creep's own cost — a slow body may detour differently
 /// than a fast one over the same ground. None when there is nothing
 /// derivable: the creep is unplaced, already inside the area, or the area
 /// is empty or unreachable. Of equally cheap goals the lowest (cost, tile)

@@ -754,8 +754,8 @@ let travelCostTests =
 
             test "swamp prices the route: a range-nearer target loses to a longer plain path" {
                 // One corridor, a source at each end. src-swamp is 3 tiles
-                // away by range but behind two swamp tiles (cost 10);
-                // src-plain is 5 tiles away over plain ground (cost 4).
+                // away by range but behind two swamp tiles (cost 20);
+                // src-plain is 5 tiles away over plain ground (cost 8).
                 let corridor =
                     [
                         { X = 10; Y = 12 }, Wall
@@ -895,14 +895,14 @@ let travelCostTests =
                     "the unreachable Harvest is not applicable to this creep at all"
             }
 
-            test "body-aware ticks: the slow heavy body is matched near, the generalist far" {
-                // The near source hides behind two swamp tiles (terrain 10);
-                // the far one lies nine plain steps away (terrain 9). By
-                // bare terrain weight both creeps would march far. In ticks
-                // the heavy body (5 fatigue parts on 2 Moves) wades the
-                // swamps for 13 + 13 = 26 rather than walk nine plains at
-                // ceil(5/2) = 3 apiece for 27 — while the generalist's
-                // ticks equal terrain, so it still takes the far source.
+            test "body-aware cost: the slow heavy body is matched near, the generalist far" {
+                // The near source hides behind two swamp tiles (terrain 20);
+                // the far one lies nine plain steps away (terrain 18). By
+                // bare terrain weight both creeps would march far. Priced
+                // by body, the heavy one (5 fatigue parts on 3 Moves) wades
+                // the swamps for 17 + 17 = 34 rather than walk nine plains
+                // at ceil(10/3) = 4 apiece for 36 — while the generalist's
+                // cost equals terrain, so it still takes the far source.
                 let terrain =
                     [
                         { X = 10; Y = 10 }, Wall // src-near
@@ -915,7 +915,7 @@ let travelCostTests =
                     ]
 
                 let heavy =
-                    creepWith "mule" 0 50 [ Work; Work; Work; Work; Work; Carry; Move; Move ]
+                    creepWith "mule" 0 50 [ Work; Work; Work; Work; Work; Carry; Move; Move; Move ]
 
                 let snapshot =
                     { bareRespawn with
@@ -1021,7 +1021,7 @@ let movementTests =
             }
 
             test "the approach detours around swamp when a plain lane is cheaper" {
-                // Straight lane x = 10 is swamp (cost 5 each); the lane at
+                // Straight lane x = 10 is swamp (cost 10 each); the lane at
                 // x = 11 is plain and reaches a Seat in as many steps.
                 let terrain =
                     [
@@ -1052,6 +1052,58 @@ let movementTests =
                     (moveIntents intents)
                     [ "w1", TopRight ]
                     "the first step leaves the swamp lane for the plain one"
+            }
+
+            test
+                "a loaded worker's first step lands on the road: the paved detour beats the terrain line" {
+                // The terrain line runs straight up the plain lane x = 10,
+                // three steps to the Seat at (10,11). A paved arc swings
+                // out through x = 11..12 — four steps, one more than the
+                // line — to the road Seat at (11,11); the unprojected gap
+                // at (11,12)/(11,13) keeps the arc from being cut short.
+                // The half-loaded worker prices a road step at 2 and a
+                // plain step at 4, so the longer paved detour (8) beats the
+                // straight terrain line (12): the road sets the first step.
+                let terrain =
+                    [
+                        { X = 10; Y = 10 }, Wall
+                        { X = 10; Y = 11 }, Plain
+                        { X = 10; Y = 12 }, Plain
+                        { X = 10; Y = 13 }, Plain
+                        { X = 10; Y = 14 }, Plain
+                        { X = 11; Y = 14 }, Plain
+                        { X = 12; Y = 13 }, Plain
+                        { X = 12; Y = 12 }, Plain
+                        { X = 11; Y = 11 }, Plain
+                    ]
+
+                let paved =
+                    Set.ofList
+                        [
+                            { X = 11; Y = 14 }
+                            { X = 12; Y = 13 }
+                            { X = 12; Y = 12 }
+                            { X = 11; Y = 11 }
+                        ]
+
+                let snapshot =
+                    { bareRespawn with
+                        Sources = [ { Id = "src-a" } ]
+                        Creeps = [ worker "w1" 25 25 ]
+                        Spatial =
+
+                            { spatial [ "src-a", { X = 10; Y = 10 } ] terrain with
+                                CreepPositions = Map.ofList [ "w1", { X = 10; Y = 14 } ]
+                                Roads = paved
+                            }
+                    }
+
+                let { Intents = intents } = decide snapshot Map.empty Set.empty
+
+                Expect.equal
+                    (moveIntents intents)
+                    [ "w1", Right ]
+                    "the first step leaves the terrain line for the paved detour"
             }
 
             test "a creep in range on a tile it may not keep acts and moves in one tick" {
