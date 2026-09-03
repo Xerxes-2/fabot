@@ -182,7 +182,10 @@ let planTasks (snapshot: Snapshot) : Task list =
         snapshot.Spatial.TargetKinds
         |> Map.toList
         |> List.choose (fun (id, kind) ->
-            if kind = Structure BuiltKind.Container then Some id else None)
+            if kind = Structure BuiltKind.Container then
+                Some id
+            else
+                None)
 
     let withdraws =
         containers |> List.filter (fun id -> stored id > 0) |> List.map Withdraw
@@ -243,12 +246,12 @@ let private planSpawns (snapshot: Snapshot) atlas : Intent list =
     let target = workforceTarget snapshot atlas
     let deficit = target - List.length snapshot.Creeps
 
-    // The anchor row's quota rule (ADR 0006): one Anchor per Dual Seat,
-    // inside the unchanged workforce target — never on top of it. Its
-    // gaps are filled before generalist gaps; the worker row's quota is
-    // whatever the target has left.
+    // The anchor row's quota rule (ADR 0006, generalized by ADR 0012):
+    // one Anchor per Post, inside the unchanged workforce target — never
+    // on top of it. Its gaps are filled before generalist gaps; the
+    // worker row's quota is whatever the target has left.
     let anchorGap =
-        (Atlas.dualSeats atlas |> Set.count |> min target)
+        (Atlas.posts atlas |> Set.count |> min target)
         - (snapshot.Creeps |> List.filter isAnchorBody |> List.length)
         |> max 0
 

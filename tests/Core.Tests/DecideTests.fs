@@ -4087,6 +4087,67 @@ let anchorTests =
                 | other -> failtest $"expected exactly one SpawnCreep intent, got %A{other}"
             }
 
+            test "a source-container Post with no Dual Seat casts an Anchor at full bank" {
+                // The W12S28 shape: controller far from every Seat, but a
+                // built container stands on the Seat at (9,10) — a Post,
+                // so the Anchor row comes alive without any Dual Seat.
+                let snapshot =
+                    { dualSeatColony with
+                        Creeps = [ worker "w1" 0 50 ]
+                        Spatial =
+                            { dualSeatRoom with
+                                TargetPositions =
+                                    Map.ofList
+                                        [
+                                            "src-a", { X = 10; Y = 10 }
+                                            "ctrl-1", { X = 40; Y = 40 }
+                                            "cont-1", { X = 9; Y = 10 }
+                                        ]
+                                TargetKinds =
+                                    dualSeatRoom.TargetKinds
+                                    |> Map.add "cont-1" (Structure BuiltKind.Container)
+                            }
+                    }
+
+                let { Intents = intents } = decide snapshot Map.empty Set.empty
+
+                match spawnIntents intents with
+                | [ (_, body, creepName) ] ->
+                    Expect.equal
+                        body
+                        [ Work; Work; Carry; Move ]
+                        "the Anchor row sized to the 300 bank"
+
+                    Expect.stringStarts creepName "anchor-" "the container Seat is a Post"
+                | other -> failtest $"expected exactly one SpawnCreep intent, got %A{other}"
+            }
+
+            test "the Anchor quota counts Posts: a Dual Seat plus a container Seat want two" {
+                // One living Anchor covers the Dual Seat; the built
+                // container on the other Seat is a second Post, so the
+                // remaining gap is cast from the anchor row, not generalist.
+                let snapshot =
+                    { dualSeatColony with
+                        Creeps = [ anchor "a1" 0 50 ]
+                        Spatial =
+                            { dualSeatRoom with
+                                TargetPositions =
+                                    dualSeatRoom.TargetPositions
+                                    |> Map.add "cont-1" { X = 9; Y = 10 }
+                                TargetKinds =
+                                    dualSeatRoom.TargetKinds
+                                    |> Map.add "cont-1" (Structure BuiltKind.Container)
+                            }
+                    }
+
+                let { Intents = intents } = decide snapshot Map.empty Set.empty
+
+                match spawnIntents intents with
+                | [ (_, _, creepName) ] ->
+                    Expect.stringStarts creepName "anchor-" "the second Post's gap is an Anchor gap"
+                | other -> failtest $"expected exactly one SpawnCreep intent, got %A{other}"
+            }
+
             test "a living Anchor fills the quota: the remaining gap goes generalist" {
                 let snapshot =
                     { dualSeatColony with
@@ -4361,7 +4422,8 @@ let logisticsTests =
                     "the stocked buffer enters the pool; the empty source container does not"
             }
 
-            test "the controller container with room is a Refill target; source containers never are" {
+            test
+                "the controller container with room is a Refill target; source containers never are" {
                 let snapshot =
                     { haulColony with
                         Spatial =
@@ -4410,8 +4472,7 @@ let logisticsTests =
                             }
                     }
 
-                let near =
-                    decide (colonyAt { X = 15; Y = 10 }) Map.empty Set.empty
+                let near = decide (colonyAt { X = 15; Y = 10 }) Map.empty Set.empty
 
                 Expect.equal
                     (Map.tryFind "w1" near.Assignments)
@@ -4446,12 +4507,20 @@ let logisticsTests =
                     }
 
                 let remembered = Map.ofList [ "w1", taskId (Withdraw "can-ctrl") ]
-                let { Assignments = assignments; Verdicts = verdicts } =
+
+                let {
+                        Assignments = assignments
+                        Verdicts = verdicts
+                    } =
                     decide snapshot remembered Set.empty
 
                 Expect.contains
                     verdicts
-                    (Verdict.Released("w1", taskId (Withdraw "can-ctrl"), ReleaseReason.Inapplicable))
+                    (Verdict.Released(
+                        "w1",
+                        taskId (Withdraw "can-ctrl"),
+                        ReleaseReason.Inapplicable
+                    ))
                     "the full store releases Withdraw"
 
                 Expect.equal

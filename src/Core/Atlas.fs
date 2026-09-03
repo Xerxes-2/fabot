@@ -432,6 +432,15 @@ let workArea (atlas: Atlas) (task: Task) : Set<Pos> =
                             tile
             ]
 
+/// Every projected source's Seat tiles, unioned — the seat half behind
+/// dualSeats and posts.
+let private seatUnion (atlas: Atlas) : Set<Pos> =
+    targetsOfKind atlas Source
+    |> List.choose (fun id ->
+        Map.tryFind id atlas.Spatial.TargetPositions
+        |> Option.map (seatTiles atlas.Spatial))
+    |> List.fold Set.union Set.empty
+
 /// Dual Seats of the room: tiles inside both some projected source's Seats
 /// and a projected controller's Upgrade Work Area — a creep standing on one
 /// harvests and upgrades without ever moving. Total: a room with no
@@ -439,19 +448,25 @@ let workArea (atlas: Atlas) (task: Task) : Set<Pos> =
 /// which never punishes anything (ADR 0004). Derived fresh each tick,
 /// never persisted.
 let dualSeats (atlas: Atlas) : Set<Pos> =
-    let seatUnion =
-        targetsOfKind atlas Source
-        |> List.choose (fun id ->
-            Map.tryFind id atlas.Spatial.TargetPositions
-            |> Option.map (seatTiles atlas.Spatial))
-        |> List.fold Set.union Set.empty
-
     let upgradeArea =
         targetsOfKind atlas Controller
         |> List.map (Upgrade >> workArea atlas)
         |> List.fold Set.union Set.empty
 
-    Set.intersect seatUnion upgradeArea
+    Set.intersect (seatUnion atlas) upgradeArea
+
+/// Posts of the room: the tiles worth garrisoning with a heavy-WORK body
+/// (ADR 0012) — the Dual Seats plus every Seat under a built container
+/// (sites don't count: a pending container catches no overflow). A
+/// Seat-standing container is a source container by the Layout's
+/// geometry — a controller container's tile that were also a Seat would
+/// already be a Dual Seat. The
+/// capacity unit of the Anchor quota. Total: a room with neither kind
+/// answers with the empty set (ADR 0004). Derived fresh each tick, never
+/// persisted.
+let posts (atlas: Atlas) : Set<Pos> =
+    Set.intersect (seatUnion atlas) (containerTiles atlas)
+    |> Set.union (dualSeats atlas)
 
 /// Travel cost of a Task for a creep (ADR 0002, revised by ADRs 0006 and
 /// 0010): the cost units — half-ticks — the creep's body needs along a

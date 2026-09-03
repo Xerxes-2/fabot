@@ -845,6 +845,95 @@ let dualSeatTests =
         ]
 
 [<Tests>]
+let postTests =
+    testList
+        "atlas posts"
+        [
+            test "posts are the Dual Seats plus Seats under built source containers" {
+                // Source at (10,10), controller at (13,10): (11,10) is a
+                // Dual Seat, (9,10) an ordinary Seat carrying a built
+                // container — both are Posts.
+                let atlas =
+                    { spatial
+                          [
+                              "src-a", { X = 10; Y = 10 }
+                              "ctrl-1", { X = 13; Y = 10 }
+                              "cont-1", { X = 9; Y = 10 }
+                          ]
+                          [ { X = 9; Y = 10 }, Plain; { X = 11; Y = 10 }, Plain ] with
+                        TargetKinds =
+                            Map.ofList
+                                [
+                                    "src-a", Source
+                                    "ctrl-1", Controller
+                                    "cont-1", Structure BuiltKind.Container
+                                ]
+                    }
+                    |> snapshotWith []
+                    |> ofSnapshot
+
+                Expect.equal
+                    (posts atlas)
+                    (Set.ofList [ { X = 9; Y = 10 }; { X = 11; Y = 10 } ])
+                    "the Dual Seat and the container Seat are both Posts"
+
+                Expect.equal
+                    (dualSeats atlas)
+                    (Set.singleton { X = 11; Y = 10 })
+                    "dualSeats is untouched by the container"
+            }
+
+            test "a container construction site is no Post" {
+                let atlas =
+                    { spatial
+                          [ "src-a", { X = 10; Y = 10 }; "cont-1", { X = 9; Y = 10 } ]
+                          [ { X = 9; Y = 10 }, Plain ] with
+                        TargetKinds =
+                            Map.ofList [ "src-a", Source; "cont-1", Site BuiltKind.Container ]
+                    }
+                    |> snapshotWith []
+                    |> ofSnapshot
+
+                Expect.equal (posts atlas) Set.empty "a pending container garrisons nothing"
+            }
+
+            test "a built container off any Seat adds no Post" {
+                // The controller container's shape: built, but not on a
+                // Seat — range 2 of the source.
+                let atlas =
+                    { spatial
+                          [ "src-a", { X = 10; Y = 10 }; "cont-1", { X = 12; Y = 10 } ]
+                          [ { X = 11; Y = 10 }, Plain; { X = 12; Y = 10 }, Plain ] with
+                        TargetKinds =
+                            Map.ofList [ "src-a", Source; "cont-1", Structure BuiltKind.Container ]
+                    }
+                    |> snapshotWith []
+                    |> ofSnapshot
+
+                Expect.equal (posts atlas) Set.empty "only a Seat under a container is a Post"
+            }
+
+            test "a room with no controller still derives container Posts" {
+                // The W12S28 shape: no Dual Seat can exist, yet the Seat
+                // under the built source container is a Post.
+                let atlas =
+                    { spatial
+                          [ "src-a", { X = 10; Y = 10 }; "cont-1", { X = 9; Y = 10 } ]
+                          [ { X = 9; Y = 10 }, Plain; { X = 11; Y = 10 }, Plain ] with
+                        TargetKinds =
+                            Map.ofList [ "src-a", Source; "cont-1", Structure BuiltKind.Container ]
+                    }
+                    |> snapshotWith []
+                    |> ofSnapshot
+
+                Expect.equal
+                    (posts atlas)
+                    (Set.singleton { X = 9; Y = 10 })
+                    "no Dual Seats, one container Post"
+            }
+        ]
+
+[<Tests>]
 let consistencyTests =
     testList
         "atlas consistency"
