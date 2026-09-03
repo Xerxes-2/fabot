@@ -126,6 +126,24 @@ if (command === "console") {
       fail(`memory write failed: ${err.message ?? err}`);
     });
     if (res.ok !== 1) fail(`memory write failed: ${JSON.stringify(res)}`);
+
+    // The write is queued; Memory reads keep serving the old list until the
+    // game applies it on a tick boundary. Poll until the read agrees, so the
+    // confirmation below is never ahead of what `verbose` would report.
+    const wanted = JSON.stringify([...next].sort());
+    const deadline = Date.now() + 20_000;
+    for (;;) {
+      const readBack = await memoryGet("fabot.observe.verbose");
+      const seen = Array.isArray(readBack) ? readBack.filter((n) => typeof n === "string") : [];
+      if (JSON.stringify(seen.sort()) === wanted) break;
+      if (Date.now() >= deadline) {
+        fail(
+          `write accepted but not visible after 20s; wanted [${next.join(", ")}], ` +
+            `still reading [${seen.join(", ")}] — check again with \`observe.mjs verbose\``,
+        );
+      }
+      await new Promise((r) => setTimeout(r, 1000));
+    }
     console.log(`verbose list is now [${next.join(", ")}]`);
   }
 } else {
