@@ -1,5 +1,7 @@
 # One declarative Layout, computed whole, truncated at RCL4
 
+> **Revised by ADR 0022**: the ordering rule now excludes the working ground (every source's Seats and the controller's Upgrade Work Area), and the RCL4 revisit this ADR asked for concluded that the clustered horizon *stays* at RCL4 — only the Storage tile and four Link footings are reserved beyond it, because those are the tiles that never come back once an extension takes them.
+
 Construction planning was a single hard-coded rule (the extension
 checkerboard), and each new structure kind — tower at RCL3, roads now —
 would have bolted on another special case. Worse, structures placed

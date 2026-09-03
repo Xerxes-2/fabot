@@ -1,5 +1,7 @@
 # The logistics layer: containers, Posts, the hauler row, and an income-based workforce
 
+> **Revised by ADR 0022**: Seats are working ground and no longer reservable by the clustered ordering, so the source-container pick never has to dodge a reservation. **Revised by ADR 0023**: the Storage joins Withdraw's sources one tier below the source containers, pooled only while some other sink is hungry.
+
 > **Revised by ADR 0020**: a Post is not merely the tile an Anchor is worth casting for — for a Work-heavy body it is the only tile Harvest's Work Area offers at a source that has one, and a creep acts only from inside its Work Area. Travel-cost pinning is now backed by geometry: nothing else on the source is a place such a body may stand or dig.
 
 > **Revised by ADR 0016**: "travel cost arbitrating dig-vs-collect" holds only for bodies that are not Work-heavy — Withdraw is inapplicable to a body with more Work than Move, so travel-cost pinning no longer carries the whole weight of walking an Anchor to its Post. The layer itself stands unchanged.

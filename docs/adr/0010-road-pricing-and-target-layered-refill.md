@@ -1,5 +1,7 @@
 # Roads enter the pricing; Refill layers its rank by target
 
+> **Revised by ADR 0023**: Refill's target layering gains one more tier below the controller container — the Storage, the place surplus goes when even the upgrade buffer is full.
+
 Observation after the Anchor landed (ADR 0006): the current room has zero
 Dual Seats — no source Seat lies inside the controller's Work Area — so
 every drop of upgrade energy commutes, at half speed loaded, over a Work
