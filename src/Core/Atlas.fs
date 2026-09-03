@@ -130,19 +130,19 @@ let buildableTiles (atlas: Atlas) : Pos list =
         else
             None)
 
-/// Extensions already standing in the room.
-let builtExtensions (atlas: Atlas) : int =
+/// Ids of the projected targets of one kind, in id order.
+let private targetsOfKind (atlas: Atlas) (kind: TargetKind) : string list =
     atlas.Spatial.TargetKinds
     |> Map.toList
-    |> List.filter (fun (_, kind) -> kind = Structure BuiltKind.Extension)
-    |> List.length
+    |> List.choose (fun (id, k) -> if k = kind then Some id else None)
+
+/// Extensions already standing in the room.
+let builtExtensions (atlas: Atlas) : int =
+    targetsOfKind atlas (Structure BuiltKind.Extension) |> List.length
 
 /// Extension construction sites already placed in the room.
 let pendingExtensions (atlas: Atlas) : int =
-    atlas.Spatial.TargetKinds
-    |> Map.toList
-    |> List.filter (fun (_, kind) -> kind = Site BuiltKind.Extension)
-    |> List.length
+    targetsOfKind atlas (Site BuiltKind.Extension) |> List.length
 
 /// Walkable tiles adjacent to `pos`, in deterministic (X, Y) order.
 /// Standing respects obstacles, unlike Seat counting.
@@ -166,21 +166,25 @@ let private targetOf =
     | Build id
     | Upgrade id -> id
 
-/// Seats of a source: walkable (non-wall) tiles adjacent to its position,
-/// by terrain alone — structures and creeps do not consume Seats (ADR
-/// 0001). None for a source the projection does not place: no capacity is
-/// derivable, and unpriceable geometry never counts against a Task.
+/// Seat tiles of a placed source: walkable (non-wall) neighbours of its
+/// tile, by terrain alone — structures and creeps do not consume Seats
+/// (ADR 0001).
+let private seatTiles (spatial: SpatialInfo) (pos: Pos) : Set<Pos> =
+    neighbours pos
+    |> List.filter (fun tile ->
+        match Map.tryFind tile spatial.Terrain with
+        | Some Plain
+        | Some Swamp -> true
+        | Some Wall
+        | None -> false)
+    |> Set.ofList
+
+/// Seats of a source: its Seat tile count. None for a source the
+/// projection does not place: no capacity is derivable, and unpriceable
+/// geometry never counts against a Task.
 let seats (atlas: Atlas) (sourceId: string) : int option =
     Map.tryFind sourceId atlas.Spatial.TargetPositions
-    |> Option.map (fun pos ->
-        neighbours pos
-        |> List.filter (fun tile ->
-            match Map.tryFind tile atlas.Spatial.Terrain with
-            | Some Plain
-            | Some Swamp -> true
-            | Some Wall
-            | None -> false)
-        |> List.length)
+    |> Option.map (seatTiles atlas.Spatial >> Set.count)
 
 /// Work Area of a Task: the tiles a creep may stand on while performing it —
 /// passable tiles within the action's range of its target. Empty when the
@@ -200,6 +204,27 @@ let workArea (atlas: Atlas) (task: Task) : Set<Pos> =
                         if (stepCost atlas.Spatial tile).IsSome then
                             tile
             ]
+
+/// Dual Seats of the room: tiles inside both some projected source's Seats
+/// and a projected controller's Upgrade Work Area — a creep standing on one
+/// harvests and upgrades without ever moving. Total: a room with no
+/// controller, no sources, or a disjoint pair answers with the empty set,
+/// which never punishes anything (ADR 0004). Derived fresh each tick,
+/// never persisted.
+let dualSeats (atlas: Atlas) : Set<Pos> =
+    let seatUnion =
+        targetsOfKind atlas Source
+        |> List.choose (fun id ->
+            Map.tryFind id atlas.Spatial.TargetPositions
+            |> Option.map (seatTiles atlas.Spatial))
+        |> List.fold Set.union Set.empty
+
+    let upgradeArea =
+        targetsOfKind atlas Controller
+        |> List.map (Upgrade >> workArea atlas)
+        |> List.fold Set.union Set.empty
+
+    Set.intersect seatUnion upgradeArea
 
 /// Travel cost of a Task for a creep (ADR 0002): the cheapest-path cost to
 /// any Work Area tile, 0 for a creep already inside. None — a placed Work

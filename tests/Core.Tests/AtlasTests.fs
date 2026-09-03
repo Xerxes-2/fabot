@@ -431,6 +431,95 @@ let mayActTests =
         ]
 
 [<Tests>]
+let dualSeatTests =
+    testList
+        "atlas dualSeats"
+        [
+            test "a Dual Seat is a Seat inside the controller's Upgrade Work Area, over all sources" {
+                // Sources at (10,10) and (16,10) flank the controller at
+                // (13,10). Each source has a Seat at range 2 of the
+                // controller (inside the Upgrade Work Area) and one at
+                // range 4 (outside); src-a's swamp Seat at (11,11) is in.
+                let atlas =
+                    { spatial
+                          [
+                              "src-a", { X = 10; Y = 10 }
+                              "ctrl-1", { X = 13; Y = 10 }
+                              "src-b", { X = 16; Y = 10 }
+                          ]
+                          [
+                              { X = 9; Y = 10 }, Plain
+                              { X = 11; Y = 10 }, Plain
+                              { X = 11; Y = 11 }, Swamp
+                              { X = 15; Y = 10 }, Plain
+                              { X = 17; Y = 10 }, Plain
+                          ] with
+                        TargetKinds =
+                            Map.ofList [ "src-a", Source; "ctrl-1", Controller; "src-b", Source ]
+                    }
+                    |> snapshotWith []
+                    |> ofSnapshot
+
+                Expect.equal
+                    (dualSeats atlas)
+                    (Set.ofList [ { X = 11; Y = 10 }; { X = 11; Y = 11 }; { X = 15; Y = 10 } ])
+                    "exactly the Seats within upgrade range; the range-4 Seats are not"
+            }
+
+            test "an obstacle keeps a Seat out of the Dual Seats: a creep must stand there" {
+                // The lone Seat within upgrade range carries an obstacle
+                // structure — it stays a Seat (ADR 0001) but no creep can
+                // stand on it, so the Upgrade Work Area excludes it.
+                let atlas =
+                    { spatial
+                          [ "src-a", { X = 10; Y = 10 }; "ctrl-1", { X = 13; Y = 10 } ]
+                          [ { X = 9; Y = 10 }, Plain; { X = 11; Y = 10 }, Plain ] with
+                        TargetKinds = Map.ofList [ "src-a", Source; "ctrl-1", Controller ]
+                        Obstacles = Set.singleton { X = 11; Y = 10 }
+                    }
+                    |> snapshotWith []
+                    |> ofSnapshot
+
+                Expect.equal (dualSeats atlas) Set.empty "an unstandable Seat is no Dual Seat"
+            }
+
+            test "a room without a controller has no Dual Seats" {
+                let atlas =
+                    { spatial [ "src-a", { X = 10; Y = 10 } ] [ { X = 11; Y = 10 }, Plain ] with
+                        TargetKinds = Map.ofList [ "src-a", Source ]
+                    }
+                    |> snapshotWith []
+                    |> ofSnapshot
+
+                Expect.equal (dualSeats atlas) Set.empty "no Upgrade Work Area to intersect"
+            }
+
+            test "a room without sources has no Dual Seats" {
+                let atlas =
+                    { spatial [ "ctrl-1", { X = 13; Y = 10 } ] [ { X = 12; Y = 10 }, Plain ] with
+                        TargetKinds = Map.ofList [ "ctrl-1", Controller ]
+                    }
+                    |> snapshotWith []
+                    |> ofSnapshot
+
+                Expect.equal (dualSeats atlas) Set.empty "no Seats to intersect"
+            }
+
+            test "a source out of upgrade range yields an empty, harmless answer" {
+                let atlas =
+                    { spatial
+                          [ "src-a", { X = 10; Y = 10 }; "ctrl-1", { X = 40; Y = 40 } ]
+                          [ { X = 11; Y = 10 }, Plain; { X = 39; Y = 40 }, Plain ] with
+                        TargetKinds = Map.ofList [ "src-a", Source; "ctrl-1", Controller ]
+                    }
+                    |> snapshotWith []
+                    |> ofSnapshot
+
+                Expect.equal (dualSeats atlas) Set.empty "a disjoint intersection is just empty"
+            }
+        ]
+
+[<Tests>]
 let consistencyTests =
     testList
         "atlas consistency"
