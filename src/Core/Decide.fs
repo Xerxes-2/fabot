@@ -587,6 +587,12 @@ let private horizonLevel = 4
 /// controller and to each spawn plus the swamps of the controller's Work
 /// Area, priced on raw terrain and routed around every reserved tile —
 /// reservations come first, so a road never sits where a structure will.
+/// One tile beside each container pick and beside the Storage is held as
+/// a Link footing (ADR 0022) and outranks the tower and the extensions;
+/// the reservation is widened by the footing count so the tiles they push
+/// the cluster onto are reserved too (ADR 0027). No link is ever placed
+/// on one — Link is a built kind only, and which footings are filled is
+/// RCL5's decision.
 /// Placement filters the Layout to what the current level unlocks and
 /// what the projection's censuses say is missing. Sites are not creep
 /// work, so this emits Intents directly rather than Tasks.
@@ -606,8 +612,10 @@ let private planLayout (snapshot: Snapshot) atlas : Intent list =
         // clusters one ring out instead of eating them.
         let working = Atlas.workingGround atlas
 
+        let buildable = Atlas.buildableTiles atlas
+
         let ordering =
-            Atlas.buildableTiles atlas
+            buildable
             |> List.filter (fun tile ->
                 (tile.X + tile.Y) % 2 = parity && not (Set.contains tile working))
             |> List.sortBy (fun tile -> range tile spawnPos, tile.X, tile.Y)
@@ -638,17 +646,28 @@ let private planLayout (snapshot: Snapshot) atlas : Intent list =
         let towerSlots = towerGap horizonLevel
         let extensionSlots = extensionGap horizonLevel
 
+        // The Link footings cannot be named here — their targets are the
+        // container picks, which are derived from the trunks the
+        // reservation is for — but their count can: one per source, one
+        // for the controller container, one for the Storage. The window is
+        // widened by that many, so the tiles the cluster is pushed onto
+        // when a footing takes one of its picks are inside the reservation
+        // too (ADR 0027). Without the widening a pick lands past the
+        // window on ground the flood never dodged, and the tick its site
+        // stands the trunk reroutes around it.
+        let footingSlots = List.length snapshot.Sources + 2
+
         let clustered =
-            ordering |> List.truncate (storageSlots + towerSlots + extensionSlots)
+            ordering
+            |> List.truncate (storageSlots + towerSlots + extensionSlots + footingSlots)
 
-        let storageTiles, afterStorage =
-            clustered |> List.splitAt (min storageSlots clustered.Length)
-
-        let towerTiles, extensionTiles =
-            afterStorage |> List.splitAt (min towerSlots afterStorage.Length)
+        let storagePick = ordering |> List.truncate storageSlots
 
         // Reserved before trunks: a trunk never crosses a tile a reserved
-        // structure will claim.
+        // structure will claim, and the widened window holds the footings
+        // as well — so the precedence runs one way for every kind the
+        // Layout places (ADR 0011). The footings' own tiles are settled
+        // below, once the trunks are known.
         let reserved = Set.ofList clustered
 
         let upgradeArea = Atlas.workArea atlas (Upgrade controller.Id)
@@ -680,11 +699,15 @@ let private planLayout (snapshot: Snapshot) atlas : Intent list =
         // (ADR 0022).
         let workAreaSwamps = upgradeArea |> Set.filter (Atlas.isSwamp atlas)
 
+        // Every tile the Layout paves: the trunks plus the Work Area's
+        // swamps. The road gap measures this against the projection's road
+        // census, and a Link footing is chosen off it.
+        let roadPlan = Set.union trunkTiles workAreaSwamps
+
         // The road gap reads the projection's road census: a built road or a
         // pending road site already claims its tile (ADR 0010).
         let roadGap =
-            Set.union trunkTiles workAreaSwamps
-            |> fun wanted -> Set.difference wanted (Atlas.roadTiles atlas)
+            Set.difference roadPlan (Atlas.roadTiles atlas)
             |> fun wanted -> Set.difference wanted (Atlas.pendingRoadTiles atlas)
 
         // Containers (ADR 0012), computed whole like everything else and
@@ -733,6 +756,76 @@ let private planLayout (snapshot: Snapshot) atlas : Intent list =
                         |> List.minBy (fun tile -> range tile controllerPos, tile.X, tile.Y)
                         |> Some)
 
+        // The Link footings (ADR 0022): one tile held for a link beside
+        // every target a link will ever serve — each planned source
+        // container, the controller container, and the Storage. Planned,
+        // not built: a Post needs a standing container, so a Post-anchored
+        // rule would reserve nothing at level 0 and the tiles would be
+        // gone by the time links arrive. A room with three sources gets
+        // five footings; the count is the rule's, never a constant
+        // (ADR 0027).
+        //
+        // The tiles are settled here rather than with the reservation
+        // because a footing's targets are the container picks, and those
+        // are derived from the trunks the reservation is for. Only the
+        // count could be held ahead of the trunks, and it was: a footing
+        // still yields to them by being chosen off the finished trunk
+        // plan, but the tiles it pushes the cluster onto were reserved.
+        // Re-flooding the trunks to name the tiles first would pay the
+        // tick's dearest step twice for the same answer (ADR 0017).
+        //
+        // One footing per target, and a tile is only ever one target: a
+        // Seat that is also the controller container's pick would
+        // otherwise be served twice and hold two tiles for one link.
+        let footingTargets =
+            sourceContainerTiles
+            @ Option.toList controllerContainerTile
+            @ storagePick
+            @ (Set.union (Atlas.storageTiles atlas) (Atlas.pendingStorageTiles atlas)
+               |> Set.toList)
+            |> List.distinct
+
+        // A standing link is a target, so its own footing has stopped
+        // being buildable: added back, or the footing would jump the tick
+        // the link went up. The working ground is deliberately not
+        // subtracted — a footing is the one structure footing allowed
+        // there (ADR 0022), because a link on a Seat or an Upgrade tile is
+        // exactly what buys the Anchor and the upgraders a transfer
+        // without leaving their tile.
+        let footingCandidates = Set.union (Set.ofList buildable) (Atlas.linkTiles atlas)
+
+        let footings =
+            (Set.empty, footingTargets)
+            ||> List.fold (fun taken target ->
+                footingCandidates
+                |> Set.filter (fun tile ->
+                    range tile target = 1
+                    && not (Set.contains tile roadPlan)
+                    && not (List.contains tile footingTargets)
+                    && not (Set.contains tile taken))
+                |> Set.toList
+                |> function
+                    | [] -> taken
+                    | candidates ->
+                        candidates
+                        |> List.minBy (fun tile -> range tile spawnPos, tile.X, tile.Y)
+                        |> fun tile -> Set.add tile taken)
+
+        // The tower and the extensions take the ordering again with the
+        // footings held out — a footing outranks both — and the Storage's
+        // pick held out with them: it outranks the footings, which are
+        // anchored on it. Each footing draws one more tile in behind it,
+        // and the reservation was widened by exactly that many, so no pick
+        // reaches past the window the trunks dodged.
+        let clusterPicks =
+            ordering
+            |> List.filter (fun tile ->
+                not (List.contains tile storagePick) && not (Set.contains tile footings))
+            |> List.truncate (towerSlots + extensionSlots)
+
+        let towerTiles, extensionTiles =
+            clusterPicks |> List.splitAt (min towerSlots clusterPicks.Length)
+
         // The container gap reads the projection's container census, tile
         // for tile (ADR 0012): a built or pending container already
         // claims its spot. A tile still owed its road defers the
@@ -755,7 +848,7 @@ let private planLayout (snapshot: Snapshot) atlas : Intent list =
         let place kind tiles =
             tiles |> List.map (fun tile -> PlaceConstructionSite(room, tile, kind))
 
-        place Storage (storageTiles |> List.truncate (storageGap controller.Level))
+        place Storage (storagePick |> List.truncate (storageGap controller.Level))
         @ place Tower (towerTiles |> List.truncate (towerGap controller.Level))
         @ place Extension (extensionTiles |> List.truncate (extensionGap controller.Level))
         @ place Road (Set.toList roadGap)

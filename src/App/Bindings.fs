@@ -48,6 +48,9 @@ let structureContainer = "container"
 /// Screeps `STRUCTURE_STORAGE` constant.
 let structureStorage = "storage"
 
+/// Screeps `STRUCTURE_LINK` constant.
+let structureLink = "link"
+
 /// Screeps `STRUCTURE_RAMPART` constant.
 let structureRampart = "rampart"
 

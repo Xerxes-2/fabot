@@ -47,6 +47,10 @@ type BuiltKind =
     | Road
     | Container
     | Storage
+    /// A link. Projection-only: no counterpart in the placeable kinds,
+    /// because the Layout holds a footing for one but never places it
+    /// (ADR 0022).
+    | Link
     /// Any structure kind the decision layer has no rules for yet.
     | Other
 

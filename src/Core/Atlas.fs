@@ -420,6 +420,22 @@ let containerTiles (atlas: Atlas) : Set<Pos> =
 let pendingContainerTiles (atlas: Atlas) : Set<Pos> =
     tilesOfKind atlas (Site BuiltKind.Container)
 
+/// Tiles holding a built Storage — the tile a Link footing is anchored on
+/// once the reservation has become a structure (ADR 0022).
+let storageTiles (atlas: Atlas) : Set<Pos> =
+    tilesOfKind atlas (Structure BuiltKind.Storage)
+
+/// Tiles holding a Storage construction site — the same anchor while the
+/// site is still being built.
+let pendingStorageTiles (atlas: Atlas) : Set<Pos> =
+    tilesOfKind atlas (Site BuiltKind.Storage)
+
+/// Tiles holding a standing link. A link is a target, so its tile is no
+/// longer buildable; the Layout adds these back as footing candidates so
+/// a footing does not jump the tick its link goes up (ADR 0022).
+let linkTiles (atlas: Atlas) : Set<Pos> =
+    tilesOfKind atlas (Structure BuiltKind.Link)
+
 /// Whether a tile's terrain is swamp; a tile outside the projection is not.
 let isSwamp (atlas: Atlas) (tile: Pos) : bool =
     Map.tryFind tile atlas.Spatial.Terrain = Some Swamp

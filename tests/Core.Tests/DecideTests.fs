@@ -1163,6 +1163,274 @@ let storageTests =
             }
         ]
 
+/// Synthetic footing fixture: the source stands three tiles north of the
+/// spawn, so its trunk leaves by (24,23) and the source container is
+/// planned there, while the Storage takes the ordering's first pick at
+/// (24,24). The tile the container's Link footing wants, (23,23), is one
+/// of the cluster's own same-colour tiles — the collision the reservation
+/// exists to settle (ADR 0022).
+let footingRoom = openRoom 6 |> withTargets [ "src-a", { X = 25; Y = 22 }, Source ]
+
+/// The two tiles `footingRoom` holds as Link footings: one beside the
+/// planned source container at (24,23), one beside the Storage at (24,24).
+/// Two, not four — the count is one per planned source container plus the
+/// controller container and the Storage, and this room projects no
+/// controller position.
+let footingTiles = Set.ofList [ { X = 23; Y = 23 }; { X = 24; Y = 25 } ]
+
+/// The room with a target standing on a tile and blocking it, the way the
+/// projection carries a built Storage or link: a target and an obstacle.
+let withStanding id pos kind room =
+    { withTargets [ id, pos, kind ] room with
+        Obstacles = Set.add pos room.Obstacles
+    }
+
+/// A footing fixture whose trunks run through the clustered ring: the
+/// source stands against the room's east edge and the controller against
+/// its west edge, so the source→controller trunk crosses the whole
+/// cluster and the tiles a footing pushes the cluster onto are the ones
+/// the trunk would otherwise want (ADR 0022, ADR 0027).
+let crossedRoom =
+    openRoom 6
+    |> withTargets [ "src-a", { X = 30; Y = 26 }, Source ]
+    |> withStanding "ctrl-1" { X = 19; Y = 25 } Controller
+
+/// The colony one tick on: every site the Layout just asked for now
+/// standing in the projection as a construction site, the obstacle kinds
+/// blocking their tile exactly as the engine's own sites do — the state
+/// the next tick's plan is computed against.
+let withPlanPending colony =
+    let { Intents = intents } = decide colony Map.empty Set.empty None
+
+    let builtKindOf =
+        function
+        | Extension -> BuiltKind.Extension
+        | Tower -> BuiltKind.Tower
+        | Road -> BuiltKind.Road
+        | Container -> BuiltKind.Container
+        | Storage -> BuiltKind.Storage
+
+    let sites =
+        placementIntents intents
+        |> List.mapi (fun i (_, pos, kind) -> $"site-{i}", pos, builtKindOf kind)
+
+    let walkable = [ BuiltKind.Road; BuiltKind.Container ]
+
+    { colony with
+        Spatial =
+            { withTargets [ for id, pos, kind in sites -> id, pos, Site kind ] colony.Spatial with
+                Obstacles =
+                    (colony.Spatial.Obstacles, sites)
+                    ||> List.fold (fun acc (_, pos, kind) ->
+                        if List.contains kind walkable then acc else Set.add pos acc)
+            }
+    }
+
+[<Tests>]
+let linkFootingTests =
+    testList
+        "link footing"
+        [
+            test "no site lands on a Link footing, at any level" {
+                // The footings are held from level 0, levels before the
+                // engine unlocks links, because the tile never comes back
+                // once an extension takes it — and past RCL4, where links
+                // would be allowed, nothing is placed on them either: Link
+                // is a built kind with no placeable counterpart, so the
+                // Layout emits no site for one at any level (ADR 0022).
+                for level in 1..8 do
+                    let { Intents = intents } =
+                        decide (atLevel level footingRoom) Map.empty Set.empty None
+
+                    Expect.isEmpty
+                        (placedTiles intents
+                         |> List.filter (fun tile -> Set.contains tile footingTiles))
+                        $"RCL{level}: no extension, tower, road or container site sits on a footing"
+            }
+
+            test "a footing outranks the extensions: the cluster fills one tile further out" {
+                // (23,23) is the ordering's third free pick and the footing
+                // beside the source container. The footing wins it, so the
+                // cluster takes the next tile instead — the allowance still
+                // fills, it just reaches one ring wider.
+                let { Intents = intents } = decide (atLevel 3 footingRoom) Map.empty Set.empty None
+
+                Expect.hasLength
+                    (sitesOfKind Extension intents)
+                    10
+                    "the RCL3 allowance still fills whole"
+
+                Expect.isFalse
+                    (Set.contains { X = 23; Y = 23 } (clusterTiles intents))
+                    "the footing's tile is out of the clustered picks"
+
+                Expect.contains
+                    (clusterTiles intents)
+                    { X = 22; Y = 24 }
+                    "the pick behind the footing is drawn in: nothing is lost, the cluster moves out"
+            }
+
+            test
+                "a footing may sit on a Seat: the working ground is off-limits to the cluster alone" {
+                // This source's trunk leaves by the Seat at (24,22), so that
+                // Seat is the container pick and the footing beside it wants
+                // (24,23) — another Seat. A footing is the one structure
+                // footing allowed on working ground (ADR 0022); were it to
+                // dodge Seats the way the ordering does, it would fall
+                // through to (25,23) and cost the cluster that tile.
+                let colony =
+                    atLevel
+                        4
+                        (openRoom 6
+                         |> withTargets
+                             [
+                                 "src-a", { X = 23; Y = 23 }, Source
+                                 "ctrl-1", { X = 30; Y = 25 }, Controller
+                             ])
+
+                let { Intents = intents } = decide colony Map.empty Set.empty None
+
+                Expect.isFalse
+                    (List.contains { X = 24; Y = 23 } (placedTiles intents))
+                    "the Seat beside the container is held, not built on"
+
+                Expect.contains
+                    (clusterTiles intents)
+                    { X = 25; Y = 23 }
+                    "the cluster keeps the tile a working-ground dodge would have cost it"
+            }
+
+            test "the footings hold their tiles as the container and the Storage are built" {
+                // The reservation becomes a structure: the source container
+                // on (24,23), the Storage on (24,24). Both picks are judged
+                // from geometry that does not move when they are built, so
+                // the footings beside them do not move either — (23,23) is
+                // buildable again on this tick and still nothing takes it.
+                let built =
+                    footingRoom
+                    |> withTargets [ "can-a", { X = 24; Y = 23 }, Structure BuiltKind.Container ]
+                    |> withStanding "sto-1" { X = 24; Y = 24 } (Structure BuiltKind.Storage)
+
+                let { Intents = intents } = decide (atLevel 4 built) Map.empty Set.empty None
+
+                Expect.isNonEmpty (sitesOfKind Extension intents) "the cluster still fills"
+
+                Expect.isEmpty
+                    (placedTiles intents |> List.filter (fun tile -> Set.contains tile footingTiles))
+                    "both footings are still held, target built or reserved"
+            }
+
+            test "a standing Storage keeps the footing beside it, and a pending one too" {
+                // (23,23) is the footing beside the Storage's pick at
+                // (24,24). The tick the Storage is placed its reservation
+                // leaves the clustered ordering, so the footing reads the
+                // site's — and then the structure's — own tile instead, or
+                // the tile it was holding falls to the next extension.
+                let room =
+                    openRoom 6
+                    |> withTargets
+                        [
+                            "src-a", { X = 22; Y = 26 }, Source
+                            "ctrl-1", { X = 30; Y = 25 }, Controller
+                        ]
+
+                let planOf colony =
+                    let { Intents = intents } = decide (atLevel 4 colony) Map.empty Set.empty None
+                    intents
+
+                let planned = planOf room
+
+                let pending =
+                    planOf (
+                        room |> withTargets [ "sto-1", { X = 24; Y = 24 }, Site BuiltKind.Storage ]
+                    )
+
+                let built =
+                    planOf (
+                        room
+                        |> withStanding "sto-1" { X = 24; Y = 24 } (Structure BuiltKind.Storage)
+                    )
+
+                Expect.equal
+                    (sitesOfKind Storage planned)
+                    [ { X = 24; Y = 24 } ]
+                    "the Storage is planned on the ordering's first pick"
+
+                for (label, intents) in
+                    [ "reserved", planned; "pending", pending; "standing", built ] do
+                    Expect.isFalse
+                        (List.contains { X = 23; Y = 23 } (placedTiles intents))
+                        $"{label}: the footing beside the Storage keeps its tile"
+            }
+
+            test "a standing link keeps its own footing: the plan is the tick-before plan" {
+                // A link is a target, so the tick it goes up its tile stops
+                // being buildable — the footing reads standing links back
+                // into its candidates rather than jumping to the next tile
+                // and costing the cluster a second one. This room's Storage
+                // already stands off in the corner, so the source
+                // container's footing is the only one bidding near the
+                // cluster and the jump would be visible.
+                let room =
+                    openRoom 6
+                    |> withTargets
+                        [
+                            "src-a", { X = 25; Y = 21 }, Source
+                            "ctrl-1", { X = 26; Y = 28 }, Controller
+                        ]
+                    |> withStanding "sto-1" { X = 29; Y = 29 } (Structure BuiltKind.Storage)
+
+                let linked =
+                    room |> withStanding "link-1" { X = 23; Y = 23 } (Structure BuiltKind.Link)
+
+                let before = decide (atLevel 4 room) Map.empty Set.empty None
+                let after = decide (atLevel 4 linked) Map.empty Set.empty None
+
+                Expect.isFalse
+                    (List.contains { X = 23; Y = 23 } (placedTiles after.Intents))
+                    "the link's tile leaves the ordering: nothing is planned onto it"
+
+                Expect.equal
+                    (placementIntents after.Intents)
+                    (placementIntents before.Intents)
+                    "the link standing on its footing moves nothing else in the plan"
+            }
+
+            test "no clustered structure and no trunk want the same tile" {
+                // A footing takes one of the cluster's own picks, so the
+                // cluster draws one more tile in behind it — and the
+                // reservation the trunk flood was routed around is widened
+                // by the footing count for exactly that (ADR 0027), so the
+                // drawn-in tile is still ground no trunk was allowed to
+                // cross. ADR 0011's precedence survives the push: a road
+                // never sits where a structure will.
+                let { Intents = intents } = decide (atLevel 4 crossedRoom) Map.empty Set.empty None
+
+                Expect.isNonEmpty (sitesOfKind Road intents) "the trunks are paved"
+
+                Expect.isEmpty
+                    (Set.intersect (clusterTiles intents) (sitesOfKind Road intents |> Set.ofList))
+                    "the cluster the footings pushed out is still inside the reservation"
+            }
+
+            test "the footings survive the placement burst: the next tick asks for nothing" {
+                // RCL4 places the whole horizon at once, so the tick after
+                // it every gap is zero and the reservation is carried by
+                // the sites themselves — except the footings, which no site
+                // ever stands on. The widened window is what still holds
+                // them (ADR 0027); without it the trunk flood is free to
+                // take a footing the moment the cluster is placed, and the
+                // Layout emits a road on the tile it had been reserving
+                // since level 0, orphaning the roads it just moved off.
+                let { Intents = intents } =
+                    decide (withPlanPending (atLevel 4 crossedRoom)) Map.empty Set.empty None
+
+                Expect.isEmpty
+                    (placementIntents intents)
+                    "the whole plan stands where it was asked for: nothing moved, nothing is re-sited"
+            }
+        ]
+
 /// The trunk colony with one extra target standing (or pending) anywhere.
 let withTarget id pos kind colony =
     { colony with

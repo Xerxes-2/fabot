@@ -36,6 +36,8 @@ let private builtKindOf structureType =
         BuiltKind.Container
     elif structureType = structureStorage then
         BuiltKind.Storage
+    elif structureType = structureLink then
+        BuiltKind.Link
     else
         BuiltKind.Other
 

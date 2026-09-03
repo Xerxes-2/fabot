@@ -256,6 +256,40 @@ let placementQueryTests =
                     "pile tiles stay buildable"
             }
 
+            test "a standing link is a built kind: its tile is censused and no longer buildable" {
+                // Link is a projection kind with no placeable counterpart
+                // (ADR 0022): the Layout never asks for one, it only needs
+                // to see the ones that stand, so a link on a footing does
+                // not send the footing looking for another tile.
+                let atlas =
+                    { spatial
+                          [ "link-1", { X = 10; Y = 10 }; "sto-1", { X = 10; Y = 11 } ]
+                          [ { X = 10; Y = 10 }, Plain; { X = 10; Y = 11 }, Plain ] with
+                        TargetKinds =
+                            Map.ofList
+                                [
+                                    "link-1", Structure BuiltKind.Link
+                                    "sto-1", Structure BuiltKind.Storage
+                                ]
+                    }
+                    |> snapshotWith []
+                    |> ofSnapshot
+
+                Expect.equal
+                    (linkTiles atlas)
+                    (Set.singleton { X = 10; Y = 10 })
+                    "the link's tile, and no other kind's"
+
+                Expect.equal
+                    (storageTiles atlas)
+                    (Set.singleton { X = 10; Y = 11 })
+                    "the Storage's tile, the anchor its own footing is read from"
+
+                Expect.isEmpty
+                    (buildableTiles atlas)
+                    "both stand on their tiles: neither takes a site"
+            }
+
             test
                 "a placed container is a target, not an obstacle: repairable in place, unbuildable under" {
                 // Container at (10,10) on a fully projected 7x7 plain square,
@@ -1127,6 +1161,58 @@ let postTests =
                     (posts atlas)
                     (Set.singleton { X = 9; Y = 10 })
                     "no Dual Seats, one container Post"
+            }
+        ]
+
+[<Tests>]
+let workingGroundTests =
+    testList
+        "atlas workingGround"
+        [
+            test "the working ground is every source's Seats plus the Upgrade Work Area" {
+                // Source at (10,10) with three projected neighbours — the
+                // wall is no Seat — and a controller at (13,10) whose
+                // Upgrade Work Area reaches (12,10), (11,10) and (10,11) —
+                // the two Seats in both halves count once.
+                let atlas =
+                    { spatial
+                          [ "src-a", { X = 10; Y = 10 }; "ctrl-1", { X = 13; Y = 10 } ]
+                          [
+                              { X = 9; Y = 10 }, Plain
+                              { X = 10; Y = 11 }, Swamp
+                              { X = 11; Y = 10 }, Plain
+                              { X = 11; Y = 9 }, Wall
+                              { X = 12; Y = 10 }, Plain
+                          ] with
+                        TargetKinds = Map.ofList [ "src-a", Source; "ctrl-1", Controller ]
+                    }
+                    |> snapshotWith []
+                    |> ofSnapshot
+
+                Expect.equal
+                    (workingGround atlas)
+                    (Set.ofList
+                        [
+                            { X = 9; Y = 10 }
+                            { X = 10; Y = 11 }
+                            { X = 11; Y = 10 }
+                            { X = 12; Y = 10 }
+                        ])
+                    "the Seats the Anchors stand on and the tiles the upgraders stand on, together"
+            }
+
+            test "a room with neither sources nor a controller works no ground" {
+                let atlas =
+                    { spatial [ "spawn-1", { X = 10; Y = 10 } ] [ { X = 10; Y = 11 }, Plain ] with
+                        TargetKinds = Map.ofList [ "spawn-1", Structure BuiltKind.Spawn ]
+                    }
+                    |> snapshotWith []
+                    |> ofSnapshot
+
+                Expect.equal
+                    (workingGround atlas)
+                    Set.empty
+                    "geometry the projection cannot place answers empty, and nothing is off-limits"
             }
         ]
 
