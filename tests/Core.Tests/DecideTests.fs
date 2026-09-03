@@ -694,6 +694,11 @@ let withRoadsBuilt colony =
 
 let chebyshev a b = max (abs (a.X - b.X)) (abs (a.Y - b.Y))
 
+/// The clustered structures of a plan: the tower and every extension, the
+/// tiles one ordering rule picks (ADR 0011).
+let clusterTiles intents =
+    sitesOfKind Tower intents @ sitesOfKind Extension intents |> Set.ofList
+
 [<Tests>]
 let layoutTests =
     testList
@@ -767,9 +772,7 @@ let layoutTests =
                 let rcl4 = decide (trunkColony 4) Map.empty Set.empty None
                 let roads = sitesOfKind Road rcl2.Intents |> Set.ofList
 
-                let cluster =
-                    sitesOfKind Tower rcl4.Intents @ sitesOfKind Extension rcl4.Intents
-                    |> Set.ofList
+                let cluster = clusterTiles rcl4.Intents
 
                 Expect.equal
                     (sitesOfKind Road rcl4.Intents |> Set.ofList)
@@ -779,6 +782,61 @@ let layoutTests =
                 Expect.isEmpty
                     (Set.intersect roads cluster)
                     "no trunk tile coincides with a reserved structure tile"
+            }
+
+            test "a Seat beside the spawn is working ground: no tower, no extension" {
+                // The source stands two tiles north of the spawn, so four of
+                // its Seats are the cluster's own nearest same-colour tiles.
+                let sourcePos = { X = 25; Y = 23 }
+
+                let colony = atLevel 3 (openRoom 6 |> withTargets [ "src-a", sourcePos, Source ])
+
+                let { Intents = intents } = decide colony Map.empty Set.empty None
+
+                let seats =
+                    Set.ofList
+                        [
+                            for x in sourcePos.X - 1 .. sourcePos.X + 1 do
+                                for y in sourcePos.Y - 1 .. sourcePos.Y + 1 do
+                                    if { X = x; Y = y } <> sourcePos then
+                                        { X = x; Y = y }
+                        ]
+
+                let cluster = clusterTiles intents
+
+                Expect.isNonEmpty cluster "the cluster still fills, one ring out"
+
+                Expect.isEmpty
+                    (Set.intersect cluster seats)
+                    "no clustered structure eats a Seat the Anchors stand on"
+            }
+
+            test "the Upgrade Work Area is working ground: no tower, no extension" {
+                // The controller stands four tiles north of the spawn, so its
+                // Upgrade Work Area covers the cluster's nearest same-colour
+                // tiles without covering the spawn itself.
+                let controllerPos = { X = 25; Y = 21 }
+
+                let colony =
+                    atLevel 3 (openRoom 6 |> withTargets [ "ctrl-1", controllerPos, Controller ])
+
+                let { Intents = intents } = decide colony Map.empty Set.empty None
+
+                let upgradeArea =
+                    Set.ofList
+                        [
+                            for x in controllerPos.X - 3 .. controllerPos.X + 3 do
+                                for y in controllerPos.Y - 3 .. controllerPos.Y + 3 do
+                                    { X = x; Y = y }
+                        ]
+
+                let cluster = clusterTiles intents
+
+                Expect.isNonEmpty cluster "the cluster still fills, one ring out"
+
+                Expect.isEmpty
+                    (Set.intersect cluster upgradeArea)
+                    "no clustered structure eats a tile an upgrader stands on"
             }
 
             test "without a source only the Work Area swamps are paved, never plain" {

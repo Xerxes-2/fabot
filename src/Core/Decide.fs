@@ -564,10 +564,11 @@ let private horizonLevel = 4
 /// deterministic Layout (ADR 0011), computed whole from the Atlas every
 /// tick and placed all at once — no persisted plan, no pacing. One
 /// ordering rule eats every clustered structure: buildable tiles on the
-/// spawn's checkerboard colour, nearest-to-spawn first, the tower taking
-/// its pick before the extensions. Trunk roads pave each source to the
-/// controller and to each spawn plus the swamps of the controller's Work
-/// Area, priced on raw terrain and routed around every reserved tile —
+/// spawn's checkerboard colour, the working ground excluded (ADR 0022),
+/// nearest-to-spawn first, the tower taking its pick before the
+/// extensions. Trunk roads pave each source to the controller and to each
+/// spawn plus the swamps of the controller's Work Area, priced on raw
+/// terrain and routed around every reserved tile —
 /// reservations come first, so a road never sits where a structure will.
 /// Placement filters the Layout to what the current level unlocks and
 /// what the projection's censuses say is missing. Sites are not creep
@@ -581,9 +582,17 @@ let private planLayout (snapshot: Snapshot) atlas : Intent list =
         // the spawn's colour, leaving the other colour free for movement.
         let parity = (spawnPos.X + spawnPos.Y) % 2
 
+        // The working ground — every source's Seats and the controller's
+        // Upgrade Work Area — is off-limits (ADR 0022): a clustered
+        // structure there eats a tile an Anchor or an upgrader stands on,
+        // so a colony whose nearest same-colour tiles are working ground
+        // clusters one ring out instead of eating them.
+        let working = Atlas.workingGround atlas
+
         let ordering =
             Atlas.buildableTiles atlas
-            |> List.filter (fun tile -> (tile.X + tile.Y) % 2 = parity)
+            |> List.filter (fun tile ->
+                (tile.X + tile.Y) % 2 = parity && not (Set.contains tile working))
             |> List.sortBy (fun tile -> range tile spawnPos, tile.X, tile.Y)
 
         // A kind's still-open gap at a level: its allowance there minus the
@@ -638,12 +647,10 @@ let private planLayout (snapshot: Snapshot) atlas : Intent list =
 
         // The controller's Work Area paves its swamps and only its swamps —
         // upgraders shuttle within it, so the dear ground gets a road and
-        // the plain ground does not. A reserved tile is a structure's, not
-        // a road's.
-        let workAreaSwamps =
-            upgradeArea
-            |> Set.filter (Atlas.isSwamp atlas)
-            |> fun s -> Set.difference s reserved
+        // the plain ground does not. No reservation can stand here: the
+        // Work Area is working ground, which the ordering never offered
+        // (ADR 0022).
+        let workAreaSwamps = upgradeArea |> Set.filter (Atlas.isSwamp atlas)
 
         // The road gap reads the projection's road census: a built road or a
         // pending road site already claims its tile (ADR 0010).
@@ -659,13 +666,13 @@ let private planLayout (snapshot: Snapshot) atlas : Intent list =
         // container lands where the trunk leaves the source and harvest
         // overflow falls straight in. Seats are terrain geometry and
         // trunks avoid only the reservations, so the pick never shifts as
-        // the container itself gets built.
+        // the container itself gets built. Seats need no reservation dodge:
+        // they are working ground, which the clustered ordering never
+        // offered (ADR 0022).
         let sourceContainerTiles =
             sourceTrunks
             |> List.choose (fun (sourceId, trunk) ->
-                let seats =
-                    Atlas.seatTilesOf atlas sourceId
-                    |> Set.filter (fun seat -> not (Set.contains seat reserved))
+                let seats = Atlas.seatTilesOf atlas sourceId
 
                 if Set.isEmpty trunk || Set.isEmpty seats then
                     None
@@ -677,17 +684,17 @@ let private planLayout (snapshot: Snapshot) atlas : Intent list =
                     |> Some)
 
         // The controller container: an Upgrade-Work-Area tile beside a
-        // trunk, off the road itself and off every reservation — the
-        // buffer upgraders work from standing still, one tile from where
-        // the haulers drive. Judged from the same stable geometry as the
+        // trunk and off the road itself — the buffer upgraders work from
+        // standing still, one tile from where the haulers drive. No
+        // reservation to dodge either: the Work Area is working ground
+        // (ADR 0022). Judged from the same stable geometry as the
         // Seat pick, so a standing container recomputes to its own tile.
         let controllerContainerTile =
             Atlas.positionOf atlas controller.Id
             |> Option.bind (fun controllerPos ->
                 upgradeArea
                 |> Set.filter (fun tile ->
-                    not (Set.contains tile reserved)
-                    && not (Set.contains tile trunkTiles)
+                    not (Set.contains tile trunkTiles)
                     && not (Set.contains tile workAreaSwamps)
                     && trunkTiles |> Set.exists (fun t -> range tile t = 1))
                 |> Set.toList

@@ -525,6 +525,16 @@ let private upgradeArea (atlas: Atlas) : Set<Pos> =
     |> List.map (Upgrade >> workArea atlas)
     |> List.fold Set.union Set.empty
 
+/// The working ground of the room (ADR 0022): every projected source's
+/// Seats plus every projected controller's Upgrade Work Area — the tiles
+/// the colony works from. Off-limits to the Layout's clustered ordering: a
+/// tower or extension there eats a tile an Anchor or an upgrader stands
+/// on. Total: a room with neither kind of geometry answers with the empty
+/// set, which reserves nothing rather than blocking every tile (ADR
+/// 0004). Derived fresh each tick, never persisted.
+let workingGround (atlas: Atlas) : Set<Pos> =
+    Set.union (seatUnion atlas) (upgradeArea atlas)
+
 /// Dual Seats of the room: tiles inside both some projected source's Seats
 /// and a projected controller's Upgrade Work Area — a creep standing on one
 /// harvests and upgrades without ever moving. Total: a room with no
