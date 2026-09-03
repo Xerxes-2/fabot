@@ -1829,20 +1829,311 @@ let sayTests =
         ]
 
 [<Tests>]
-let tests =
+let verdictTests =
     testList
-        "decide"
+        "matcher verdicts"
         [
-            test "the Decision carries an empty Verdict collection for now" {
+            test "a lone applicable Task wins as the only candidate" {
                 let snapshot =
                     { bareRespawn with
+                        Sources = [ { Id = "src-a" } ]
+                        Controller = None
                         Creeps = [ worker "w1" 0 50 ]
                     }
 
                 let { Verdicts = verdicts } = decide snapshot Map.empty Set.empty
-                Expect.isEmpty verdicts "no decision step speaks yet"
+
+                Expect.equal
+                    verdicts
+                    [ Verdict.Matched("w1", taskId (Harvest "src-a"), MatchFactor.OnlyCandidate) ]
+                    "one creep, one candidate: the Verdict names the Task and the walkover"
             }
 
+            test "rank decides: Refill outbids Upgrade for a loaded creep" {
+                let snapshot =
+                    { bareRespawn with
+                        Sources = []
+                        Refillables = [ { Id = "spawn-1"; FreeCapacity = 50 } ]
+                        Creeps = [ worker "w1" 50 0 ]
+                    }
+
+                let { Verdicts = verdicts } = decide snapshot Map.empty Set.empty
+
+                Expect.equal
+                    verdicts
+                    [ Verdict.Matched("w1", taskId (Refill "spawn-1"), MatchFactor.Rank) ]
+                    "the feeding tier beat the surplus tier: rank decided"
+            }
+
+            test "travel cost decides: the near source wins the rank tie" {
+                let snapshot =
+                    { bareRespawn with
+                        Sources = [ { Id = "src-far" }; { Id = "src-near" } ]
+                        Controller = None
+                        Creeps = [ worker "w1" 0 50 ]
+                        Spatial = nearFarCorridor [ "w1", { X = 10; Y = 17 } ]
+                    }
+
+                let { Verdicts = verdicts } = decide snapshot Map.empty Set.empty
+
+                Expect.equal
+                    verdicts
+                    [ Verdict.Matched("w1", taskId (Harvest "src-near"), MatchFactor.TravelCost) ]
+                    "same rank, cheaper path: travel cost decided"
+            }
+
+            test "load decides: the second creep spreads to the emptier source" {
+                let snapshot =
+                    { bareRespawn with
+                        Controller = None
+                        Creeps = [ worker "w1" 0 50; worker "w2" 0 50 ]
+                    }
+
+                let { Verdicts = verdicts } = decide snapshot Map.empty Set.empty
+
+                Expect.equal
+                    verdicts
+                    [
+                        Verdict.Matched("w1", taskId (Harvest "src-a"), MatchFactor.PoolOrder)
+                        Verdict.Matched("w2", taskId (Harvest "src-b"), MatchFactor.Load)
+                    ]
+                    "w1's tie fell to pool order; w2 avoided the loaded source"
+            }
+
+            test "a remembered assignment kept is distinguishable from a fresh match" {
+                let snapshot =
+                    { bareRespawn with
+                        Sources = [ { Id = "src-far" }; { Id = "src-near" } ]
+                        Creeps = [ worker "w1" 0 50 ]
+                        Spatial = nearFarCorridor [ "w1", { X = 10; Y = 17 } ]
+                    }
+
+                let sticky = Map.ofList [ "w1", taskId (Harvest "src-far") ]
+                let { Verdicts = verdicts } = decide snapshot sticky Set.empty
+
+                Expect.equal
+                    verdicts
+                    [ Verdict.Kept("w1", taskId (Harvest "src-far")) ]
+                    "anti-thrash speaks as Kept, never as a fresh Matched"
+            }
+
+            test "a Task that left the pool releases with TaskGone" {
+                // The remembered Refill target has no free capacity this
+                // tick, so the Planner never generates the Task.
+                let snapshot =
+                    { bareRespawn with
+                        Sources = []
+                        Controller = None
+                        Creeps = [ worker "w1" 50 0 ]
+                    }
+
+                let sticky = Map.ofList [ "w1", taskId (Refill "spawn-1") ]
+                let { Verdicts = verdicts } = decide snapshot sticky Set.empty
+
+                Expect.contains
+                    verdicts
+                    (Verdict.Released("w1", taskId (Refill "spawn-1"), ReleaseReason.TaskGone))
+                    "the release names the vanished Task"
+            }
+
+            test "a creep that fills up releases Harvest as Inapplicable and matches fresh" {
+                let snapshot =
+                    { bareRespawn with
+                        Refillables = [ { Id = "spawn-1"; FreeCapacity = 50 } ]
+                        Creeps = [ worker "w1" 50 0 ]
+                    }
+
+                let sticky = Map.ofList [ "w1", taskId (Harvest "src-a") ]
+                let { Verdicts = verdicts } = decide snapshot sticky Set.empty
+
+                Expect.equal
+                    verdicts
+                    [
+                        Verdict.Released("w1", taskId (Harvest "src-a"), ReleaseReason.Inapplicable)
+                        Verdict.Matched("w1", taskId (Refill "spawn-1"), MatchFactor.Rank)
+                    ]
+                    "the handover carries both halves: why released, what won next"
+            }
+
+            test "a body that cannot do its remembered Task releases as Inapplicable" {
+                // Part-based, not energy-state: the hauler has room to
+                // harvest into but no Work part to harvest with.
+                let snapshot =
+                    { bareRespawn with
+                        Sources = [ { Id = "src-a" } ]
+                        Controller = None
+                        Creeps = [ creepWith "hauler" 0 50 [ Carry; Move ] ]
+                    }
+
+                let sticky = Map.ofList [ "hauler", taskId (Harvest "src-a") ]
+                let { Verdicts = verdicts } = decide snapshot sticky Set.empty
+
+                Expect.contains
+                    verdicts
+                    (Verdict.Released(
+                        "hauler",
+                        taskId (Harvest "src-a"),
+                        ReleaseReason.Inapplicable
+                    ))
+                    "the missing Work part releases the assignment as Inapplicable"
+            }
+
+            test "a walled-off Work Area releases with Unreachable" {
+                let terrain =
+                    [
+                        { X = 10; Y = 10 }, Wall
+                        { X = 10; Y = 11 }, Plain
+                        { X = 10; Y = 12 }, Wall
+                        { X = 10; Y = 13 }, Plain
+                        { X = 10; Y = 14 }, Plain
+                        { X = 10; Y = 16 }, Wall
+                    ]
+
+                let snapshot =
+                    { bareRespawn with
+                        Sources = [ { Id = "src-a" } ]
+                        Creeps = [ worker "w1" 25 25 ]
+                        Spatial =
+
+                            { spatial
+                                  [ "src-a", { X = 10; Y = 10 }; "ctrl-1", { X = 10; Y = 16 } ]
+                                  terrain with
+                                CreepPositions = Map.ofList [ "w1", { X = 10; Y = 14 } ]
+                            }
+                    }
+
+                let sticky = Map.ofList [ "w1", taskId (Harvest "src-a") ]
+                let { Verdicts = verdicts } = decide snapshot sticky Set.empty
+
+                Expect.contains
+                    verdicts
+                    (Verdict.Released("w1", taskId (Harvest "src-a"), ReleaseReason.Unreachable))
+                    "no Seat can be reached: the release says so"
+            }
+
+            test "a remembered oversell releases with OverCapacity, the loser idles as NoneFree" {
+                // One Seat at the source, two creeps remembered on it — an
+                // oversell memory can carry across a redeploy. The
+                // alphabetically first keeps; nothing else fits the loser.
+                let corridor =
+                    [ { X = 10; Y = 10 }, Wall ] @ [ for y in 11..14 -> { X = 10; Y = y }, Plain ]
+
+                let snapshot =
+                    { bareRespawn with
+                        Sources = [ { Id = "src-a" } ]
+                        Creeps = [ worker "w1" 0 50; worker "w2" 0 50 ]
+                        Spatial =
+
+                            { spatial [ "src-a", { X = 10; Y = 10 } ] corridor with
+                                CreepPositions =
+                                    Map.ofList
+                                        [ "w1", { X = 10; Y = 12 }; "w2", { X = 10; Y = 13 } ]
+                            }
+                    }
+
+                let sticky =
+                    Map.ofList [ "w1", taskId (Harvest "src-a"); "w2", taskId (Harvest "src-a") ]
+
+                let { Verdicts = verdicts } = decide snapshot sticky Set.empty
+
+                Expect.equal
+                    verdicts
+                    [
+                        Verdict.Released("w2", taskId (Harvest "src-a"), ReleaseReason.OverCapacity)
+                        Verdict.Kept("w1", taskId (Harvest "src-a"))
+                        Verdict.Unassigned("w2", IdleReason.NoneFree)
+                    ]
+                    "the cap releases the oversell and explains the loser's idleness"
+            }
+
+            test "an empty pool idles a creep with NoTasks" {
+                let snapshot =
+                    { bareRespawn with
+                        Sources = []
+                        Controller = None
+                        Creeps = [ worker "w1" 0 50 ]
+                    }
+
+                let { Verdicts = verdicts } = decide snapshot Map.empty Set.empty
+
+                Expect.equal
+                    verdicts
+                    [ Verdict.Unassigned("w1", IdleReason.NoTasks) ]
+                    "the Planner generated nothing at all"
+            }
+
+            test "a full creep with only Harvest on offer idles as NoneApplicable" {
+                let snapshot =
+                    { bareRespawn with
+                        Controller = None
+                        Creeps = [ worker "w1" 50 0 ]
+                    }
+
+                let { Verdicts = verdicts } = decide snapshot Map.empty Set.empty
+
+                Expect.equal
+                    verdicts
+                    [ Verdict.Unassigned("w1", IdleReason.NoneApplicable) ]
+                    "no Task fit the creep's body or energy state"
+            }
+
+            test "an applicable Task with an unreachable Work Area idles as NoneReachable" {
+                // The source's one Seat is walled off; nothing else exists.
+                let terrain =
+                    [
+                        { X = 10; Y = 10 }, Wall
+                        { X = 10; Y = 11 }, Plain
+                        { X = 10; Y = 12 }, Wall
+                        { X = 10; Y = 13 }, Plain
+                        { X = 10; Y = 14 }, Plain
+                    ]
+
+                let snapshot =
+                    { bareRespawn with
+                        Sources = [ { Id = "src-a" } ]
+                        Controller = None
+                        Creeps = [ worker "w1" 0 50 ]
+                        Spatial =
+
+                            { spatial [ "src-a", { X = 10; Y = 10 } ] terrain with
+                                CreepPositions = Map.ofList [ "w1", { X = 10; Y = 14 } ]
+                            }
+                    }
+
+                let { Verdicts = verdicts } = decide snapshot Map.empty Set.empty
+
+                Expect.equal
+                    verdicts
+                    [ Verdict.Unassigned("w1", IdleReason.NoneReachable) ]
+                    "the Task fit and had room, but no path reaches its Work Area"
+            }
+
+            test "a dead creep's dropped assignment speaks no Verdict" {
+                let snapshot =
+                    { bareRespawn with
+                        Sources = [ { Id = "src-a" } ]
+                        Controller = None
+                        Creeps = []
+                    }
+
+                let sticky = Map.ofList [ "ghost", taskId (Harvest "src-a") ]
+
+                let {
+                        Assignments = assignments
+                        Verdicts = verdicts
+                    } =
+                    decide snapshot sticky Set.empty
+
+                Expect.isEmpty (Map.toList assignments) "the dead creep's assignment is dropped"
+                Expect.isEmpty verdicts "Verdicts attribute to living creeps only"
+            }
+        ]
+
+[<Tests>]
+let tests =
+    testList
+        "decide"
+        [
             test "names on the verbose list change nothing yet" {
                 let snapshot =
                     { bareRespawn with

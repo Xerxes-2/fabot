@@ -80,7 +80,7 @@ The repeating [Work; Carry; Move] block worker bodies are built from — the gen
 The body-generation invariant (ADR 0003): a worker body padded beyond whole [[worker unit]]s never moves slower than the pure-unit body, empty or loaded. The remainder buys as much Carry as parity allows, then Move — never Work.
 
 ### Verdict
-The reasoned outcome a decision step returns beside its decision — data, never a log line (ADR 0009). The [[matcher]]'s Verdict on a creep says which [[task]] won it and why (rank, [[travel cost]], tie-break) or why an assignment was released; the [[resolver]]'s says what became of its movement ([[grounded]], yielded, reroute). Conclusion-level always; a creep on the verbose list gets its full candidate scoring too. The Planner and spawn decisions return no Verdicts.
+The reasoned outcome a decision step returns beside its decision — data, never a log line (ADR 0009). The [[matcher]]'s Verdict on a creep says which [[task]] won it and why (rank, [[travel cost]], load, tie-break), that a remembered assignment was kept (anti-thrash, distinct from a fresh match), why an assignment was released, or why an unassigned creep got nothing; the [[resolver]]'s says what became of its movement ([[grounded]], yielded, reroute). Conclusion-level always; a creep on the verbose list gets its full candidate scoring too. The Planner and spawn decisions return no Verdicts.
 
 ### Transition log
 The per-creep ring of recent changes — task handovers and movement events, each with its [[verdict]] and tick — written only on the tick something changed. The colony's answer to "why did this creep flip", capped per creep; a quiet creep writes nothing.

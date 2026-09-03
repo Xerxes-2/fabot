@@ -547,14 +547,16 @@ let resolve (snapshot: Snapshot) atlas (assigned: Map<string, Task>) : Intent li
         |> Option.map (fun direction -> MoveCreep(name, direction)))
 
 /// Matcher: keep still-valid assignments (anti-thrash) and greedily assign
-/// the rest. Assignments in, Assignments out — emission belongs to the
-/// Emitter, movement to the Resolver.
+/// the rest. Assignments in, Assignments and the Verdicts explaining them
+/// out (ADR 0009): releases first in memory order, then one status Verdict
+/// per living creep in Snapshot order. Emission belongs to the Emitter,
+/// movement to the Resolver.
 let matchCreeps
     (snapshot: Snapshot)
     atlas
     (tasks: Task list)
     (assignments: Assignments)
-    : Assignments =
+    : Assignments * Verdict list =
     let byId = tasks |> List.map (fun t -> taskId t, t) |> Map.ofList
     let capacities = taskCapacities snapshot atlas
 
@@ -570,25 +572,30 @@ let matchCreeps
     // oversell from before a cap existed (e.g. across a redeploy). So does
     // reachability: a Work Area the Atlas can no longer reach releases the
     // assignment, freeing its capacity for creeps that can get there —
-    // deliberately with no range-based fallback (ADR 0002).
-    let kept =
-        (Map.empty, assignments)
-        ||> Map.fold (fun acc name tid ->
-            match
-                snapshot.Creeps |> List.tryFind (fun c -> c.Name = name), Map.tryFind tid byId
-            with
-            | Some creep, Some task when
-                applicable creep task
-                && hasCapacity acc tid
-                && (Atlas.travelCost atlas creep.Name task).IsSome
-                ->
-                Map.add name tid acc
-            | _ -> acc)
+    // deliberately with no range-based fallback (ADR 0002). Each failed
+    // gate names the release; a dead creep's assignment drops silently —
+    // Verdicts attribute to living creeps only.
+    let kept, released =
+        ((Map.empty, []), assignments)
+        ||> Map.fold (fun (acc, released) name tid ->
+            let release reason =
+                acc, Verdict.Released(name, tid, reason) :: released
 
-    let assignOne acc (creep: CreepInfo) =
-        if Map.containsKey creep.Name acc then
-            acc
-        else
+            match snapshot.Creeps |> List.tryFind (fun c -> c.Name = name) with
+            | None -> acc, released
+            | Some creep ->
+                match Map.tryFind tid byId with
+                | None -> release ReleaseReason.TaskGone
+                | Some task when not (applicable creep task) -> release ReleaseReason.Inapplicable
+                | Some _ when not (hasCapacity acc tid) -> release ReleaseReason.OverCapacity
+                | Some task when (Atlas.travelCost atlas creep.Name task).IsNone ->
+                    release ReleaseReason.Unreachable
+                | Some _ -> Map.add name tid acc, released)
+
+    let assignOne (acc, verdicts) (creep: CreepInfo) =
+        match Map.tryFind creep.Name acc with
+        | Some tid -> acc, Verdict.Kept(creep.Name, tid) :: verdicts
+        | None ->
             let candidates =
                 tasks
                 |> List.choose (fun t ->
@@ -598,15 +605,50 @@ let matchCreeps
                         None)
 
             match candidates with
-            | [] -> acc
+            | [] ->
+                // How far the best Task got through the gates — applicable,
+                // capacity, reachable — is why the creep sits idle.
+                let reason =
+                    if List.isEmpty tasks then
+                        IdleReason.NoTasks
+                    elif
+                        tasks
+                        |> List.exists (fun t -> applicable creep t && hasCapacity acc (taskId t))
+                    then
+                        IdleReason.NoneReachable
+                    elif tasks |> List.exists (applicable creep) then
+                        IdleReason.NoneFree
+                    else
+                        IdleReason.NoneApplicable
+
+                acc, Verdict.Unassigned(creep.Name, reason) :: verdicts
             | candidates ->
-                let task, _ =
+                let keyed =
                     candidates
-                    |> List.minBy (fun (t, cost) -> rank snapshot t, cost, load acc (taskId t))
+                    |> List.map (fun (t, cost) -> (rank snapshot t, cost, load acc (taskId t)), t)
 
-                Map.add creep.Name (taskId task) acc
+                let bestKey, task = keyed |> List.minBy fst
 
-    snapshot.Creeps |> List.fold assignOne kept
+                // The deciding factor: the first component separating the
+                // winner from its closest rival, or the pool-order tie-break
+                // when the whole key ties.
+                let factor =
+                    match keyed |> List.filter (fun (_, t) -> t <> task) with
+                    | [] -> MatchFactor.OnlyCandidate
+                    | rivals ->
+                        let bestRank, bestCost, bestLoad = bestKey
+                        let rivalRank, rivalCost, rivalLoad = rivals |> List.map fst |> List.min
+
+                        if rivalRank <> bestRank then MatchFactor.Rank
+                        elif rivalCost <> bestCost then MatchFactor.TravelCost
+                        elif rivalLoad <> bestLoad then MatchFactor.Load
+                        else MatchFactor.PoolOrder
+
+                Map.add creep.Name (taskId task) acc,
+                Verdict.Matched(creep.Name, taskId task, factor) :: verdicts
+
+    let next, statuses = snapshot.Creeps |> List.fold assignOne (kept, [])
+    next, List.rev released @ List.rev statuses
 
 /// Join the Matcher's Assignments back onto the Planner's pool: the tick's
 /// assigned Task per creep, as data for the Emitter and the Resolver.
@@ -630,7 +672,7 @@ let decide (snapshot: Snapshot) (assignments: Assignments) (_verbose: Set<string
     let spawnIntents = planSpawns snapshot atlas
     let siteIntents = planConstructionSites snapshot atlas
     let tasks = planTasks snapshot
-    let next = matchCreeps snapshot atlas tasks assignments
+    let next, verdicts = matchCreeps snapshot atlas tasks assignments
     let assigned = assignedTasks tasks next
 
     {
@@ -641,5 +683,5 @@ let decide (snapshot: Snapshot) (assignments: Assignments) (_verbose: Set<string
             @ emit snapshot atlas assigned
             @ resolve snapshot atlas assigned
         Assignments = next
-        Verdicts = []
+        Verdicts = verdicts
     }

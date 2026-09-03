@@ -238,12 +238,52 @@ type Intent =
 /// Creep name -> task id. The only state remembered between ticks (anti-thrash).
 type Assignments = Map<string, string>
 
-/// The reasoned outcome a decision step returns beside its decision — data,
-/// never a log line (ADR 0009). The Matcher's and the Resolver's cases land
-/// with attribution itself; until then the one placeholder case is never
-/// constructed and every decision carries an empty collection.
+/// What decided a fresh match: the first comparison that separated the
+/// winning Task from its closest rival — rank tier, then travel cost, then
+/// current load — or the tie-break when none did (pool order), or the fact
+/// that no rival existed at all.
 [<RequireQualifiedAccess>]
-type Verdict = | Unspoken
+type MatchFactor =
+    | OnlyCandidate
+    | Rank
+    | TravelCost
+    | Load
+    | PoolOrder
+
+/// Why a remembered assignment was released: its Task left the pool, the
+/// creep can no longer usefully work it (body parts or energy state), the
+/// Task's worker cap was already full, or its Work Area is unreachable or
+/// empty (ADR 0002).
+[<RequireQualifiedAccess>]
+type ReleaseReason =
+    | TaskGone
+    | Inapplicable
+    | OverCapacity
+    | Unreachable
+
+/// Why an unassigned creep got nothing: the pool was empty, no Task fit
+/// its body or energy state, every fitting Task's worker cap was full, or
+/// every fitting Task with room had an unreachable Work Area. Reports how
+/// far the best Task got through the matching gates.
+[<RequireQualifiedAccess>]
+type IdleReason =
+    | NoTasks
+    | NoneApplicable
+    | NoneFree
+    | NoneReachable
+
+/// The reasoned outcome a decision step returns beside its decision — data,
+/// never a log line (ADR 0009). The Matcher speaks at conclusion level:
+/// which Task won a creep and what decided it, a remembered assignment kept
+/// (anti-thrash) as distinct from a fresh match, a release with its reason,
+/// or why nothing was applicable. The Resolver's cases land with movement
+/// attribution. Tasks are named by task id.
+[<RequireQualifiedAccess>]
+type Verdict =
+    | Matched of creep: string * task: string * factor: MatchFactor
+    | Kept of creep: string * task: string
+    | Released of creep: string * task: string * reason: ReleaseReason
+    | Unassigned of creep: string * reason: IdleReason
 
 /// What one tick of deciding returns: the Intents to execute, the
 /// Assignments to remember for next tick, and the Verdicts explaining
