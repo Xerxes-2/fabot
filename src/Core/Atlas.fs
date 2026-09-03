@@ -21,13 +21,40 @@ type Atlas =
             /// Each creep's fatigue factor — what turns terrain weight
             /// into ticks for that body (ADR 0006).
             Factors: Map<string, FatigueFactor>
+            /// Step weight per tile index (stepCost flattened once for the
+            /// flood's hot loop): -1 impassable, else the terrain weight.
+            Weights: int[]
+            /// Whether a creep stands on each tile index this tick; the
+            /// flood prices these tiles dearer so paths detour around
+            /// standing traffic.
+            Occupied: bool[]
             /// Memoised Dijkstra flood per placed creep's tile and fatigue
             /// factor, forced at most once per tick and shared by every
             /// query pricing from it (ADR 0002, extended to the whole
             /// tick). Bodies of the same factor at the same tile share one
-            /// flood.
-            Floods: Map<Pos * FatigueFactor, Lazy<Map<Pos, int> * Map<Pos, Pos>>>
+            /// flood. Each flood is a distance and a predecessor-index
+            /// array over tile indices.
+            Floods: Map<Pos * FatigueFactor, Lazy<int[] * int[]>>
         }
+
+let private roomSide = 50
+let private tileCount = roomSide * roomSide
+let private indexOf pos = pos.X * roomSide + pos.Y
+
+let private posAt index =
+    {
+        X = index / roomSide
+        Y = index % roomSide
+    }
+
+/// Unreached marker in a flood's distance array.
+let private unreached = System.Int32.MaxValue
+
+/// Extra ticks priced onto a step landing on a tile some creep occupies
+/// this tick: a crowd usually means waiting or displacing, so a modest
+/// detour is preferred over pushing through — yet the tile stays passable,
+/// unlike an obstacle, so traffic never makes a Task inapplicable.
+let private occupancyPenalty = 5
 
 let private neighbours pos =
     [
@@ -76,52 +103,103 @@ let private tickCost (factor: FatigueFactor) weight =
     else
         Some(max 1 ((weight * factor.FatigueParts + factor.MoveParts - 1) / factor.MoveParts))
 
-/// Dijkstra flood over the terrain from `start`, priced in ticks for one
-/// fatigue factor: cheapest travel cost to every reachable tile, plus
-/// each tile's predecessor on a cheapest path. A Set of (distance, tile)
-/// doubles as the priority queue; its ordering also makes tie-breaking
-/// deterministic. The start tile costs 0 even when it cannot be stepped
-/// onto — the creep already stands there.
+/// Dijkstra flood over the weight grid from `start`, priced in ticks for
+/// one fatigue factor: cheapest travel cost to every reachable tile
+/// (`unreached` elsewhere), plus each tile's predecessor index on a
+/// cheapest path (-1 elsewhere). This is the tick's hottest loop, so it
+/// runs on flat arrays with a binary min-heap of dist-then-index keys —
+/// the key ordering also keeps tie-breaking deterministic. The start tile
+/// costs 0 even when it cannot be stepped onto — the creep already stands
+/// there. A tile some creep occupies costs occupancyPenalty extra, so
+/// paths detour around standing traffic when a detour is cheaper.
 let private floodFrom
-    (spatial: SpatialInfo)
+    (weights: int[])
+    (occupied: bool[])
     (factor: FatigueFactor)
     (start: Pos)
-    : Map<Pos, int> * Map<Pos, Pos> =
-    let rec search (frontier: Set<int * Pos>) (dist: Map<Pos, int>) (parents: Map<Pos, Pos>) =
-        if Set.isEmpty frontier then
-            dist, parents
-        else
-            let (d, tile) as entry = Set.minElement frontier
-            let frontier = Set.remove entry frontier
+    : int[] * int[] =
+    let dist = Array.create tileCount unreached
+    let parents = Array.create tileCount -1
 
-            if Map.tryFind tile dist <> Some d then
-                // Stale queue entry: the tile was reached cheaper meanwhile.
-                search frontier dist parents
+    // Binary min-heap over dist * tileCount + index: one int per entry.
+    let heap = ResizeArray<int>()
+
+    let swap i j =
+        let t = heap.[i]
+        heap.[i] <- heap.[j]
+        heap.[j] <- t
+
+    let push key =
+        heap.Add key
+        let mutable i = heap.Count - 1
+
+        while i > 0 && heap.[(i - 1) / 2] > heap.[i] do
+            swap ((i - 1) / 2) i
+            i <- (i - 1) / 2
+
+    let pop () =
+        let top = heap.[0]
+        heap.[0] <- heap.[heap.Count - 1]
+        heap.RemoveAt(heap.Count - 1)
+        let mutable i = 0
+        let mutable sinking = true
+
+        while sinking do
+            let l = 2 * i + 1
+            let r = 2 * i + 2
+            let mutable smallest = i
+
+            if l < heap.Count && heap.[l] < heap.[smallest] then
+                smallest <- l
+
+            if r < heap.Count && heap.[r] < heap.[smallest] then
+                smallest <- r
+
+            if smallest = i then
+                sinking <- false
             else
-                let step (frontier, dist, parents) next =
-                    match stepCost spatial next |> Option.bind (tickCost factor) with
-                    | None -> frontier, dist, parents
-                    | Some cost ->
-                        let candidate = d + cost
+                swap i smallest
+                i <- smallest
 
-                        let improves =
-                            match Map.tryFind next dist with
-                            | Some best -> candidate < best
-                            | None -> true
+        top
 
-                        if improves then
-                            Set.add (candidate, next) frontier,
-                            Map.add next candidate dist,
-                            Map.add next tile parents
-                        else
-                            frontier, dist, parents
+    let startIndex = indexOf start
+    dist.[startIndex] <- 0
+    push startIndex
 
-                let frontier, dist, parents =
-                    ((frontier, dist, parents), neighbours tile) ||> List.fold step
+    while heap.Count > 0 do
+        let key = pop ()
+        let index = key % tileCount
+        let d = key / tileCount
 
-                search frontier dist parents
+        // Stale heap entry when unequal: the tile was reached cheaper meanwhile.
+        if dist.[index] = d then
+            let x = index / roomSide
+            let y = index % roomSide
 
-    search (Set.singleton (0, start)) (Map.ofList [ start, 0 ]) Map.empty
+            for dx in -1 .. 1 do
+                for dy in -1 .. 1 do
+                    let nx = x + dx
+                    let ny = y + dy
+
+                    if
+                        (dx <> 0 || dy <> 0) && nx >= 0 && nx < roomSide && ny >= 0 && ny < roomSide
+                    then
+                        let next = nx * roomSide + ny
+
+                        if weights.[next] >= 0 then
+                            match tickCost factor weights.[next] with
+                            | None -> ()
+                            | Some ticks ->
+                                let candidate =
+                                    d + ticks + (if occupied.[next] then occupancyPenalty else 0)
+
+                                if candidate < dist.[next] then
+                                    dist.[next] <- candidate
+                                    parents.[next] <- index
+                                    push (candidate * tileCount + next)
+
+    dist, parents
 
 let ofSnapshot (snapshot: Snapshot) : Atlas =
     let spatial = snapshot.Spatial
@@ -137,15 +215,28 @@ let ofSnapshot (snapshot: Snapshot) : Atlas =
         |> List.map (fun creep -> creep.Name, fatigueFactorOf creep)
         |> Map.ofList
 
+    let weights = Array.create tileCount -1
+
+    spatial.Terrain
+    |> Map.iter (fun tile _ ->
+        weights.[indexOf tile] <- stepCost spatial tile |> Option.defaultValue -1)
+
+    let occupied = Array.create tileCount false
+
+    spatial.CreepPositions
+    |> Map.iter (fun _ tile -> occupied.[indexOf tile] <- true)
+
     {
         Spatial = spatial
         Placed = placed
         Factors = factors
+        Weights = weights
+        Occupied = occupied
         Floods =
             placed
             |> List.map (fun (name, pos) ->
                 let factor = Map.find name factors
-                (pos, factor), lazy (floodFrom spatial factor pos))
+                (pos, factor), lazy (floodFrom weights occupied factor pos))
             |> Map.ofList
     }
 
@@ -162,7 +253,7 @@ let private flood (atlas: Atlas) (creep: string) (pos: Pos) =
 
     match Map.tryFind (pos, factor) atlas.Floods with
     | Some memo -> memo.Value
-    | None -> floodFrom atlas.Spatial factor pos
+    | None -> floodFrom atlas.Weights atlas.Occupied factor pos
 
 /// The creeps the projection places, in Snapshot creep order.
 let placedCreeps (atlas: Atlas) : (string * Pos) list = atlas.Placed
@@ -287,8 +378,9 @@ let dualSeats (atlas: Atlas) : Set<Pos> =
 
 /// Travel cost of a Task for a creep (ADR 0002, revised by ADR 0006): the
 /// ticks the creep's body needs along a cheapest path to any Work Area
-/// tile — terrain weights scaled by the body's fatigue factor — 0 for a
-/// creep already inside. None — a placed Work Area the creep cannot reach
+/// tile — terrain weights scaled by the body's fatigue factor, tiles
+/// under standing creeps priced occupancyPenalty dearer — 0 for a creep
+/// already inside. None — a placed Work Area the creep cannot reach
 /// (a body without Move parts reaches nothing), or an empty one — makes
 /// the Task inapplicable to that creep. An unplaced creep or target
 /// prices at 0: unpriceable geometry never counts against a Task (ADR
@@ -310,7 +402,9 @@ let travelCost (atlas: Atlas) (creep: string) (task: Task) : int option =
 
             area
             |> Set.toList
-            |> List.choose (fun tile -> Map.tryFind tile dist)
+            |> List.choose (fun tile ->
+                let d = dist.[indexOf tile]
+                if d = unreached then None else Some d)
             |> function
                 | [] -> None
                 | costs -> Some(List.min costs)
@@ -337,11 +431,13 @@ let mayAct (atlas: Atlas) (creep: string) (task: Task) : bool =
 /// is empty or unreachable. Of equally cheap goals the lowest (cost, tile)
 /// wins, matching the flood's tie-breaking.
 let firstStep (atlas: Atlas) (creep: string) (task: Task) : Pos option =
-    let rec firstStepOf tile start (parents: Map<Pos, Pos>) =
-        match Map.tryFind tile parents with
-        | Some parent when parent = start -> tile
-        | Some parent -> firstStepOf parent start parents
-        | None -> tile
+    let rec firstStepOf index startIndex (parents: int[]) =
+        let parent = parents.[index]
+
+        if parent = startIndex || parent < 0 then
+            index
+        else
+            firstStepOf parent startIndex parents
 
     match Map.tryFind creep atlas.Spatial.CreepPositions with
     | None -> None
@@ -355,9 +451,11 @@ let firstStep (atlas: Atlas) (creep: string) (task: Task) : Pos option =
 
             goals
             |> Set.toList
-            |> List.choose (fun goal -> Map.tryFind goal dist |> Option.map (fun d -> d, goal))
+            |> List.choose (fun goal ->
+                let d = dist.[indexOf goal]
+                if d = unreached then None else Some(d, goal))
             |> function
                 | [] -> None
                 | reachable ->
                     let _, goal = List.min reachable
-                    Some(firstStepOf goal pos parents)
+                    Some(posAt (firstStepOf (indexOf goal) (indexOf pos) parents))

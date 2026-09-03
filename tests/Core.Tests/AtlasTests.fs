@@ -23,6 +23,7 @@ let snapshotWith creeps spatial =
 let worker name =
     {
         Name = name
+        Fatigue = 0
         Energy = 0
         FreeCapacity = 50
         Body = Map.ofList [ Work, 1; Carry, 1; Move, 1 ]
@@ -32,6 +33,7 @@ let worker name =
 let creepWith name energy body =
     {
         Name = name
+        Fatigue = 0
         Energy = energy
         FreeCapacity = 50
         Body = body |> List.countBy id |> Map.ofList
@@ -327,6 +329,22 @@ let travelCostTests =
                     "geometry that cannot be priced never counts against a Task"
             }
 
+            test "a standing creep prices its tile dearer: the free swamp Seat wins" {
+                // Another creep parks on the plain Seat at (11,13). Its
+                // occupancy surcharge makes that route cost 7, so the
+                // untouched swamp Seat at 6 is now the cheapest way in —
+                // dearer, but never inapplicable, unlike an obstacle.
+                let atlas =
+                    corridor [ "w", { X = 10; Y = 15 }; "b", { X = 11; Y = 13 } ]
+                    |> snapshotWith [ worker "w"; worker "b" ]
+                    |> ofSnapshot
+
+                Expect.equal
+                    (travelCost atlas "w" (Harvest "src-a"))
+                    (Some 6)
+                    "standing traffic re-prices the route without ever closing it"
+            }
+
             test "an unplaced target prices at 0, not None" {
                 let atlas =
                     corridor [ "w", { X = 10; Y = 15 } ]
@@ -461,6 +479,35 @@ let firstStepTests =
                     (firstStep atlas "w" (Harvest "src-a"))
                     (Some { X = 11; Y = 13 })
                     "the step leaves the swamp lane for the plain one"
+            }
+
+            test "the first step detours around a standing creep when a lane is open" {
+                // Same shape as the swamp detour, but on all-plain ground
+                // with a creep parked mid-lane: the occupancy surcharge
+                // sends the first step into the free lane at x = 11.
+                let atlas =
+                    { spatial
+                          [ "src-a", { X = 10; Y = 10 } ]
+                          [
+                              { X = 10; Y = 10 }, Wall
+                              { X = 10; Y = 11 }, Plain
+                              { X = 10; Y = 12 }, Plain
+                              { X = 10; Y = 13 }, Plain
+                              { X = 10; Y = 14 }, Plain
+                              { X = 11; Y = 11 }, Plain
+                              { X = 11; Y = 12 }, Plain
+                              { X = 11; Y = 13 }, Plain
+                          ] with
+                        CreepPositions =
+                            Map.ofList [ "w", { X = 10; Y = 14 }; "b", { X = 10; Y = 13 } ]
+                    }
+                    |> snapshotWith [ worker "w"; worker "b" ]
+                    |> ofSnapshot
+
+                Expect.equal
+                    (firstStep atlas "w" (Harvest "src-a"))
+                    (Some { X = 11; Y = 13 })
+                    "the step leaves the parked creep's lane for the free one"
             }
 
             test "a creep already inside the Work Area has no step to take" {

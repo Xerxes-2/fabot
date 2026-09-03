@@ -112,6 +112,8 @@ type ICreep =
     abstract name: string
     /// True while the creep is still being built inside the spawn.
     abstract spawning: bool
+    /// Fatigue points outstanding; the creep cannot move while > 0.
+    abstract fatigue: int
     abstract store: IStore
     abstract pos: IRoomPosition
     abstract body: IBodyPartDef[]

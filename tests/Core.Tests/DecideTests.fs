@@ -53,6 +53,7 @@ let bareRespawn =
 let creepWith name energy freeCapacity body =
     {
         Name = name
+        Fatigue = 0
         Energy = energy
         FreeCapacity = freeCapacity
         Body = body |> List.countBy id |> Map.ofList
@@ -1515,6 +1516,76 @@ let arbitrationTests =
                     (emitOn snapshot assigned)
                     (HarvestSource("har", "src-a"))
                     "the harvester still harvests this tick"
+            }
+
+            test "a fatigued creep is never asked to move, nor displaced through" {
+                // The same one-lane corridor, but the seated harvester is
+                // still paying off fatigue: the engine would answer any move
+                // with ERR_TIRED, so the Resolver issues none — neither to
+                // the harvester nor to the builder whose only path runs
+                // through its blocked tile.
+                let terrain = [ for x in 8..15 -> { X = x; Y = 12 }, Plain ]
+
+                let snapshot =
+                    { bareRespawn with
+                        Sources = [ { Id = "src-a" } ]
+                        ConstructionSites = [ { Id = "site-1" } ]
+                        Creeps = [ { worker "har" 0 50 with Fatigue = 4 }; worker "bob" 50 0 ]
+                        Spatial =
+
+                            { spatial
+                                  [ "src-a", { X = 10; Y = 11 }; "site-1", { X = 15; Y = 12 } ]
+                                  terrain with
+                                CreepPositions =
+                                    Map.ofList
+                                        [ "har", { X = 10; Y = 12 }; "bob", { X = 9; Y = 12 } ]
+                            }
+                    }
+
+                let assigned = [ "har", Harvest "src-a"; "bob", Build "site-1" ]
+
+                Expect.isEmpty
+                    (resolveOn snapshot assigned |> moveIntents)
+                    "no move Intent the engine would refuse with ERR_TIRED"
+
+                Expect.contains
+                    (emitOn snapshot assigned)
+                    (HarvestSource("har", "src-a"))
+                    "the tired harvester still harvests this tick"
+            }
+
+            test "a travelling builder detours around a seated harvester when a lane is open" {
+                // The corridor grows a parallel lane at y = 13. The straight
+                // path runs through the seated harvester's tile; the flood
+                // prices that tile dearer for the standing creep, so the
+                // builder sidesteps into the lane instead of displacing the
+                // Seat.
+                let terrain =
+                    [ for x in 8..15 -> { X = x; Y = 12 }, Plain ]
+                    @ [ for x in 8..15 -> { X = x; Y = 13 }, Plain ]
+
+                let snapshot =
+                    { bareRespawn with
+                        Sources = [ { Id = "src-a" } ]
+                        ConstructionSites = [ { Id = "site-1" } ]
+                        Creeps = [ worker "har" 0 50; worker "bob" 50 0 ]
+                        Spatial =
+
+                            { spatial
+                                  [ "src-a", { X = 10; Y = 11 }; "site-1", { X = 15; Y = 12 } ]
+                                  terrain with
+                                CreepPositions =
+                                    Map.ofList
+                                        [ "har", { X = 10; Y = 12 }; "bob", { X = 9; Y = 12 } ]
+                            }
+                    }
+
+                let assigned = [ "har", Harvest "src-a"; "bob", Build "site-1" ]
+
+                Expect.equal
+                    (resolveOn snapshot assigned |> moveIntents)
+                    [ "bob", BottomRight ]
+                    "the builder takes the lane; the seated harvester is left alone"
             }
 
             test "an occupant with no in-area alternative swaps with its displacer" {

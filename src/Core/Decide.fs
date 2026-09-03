@@ -420,9 +420,14 @@ let private moveIntentFor
 /// last resort, so an occupant that cannot stand elsewhere swaps with its
 /// displacer. An occupant left with fewer than two open candidates
 /// resolves immediately, ahead of every rank, locking the exchange in
-/// before the vacated tile is claimed by anyone else.
+/// before the vacated tile is claimed by anyone else. Tiles in `blocked`
+/// arrive pre-claimed: they belong to fatigued creeps, which are not in
+/// arbitration at all — a creep that cannot step this tick can neither be
+/// displaced nor asked to move, so nobody claims its tile and no Intent
+/// is ever issued to it.
 let private arbitrate
     (occupants: Map<Pos, string>)
+    (blocked: Set<Pos>)
     (moveIntents: MoveIntent list)
     : Map<string, Pos> =
     let openCandidates (claimed: Set<Pos>) (intent: MoveIntent) =
@@ -491,7 +496,7 @@ let private arbitrate
             | _ -> settle pending urgent claimed resolved
 
     let pending = moveIntents |> List.map (fun i -> i.Creep, i) |> Map.ofList
-    settle pending [] Set.empty Map.empty
+    settle pending [] blocked Map.empty
 
 /// Direction of a single step between adjacent tiles.
 let private directionTo (from: Pos) (dest: Pos) : Direction option =
@@ -506,21 +511,34 @@ let private directionTo (from: Pos) (dest: Pos) : Direction option =
     | -1, -1 -> Some TopLeft
     | _ -> None
 
-/// Resolver, room pass: every creep the Atlas places registers a Move
-/// Intent, arbitration settles them into at most one single-step move per
-/// creep, and the settled standing tiles become move Intents in Snapshot
-/// creep order. Takes the tick's assigned Task per creep as data; a creep
-/// absent from the map is idle.
+/// Resolver, room pass: every rested creep the Atlas places registers a
+/// Move Intent, arbitration settles them into at most one single-step move
+/// per creep, and the settled standing tiles become move Intents in
+/// Snapshot creep order. Takes the tick's assigned Task per creep as data;
+/// a creep absent from the map is idle. A fatigued creep sits arbitration
+/// out — the engine would answer its move with ERR_TIRED — and its tile is
+/// blocked for the tick, so nobody plans a step through it.
 let resolve (snapshot: Snapshot) atlas (assigned: Map<string, Task>) : Intent list =
     let placed = Atlas.placedCreeps atlas
 
+    let tired =
+        snapshot.Creeps
+        |> List.choose (fun c -> if c.Fatigue > 0 then Some c.Name else None)
+        |> Set.ofList
+
     let moveIntents =
         placed
+        |> List.filter (fun (name, _) -> not (Set.contains name tired))
         |> List.map (fun (name, pos) ->
             moveIntentFor (rank snapshot) atlas name pos (Map.tryFind name assigned))
 
+    let blocked =
+        placed
+        |> List.choose (fun (name, pos) -> if Set.contains name tired then Some pos else None)
+        |> Set.ofList
+
     let occupants = placed |> List.map (fun (name, pos) -> pos, name) |> Map.ofList
-    let standing = arbitrate occupants moveIntents
+    let standing = arbitrate occupants blocked moveIntents
 
     placed
     |> List.choose (fun (name, pos) ->

@@ -198,6 +198,7 @@ let build () : Snapshot =
             |> Array.map (fun c ->
                 {
                     Name = c.name
+                    Fatigue = c.fatigue
                     Energy = c.store.getUsedCapacity "energy"
                     FreeCapacity = c.store.getFreeCapacity "energy"
                     Body = c.body |> Array.countBy (fun p -> bodyPartOf p.``type``) |> Map.ofArray

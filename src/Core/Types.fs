@@ -137,6 +137,9 @@ type HostileInfo = { Body: BodyPart list }
 type CreepInfo =
     {
         Name: string
+        /// Fatigue points still to pay off; a creep with any cannot step
+        /// this tick — the engine's move answers ERR_TIRED.
+        Fatigue: int
         /// Energy currently carried.
         Energy: int
         /// Carry capacity still free (0 = full).
