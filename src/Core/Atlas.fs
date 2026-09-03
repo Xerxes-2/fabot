@@ -2,6 +2,11 @@ module Fabot.Core.Atlas
 
 open Fabot.Core.Types
 
+/// A body's fatigue factor (ADR 0006): the parts that generate fatigue
+/// when moving and the Move parts that pay it off. Terrain weight scales
+/// by their ratio to price travel in whole ticks.
+type private FatigueFactor = { FatigueParts: int; MoveParts: int }
+
 /// The per-tick, task-aware query interface over the spatial projection
 /// (ADR 0004). Total: geometry the projection cannot place gets one
 /// documented answer per query — it never counts against a Task and never
@@ -13,10 +18,15 @@ type Atlas =
             /// Placed creeps in Snapshot order — the canonical iteration
             /// order for everything derived per creep.
             Placed: (string * Pos) list
-            /// Memoised Dijkstra flood per placed creep's tile, forced at
-            /// most once per tick and shared by every query pricing from it
-            /// (ADR 0002, extended to the whole tick).
-            Floods: Map<Pos, Lazy<Map<Pos, int> * Map<Pos, Pos>>>
+            /// Each creep's fatigue factor — what turns terrain weight
+            /// into ticks for that body (ADR 0006).
+            Factors: Map<string, FatigueFactor>
+            /// Memoised Dijkstra flood per placed creep's tile and fatigue
+            /// factor, forced at most once per tick and shared by every
+            /// query pricing from it (ADR 0002, extended to the whole
+            /// tick). Bodies of the same factor at the same tile share one
+            /// flood.
+            Floods: Map<Pos * FatigueFactor, Lazy<Map<Pos, int> * Map<Pos, Pos>>>
         }
 
 let private neighbours pos =
@@ -39,12 +49,44 @@ let private stepCost (spatial: SpatialInfo) tile =
         | Some Wall
         | None -> None
 
-/// Dijkstra flood over the terrain from `start`: cheapest travel cost to
-/// every reachable tile, plus each tile's predecessor on a cheapest path.
-/// A Set of (distance, tile) doubles as the priority queue; its ordering
-/// also makes tie-breaking deterministic. The start tile costs 0 even when
-/// it cannot be stepped onto — the creep already stands there.
-let private floodFrom (spatial: SpatialInfo) (start: Pos) : Map<Pos, int> * Map<Pos, Pos> =
+/// A creep's fatigue factor from its body and current load: every part
+/// except Move and except empty Carry generates fatigue — the engine
+/// loads Carry parts 50 energy apiece, and the empty ones ride free.
+let private fatigueFactorOf (creep: CreepInfo) : FatigueFactor =
+    let count part =
+        creep.Body |> Map.tryFind part |> Option.defaultValue 0
+
+    let carry = count Carry
+    let loadedCarry = min carry ((creep.Energy + 49) / 50)
+    let parts = creep.Body |> Map.toList |> List.sumBy snd
+
+    {
+        FatigueParts = parts - count Move - (carry - loadedCarry)
+        MoveParts = count Move
+    }
+
+/// Ticks the body needs to step onto a tile of the given terrain weight
+/// (Screeps fatigue): the step generates 2 × weight fatigue per
+/// fatigue-generating part, each Move part pays off 2 per tick, and no
+/// step takes less than one tick. A body without Move parts cannot step
+/// at all (the engine's move refuses with ERR_NO_BODYPART).
+let private tickCost (factor: FatigueFactor) weight =
+    if factor.MoveParts = 0 then
+        None
+    else
+        Some(max 1 ((weight * factor.FatigueParts + factor.MoveParts - 1) / factor.MoveParts))
+
+/// Dijkstra flood over the terrain from `start`, priced in ticks for one
+/// fatigue factor: cheapest travel cost to every reachable tile, plus
+/// each tile's predecessor on a cheapest path. A Set of (distance, tile)
+/// doubles as the priority queue; its ordering also makes tie-breaking
+/// deterministic. The start tile costs 0 even when it cannot be stepped
+/// onto — the creep already stands there.
+let private floodFrom
+    (spatial: SpatialInfo)
+    (factor: FatigueFactor)
+    (start: Pos)
+    : Map<Pos, int> * Map<Pos, Pos> =
     let rec search (frontier: Set<int * Pos>) (dist: Map<Pos, int>) (parents: Map<Pos, Pos>) =
         if Set.isEmpty frontier then
             dist, parents
@@ -57,7 +99,7 @@ let private floodFrom (spatial: SpatialInfo) (start: Pos) : Map<Pos, int> * Map<
                 search frontier dist parents
             else
                 let step (frontier, dist, parents) next =
-                    match stepCost spatial next with
+                    match stepCost spatial next |> Option.bind (tickCost factor) with
                     | None -> frontier, dist, parents
                     | Some cost ->
                         let candidate = d + cost
@@ -90,20 +132,37 @@ let ofSnapshot (snapshot: Snapshot) : Atlas =
             Map.tryFind creep.Name spatial.CreepPositions
             |> Option.map (fun pos -> creep.Name, pos))
 
+    let factors =
+        snapshot.Creeps
+        |> List.map (fun creep -> creep.Name, fatigueFactorOf creep)
+        |> Map.ofList
+
     {
         Spatial = spatial
         Placed = placed
+        Factors = factors
         Floods =
             placed
-            |> List.map (fun (_, pos) -> pos, lazy (floodFrom spatial pos))
+            |> List.map (fun (name, pos) ->
+                let factor = Map.find name factors
+                (pos, factor), lazy (floodFrom spatial factor pos))
             |> Map.ofList
     }
 
-/// The memoised flood from a tile; placed creeps' tiles hit the memo.
-let private flood (atlas: Atlas) (pos: Pos) =
-    match Map.tryFind pos atlas.Floods with
+/// A creep's fatigue factor; a creep the Snapshot does not carry prices
+/// as a bare one-part-one-Move body — terrain weight verbatim.
+let private factorOf (atlas: Atlas) (creep: string) : FatigueFactor =
+    Map.tryFind creep atlas.Factors
+    |> Option.defaultValue { FatigueParts = 1; MoveParts = 1 }
+
+/// The memoised flood for a creep from a tile; placed creeps' own tiles
+/// hit the memo.
+let private flood (atlas: Atlas) (creep: string) (pos: Pos) =
+    let factor = factorOf atlas creep
+
+    match Map.tryFind (pos, factor) atlas.Floods with
     | Some memo -> memo.Value
-    | None -> floodFrom atlas.Spatial pos
+    | None -> floodFrom atlas.Spatial factor pos
 
 /// The creeps the projection places, in Snapshot creep order.
 let placedCreeps (atlas: Atlas) : (string * Pos) list = atlas.Placed
@@ -226,11 +285,14 @@ let dualSeats (atlas: Atlas) : Set<Pos> =
 
     Set.intersect seatUnion upgradeArea
 
-/// Travel cost of a Task for a creep (ADR 0002): the cheapest-path cost to
-/// any Work Area tile, 0 for a creep already inside. None — a placed Work
-/// Area the creep cannot reach, or an empty one — makes the Task
-/// inapplicable to that creep. An unplaced creep or target prices at 0:
-/// unpriceable geometry never counts against a Task (ADR 0004).
+/// Travel cost of a Task for a creep (ADR 0002, revised by ADR 0006): the
+/// ticks the creep's body needs along a cheapest path to any Work Area
+/// tile — terrain weights scaled by the body's fatigue factor — 0 for a
+/// creep already inside. None — a placed Work Area the creep cannot reach
+/// (a body without Move parts reaches nothing), or an empty one — makes
+/// the Task inapplicable to that creep. An unplaced creep or target
+/// prices at 0: unpriceable geometry never counts against a Task (ADR
+/// 0004).
 let travelCost (atlas: Atlas) (creep: string) (task: Task) : int option =
     match
         Map.tryFind creep atlas.Spatial.CreepPositions,
@@ -244,7 +306,7 @@ let travelCost (atlas: Atlas) (creep: string) (task: Task) : int option =
         if Set.contains pos area then
             Some 0
         else
-            let dist, _ = flood atlas pos
+            let dist, _ = flood atlas creep pos
 
             area
             |> Set.toList
@@ -268,10 +330,12 @@ let mayAct (atlas: Atlas) (creep: string) (task: Task) : bool =
     | Some creepPos, Some targetPos -> range creepPos targetPos <= actionRange task
     | _ -> true
 
-/// The first step of a cheapest path from a creep to its Task's Work Area.
-/// None when there is nothing derivable: the creep is unplaced, already
-/// inside the area, or the area is empty or unreachable. Of equally cheap
-/// goals the lowest (cost, tile) wins, matching the flood's tie-breaking.
+/// The first step of a cheapest path from a creep to its Task's Work Area,
+/// priced in the creep's own ticks — a slow body may detour differently
+/// than a fast one over the same ground. None when there is nothing
+/// derivable: the creep is unplaced, already inside the area, or the area
+/// is empty or unreachable. Of equally cheap goals the lowest (cost, tile)
+/// wins, matching the flood's tie-breaking.
 let firstStep (atlas: Atlas) (creep: string) (task: Task) : Pos option =
     let rec firstStepOf tile start (parents: Map<Pos, Pos>) =
         match Map.tryFind tile parents with
@@ -287,7 +351,7 @@ let firstStep (atlas: Atlas) (creep: string) (task: Task) : Pos option =
         if Set.isEmpty goals || Set.contains pos goals then
             None
         else
-            let dist, parents = flood atlas pos
+            let dist, parents = flood atlas creep pos
 
             goals
             |> Set.toList

@@ -28,6 +28,15 @@ let worker name =
         Body = Map.ofList [ Work, 1; Carry, 1; Move, 1 ]
     }
 
+/// A creep with the given carried energy and body's part counts.
+let creepWith name energy body =
+    {
+        Name = name
+        Energy = energy
+        FreeCapacity = 50
+        Body = body |> List.countBy id |> Map.ofList
+    }
+
 /// Projection with the given target positions and terrain tiles; no creeps,
 /// no obstacles — tests layer those on top.
 let spatial targets tiles =
@@ -328,6 +337,97 @@ let travelCostTests =
                     (travelCost atlas "w" (Harvest "ghost"))
                     (Some 0)
                     "an unplaced target is unpriceable, not unreachable"
+            }
+        ]
+
+/// Source at (10,10) whose only Seat is the swamp at (10,11); the creep
+/// stands one step below on plain — the cost is exactly one swamp step.
+let swampSeat creep =
+    { spatial
+          [ "src-a", { X = 10; Y = 10 } ]
+          [
+              { X = 10; Y = 10 }, Wall
+              { X = 10; Y = 11 }, Swamp
+              { X = 10; Y = 12 }, Plain
+          ] with
+        CreepPositions = Map.ofList [ creep, { X = 10; Y = 12 } ]
+    }
+
+[<Tests>]
+let travelTickTests =
+    testList
+        "atlas travel ticks"
+        [
+            test "the same path costs more ticks for a body with fewer Move parts per part" {
+                // The corridor's cheapest path is two plain steps. The
+                // worker unit (1 fatigue part per Move) walks it in 2 ticks;
+                // a heavy body (5 fatigue parts per Move) needs
+                // ceil(1 × 5 / 1) = 5 ticks a step, 10 in all. The empty
+                // Carry rides free in both bodies (engine fatigue rules).
+                let costFor creep =
+                    let atlas =
+                        corridor [ "w", { X = 10; Y = 15 } ] |> snapshotWith [ creep ] |> ofSnapshot
+
+                    travelCost atlas "w" (Harvest "src-a")
+
+                Expect.equal (costFor (worker "w")) (Some 2) "the worker unit's ticks equal terrain"
+
+                Expect.equal
+                    (costFor (creepWith "w" 0 [ Work; Work; Work; Work; Work; Carry; Move ]))
+                    (Some 10)
+                    "five fatigue parts on one Move price each plain step at 5 ticks"
+            }
+
+            test "a Move surplus divides the weight, ceiled, never below one tick a step" {
+                // One swamp step (weight 5): the worker pays 5 ticks, two
+                // Moves under one Work pay ceil(5 × 1 / 2) = 3 — the ceil is
+                // visible — and on plain the same body still pays the
+                // 1-tick-per-step floor, never half a tick.
+                let costFor creep =
+                    let atlas = swampSeat "w" |> snapshotWith [ creep ] |> ofSnapshot
+                    travelCost atlas "w" (Harvest "src-a")
+
+                Expect.equal (costFor (worker "w")) (Some 5) "the worker unit's ticks equal terrain"
+
+                Expect.equal
+                    (costFor (creepWith "w" 0 [ Work; Move; Move ]))
+                    (Some 3)
+                    "ceil(5/2) = 3: the surplus Move cannot halve a step below whole ticks"
+            }
+
+            test "carried energy loads Carry parts into the fatigue count" {
+                // Deliberate choice, documented here: travel is priced from
+                // the load the creep carries right now — the engine loads
+                // Carry parts 50 energy apiece, and an empty Carry generates
+                // no fatigue. The same worker walks the two-plain-step path
+                // in 2 ticks empty and 4 ticks with its Carry full.
+                let costFor energy =
+                    let atlas =
+                        corridor [ "w", { X = 10; Y = 15 } ]
+                        |> snapshotWith [ creepWith "w" energy [ Work; Carry; Move ] ]
+                        |> ofSnapshot
+
+                    travelCost atlas "w" (Harvest "src-a")
+
+                Expect.equal (costFor 0) (Some 2) "empty: only the Work part generates fatigue"
+                Expect.equal (costFor 50) (Some 4) "loaded: the full Carry part joins in"
+            }
+
+            test "a body without Move parts reaches nothing beyond where it stands" {
+                let atlasAt pos =
+                    corridor [ "w", pos ]
+                    |> snapshotWith [ creepWith "w" 0 [ Work; Carry ] ]
+                    |> ofSnapshot
+
+                Expect.equal
+                    (travelCost (atlasAt { X = 10; Y = 15 }) "w" (Harvest "src-a"))
+                    None
+                    "outside the Work Area every path is unwalkable: the Task is inapplicable"
+
+                Expect.equal
+                    (travelCost (atlasAt { X = 11; Y = 13 }) "w" (Harvest "src-a"))
+                    (Some 0)
+                    "already inside, the body works without a step"
             }
         ]
 

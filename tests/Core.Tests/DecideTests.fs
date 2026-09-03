@@ -860,6 +860,56 @@ let travelCostTests =
                     (Some(taskId (Upgrade "ctrl-1")))
                     "the unreachable Harvest is not applicable to this creep at all"
             }
+
+            test "body-aware ticks: the slow heavy body is matched near, the generalist far" {
+                // The near source hides behind two swamp tiles (terrain 10);
+                // the far one lies nine plain steps away (terrain 9). By
+                // bare terrain weight both creeps would march far. In ticks
+                // the heavy body (5 fatigue parts on 2 Moves) wades the
+                // swamps for 13 + 13 = 26 rather than walk nine plains at
+                // ceil(5/2) = 3 apiece for 27 — while the generalist's
+                // ticks equal terrain, so it still takes the far source.
+                let terrain =
+                    [
+                        { X = 10; Y = 10 }, Wall // src-near
+                        { X = 10; Y = 11 }, Swamp // its only Seat
+                        { X = 10; Y = 12 }, Swamp
+                        { X = 10; Y = 13 }, Plain // the heavy body stands here
+                        { X = 11; Y = 13 }, Plain // the generalist beside it
+                        yield! [ for y in 14..22 -> { X = 10; Y = y }, Plain ]
+                        { X = 10; Y = 23 }, Wall // src-far
+                    ]
+
+                let heavy =
+                    creepWith "mule" 0 50 [ Work; Work; Work; Work; Work; Carry; Move; Move ]
+
+                let snapshot =
+                    { bareRespawn with
+                        Sources = [ { Id = "src-near" }; { Id = "src-far" } ]
+                        Creeps = [ heavy; worker "runner" 0 50 ]
+                        Spatial =
+
+                            { spatial
+                                  [ "src-near", { X = 10; Y = 10 }; "src-far", { X = 10; Y = 23 } ]
+                                  terrain with
+                                CreepPositions =
+                                    Map.ofList
+                                        [ "mule", { X = 10; Y = 13 }; "runner", { X = 11; Y = 13 } ]
+                            }
+                    }
+
+                let _, assignments = decide snapshot Map.empty
+
+                Expect.equal
+                    (Map.tryFind "mule" assignments)
+                    (Some(taskId (Harvest "src-near")))
+                    "the slow body's real travel time keeps it near"
+
+                Expect.equal
+                    (Map.tryFind "runner" assignments)
+                    (Some(taskId (Harvest "src-far")))
+                    "the generalist stays the cheaper traveller to the far source"
+            }
         ]
 
 /// A rectangle of Plain tiles, bounds inclusive.
