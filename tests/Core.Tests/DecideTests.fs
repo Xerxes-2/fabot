@@ -3803,6 +3803,12 @@ let activations intents =
         | ActivateSafeMode id -> Some id
         | _ -> None)
 
+/// A hostile creep of the given body standing on the given tile.
+let hostileAt id pos body : HostileInfo = { Id = id; Pos = pos; Body = body }
+
+/// A hostile creep of the given body, position immaterial.
+let hostile body = hostileAt "h-1" { X = 25; Y = 25 } body
+
 [<Tests>]
 let safeModeTests =
     testList
@@ -3813,7 +3819,7 @@ let safeModeTests =
                 // ticks — waiting until the hostile arrives is waiting too long.
                 let snapshot =
                     { bareRespawn with
-                        Hostiles = [ { Body = [ Claim; Claim; Move; Move ] } ]
+                        Hostiles = [ hostile [ Claim; Claim; Move; Move ] ]
                     }
 
                 let { Intents = intents } = decide snapshot Map.empty Set.empty
@@ -3823,12 +3829,7 @@ let safeModeTests =
             test "a hostile without CLAIM parts does not spend the activation" {
                 let snapshot =
                     { bareRespawn with
-                        Hostiles =
-                            [
-                                {
-                                    Body = [ Tough; Attack; RangedAttack; Heal; Move ]
-                                }
-                            ]
+                        Hostiles = [ hostile [ Tough; Attack; RangedAttack; Heal; Move ] ]
                     }
 
                 let { Intents = intents } = decide snapshot Map.empty Set.empty
@@ -3846,7 +3847,7 @@ let safeModeTests =
                                 { controllerAt 1 with
                                     SafeModeAvailable = 0
                                 }
-                        Hostiles = [ { Body = [ Claim; Move ] } ]
+                        Hostiles = [ hostile [ Claim; Move ] ]
                     }
 
                 let { Intents = intents } = decide snapshot Map.empty Set.empty
@@ -3861,7 +3862,7 @@ let safeModeTests =
                                 { controllerAt 1 with
                                     SafeModeActive = true
                                 }
-                        Hostiles = [ { Body = [ Claim; Move ] } ]
+                        Hostiles = [ hostile [ Claim; Move ] ]
                     }
 
                 let { Intents = intents } = decide snapshot Map.empty Set.empty
@@ -3871,6 +3872,101 @@ let safeModeTests =
             test "a quiet room fires nothing" {
                 let { Intents = intents } = decide bareRespawn Map.empty Set.empty
                 Expect.isEmpty (activations intents) "no hostiles, no reflex"
+            }
+        ]
+
+let shots intents =
+    intents
+    |> List.choose (function
+        | FireTower(tower, target) -> Some(tower, target)
+        | _ -> None)
+
+/// A colony whose towers stand on the given tiles, facing the given hostiles.
+let towerColony towers hostiles =
+    { bareRespawn with
+        Hostiles = hostiles
+        Spatial =
+            { spatial towers [] with
+                TargetKinds =
+                    towers |> List.map (fun (id, _) -> id, Structure BuiltKind.Tower) |> Map.ofList
+            }
+    }
+
+[<Tests>]
+let fireReflexTests =
+    testList
+        "fire reflex"
+        [
+            test "a tower shoots the hostile in the room" {
+                let snapshot =
+                    towerColony
+                        [ "tower-1", { X = 10; Y = 40 } ]
+                        [ hostileAt "h-1" { X = 20; Y = 20 } [ Attack; Move ] ]
+
+                let { Intents = intents } = decide snapshot Map.empty Set.empty
+                Expect.equal (shots intents) [ "tower-1", "h-1" ] "any hostile is fired on"
+            }
+
+            test "the nearest hostile is shot — damage decays with range" {
+                let snapshot =
+                    towerColony
+                        [ "tower-1", { X = 10; Y = 40 } ]
+                        [
+                            hostileAt "h-far" { X = 40; Y = 10 } [ Attack; Move ]
+                            hostileAt "h-near" { X = 12; Y = 38 } [ Attack; Move ]
+                        ]
+
+                let { Intents = intents } = decide snapshot Map.empty Set.empty
+                Expect.equal (shots intents) [ "tower-1", "h-near" ] "never waste a decayed shot"
+            }
+
+            test "equidistant hostiles tie-break by id — the pick is deterministic" {
+                let snapshot =
+                    towerColony
+                        [ "tower-1", { X = 10; Y = 40 } ]
+                        [
+                            hostileAt "h-b" { X = 15; Y = 40 } [ Attack; Move ]
+                            hostileAt "h-a" { X = 10; Y = 45 } [ Attack; Move ]
+                        ]
+
+                let { Intents = intents } = decide snapshot Map.empty Set.empty
+                Expect.equal (shots intents) [ "tower-1", "h-a" ] "same range: lowest id wins"
+            }
+
+            test "each tower picks its own nearest — no focus fire" {
+                let snapshot =
+                    towerColony
+                        [ "tower-1", { X = 10; Y = 40 }; "tower-2", { X = 40; Y = 10 } ]
+                        [
+                            hostileAt "h-a" { X = 12; Y = 38 } [ Attack; Move ]
+                            hostileAt "h-b" { X = 38; Y = 12 } [ Attack; Move ]
+                        ]
+
+                let { Intents = intents } = decide snapshot Map.empty Set.empty
+
+                Expect.equal
+                    (shots intents |> List.sort)
+                    [ "tower-1", "h-a"; "tower-2", "h-b" ]
+                    "the rule is per-tower, stated once"
+            }
+
+            test "a quiet room fires no shot" {
+                let snapshot = towerColony [ "tower-1", { X = 10; Y = 40 } ] []
+                let { Intents = intents } = decide snapshot Map.empty Set.empty
+                Expect.isEmpty (shots intents) "no hostile, no reflex"
+            }
+
+            test "a towerless room shoots nothing and keeps the safe-mode rule intact" {
+                // A clawless hostile before RCL3: no tower to answer with,
+                // and the safe-mode stock stays banked (ADR 0007).
+                let snapshot =
+                    { bareRespawn with
+                        Hostiles = [ hostileAt "h-1" { X = 20; Y = 20 } [ Attack; Move ] ]
+                    }
+
+                let { Intents = intents } = decide snapshot Map.empty Set.empty
+                Expect.isEmpty (shots intents) "no tower, no shot"
+                Expect.isEmpty (activations intents) "fighters never spend the stock"
             }
         ]
 

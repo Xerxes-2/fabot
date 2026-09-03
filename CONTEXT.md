@@ -121,8 +121,11 @@ The colony reflex (ADR 0007) that emits `ActivateSafeMode` the tick any CLAIM-pa
 ### Pickup reflex
 The colony reflex that emits a pickup Intent for every creep with free carry capacity standing within range 1 of a dropped energy pile — beside its assigned [[task]]'s action, since the engine's pickup conflicts with no other action. A reflex, not a Task: no movement, no matching, no threshold — it only recaptures what is already in reach (death drops, harvest overflow). Energy only; tombstones are not covered. Piles are projected as position and kind alone — no amount, since no decision reads one. Like the [[safe-mode reflex]], it speaks no [[verdict]] and shows no [[chat bubble]].
 
+### Fire reflex
+The colony reflex (ADR 0014) that has every tower shoot the [[hostile]] nearest to itself, each tick one stands in the room. Attack only — towers never repair (creep Repair is far cheaper per hit) or heal — and per-tower: no focus fire, no anti-drain gate, no energy floor (a dry tower's shot fails harmlessly; unlike the [[safe-mode reflex]] there is no stock to protect). Like its siblings, it speaks no [[verdict]] and shows no [[chat bubble]].
+
 ### Hostile
-A hostile creep as the Snapshot projects it: its body parts, verbatim, and nothing else. What a hostile can do is decided from what it is made of — CLAIM is the only part that threatens the controller, and the controller is the only thing safe mode is spent on (ADR 0007).
+A hostile creep as the Snapshot projects it: its id, its position, and its body parts, verbatim — the fields the two reading decisions need (ADR 0014). What a hostile can do is decided from what it is made of — CLAIM is the only part that threatens the controller, and the controller is the only thing safe mode is spent on (ADR 0007); where it stands is what the [[fire reflex]] aims at. Hostiles stay out of the [[spatial projection]]: they block no tiles, price no paths, gate no tasks.
 
 ### Downgrade deadline
 The hard floor on the controller's downgrade timer: half the level's full timer (ADR 0007). Inside it, Upgrade stops being surplus work and outranks even the feeding tier — a downgrade costs a level and zeroes the safe-mode stock, and the engine refuses safe-mode activation below half minus 5,000, so escalating at half keeps the [[safe-mode reflex]] fireable with the engine's whole grace intact.

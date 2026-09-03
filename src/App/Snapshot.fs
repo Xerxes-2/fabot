@@ -257,6 +257,8 @@ let build () : Snapshot =
                 let c = o :?> ICreep
 
                 {
+                    Id = c.id
+                    Pos = posOf c.pos
                     Body = c.body |> Array.map (fun p -> bodyPartOf p.``type``) |> Array.toList
                 }
                 : HostileInfo)

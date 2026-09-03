@@ -486,6 +486,21 @@ let private planSafeMode (snapshot: Snapshot) : Intent list =
         [ ActivateSafeMode controller.Id ]
     | _ -> []
 
+/// Colony reflex beside the pipeline (ADR 0014): every tower shoots the
+/// hostile nearest to itself, every tick one stands in the room. Attack
+/// only — no tower repair or heal — per-tower nearest with no focus fire
+/// or anti-drain gate, and no energy gate: unlike safe mode there is no
+/// stock to protect, so a dry tower's Intent fails harmlessly. Equal
+/// ranges tie-break by hostile id, so the pick is deterministic.
+let private planFire (snapshot: Snapshot) atlas : Intent list =
+    match snapshot.Hostiles with
+    | [] -> []
+    | hostiles ->
+        Atlas.placedTowers atlas
+        |> List.map (fun (towerId, pos) ->
+            let target = hostiles |> List.minBy (fun h -> range pos h.Pos, h.Id)
+            FireTower(towerId, target.Id))
+
 /// Extensions the controller level allows in the room (Screeps
 /// CONTROLLER_STRUCTURES for "extension").
 let private extensionAllowance level =
@@ -1264,7 +1279,7 @@ let private assignedTasks (tasks: Task list) (assignments: Assignments) : Map<st
 /// flood (ADR 0004).
 let decide (snapshot: Snapshot) (assignments: Assignments) (verbose: Set<string>) : Decision =
     let atlas = Atlas.ofSnapshot snapshot
-    let defenseIntents = planSafeMode snapshot
+    let defenseIntents = planSafeMode snapshot @ planFire snapshot atlas
     let spawnIntents = planSpawns snapshot atlas
     let siteIntents = planLayout snapshot atlas
     let pickupIntents = planPickups snapshot atlas

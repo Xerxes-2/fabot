@@ -163,9 +163,16 @@ module SpatialInfo =
 type ConstructionSiteInfo = { Id: string }
 
 /// What the decision layer knows about one hostile creep in a spawn room
-/// this tick: its body parts, verbatim — what a hostile can do is decided
-/// from what it is made of.
-type HostileInfo = { Body: BodyPart list }
+/// this tick: its id and tile — what the fire reflex aims at (ADR 0014) —
+/// and its body parts, verbatim — what a hostile can do is decided from
+/// what it is made of. Hostiles stay out of the spatial projection: they
+/// block no tiles, price no paths, gate no tasks.
+type HostileInfo =
+    {
+        Id: string
+        Pos: Pos
+        Body: BodyPart list
+    }
 
 /// What the decision layer knows about one owned creep this tick.
 type CreepInfo =
@@ -280,6 +287,7 @@ type Intent =
     | MoveCreep of creepName: string * direction: Direction
     | SayCreep of creepName: string * message: string
     | ActivateSafeMode of controllerId: string
+    | FireTower of towerId: string * hostileId: string
 
 /// Creep name -> task id. The only state remembered between ticks (anti-thrash).
 type Assignments = Map<string, string>

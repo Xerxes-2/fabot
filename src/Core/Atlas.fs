@@ -322,12 +322,21 @@ let builtTowers (atlas: Atlas) : int =
 let pendingTowers (atlas: Atlas) : int =
     targetsOfKind atlas (Site BuiltKind.Tower) |> List.length
 
-/// Dropped energy piles the projection places: id and tile, in id order.
-/// The pickup reflex's whole view of a pile — no amount is projected.
-let droppedEnergy (atlas: Atlas) : (string * Pos) list =
-    targetsOfKind atlas Dropped
+/// Placed targets of one kind: id and tile, in id order.
+let private placedOfKind (atlas: Atlas) (kind: TargetKind) : (string * Pos) list =
+    targetsOfKind atlas kind
     |> List.choose (fun id ->
         Map.tryFind id atlas.Spatial.TargetPositions |> Option.map (fun pos -> id, pos))
+
+/// Towers standing in the room: id and tile, in id order — the fire
+/// reflex's whole view of a tower (ADR 0014): no store is projected, a
+/// dry tower's shot simply fails at the engine.
+let placedTowers (atlas: Atlas) : (string * Pos) list =
+    placedOfKind atlas (Structure BuiltKind.Tower)
+
+/// Dropped energy piles the projection places: id and tile, in id order.
+/// The pickup reflex's whole view of a pile — no amount is projected.
+let droppedEnergy (atlas: Atlas) : (string * Pos) list = placedOfKind atlas Dropped
 
 /// Tiles holding a built road — the projection's road census, one half of
 /// what the Layout's road gap subtracts (ADR 0011).

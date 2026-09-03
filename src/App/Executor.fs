@@ -34,17 +34,17 @@ let private withActor (actor: 'a) (act: 'a -> int) : Outcome =
 let private withCreep (name: string) (act: ICreep -> int) : Outcome =
     withActor (Game.creeps?(name): ICreep) act
 
+let private withTarget (targetId: string) (act: obj -> Outcome) : Outcome =
+    let target = Game.getObjectById targetId
+
+    if isNull target then ActorMissing else act target
+
 let private withCreepTarget
     (name: string)
     (targetId: string)
     (act: ICreep -> obj -> int)
     : Outcome =
-    let target = Game.getObjectById targetId
-
-    if isNull target then
-        ActorMissing
-    else
-        withCreep name (fun creep -> act creep target)
+    withTarget targetId (fun target -> withCreep name (fun creep -> act creep target))
 
 let private execute (intent: Intent) : Outcome =
     match intent with
@@ -73,6 +73,9 @@ let private execute (intent: Intent) : Outcome =
     | ActivateSafeMode controllerId ->
         withActor (Game.getObjectById controllerId :?> IController) (fun controller ->
             controller.activateSafeMode ())
+    | FireTower(towerId, hostileId) ->
+        withTarget hostileId (fun target ->
+            withActor (Game.getObjectById towerId :?> ITower) (fun tower -> tower.attack target))
 
 /// Replay every Intent and answer back what the engine said. Failures are
 /// logged here, once and uniformly; the outcome list is the seam a future

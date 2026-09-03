@@ -101,6 +101,9 @@ type IController =
     abstract pos: IRoomPosition
     abstract activateSafeMode: unit -> int
 
+type ITower =
+    abstract attack: target: obj -> int
+
 type IRoom =
     abstract name: string
     /// Energy available for spawning in this room (spawn + extensions).
@@ -128,6 +131,7 @@ type IBodyPartDef =
     abstract ``type``: string
 
 type ICreep =
+    abstract id: string
     abstract name: string
     /// True while the creep is still being built inside the spawn.
     abstract spawning: bool
