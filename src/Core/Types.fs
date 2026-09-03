@@ -38,7 +38,8 @@ type RoomEnergy =
 
 /// What a built structure is — or what a construction site will become
 /// once built. Projection vocabulary, distinct from the Intent vocabulary
-/// of placeable kinds (StructureKind).
+/// of placeable kinds (StructureKind): every placeable kind widens into
+/// one of these (`builtKindOfPlaceable`), never the other way.
 [<RequireQualifiedAccess>]
 type BuiltKind =
     | Spawn
@@ -51,6 +52,11 @@ type BuiltKind =
     /// because the Layout holds a footing for one but never places it
     /// (ADR 0022).
     | Link
+    /// A rampart. No Task targets one and the Layout never places one,
+    /// but walkability must answer for it: a creep may stand on a
+    /// rampart, and folding it into Other would make every kind the
+    /// decision layer does not model walkable with it.
+    | Rampart
     /// Any structure kind the decision layer has no rules for yet.
     | Other
 
@@ -295,6 +301,123 @@ let partName =
     | Heal -> "heal"
     | Claim -> "claim"
     | Tough -> "tough"
+
+/// Every BuiltKind the engine spells — the modelled set, not the engine's
+/// whole structure vocabulary, for building tables over the kinds. Every
+/// spelling outside it classifies to Other, which is why Other is not one
+/// of them: it is the absence of a modelled kind, never a kind with a
+/// spelling of its own. A literal, and so not compiler-checked: a kind
+/// added to the union has to be added here by hand, the same hole
+/// `allBodyParts` has (issue #80).
+let allBuiltKinds =
+    [
+        BuiltKind.Spawn
+        BuiltKind.Extension
+        BuiltKind.Tower
+        BuiltKind.Road
+        BuiltKind.Container
+        BuiltKind.Storage
+        BuiltKind.Link
+        BuiltKind.Rampart
+    ]
+
+/// Screeps STRUCTURE_* strings as the engine spells them, in `structureType`
+/// on structures and construction sites alike and in `createConstructionSite`
+/// — the one place the spelling lives (its reverse is derived from this
+/// table, never written twice). Other spells to nothing: it is the absence
+/// of a modelled kind, so it stays out of `allBuiltKinds` and the empty
+/// string never reaches the engine.
+let builtKindName =
+    function
+    | BuiltKind.Spawn -> "spawn"
+    | BuiltKind.Extension -> "extension"
+    | BuiltKind.Tower -> "tower"
+    | BuiltKind.Road -> "road"
+    | BuiltKind.Container -> "container"
+    | BuiltKind.Storage -> "storage"
+    | BuiltKind.Link -> "link"
+    | BuiltKind.Rampart -> "rampart"
+    | BuiltKind.Other -> ""
+
+/// The built kind a placement Intent's kind names: the one crossing
+/// between the Intent vocabulary and the projection's, stated in Core
+/// beside both unions rather than respelled wherever the two meet — the
+/// Executor's site placement and any projection built on the .NET side
+/// read the same widening (#75). Every placeable kind is a built kind;
+/// the reverse does not hold — a Link is projected but never placed (ADR
+/// 0022) — so the crossing runs this way only.
+let builtKindOfPlaceable =
+    function
+    | Extension -> BuiltKind.Extension
+    | Tower -> BuiltKind.Tower
+    | Road -> BuiltKind.Road
+    | Container -> BuiltKind.Container
+    | Storage -> BuiltKind.Storage
+
+/// The kinds Refill keeps fed (ADR 0010): the spawn-energy feeders and the
+/// towers, the structures the Snapshot projects as Refillables. The
+/// controller container and the Storage are Refill targets too, but the
+/// Planner pools them off the projection's stores (ADR 0012, ADR 0023), so
+/// they are not one of these.
+let isRefillable =
+    function
+    | BuiltKind.Spawn
+    | BuiltKind.Extension
+    | BuiltKind.Tower -> true
+    | BuiltKind.Road
+    | BuiltKind.Container
+    | BuiltKind.Storage
+    | BuiltKind.Link
+    | BuiltKind.Rampart
+    | BuiltKind.Other -> false
+
+/// The kinds Repair keeps whole (ADR 0010, ADR 0012) — the decaying ones,
+/// and so the only kinds whose hits the projection carries at all. The
+/// Storage is deliberately not one: it does not decay, so nothing repairs
+/// it (ADR 0023).
+let isRepairable =
+    function
+    | BuiltKind.Road
+    | BuiltKind.Container -> true
+    | BuiltKind.Spawn
+    | BuiltKind.Extension
+    | BuiltKind.Tower
+    | BuiltKind.Storage
+    | BuiltKind.Link
+    | BuiltKind.Rampart
+    | BuiltKind.Other -> false
+
+/// The kinds whose stored energy enters the projection: the containers,
+/// whose stock the logistics Tasks judge (ADR 0012), and the Storage,
+/// whose Withdraw and Refill tiers read the same field (ADR 0023) — a
+/// standing Storage's store is read exactly like a container's.
+let isStored =
+    function
+    | BuiltKind.Container
+    | BuiltKind.Storage -> true
+    | BuiltKind.Spawn
+    | BuiltKind.Extension
+    | BuiltKind.Tower
+    | BuiltKind.Road
+    | BuiltKind.Link
+    | BuiltKind.Rampart
+    | BuiltKind.Other -> false
+
+/// The kinds a creep can stand on; every other kind blocks its tile
+/// (Screeps OBSTACLE_OBJECT_TYPES). Other is not walkable: a kind the
+/// decision layer has no rules for is the one thing that must not quietly
+/// open a tile, which is why Rampart is a case of its own.
+let isWalkable =
+    function
+    | BuiltKind.Road
+    | BuiltKind.Container
+    | BuiltKind.Rampart -> true
+    | BuiltKind.Spawn
+    | BuiltKind.Extension
+    | BuiltKind.Tower
+    | BuiltKind.Storage
+    | BuiltKind.Link
+    | BuiltKind.Other -> false
 
 /// Screeps direction constants as `Creep.move` expects them: TOP = 1, then clockwise.
 let directionCode =

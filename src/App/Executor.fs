@@ -13,13 +13,11 @@ type Outcome =
     | Failed of code: int
     | ActorMissing
 
-let private structureName =
-    function
-    | Extension -> structureExtension
-    | Tower -> structureTower
-    | Road -> structureRoad
-    | Container -> structureContainer
-    | Storage -> structureStorage
+/// A placement Intent's kind as `createConstructionSite` spells it: the
+/// placeable kind widened to its built kind, then spelled by the Core's
+/// one kind-name table (#75) — as a spawned body's parts are. Nothing is
+/// restated here, so no case can drift out of step with the projection's.
+let private structureName = builtKindOfPlaceable >> builtKindName
 
 let private outcomeOf code = if code = 0 then Ok else Failed code
 

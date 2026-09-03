@@ -123,6 +123,109 @@ let partNameTests =
         ]
 
 [<Tests>]
+let builtKindTests =
+    testList
+        "built kinds"
+        [
+            test "matches the engine's spelling, one name per kind" {
+                // These strings come back in `structureType` on structures and
+                // sites and leave the program in createConstructionSite; the
+                // table is the engine's spec, restated so a swapped or
+                // misspelt case fails. Other is not among them: it is what an
+                // unmatched string classifies to, not a kind the engine names.
+                Expect.equal
+                    (allBuiltKinds |> List.map builtKindName)
+                    [
+                        "spawn"
+                        "extension"
+                        "tower"
+                        "road"
+                        "container"
+                        "storage"
+                        "link"
+                        "rampart"
+                    ]
+                    "each BuiltKind maps to its Screeps string"
+            }
+
+            test "Refill keeps the spawn, the extensions and the towers fed" {
+                // The rank layer's own kinds (ADR 0010). The controller
+                // container and the Storage are Refill targets too, but
+                // pooled off the projection's stores (ADR 0012, ADR 0023) —
+                // they never enter the Refillables list.
+                Expect.equal
+                    (allBuiltKinds |> List.filter isRefillable)
+                    [ BuiltKind.Spawn; BuiltKind.Extension; BuiltKind.Tower ]
+                    "the energy-hungry kinds alone are Refillables"
+
+                Expect.isFalse
+                    (isRefillable BuiltKind.Other)
+                    "an unmodelled kind is no Refillable: the projection reads no free capacity off it"
+            }
+
+            test "the Storage is stored but never repaired; a container is both" {
+                // Repair keeps the decaying kinds whole (ADR 0010, ADR 0012)
+                // and the Storage is deliberately not one — it does not decay
+                // (ADR 0023) — while its store is read exactly like a
+                // container's. Both rules were comments in the Snapshot shell
+                // until #75; here Core can state them.
+                Expect.equal
+                    (allBuiltKinds |> List.filter isRepairable)
+                    [ BuiltKind.Road; BuiltKind.Container ]
+                    "roads and containers alone put hits in the projection and enter the Repair pool"
+
+                Expect.equal
+                    (allBuiltKinds |> List.filter isStored)
+                    [ BuiltKind.Container; BuiltKind.Storage ]
+                    "the containers and the Storage alone put a store in the projection"
+
+                // `allBuiltKinds` leaves Other out, so neither filter above
+                // can say anything about it — and Other is the arm with the
+                // worst reach: the projection reads hits and a store off
+                // every kind these two admit, and an unmodelled structure
+                // carries neither.
+                Expect.isFalse
+                    (isRepairable BuiltKind.Other)
+                    "an unmodelled kind never enters the Repair pool"
+
+                Expect.isFalse
+                    (isStored BuiltKind.Other)
+                    "an unmodelled kind puts no store in the projection"
+            }
+
+            test "a creep stands on a road, a container or a rampart, and on nothing else" {
+                // Screeps OBSTACLE_OBJECT_TYPES, as the projection reads it:
+                // every kind that is not walkable blocks its tile.
+                Expect.equal
+                    (allBuiltKinds |> List.filter isWalkable)
+                    [ BuiltKind.Road; BuiltKind.Container; BuiltKind.Rampart ]
+                    "the three kinds a creep may share a tile with"
+
+                Expect.isFalse
+                    (isWalkable BuiltKind.Other)
+                    "a kind the decision layer does not model blocks its tile: Other never walks"
+            }
+
+            test "a placement Intent's kind widens to the built kind of the same name" {
+                // The one crossing between the two vocabularies (#75). The
+                // Executor spells a site through it and a projection rebuilt
+                // on the .NET side classifies its pending sites through it,
+                // so a transposed case would place one kind and describe
+                // another with nothing in either layer to catch it.
+                Expect.equal
+                    ([ Extension; Tower; Road; Container; Storage ] |> List.map builtKindOfPlaceable)
+                    [
+                        BuiltKind.Extension
+                        BuiltKind.Tower
+                        BuiltKind.Road
+                        BuiltKind.Container
+                        BuiltKind.Storage
+                    ]
+                    "each placeable kind widens to its own built kind"
+            }
+        ]
+
+[<Tests>]
 let bodyTests =
     testList
         "worker body"
@@ -1212,23 +1315,16 @@ let crossedRoom =
 /// The colony one tick on: every site the Layout just asked for now
 /// standing in the projection as a construction site, the obstacle kinds
 /// blocking their tile exactly as the engine's own sites do — the state
-/// the next tick's plan is computed against.
+/// the next tick's plan is computed against. Both halves go through the
+/// Core's own tables (#75): a .NET-side projection builder that restated
+/// them would drift from the one `buildSpatial` really builds, and the
+/// tests would stay green describing a room the bot never sees.
 let withPlanPending colony =
     let { Intents = intents } = decide colony Map.empty Set.empty None
 
-    let builtKindOf =
-        function
-        | Extension -> BuiltKind.Extension
-        | Tower -> BuiltKind.Tower
-        | Road -> BuiltKind.Road
-        | Container -> BuiltKind.Container
-        | Storage -> BuiltKind.Storage
-
     let sites =
         placementIntents intents
-        |> List.mapi (fun i (_, pos, kind) -> $"site-{i}", pos, builtKindOf kind)
-
-    let walkable = [ BuiltKind.Road; BuiltKind.Container ]
+        |> List.mapi (fun i (_, pos, kind) -> $"site-{i}", pos, builtKindOfPlaceable kind)
 
     { colony with
         Spatial =
@@ -1236,7 +1332,7 @@ let withPlanPending colony =
                 Obstacles =
                     (colony.Spatial.Obstacles, sites)
                     ||> List.fold (fun acc (_, pos, kind) ->
-                        if List.contains kind walkable then acc else Set.add pos acc)
+                        if isWalkable kind then acc else Set.add pos acc)
             }
     }
 

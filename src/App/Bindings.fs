@@ -30,29 +30,9 @@ let terrainMaskWall = 1
 /// Screeps `TERRAIN_MASK_SWAMP` constant.
 let terrainMaskSwamp = 2
 
-/// Screeps `STRUCTURE_SPAWN` constant.
-let structureSpawn = "spawn"
-
-/// Screeps `STRUCTURE_EXTENSION` constant.
-let structureExtension = "extension"
-
-/// Screeps `STRUCTURE_TOWER` constant.
-let structureTower = "tower"
-
-/// Screeps `STRUCTURE_ROAD` constant.
-let structureRoad = "road"
-
-/// Screeps `STRUCTURE_CONTAINER` constant.
-let structureContainer = "container"
-
-/// Screeps `STRUCTURE_STORAGE` constant.
-let structureStorage = "storage"
-
-/// Screeps `STRUCTURE_LINK` constant.
-let structureLink = "link"
-
-/// Screeps `STRUCTURE_RAMPART` constant.
-let structureRampart = "rampart"
+// The STRUCTURE_* spellings live in Core (`builtKindName`, #75): the kind
+// predicates over them are Core rules, so the table has to be readable
+// there — as `partName`'s is.
 
 type IStore =
     abstract getFreeCapacity: resource: string -> int

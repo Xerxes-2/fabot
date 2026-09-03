@@ -22,38 +22,15 @@ let private bodyPartOf =
     let byName = allBodyParts |> List.map (fun p -> partName p, p) |> Map.ofList
     fun partType -> byName |> Map.tryFind partType |> Option.defaultValue Tough
 
-/// Classify an engine STRUCTURE_* string into the Core's built kinds.
-let private builtKindOf structureType =
-    if structureType = structureSpawn then
-        BuiltKind.Spawn
-    elif structureType = structureExtension then
-        BuiltKind.Extension
-    elif structureType = structureTower then
-        BuiltKind.Tower
-    elif structureType = structureRoad then
-        BuiltKind.Road
-    elif structureType = structureContainer then
-        BuiltKind.Container
-    elif structureType = structureStorage then
-        BuiltKind.Storage
-    elif structureType = structureLink then
-        BuiltKind.Link
-    else
-        BuiltKind.Other
-
-/// The energy-hungry structure types Refill keeps fed (ADR 0010).
-let private refillableTypes = [ structureSpawn; structureExtension; structureTower ]
-
-/// The structure types Repair keeps whole — the kinds whose hits enter
-/// the projection (ADR 0010, ADR 0012). The Storage is deliberately not
-/// one: it does not decay, so nothing repairs it (ADR 0023).
-let private repairableTypes = [ structureRoad; structureContainer ]
-
-/// The structure types whose stored energy enters the projection: the
-/// containers, whose stock the logistics Tasks judge (ADR 0012), and the
-/// Storage, whose Withdraw and Refill tiers read the same field (ADR
-/// 0023) — a standing Storage's store is read exactly like a container's.
-let private storedTypes = [ structureContainer; structureStorage ]
+/// Classify an engine STRUCTURE_* string into the Core's built kinds: the
+/// reverse of the Core's one kind-name table, exactly as `bodyPartOf` is
+/// the reverse of `partName`. A string the table lacks is a kind the
+/// decision layer has no rules for, which is what Other says. Classify
+/// once here; every filter below reads the kind, never the string, so the
+/// rules over it stay in Core where a test can pin them (#75).
+let private builtKindOf =
+    let byName = allBuiltKinds |> List.map (fun k -> builtKindName k, k) |> Map.ofList
+    fun structureType -> byName |> Map.tryFind structureType |> Option.defaultValue BuiltKind.Other
 
 let private buildSpatial (spawn: ISpawn) : SpatialInfo =
     let room = spawn.room
@@ -70,11 +47,20 @@ let private buildSpatial (spawn: ISpawn) : SpatialInfo =
                         { X = x; Y = y }, terrainAt terrain x y
             ]
 
-    let structures = room.find findStructures |> Array.map (fun o -> o :?> IStructure)
+    // Each structure and site is classified once, here, and carried beside
+    // its kind: every filter below reads that kind, and the engine string
+    // is interpreted in one place (#75).
+    let structures =
+        room.find findStructures
+        |> Array.map (fun o ->
+            let st = o :?> IStructure
+            st, builtKindOf st.structureType)
 
     let sites =
         room.find findMyConstructionSites
-        |> Array.map (fun o -> o :?> IConstructionSite)
+        |> Array.map (fun o ->
+            let site = o :?> IConstructionSite
+            site, builtKindOf site.structureType)
 
     let sources = room.find findSources |> Array.map (fun o -> o :?> ISource)
 
@@ -93,10 +79,6 @@ let private buildSpatial (spawn: ISpawn) : SpatialInfo =
         else
             [| room.controller |]
 
-    // Structures a creep can stand on; every other kind blocks its tile
-    // (Screeps OBSTACLE_OBJECT_TYPES).
-    let walkableStructures = [ structureRoad; structureContainer; structureRampart ]
-
     {
         RoomName = Some room.name
         Terrain = tiles
@@ -105,8 +87,8 @@ let private buildSpatial (spawn: ISpawn) : SpatialInfo =
                 Array.concat
                     [
                         sources |> Array.map (fun s -> s.id, posOf s.pos)
-                        structures |> Array.map (fun st -> st.id, posOf st.pos)
-                        sites |> Array.map (fun site -> site.id, posOf site.pos)
+                        structures |> Array.map (fun (st, _) -> st.id, posOf st.pos)
+                        sites |> Array.map (fun (site, _) -> site.id, posOf site.pos)
                         controllers |> Array.map (fun c -> c.id, posOf c.pos)
                         dropped |> Array.map (fun r -> r.id, posOf r.pos)
                     ]
@@ -118,10 +100,8 @@ let private buildSpatial (spawn: ISpawn) : SpatialInfo =
                 Array.concat
                     [
                         sources |> Array.map (fun s -> s.id, Source)
-                        structures
-                        |> Array.map (fun st -> st.id, Structure(builtKindOf st.structureType))
-                        sites
-                        |> Array.map (fun site -> site.id, Site(builtKindOf site.structureType))
+                        structures |> Array.map (fun (st, kind) -> st.id, Structure kind)
+                        sites |> Array.map (fun (site, kind) -> site.id, Site kind)
                         controllers |> Array.map (fun c -> c.id, Controller)
                         dropped |> Array.map (fun r -> r.id, Dropped)
                     ]
@@ -131,21 +111,21 @@ let private buildSpatial (spawn: ISpawn) : SpatialInfo =
             |> Array.filter (fun c -> not c.spawning)
             |> Array.map (fun c -> c.name, posOf c.pos)
             |> Map.ofArray
+        // Structures a creep cannot stand on block their tile; the kinds it
+        // can are the Core's own predicate (Screeps OBSTACLE_OBJECT_TYPES).
         Obstacles =
             Set.ofArray (
                 Array.concat
                     [
                         structures
-                        |> Array.filter (fun st ->
-                            not (List.contains st.structureType walkableStructures))
-                        |> Array.map (fun st -> posOf st.pos)
+                        |> Array.filter (fun (_, kind) -> not (isWalkable kind))
+                        |> Array.map (fun (st, _) -> posOf st.pos)
                         // The engine refuses to move a creep onto its own
                         // obstacle-type construction site, so those tiles
                         // block exactly like the finished structure would.
                         sites
-                        |> Array.filter (fun site ->
-                            not (List.contains site.structureType walkableStructures))
-                        |> Array.map (fun site -> posOf site.pos)
+                        |> Array.filter (fun (_, kind) -> not (isWalkable kind))
+                        |> Array.map (fun (site, _) -> posOf site.pos)
                         controllers |> Array.map (fun c -> posOf c.pos)
                     ]
             )
@@ -153,15 +133,15 @@ let private buildSpatial (spawn: ISpawn) : SpatialInfo =
         // so it never enters the pricing (ADR 0010).
         Roads =
             structures
-            |> Array.filter (fun st -> st.structureType = structureRoad)
-            |> Array.map (fun st -> posOf st.pos)
+            |> Array.filter (fun (_, kind) -> kind = BuiltKind.Road)
+            |> Array.map (fun (st, _) -> posOf st.pos)
             |> Set.ofArray
         // Hits on repairable kinds only — roads and containers (ADR 0010,
         // ADR 0012): fields nobody decides on stay out of the projection.
         Hits =
             structures
-            |> Array.filter (fun st -> List.contains st.structureType repairableTypes)
-            |> Array.map (fun st -> st.id, { Hits = st.hits; HitsMax = st.hitsMax })
+            |> Array.filter (fun (_, kind) -> isRepairable kind)
+            |> Array.map (fun (st, _) -> st.id, { Hits = st.hits; HitsMax = st.hitsMax })
             |> Map.ofArray
         // Stored energy on the containers, the stock the logistics Tasks
         // judge one by (ADR 0012), and on the Storage, which the Planner
@@ -171,8 +151,8 @@ let private buildSpatial (spawn: ISpawn) : SpatialInfo =
         // than the stock still has room to take the load.
         Stores =
             structures
-            |> Array.filter (fun st -> List.contains st.structureType storedTypes)
-            |> Array.map (fun st -> st.id, st.store.getUsedCapacity "energy")
+            |> Array.filter (fun (_, kind) -> isStored kind)
+            |> Array.map (fun (st, _) -> st.id, st.store.getUsedCapacity "energy")
             |> Map.ofArray
     }
 
@@ -206,14 +186,16 @@ let build () : Snapshot =
         Refillables =
             spawns
             |> Array.collect (fun s -> s.room.find findMyStructures)
-            |> Array.map (fun o -> o :?> IStructure)
-            |> Array.filter (fun st -> List.contains st.structureType refillableTypes)
-            |> Array.distinctBy (fun st -> st.id)
-            |> Array.map (fun st ->
+            |> Array.map (fun o ->
+                let st = o :?> IStructure
+                st, builtKindOf st.structureType)
+            |> Array.filter (fun (_, kind) -> isRefillable kind)
+            |> Array.distinctBy (fun (st, _) -> st.id)
+            |> Array.map (fun (st, kind) ->
                 {
                     Id = st.id
                     FreeCapacity = st.store.getFreeCapacity "energy"
-                    Kind = builtKindOf st.structureType
+                    Kind = kind
                 }
                 : RefillableInfo)
             |> Array.toList

@@ -172,11 +172,6 @@ let taskId =
     | Repair structureId -> $"repair:{structureId}"
     | Upgrade controllerId -> $"upgrade:{controllerId}"
 
-/// The built kinds Repair keeps whole (ADR 0010, ADR 0012): roads and
-/// containers. Non-repairable kinds (spawn, extension, tower) never
-/// enter the pool on low hits, whatever the projection carries.
-let private repairableKinds = [ BuiltKind.Road; BuiltKind.Container ]
-
 /// The Repair trigger: a repairable structure enters the pool when its
 /// hits sink strictly below this fraction of max, and leaves it once
 /// repaired back over the line. A tunable, not part of ADR 0010.
@@ -222,13 +217,14 @@ let planTasks (snapshot: Snapshot) : Task list =
 
     // A Repair per repairable structure below the trigger, in id order.
     // The projection carries hits on repairable kinds only, but the kind
-    // gate is judged here — the Planner owns what enters the pool.
+    // gate is judged here — the Planner owns what enters the pool, off the
+    // same predicate the projection filtered by (ADR 0010, ADR 0012).
     let repairs =
         snapshot.Spatial.Hits
         |> Map.toList
         |> List.filter (fun (id, hits) ->
             match Map.tryFind id snapshot.Spatial.TargetKinds with
-            | Some(Structure kind) when List.contains kind repairableKinds ->
+            | Some(Structure kind) when isRepairable kind ->
                 float hits.Hits < repairTrigger * float hits.HitsMax
             | _ -> false)
         |> List.map (fst >> Repair)
