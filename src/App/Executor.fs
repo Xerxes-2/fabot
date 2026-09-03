@@ -16,6 +16,8 @@ type Outcome =
 let private structureName =
     function
     | Extension -> structureExtension
+    | Tower -> structureTower
+    | Road -> structureRoad
 
 let private outcomeOf code = if code = 0 then Ok else Failed code
 

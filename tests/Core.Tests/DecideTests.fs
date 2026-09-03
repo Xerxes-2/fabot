@@ -412,20 +412,22 @@ let placementTests =
             test "RCL2 on open terrain places 5 extensions checkerboard, nearest first" {
                 let { Intents = intents } = decide (atLevel 2 (openRoom 3)) Map.empty Set.empty
 
+                // The nearest checkerboard tile (24,24) is the tower's pick in
+                // the RCL4-horizon Layout, so the extensions start one tile in.
                 Expect.equal
                     (placedTiles intents)
                     [
-                        { X = 24; Y = 24 }
                         { X = 24; Y = 26 }
                         { X = 26; Y = 24 }
                         { X = 26; Y = 26 }
                         { X = 23; Y = 23 }
+                        { X = 23; Y = 25 }
                     ]
-                    "diagonal neighbours first, then the nearest rank-2 checkerboard tile"
+                    "diagonal neighbours after the tower reserve, then rank-2 checkerboard tiles"
 
                 for (room, _, kind) in placementIntents intents do
                     Expect.equal room "W1N1" "sites go in the spawn's room"
-                    Expect.equal kind Extension "only extensions are placed"
+                    Expect.equal kind Extension "only extensions are placed at RCL2"
             }
 
             test "below RCL2 no placement Intents are emitted" {
@@ -514,6 +516,198 @@ let placementTests =
 
                 let { Intents = intents } = decide snapshot Map.empty Set.empty
                 Expect.isEmpty (placementIntents intents) "nothing to plan around"
+            }
+        ]
+
+/// The trunk fixture (ADR 0011): a broad plain field with the spawn at
+/// (25,25), the controller at (35,25), one source embedded in wall terrain
+/// at (15,25), two swamps inside the controller's Upgrade Work Area, one
+/// far swamp off every trunk line, and two extensions already built on the
+/// cluster's nearest tiles.
+let trunkRoom =
+    let sourcePos = { X = 15; Y = 25 }
+    let spawnPos = { X = 25; Y = 25 }
+    let controllerPos = { X = 35; Y = 25 }
+    let builtExtensions = [ { X = 24; Y = 26 }; { X = 26; Y = 24 } ]
+    let areaSwamps = [ { X = 33; Y = 27 }; { X = 34; Y = 24 } ]
+
+    { SpatialInfo.empty with
+        RoomName = Some "W1N1"
+        Terrain =
+            Map.ofList
+                [
+                    for x in 10..40 do
+                        for y in 15..35 do
+                            let tile = { X = x; Y = y }
+
+                            tile,
+                            (if tile = sourcePos then
+                                 Wall
+                             elif List.contains tile areaSwamps || tile = { X = 20; Y = 20 } then
+                                 Swamp
+                             else
+                                 Plain)
+                ]
+        TargetPositions =
+            Map.ofList
+                [
+                    "spawn-1", spawnPos
+                    "ctrl-1", controllerPos
+                    "src-a", sourcePos
+                    "ext-1", builtExtensions.[0]
+                    "ext-2", builtExtensions.[1]
+                ]
+        TargetKinds =
+            Map.ofList
+                [
+                    "spawn-1", Structure BuiltKind.Spawn
+                    "ctrl-1", Controller
+                    "src-a", Source
+                    "ext-1", Structure BuiltKind.Extension
+                    "ext-2", Structure BuiltKind.Extension
+                ]
+        Obstacles = Set.ofList (spawnPos :: controllerPos :: builtExtensions)
+    }
+
+/// The trunk fixture's colony at a controller level.
+let trunkColony level =
+    { bareRespawn with
+        Sources = [ { Id = "src-a" } ]
+        Controller = Some(controllerAt level)
+        Spatial = trunkRoom
+    }
+
+/// The trunk fixture without its source: nothing to pave a trunk from.
+let noSourceColony level =
+    { trunkColony level with
+        Sources = []
+        Spatial =
+            { trunkRoom with
+                TargetPositions = Map.remove "src-a" trunkRoom.TargetPositions
+                TargetKinds = Map.remove "src-a" trunkRoom.TargetKinds
+            }
+    }
+
+let sitesOfKind kind intents =
+    placementIntents intents
+    |> List.choose (fun (_, pos, k) -> if k = kind then Some pos else None)
+
+let chebyshev a b = max (abs (a.X - b.X)) (abs (a.Y - b.Y))
+
+[<Tests>]
+let layoutTests =
+    testList
+        "layout"
+        [
+            test "RCL2 places the extension gap and every trunk road, no tower" {
+                let { Intents = intents } = decide (trunkColony 2) Map.empty Set.empty
+
+                Expect.isEmpty (sitesOfKind Tower intents) "no tower below RCL3"
+
+                Expect.hasLength
+                    (sitesOfKind Extension intents)
+                    3
+                    "only the gap against the two built extensions is placed"
+
+                let roads = sitesOfKind Road intents |> Set.ofList
+
+                Expect.isTrue
+                    (roads |> Set.exists (fun t -> chebyshev t { X = 15; Y = 25 } = 1))
+                    "a trunk starts beside the source"
+
+                Expect.isTrue
+                    (roads |> Set.exists (fun t -> chebyshev t { X = 25; Y = 25 } = 1))
+                    "a trunk ends beside the spawn"
+
+                Expect.isTrue
+                    (roads |> Set.exists (fun t -> chebyshev t { X = 35; Y = 25 } <= 3))
+                    "a trunk reaches the controller's Work Area"
+
+                Expect.contains roads { X = 33; Y = 27 } "a Work Area swamp is paved"
+                Expect.contains roads { X = 34; Y = 24 } "the other Work Area swamp is paved"
+
+                Expect.isFalse
+                    (Set.contains { X = 20; Y = 20 } roads)
+                    "a swamp off every trunk line is not paved"
+            }
+
+            test "the same fixture at RCL3 adds the tower and extensions 6-10 at once" {
+                let { Intents = intents } = decide (trunkColony 3) Map.empty Set.empty
+
+                Expect.equal
+                    (sitesOfKind Tower intents)
+                    [ { X = 24; Y = 24 } ]
+                    "the tower takes the ordering's first free tile"
+
+                let extensions = sitesOfKind Extension intents
+                Expect.hasLength extensions 8 "the RCL3 allowance fills against the two built"
+
+                let spawnPos = { X = 25; Y = 25 }
+                let orderKey tile = chebyshev tile spawnPos, tile.X, tile.Y
+
+                for tile in extensions do
+                    Expect.isLessThan
+                        (orderKey { X = 24; Y = 24 })
+                        (orderKey tile)
+                        "the tower's pick comes before every extension in the one ordering"
+            }
+
+            test "the same Snapshot recomputes to the identical site set" {
+                let first = decide (trunkColony 2) Map.empty Set.empty
+                let second = decide (trunkColony 2) Map.empty Set.empty
+
+                Expect.equal
+                    (placementIntents first.Intents)
+                    (placementIntents second.Intents)
+                    "the Layout is deterministic — sites never jitter between computations"
+            }
+
+            test "trunks route around every RCL4-horizon reservation" {
+                let rcl2 = decide (trunkColony 2) Map.empty Set.empty
+                let rcl4 = decide (trunkColony 4) Map.empty Set.empty
+                let roads = sitesOfKind Road rcl2.Intents |> Set.ofList
+
+                let cluster =
+                    sitesOfKind Tower rcl4.Intents @ sitesOfKind Extension rcl4.Intents
+                    |> Set.ofList
+
+                Expect.equal
+                    (sitesOfKind Road rcl4.Intents |> Set.ofList)
+                    roads
+                    "the road plan is the same at every level — the horizon never moves"
+
+                Expect.isEmpty
+                    (Set.intersect roads cluster)
+                    "no trunk tile coincides with a reserved structure tile"
+            }
+
+            test "without a source only the Work Area swamps are paved, never plain" {
+                let { Intents = intents } = decide (noSourceColony 2) Map.empty Set.empty
+
+                Expect.equal
+                    (sitesOfKind Road intents |> Set.ofList)
+                    (Set.ofList [ { X = 33; Y = 27 }; { X = 34; Y = 24 } ])
+                    "exactly the Work Area's swamp tiles get roads"
+            }
+
+            test "built roads and pending road sites are never placed again" {
+                let colony = noSourceColony 2
+
+                let snapshot =
+                    { colony with
+                        Spatial =
+                            { colony.Spatial with
+                                Roads = Set.singleton { X = 33; Y = 27 }
+                            }
+                            |> withTargets
+                                [ "road-site-1", { X = 34; Y = 24 }, Site BuiltKind.Road ]
+                    }
+
+                let { Intents = intents } = decide snapshot Map.empty Set.empty
+
+                Expect.isEmpty
+                    (sitesOfKind Road intents)
+                    "the gap reads the projection's road census: both tiles are claimed"
             }
         ]
 

@@ -308,6 +308,29 @@ let builtExtensions (atlas: Atlas) : int =
 let pendingExtensions (atlas: Atlas) : int =
     targetsOfKind atlas (Site BuiltKind.Extension) |> List.length
 
+/// Towers already standing in the room.
+let builtTowers (atlas: Atlas) : int =
+    targetsOfKind atlas (Structure BuiltKind.Tower) |> List.length
+
+/// Tower construction sites already placed in the room.
+let pendingTowers (atlas: Atlas) : int =
+    targetsOfKind atlas (Site BuiltKind.Tower) |> List.length
+
+/// Tiles holding a built road — the projection's road census, one half of
+/// what the Layout's road gap subtracts (ADR 0011).
+let roadTiles (atlas: Atlas) : Set<Pos> = atlas.Spatial.Roads
+
+/// Tiles holding a road construction site — the census's other half: a
+/// pending road is not yet a road (ADR 0010) but its tile needs no new site.
+let pendingRoadTiles (atlas: Atlas) : Set<Pos> =
+    targetsOfKind atlas (Site BuiltKind.Road)
+    |> List.choose (fun id -> Map.tryFind id atlas.Spatial.TargetPositions)
+    |> Set.ofList
+
+/// Whether a tile's terrain is swamp; a tile outside the projection is not.
+let isSwamp (atlas: Atlas) (tile: Pos) : bool =
+    Map.tryFind tile atlas.Spatial.Terrain = Some Swamp
+
 /// Walkable tiles adjacent to `pos`, in deterministic (X, Y) order.
 /// Standing respects obstacles, unlike Seat counting.
 let adjacentWalkable (atlas: Atlas) (pos: Pos) : Pos list =
@@ -496,3 +519,46 @@ let private noTraffic: bool[] = Array.create tileCount false
 /// share (ADR 0008, ADR 0009).
 let firstStepIgnoringTraffic (atlas: Atlas) (creep: string) (task: Task) : Pos option =
     firstStepVia atlas (floodFrom atlas.Weights noTraffic (factorOf atlas creep)) creep task
+
+/// Cheapest raw-terrain path for a trunk road (ADR 0011): plain 2, swamp
+/// 10 — no road discount and no occupancy surcharge, so the line neither
+/// shifts as its own roads get built nor bends around today's traffic.
+/// Walls, obstacle structures and the `avoid` tiles (the Layout's
+/// reservations) are impassable; the origin prices 0 though it cannot be
+/// stood on — a source sits in wall terrain, yet its trunk starts beside
+/// it. Answers the path tiles from the first step beside the origin to the
+/// cheapest reachable goal, or [] when no goal is reachable — unpriceable
+/// geometry paves nothing. Deterministic: the flood's dist-then-index heap
+/// keys and the lowest (cost, tile) goal break every tie.
+let trunkPath (atlas: Atlas) (avoid: Set<Pos>) (origin: Pos) (goals: Set<Pos>) : Pos list =
+    let weights = Array.create tileCount -1
+
+    atlas.Spatial.Terrain
+    |> Map.iter (fun tile terrain ->
+        if not (Set.contains tile atlas.Spatial.Obstacles) && not (Set.contains tile avoid) then
+            match terrain with
+            | Plain -> weights.[indexOf tile] <- 2
+            | Swamp -> weights.[indexOf tile] <- swampWeight
+            | Wall -> ())
+
+    let dist, parents =
+        floodFrom weights noTraffic { FatigueParts = 1; MoveParts = 1 } origin
+
+    goals
+    |> Set.toList
+    |> List.choose (fun goal ->
+        let d = dist.[indexOf goal]
+        if d = unreached then None else Some(d, goal))
+    |> function
+        | [] -> []
+        | reachable ->
+            let _, goal = List.min reachable
+            let originIndex = indexOf origin
+
+            let rec walk index acc =
+                if index = originIndex then
+                    acc
+                else
+                    walk parents.[index] (posAt index :: acc)
+
+            walk (indexOf goal) []

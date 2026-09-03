@@ -30,6 +30,8 @@ let private builtKindOf structureType =
         BuiltKind.Extension
     elif structureType = structureTower then
         BuiltKind.Tower
+    elif structureType = structureRoad then
+        BuiltKind.Road
     else
         BuiltKind.Other
 

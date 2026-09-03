@@ -44,6 +44,7 @@ type BuiltKind =
     | Spawn
     | Extension
     | Tower
+    | Road
     /// Any structure kind the decision layer has no rules for yet.
     | Other
 
@@ -191,7 +192,10 @@ type Task =
     | Upgrade of controllerId: string
 
 /// What kind of structure a placement Intent asks for.
-type StructureKind = | Extension
+type StructureKind =
+    | Extension
+    | Tower
+    | Road
 
 /// One step of creep movement, engine vocabulary: Top decreases Y.
 type Direction =

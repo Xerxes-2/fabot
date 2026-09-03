@@ -18,7 +18,10 @@ plan — same statelessness as the Planner):
   swamp tiles inside the controller's Work Area. Trunk paths are priced
   on raw terrain only and route around the Layout's reserved tiles;
   reserved tiles are computed before trunks, so a future extension never
-  lands on a road.
+  lands on a road. A trunk ends where the work stands — the controller's
+  Work Area edge, a spawn's neighbouring tile — and reservations win
+  every overlap: a Work-Area swamp on a reserved tile stays a
+  structure's, not a road's.
 - **The horizon truncates at RCL4** (20 extensions + tower). The Layout
   is computed for everything up to RCL4 regardless of current level;
   placement is then filtered to what the current RCL unlocks and what is

@@ -260,35 +260,121 @@ let private extensionAllowance level =
     | 7 -> 50
     | _ -> 60
 
+/// Towers the controller level allows in the room (Screeps
+/// CONTROLLER_STRUCTURES for "tower").
+let private towerAllowance level =
+    match level with
+    | 0
+    | 1
+    | 2 -> 0
+    | 3
+    | 4 -> 1
+    | 5
+    | 6 -> 2
+    | 7 -> 3
+    | _ -> 6
+
+/// The Layout horizon (ADR 0011): the whole plan is computed up to this
+/// level regardless of the current one, so today's roads route around
+/// tomorrow's structures. Deliberately not RCL8 — a wider reservation
+/// would tax today's trunks with detours for structures five levels away.
+let private horizonLevel = 4
+
 /// Screeps range: Chebyshev distance between two tiles.
 let private range a b = max (abs (a.X - b.X)) (abs (a.Y - b.Y))
 
-/// Colony-level planning step beside the Planner/Matcher pipeline: fill the
-/// controller level's extension allowance with construction sites on a
-/// checkerboard around the first placed spawn, nearest tiles first. Sites
-/// are not creep work, so this emits Intents directly rather than Tasks.
-let private planConstructionSites (snapshot: Snapshot) atlas : Intent list =
+/// Colony-level planning step beside the Planner/Matcher pipeline: the
+/// deterministic Layout (ADR 0011), computed whole from the Atlas every
+/// tick and placed all at once — no persisted plan, no pacing. One
+/// ordering rule eats every clustered structure: buildable tiles on the
+/// spawn's checkerboard colour, nearest-to-spawn first, the tower taking
+/// its pick before the extensions. Trunk roads pave each source to the
+/// controller and to each spawn plus the swamps of the controller's Work
+/// Area, priced on raw terrain and routed around every reserved tile —
+/// reservations come first, so a road never sits where a structure will.
+/// Placement filters the Layout to what the current level unlocks and
+/// what the projection's censuses say is missing. Sites are not creep
+/// work, so this emits Intents directly rather than Tasks.
+let private planLayout (snapshot: Snapshot) atlas : Intent list =
     let anchor = snapshot.Spawns |> List.tryPick (fun s -> Atlas.positionOf atlas s.Id)
 
     match Atlas.roomName atlas, anchor, snapshot.Controller with
     | Some room, Some spawnPos, Some controller ->
-        let missing =
-            extensionAllowance controller.Level
-            - Atlas.builtExtensions atlas
-            - Atlas.pendingExtensions atlas
+        // Same checkerboard colour as the spawn: clustered structures sit on
+        // the spawn's colour, leaving the other colour free for movement.
+        let parity = (spawnPos.X + spawnPos.Y) % 2
 
-        if missing <= 0 then
-            []
-        else
-            // Same checkerboard colour as the spawn: extensions cluster on the
-            // spawn's colour, leaving the other colour free for movement.
-            let parity = (spawnPos.X + spawnPos.Y) % 2
-
+        let ordering =
             Atlas.buildableTiles atlas
             |> List.filter (fun tile -> (tile.X + tile.Y) % 2 = parity)
             |> List.sortBy (fun tile -> range tile spawnPos, tile.X, tile.Y)
-            |> List.truncate missing
-            |> List.map (fun tile -> PlaceConstructionSite(room, tile, Extension))
+
+        // A kind's still-open gap at a level: its allowance there minus the
+        // projection's censuses of standing and pending structures. Judged
+        // at the horizon it sizes the reservation; at the current level it
+        // sizes the placement.
+        let gapAt allowanceOf built pending level =
+            allowanceOf level - built - pending |> max 0
+
+        let towerGap =
+            gapAt towerAllowance (Atlas.builtTowers atlas) (Atlas.pendingTowers atlas)
+
+        let extensionGap =
+            gapAt extensionAllowance (Atlas.builtExtensions atlas) (Atlas.pendingExtensions atlas)
+
+        // The horizon's still-unclaimed slots, tower first: a built or
+        // pending structure keeps its tile out of the ordering (it is a
+        // target) and its slot off the plan.
+        let towerSlots = towerGap horizonLevel
+        let extensionSlots = extensionGap horizonLevel
+
+        let clustered = ordering |> List.truncate (towerSlots + extensionSlots)
+
+        let towerTiles, extensionTiles =
+            clustered |> List.splitAt (min towerSlots clustered.Length)
+
+        // Reserved before trunks: a trunk never crosses a tile any horizon
+        // structure will claim.
+        let reserved = Set.ofList clustered
+
+        let upgradeArea = Atlas.workArea atlas (Upgrade controller.Id)
+
+        let spawnAreas =
+            snapshot.Spawns
+            |> List.choose (fun s -> Atlas.positionOf atlas s.Id)
+            |> List.map (Atlas.adjacentWalkable atlas >> Set.ofList)
+
+        let trunkTiles =
+            snapshot.Sources
+            |> List.sortBy (fun s -> s.Id)
+            |> List.choose (fun s -> Atlas.positionOf atlas s.Id)
+            |> List.collect (fun sourcePos ->
+                upgradeArea :: spawnAreas
+                |> List.collect (Atlas.trunkPath atlas reserved sourcePos))
+            |> Set.ofList
+
+        // The controller's Work Area paves its swamps and only its swamps —
+        // upgraders shuttle within it, so the dear ground gets a road and
+        // the plain ground does not. A reserved tile is a structure's, not
+        // a road's.
+        let workAreaSwamps =
+            upgradeArea
+            |> Set.filter (Atlas.isSwamp atlas)
+            |> fun s -> Set.difference s reserved
+
+        // The road gap reads the projection's road census: a built road or a
+        // pending road site already claims its tile (ADR 0010).
+        let roadGap =
+            Set.union trunkTiles workAreaSwamps
+            |> fun wanted -> Set.difference wanted (Atlas.roadTiles atlas)
+            |> fun wanted -> Set.difference wanted (Atlas.pendingRoadTiles atlas)
+
+        let place kind tiles =
+            tiles |> List.map (fun tile -> PlaceConstructionSite(room, tile, kind))
+
+        place Tower (towerTiles |> List.truncate (towerGap controller.Level))
+        @ place Extension (extensionTiles |> List.truncate (extensionGap controller.Level))
+        @ place Road (Set.toList roadGap)
     | _ -> []
 
 /// Whether a creep can usefully work this Task right now. The body must
@@ -813,7 +899,7 @@ let decide (snapshot: Snapshot) (assignments: Assignments) (verbose: Set<string>
     let atlas = Atlas.ofSnapshot snapshot
     let defenseIntents = planSafeMode snapshot
     let spawnIntents = planSpawns snapshot atlas
-    let siteIntents = planConstructionSites snapshot atlas
+    let siteIntents = planLayout snapshot atlas
     let tasks = planTasks snapshot
     let next, verdicts = matchCreeps snapshot atlas tasks assignments verbose
     let assigned = assignedTasks tasks next

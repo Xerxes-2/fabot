@@ -840,3 +840,107 @@ let consistencyTests =
                     "standing tiles never exceed Seats"
             }
         ]
+
+[<Tests>]
+let trunkPathTests =
+    testList
+        "atlas trunkPath"
+        [
+            // A 5-wide corridor of plain ground along y = 10, three rows tall,
+            // anchored at a wall tile the way a source is embedded in one.
+            let corridor =
+                spatial
+                    []
+                    [
+                        yield { X = 10; Y = 10 }, Wall
+                        for x in 11..14 do
+                            for y in 9..11 do
+                                yield { X = x; Y = y }, Plain
+                    ]
+
+            test "paves the straight line from beside the anchor to the goal" {
+                // A single-row corridor: diagonal steps cost the same as
+                // straight ones, so a wider room may legally drift the line.
+                let atlas =
+                    spatial
+                        []
+                        [
+                            yield { X = 10; Y = 10 }, Wall
+                            for x in 11..14 do
+                                yield { X = x; Y = 10 }, Plain
+                        ]
+                    |> snapshotWith []
+                    |> ofSnapshot
+
+                Expect.equal
+                    (trunkPath atlas Set.empty { X = 10; Y = 10 } (Set.singleton { X = 14; Y = 10 }))
+                    [
+                        { X = 11; Y = 10 }
+                        { X = 12; Y = 10 }
+                        { X = 13; Y = 10 }
+                        { X = 14; Y = 10 }
+                    ]
+                    "the path starts beside the impassable anchor and ends on the goal"
+            }
+
+            test "routes around avoided tiles" {
+                let atlas = corridor |> snapshotWith [] |> ofSnapshot
+
+                let path =
+                    trunkPath
+                        atlas
+                        (Set.singleton { X = 12; Y = 10 })
+                        { X = 10; Y = 10 }
+                        (Set.singleton { X = 14; Y = 10 })
+
+                Expect.isFalse
+                    (List.contains { X = 12; Y = 10 } path)
+                    "an avoided tile is never paved through"
+
+                Expect.equal (List.last path) { X = 14; Y = 10 } "the goal is still reached"
+                Expect.hasLength path 4 "the detour is a same-length diagonal"
+            }
+
+            test "prices raw terrain: a built road on a swamp does not attract the line" {
+                // The straight line crosses a swamp that already carries a
+                // road; normal pricing would make it the cheap lane, but
+                // trunk pricing reads the ground under it (ADR 0011).
+                let atlas =
+                    { corridor with
+                        Terrain = Map.add { X = 12; Y = 10 } Swamp corridor.Terrain
+                        Roads = Set.singleton { X = 12; Y = 10 }
+                    }
+                    |> snapshotWith []
+                    |> ofSnapshot
+
+                let path =
+                    trunkPath atlas Set.empty { X = 10; Y = 10 } (Set.singleton { X = 14; Y = 10 })
+
+                Expect.isFalse
+                    (List.contains { X = 12; Y = 10 } path)
+                    "the swamp is dodged though its road would be cheap to walk"
+
+                Expect.equal (List.last path) { X = 14; Y = 10 } "the goal is still reached"
+            }
+
+            test "unreachable goals pave nothing" {
+                let atlas = corridor |> snapshotWith [] |> ofSnapshot
+
+                Expect.isEmpty
+                    (trunkPath atlas Set.empty { X = 10; Y = 10 } (Set.singleton { X = 30; Y = 30 }))
+                    "a goal outside the projection is unreachable"
+            }
+
+            test "of equally cheap goals the lowest (cost, tile) wins" {
+                let atlas = corridor |> snapshotWith [] |> ofSnapshot
+
+                let path =
+                    trunkPath
+                        atlas
+                        Set.empty
+                        { X = 10; Y = 10 }
+                        (Set.ofList [ { X = 13; Y = 9 }; { X = 13; Y = 11 } ])
+
+                Expect.equal (List.last path) { X = 13; Y = 9 } "ties break on the tile ordering"
+            }
+        ]
