@@ -272,6 +272,24 @@ type IdleReason =
     | NoneFree
     | NoneReachable
 
+/// Why a Task in the pool was rejected for a creep, in a verbose scoring:
+/// it did not fit the creep's body or energy state, its worker cap was
+/// already full, or its Work Area is unreachable — the matching gates, in
+/// the order they are tried.
+[<RequireQualifiedAccess>]
+type RejectReason =
+    | Inapplicable
+    | CapacityFull
+    | Unreachable
+
+/// One row of a verbose scoring: a Task in the pool, either scored on the
+/// full matching key — rank tier, travel cost, current load — or rejected
+/// at the first gate it failed. The answer to "why *not* that Task".
+[<RequireQualifiedAccess>]
+type Candidate =
+    | Scored of task: string * rank: int * cost: int * load: int
+    | Rejected of task: string * reason: RejectReason
+
 /// The reasoned outcome a decision step returns beside its decision — data,
 /// never a log line (ADR 0009). The Matcher speaks at conclusion level:
 /// which Task won a creep and what decided it, a remembered assignment kept
@@ -281,13 +299,16 @@ type IdleReason =
 /// settled off its preferred tile, naming the counterpart creep that holds
 /// it — or rerouted, detoured by the occupancy surcharge. A creep that
 /// simply steps toward its Work Area says nothing: conclusion level means
-/// events, not every step. Tasks are named by task id.
+/// events, not every step. Tasks are named by task id. A creep on the
+/// verbose list additionally gets a Scoring Verdict: the whole pool as
+/// Candidates, judged against the state its match was decided from.
 [<RequireQualifiedAccess>]
 type Verdict =
     | Matched of creep: string * task: string * factor: MatchFactor
     | Kept of creep: string * task: string
     | Released of creep: string * task: string * reason: ReleaseReason
     | Unassigned of creep: string * reason: IdleReason
+    | Scoring of creep: string * candidates: Candidate list
     | Grounded of creep: string
     | Yielded of creep: string * counterpart: string
     | Rerouted of creep: string

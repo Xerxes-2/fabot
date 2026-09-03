@@ -605,13 +605,16 @@ let resolve (snapshot: Snapshot) atlas (assigned: Map<string, Task>) : Intent li
 /// Matcher: keep still-valid assignments (anti-thrash) and greedily assign
 /// the rest. Assignments in, Assignments and the Verdicts explaining them
 /// out (ADR 0009): releases first in memory order, then one status Verdict
-/// per living creep in Snapshot order. Emission belongs to the Emitter,
-/// movement to the Resolver.
+/// per living creep in Snapshot order — each preceded, for a creep on the
+/// verbose list, by its Scoring Verdict: the whole pool judged against the
+/// same state its status was decided from. Emission belongs to the
+/// Emitter, movement to the Resolver.
 let matchCreeps
     (snapshot: Snapshot)
     atlas
     (tasks: Task list)
     (assignments: Assignments)
+    (verbose: Set<string>)
     : Assignments * Verdict list =
     let byId = tasks |> List.map (fun t -> taskId t, t) |> Map.ofList
     let capacities = taskCapacities snapshot atlas
@@ -648,41 +651,67 @@ let matchCreeps
                     release ReleaseReason.Unreachable
                 | Some _ -> Map.add name tid acc, released)
 
+    // One gate cascade judges every (creep, Task) pair — rejected at the
+    // first matching gate it fails (applicable, capacity, reachable) or
+    // scored on the full key when none does. The Matcher's candidates and a
+    // verbose Scoring both read from here, so the narration can never
+    // drift from what actually decided the match.
+    let judge acc (creep: CreepInfo) task =
+        let tid = taskId task
+
+        if not (applicable creep task) then
+            Candidate.Rejected(tid, RejectReason.Inapplicable)
+        elif not (hasCapacity acc tid) then
+            Candidate.Rejected(tid, RejectReason.CapacityFull)
+        else
+            match Atlas.travelCost atlas creep.Name task with
+            | None -> Candidate.Rejected(tid, RejectReason.Unreachable)
+            | Some cost -> Candidate.Scored(tid, rank snapshot task, cost, load acc tid)
+
     let assignOne (acc, verdicts) (creep: CreepInfo) =
+        let verdicts =
+            if Set.contains creep.Name verbose then
+                // The creep's own claim is set aside for its scoring: a held
+                // single-Seat Task must read as the winning row, never as
+                // capacity-full against its own holder's seat.
+                let rows = tasks |> List.map (judge (Map.remove creep.Name acc) creep)
+                Verdict.Scoring(creep.Name, rows) :: verdicts
+            else
+                verdicts
+
         match Map.tryFind creep.Name acc with
         | Some tid -> acc, Verdict.Kept(creep.Name, tid) :: verdicts
         | None ->
-            let candidates =
-                tasks
-                |> List.choose (fun t ->
-                    if applicable creep t && hasCapacity acc (taskId t) then
-                        Atlas.travelCost atlas creep.Name t |> Option.map (fun cost -> t, cost)
-                    else
-                        None)
+            let judged = tasks |> List.map (fun t -> t, judge acc creep t)
 
-            match candidates with
+            let keyed =
+                judged
+                |> List.choose (function
+                    | t, Candidate.Scored(_, rank, cost, load) -> Some((rank, cost, load), t)
+                    | _ -> None)
+
+            match keyed with
             | [] ->
                 // How far the best Task got through the gates — applicable,
                 // capacity, reachable — is why the creep sits idle.
+                let rejectedWith wanted =
+                    judged
+                    |> List.exists (function
+                        | _, Candidate.Rejected(_, reason) -> reason = wanted
+                        | _ -> false)
+
                 let reason =
                     if List.isEmpty tasks then
                         IdleReason.NoTasks
-                    elif
-                        tasks
-                        |> List.exists (fun t -> applicable creep t && hasCapacity acc (taskId t))
-                    then
+                    elif rejectedWith RejectReason.Unreachable then
                         IdleReason.NoneReachable
-                    elif tasks |> List.exists (applicable creep) then
+                    elif rejectedWith RejectReason.CapacityFull then
                         IdleReason.NoneFree
                     else
                         IdleReason.NoneApplicable
 
                 acc, Verdict.Unassigned(creep.Name, reason) :: verdicts
-            | candidates ->
-                let keyed =
-                    candidates
-                    |> List.map (fun (t, cost) -> (rank snapshot t, cost, load acc (taskId t)), t)
-
+            | keyed ->
                 let bestKey, task = keyed |> List.minBy fst
 
                 // The deciding factor: the first component separating the
@@ -717,18 +746,17 @@ let private assignedTasks (tasks: Task list) (assignments: Assignments) : Map<st
     |> Map.ofList
 
 /// The decision seam: Snapshot in — with the verbose list of creep names
-/// owed full candidate scoring (accepted, not yet consumed) — Decision
-/// out. The tick's pipeline is visible here — plan, match, emit, resolve —
+/// owed full candidate scoring — Decision out. The tick's pipeline is visible here — plan, match, emit, resolve —
 /// beside the colony steps (spawns, sites), with geometry consulted
 /// through one Atlas built up front, so every step prices from the same
 /// flood (ADR 0004).
-let decide (snapshot: Snapshot) (assignments: Assignments) (_verbose: Set<string>) : Decision =
+let decide (snapshot: Snapshot) (assignments: Assignments) (verbose: Set<string>) : Decision =
     let atlas = Atlas.ofSnapshot snapshot
     let defenseIntents = planSafeMode snapshot
     let spawnIntents = planSpawns snapshot atlas
     let siteIntents = planConstructionSites snapshot atlas
     let tasks = planTasks snapshot
-    let next, verdicts = matchCreeps snapshot atlas tasks assignments
+    let next, verdicts = matchCreeps snapshot atlas tasks assignments verbose
     let assigned = assignedTasks tasks next
     let moveIntents, moveVerdicts = resolve snapshot atlas assigned
 

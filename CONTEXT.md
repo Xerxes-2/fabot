@@ -82,6 +82,9 @@ The body-generation invariant (ADR 0003): a worker body padded beyond whole [[wo
 ### Verdict
 The reasoned outcome a decision step returns beside its decision — data, never a log line (ADR 0009). The [[matcher]]'s Verdict on a creep says which [[task]] won it and why (rank, [[travel cost]], load, tie-break), that a remembered assignment was kept (anti-thrash, distinct from a fresh match), why an assignment was released, or why an unassigned creep got nothing; the [[resolver]]'s says what became of its movement ([[grounded]], yielded, reroute). Conclusion-level always; a creep on the verbose list gets its full candidate scoring too. The Planner and spawn decisions return no Verdicts.
 
+### Verbose list
+The creep names owed full candidate scoring, stored beside the [[transition log]] under `Memory.fabot.observe` and read fresh each tick — flipped from the terminal through the Memory HTTP API, so an investigation needs no redeploy. Empty (or absent, or malformed) means off; each listed creep's Scoring [[verdict]] carries one Candidate per pooled [[task]]: scored on the full matching key, or rejected at the first gate it failed (inapplicable, capacity-full, unreachable).
+
 ### Transition log
 The per-creep ring of recent changes — task handovers and movement events, each with its [[verdict]] and tick — written only on the tick something changed. The colony's answer to "why did this creep flip", capped per creep; a quiet creep writes nothing.
 

@@ -49,7 +49,9 @@ let private pruneDeadCreepMemory (living: Set<string>) =
 // Exported as `loop` on the bundled `main` module; the engine calls it every tick.
 let loop () =
     let snapshot = Snapshot.build ()
-    let decision = decide snapshot (loadAssignments ()) Set.empty
+    // The verbose list is read fresh from Memory each tick, so a flip from
+    // the terminal changes what the very next tick records.
+    let decision = decide snapshot (loadAssignments ()) (ObserveMemory.loadVerbose ())
     // Memory writes land before the engine calls: a throw inside Executor.run
     // must not discard the tick's anti-thrash state.
     saveAssignments decision.Assignments

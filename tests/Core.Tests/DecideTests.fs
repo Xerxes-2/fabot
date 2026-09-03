@@ -2342,21 +2342,172 @@ let verdictTests =
         ]
 
 [<Tests>]
+let verboseScoringTests =
+    testList
+        "verbose scoring"
+        [
+            test "a verbose creep's Scoring covers the whole pool, scores and rejections both" {
+                // Loaded and full: Harvest cannot fit the energy state, while
+                // Refill and Upgrade score on the full key — no projection, so
+                // every travel cost prices at 0.
+                let snapshot =
+                    { bareRespawn with
+                        Sources = [ { Id = "src-a" } ]
+                        Refillables = [ { Id = "spawn-1"; FreeCapacity = 50 } ]
+                        Creeps = [ worker "w1" 50 0 ]
+                    }
+
+                let { Verdicts = verdicts } = decide snapshot Map.empty (Set.ofList [ "w1" ])
+
+                Expect.equal
+                    verdicts
+                    [
+                        Verdict.Scoring(
+                            "w1",
+                            [
+                                Candidate.Rejected(
+                                    taskId (Harvest "src-a"),
+                                    RejectReason.Inapplicable
+                                )
+                                Candidate.Scored(taskId (Refill "spawn-1"), 0, 0, 0)
+                                Candidate.Scored(taskId (Upgrade "ctrl-1"), 1, 0, 0)
+                            ]
+                        )
+                        Verdict.Matched("w1", taskId (Refill "spawn-1"), MatchFactor.Rank)
+                    ]
+                    "every pool Task appears once: scored on the key or rejected at its gate"
+            }
+
+            test "a full Task rejects as CapacityFull; only the listed creep gets a Scoring" {
+                // One Seat at the source, claimed by w1's match before w2's
+                // turn: w2's scoring shows the cap, and its upgrade row shows
+                // the empty carry. w1 is off the list and speaks no Scoring.
+                let corridor =
+                    [ { X = 10; Y = 10 }, Wall ] @ [ for y in 11..14 -> { X = 10; Y = y }, Plain ]
+
+                let snapshot =
+                    { bareRespawn with
+                        Sources = [ { Id = "src-a" } ]
+                        Creeps = [ worker "w1" 0 50; worker "w2" 0 50 ]
+                        Spatial =
+
+                            { spatial [ "src-a", { X = 10; Y = 10 } ] corridor with
+                                CreepPositions =
+                                    Map.ofList
+                                        [ "w1", { X = 10; Y = 12 }; "w2", { X = 10; Y = 13 } ]
+                            }
+                    }
+
+                let { Verdicts = verdicts } = decide snapshot Map.empty (Set.ofList [ "w2" ])
+
+                Expect.equal
+                    verdicts
+                    [
+                        Verdict.Matched("w1", taskId (Harvest "src-a"), MatchFactor.OnlyCandidate)
+                        Verdict.Scoring(
+                            "w2",
+                            [
+                                Candidate.Rejected(
+                                    taskId (Harvest "src-a"),
+                                    RejectReason.CapacityFull
+                                )
+                                Candidate.Rejected(
+                                    taskId (Upgrade "ctrl-1"),
+                                    RejectReason.Inapplicable
+                                )
+                            ]
+                        )
+                        Verdict.Unassigned("w2", IdleReason.NoneFree)
+                    ]
+                    "the cap that idled w2 is named per Task; the unlisted creep stays terse"
+            }
+
+            test "a kept creep's own single-Seat Task scores as held, never capacity-full" {
+                // The creep's own claim is set aside for its scoring: the
+                // Task it holds must read as the winning row, not as
+                // rejected against its holder's own seat.
+                let corridor =
+                    [ { X = 10; Y = 10 }, Wall ] @ [ for y in 11..14 -> { X = 10; Y = y }, Plain ]
+
+                let snapshot =
+                    { bareRespawn with
+                        Sources = [ { Id = "src-a" } ]
+                        Creeps = [ worker "w1" 0 50 ]
+                        Spatial =
+
+                            { spatial [ "src-a", { X = 10; Y = 10 } ] corridor with
+                                CreepPositions = Map.ofList [ "w1", { X = 10; Y = 11 } ]
+                            }
+                    }
+
+                let sticky = Map.ofList [ "w1", taskId (Harvest "src-a") ]
+                let { Verdicts = verdicts } = decide snapshot sticky (Set.ofList [ "w1" ])
+
+                Expect.equal
+                    verdicts
+                    [
+                        Verdict.Scoring(
+                            "w1",
+                            [
+                                Candidate.Scored(taskId (Harvest "src-a"), 0, 0, 0)
+                                Candidate.Rejected(
+                                    taskId (Upgrade "ctrl-1"),
+                                    RejectReason.Inapplicable
+                                )
+                            ]
+                        )
+                        Verdict.Kept("w1", taskId (Harvest "src-a"))
+                    ]
+                    "the held Task is the scoring's winning row"
+            }
+
+            test "a walled-off Work Area rejects as Unreachable" {
+                let terrain =
+                    [
+                        { X = 10; Y = 10 }, Wall
+                        { X = 10; Y = 11 }, Plain
+                        { X = 10; Y = 12 }, Wall
+                        { X = 10; Y = 13 }, Plain
+                        { X = 10; Y = 14 }, Plain
+                    ]
+
+                let snapshot =
+                    { bareRespawn with
+                        Sources = [ { Id = "src-a" } ]
+                        Controller = None
+                        Creeps = [ worker "w1" 0 50 ]
+                        Spatial =
+
+                            { spatial [ "src-a", { X = 10; Y = 10 } ] terrain with
+                                CreepPositions = Map.ofList [ "w1", { X = 10; Y = 14 } ]
+                            }
+                    }
+
+                let { Verdicts = verdicts } = decide snapshot Map.empty (Set.ofList [ "w1" ])
+
+                Expect.equal
+                    verdicts
+                    [
+                        Verdict.Scoring(
+                            "w1",
+                            [
+                                Candidate.Rejected(
+                                    taskId (Harvest "src-a"),
+                                    RejectReason.Unreachable
+                                )
+                            ]
+                        )
+                        Verdict.Unassigned("w1", IdleReason.NoneReachable)
+                    ]
+                    "the scoring pinpoints the gate the idle reason summarises"
+            }
+        ]
+
+[<Tests>]
 let tests =
     testList
         "decide"
         [
-            test "names on the verbose list change nothing yet" {
-                let snapshot =
-                    { bareRespawn with
-                        Creeps = [ worker "w1" 0 50 ]
-                    }
-
-                let plain = decide snapshot Map.empty Set.empty
-                let verbose = decide snapshot Map.empty (Set.ofList [ "w1" ])
-                Expect.equal verbose plain "the verbose list is accepted, not yet consumed"
-            }
-
             test "an empty creep is matched to a Harvest task and remembered" {
                 let snapshot =
                     { bareRespawn with

@@ -21,6 +21,13 @@ type CreepLog =
         /// entry that opened the steady state, and an unchanged Kept must
         /// stay quiet regardless of what the ring retains.
         LastTask: Verdict option
+        /// The Scoring Verdict the tick before, if any — the verbose
+        /// channel's own cursor. Scorings are episodic like movement: a
+        /// tick without one means the creep is off the verbose list, so
+        /// this cursor resets every tick and flipping verbose back on
+        /// always records a fresh scoring, even an unchanged one — the
+        /// investigator's confirmation the flip took effect.
+        LastScoring: Verdict option
         /// The movement Verdicts the Resolver emitted for this creep last
         /// tick. Movement Verdicts are episodic — a tick without one means
         /// the creep moved freely — so continuation is judged against the
@@ -44,6 +51,7 @@ let private creepOf =
     | Verdict.Kept(creep, _)
     | Verdict.Released(creep, _, _)
     | Verdict.Unassigned(creep, _)
+    | Verdict.Scoring(creep, _)
     | Verdict.Grounded creep
     | Verdict.Yielded(creep, _)
     | Verdict.Rerouted creep -> creep
@@ -53,6 +61,11 @@ let private isMovement =
     | Verdict.Grounded _
     | Verdict.Yielded _
     | Verdict.Rerouted _ -> true
+    | _ -> false
+
+let private isScoring =
+    function
+    | Verdict.Scoring _ -> true
     | _ -> false
 
 /// Whether two Verdicts say the same thing, so the newer appends nothing.
@@ -73,8 +86,10 @@ let private trim cap entries =
 /// log: append each Verdict that is a change, stamp it with the tick, keep
 /// the newest cap-many entries, and advance the channel cursors — the task
 /// cursor to the tick's last task Verdict (task Verdicts are total, so it
-/// only ever moves forward), the movement cursor to this tick's movement
-/// Verdicts as the episode baseline for the next tick.
+/// only ever moves forward), the scoring and movement cursors to this
+/// tick's Scoring and movement Verdicts as the episode baselines for the
+/// next tick — both channels are episodic, so each resets on a tick that
+/// brings none.
 let private step cap tick (verdicts: Verdict list) (log: CreepLog) : CreepLog =
     let appended =
         (log, verdicts)
@@ -82,11 +97,13 @@ let private step cap tick (verdicts: Verdict list) (log: CreepLog) : CreepLog =
             let unchanged =
                 if isMovement verdict then
                     log.LastMove |> List.exists (sameSubstance verdict)
+                elif isScoring verdict then
+                    log.LastScoring |> Option.exists (sameSubstance verdict)
                 else
                     log.LastTask |> Option.exists (sameSubstance verdict)
 
             let log =
-                if isMovement verdict then
+                if isMovement verdict || isScoring verdict then
                     log
                 else
                     { log with LastTask = Some verdict }
@@ -99,6 +116,7 @@ let private step cap tick (verdicts: Verdict list) (log: CreepLog) : CreepLog =
                 })
 
     { appended with
+        LastScoring = verdicts |> List.filter isScoring |> List.tryLast
         LastMove = verdicts |> List.filter isMovement
     }
 
@@ -132,6 +150,7 @@ let fold
                 {
                     Entries = []
                     LastTask = None
+                    LastScoring = None
                     LastMove = []
                 }
 

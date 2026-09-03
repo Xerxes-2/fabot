@@ -168,6 +168,64 @@ let movementTests =
         ]
 
 [<Tests>]
+let scoringTests =
+    testList
+        "observe fold: the verbose scoring channel"
+        [
+            test "an unchanged scoring appends nothing; a changed row appends" {
+                let stable = Candidate.Rejected("t2", RejectReason.CapacityFull)
+                let before = Verdict.Scoring("a", [ Candidate.Scored("t1", 0, 3, 1); stable ])
+                let after = Verdict.Scoring("a", [ Candidate.Scored("t1", 0, 4, 1); stable ])
+
+                let state =
+                    Map.empty
+                    |> tick 5 [ "a" ] [ before ]
+                    |> tick 6 [ "a" ] [ before ]
+                    |> tick 7 [ "a" ] [ after ]
+
+                Expect.equal
+                    (timeline "a" state)
+                    [ 5, before; 7, after ]
+                    "only the tick a row moved is a recorded event"
+            }
+
+            test "re-flipping verbose on records the unchanged scoring afresh" {
+                // Scorings are episodic: a tick without one means off the
+                // list, so turning verbose back on always records — the
+                // investigator's confirmation the flip took effect.
+                let scoring = Verdict.Scoring("a", [ Candidate.Scored("t", 0, 0, 0) ])
+
+                let state =
+                    Map.empty
+                    |> tick 5 [ "a" ] [ scoring ]
+                    |> tick 6 [ "a" ] []
+                    |> tick 7 [ "a" ] [ scoring ]
+
+                Expect.equal
+                    (timeline "a" state)
+                    [ 5, scoring; 7, scoring ]
+                    "each verbose episode opens with a recorded scoring"
+            }
+
+            test "scoring rides its own channel: the steady Kept stays quiet around it" {
+                // Flipping verbose on mid-investigation must not make the
+                // unchanged assignment re-append as if it were news.
+                let scoring = Verdict.Scoring("a", [ Candidate.Scored("t", 0, 0, 0) ])
+
+                let state =
+                    Map.empty
+                    |> tick 5 [ "a" ] [ Verdict.Matched("a", "t", MatchFactor.Rank) ]
+                    |> tick 6 [ "a" ] [ scoring; Verdict.Kept("a", "t") ]
+                    |> tick 7 [ "a" ] [ scoring; Verdict.Kept("a", "t") ]
+
+                Expect.equal
+                    (timeline "a" state)
+                    [ 5, Verdict.Matched("a", "t", MatchFactor.Rank); 6, scoring ]
+                    "the scoring lands once and displaces no task-channel judgement"
+            }
+        ]
+
+[<Tests>]
 let ringTests =
     testList
         "observe fold: ring cap"
