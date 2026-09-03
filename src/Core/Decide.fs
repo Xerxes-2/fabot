@@ -618,12 +618,13 @@ let private assignedTasks (tasks: Task list) (assignments: Assignments) : Map<st
     |> List.choose (fun (name, tid) -> Map.tryFind tid byId |> Option.map (fun t -> name, t))
     |> Map.ofList
 
-/// The decision seam: Snapshot in, Intents plus next tick's Assignments
+/// The decision seam: Snapshot in — with the verbose list of creep names
+/// owed full candidate scoring (accepted, not yet consumed) — Decision
 /// out. The tick's pipeline is visible here — plan, match, emit, resolve —
 /// beside the colony steps (spawns, sites), with geometry consulted
 /// through one Atlas built up front, so every step prices from the same
 /// flood (ADR 0004).
-let decide (snapshot: Snapshot) (assignments: Assignments) : Intent list * Assignments =
+let decide (snapshot: Snapshot) (assignments: Assignments) (_verbose: Set<string>) : Decision =
     let atlas = Atlas.ofSnapshot snapshot
     let defenseIntents = planSafeMode snapshot
     let spawnIntents = planSpawns snapshot atlas
@@ -632,9 +633,13 @@ let decide (snapshot: Snapshot) (assignments: Assignments) : Intent list * Assig
     let next = matchCreeps snapshot atlas tasks assignments
     let assigned = assignedTasks tasks next
 
-    defenseIntents
-    @ spawnIntents
-    @ siteIntents
-    @ emit snapshot atlas assigned
-    @ resolve snapshot atlas assigned,
-    next
+    {
+        Intents =
+            defenseIntents
+            @ spawnIntents
+            @ siteIntents
+            @ emit snapshot atlas assigned
+            @ resolve snapshot atlas assigned
+        Assignments = next
+        Verdicts = []
+    }

@@ -44,10 +44,10 @@ let private pruneDeadCreepMemory () =
 // Exported as `loop` on the bundled `main` module; the engine calls it every tick.
 let loop () =
     let snapshot = Snapshot.build ()
-    let intents, assignments = decide snapshot (loadAssignments ())
+    let decision = decide snapshot (loadAssignments ()) Set.empty
     // Memory writes land before the engine calls: a throw inside Executor.run
     // must not discard the tick's anti-thrash state.
-    saveAssignments assignments
+    saveAssignments decision.Assignments
     pruneDeadCreepMemory ()
     // Outcomes go unread here; failures are already logged by the Executor.
-    Executor.run intents |> ignore
+    Executor.run decision.Intents |> ignore

@@ -237,3 +237,20 @@ type Intent =
 
 /// Creep name -> task id. The only state remembered between ticks (anti-thrash).
 type Assignments = Map<string, string>
+
+/// The reasoned outcome a decision step returns beside its decision — data,
+/// never a log line (ADR 0009). The Matcher's and the Resolver's cases land
+/// with attribution itself; until then the one placeholder case is never
+/// constructed and every decision carries an empty collection.
+[<RequireQualifiedAccess>]
+type Verdict = | Unspoken
+
+/// What one tick of deciding returns: the Intents to execute, the
+/// Assignments to remember for next tick, and the Verdicts explaining
+/// them (ADR 0009).
+type Decision =
+    {
+        Intents: Intent list
+        Assignments: Assignments
+        Verdicts: Verdict list
+    }

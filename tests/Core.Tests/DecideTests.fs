@@ -207,7 +207,7 @@ let patternTableTests =
                         Creeps = [ worker "w1" 0 50 ]
                     }
 
-                let intents, _ = decide snapshot Map.empty
+                let { Intents = intents } = decide snapshot Map.empty Set.empty
                 let row = List.head patternTable
 
                 match spawnIntents intents with
@@ -350,7 +350,7 @@ let placementTests =
         "placement"
         [
             test "RCL2 on open terrain places 5 extensions checkerboard, nearest first" {
-                let intents, _ = decide (atLevel 2 (openRoom 3)) Map.empty
+                let { Intents = intents } = decide (atLevel 2 (openRoom 3)) Map.empty Set.empty
 
                 Expect.equal
                     (placedTiles intents)
@@ -369,7 +369,7 @@ let placementTests =
             }
 
             test "below RCL2 no placement Intents are emitted" {
-                let intents, _ = decide (atLevel 1 (openRoom 3)) Map.empty
+                let { Intents = intents } = decide (atLevel 1 (openRoom 3)) Map.empty Set.empty
                 Expect.isEmpty (placementIntents intents) "no extensions allowed at RCL1"
             }
 
@@ -381,7 +381,7 @@ let placementTests =
                         Terrain = Map.add { X = 24; Y = 24 } Wall room.Terrain
                     }
 
-                let intents, _ = decide (atLevel 2 holed) Map.empty
+                let { Intents = intents } = decide (atLevel 2 holed) Map.empty Set.empty
 
                 Expect.isFalse
                     (List.contains { X = 24; Y = 24 } (placedTiles intents))
@@ -395,7 +395,7 @@ let placementTests =
                     openRoom 3
                     |> withTargets [ "rock-1", { X = 24; Y = 24 }, Structure BuiltKind.Other ]
 
-                let intents, _ = decide (atLevel 2 blocked) Map.empty
+                let { Intents = intents } = decide (atLevel 2 blocked) Map.empty Set.empty
 
                 Expect.isFalse
                     (List.contains { X = 24; Y = 24 } (placedTiles intents))
@@ -415,7 +415,7 @@ let placementTests =
                             "site-2", { X = 26; Y = 26 }, Site BuiltKind.Extension
                         ]
 
-                let intents, _ = decide (atLevel 2 room) Map.empty
+                let { Intents = intents } = decide (atLevel 2 room) Map.empty Set.empty
                 Expect.hasLength (placementIntents intents) 1 "only the shortfall is placed"
             }
 
@@ -428,7 +428,7 @@ let placementTests =
                                 $"ext-{i}", { X = 22 + i; Y = 22 }, Structure BuiltKind.Extension
                         ]
 
-                let intents, _ = decide (atLevel 2 room) Map.empty
+                let { Intents = intents } = decide (atLevel 2 room) Map.empty Set.empty
                 Expect.isEmpty (placementIntents intents) "allowance already used up"
             }
 
@@ -437,7 +437,7 @@ let placementTests =
                 // Placement projection would have offered to a site.
                 let room = openRoom 3 |> withTargets [ "ctrl-1", { X = 24; Y = 24 }, Controller ]
 
-                let intents, _ = decide (atLevel 2 room) Map.empty
+                let { Intents = intents } = decide (atLevel 2 room) Map.empty Set.empty
 
                 Expect.isFalse
                     (List.contains { X = 24; Y = 24 } (placedTiles intents))
@@ -452,7 +452,7 @@ let placementTests =
                         Controller = Some(controllerAt 2)
                     }
 
-                let intents, _ = decide snapshot Map.empty
+                let { Intents = intents } = decide snapshot Map.empty Set.empty
                 Expect.isEmpty (placementIntents intents) "nothing to plan around"
             }
         ]
@@ -497,7 +497,11 @@ let seatTests =
 
                     }
 
-                let intents, assignments = decide snapshot Map.empty
+                let {
+                        Intents = intents
+                        Assignments = assignments
+                    } =
+                    decide snapshot Map.empty Set.empty
 
                 Expect.hasLength
                     (harvesters assignments "src-a")
@@ -525,7 +529,7 @@ let seatTests =
 
                     }
 
-                let _, assignments = decide snapshot Map.empty
+                let { Assignments = assignments } = decide snapshot Map.empty Set.empty
 
                 Expect.hasLength (harvesters assignments "src-a") 1 "the one Seat is filled"
 
@@ -546,7 +550,7 @@ let seatTests =
 
                     }
 
-                let _, assignments = decide snapshot Map.empty
+                let { Assignments = assignments } = decide snapshot Map.empty Set.empty
 
                 Expect.hasLength (harvesters assignments "src-a") 1 "the one Seat is filled"
 
@@ -573,7 +577,7 @@ let seatTests =
 
                     }
 
-                let _, assignments = decide snapshot Map.empty
+                let { Assignments = assignments } = decide snapshot Map.empty Set.empty
 
                 Expect.hasLength
                     (harvesters assignments "src-a")
@@ -596,7 +600,7 @@ let seatTests =
                     Map.ofList
                         [ "w1", (taskId (Harvest "src-a")); "w2", (taskId (Harvest "src-a")) ]
 
-                let _, assignments = decide snapshot stale
+                let { Assignments = assignments } = decide snapshot stale Set.empty
 
                 Expect.equal
                     (harvesters assignments "src-a")
@@ -611,7 +615,7 @@ let seatTests =
                         Creeps = [ worker "w1" 0 50; worker "w2" 0 50; worker "w3" 0 50 ]
                     }
 
-                let _, assignments = decide snapshot Map.empty
+                let { Assignments = assignments } = decide snapshot Map.empty Set.empty
 
                 Expect.hasLength
                     (harvesters assignments "src-a")
@@ -636,7 +640,7 @@ let partApplicabilityTests =
                         Creeps = [ creepWith "hauler" 25 25 [ Carry; Move ] ]
                     }
 
-                let _, assignments = decide snapshot Map.empty
+                let { Assignments = assignments } = decide snapshot Map.empty Set.empty
 
                 Expect.isEmpty
                     (Map.toList assignments)
@@ -654,7 +658,7 @@ let partApplicabilityTests =
                         Creeps = [ creepWith "digger" 25 25 [ Work; Move ] ]
                     }
 
-                let _, assignments = decide snapshot Map.empty
+                let { Assignments = assignments } = decide snapshot Map.empty Set.empty
 
                 Expect.isEmpty
                     (Map.toList assignments)
@@ -671,7 +675,7 @@ let partApplicabilityTests =
                     }
 
                 let remembered = Map.ofList [ "hauler", taskId (Harvest "src-a") ]
-                let _, assignments = decide snapshot remembered
+                let { Assignments = assignments } = decide snapshot remembered Set.empty
 
                 Expect.isEmpty
                     (Map.toList assignments)
@@ -711,7 +715,8 @@ let travelCostTests =
                 let near: SourceInfo = { Id = "src-near" }
 
                 for sources in [ [ far; near ]; [ near; far ] ] do
-                    let _, assignments = decide (snapshotWith sources) Map.empty
+                    let { Assignments = assignments } =
+                        decide (snapshotWith sources) Map.empty Set.empty
 
                     Expect.equal
                         (Map.tryFind "w1" assignments)
@@ -752,7 +757,7 @@ let travelCostTests =
                             }
                     }
 
-                let _, assignments = decide snapshot Map.empty
+                let { Assignments = assignments } = decide snapshot Map.empty Set.empty
 
                 Expect.equal
                     (Map.tryFind "w1" assignments)
@@ -781,7 +786,7 @@ let travelCostTests =
                             }
                     }
 
-                let _, assignments = decide snapshot Map.empty
+                let { Assignments = assignments } = decide snapshot Map.empty Set.empty
 
                 Expect.equal
                     (Map.tryFind "w1" assignments)
@@ -800,7 +805,7 @@ let travelCostTests =
                     }
 
                 let sticky = Map.ofList [ "w1", (taskId (Harvest "src-far")) ]
-                let _, assignments = decide snapshot sticky
+                let { Assignments = assignments } = decide snapshot sticky Set.empty
 
                 Expect.equal
                     (Map.tryFind "w1" assignments)
@@ -818,7 +823,7 @@ let travelCostTests =
                         Spatial = nearFarCorridor []
                     }
 
-                let _, assignments = decide snapshot Map.empty
+                let { Assignments = assignments } = decide snapshot Map.empty Set.empty
 
                 Expect.equal
                     (Map.tryFind "w1" assignments)
@@ -854,7 +859,7 @@ let travelCostTests =
                             }
                     }
 
-                let _, assignments = decide snapshot Map.empty
+                let { Assignments = assignments } = decide snapshot Map.empty Set.empty
 
                 Expect.equal
                     (Map.tryFind "w1" assignments)
@@ -899,7 +904,7 @@ let travelCostTests =
                             }
                     }
 
-                let _, assignments = decide snapshot Map.empty
+                let { Assignments = assignments } = decide snapshot Map.empty Set.empty
 
                 Expect.equal
                     (Map.tryFind "mule" assignments)
@@ -958,7 +963,7 @@ let movementTests =
                             }
                     }
 
-                let intents, _ = decide snapshot Map.empty
+                let { Intents = intents } = decide snapshot Map.empty Set.empty
 
                 Expect.equal
                     (moveIntents intents)
@@ -980,7 +985,7 @@ let movementTests =
                             }
                     }
 
-                let intents, _ = decide snapshot Map.empty
+                let { Intents = intents } = decide snapshot Map.empty Set.empty
 
                 Expect.contains intents (HarvestSource("w1", "src-a")) "seated creep harvests"
 
@@ -1013,7 +1018,7 @@ let movementTests =
                             }
                     }
 
-                let intents, _ = decide snapshot Map.empty
+                let { Intents = intents } = decide snapshot Map.empty Set.empty
 
                 Expect.equal
                     (moveIntents intents)
@@ -1043,7 +1048,7 @@ let movementTests =
                             }
                     }
 
-                let intents, _ = decide snapshot Map.empty
+                let { Intents = intents } = decide snapshot Map.empty Set.empty
 
                 Expect.contains
                     intents
@@ -1073,7 +1078,7 @@ let movementTests =
                             }
                     }
 
-                let intents, _ = decide snapshot Map.empty
+                let { Intents = intents } = decide snapshot Map.empty Set.empty
 
                 Expect.isEmpty (moveIntents intents) "no path: standing still beats oscillating"
                 Expect.isEmpty (actionIntents intents) "and the target is out of range"
@@ -1093,7 +1098,7 @@ let movementTests =
                             }
                     }
 
-                let intents, _ = decide snapshot Map.empty
+                let { Intents = intents } = decide snapshot Map.empty Set.empty
 
                 Expect.contains intents (BuildSite("w1", "site-1")) "range 3 is close enough"
                 Expect.isEmpty (moveIntents intents) "no reason to walk closer"
@@ -1114,7 +1119,7 @@ let movementTests =
                             }
                     }
 
-                let intents, _ = decide snapshot Map.empty
+                let { Intents = intents } = decide snapshot Map.empty Set.empty
 
                 Expect.equal
                     (moveIntents intents)
@@ -1156,7 +1161,7 @@ let unreachableTests =
                     }
 
                 let sticky = Map.ofList [ "w1", (taskId (Harvest "src-a")) ]
-                let _, assignments = decide snapshot sticky
+                let { Assignments = assignments } = decide snapshot sticky Set.empty
 
                 Expect.equal
                     (harvesters assignments "src-a")
@@ -1184,7 +1189,12 @@ let unreachableTests =
                     }
 
                 let sticky = Map.ofList [ "w1", (taskId (Harvest "src-a")) ]
-                let intents, assignments = decide snapshot sticky
+
+                let {
+                        Intents = intents
+                        Assignments = assignments
+                    } =
+                    decide snapshot sticky Set.empty
 
                 Expect.equal
                     (Map.tryFind "w1" assignments)
@@ -1209,7 +1219,7 @@ let unreachableTests =
                     }
 
                 let sticky = Map.ofList [ "w1", (taskId (Upgrade "ctrl-1")) ]
-                let _, assignments = decide snapshot sticky
+                let { Assignments = assignments } = decide snapshot sticky Set.empty
 
                 Expect.equal (Map.tryFind "w1" assignments) None "no Work Area means no assignment"
             }
@@ -1228,7 +1238,7 @@ let unreachableTests =
                     }
 
                 let sticky = Map.ofList [ "w1", (taskId (Harvest "src-a")) ]
-                let _, assignments = decide snapshot sticky
+                let { Assignments = assignments } = decide snapshot sticky Set.empty
 
                 Expect.equal
                     (Map.tryFind "w1" assignments)
@@ -1358,7 +1368,11 @@ let arbitrationTests =
                     Map.ofList
                         [ "wa", (taskId (Harvest "src-a")); "wb", (taskId (Harvest "src-b")) ]
 
-                let intents, next = decide headOnSwap sticky
+                let {
+                        Intents = intents
+                        Assignments = next
+                    } =
+                    decide headOnSwap sticky Set.empty
 
                 Expect.equal next sticky "the Matcher keeps both remembered assignments"
 
@@ -1679,7 +1693,7 @@ let workforceTests =
                         Spatial = fiveSeats
                     }
 
-                let intents, _ = decide snapshot Map.empty
+                let { Intents = intents } = decide snapshot Map.empty Set.empty
 
                 Expect.hasLength
                     (spawnIntents intents)
@@ -1694,7 +1708,7 @@ let workforceTests =
                         Spatial = fiveSeats
                     }
 
-                let intents, _ = decide snapshot Map.empty
+                let { Intents = intents } = decide snapshot Map.empty Set.empty
                 Expect.isEmpty (spawnIntents intents) "workforce already at target"
             }
 
@@ -1708,7 +1722,7 @@ let workforceTests =
                         Spatial = oneSeat
                     }
 
-                let intents, _ = decide snapshot Map.empty
+                let { Intents = intents } = decide snapshot Map.empty Set.empty
 
                 Expect.hasLength
                     (spawnIntents intents)
@@ -1723,7 +1737,7 @@ let workforceTests =
                         Spatial = spatial [] []
                     }
 
-                let intents, _ = decide snapshot Map.empty
+                let { Intents = intents } = decide snapshot Map.empty Set.empty
                 Expect.isEmpty (spawnIntents intents) "only the floor applies"
             }
         ]
@@ -1745,7 +1759,7 @@ let sayTests =
                         Creeps = [ worker "w1" 0 50 ]
                     }
 
-                let intents, _ = decide snapshot Map.empty
+                let { Intents = intents } = decide snapshot Map.empty Set.empty
 
                 Expect.contains
                     intents
@@ -1769,7 +1783,7 @@ let sayTests =
                             "w3", (taskId (Upgrade "ctrl-1"))
                         ]
 
-                let intents, _ = decide snapshot sticky
+                let { Intents = intents } = decide snapshot sticky Set.empty
 
                 Expect.equal
                     (sayIntents intents)
@@ -1786,7 +1800,7 @@ let sayTests =
                         Creeps = [ worker "w1" 50 0 ]
                     }
 
-                let intents, _ = decide snapshot Map.empty
+                let { Intents = intents } = decide snapshot Map.empty Set.empty
                 Expect.isEmpty (sayIntents intents) "no Task, no bubble"
             }
 
@@ -1807,7 +1821,7 @@ let sayTests =
                             }
                     }
 
-                let intents, _ = decide snapshot Map.empty
+                let { Intents = intents } = decide snapshot Map.empty Set.empty
 
                 Expect.isEmpty (actionIntents intents) "out of range: no action Intent yet"
                 Expect.equal (sayIntents intents) [ "w1", "⛏" ] "the bubble still shows the Task"
@@ -1819,13 +1833,39 @@ let tests =
     testList
         "decide"
         [
+            test "the Decision carries an empty Verdict collection for now" {
+                let snapshot =
+                    { bareRespawn with
+                        Creeps = [ worker "w1" 0 50 ]
+                    }
+
+                let { Verdicts = verdicts } = decide snapshot Map.empty Set.empty
+                Expect.isEmpty verdicts "no decision step speaks yet"
+            }
+
+            test "names on the verbose list change nothing yet" {
+                let snapshot =
+                    { bareRespawn with
+                        Creeps = [ worker "w1" 0 50 ]
+                    }
+
+                let plain = decide snapshot Map.empty Set.empty
+                let verbose = decide snapshot Map.empty (Set.ofList [ "w1" ])
+                Expect.equal verbose plain "the verbose list is accepted, not yet consumed"
+            }
+
             test "an empty creep is matched to a Harvest task and remembered" {
                 let snapshot =
                     { bareRespawn with
                         Creeps = [ worker "w1" 0 50 ]
                     }
 
-                let intents, assignments = decide snapshot Map.empty
+                let {
+                        Intents = intents
+                        Assignments = assignments
+                    } =
+                    decide snapshot Map.empty Set.empty
+
                 Expect.contains intents (HarvestSource("w1", "src-a")) "empty creep goes harvesting"
 
                 Expect.equal
@@ -1835,7 +1875,7 @@ let tests =
             }
 
             test "bare respawn yields exactly one spawn Intent" {
-                let intents, _ = decide bareRespawn Map.empty
+                let { Intents = intents } = decide bareRespawn Map.empty Set.empty
 
                 match spawnIntents intents with
                 | [ (spawnName, body, creepName) ] ->
@@ -1846,7 +1886,7 @@ let tests =
             }
 
             test "spawn Intent body is affordable at bare-respawn energy" {
-                let intents, _ = decide bareRespawn Map.empty
+                let { Intents = intents } = decide bareRespawn Map.empty Set.empty
 
                 for (_, body, _) in spawnIntents intents do
                     Expect.isLessThanOrEqual
@@ -1861,7 +1901,7 @@ let tests =
                         RoomEnergy = bank 100 300
                     }
 
-                let intents, _ = decide snapshot Map.empty
+                let { Intents = intents } = decide snapshot Map.empty Set.empty
                 Expect.isEmpty (spawnIntents intents) "cannot afford a worker"
             }
 
@@ -1871,7 +1911,7 @@ let tests =
                         Spawns = [ { spawn with IsSpawning = true } ]
                     }
 
-                let intents, _ = decide snapshot Map.empty
+                let { Intents = intents } = decide snapshot Map.empty Set.empty
                 Expect.isEmpty (spawnIntents intents) "spawn is busy"
             }
 
@@ -1901,7 +1941,7 @@ let tests =
                         Spatial = threeSeats
                     }
 
-                let intents, _ = decide snapshot Map.empty
+                let { Intents = intents } = decide snapshot Map.empty Set.empty
 
                 match spawnIntents intents with
                 | [ (spawnName, _, _) ] ->
@@ -1927,7 +1967,7 @@ let tests =
                         Spatial = threeSeats
                     }
 
-                let intents, _ = decide snapshot Map.empty
+                let { Intents = intents } = decide snapshot Map.empty Set.empty
 
                 Expect.equal
                     (spawnIntents intents |> List.map (fun (name, _, _) -> name))
@@ -1949,7 +1989,7 @@ let tests =
                         RoomEnergy = bank 550 550
                     }
 
-                let intents, _ = decide snapshot Map.empty
+                let { Intents = intents } = decide snapshot Map.empty Set.empty
 
                 Expect.equal
                     (spawnIntents intents |> List.map (fun (name, body, _) -> name, body))
@@ -1964,7 +2004,7 @@ let tests =
                         Creeps = [ worker "worker-1" 0 50 ]
                     }
 
-                let intents, _ = decide snapshot Map.empty
+                let { Intents = intents } = decide snapshot Map.empty Set.empty
 
                 match spawnIntents intents with
                 | [ (_, body, _) ] ->
@@ -1981,7 +2021,7 @@ let tests =
                         Creeps = [ worker "worker-1" 0 50 ]
                     }
 
-                let intents, _ = decide snapshot Map.empty
+                let { Intents = intents } = decide snapshot Map.empty Set.empty
 
                 match spawnIntents intents with
                 | [ (_, body, _) ] ->
@@ -1999,7 +2039,7 @@ let tests =
                         Creeps = [ worker "worker-1" 0 50 ]
                     }
 
-                let intents, _ = decide snapshot Map.empty
+                let { Intents = intents } = decide snapshot Map.empty Set.empty
 
                 Expect.isEmpty
                     (spawnIntents intents)
@@ -2012,7 +2052,7 @@ let tests =
                         RoomEnergy = bank 250 550
                     }
 
-                let intents, _ = decide snapshot Map.empty
+                let { Intents = intents } = decide snapshot Map.empty Set.empty
 
                 match spawnIntents intents with
                 | [ (_, body, _) ] ->
@@ -2029,7 +2069,7 @@ let tests =
                         RoomEnergy = bank 150 550
                     }
 
-                let intents, _ = decide snapshot Map.empty
+                let { Intents = intents } = decide snapshot Map.empty Set.empty
                 Expect.isEmpty (spawnIntents intents) "even the fallback needs its unit cost"
             }
 
@@ -2039,7 +2079,7 @@ let tests =
                         Creeps = [ worker "worker-1" 0 50 ]
                     }
 
-                let intents, _ = decide snapshot Map.empty
+                let { Intents = intents } = decide snapshot Map.empty Set.empty
                 Expect.hasLength (spawnIntents intents) 1 "a lone worker cannot keep the loop going"
             }
 
@@ -2049,7 +2089,7 @@ let tests =
                         Creeps = [ worker "worker-1" 0 50; worker "worker-2" 0 50 ]
                     }
 
-                let intents, _ = decide snapshot Map.empty
+                let { Intents = intents } = decide snapshot Map.empty Set.empty
                 Expect.isEmpty (spawnIntents intents) "workforce already at minimum"
             }
 
@@ -2059,7 +2099,7 @@ let tests =
                         Creeps = [ worker "w1" 0 50; worker "w2" 0 50 ]
                     }
 
-                let _, assignments = decide snapshot Map.empty
+                let { Assignments = assignments } = decide snapshot Map.empty Set.empty
                 let assigned = assignments |> Map.toList |> List.map snd |> List.sort
 
                 Expect.equal
@@ -2074,8 +2114,8 @@ let tests =
                         Creeps = [ worker "w1" 20 30; worker "w2" 0 50 ]
                     }
 
-                let _, assignments =
-                    decide snapshot (Map.ofList [ "w1", (taskId (Harvest "src-a")) ])
+                let { Assignments = assignments } =
+                    decide snapshot (Map.ofList [ "w1", (taskId (Harvest "src-a")) ]) Set.empty
 
                 Expect.equal
                     (Map.tryFind "w1" assignments)
@@ -2096,7 +2136,7 @@ let tests =
                         Creeps = [ worker "worker-1" 0 50 ]
                     }
 
-                let _, kept = decide snapshot assignments
+                let { Assignments = kept } = decide snapshot assignments Set.empty
                 Expect.equal kept assignments "assignments survive the tick"
             }
 
@@ -2107,7 +2147,12 @@ let tests =
                     }
 
                 let assignments = Map.ofList [ "w1", (taskId (Harvest "src-b")) ]
-                let intents, kept = decide snapshot assignments
+
+                let {
+                        Intents = intents
+                        Assignments = kept
+                    } =
+                    decide snapshot assignments Set.empty
 
                 Expect.equal
                     (Map.tryFind "w1" kept)
@@ -2127,8 +2172,11 @@ let tests =
                         Creeps = [ worker "w1" 50 0 ]
                     }
 
-                let intents, kept =
-                    decide snapshot (Map.ofList [ "w1", (taskId (Harvest "src-a")) ])
+                let {
+                        Intents = intents
+                        Assignments = kept
+                    } =
+                    decide snapshot (Map.ofList [ "w1", (taskId (Harvest "src-a")) ]) Set.empty
 
                 Expect.equal
                     (Map.tryFind "w1" kept)
@@ -2148,7 +2196,8 @@ let tests =
                         Creeps = [ worker "w1" 0 50 ]
                     }
 
-                let _, kept = decide snapshot (Map.ofList [ "w1", (taskId (Refill "spawn-1")) ])
+                let { Assignments = kept } =
+                    decide snapshot (Map.ofList [ "w1", (taskId (Refill "spawn-1")) ]) Set.empty
 
                 match Map.tryFind "w1" kept with
                 | Some tid ->
@@ -2165,8 +2214,11 @@ let tests =
                         Creeps = [ worker "w1" 50 0 ]
                     }
 
-                let intents, kept =
-                    decide snapshot (Map.ofList [ "w1", (taskId (Harvest "src-a")) ])
+                let {
+                        Intents = intents
+                        Assignments = kept
+                    } =
+                    decide snapshot (Map.ofList [ "w1", (taskId (Harvest "src-a")) ]) Set.empty
 
                 Expect.equal
                     (Map.tryFind "w1" kept)
@@ -2183,7 +2235,7 @@ let tests =
                         Creeps = [ worker "w1" 50 0 ]
                     }
 
-                let _, kept = decide snapshot Map.empty
+                let { Assignments = kept } = decide snapshot Map.empty Set.empty
 
                 Expect.equal
                     (Map.tryFind "w1" kept)
@@ -2197,7 +2249,8 @@ let tests =
                         Creeps = [ worker "w1" 0 50 ]
                     }
 
-                let _, kept = decide snapshot (Map.ofList [ "w1", (taskId (Upgrade "ctrl-1")) ])
+                let { Assignments = kept } =
+                    decide snapshot (Map.ofList [ "w1", (taskId (Upgrade "ctrl-1")) ]) Set.empty
 
                 match Map.tryFind "w1" kept with
                 | Some tid ->
@@ -2216,8 +2269,11 @@ let tests =
                         Creeps = [ worker "w1" 50 0 ]
                     }
 
-                let intents, kept =
-                    decide snapshot (Map.ofList [ "w1", (taskId (Harvest "src-a")) ])
+                let {
+                        Intents = intents
+                        Assignments = kept
+                    } =
+                    decide snapshot (Map.ofList [ "w1", (taskId (Harvest "src-a")) ]) Set.empty
 
                 Expect.isEmpty (Map.toList kept) "no applicable task"
 
@@ -2237,8 +2293,11 @@ let tests =
                         Creeps = [ worker "w1" 50 0 ]
                     }
 
-                let intents, kept =
-                    decide snapshot (Map.ofList [ "w1", (taskId (Harvest "src-a")) ])
+                let {
+                        Intents = intents
+                        Assignments = kept
+                    } =
+                    decide snapshot (Map.ofList [ "w1", (taskId (Harvest "src-a")) ]) Set.empty
 
                 Expect.equal
                     (Map.tryFind "w1" kept)
@@ -2255,7 +2314,8 @@ let tests =
                         Creeps = [ worker "w1" 0 50 ]
                     }
 
-                let _, kept = decide snapshot (Map.ofList [ "w1", (taskId (Build "site-1")) ])
+                let { Assignments = kept } =
+                    decide snapshot (Map.ofList [ "w1", (taskId (Build "site-1")) ]) Set.empty
 
                 match Map.tryFind "w1" kept with
                 | Some tid ->
@@ -2274,7 +2334,7 @@ let tests =
                         Creeps = [ worker "w1" 50 0 ]
                     }
 
-                let _, kept = decide snapshot Map.empty
+                let { Assignments = kept } = decide snapshot Map.empty Set.empty
 
                 Expect.equal
                     (Map.tryFind "w1" kept)
@@ -2284,7 +2344,7 @@ let tests =
 
             test "assignments of dead creeps are dropped" {
                 let assignments = Map.ofList [ "ghost", "task-a" ]
-                let _, kept = decide bareRespawn assignments
+                let { Assignments = kept } = decide bareRespawn assignments Set.empty
                 Expect.isEmpty (Map.toList kept) "dead creep's assignment is released"
             }
         ]
@@ -2308,7 +2368,7 @@ let safeModeTests =
                         Hostiles = [ { Body = [ Claim; Claim; Move; Move ] } ]
                     }
 
-                let intents, _ = decide snapshot Map.empty
+                let { Intents = intents } = decide snapshot Map.empty Set.empty
                 Expect.equal (activations intents) [ "ctrl-1" ] "safe mode fires immediately"
             }
 
@@ -2323,7 +2383,7 @@ let safeModeTests =
                             ]
                     }
 
-                let intents, _ = decide snapshot Map.empty
+                let { Intents = intents } = decide snapshot Map.empty Set.empty
 
                 Expect.isEmpty
                     (activations intents)
@@ -2341,7 +2401,7 @@ let safeModeTests =
                         Hostiles = [ { Body = [ Claim; Move ] } ]
                     }
 
-                let intents, _ = decide snapshot Map.empty
+                let { Intents = intents } = decide snapshot Map.empty Set.empty
                 Expect.isEmpty (activations intents) "nothing to activate with"
             }
 
@@ -2356,12 +2416,12 @@ let safeModeTests =
                         Hostiles = [ { Body = [ Claim; Move ] } ]
                     }
 
-                let intents, _ = decide snapshot Map.empty
+                let { Intents = intents } = decide snapshot Map.empty Set.empty
                 Expect.isEmpty (activations intents) "the room is already protected"
             }
 
             test "a quiet room fires nothing" {
-                let intents, _ = decide bareRespawn Map.empty
+                let { Intents = intents } = decide bareRespawn Map.empty Set.empty
                 Expect.isEmpty (activations intents) "no hostiles, no reflex"
             }
         ]
@@ -2385,7 +2445,7 @@ let downgradeDeadlineTests =
                                 }
                     }
 
-                let _, kept = decide snapshot Map.empty
+                let { Assignments = kept } = decide snapshot Map.empty Set.empty
 
                 Expect.equal
                     (Map.tryFind "w1" kept)
@@ -2409,7 +2469,7 @@ let downgradeDeadlineTests =
                                 }
                     }
 
-                let _, kept = decide snapshot Map.empty
+                let { Assignments = kept } = decide snapshot Map.empty Set.empty
 
                 Expect.equal
                     (Map.tryFind "w1" kept)
@@ -2429,7 +2489,7 @@ let downgradeDeadlineTests =
                                 }
                     }
 
-                let _, kept = decide snapshot Map.empty
+                let { Assignments = kept } = decide snapshot Map.empty Set.empty
 
                 Expect.equal
                     (Map.tryFind "w1" kept)
@@ -2444,7 +2504,7 @@ let downgradeDeadlineTests =
                         Creeps = [ worker "w1" 50 0 ]
                     }
 
-                let _, kept = decide snapshot Map.empty
+                let { Assignments = kept } = decide snapshot Map.empty Set.empty
 
                 Expect.equal
                     (Map.tryFind "w1" kept)
