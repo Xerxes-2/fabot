@@ -27,6 +27,7 @@ let private releaseName =
     | ReleaseReason.Inapplicable -> "inapplicable"
     | ReleaseReason.OverCapacity -> "over-capacity"
     | ReleaseReason.Unreachable -> "unreachable"
+    | ReleaseReason.TooEarly -> "too-early"
 
 let private idleName =
     function
@@ -34,12 +35,14 @@ let private idleName =
     | IdleReason.NoneApplicable -> "none-applicable"
     | IdleReason.NoneFree -> "none-free"
     | IdleReason.NoneReachable -> "none-reachable"
+    | IdleReason.NoneInTime -> "none-in-time"
 
 let private rejectName =
     function
     | RejectReason.Inapplicable -> "inapplicable"
     | RejectReason.CapacityFull -> "capacity-full"
     | RejectReason.Unreachable -> "unreachable"
+    | RejectReason.TooEarly -> "too-early"
 
 let private reverse toName values =
     values |> List.map (fun v -> toName v, v) |> Map.ofList
@@ -63,6 +66,7 @@ let private releaseOf =
             ReleaseReason.Inapplicable
             ReleaseReason.OverCapacity
             ReleaseReason.Unreachable
+            ReleaseReason.TooEarly
         ]
 
 let private idleOf =
@@ -73,6 +77,7 @@ let private idleOf =
             IdleReason.NoneApplicable
             IdleReason.NoneFree
             IdleReason.NoneReachable
+            IdleReason.NoneInTime
         ]
 
 let private rejectOf =
@@ -82,6 +87,7 @@ let private rejectOf =
             RejectReason.Inapplicable
             RejectReason.CapacityFull
             RejectReason.Unreachable
+            RejectReason.TooEarly
         ]
 
 // A Candidate on the wire: a scored row carries the full matching key, a

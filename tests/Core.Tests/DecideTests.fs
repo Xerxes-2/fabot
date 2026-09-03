@@ -35,8 +35,11 @@ let controllerAt level =
         SafeModeActive = false
     }
 
-/// A stocked source — the kind the Planner pools a Harvest for (ADR 0013).
-let source id : SourceInfo = { Id = id; Stocked = true }
+/// A stocked source: a restock of zero, ready to dig now (ADR 0025).
+let source id : SourceInfo = { Id = id; TicksToRestock = 0 }
+
+/// A drained source, the given number of ticks from its restock (ADR 0025).
+let drained id ticks : SourceInfo = { Id = id; TicksToRestock = ticks }
 
 /// An energy-hungry structure of the given kind with the given free capacity.
 let refillable id freeCapacity kind =
@@ -317,13 +320,14 @@ let plannerTests =
                     "each source gets exactly one Harvest task"
             }
 
-            test "a drained source pools no Harvest task" {
-                // ADR 0013: the task exists while the source holds energy
-                // and is gone otherwise — the Repair shape. Holders are
-                // released through the existing TaskGone path.
+            test "a drained source pools its Harvest task all the same" {
+                // ADR 0013's gate, inverted by ADR 0025: the task no longer
+                // flickers with the source's stock, because whether a dry
+                // rock is worth walking to depends on the walker's body and
+                // position — the Matcher's knowledge, not the Planner's.
                 let snapshot =
                     { bareRespawn with
-                        Sources = [ source "src-a"; { source "src-b" with Stocked = false } ]
+                        Sources = [ source "src-a"; drained "src-b" 120 ]
                     }
 
                 let harvests =
@@ -332,7 +336,10 @@ let plannerTests =
                         | Harvest sourceId -> Some sourceId
                         | _ -> None)
 
-                Expect.equal harvests [ "src-a" ] "only the stocked source is worth digging"
+                Expect.equal
+                    harvests
+                    [ "src-a"; "src-b" ]
+                    "the empty window is a wait to be judged at arrival, not a missing Task"
             }
 
             test "a controller yields an Upgrade task" {
@@ -1548,7 +1555,7 @@ let censusSignatureTests =
                     { colony with
                         Time = colony.Time + 100
                         RoomEnergy = bank 0 300
-                        Sources = [ { source "src-a" with Stocked = false } ]
+                        Sources = [ drained "src-a" 120 ]
                         Creeps = [ worker "w1" 25 25 ]
                         Hostiles =
                             [
@@ -3713,14 +3720,17 @@ let verdictTests =
                     "the release names the vanished Task"
             }
 
-            test "a drained source releases its harvester with TaskGone" {
+            test "a drained source releases its harvester with TooEarly" {
                 // Issue #48: anti-thrash must not pin a creep to a dry
-                // rock. The Harvest task is simply not pooled (ADR 0013),
-                // so the kept assignment dies through the same TaskGone
-                // path as any vanished Task.
+                // rock. The Task stays pooled since ADR 0025, so the
+                // release is the arrival gate's rather than TaskGone's, and
+                // Inapplicable would make the transition log lie. No
+                // projection here, so the walk prices at 0 the way ADR 0004
+                // prices unplaced geometry; the same release on real ground
+                // is pinned under "restock dispatch".
                 let snapshot =
                     { bareRespawn with
-                        Sources = [ { source "src-a" with Stocked = false } ]
+                        Sources = [ drained "src-a" 120 ]
                         Controller = None
                         Creeps = [ worker "w1" 0 50 ]
                     }
@@ -3730,8 +3740,8 @@ let verdictTests =
 
                 Expect.contains
                     verdicts
-                    (Verdict.Released("w1", taskId (Harvest "src-a"), ReleaseReason.TaskGone))
-                    "the empty source's Harvest no longer exists to be kept"
+                    (Verdict.Released("w1", taskId (Harvest "src-a"), ReleaseReason.TooEarly))
+                    "an arrival that covers no wait leaves the rock, exactly as ADR 0013 did"
             }
 
             test "a creep that fills up releases Harvest as Inapplicable and matches fresh" {
@@ -6128,6 +6138,352 @@ let postCapacityTests =
                     (harvesters assignments "src-a")
                     [ "a1"; "a2" ]
                     "no Post derives no Post cap: both Seats are open"
+            }
+        ]
+
+/// The restock dispatch corridor: a one-tile lane y = 10 from x = 9 to
+/// x = 21 with the source embedded in wall at (10,10), so its Seats are
+/// (9,10) and (11,10) and the lane east of the source is the only approach
+/// to either. An empty worker-unit body pays two half-ticks per plain
+/// step, so a creep at (15,10) is four steps and a travel cost of 8 —
+/// four ticks of walking — from the Seat it can reach.
+let restockRoom =
+    spatial [] [ for x in 9..21 -> { X = x; Y = 10 }, (if x = 10 then Wall else Plain) ]
+    |> withTargets [ "src-a", { X = 10; Y = 10 }, Source ]
+
+/// The corridor with its one source the given number of ticks from its
+/// restock, and one empty creep standing in the lane. The controller is
+/// unplaced and its Upgrade is inapplicable to an empty body, so Harvest
+/// is the only Task a creep in the lane can hold.
+let restockAt name pos ticks =
+    { bareRespawn with
+        Sources = [ drained "src-a" ticks ]
+        Creeps = [ worker name 0 50 ]
+        Spatial =
+            { restockRoom with
+                CreepPositions = Map.ofList [ name, pos ]
+            }
+    }
+
+[<Tests>]
+let restockTests =
+    testList
+        "restock dispatch"
+        [
+            test "a drained source's Harvest is applicable the tick the walk covers the wait" {
+                // ADR 0025: the Task is judged at arrival, not at this tick.
+                // Four ticks of walking against four ticks of waiting — the
+                // creep leaves now and reaches the Seat as the energy lands.
+                let snapshot = restockAt "w1" { X = 15; Y = 10 } 4
+
+                let {
+                        Assignments = assignments
+                        Intents = intents
+                    } =
+                    decide snapshot Map.empty Set.empty None
+
+                Expect.equal
+                    (harvesters assignments "src-a")
+                    [ "w1" ]
+                    "the walk covers the wait: the dry rock is worth setting out for"
+
+                Expect.isNonEmpty
+                    (moveIntentsFor "w1" intents)
+                    "dispatched, not idled: the window is spent on the road"
+            }
+
+            test "one tick short of covering the wait, the creep stays where it stands" {
+                // Zero slack, and the rule is self-correcting: the wait
+                // shrinks by one each tick while the walk stays put, so this
+                // creep departs next tick and still arrives as the energy
+                // does.
+                let snapshot = restockAt "w1" { X = 15; Y = 10 } 5
+
+                let {
+                        Assignments = assignments
+                        Intents = intents
+                    } =
+                    decide snapshot Map.empty Set.empty None
+
+                Expect.equal (Map.tryFind "w1" assignments) None "four ticks do not cover five"
+
+                Expect.isEmpty
+                    (moveIntentsFor "w1" intents)
+                    "nothing to walk toward yet: it holds its ground for a tick"
+            }
+
+            test "an odd travel cost rounds up: half a tick of walking still costs a tick" {
+                // Travel cost is priced in half-ticks (ADR 0010); a road on
+                // (14,10) makes the four-step approach cost 7, not 8. Rounded
+                // up that is the same four-tick arrival, and the boundary
+                // holds — rounded down it would be three and the creep would
+                // sit out a tick it could have spent walking.
+                let snapshot = restockAt "w1" { X = 15; Y = 10 } 4
+
+                let snapshot =
+                    { snapshot with
+                        Spatial =
+                            { snapshot.Spatial with
+                                Roads = Set.singleton { X = 14; Y = 10 }
+                            }
+                    }
+
+                let { Assignments = assignments } = decide snapshot Map.empty Set.empty None
+
+                Expect.equal
+                    (harvesters assignments "src-a")
+                    [ "w1" ]
+                    "seven half-ticks is four ticks of walking, not three"
+            }
+
+            test "an unreachable drained source rejects as Unreachable, not as too early" {
+                // The arrival gate is priced from the travel cost, so it
+                // stands behind the reachability gate: geometry the creep
+                // cannot cross is reported as such, whatever the source holds.
+                let snapshot = restockAt "w1" { X = 17; Y = 10 } 60
+
+                let snapshot =
+                    { snapshot with
+                        Spatial =
+                            { snapshot.Spatial with
+                                Obstacles = Set.singleton { X = 16; Y = 10 }
+                            }
+                    }
+
+                let { Verdicts = verdicts } = decide snapshot Map.empty (Set.ofList [ "w1" ]) None
+
+                Expect.equal
+                    verdicts
+                    [
+                        Verdict.Scoring(
+                            "w1",
+                            [
+                                Candidate.Rejected(
+                                    taskId (Harvest "src-a"),
+                                    RejectReason.Unreachable
+                                )
+                                Candidate.Rejected(
+                                    taskId (Upgrade "ctrl-1"),
+                                    RejectReason.Inapplicable
+                                )
+                            ]
+                        )
+                        Verdict.Unassigned("w1", IdleReason.NoneReachable)
+                    ]
+                    "the first gate it fails names the rejection, and the idle reason follows it"
+            }
+
+            test "a verbose Scoring names the wait: the drained Harvest is rejected TooEarly" {
+                // The body and the energy state fit and the Seat is reachable
+                // — only the arrival doesn't (ADR 0025), so the row carries
+                // its own reason rather than lying as Inapplicable, and the
+                // always-on Verdict beside it says the same.
+                let snapshot = restockAt "w1" { X = 15; Y = 10 } 60
+
+                let { Verdicts = verdicts } = decide snapshot Map.empty (Set.ofList [ "w1" ]) None
+
+                Expect.equal
+                    verdicts
+                    [
+                        Verdict.Scoring(
+                            "w1",
+                            [
+                                Candidate.Rejected(taskId (Harvest "src-a"), RejectReason.TooEarly)
+                                Candidate.Rejected(
+                                    taskId (Upgrade "ctrl-1"),
+                                    RejectReason.Inapplicable
+                                )
+                            ]
+                        )
+                        Verdict.Unassigned("w1", IdleReason.NoneInTime)
+                    ]
+                    "a dry source with no garrison shows up as a number of ticks, not a missing row"
+            }
+
+            test "the always-on Verdict names the wait even off the verbose list" {
+                // ADR 0025, CONTEXT's Verdict entry: the transition log is
+                // always on, and none-applicable there would claim the body
+                // or the energy state was the problem. Neither is: the creep
+                // is simply too far from a source that is not ready yet.
+                let snapshot = restockAt "w1" { X = 15; Y = 10 } 60
+
+                let { Verdicts = verdicts } = decide snapshot Map.empty Set.empty None
+
+                Expect.equal
+                    verdicts
+                    [ Verdict.Unassigned("w1", IdleReason.NoneInTime) ]
+                    "waiting on a restock, not rejected by its body"
+            }
+
+            test "a creep on the Seat beside a dry rock is released, walk or no walk" {
+                // Issue #48's rule under ADR 0025's gate, on real geometry:
+                // standing in the Work Area there is no walk left to cover
+                // the wait with, so anti-thrash does not pin the creep to a
+                // source that will not feed it for another sixty ticks.
+                let snapshot = restockAt "w1" { X = 11; Y = 10 } 60
+                let remembered = Map.ofList [ "w1", taskId (Harvest "src-a") ]
+
+                let {
+                        Assignments = assignments
+                        Verdicts = verdicts
+                    } =
+                    decide snapshot remembered Set.empty None
+
+                Expect.contains
+                    verdicts
+                    (Verdict.Released("w1", taskId (Harvest "src-a"), ReleaseReason.TooEarly))
+                    "an arrival of now covers no wait at all"
+
+                Expect.equal (Map.tryFind "w1" assignments) None "and it is free to work elsewhere"
+            }
+
+            test "a Work-heavy garrison on a source container keeps Harvest through the window" {
+                // The one exemption, on ADR 0024's condition and no other:
+                // that tile is the garrison's job whatever the store or the
+                // source holds, so the container-Post wobble is gone.
+                let snapshot =
+                    { haulColony with
+                        Sources = [ drained "src-a" 60 ]
+                        Creeps = [ anchor "a1" 50 0 ]
+                        Spatial =
+                            { haulRoom with
+                                CreepPositions = Map.ofList [ "a1", { X = 11; Y = 10 } ]
+                            }
+                    }
+
+                let remembered = Map.ofList [ "a1", taskId (Harvest "src-a") ]
+
+                let {
+                        Assignments = assignments
+                        Intents = intents
+                        Verdicts = verdicts
+                    } =
+                    decide snapshot remembered Set.empty None
+
+                Expect.contains
+                    verdicts
+                    (Verdict.Kept("a1", taskId (Harvest "src-a")))
+                    "kept through the empty window, never released as too early"
+
+                Expect.equal
+                    (harvesters assignments "src-a")
+                    [ "a1" ]
+                    "the Post's capacity is held whether the source is drained or not"
+
+                Expect.isEmpty (moveIntentsFor "a1" intents) "no wobble off the Post"
+            }
+
+            test "the garrison holding residual energy keeps its Post too" {
+                // ADR 0025's motivating symptom, with room left in the store:
+                // this Anchor clears the applicability gate on free capacity
+                // alone, so only the arrival gate's exemption can keep it —
+                // the reprieve is pinned here without ADR 0012's overflow
+                // widening standing in for it.
+                let snapshot =
+                    { haulColony with
+                        Sources = [ drained "src-a" 60 ]
+                        Creeps = [ anchor "a1" 20 30 ]
+                        Spatial =
+                            { haulRoom with
+                                CreepPositions = Map.ofList [ "a1", { X = 11; Y = 10 } ]
+                            }
+                    }
+
+                let remembered = Map.ofList [ "a1", taskId (Harvest "src-a") ]
+
+                let {
+                        Assignments = assignments
+                        Intents = intents
+                        Verdicts = verdicts
+                    } =
+                    decide snapshot remembered Set.empty None
+
+                Expect.contains
+                    verdicts
+                    (Verdict.Kept("a1", taskId (Harvest "src-a")))
+                    "the wobble every cycle began here: it is kept, not released"
+
+                Expect.equal
+                    (harvesters assignments "src-a")
+                    [ "a1" ]
+                    "still the Post's holder through the window"
+
+                Expect.isEmpty (moveIntentsFor "a1" intents) "and it walks nowhere with its load"
+            }
+
+            test "the garrison digs nothing while the source is drained" {
+                // The Emitter gate (ADR 0025): the occupancy surcharge can
+                // land a creep a tick or two early, and the engine's
+                // ERR_NOT_ENOUGH_RESOURCES spam must stay impossible. The
+                // garrison stays kept and silent, and digs the tick the
+                // energy lands.
+                let snapshot =
+                    { haulColony with
+                        Sources = [ drained "src-a" 1 ]
+                        Creeps = [ anchor "a1" 50 0 ]
+                        Spatial =
+                            { haulRoom with
+                                CreepPositions = Map.ofList [ "a1", { X = 11; Y = 10 } ]
+                            }
+                    }
+
+                let remembered = Map.ofList [ "a1", taskId (Harvest "src-a") ]
+                let { Intents = intents } = decide snapshot remembered Set.empty None
+
+                Expect.isEmpty
+                    (actionIntents intents)
+                    "no dig Intent until the energy is there to dig"
+
+                let restocked =
+                    { snapshot with
+                        Sources = [ source "src-a" ]
+                    }
+
+                let { Intents = intents } = decide restocked remembered Set.empty None
+
+                Expect.contains
+                    (actionIntents intents)
+                    (HarvestSource("a1", "src-a"))
+                    "the tick the energy lands, the same garrison digs"
+            }
+
+            test "a Dual Seat Anchor gets no reprieve: it upgrades in place through the window" {
+                // The exemption is ADR 0024's condition and no other. On a
+                // Dual Seat Upgrade is in place, so the Anchor keeps
+                // upgrading as ADR 0013 described and rematches Harvest once
+                // its Carry is spent.
+                let snapshot =
+                    { dualSeatColony with
+                        Sources = [ drained "src-a" 60 ]
+                        Creeps = [ anchor "a1" 50 10 ]
+                        Spatial =
+                            { dualSeatRoom with
+                                CreepPositions = Map.ofList [ "a1", { X = 11; Y = 10 } ]
+                            }
+                    }
+
+                let remembered = Map.ofList [ "a1", taskId (Harvest "src-a") ]
+
+                let {
+                        Assignments = assignments
+                        Intents = intents
+                        Verdicts = verdicts
+                    } =
+                    decide snapshot remembered Set.empty None
+
+                Expect.contains
+                    verdicts
+                    (Verdict.Released("a1", taskId (Harvest "src-a"), ReleaseReason.TooEarly))
+                    "no container underfoot, so no garrison exemption"
+
+                Expect.equal
+                    (Map.tryFind "a1" assignments)
+                    (Some(taskId (Upgrade "ctrl-1")))
+                    "the Dual Seat's other half is work it can do standing still"
+
+                Expect.isEmpty
+                    (moveIntentsFor "a1" intents)
+                    "it upgrades in place, it does not walk"
             }
         ]
 

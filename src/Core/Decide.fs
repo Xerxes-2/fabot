@@ -202,13 +202,12 @@ let private isSourceContainerTile (snapshot: Snapshot) pos =
 /// Planner: rebuild this tick's full Task pool from the Snapshot. Pure and
 /// from scratch every tick — Tasks are never persisted.
 let planTasks (snapshot: Snapshot) : Task list =
-    // Harvest exists only for a stocked source (ADR 0013) — the Repair
-    // shape: the task is gone while the source is drained, releasing its
-    // holders through TaskGone rather than stranding them at a dry rock.
-    let harvests =
-        snapshot.Sources
-        |> List.filter (fun s -> s.Stocked)
-        |> List.map (fun s -> Harvest s.Id)
+    // Harvest exists for every source, drained or not (ADR 0013, revised
+    // by ADR 0025): the task no longer flickers with the source's stock,
+    // because whether a dry rock is worth walking to depends on the
+    // walker's body and position — the Matcher's knowledge, not the
+    // creep-blind Planner's.
+    let harvests = snapshot.Sources |> List.map (fun s -> Harvest s.Id)
 
     let refills =
         snapshot.Refillables
@@ -884,6 +883,58 @@ let private planPickups (snapshot: Snapshot) atlas : Intent list =
             else
                 [])
 
+/// Ticks until a source restocks (ADR 0025), 0 while it holds energy —
+/// and 0 for a source the Snapshot does not carry at all, so a source
+/// nothing projects never holds a decision up.
+let private ticksToRestock (snapshot: Snapshot) sourceId =
+    snapshot.Sources
+    |> List.tryFind (fun s -> s.Id = sourceId)
+    |> Option.map (fun s -> s.TicksToRestock)
+    |> Option.defaultValue 0
+
+/// A travel cost as the creep's arrival in whole ticks: the cost is priced
+/// in half-ticks (ADR 0010) and a half step still costs a whole tick, so
+/// it rounds up — the same halving the hauler quota's round trip uses.
+let private arrivalTicks cost = (cost + 1) / 2
+
+/// Whether a creep garrisons a source's container Post: ADR 0024's
+/// condition — a Work-heavy body standing on that source's built
+/// container. The full-store reprieve and the empty-window reprieve are
+/// one judgement (ADR 0025), so both gates ask it here rather than
+/// spelling the pair out twice: that tile is the garrison's job whatever
+/// its store or the source holds.
+let private garrisons atlas (creep: CreepInfo) sourceId =
+    Atlas.workHeavy atlas creep.Name
+    && Atlas.catchesOverflow atlas creep.Name sourceId
+
+/// Whether a Task's time has not come for this creep (ADR 0025): a drained
+/// source's Harvest is applicable only when the creep's walk covers the
+/// restock wait — arrival ≥ ticks to restock, with no slack, because the
+/// wait shrinks by one each tick while the walk stays put, so a creep one
+/// tick short departs one tick later and arrives as the energy does. A
+/// creep already beside a dry rock has no walk to cover anything and is
+/// released, exactly as ADR 0013 released it. One exemption, on ADR 0024's
+/// condition and no other: the garrison keeps its Post through the empty
+/// window. A Dual Seat Anchor gets none: Upgrade is in place there, so it
+/// upgrades through the window and rematches Harvest once its Carry is
+/// spent. Every other Task is judged at the current tick.
+/// One consequence worth naming: travel cost answers 0 for an unplaced
+/// creep or target (ADR 0004), and this gate reads that as an arrival of
+/// now — the one place unpriceable geometry holds a Task up, waiting out a
+/// drained source exactly as a creep on its Seat does. Exempting it would
+/// assign a creep to waiting instead, the stranding ADR 0013 fixed, and
+/// the outcome is 0013's own: no Task at all for a drained source.
+let private tooEarly (snapshot: Snapshot) atlas (creep: CreepInfo) task cost =
+    match task with
+    | Harvest sourceId ->
+        arrivalTicks cost < ticksToRestock snapshot sourceId
+        && not (garrisons atlas creep sourceId)
+    | Withdraw _
+    | Refill _
+    | Build _
+    | Repair _
+    | Upgrade _ -> false
+
 /// Whether a creep can usefully work this Task right now. The body must
 /// physically be able to do it — Work-part tasks need a Work part, energy
 /// delivery needs a Carry part — and the energy state must call for it: a
@@ -913,11 +964,7 @@ let private applicable atlas (creep: CreepInfo) task =
         creep.Body |> Map.tryFind part |> Option.exists (fun n -> n > 0)
 
     match task with
-    | Harvest sourceId ->
-        has Work
-        && (creep.FreeCapacity > 0
-            || (Atlas.workHeavy atlas creep.Name
-                && Atlas.catchesOverflow atlas creep.Name sourceId))
+    | Harvest sourceId -> has Work && (creep.FreeCapacity > 0 || garrisons atlas creep sourceId)
     | Withdraw containerId ->
         has Carry
         && creep.FreeCapacity > 0
@@ -1036,9 +1083,24 @@ let private postCapacities (snapshot: Snapshot) atlas : Map<string, int> =
     |> Map.ofList
 
 /// Action Intent for one assigned creep: emitted when the Atlas judges the
-/// action reachable from the tick-start position.
-let private actionIntents atlas (creep: CreepInfo) (task: Task) : Intent list =
-    if Atlas.mayAct atlas creep.Name task then
+/// action reachable from the tick-start position, and — for Harvest alone
+/// — only while the source holds energy (ADR 0025). Anticipatory dispatch
+/// and the occupancy surcharge (ADR 0008) both price a walk high enough to
+/// land a creep a tick or two early, so the gate is what keeps the
+/// engine's ERR_NOT_ENOUGH_RESOURCES spam structurally impossible. The
+/// garrison gets no exemption here: it stays kept on its Post through the
+/// window, silent, and digs the tick the energy lands.
+let private actionIntents (snapshot: Snapshot) atlas (creep: CreepInfo) (task: Task) : Intent list =
+    let drained =
+        match task with
+        | Harvest sourceId -> ticksToRestock snapshot sourceId > 0
+        | Withdraw _
+        | Refill _
+        | Build _
+        | Repair _
+        | Upgrade _ -> false
+
+    if Atlas.mayAct atlas creep.Name task && not drained then
         [ intentFor creep task ]
     else
         []
@@ -1052,7 +1114,7 @@ let emit (snapshot: Snapshot) atlas (assigned: Map<string, Task>) : Intent list 
         snapshot.Creeps
         |> List.collect (fun creep ->
             match Map.tryFind creep.Name assigned with
-            | Some task -> actionIntents atlas creep task
+            | Some task -> actionIntents snapshot atlas creep task
             | None -> [])
 
     // Every assigned creep says its Task's glyph every tick; unassigned
@@ -1381,9 +1443,12 @@ let matchCreeps
     // oversell from before a cap existed (e.g. across a redeploy). So does
     // reachability: a Work Area the Atlas can no longer reach releases the
     // assignment, freeing its capacity for creeps that can get there —
-    // deliberately with no range-based fallback (ADR 0002). Each failed
-    // gate names the release; a dead creep's assignment drops silently —
-    // Verdicts attribute to living creeps only.
+    // deliberately with no range-based fallback (ADR 0002). So does the
+    // arrival gate: a drained source's Harvest whose wait the holder's
+    // walk no longer covers releases it (ADR 0025) — the same behaviour
+    // ADR 0013 got from the Task vanishing, now under its own reason. Each
+    // failed gate names the release; a dead creep's assignment drops
+    // silently — Verdicts attribute to living creeps only.
     let kept, released =
         ((Map.empty, []), assignments)
         ||> Map.fold (fun (acc, released) name tid ->
@@ -1398,15 +1463,20 @@ let matchCreeps
                 | Some task when not (applicable atlas creep task) ->
                     release ReleaseReason.Inapplicable
                 | Some _ when not (hasCapacity creep acc tid) -> release ReleaseReason.OverCapacity
-                | Some task when (Atlas.travelCost atlas creep.Name task).IsNone ->
-                    release ReleaseReason.Unreachable
-                | Some _ -> Map.add name tid acc, released)
+                | Some task ->
+                    match Atlas.travelCost atlas creep.Name task with
+                    | None -> release ReleaseReason.Unreachable
+                    | Some cost when tooEarly snapshot atlas creep task cost ->
+                        release ReleaseReason.TooEarly
+                    | Some _ -> Map.add name tid acc, released)
 
     // One gate cascade judges every (creep, Task) pair — rejected at the
-    // first matching gate it fails (applicable, capacity, reachable) or
-    // scored on the full key when none does. The Matcher's candidates and a
-    // verbose Scoring both read from here, so the narration can never
-    // drift from what actually decided the match.
+    // first matching gate it fails (applicable, capacity, reachable, in
+    // time) or scored on the full key when none does. The arrival gate
+    // comes last of the four because it is priced from the travel cost the
+    // reachability gate computes. The Matcher's candidates and a verbose
+    // Scoring both read from here, so the narration can never drift from
+    // what actually decided the match.
     let judge acc (creep: CreepInfo) task =
         let tid = taskId task
 
@@ -1417,6 +1487,8 @@ let matchCreeps
         else
             match Atlas.travelCost atlas creep.Name task with
             | None -> Candidate.Rejected(tid, RejectReason.Unreachable)
+            | Some cost when tooEarly snapshot atlas creep task cost ->
+                Candidate.Rejected(tid, RejectReason.TooEarly)
             | Some cost -> Candidate.Scored(tid, rank snapshot task, cost, load acc tid)
 
     let assignOne (acc, verdicts) (creep: CreepInfo) =
@@ -1444,7 +1516,11 @@ let matchCreeps
             match keyed with
             | [] ->
                 // How far the best Task got through the gates — applicable,
-                // capacity, reachable — is why the creep sits idle.
+                // capacity, reachable, in time — is why the creep sits
+                // idle, deepest gate first: a creep whose only rejection is
+                // the arrival gate is waiting out a restock (ADR 0025), and
+                // saying nothing fit its body would be the same lie the
+                // rejection reason refuses.
                 let rejectedWith wanted =
                     judged
                     |> List.exists (function
@@ -1454,6 +1530,8 @@ let matchCreeps
                 let reason =
                     if List.isEmpty tasks then
                         IdleReason.NoTasks
+                    elif rejectedWith RejectReason.TooEarly then
+                        IdleReason.NoneInTime
                     elif rejectedWith RejectReason.Unreachable then
                         IdleReason.NoneReachable
                     elif rejectedWith RejectReason.CapacityFull then

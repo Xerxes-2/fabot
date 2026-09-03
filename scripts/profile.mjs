@@ -134,7 +134,7 @@ function buildWorld() {
   const ok = () => 0;
 
   const sources = [SOURCE_A, SOURCE_B].map((pos, i) =>
-    register({ id: `src-${i}`, pos, energy: 3000 })
+    register({ id: `src-${i}`, pos, energy: 3000, ticksToRegeneration: undefined })
   );
 
   const controller = register({

@@ -67,6 +67,9 @@ type ISource =
     abstract pos: IRoomPosition
     /// Energy remaining in the source this regen cycle.
     abstract energy: int
+    /// Ticks until the source regenerates; undefined until the engine
+    /// starts the timer.
+    abstract ticksToRegeneration: int
 
 type IStructure =
     abstract id: string

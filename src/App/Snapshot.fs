@@ -222,7 +222,20 @@ let build () : Snapshot =
             |> Array.map (fun o ->
                 let s = o :?> ISource
 
-                ({ Id = s.id; Stocked = s.energy > 0 }: SourceInfo))
+                // A source holding energy restocks in zero ticks (ADR
+                // 0025), whatever its regeneration timer reads — that
+                // guard, not the timer, is what makes the projection
+                // right. The timer is read only for a drained source, and
+                // is undefined until the engine starts it.
+                ({
+                    Id = s.id
+                    TicksToRestock =
+                        if s.energy > 0 || isNull (box s.ticksToRegeneration) then
+                            0
+                        else
+                            s.ticksToRegeneration
+                }
+                : SourceInfo))
             |> Array.distinctBy (fun s -> s.Id)
             |> Array.toList
         Controller =

@@ -71,10 +71,13 @@ type RefillableInfo =
 type SourceInfo =
     {
         Id: string
-        /// Whether the source holds any energy right now (ADR 0013). A
-        /// boolean, not the amount — the Planner pools Harvest only for
-        /// a stocked source, and nothing decided reads more than that.
-        Stocked: bool
+        /// Ticks until the source holds energy again — its restock
+        /// (ADR 0013, widened by ADR 0025); 0 while it holds energy now.
+        /// Not the amount: the one time fact a decision reads about a
+        /// source, so that a drained source's Harvest can be judged at
+        /// the creep's arrival rather than at the current tick. Stocked
+        /// is a restock of zero, never a field of its own.
+        TicksToRestock: int
     }
 
 /// What the decision layer knows about the room controller this tick.
@@ -324,35 +327,45 @@ type MatchFactor =
 
 /// Why a remembered assignment was released: its Task left the pool, the
 /// creep can no longer usefully work it (body parts or energy state), the
-/// Task's worker cap was already full, or its Work Area is unreachable or
-/// empty (ADR 0002).
+/// Task's worker cap was already full, its Work Area is unreachable or
+/// empty (ADR 0002), or its time has not come — the creep's walk no
+/// longer covers a drained source's restock wait (ADR 0025), which is how
+/// a creep beside a dry rock leaves it now that the Task stays pooled.
 [<RequireQualifiedAccess>]
 type ReleaseReason =
     | TaskGone
     | Inapplicable
     | OverCapacity
     | Unreachable
+    | TooEarly
 
 /// Why an unassigned creep got nothing: the pool was empty, no Task fit
-/// its body or energy state, every fitting Task's worker cap was full, or
-/// every fitting Task with room had an unreachable Work Area. Reports how
-/// far the best Task got through the matching gates.
+/// its body or energy state, every fitting Task's worker cap was full,
+/// every fitting Task with room had an unreachable Work Area, or every
+/// Task it could otherwise have taken is one whose time has not come
+/// (ADR 0025). Reports the deepest matching gate any Task reached, so a
+/// creep waiting out a drained source's restock says exactly that rather
+/// than claiming nothing fit its body.
 [<RequireQualifiedAccess>]
 type IdleReason =
     | NoTasks
     | NoneApplicable
     | NoneFree
     | NoneReachable
+    | NoneInTime
 
 /// Why a Task in the pool was rejected for a creep, in a verbose scoring:
 /// it did not fit the creep's body or energy state, its worker cap was
-/// already full, or its Work Area is unreachable — the matching gates, in
-/// the order they are tried.
+/// already full, its Work Area is unreachable, or its time has not come —
+/// the matching gates, in the order they are tried. The last is its own
+/// reason rather than Inapplicable (ADR 0025): the body and the energy
+/// state fit, only the arrival doesn't, and the transition log would lie.
 [<RequireQualifiedAccess>]
 type RejectReason =
     | Inapplicable
     | CapacityFull
     | Unreachable
+    | TooEarly
 
 /// One row of a verbose scoring: a Task in the pool, either scored on the
 /// full matching key — rank tier, travel cost, current load — or rejected
