@@ -4646,6 +4646,183 @@ let logisticsTests =
             }
         ]
 
+[<Tests>]
+let containerPostTests =
+    testList
+        "container post garrison"
+        [
+            // The garrison rule (#47, ADR 0012): a full creep standing on a
+            // built source container keeps Harvest — the engine drops the
+            // overflow into the container underfoot, so the creep
+            // effectively has capacity. Everywhere else the ordinary
+            // full-store rule stands.
+            test "a full Anchor on a built source container keeps its Harvest across ticks" {
+                let snapshot =
+                    { haulColony with
+                        Creeps = [ anchor "a1" 50 0 ]
+                        Spatial =
+                            { haulRoom with
+                                CreepPositions = Map.ofList [ "a1", { X = 11; Y = 10 } ]
+                            }
+                    }
+
+                let remembered = Map.ofList [ "a1", taskId (Harvest "src-a") ]
+
+                let {
+                        Intents = intents
+                        Assignments = assignments
+                        Verdicts = verdicts
+                    } =
+                    decide snapshot remembered Set.empty
+
+                Expect.equal
+                    (Map.tryFind "a1" assignments)
+                    (Some(taskId (Harvest "src-a")))
+                    "the overflow falls into the container: the Post stays garrisoned"
+
+                Expect.contains
+                    verdicts
+                    (Verdict.Kept("a1", taskId (Harvest "src-a")))
+                    "kept, never released as Inapplicable"
+
+                Expect.contains
+                    intents
+                    (HarvestSource("a1", "src-a"))
+                    "the dig keeps firing past a full store"
+
+                Expect.isEmpty (moveIntentsFor "a1" intents) "no drift off the Post"
+            }
+
+            test "a full Anchor on the container matches Harvest fresh, not just from memory" {
+                // Both gates — the remembered-assignment release and the
+                // fresh judge — must read the same widened rule, or the
+                // Anchor would be matched and released in alternate ticks.
+                let snapshot =
+                    { haulColony with
+                        Creeps = [ anchor "a1" 50 0 ]
+                        Spatial =
+                            { haulRoom with
+                                CreepPositions = Map.ofList [ "a1", { X = 11; Y = 10 } ]
+                            }
+                    }
+
+                let { Assignments = assignments } = decide snapshot Map.empty Set.empty
+
+                Expect.equal
+                    (Map.tryFind "a1" assignments)
+                    (Some(taskId (Harvest "src-a")))
+                    "the feeding-tier dig at cost 0 wins the fresh match too"
+            }
+
+            test "the gate is body-blind: a full worker on the container also keeps Harvest" {
+                // ADR 0006: a pattern shapes what a creep is good at, never
+                // what it is assigned. Travel-cost pinning and the workforce
+                // quotas keep the tile an Anchor's home, not this gate.
+                let snapshot =
+                    { haulColony with
+                        Creeps = [ worker "w1" 50 0 ]
+                        Spatial =
+                            { haulRoom with
+                                CreepPositions = Map.ofList [ "w1", { X = 11; Y = 10 } ]
+                            }
+                    }
+
+                let remembered = Map.ofList [ "w1", taskId (Harvest "src-a") ]
+                let { Assignments = assignments } = decide snapshot remembered Set.empty
+
+                Expect.equal
+                    (Map.tryFind "w1" assignments)
+                    (Some(taskId (Harvest "src-a")))
+                    "any full creep on the tile qualifies"
+            }
+
+            test "a full Anchor on a bare Seat still releases Harvest" {
+                // (9,10) is a Seat of src-a with no container: harvesting
+                // past a full store there spills onto the ground.
+                let snapshot =
+                    { haulColony with
+                        Creeps = [ anchor "a1" 50 0 ]
+                        Spatial =
+                            { haulRoom with
+                                CreepPositions = Map.ofList [ "a1", { X = 9; Y = 10 } ]
+                            }
+                    }
+
+                let remembered = Map.ofList [ "a1", taskId (Harvest "src-a") ]
+                let { Verdicts = verdicts } = decide snapshot remembered Set.empty
+
+                Expect.contains
+                    verdicts
+                    (Verdict.Released("a1", taskId (Harvest "src-a"), ReleaseReason.Inapplicable))
+                    "no container underfoot: the ordinary full-store rule stands"
+            }
+
+            test "a full creep beside the built container still releases Harvest" {
+                // (12,10) touches the container at (11,10) but stands off
+                // it: adjacency catches nothing — only the tile itself.
+                let snapshot =
+                    { haulColony with
+                        Creeps = [ anchor "a1" 50 0 ]
+                        Spatial =
+                            { haulRoom with
+                                CreepPositions = Map.ofList [ "a1", { X = 12; Y = 10 } ]
+                            }
+                    }
+
+                let remembered = Map.ofList [ "a1", taskId (Harvest "src-a") ]
+                let { Verdicts = verdicts } = decide snapshot remembered Set.empty
+
+                Expect.contains
+                    verdicts
+                    (Verdict.Released("a1", taskId (Harvest "src-a"), ReleaseReason.Inapplicable))
+                    "the widening reads the creep's own tile, never a neighbour"
+            }
+
+            test "a container construction site catches no overflow: Harvest still releases" {
+                let snapshot =
+                    { haulColony with
+                        Creeps = [ anchor "a1" 50 0 ]
+                        Spatial =
+                            { haulRoom with
+                                TargetKinds =
+                                    haulRoom.TargetKinds
+                                    |> Map.add "can-src" (Site BuiltKind.Container)
+                                CreepPositions = Map.ofList [ "a1", { X = 11; Y = 10 } ]
+                            }
+                    }
+
+                let remembered = Map.ofList [ "a1", taskId (Harvest "src-a") ]
+                let { Verdicts = verdicts } = decide snapshot remembered Set.empty
+
+                Expect.contains
+                    verdicts
+                    (Verdict.Released("a1", taskId (Harvest "src-a"), ReleaseReason.Inapplicable))
+                    "a pending container is not yet a container"
+            }
+
+            test "a built container off the Seats widens nothing: Harvest still releases" {
+                // The controller container's tile is no Seat of src-a — a
+                // full creep standing on it is nowhere the overflow rule
+                // helps, however built the container underfoot.
+                let snapshot =
+                    { haulColony with
+                        Creeps = [ anchor "a1" 50 0 ]
+                        Spatial =
+                            { haulRoom with
+                                CreepPositions = Map.ofList [ "a1", { X = 18; Y = 10 } ]
+                            }
+                    }
+
+                let remembered = Map.ofList [ "a1", taskId (Harvest "src-a") ]
+                let { Verdicts = verdicts } = decide snapshot remembered Set.empty
+
+                Expect.contains
+                    verdicts
+                    (Verdict.Released("a1", taskId (Harvest "src-a"), ReleaseReason.Inapplicable))
+                    "only that source's own container Seat catches its overflow"
+            }
+        ]
+
 /// A hauler-unit creep: two Carry, one Move — the hauler row's block.
 let hauler name energy freeCapacity =
     creepWith name energy freeCapacity [ Carry; Carry; Move ]

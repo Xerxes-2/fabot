@@ -468,6 +468,21 @@ let posts (atlas: Atlas) : Set<Pos> =
     Set.intersect (seatUnion atlas) (containerTiles atlas)
     |> Set.union (dualSeats atlas)
 
+/// Whether a creep's tile catches its harvest overflow: a built container
+/// standing on one of the source's own Seats — the container Post's
+/// footing, judged from the same census `posts` reads (ADR 0012). There
+/// the engine drops harvest past a full store into the container under
+/// the creep, so a full store never ends the dig. A site catches nothing,
+/// and an unplaced creep or source widens nothing — absence of geometry
+/// leaves the ordinary full-store rule standing rather than blocking a
+/// Task, keeping the query total (ADR 0004).
+let catchesOverflow (atlas: Atlas) (creep: string) (sourceId: string) : bool =
+    match Map.tryFind creep atlas.Spatial.CreepPositions with
+    | None -> false
+    | Some pos ->
+        Set.contains pos (containerTiles atlas)
+        && Set.contains pos (seatTilesOf atlas sourceId)
+
 /// Travel cost of a Task for a creep (ADR 0002, revised by ADRs 0006 and
 /// 0010): the cost units — half-ticks — the creep's body needs along a
 /// cheapest path to any Work Area

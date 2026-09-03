@@ -713,12 +713,20 @@ let private planPickups (snapshot: Snapshot) atlas : Intent list =
 /// physically be able to do it — Work-part tasks need a Work part, energy
 /// delivery needs a Carry part — and the energy state must call for it: a
 /// full creep is done harvesting; an empty creep has nothing to deliver.
-let private applicable (creep: CreepInfo) task =
+/// One geometric widening (ADR 0012): a full creep standing on a built
+/// source container keeps Harvest — the engine drops the overflow into
+/// the container underfoot, so the creep effectively has capacity and the
+/// Post stays garrisoned. Body-blind like every gate here (ADR 0006):
+/// any full creep on the tile qualifies; travel-cost pinning and the
+/// workforce quotas are what keep the tile an Anchor's home.
+let private applicable atlas (creep: CreepInfo) task =
     let has part =
         creep.Body |> Map.tryFind part |> Option.exists (fun n -> n > 0)
 
     match task with
-    | Harvest _ -> has Work && creep.FreeCapacity > 0
+    | Harvest sourceId ->
+        has Work
+        && (creep.FreeCapacity > 0 || Atlas.catchesOverflow atlas creep.Name sourceId)
     | Withdraw _ -> has Carry && creep.FreeCapacity > 0
     | Refill _ -> has Carry && creep.Energy > 0
     | Build _
@@ -1142,7 +1150,8 @@ let matchCreeps
             | Some creep ->
                 match Map.tryFind tid byId with
                 | None -> release ReleaseReason.TaskGone
-                | Some task when not (applicable creep task) -> release ReleaseReason.Inapplicable
+                | Some task when not (applicable atlas creep task) ->
+                    release ReleaseReason.Inapplicable
                 | Some _ when not (hasCapacity acc tid) -> release ReleaseReason.OverCapacity
                 | Some task when (Atlas.travelCost atlas creep.Name task).IsNone ->
                     release ReleaseReason.Unreachable
@@ -1156,7 +1165,7 @@ let matchCreeps
     let judge acc (creep: CreepInfo) task =
         let tid = taskId task
 
-        if not (applicable creep task) then
+        if not (applicable atlas creep task) then
             Candidate.Rejected(tid, RejectReason.Inapplicable)
         elif not (hasCapacity acc tid) then
             Candidate.Rejected(tid, RejectReason.CapacityFull)
