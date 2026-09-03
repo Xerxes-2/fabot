@@ -35,12 +35,20 @@ let controllerAt level =
         SafeModeActive = false
     }
 
+/// An energy-hungry structure of the given kind with the given free capacity.
+let refillable id freeCapacity kind =
+    {
+        Id = id
+        FreeCapacity = freeCapacity
+        Kind = kind
+    }
+
 let bareRespawn =
     {
         Time = 42
         Spawns = [ spawn ]
         RoomEnergy = bank 300 300
-        Refillables = [ { Id = "spawn-1"; FreeCapacity = 0 } ]
+        Refillables = [ refillable "spawn-1" 0 BuiltKind.Spawn ]
         Sources = [ { Id = "src-a" }; { Id = "src-b" } ]
         Controller = Some(controllerAt 1)
         ConstructionSites = []
@@ -308,9 +316,9 @@ let plannerTests =
                     { bareRespawn with
                         Refillables =
                             [
-                                { Id = "spawn-1"; FreeCapacity = 50 }
-                                { Id = "ext-1"; FreeCapacity = 0 }
-                                { Id = "ext-2"; FreeCapacity = 50 }
+                                refillable "spawn-1" 50 BuiltKind.Spawn
+                                refillable "ext-1" 0 BuiltKind.Extension
+                                refillable "ext-2" 50 BuiltKind.Extension
                             ]
                     }
 
@@ -324,6 +332,30 @@ let plannerTests =
                     refills
                     [ "spawn-1"; "ext-2" ]
                     "only structures with free capacity need a Refill"
+            }
+
+            test "a tower missing energy gets a Refill task; a full tower gets none" {
+                // Same generalized Task, same free-capacity filter (ADR 0010) —
+                // a tower is just one more energy-hungry structure to the Planner.
+                let snapshot =
+                    { bareRespawn with
+                        Refillables =
+                            [
+                                refillable "tower-1" 500 BuiltKind.Tower
+                                refillable "tower-2" 0 BuiltKind.Tower
+                            ]
+                    }
+
+                let refills =
+                    planTasks snapshot
+                    |> List.choose (function
+                        | Refill structureId -> Some structureId
+                        | _ -> None)
+
+                Expect.equal
+                    refills
+                    [ "tower-1" ]
+                    "only the tower with free capacity needs a Refill"
             }
         ]
 
@@ -682,7 +714,7 @@ let partApplicabilityTests =
                     { bareRespawn with
                         Sources = []
                         Controller = None
-                        Refillables = [ { Id = "spawn-1"; FreeCapacity = 300 } ]
+                        Refillables = [ refillable "spawn-1" 300 BuiltKind.Spawn ]
                         Creeps = [ creepWith "digger" 25 25 [ Work; Move ] ]
                     }
 
@@ -801,7 +833,7 @@ let travelCostTests =
 
                 let snapshot =
                     { bareRespawn with
-                        Refillables = [ { Id = "spawn-1"; FreeCapacity = 50 } ]
+                        Refillables = [ refillable "spawn-1" 50 BuiltKind.Spawn ]
                         ConstructionSites = [ { Id = "site-1" } ]
                         Creeps = [ worker "w1" 50 0 ]
                         Spatial =
@@ -1187,7 +1219,7 @@ let movementTests =
             test "a refiller two tiles out still has to walk to the structure" {
                 let snapshot =
                     { bareRespawn with
-                        Refillables = [ { Id = "spawn-1"; FreeCapacity = 50 } ]
+                        Refillables = [ refillable "spawn-1" 50 BuiltKind.Spawn ]
                         Creeps = [ worker "w1" 50 0 ]
                         Spatial =
 
@@ -2062,7 +2094,7 @@ let sayTests =
             test "each Task has its own glyph: Refill, Build, Upgrade" {
                 let snapshot =
                     { bareRespawn with
-                        Refillables = [ { Id = "spawn-1"; FreeCapacity = 50 } ]
+                        Refillables = [ refillable "spawn-1" 50 BuiltKind.Spawn ]
                         ConstructionSites = [ { Id = "site-1" } ]
                         Creeps = [ worker "w1" 50 0; worker "w2" 50 0; worker "w3" 50 0 ]
                     }
@@ -2145,7 +2177,7 @@ let verdictTests =
                 let snapshot =
                     { bareRespawn with
                         Sources = []
-                        Refillables = [ { Id = "spawn-1"; FreeCapacity = 50 } ]
+                        Refillables = [ refillable "spawn-1" 50 BuiltKind.Spawn ]
                         Creeps = [ worker "w1" 50 0 ]
                     }
 
@@ -2155,6 +2187,29 @@ let verdictTests =
                     verdicts
                     [ Verdict.Matched("w1", taskId (Refill "spawn-1"), MatchFactor.Rank) ]
                     "the feeding tier beat the surplus tier: rank decided"
+            }
+
+            test "rank layers by target: feeding the spawn outbids feeding the tower" {
+                // The tower sits first in the pool, so only the target-layered
+                // rank (ADR 0010) — not pool order — can hand the spawn the win.
+                let snapshot =
+                    { bareRespawn with
+                        Sources = []
+                        Controller = None
+                        Refillables =
+                            [
+                                refillable "tower-1" 500 BuiltKind.Tower
+                                refillable "spawn-1" 50 BuiltKind.Spawn
+                            ]
+                        Creeps = [ worker "w1" 50 0 ]
+                    }
+
+                let { Verdicts = verdicts } = decide snapshot Map.empty Set.empty
+
+                Expect.equal
+                    verdicts
+                    [ Verdict.Matched("w1", taskId (Refill "spawn-1"), MatchFactor.Rank) ]
+                    "the colony feeds its own reproduction before its guns: rank decided"
             }
 
             test "travel cost decides: the near source wins the rank tie" {
@@ -2231,7 +2286,7 @@ let verdictTests =
             test "a creep that fills up releases Harvest as Inapplicable and matches fresh" {
                 let snapshot =
                     { bareRespawn with
-                        Refillables = [ { Id = "spawn-1"; FreeCapacity = 50 } ]
+                        Refillables = [ refillable "spawn-1" 50 BuiltKind.Spawn ]
                         Creeps = [ worker "w1" 50 0 ]
                     }
 
@@ -2433,7 +2488,7 @@ let verboseScoringTests =
                 let snapshot =
                     { bareRespawn with
                         Sources = [ { Id = "src-a" } ]
-                        Refillables = [ { Id = "spawn-1"; FreeCapacity = 50 } ]
+                        Refillables = [ refillable "spawn-1" 50 BuiltKind.Spawn ]
                         Creeps = [ worker "w1" 50 0 ]
                     }
 
@@ -2902,7 +2957,7 @@ let tests =
             test "a creep that fills up is reassigned from Harvest to Refill" {
                 let snapshot =
                     { bareRespawn with
-                        Refillables = [ { Id = "spawn-1"; FreeCapacity = 50 } ]
+                        Refillables = [ refillable "spawn-1" 50 BuiltKind.Spawn ]
                         Creeps = [ worker "w1" 50 0 ]
                     }
 
@@ -2923,10 +2978,43 @@ let tests =
                     "delivery intent emitted"
             }
 
+            test "a loaded creep feeds a hungry tower once spawn and extensions are full" {
+                // Full feeders leave the pool, so the tower Refill is the one
+                // delivery on offer — the same transfer to the creep (ADR 0010).
+                let snapshot =
+                    { bareRespawn with
+                        Sources = []
+                        Controller = None
+                        Refillables =
+                            [
+                                refillable "spawn-1" 0 BuiltKind.Spawn
+                                refillable "ext-1" 0 BuiltKind.Extension
+                                refillable "tower-1" 500 BuiltKind.Tower
+                            ]
+                        Creeps = [ worker "w1" 50 0 ]
+                    }
+
+                let {
+                        Intents = intents
+                        Assignments = kept
+                    } =
+                    decide snapshot Map.empty Set.empty
+
+                Expect.equal
+                    (Map.tryFind "w1" kept)
+                    (Some(taskId (Refill "tower-1")))
+                    "the tower is the delivery that remains"
+
+                Expect.contains
+                    intents
+                    (TransferEnergyToStructure("w1", "tower-1"))
+                    "the same transfer intent feeds a tower"
+            }
+
             test "a creep that empties is reassigned from Refill back to Harvest" {
                 let snapshot =
                     { bareRespawn with
-                        Refillables = [ { Id = "spawn-1"; FreeCapacity = 50 } ]
+                        Refillables = [ refillable "spawn-1" 50 BuiltKind.Spawn ]
                         Creeps = [ worker "w1" 0 50 ]
                     }
 
@@ -2965,7 +3053,7 @@ let tests =
             test "a hungry structure beats the controller for a delivering creep" {
                 let snapshot =
                     { bareRespawn with
-                        Refillables = [ { Id = "spawn-1"; FreeCapacity = 50 } ]
+                        Refillables = [ refillable "spawn-1" 50 BuiltKind.Spawn ]
                         Creeps = [ worker "w1" 50 0 ]
                     }
 
@@ -3063,7 +3151,7 @@ let tests =
             test "a hungry structure beats a construction site for a delivering creep" {
                 let snapshot =
                     { bareRespawn with
-                        Refillables = [ { Id = "spawn-1"; FreeCapacity = 50 } ]
+                        Refillables = [ refillable "spawn-1" 50 BuiltKind.Spawn ]
                         ConstructionSites = [ { Id = "site-1" } ]
                         Creeps = [ worker "w1" 50 0 ]
                     }
@@ -3170,7 +3258,7 @@ let downgradeDeadlineTests =
                 // hard deadline, not surplus-rank work.
                 let snapshot =
                     { bareRespawn with
-                        Refillables = [ { Id = "spawn-1"; FreeCapacity = 50 } ]
+                        Refillables = [ refillable "spawn-1" 50 BuiltKind.Spawn ]
                         Creeps = [ worker "w1" 50 0 ]
                         Controller =
                             Some
@@ -3194,7 +3282,7 @@ let downgradeDeadlineTests =
                 // the whole 5,000-tick grace intact.
                 let snapshot =
                     { bareRespawn with
-                        Refillables = [ { Id = "spawn-1"; FreeCapacity = 50 } ]
+                        Refillables = [ refillable "spawn-1" 50 BuiltKind.Spawn ]
                         Creeps = [ worker "w1" 50 0 ]
                         Controller =
                             Some
@@ -3214,7 +3302,7 @@ let downgradeDeadlineTests =
             test "RCL4 above half its timer is not urgent" {
                 let snapshot =
                     { bareRespawn with
-                        Refillables = [ { Id = "spawn-1"; FreeCapacity = 50 } ]
+                        Refillables = [ refillable "spawn-1" 50 BuiltKind.Spawn ]
                         Creeps = [ worker "w1" 50 0 ]
                         Controller =
                             Some
@@ -3234,7 +3322,7 @@ let downgradeDeadlineTests =
             test "far from the deadline upgrade stays surplus work" {
                 let snapshot =
                     { bareRespawn with
-                        Refillables = [ { Id = "spawn-1"; FreeCapacity = 50 } ]
+                        Refillables = [ refillable "spawn-1" 50 BuiltKind.Spawn ]
                         Creeps = [ worker "w1" 50 0 ]
                     }
 
@@ -3511,7 +3599,7 @@ let anchorTests =
             test "a distant Refill flows to the generalist; the empty Anchor harvests" {
                 let snapshot =
                     { dualSeatColony with
-                        Refillables = [ { Id = "spawn-1"; FreeCapacity = 300 } ]
+                        Refillables = [ refillable "spawn-1" 300 BuiltKind.Spawn ]
                         Creeps = [ anchor "a1" 0 50; worker "g1" 50 0 ]
                         Spatial =
                             { corridorEast [ "spawn-1", { X = 31; Y = 10 } ] with

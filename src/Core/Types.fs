@@ -36,13 +36,28 @@ type RoomEnergy =
         Capacity: int
     }
 
-/// What the decision layer knows about one structure that feeds spawning
-/// (spawn or extension) this tick.
+/// What a built structure is — or what a construction site will become
+/// once built. Projection vocabulary, distinct from the Intent vocabulary
+/// of placeable kinds (StructureKind).
+[<RequireQualifiedAccess>]
+type BuiltKind =
+    | Spawn
+    | Extension
+    | Tower
+    /// Any structure kind the decision layer has no rules for yet.
+    | Other
+
+/// What the decision layer knows about one energy-hungry structure
+/// (spawn, extension, or tower) this tick.
 type RefillableInfo =
     {
         Id: string
         /// Energy the structure's store can still take (0 = full).
         FreeCapacity: int
+        /// What kind of structure this is — the Refill rank layer's key
+        /// (ADR 0010): spawn-feeding kinds are feeding-tier work, towers
+        /// surplus-tier. To a creep both are the same transfer.
+        Kind: BuiltKind
     }
 
 /// What the decision layer knows about one energy source this tick.
@@ -72,16 +87,6 @@ type Terrain =
     | Plain
     | Swamp
     | Wall
-
-/// What a built structure is — or what a construction site will become
-/// once built. Projection vocabulary, distinct from the Intent vocabulary
-/// of placeable kinds (StructureKind).
-[<RequireQualifiedAccess>]
-type BuiltKind =
-    | Spawn
-    | Extension
-    /// Any structure kind the decision layer has no rules for yet.
-    | Other
 
 /// What kind of thing a projected target is.
 type TargetKind =
@@ -162,7 +167,8 @@ type Snapshot =
         /// Room name -> that room's shared spawn-energy bank. A room absent
         /// from the map banks nothing: its spawns wait.
         RoomEnergy: Map<string, RoomEnergy>
-        /// Structures that feed spawning, whether or not they currently have room.
+        /// Energy-hungry structures (spawn, extension, tower), whether or
+        /// not they currently have room.
         Refillables: RefillableInfo list
         Sources: SourceInfo list
         /// None when no spawn room has an owned controller (should not happen in practice).

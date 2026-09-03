@@ -33,6 +33,9 @@ let structureSpawn = "spawn"
 /// Screeps `STRUCTURE_EXTENSION` constant.
 let structureExtension = "extension"
 
+/// Screeps `STRUCTURE_TOWER` constant.
+let structureTower = "tower"
+
 /// Screeps `STRUCTURE_ROAD` constant.
 let structureRoad = "road"
 

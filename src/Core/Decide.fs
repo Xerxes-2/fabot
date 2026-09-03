@@ -344,14 +344,22 @@ let private fullDowngradeTimer level =
 let private downgradeDeadline level = fullDowngradeTimer level / 2
 
 /// Matching tier between applicable tasks (lower wins): feeding the economy
-/// (Harvest, Refill) outranks sinking surplus into construction (Build) or
-/// the controller (Upgrade). One exception: a controller inside the
-/// downgrade deadline makes Upgrade the colony's most urgent work,
-/// outranking even the feeding tier (ADR 0007).
+/// (Harvest, spawn-feeding Refill) outranks sinking surplus into
+/// construction (Build), the controller (Upgrade), or the guns — Refill is
+/// the one Task whose rank layers by target (ADR 0010): a tower Refill is
+/// surplus-tier, because the colony feeds its own reproduction before its
+/// guns. One exception: a controller inside the downgrade deadline makes
+/// Upgrade the colony's most urgent work, outranking even the feeding tier
+/// (ADR 0007).
 let private rank (snapshot: Snapshot) task =
     match task with
     | Harvest _ -> 0
-    | Refill _ -> 0
+    | Refill structureId ->
+        let isTower =
+            snapshot.Refillables
+            |> List.exists (fun r -> r.Id = structureId && r.Kind = BuiltKind.Tower)
+
+        if isTower then 1 else 0
     | Build _ -> 1
     | Upgrade _ ->
         let urgent =

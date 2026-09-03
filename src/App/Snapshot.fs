@@ -28,8 +28,13 @@ let private builtKindOf structureType =
         BuiltKind.Spawn
     elif structureType = structureExtension then
         BuiltKind.Extension
+    elif structureType = structureTower then
+        BuiltKind.Tower
     else
         BuiltKind.Other
+
+/// The energy-hungry structure types Refill keeps fed (ADR 0010).
+let private refillableTypes = [ structureSpawn; structureExtension; structureTower ]
 
 let private buildSpatial (spawn: ISpawn) : SpatialInfo =
     let room = spawn.room
@@ -156,13 +161,13 @@ let build () : Snapshot =
             spawns
             |> Array.collect (fun s -> s.room.find findMyStructures)
             |> Array.map (fun o -> o :?> IStructure)
-            |> Array.filter (fun st ->
-                st.structureType = structureSpawn || st.structureType = structureExtension)
+            |> Array.filter (fun st -> List.contains st.structureType refillableTypes)
             |> Array.distinctBy (fun st -> st.id)
             |> Array.map (fun st ->
                 {
                     Id = st.id
                     FreeCapacity = st.store.getFreeCapacity "energy"
+                    Kind = builtKindOf st.structureType
                 }
                 : RefillableInfo)
             |> Array.toList
