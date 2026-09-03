@@ -333,12 +333,26 @@ let droppedEnergy (atlas: Atlas) : (string * Pos) list =
 /// what the Layout's road gap subtracts (ADR 0011).
 let roadTiles (atlas: Atlas) : Set<Pos> = atlas.Spatial.Roads
 
-/// Tiles holding a road construction site — the census's other half: a
-/// pending road is not yet a road (ADR 0010) but its tile needs no new site.
-let pendingRoadTiles (atlas: Atlas) : Set<Pos> =
-    targetsOfKind atlas (Site BuiltKind.Road)
+/// Tiles of every placed target of one kind.
+let private tilesOfKind (atlas: Atlas) (kind: TargetKind) : Set<Pos> =
+    targetsOfKind atlas kind
     |> List.choose (fun id -> Map.tryFind id atlas.Spatial.TargetPositions)
     |> Set.ofList
+
+/// Tiles holding a road construction site — the census's other half: a
+/// pending road is not yet a road (ADR 0010) but its tile needs no new site.
+let pendingRoadTiles (atlas: Atlas) : Set<Pos> = tilesOfKind atlas (Site BuiltKind.Road)
+
+/// Tiles holding a built container — the container census's standing half
+/// (ADR 0012): a built container keeps the Layout from re-dropping its site.
+let containerTiles (atlas: Atlas) : Set<Pos> =
+    tilesOfKind atlas (Structure BuiltKind.Container)
+
+/// Tiles holding a container construction site — the census's pending
+/// half: a pending container is not yet a container but its tile needs no
+/// new site.
+let pendingContainerTiles (atlas: Atlas) : Set<Pos> =
+    tilesOfKind atlas (Site BuiltKind.Container)
 
 /// Whether a tile's terrain is swamp; a tile outside the projection is not.
 let isSwamp (atlas: Atlas) (tile: Pos) : bool =
@@ -381,6 +395,14 @@ let private seatTiles (spatial: SpatialInfo) (pos: Pos) : Set<Pos> =
         | Some Wall
         | None -> false)
     |> Set.ofList
+
+/// Seat tiles of a source — the geometry behind `seats`, for the Layout's
+/// source-container pick (ADR 0012). Empty for a source the projection
+/// does not place: an unplaceable source anchors nothing.
+let seatTilesOf (atlas: Atlas) (sourceId: string) : Set<Pos> =
+    Map.tryFind sourceId atlas.Spatial.TargetPositions
+    |> Option.map (seatTiles atlas.Spatial)
+    |> Option.defaultValue Set.empty
 
 /// Seats of a source: its Seat tile count. None for a source the
 /// projection does not place: no capacity is derivable, and unpriceable

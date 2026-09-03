@@ -214,6 +214,7 @@ type StructureKind =
     | Extension
     | Tower
     | Road
+    | Container
 
 /// One step of creep movement, engine vocabulary: Top decreases Y.
 type Direction =

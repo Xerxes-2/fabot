@@ -368,14 +368,20 @@ let private planLayout (snapshot: Snapshot) atlas : Intent list =
             |> List.choose (fun s -> Atlas.positionOf atlas s.Id)
             |> List.map (Atlas.adjacentWalkable atlas >> Set.ofList)
 
-        let trunkTiles =
+        // Trunks kept per source: the union paves the roads, and each
+        // source's own trunk anchors its container (ADR 0012).
+        let sourceTrunks =
             snapshot.Sources
             |> List.sortBy (fun s -> s.Id)
-            |> List.choose (fun s -> Atlas.positionOf atlas s.Id)
-            |> List.collect (fun sourcePos ->
-                upgradeArea :: spawnAreas
-                |> List.collect (Atlas.trunkPath atlas reserved sourcePos))
-            |> Set.ofList
+            |> List.choose (fun s ->
+                Atlas.positionOf atlas s.Id
+                |> Option.map (fun sourcePos ->
+                    s.Id,
+                    upgradeArea :: spawnAreas
+                    |> List.collect (Atlas.trunkPath atlas reserved sourcePos)
+                    |> Set.ofList))
+
+        let trunkTiles = sourceTrunks |> List.map snd |> List.fold Set.union Set.empty
 
         // The controller's Work Area paves its swamps and only its swamps —
         // upgraders shuttle within it, so the dear ground gets a road and
@@ -393,12 +399,78 @@ let private planLayout (snapshot: Snapshot) atlas : Intent list =
             |> fun wanted -> Set.difference wanted (Atlas.roadTiles atlas)
             |> fun wanted -> Set.difference wanted (Atlas.pendingRoadTiles atlas)
 
+        // Containers (ADR 0012), computed whole like everything else and
+        // RCL-gated by nothing — the engine allows them from level 0. Each
+        // source's container sits on the Seat nearest that source's trunk;
+        // the trunk's first tile is itself a Seat, so in practice the
+        // container lands where the trunk leaves the source and harvest
+        // overflow falls straight in. Seats are terrain geometry and
+        // trunks avoid only the reservations, so the pick never shifts as
+        // the container itself gets built.
+        let sourceContainerTiles =
+            sourceTrunks
+            |> List.choose (fun (sourceId, trunk) ->
+                let seats =
+                    Atlas.seatTilesOf atlas sourceId
+                    |> Set.filter (fun seat -> not (Set.contains seat reserved))
+
+                if Set.isEmpty trunk || Set.isEmpty seats then
+                    None
+                else
+                    seats
+                    |> Set.toList
+                    |> List.minBy (fun seat ->
+                        trunk |> Set.toList |> List.map (range seat) |> List.min, seat.X, seat.Y)
+                    |> Some)
+
+        // The controller container: an Upgrade-Work-Area tile beside a
+        // trunk, off the road itself and off every reservation — the
+        // buffer upgraders work from standing still, one tile from where
+        // the haulers drive. Judged from the same stable geometry as the
+        // Seat pick, so a standing container recomputes to its own tile.
+        let controllerContainerTile =
+            Atlas.positionOf atlas controller.Id
+            |> Option.bind (fun controllerPos ->
+                upgradeArea
+                |> Set.filter (fun tile ->
+                    not (Set.contains tile reserved)
+                    && not (Set.contains tile trunkTiles)
+                    && not (Set.contains tile workAreaSwamps)
+                    && trunkTiles |> Set.exists (fun t -> range tile t = 1))
+                |> Set.toList
+                |> function
+                    | [] -> None
+                    | candidates ->
+                        candidates
+                        |> List.minBy (fun tile -> range tile controllerPos, tile.X, tile.Y)
+                        |> Some)
+
+        // The container gap reads the projection's container census, tile
+        // for tile (ADR 0012): a built or pending container already
+        // claims its spot. A tile still owed its road defers the
+        // container too — the engine takes one construction site per
+        // tile, so the source container (planned onto the trunk's first
+        // tile) waits for the road to stand and then coexists with it.
+        let claimed =
+            [
+                Atlas.containerTiles atlas
+                Atlas.pendingContainerTiles atlas
+                Atlas.pendingRoadTiles atlas
+                roadGap
+            ]
+            |> List.fold Set.union Set.empty
+
+        let containerGap =
+            sourceContainerTiles @ Option.toList controllerContainerTile
+            |> List.filter (fun tile -> not (Set.contains tile claimed))
+
         let place kind tiles =
             tiles |> List.map (fun tile -> PlaceConstructionSite(room, tile, kind))
 
         place Tower (towerTiles |> List.truncate (towerGap controller.Level))
         @ place Extension (extensionTiles |> List.truncate (extensionGap controller.Level))
         @ place Road (Set.toList roadGap)
+        @ place Container containerGap
     | _ -> []
 
 /// Colony reflex beside the pipeline, the second after safe mode: every

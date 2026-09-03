@@ -588,9 +588,48 @@ let noSourceColony level =
             }
     }
 
+/// The trunk fixture with a second source walled into a pocket: every
+/// neighbour of (20,30) is wall terrain except the single Seat east of
+/// it — the W12S28-source-B shape (ADR 0012).
+let pocketColony level =
+    let srcB = { X = 20; Y = 30 }
+    let seat = { X = 21; Y = 30 }
+
+    let walled =
+        [
+            for dx in -1 .. 1 do
+                for dy in -1 .. 1 do
+                    { X = srcB.X + dx; Y = srcB.Y + dy }
+        ]
+        |> List.filter (fun tile -> tile <> seat)
+
+    let room =
+        { trunkRoom with
+            Terrain = (trunkRoom.Terrain, walled) ||> List.fold (fun acc t -> Map.add t Wall acc)
+        }
+        |> withTargets [ "src-b", srcB, Source ]
+
+    { trunkColony level with
+        Sources = [ { Id = "src-a" }; { Id = "src-b" } ]
+        Spatial = room
+    }
+
 let sitesOfKind kind intents =
     placementIntents intents
     |> List.choose (fun (_, pos, k) -> if k = kind then Some pos else None)
+
+/// The colony with its own road plan already standing: the state the
+/// source containers drop in — a container defers to a road site on its
+/// tile (one construction site per tile) and coexists with the built road.
+let withRoadsBuilt colony =
+    let { Intents = intents } = decide colony Map.empty Set.empty
+
+    { colony with
+        Spatial =
+            { colony.Spatial with
+                Roads = sitesOfKind Road intents |> Set.ofList
+            }
+    }
 
 let chebyshev a b = max (abs (a.X - b.X)) (abs (a.Y - b.Y))
 
@@ -708,6 +747,105 @@ let layoutTests =
                 Expect.isEmpty
                     (sitesOfKind Road intents)
                     "the gap reads the projection's road census: both tiles are claimed"
+            }
+
+            test "each source gets one container on the Seat where its trunk starts" {
+                let colony = withRoadsBuilt (trunkColony 2)
+                let { Intents = intents } = decide colony Map.empty Set.empty
+
+                let sourceContainers =
+                    sitesOfKind Container intents
+                    |> List.filter (fun tile -> chebyshev tile { X = 15; Y = 25 } = 1)
+
+                Expect.hasLength sourceContainers 1 "one container per source"
+
+                Expect.contains
+                    colony.Spatial.Roads
+                    sourceContainers.Head
+                    "the Seat nearest the trunk is the trunk's own first tile"
+            }
+
+            test "a container never shares a tile with a planned road site" {
+                // One construction site per tile (engine rule): on a fresh
+                // plan the source container defers to the trunk road site
+                // under it and drops only once that road stands.
+                let { Intents = intents } = decide (trunkColony 2) Map.empty Set.empty
+                let roads = sitesOfKind Road intents |> Set.ofList
+
+                for tile in sitesOfKind Container intents do
+                    Expect.isFalse
+                        (Set.contains tile roads)
+                        "the container waits for the road on its tile"
+            }
+
+            test "the controller container lands in the Work Area beside a trunk" {
+                let { Intents = intents } = decide (trunkColony 2) Map.empty Set.empty
+                let controllerPos = { X = 35; Y = 25 }
+
+                let controllerContainers =
+                    sitesOfKind Container intents
+                    |> List.filter (fun tile -> chebyshev tile controllerPos <= 3)
+
+                Expect.hasLength controllerContainers 1 "exactly one controller container"
+
+                let tile = controllerContainers.Head
+                let roads = sitesOfKind Road intents |> Set.ofList
+
+                Expect.isTrue
+                    (roads |> Set.exists (fun road -> chebyshev road tile = 1))
+                    "the container sits adjacent to a trunk tile"
+
+                Expect.isFalse (Set.contains tile roads) "the container stays off the road itself"
+            }
+
+            test "containers have no RCL gate — level 1 already places both kinds" {
+                let { Intents = intents } =
+                    decide (withRoadsBuilt (trunkColony 1)) Map.empty Set.empty
+
+                Expect.hasLength
+                    (sitesOfKind Container intents)
+                    2
+                    "one source container and one controller container"
+            }
+
+            test "a one-Seat source gets its container on that Seat" {
+                let { Intents = intents } =
+                    decide (withRoadsBuilt (pocketColony 2)) Map.empty Set.empty
+
+                Expect.contains
+                    (sitesOfKind Container intents)
+                    { X = 21; Y = 30 }
+                    "the single Seat is the nearest Seat to the pocket source's trunk"
+            }
+
+            test "built containers and pending container sites are never placed again" {
+                let colony = withRoadsBuilt (trunkColony 2)
+                let planned = decide colony Map.empty Set.empty
+
+                let standing =
+                    match sitesOfKind Container planned.Intents with
+                    | [ a; b ] ->
+                        [
+                            "can-1", a, Structure BuiltKind.Container
+                            "can-site-1", b, Site BuiltKind.Container
+                        ]
+                    | other -> failtest $"expected two planned container sites, got %A{other}"
+
+                let snapshot =
+                    { colony with
+                        Spatial = colony.Spatial |> withTargets standing
+                    }
+
+                let { Intents = intents } = decide snapshot Map.empty Set.empty
+
+                Expect.isEmpty
+                    (sitesOfKind Container intents)
+                    "the census claims both tiles: nothing re-drops"
+
+                Expect.equal
+                    (sitesOfKind Road intents)
+                    (sitesOfKind Road planned.Intents)
+                    "standing containers never perturb the road plan"
             }
         ]
 
