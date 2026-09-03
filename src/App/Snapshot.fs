@@ -32,11 +32,17 @@ let private builtKindOf structureType =
         BuiltKind.Tower
     elif structureType = structureRoad then
         BuiltKind.Road
+    elif structureType = structureContainer then
+        BuiltKind.Container
     else
         BuiltKind.Other
 
 /// The energy-hungry structure types Refill keeps fed (ADR 0010).
 let private refillableTypes = [ structureSpawn; structureExtension; structureTower ]
+
+/// The structure types Repair keeps whole — the kinds whose hits enter
+/// the projection (ADR 0010, ADR 0012).
+let private repairableTypes = [ structureRoad; structureContainer ]
 
 let private buildSpatial (spawn: ISpawn) : SpatialInfo =
     let room = spawn.room
@@ -139,12 +145,19 @@ let private buildSpatial (spawn: ISpawn) : SpatialInfo =
             |> Array.filter (fun st -> st.structureType = structureRoad)
             |> Array.map (fun st -> posOf st.pos)
             |> Set.ofArray
-        // Hits on repairable kinds only — roads today (ADR 0010): fields
-        // nobody decides on stay out of the projection.
+        // Hits on repairable kinds only — roads and containers (ADR 0010,
+        // ADR 0012): fields nobody decides on stay out of the projection.
         Hits =
             structures
-            |> Array.filter (fun st -> st.structureType = structureRoad)
+            |> Array.filter (fun st -> List.contains st.structureType repairableTypes)
             |> Array.map (fun st -> st.id, { Hits = st.hits; HitsMax = st.hitsMax })
+            |> Map.ofArray
+        // Stored energy on containers only, same rule: the stock the
+        // logistics Tasks judge a container by (ADR 0012).
+        Stores =
+            structures
+            |> Array.filter (fun st -> st.structureType = structureContainer)
+            |> Array.map (fun st -> st.id, st.store.getUsedCapacity "energy")
             |> Map.ofArray
     }
 

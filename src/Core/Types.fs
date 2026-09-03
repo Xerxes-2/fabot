@@ -45,6 +45,7 @@ type BuiltKind =
     | Extension
     | Tower
     | Road
+    | Container
     /// Any structure kind the decision layer has no rules for yet.
     | Other
 
@@ -127,8 +128,12 @@ type SpatialInfo =
         /// construction site is not yet a road (ADR 0010).
         Roads: Set<Pos>
         /// Target id -> current/max hits, repairable kinds only (roads
-        /// today) — fields nobody decides on stay out (ADR 0010).
+        /// and containers — ADR 0010, ADR 0012); fields nobody decides
+        /// on stay out.
         Hits: Map<string, HitsInfo>
+        /// Target id -> energy currently stored, containers only (ADR
+        /// 0012): the stock the logistics Tasks judge a container by.
+        Stores: Map<string, int>
     }
 
 [<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
@@ -144,6 +149,7 @@ module SpatialInfo =
             Obstacles = Set.empty
             Roads = Set.empty
             Hits = Map.empty
+            Stores = Map.empty
         }
 
 /// What the decision layer knows about one construction site this tick.

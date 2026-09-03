@@ -2470,6 +2470,74 @@ let repairTests =
                     "the economy is fed before roads are patched: rank decided"
             }
 
+            test "a container below half hits yields a Repair task; at half it yields none" {
+                let low = bareRespawn |> withHits "cont-1" BuiltKind.Container 124999 250000
+                let half = bareRespawn |> withHits "cont-1" BuiltKind.Container 125000 250000
+
+                Expect.equal
+                    (repairTasks (planTasks low))
+                    [ "cont-1" ]
+                    "below the trigger: one Repair per ailing container"
+
+                Expect.isEmpty
+                    (repairTasks (planTasks half))
+                    "at half hits the container is left alone"
+            }
+
+            test "a whole container produces no Repair" {
+                let whole = bareRespawn |> withHits "cont-1" BuiltKind.Container 250000 250000
+                Expect.isEmpty (repairTasks (planTasks whole)) "a whole container needs nothing"
+            }
+
+            test "container Repair is surplus-tier: feeding still wins the creep" {
+                // The same duel the road fights: a hungry spawn and an ailing
+                // container bid for one loaded creep, and feeding wins on rank.
+                let snapshot =
+                    { bareRespawn with
+                        Sources = []
+                        Controller = None
+                        Refillables = [ refillable "spawn-1" 50 BuiltKind.Spawn ]
+                        Creeps = [ worker "w1" 50 0 ]
+                    }
+                    |> withHits "cont-1" BuiltKind.Container 100 250000
+
+                let { Verdicts = verdicts } = decide snapshot Map.empty Set.empty
+
+                Expect.equal
+                    verdicts
+                    [ Verdict.Matched("w1", taskId (Refill "spawn-1"), MatchFactor.Rank) ]
+                    "the colony feeds itself before it mends containers: rank decided"
+            }
+
+            test "a surplus creep mends the container: assignment, intent and bubble" {
+                // Feeding satisfied — spawn full, creep full — so the ailing
+                // container is the only work left, exactly like a road.
+                let snapshot =
+                    { bareRespawn with
+                        Controller = None
+                        Creeps = [ worker "w1" 50 0 ]
+                    }
+                    |> withHits "cont-1" BuiltKind.Container 100 250000
+
+                let {
+                        Intents = intents
+                        Assignments = assignments
+                    } =
+                    decide snapshot Map.empty Set.empty
+
+                Expect.equal
+                    (Map.tryFind "w1" assignments)
+                    (Some(taskId (Repair "cont-1")))
+                    "the surplus creep is assigned to the container Repair"
+
+                Expect.contains
+                    intents
+                    (RepairStructure("w1", "cont-1"))
+                    "the assignment emits the repair intent"
+
+                Expect.equal (sayIntents intents) [ "w1", "🔧" ] "a repairing creep says 🔧"
+            }
+
             test "an empty creep is inapplicable to Repair" {
                 // Nothing to spend: no energy makes Repair unworkable, and the
                 // remembered assignment is released rather than kept.

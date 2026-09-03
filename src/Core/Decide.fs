@@ -125,10 +125,10 @@ let taskId =
     | Repair structureId -> $"repair:{structureId}"
     | Upgrade controllerId -> $"upgrade:{controllerId}"
 
-/// The built kinds Repair keeps whole (ADR 0010): roads today, containers
-/// when they enter. Non-repairable kinds (spawn, extension, tower) never
+/// The built kinds Repair keeps whole (ADR 0010, ADR 0012): roads and
+/// containers. Non-repairable kinds (spawn, extension, tower) never
 /// enter the pool on low hits, whatever the projection carries.
-let private repairableKinds = [ BuiltKind.Road ]
+let private repairableKinds = [ BuiltKind.Road; BuiltKind.Container ]
 
 /// The Repair trigger: a repairable structure enters the pool when its
 /// hits sink strictly below this fraction of max, and leaves it once

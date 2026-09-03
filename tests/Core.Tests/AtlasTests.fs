@@ -256,6 +256,67 @@ let placementQueryTests =
                     "pile tiles stay buildable"
             }
 
+            test
+                "a placed container is a target, not an obstacle: repairable in place, unbuildable under" {
+                // Container at (10,10) on a fully projected 7x7 plain square,
+                // carrying hits and store as the projection now does.
+                let tiles =
+                    [
+                        for x in 7..13 do
+                            for y in 7..13 -> { X = x; Y = y }, Plain
+                    ]
+
+                let atlas =
+                    { spatial [ "cont-1", { X = 10; Y = 10 } ] tiles with
+                        TargetKinds = Map.ofList [ "cont-1", Structure BuiltKind.Container ]
+                        Hits = Map.ofList [ "cont-1", { Hits = 100; HitsMax = 250000 } ]
+                        Stores = Map.ofList [ "cont-1", 800 ]
+                        CreepPositions = Map.ofList [ "w", { X = 7; Y = 7 } ]
+                    }
+                    |> snapshotWith [ worker "w" ]
+                    |> ofSnapshot
+
+                let area = workArea atlas (Repair "cont-1")
+
+                Expect.hasLength
+                    area
+                    49
+                    "the full range-3 square stands: a container blocks no tile, its own included"
+
+                Expect.equal
+                    (travelCost atlas "w" (Repair "cont-1"))
+                    (Some 0)
+                    "the corner creep already stands inside the Work Area"
+
+                Expect.isFalse
+                    (List.contains { X = 10; Y = 10 } (buildableTiles atlas))
+                    "the container's tile takes no construction site"
+            }
+
+            test "an unplaced container gets the documented answers: empty area, free pricing" {
+                // Hits arrive without a position — unpriceable geometry never
+                // counts against a Task (ADR 0004).
+                let atlas =
+                    { spatial [] [ { X = 10; Y = 10 }, Plain ] with
+                        TargetKinds = Map.ofList [ "cont-1", Structure BuiltKind.Container ]
+                        Hits = Map.ofList [ "cont-1", { Hits = 100; HitsMax = 250000 } ]
+                        CreepPositions = Map.ofList [ "w", { X = 10; Y = 10 } ]
+                    }
+                    |> snapshotWith [ worker "w" ]
+                    |> ofSnapshot
+
+                Expect.equal (workArea atlas (Repair "cont-1")) Set.empty "nowhere to stand"
+
+                Expect.equal
+                    (travelCost atlas "w" (Repair "cont-1"))
+                    (Some 0)
+                    "an unplaced target prices at 0, never against the Task"
+
+                Expect.isTrue
+                    (mayAct atlas "w" (Repair "cont-1"))
+                    "an unplaced target never blocks the action"
+            }
+
             test "extension censuses count exactly the built and pending extensions" {
                 let atlas =
                     { SpatialInfo.empty with
