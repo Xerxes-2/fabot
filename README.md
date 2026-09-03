@@ -31,6 +31,47 @@ npm run deploy   # build (Fable → esbuild → dist/main.js) + upload to the se
 
 Or separately: `npm run build` / `npm run upload`.
 
+## Profiling
+
+```sh
+npm run build
+npm run profile            # 100 ticks; or: npm run profile -- 500 [top-N]
+```
+
+`npm run profile` drives the compiled `loop()` in Node against a stub colony
+under the V8 sampling profiler and prints ms/tick plus two hotspot tables
+(by self time and by inclusive time). The raw `build/fabot.cpuprofile` opens
+in Chrome DevTools or speedscope.
+
+The stub (in `scripts/profile.mjs`) mirrors the live colony's shape at the
+#50 baseline — W12S28 at RCL3: 2 sources, one spawn, a controller, ~25
+trunk-road tiles (spawn → source container, spawn → controller container,
+a couple below half hits so Repair pools tasks), a source container and a
+controller container, 3 extension sites, and 8 creeps (2 Anchors, 3 hauler
+units, 3 worker units). It implements only the API surface declared in
+`src/App/Bindings.fs` and never touches the Screeps network API.
+
+The instrument recognizes the known hotspots from #50 — a run on the
+machine that recorded that baseline shows ~15 ms/tick with `floodFrom` at
+~11% self / ~39% inclusive, `planLayout` ~32% inclusive (`trunkPath` ~25%),
+`resolve` ~20%, `matchCreeps` ~15%, and the Fable structural-comparison
+family (`compare` / `recordCompareTo` / `sameConstructor` / `item`) around
+a third of self time.
+
+Limits to keep in mind when reading the numbers:
+
+- The terrain is synthetic (deterministic walls/swamp over a plain room),
+  not W12S28's map; flood and path costs are the right order, not exact.
+- The world is frozen: every intent is accepted (`OK`) but nothing mutates
+  between ticks except `Game.time` and whatever the bot writes to `Memory`.
+  Costs that only appear when state changes tick-to-tick are underweighted.
+- No hostiles, towers, or dropped energy piles: the fire, safe-mode, and
+  pickup paths are measured at their quiet-colony (near-zero) cost.
+- Engine-side costs (intent execution, `Memory` JSON serialization) are not
+  simulated.
+- Absolute ms/tick is machine-dependent (the official server is several
+  times slower); the relative percentages are the signal.
+
 ## Layout
 
 - `src/Core` — pure decision layer (no JS/Fable deps). Single seam:
