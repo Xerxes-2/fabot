@@ -405,9 +405,12 @@ let private moveIntentFor
                 }
             | None -> parked (rankOf task)
 
-/// Resolver core (per screeps-cartographer): claim tiles priority
-/// descending, most-constrained first within a priority. Claiming a tile
-/// somebody stands on displaces that occupant: the claimed tile leaves the
+/// Resolver core (per screeps-cartographer): movers claim before creeps
+/// already standing where they want to be — a stay-put claim never walls
+/// off a traveller's path; the stayer is displaced instead and shuffles
+/// or swaps. Within each class claims go priority descending,
+/// most-constrained first within a priority. Claiming a tile somebody
+/// stands on displaces that occupant: the claimed tile leaves the
 /// occupant's candidates and the claimant's vacated tile joins them as a
 /// last resort, so an occupant that cannot stand elsewhere swaps with its
 /// displacer. An occupant left with fewer than two open candidates
@@ -420,6 +423,13 @@ let private arbitrate
     let openCandidates (claimed: Set<Pos>) (intent: MoveIntent) =
         intent.Candidates |> List.filter (fun tile -> not (Set.contains tile claimed))
 
+    // A creep whose preferred tile is the one it stands on. Travellers
+    // settle first: a stayer's claim can always be honoured by shuffling
+    // or swapping it later, but a stayer settling first would wall off a
+    // traveller's only path for the tick.
+    let staying (intent: MoveIntent) =
+        List.tryHead intent.Candidates = Some intent.Pos
+
     let rec settle (pending: Map<string, MoveIntent>) urgent claimed resolved =
         let next =
             match urgent |> List.filter (fun name -> Map.containsKey name pending) with
@@ -431,7 +441,8 @@ let private arbitrate
                     pending
                     |> Map.toList
                     |> List.map snd
-                    |> List.minBy (fun i -> i.Rank, List.length (openCandidates claimed i), i.Creep)
+                    |> List.minBy (fun i ->
+                        staying i, i.Rank, List.length (openCandidates claimed i), i.Creep)
                     |> fun intent -> Some(intent, [])
 
         match next with

@@ -1365,6 +1365,43 @@ let arbitrationTests =
                     "the displaced harvester still harvests this tick"
             }
 
+            test "a builder blocked by a seated harvester still makes progress" {
+                // Corridor y=12, x 8..15. Source at (10,11) seats the
+                // harvester mid-corridor; the site sits at the far end. The
+                // builder's only path runs through the seated harvester's
+                // tile — it must not stand idle while a swap (or an in-area
+                // shuffle by the harvester) would let it pass.
+                let terrain = [ for x in 8..15 -> { X = x; Y = 12 }, Plain ]
+
+                let snapshot =
+                    { bareRespawn with
+                        Sources = [ { Id = "src-a" } ]
+                        ConstructionSites = [ { Id = "site-1" } ]
+                        Creeps = [ worker "har" 0 50; worker "bob" 50 0 ]
+                        Spatial =
+
+                            { spatial
+                                  [ "src-a", { X = 10; Y = 11 }; "site-1", { X = 15; Y = 12 } ]
+                                  terrain with
+                                CreepPositions =
+                                    Map.ofList
+                                        [ "har", { X = 10; Y = 12 }; "bob", { X = 9; Y = 12 } ]
+                            }
+                    }
+
+                let assigned = [ "har", Harvest "src-a"; "bob", Build "site-1" ]
+                let moves = resolveOn snapshot assigned |> moveIntents
+
+                Expect.isTrue
+                    (moves |> List.exists (fun (name, _) -> name = "bob"))
+                    "the travelling builder moves instead of stalling behind the seat"
+
+                Expect.contains
+                    (emitOn snapshot assigned)
+                    (HarvestSource("har", "src-a"))
+                    "the harvester still harvests this tick"
+            }
+
             test "an occupant with no in-area alternative swaps with its displacer" {
                 // The upgrader's only in-area standing tile is the Seat
                 // itself: every adjacent walkable tile is outside upgrade
