@@ -185,7 +185,13 @@ let private isSourceContainerTile (snapshot: Snapshot) pos =
 /// Planner: rebuild this tick's full Task pool from the Snapshot. Pure and
 /// from scratch every tick — Tasks are never persisted.
 let planTasks (snapshot: Snapshot) : Task list =
-    let harvests = snapshot.Sources |> List.map (fun s -> Harvest s.Id)
+    // Harvest exists only for a stocked source (ADR 0013) — the Repair
+    // shape: the task is gone while the source is drained, releasing its
+    // holders through TaskGone rather than stranding them at a dry rock.
+    let harvests =
+        snapshot.Sources
+        |> List.filter (fun s -> s.Stocked)
+        |> List.map (fun s -> Harvest s.Id)
 
     let refills =
         snapshot.Refillables

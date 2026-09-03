@@ -59,6 +59,8 @@ type IRoomPosition =
 type ISource =
     abstract id: string
     abstract pos: IRoomPosition
+    /// Energy remaining in the source this regen cycle.
+    abstract energy: int
 
 type IStructure =
     abstract id: string

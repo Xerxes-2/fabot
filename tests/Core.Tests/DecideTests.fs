@@ -35,6 +35,9 @@ let controllerAt level =
         SafeModeActive = false
     }
 
+/// A stocked source — the kind the Planner pools a Harvest for (ADR 0013).
+let source id : SourceInfo = { Id = id; Stocked = true }
+
 /// An energy-hungry structure of the given kind with the given free capacity.
 let refillable id freeCapacity kind =
     {
@@ -49,7 +52,7 @@ let bareRespawn =
         Spawns = [ spawn ]
         RoomEnergy = bank 300 300
         Refillables = [ refillable "spawn-1" 0 BuiltKind.Spawn ]
-        Sources = [ { Id = "src-a" }; { Id = "src-b" } ]
+        Sources = [ source "src-a"; source "src-b" ]
         Controller = Some(controllerAt 1)
         ConstructionSites = []
         Creeps = []
@@ -301,6 +304,24 @@ let plannerTests =
                     harvests
                     [ "src-a"; "src-b" ]
                     "each source gets exactly one Harvest task"
+            }
+
+            test "a drained source pools no Harvest task" {
+                // ADR 0013: the task exists while the source holds energy
+                // and is gone otherwise — the Repair shape. Holders are
+                // released through the existing TaskGone path.
+                let snapshot =
+                    { bareRespawn with
+                        Sources = [ source "src-a"; { source "src-b" with Stocked = false } ]
+                    }
+
+                let harvests =
+                    planTasks snapshot
+                    |> List.choose (function
+                        | Harvest sourceId -> Some sourceId
+                        | _ -> None)
+
+                Expect.equal harvests [ "src-a" ] "only the stocked source is worth digging"
             }
 
             test "a controller yields an Upgrade task" {
@@ -601,7 +622,7 @@ let trunkRoom =
 /// The trunk fixture's colony at a controller level.
 let trunkColony level =
     { bareRespawn with
-        Sources = [ { Id = "src-a" } ]
+        Sources = [ source "src-a" ]
         Controller = Some(controllerAt level)
         Spatial = trunkRoom
     }
@@ -639,7 +660,7 @@ let pocketColony level =
         |> withTargets [ "src-b", srcB, Source ]
 
     { trunkColony level with
-        Sources = [ { Id = "src-a" }; { Id = "src-b" } ]
+        Sources = [ source "src-a"; source "src-b" ]
         Spatial = room
     }
 
@@ -910,7 +931,7 @@ let seatTests =
             test "a single-Seat source gets exactly one of three empty creeps" {
                 let snapshot =
                     { bareRespawn with
-                        Sources = [ { Id = "src-a" } ]
+                        Sources = [ source "src-a" ]
                         Creeps = [ worker "w1" 0 50; worker "w2" 0 50; worker "w3" 0 50 ]
                         Spatial =
 
@@ -963,7 +984,7 @@ let seatTests =
             test "a creep denied a Seat falls through to a lower-rank task" {
                 let snapshot =
                     { bareRespawn with
-                        Sources = [ { Id = "src-a" } ]
+                        Sources = [ source "src-a" ]
                         Creeps = [ worker "w1" 25 25; worker "w2" 25 25 ]
                         Spatial =
 
@@ -984,7 +1005,7 @@ let seatTests =
             test "Seats are counted from terrain: swamp is a Seat, wall and absent are not" {
                 let snapshot =
                     { bareRespawn with
-                        Sources = [ { Id = "src-a" } ]
+                        Sources = [ source "src-a" ]
                         Creeps = [ worker "w1" 0 50; worker "w2" 0 50; worker "w3" 0 50 ]
                         Spatial =
 
@@ -1009,7 +1030,7 @@ let seatTests =
             test "oversold remembered assignments are trimmed back to the Seat count" {
                 let snapshot =
                     { bareRespawn with
-                        Sources = [ { Id = "src-a" } ]
+                        Sources = [ source "src-a" ]
                         Creeps = [ worker "w1" 0 50; worker "w2" 0 50 ]
                         Spatial =
 
@@ -1032,7 +1053,7 @@ let seatTests =
             test "without a spatial projection Harvest stays uncapped" {
                 let snapshot =
                     { bareRespawn with
-                        Sources = [ { Id = "src-a" } ]
+                        Sources = [ source "src-a" ]
                         Creeps = [ worker "w1" 0 50; worker "w2" 0 50; worker "w3" 0 50 ]
                     }
 
@@ -1055,7 +1076,7 @@ let partApplicabilityTests =
                 // part can make these tasks inapplicable.
                 let snapshot =
                     { bareRespawn with
-                        Sources = [ { Id = "src-a" } ]
+                        Sources = [ source "src-a" ]
                         ConstructionSites = [ { Id = "site-1" } ]
                         Controller = Some(controllerAt 2)
                         Creeps = [ creepWith "hauler" 25 25 [ Carry; Move ] ]
@@ -1089,7 +1110,7 @@ let partApplicabilityTests =
             test "a remembered assignment to a task the body cannot do is released" {
                 let snapshot =
                     { bareRespawn with
-                        Sources = [ { Id = "src-a" } ]
+                        Sources = [ source "src-a" ]
                         ConstructionSites = []
                         Controller = None
                         Creeps = [ creepWith "hauler" 0 50 [ Carry; Move ] ]
@@ -1132,8 +1153,8 @@ let travelCostTests =
                         Spatial = nearFarCorridor [ "w1", { X = 10; Y = 17 } ]
                     }
 
-                let far: SourceInfo = { Id = "src-far" }
-                let near: SourceInfo = { Id = "src-near" }
+                let far: SourceInfo = source "src-far"
+                let near: SourceInfo = source "src-near"
 
                 for sources in [ [ far; near ]; [ near; far ] ] do
                     let { Assignments = assignments } =
@@ -1164,7 +1185,7 @@ let travelCostTests =
 
                 let snapshot =
                     { bareRespawn with
-                        Sources = [ { Id = "src-swamp" }; { Id = "src-plain" } ]
+                        Sources = [ source "src-swamp"; source "src-plain" ]
                         Creeps = [ worker "w1" 0 50 ]
                         Spatial =
 
@@ -1220,7 +1241,7 @@ let travelCostTests =
                 // already holds the far source from an earlier tick.
                 let snapshot =
                     { bareRespawn with
-                        Sources = [ { Id = "src-far" }; { Id = "src-near" } ]
+                        Sources = [ source "src-far"; source "src-near" ]
                         Creeps = [ worker "w1" 0 50 ]
                         Spatial = nearFarCorridor [ "w1", { X = 10; Y = 17 } ]
                     }
@@ -1239,7 +1260,7 @@ let travelCostTests =
                 // no flood can run — the pick falls back to (rank, load).
                 let snapshot =
                     { bareRespawn with
-                        Sources = [ { Id = "src-far" }; { Id = "src-near" } ]
+                        Sources = [ source "src-far"; source "src-near" ]
                         Creeps = [ worker "w1" 0 50 ]
                         Spatial = nearFarCorridor []
                     }
@@ -1269,7 +1290,7 @@ let travelCostTests =
 
                 let snapshot =
                     { bareRespawn with
-                        Sources = [ { Id = "src-a" } ]
+                        Sources = [ source "src-a" ]
                         Creeps = [ worker "w1" 25 25 ]
                         Spatial =
 
@@ -1312,7 +1333,7 @@ let travelCostTests =
 
                 let snapshot =
                     { bareRespawn with
-                        Sources = [ { Id = "src-near" }; { Id = "src-far" } ]
+                        Sources = [ source "src-near"; source "src-far" ]
                         Creeps = [ heavy; worker "runner" 0 50 ]
                         Spatial =
 
@@ -1375,7 +1396,7 @@ let movementTests =
 
                 let snapshot =
                     { bareRespawn with
-                        Sources = [ { Id = "src-a" } ]
+                        Sources = [ source "src-a" ]
                         Creeps = [ worker "w1" 0 50 ]
                         Spatial =
 
@@ -1397,7 +1418,7 @@ let movementTests =
             test "a creep inside its Work Area acts and does not move" {
                 let snapshot =
                     { bareRespawn with
-                        Sources = [ { Id = "src-a" } ]
+                        Sources = [ source "src-a" ]
                         Creeps = [ worker "w1" 0 50 ]
                         Spatial =
 
@@ -1430,7 +1451,7 @@ let movementTests =
 
                 let snapshot =
                     { bareRespawn with
-                        Sources = [ { Id = "src-a" } ]
+                        Sources = [ source "src-a" ]
                         Creeps = [ worker "w1" 0 50 ]
                         Spatial =
 
@@ -1481,7 +1502,7 @@ let movementTests =
 
                 let snapshot =
                     { bareRespawn with
-                        Sources = [ { Id = "src-a" } ]
+                        Sources = [ source "src-a" ]
                         Creeps = [ worker "w1" 25 25 ]
                         Spatial =
 
@@ -1540,7 +1561,7 @@ let movementTests =
                 // waits instead of thrashing.
                 let snapshot =
                     { bareRespawn with
-                        Sources = [ { Id = "src-a" } ]
+                        Sources = [ source "src-a" ]
                         Creeps = [ worker "w1" 0 50 ]
                         Spatial =
 
@@ -1622,7 +1643,7 @@ let unreachableTests =
 
                 let snapshot =
                     { bareRespawn with
-                        Sources = [ { Id = "src-a" } ]
+                        Sources = [ source "src-a" ]
                         Creeps = [ worker "w1" 25 25; worker "w2" 0 50 ]
                         Spatial =
 
@@ -1652,7 +1673,7 @@ let unreachableTests =
 
                 let snapshot =
                     { bareRespawn with
-                        Sources = [ { Id = "src-a" } ]
+                        Sources = [ source "src-a" ]
                         Creeps = [ worker "w1" 0 50 ]
                         Spatial =
 
@@ -1705,7 +1726,7 @@ let unreachableTests =
 
                 let snapshot =
                     { bareRespawn with
-                        Sources = [ { Id = "src-a" } ]
+                        Sources = [ source "src-a" ]
                         Creeps = [ worker "w1" 0 50 ]
                         Spatial = spatial [ "src-a", { X = 10; Y = 10 } ] terrain
                     }
@@ -1758,7 +1779,7 @@ let headOnSwap =
         ]
 
     { bareRespawn with
-        Sources = [ { Id = "src-a" }; { Id = "src-b" } ]
+        Sources = [ source "src-a"; source "src-b" ]
         Creeps = [ worker "wa" 0 50; worker "wb" 0 50 ]
         Spatial =
 
@@ -1790,7 +1811,7 @@ let arbitrationTests =
 
                 let snapshot =
                     { bareRespawn with
-                        Sources = [ { Id = "src-a" } ]
+                        Sources = [ source "src-a" ]
                         Creeps = [ worker "har" 0 50; worker "upg" 50 0 ]
                         Spatial =
 
@@ -1875,7 +1896,7 @@ let arbitrationTests =
 
                 let snapshot =
                     { bareRespawn with
-                        Sources = [ { Id = "src-a" } ]
+                        Sources = [ source "src-a" ]
                         Creeps = [ worker "w1" 0 50; worker "w2" 50 0 ]
                         Spatial =
 
@@ -1911,7 +1932,7 @@ let arbitrationTests =
 
                 let snapshot =
                     { bareRespawn with
-                        Sources = [ { Id = "src-a" } ]
+                        Sources = [ source "src-a" ]
                         Creeps = [ worker "h" 0 50; worker "u" 50 0 ]
                         Spatial =
 
@@ -1947,7 +1968,7 @@ let arbitrationTests =
 
                 let snapshot =
                     { bareRespawn with
-                        Sources = [ { Id = "src-a" } ]
+                        Sources = [ source "src-a" ]
                         Creeps = [ worker "h1" 0 50; worker "h2" 0 50 ]
                         Spatial =
 
@@ -1980,7 +2001,7 @@ let arbitrationTests =
 
                 let snapshot =
                     { bareRespawn with
-                        Sources = [ { Id = "src-a" } ]
+                        Sources = [ source "src-a" ]
                         ConstructionSites = [ { Id = "site-1" } ]
                         Creeps = [ worker "har" 0 50; worker "bob" 50 0 ]
                         Spatial =
@@ -2017,7 +2038,7 @@ let arbitrationTests =
 
                 let snapshot =
                     { bareRespawn with
-                        Sources = [ { Id = "src-a" } ]
+                        Sources = [ source "src-a" ]
                         ConstructionSites = [ { Id = "site-1" } ]
                         Creeps = [ { worker "har" 0 50 with Fatigue = 4 }; worker "bob" 50 0 ]
                         Spatial =
@@ -2052,7 +2073,7 @@ let arbitrationTests =
 
                 let snapshot =
                     { bareRespawn with
-                        Sources = [ { Id = "src-a" } ]
+                        Sources = [ source "src-a" ]
                         Creeps = [ { worker "w1" 0 50 with Fatigue = 4 } ]
                         Spatial =
 
@@ -2078,7 +2099,7 @@ let arbitrationTests =
 
                 let snapshot =
                     { bareRespawn with
-                        Sources = [ { Id = "src-a" } ]
+                        Sources = [ source "src-a" ]
                         ConstructionSites = [ { Id = "site-1" } ]
                         Creeps = [ worker "har" 0 50; worker "bob" 50 0 ]
                         Spatial =
@@ -2116,7 +2137,7 @@ let arbitrationTests =
 
                 let snapshot =
                     { bareRespawn with
-                        Sources = [ { Id = "src-a" } ]
+                        Sources = [ source "src-a" ]
                         Creeps = [ worker "har" 0 50; worker "upg" 50 0 ]
                         Spatial =
 
@@ -2156,7 +2177,7 @@ let resolverVerdictTests =
 
                 let snapshot =
                     { bareRespawn with
-                        Sources = [ { Id = "src-a" } ]
+                        Sources = [ source "src-a" ]
                         ConstructionSites = [ { Id = "site-1" } ]
                         Creeps = [ { worker "har" 0 50 with Fatigue = 4 }; worker "bob" 50 0 ]
                         Spatial =
@@ -2182,7 +2203,7 @@ let resolverVerdictTests =
 
                 let snapshot =
                     { bareRespawn with
-                        Sources = [ { Id = "src-a" } ]
+                        Sources = [ source "src-a" ]
                         Creeps = [ { worker "w1" 0 50 with Fatigue = 4 } ]
                         Spatial =
 
@@ -2213,7 +2234,7 @@ let resolverVerdictTests =
 
                 let snapshot =
                     { bareRespawn with
-                        Sources = [ { Id = "src-a" } ]
+                        Sources = [ source "src-a" ]
                         Creeps = [ worker "har" 0 50; worker "upg" 50 0 ]
                         Spatial =
 
@@ -2248,7 +2269,7 @@ let resolverVerdictTests =
 
                 let snapshot =
                     { bareRespawn with
-                        Sources = [ { Id = "src-a" } ]
+                        Sources = [ source "src-a" ]
                         Creeps = [ worker "h" 0 50; worker "u" 50 0 ]
                         Spatial =
 
@@ -2277,7 +2298,7 @@ let resolverVerdictTests =
 
                 let snapshot =
                     { bareRespawn with
-                        Sources = [ { Id = "src-a" } ]
+                        Sources = [ source "src-a" ]
                         ConstructionSites = [ { Id = "site-1" } ]
                         Creeps = [ worker "har" 0 50; worker "bob" 50 0 ]
                         Spatial =
@@ -2303,7 +2324,7 @@ let resolverVerdictTests =
 
                 let snapshot =
                     { bareRespawn with
-                        Sources = [ { Id = "src-a" } ]
+                        Sources = [ source "src-a" ]
                         Creeps = [ worker "w1" 0 50 ]
                         Spatial =
 
@@ -2332,7 +2353,7 @@ let resolverVerdictTests =
 
                 let snapshot =
                     { bareRespawn with
-                        Sources = [ { Id = "src-a" } ]
+                        Sources = [ source "src-a" ]
                         Creeps = [ { worker "w1" 0 50 with Fatigue = 4 } ]
                         Spatial =
 
@@ -2402,7 +2423,7 @@ let workforceTests =
 
                 let snapshot =
                     { bareRespawn with
-                        Sources = [ { Id = "src-a" } ]
+                        Sources = [ source "src-a" ]
                         Creeps = [ worker "w1" 0 50 ]
                         Spatial = oneSeat
                     }
@@ -2497,7 +2518,7 @@ let sayTests =
 
                 let snapshot =
                     { bareRespawn with
-                        Sources = [ { Id = "src-a" } ]
+                        Sources = [ source "src-a" ]
                         Creeps = [ worker "w1" 0 50 ]
                         Spatial =
 
@@ -2623,7 +2644,7 @@ let repairTests =
                 // energy to spend — and the feeding tier wins on rank.
                 let snapshot =
                     { bareRespawn with
-                        Sources = [ { Id = "src-a" } ]
+                        Sources = [ source "src-a" ]
                         Controller = None
                         Creeps = [ worker "w1" 25 25 ]
                     }
@@ -2744,7 +2765,7 @@ let verdictTests =
             test "a lone applicable Task wins as the only candidate" {
                 let snapshot =
                     { bareRespawn with
-                        Sources = [ { Id = "src-a" } ]
+                        Sources = [ source "src-a" ]
                         Controller = None
                         Creeps = [ worker "w1" 0 50 ]
                     }
@@ -2799,7 +2820,7 @@ let verdictTests =
             test "travel cost decides: the near source wins the rank tie" {
                 let snapshot =
                     { bareRespawn with
-                        Sources = [ { Id = "src-far" }; { Id = "src-near" } ]
+                        Sources = [ source "src-far"; source "src-near" ]
                         Controller = None
                         Creeps = [ worker "w1" 0 50 ]
                         Spatial = nearFarCorridor [ "w1", { X = 10; Y = 17 } ]
@@ -2834,7 +2855,7 @@ let verdictTests =
             test "a remembered assignment kept is distinguishable from a fresh match" {
                 let snapshot =
                     { bareRespawn with
-                        Sources = [ { Id = "src-far" }; { Id = "src-near" } ]
+                        Sources = [ source "src-far"; source "src-near" ]
                         Creeps = [ worker "w1" 0 50 ]
                         Spatial = nearFarCorridor [ "w1", { X = 10; Y = 17 } ]
                     }
@@ -2867,6 +2888,27 @@ let verdictTests =
                     "the release names the vanished Task"
             }
 
+            test "a drained source releases its harvester with TaskGone" {
+                // Issue #48: anti-thrash must not pin a creep to a dry
+                // rock. The Harvest task is simply not pooled (ADR 0013),
+                // so the kept assignment dies through the same TaskGone
+                // path as any vanished Task.
+                let snapshot =
+                    { bareRespawn with
+                        Sources = [ { source "src-a" with Stocked = false } ]
+                        Controller = None
+                        Creeps = [ worker "w1" 0 50 ]
+                    }
+
+                let sticky = Map.ofList [ "w1", taskId (Harvest "src-a") ]
+                let { Verdicts = verdicts } = decide snapshot sticky Set.empty
+
+                Expect.contains
+                    verdicts
+                    (Verdict.Released("w1", taskId (Harvest "src-a"), ReleaseReason.TaskGone))
+                    "the empty source's Harvest no longer exists to be kept"
+            }
+
             test "a creep that fills up releases Harvest as Inapplicable and matches fresh" {
                 let snapshot =
                     { bareRespawn with
@@ -2891,7 +2933,7 @@ let verdictTests =
                 // harvest into but no Work part to harvest with.
                 let snapshot =
                     { bareRespawn with
-                        Sources = [ { Id = "src-a" } ]
+                        Sources = [ source "src-a" ]
                         Controller = None
                         Creeps = [ creepWith "hauler" 0 50 [ Carry; Move ] ]
                     }
@@ -2922,7 +2964,7 @@ let verdictTests =
 
                 let snapshot =
                     { bareRespawn with
-                        Sources = [ { Id = "src-a" } ]
+                        Sources = [ source "src-a" ]
                         Creeps = [ worker "w1" 25 25 ]
                         Spatial =
 
@@ -2951,7 +2993,7 @@ let verdictTests =
 
                 let snapshot =
                     { bareRespawn with
-                        Sources = [ { Id = "src-a" } ]
+                        Sources = [ source "src-a" ]
                         Creeps = [ worker "w1" 0 50; worker "w2" 0 50 ]
                         Spatial =
 
@@ -3021,7 +3063,7 @@ let verdictTests =
 
                 let snapshot =
                     { bareRespawn with
-                        Sources = [ { Id = "src-a" } ]
+                        Sources = [ source "src-a" ]
                         Controller = None
                         Creeps = [ worker "w1" 0 50 ]
                         Spatial =
@@ -3042,7 +3084,7 @@ let verdictTests =
             test "a dead creep's dropped assignment speaks no Verdict" {
                 let snapshot =
                     { bareRespawn with
-                        Sources = [ { Id = "src-a" } ]
+                        Sources = [ source "src-a" ]
                         Controller = None
                         Creeps = []
                     }
@@ -3071,7 +3113,7 @@ let verboseScoringTests =
                 // every travel cost prices at 0.
                 let snapshot =
                     { bareRespawn with
-                        Sources = [ { Id = "src-a" } ]
+                        Sources = [ source "src-a" ]
                         Refillables = [ refillable "spawn-1" 50 BuiltKind.Spawn ]
                         Creeps = [ worker "w1" 50 0 ]
                     }
@@ -3106,7 +3148,7 @@ let verboseScoringTests =
 
                 let snapshot =
                     { bareRespawn with
-                        Sources = [ { Id = "src-a" } ]
+                        Sources = [ source "src-a" ]
                         Creeps = [ worker "w1" 0 50; worker "w2" 0 50 ]
                         Spatial =
 
@@ -3150,7 +3192,7 @@ let verboseScoringTests =
 
                 let snapshot =
                     { bareRespawn with
-                        Sources = [ { Id = "src-a" } ]
+                        Sources = [ source "src-a" ]
                         Creeps = [ worker "w1" 0 50 ]
                         Spatial =
 
@@ -3192,7 +3234,7 @@ let verboseScoringTests =
 
                 let snapshot =
                     { bareRespawn with
-                        Sources = [ { Id = "src-a" } ]
+                        Sources = [ source "src-a" ]
                         Controller = None
                         Creeps = [ worker "w1" 0 50 ]
                         Spatial =
@@ -3905,7 +3947,7 @@ let pickupReflexTests =
                 // Intents are emitted for the same tick.
                 let snapshot =
                     { pileColony [ worker "w1" 0 50 ] [ "w1", { X = 10; Y = 11 } ] with
-                        Sources = [ { Id = "src-a" } ]
+                        Sources = [ source "src-a" ]
                     }
 
                 let withSource =
@@ -4055,7 +4097,7 @@ let anchor name energy freeCapacity =
 /// The Dual Seat room, one source, controller in place — the base Anchor scenario.
 let dualSeatColony =
     { bareRespawn with
-        Sources = [ { Id = "src-a" } ]
+        Sources = [ source "src-a" ]
         Controller = Some(controllerAt 2)
         Spatial = dualSeatRoom
     }
@@ -4424,7 +4466,7 @@ let haulRoom =
 
 let haulColony =
     { bareRespawn with
-        Sources = [ { Id = "src-a" } ]
+        Sources = [ source "src-a" ]
         Spatial = haulRoom
     }
 
@@ -4866,7 +4908,7 @@ let quotaColony spawnX spawnCount available =
                     }
             ]
         RoomEnergy = bank available 300
-        Sources = [ { Id = "src-a" } ]
+        Sources = [ source "src-a" ]
         Spatial = quotaRoom spawnX
     }
 
@@ -5072,7 +5114,7 @@ let incomeColony =
                     }
             ]
         RoomEnergy = bank 1200 300
-        Sources = [ { Id = "src-a" }; { Id = "src-b" } ]
+        Sources = [ source "src-a"; source "src-b" ]
         Spatial = incomeRoom
     }
 

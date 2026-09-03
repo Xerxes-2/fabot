@@ -16,6 +16,9 @@ The thin imperative shell that turns Intents into Screeps API calls. The only la
 ### Task
 A unit of work in the task pool (e.g. "deliver 300 energy to spawn"). Creeps are interchangeable executors that get matched to Tasks; a creep has no fixed role.
 
+### Harvest
+The Task of digging energy out of a source. Pooled only for a **stocked** source — one holding energy right now (ADR 0013, the Repair shape: the task exists while the condition holds and is gone otherwise; a drained source strands no creeps). Feeding-tier intake beside [[withdraw]]; capped by the source's [[seat]] count. Applicability: a Work part and free capacity — widened for a full creep standing on that source's built [[container]], whose overflow the engine catches (ADR 0012).
+
 ### Refill
 The Task of delivering energy to any energy-hungry structure — spawn, extension, tower, or the controller [[container]]; the Planner filters by free capacity. One generalized Task, but rank layers by target (ADR 0010): spawn-feeding Refill is feeding-tier work, tower Refill is surplus-tier — the colony feeds its own reproduction before its guns — and controller-container Refill sits one tier deeper still, below every surplus Task (ADR 0012): a full creep beside the buffer sinks its load into the controller rather than dumping it back into the container it just drew from, so the buffer is filled by bodies with no surplus work of their own — the hauler row's whole life.
 

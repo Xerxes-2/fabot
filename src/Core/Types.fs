@@ -63,7 +63,14 @@ type RefillableInfo =
     }
 
 /// What the decision layer knows about one energy source this tick.
-type SourceInfo = { Id: string }
+type SourceInfo =
+    {
+        Id: string
+        /// Whether the source holds any energy right now (ADR 0013). A
+        /// boolean, not the amount — the Planner pools Harvest only for
+        /// a stocked source, and nothing decided reads more than that.
+        Stocked: bool
+    }
 
 /// What the decision layer knows about the room controller this tick.
 type ControllerInfo =

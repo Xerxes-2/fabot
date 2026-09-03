@@ -205,7 +205,10 @@ let build () : Snapshot =
         Sources =
             spawns
             |> Array.collect (fun s -> s.room.find findSources)
-            |> Array.map (fun o -> ({ Id = (o :?> ISource).id }: SourceInfo))
+            |> Array.map (fun o ->
+                let s = o :?> ISource
+
+                ({ Id = s.id; Stocked = s.energy > 0 }: SourceInfo))
             |> Array.distinctBy (fun s -> s.Id)
             |> Array.toList
         Controller =
