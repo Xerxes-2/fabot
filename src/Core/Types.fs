@@ -204,6 +204,9 @@ type Snapshot =
 /// executors that get matched to Tasks.
 type Task =
     | Harvest of sourceId: string
+    /// Take stored energy out of a stocked container (ADR 0012) — the
+    /// haul cycle's intake, judged over stores rather than energy's name.
+    | Withdraw of containerId: string
     | Refill of structureId: string
     | Build of siteId: string
     | Repair of structureId: string
@@ -262,6 +265,7 @@ type Intent =
     | PlaceConstructionSite of roomName: string * pos: Pos * kind: StructureKind
     | HarvestSource of creepName: string * sourceId: string
     | TransferEnergyToStructure of creepName: string * structureId: string
+    | WithdrawEnergyFromStructure of creepName: string * structureId: string
     | BuildSite of creepName: string * siteId: string
     | RepairStructure of creepName: string * structureId: string
     | UpgradeController of creepName: string * controllerId: string

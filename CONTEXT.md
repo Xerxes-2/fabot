@@ -17,7 +17,7 @@ The thin imperative shell that turns Intents into Screeps API calls. The only la
 A unit of work in the task pool (e.g. "deliver 300 energy to spawn"). Creeps are interchangeable executors that get matched to Tasks; a creep has no fixed role.
 
 ### Refill
-The Task of delivering energy to any energy-hungry structure — spawn, extension, tower, or the controller [[container]]; the Planner filters by free capacity. One generalized Task, but rank layers by target (ADR 0010): spawn-feeding Refill is feeding-tier work, tower and controller-container Refill are surplus-tier — the colony feeds its own reproduction before its guns or its growth (ADR 0012).
+The Task of delivering energy to any energy-hungry structure — spawn, extension, tower, or the controller [[container]]; the Planner filters by free capacity. One generalized Task, but rank layers by target (ADR 0010): spawn-feeding Refill is feeding-tier work, tower Refill is surplus-tier — the colony feeds its own reproduction before its guns — and controller-container Refill sits one tier deeper still, below every surplus Task (ADR 0012): a full creep beside the buffer sinks its load into the controller rather than dumping it back into the container it just drew from, so the buffer is filled by bodies with no surplus work of their own — the hauler row's whole life.
 
 ### Withdraw
 The Task of taking energy out of a stocked [[container]] (ADR 0012). Feeding-tier intake beside Harvest: an empty creep's choice between digging and collecting is made by [[travel cost]], not by rule. Applicability: a Carry part and free capacity. The intake half of the haul cycle — a filled hauler loses Withdraw applicability and rematches to [[refill]], the same emergent alternation as every other Task pair.
@@ -47,7 +47,7 @@ A [[seat]] that also lies inside the controller's Upgrade [[work area]]. A creep
 A tile worth garrisoning with a heavy-WORK body (ADR 0012): a [[dual seat]], or the [[seat]] under a source [[container]]. The capacity unit of the [[anchor]] quota — one Anchor per Post. Derived by the [[atlas]] each tick, never persisted.
 
 ### Container
-A container structure as the [[layout]] places it (ADR 0012): one **source container** per source, on the [[seat]] nearest that source's [[trunk]]; one **controller container** on a buildable work-area tile adjacent to a trunk — the upgrade buffer that lets upgraders work standing still. A repairable kind: its hits enter the [[spatial projection]] and the Repair pool (ADR 0010). A stocked container is a [[withdraw]] target; the controller container is also a surplus-tier [[refill]] target.
+A container structure as the [[layout]] places it (ADR 0012): one **source container** per source, on the [[seat]] nearest that source's [[trunk]]; one **controller container** on a buildable work-area tile adjacent to a trunk — the upgrade buffer that lets upgraders work standing still. A repairable kind: its hits enter the [[spatial projection]] and the Repair pool (ADR 0010). A stocked container is a [[withdraw]] target; the controller container is also a [[refill]] target, on Refill's own deepest tier — source containers never are.
 
 ### Work Area
 The set of tiles a creep may stand on while performing its current Task, derived from the Task's target position and the action's range. Derived fresh each tick, never persisted.

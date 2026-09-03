@@ -58,6 +58,8 @@ let private execute (intent: Intent) : Outcome =
         withCreepTarget creepName sourceId (fun c t -> c.harvest t)
     | TransferEnergyToStructure(creepName, structureId) ->
         withCreepTarget creepName structureId (fun c t -> c.transfer (t, "energy"))
+    | WithdrawEnergyFromStructure(creepName, structureId) ->
+        withCreepTarget creepName structureId (fun c t -> c.withdraw (t, "energy"))
     | BuildSite(creepName, siteId) -> withCreepTarget creepName siteId (fun c t -> c.build t)
     | RepairStructure(creepName, structureId) ->
         withCreepTarget creepName structureId (fun c t -> c.repair t)

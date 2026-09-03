@@ -120,6 +120,7 @@ let workerBodyFor capacity = bodyFor workerPattern capacity
 let taskId =
     function
     | Harvest sourceId -> $"harvest:{sourceId}"
+    | Withdraw containerId -> $"withdraw:{containerId}"
     | Refill structureId -> $"refill:{structureId}"
     | Build siteId -> $"build:{siteId}"
     | Repair structureId -> $"repair:{structureId}"
@@ -134,6 +135,13 @@ let private repairableKinds = [ BuiltKind.Road; BuiltKind.Container ]
 /// hits sink strictly below this fraction of max, and leaves it once
 /// repaired back over the line. A tunable, not part of ADR 0010.
 let private repairTrigger = 0.5
+
+/// Screeps range: Chebyshev distance between two tiles.
+let private range a b = max (abs (a.X - b.X)) (abs (a.Y - b.Y))
+
+/// Screeps CONTAINER_CAPACITY: what a container's store can hold — the
+/// line past which the buffer needs no Refill.
+let private containerCapacity = 2000
 
 /// Planner: rebuild this tick's full Task pool from the Snapshot. Pure and
 /// from scratch every tick — Tasks are never persisted.
@@ -163,7 +171,49 @@ let planTasks (snapshot: Snapshot) : Task list =
     let upgrades =
         snapshot.Controller |> Option.toList |> List.map (fun c -> Upgrade c.Id)
 
-    harvests @ refills @ builds @ repairs @ upgrades
+    // The haul cycle's intake (ADR 0012), shaped over the projection's
+    // stores rather than energy's name: every stocked container yields a
+    // Withdraw, at feeding tier beside Harvest — whether to dig or to
+    // collect is travel cost's call, never a rule's.
+    let stored id =
+        snapshot.Spatial.Stores |> Map.tryFind id |> Option.defaultValue 0
+
+    let containers =
+        snapshot.Spatial.TargetKinds
+        |> Map.toList
+        |> List.choose (fun (id, kind) ->
+            if kind = Structure BuiltKind.Container then Some id else None)
+
+    let withdraws =
+        containers |> List.filter (fun id -> stored id > 0) |> List.map Withdraw
+
+    // The haul cycle's outflow: the controller container is one more
+    // Refill target (ADR 0010's target layering, widened by ADR 0012).
+    // Which container is the controller's is judged by geometry — it
+    // stands inside the Upgrade Work Area (range 3) the Layout picked it
+    // from, while a Seat-adjacent (range 1) container is a source's,
+    // which harvest overflow fills and Refill never targets. Unplaced
+    // geometry classifies nothing.
+    let sourcePositions =
+        snapshot.Sources
+        |> List.choose (fun s -> Map.tryFind s.Id snapshot.Spatial.TargetPositions)
+
+    let containerRefills =
+        snapshot.Controller
+        |> Option.bind (fun c -> Map.tryFind c.Id snapshot.Spatial.TargetPositions)
+        |> Option.map (fun controllerPos ->
+            containers
+            |> List.filter (fun id ->
+                match Map.tryFind id snapshot.Spatial.TargetPositions with
+                | Some pos ->
+                    range pos controllerPos <= 3
+                    && sourcePositions |> List.forall (fun s -> range pos s > 1)
+                    && stored id < containerCapacity
+                | None -> false)
+            |> List.map Refill)
+        |> Option.defaultValue []
+
+    harvests @ withdraws @ refills @ builds @ repairs @ upgrades @ containerRefills
 
 /// Workforce target: how many creeps the colony maintains — the total Seat
 /// count across all sources, floored at minWorkforce. Derived fresh each
@@ -303,9 +353,6 @@ let private towerAllowance level =
 /// tomorrow's structures. Deliberately not RCL8 — a wider reservation
 /// would tax today's trunks with detours for structures five levels away.
 let private horizonLevel = 4
-
-/// Screeps range: Chebyshev distance between two tiles.
-let private range a b = max (abs (a.X - b.X)) (abs (a.Y - b.Y))
 
 /// Colony-level planning step beside the Planner/Matcher pipeline: the
 /// deterministic Layout (ADR 0011), computed whole from the Atlas every
@@ -512,6 +559,7 @@ let private applicable (creep: CreepInfo) task =
 
     match task with
     | Harvest _ -> has Work && creep.FreeCapacity > 0
+    | Withdraw _ -> has Carry && creep.FreeCapacity > 0
     | Refill _ -> has Carry && creep.Energy > 0
     | Build _
     | Repair _
@@ -520,6 +568,7 @@ let private applicable (creep: CreepInfo) task =
 let private intentFor (creep: CreepInfo) task =
     match task with
     | Harvest sourceId -> HarvestSource(creep.Name, sourceId)
+    | Withdraw containerId -> WithdrawEnergyFromStructure(creep.Name, containerId)
     | Refill structureId -> TransferEnergyToStructure(creep.Name, structureId)
     | Build siteId -> BuildSite(creep.Name, siteId)
     | Repair structureId -> RepairStructure(creep.Name, structureId)
@@ -530,6 +579,7 @@ let private intentFor (creep: CreepInfo) task =
 let private glyphFor =
     function
     | Harvest _ -> "⛏"
+    | Withdraw _ -> "📥"
     | Refill _ -> "🔋"
     | Build _ -> "🔨"
     | Repair _ -> "🔧"
@@ -558,23 +608,35 @@ let private fullDowngradeTimer level =
 let private downgradeDeadline level = fullDowngradeTimer level / 2
 
 /// Matching tier between applicable tasks (lower wins): feeding the economy
-/// (Harvest, spawn-feeding Refill) outranks sinking surplus into
+/// (Harvest, Withdraw, spawn-feeding Refill) outranks sinking surplus into
 /// construction (Build), upkeep (Repair), the controller (Upgrade), or
 /// the guns — Refill is the one Task whose rank layers by target (ADR
 /// 0010): a tower Refill is
 /// surplus-tier, because the colony feeds its own reproduction before its
-/// guns. One exception: a controller inside the downgrade deadline makes
-/// Upgrade the colony's most urgent work, outranking even the feeding tier
-/// (ADR 0007).
+/// guns, and a controller-container Refill (ADR 0012) sits one tier
+/// deeper still — below Upgrade, so a full creep beside the buffer sinks
+/// its load into the controller rather than dumping it back into the
+/// container it just drew from and orbiting in place; the buffer is
+/// filled by bodies with no surplus work of their own. One exception: a
+/// controller inside the downgrade deadline makes Upgrade the colony's
+/// most urgent work, outranking even the feeding tier (ADR 0007).
 let private rank (snapshot: Snapshot) task =
     match task with
-    | Harvest _ -> 0
+    | Harvest _
+    | Withdraw _ -> 0
     | Refill structureId ->
         let isTower =
             snapshot.Refillables
             |> List.exists (fun r -> r.Id = structureId && r.Kind = BuiltKind.Tower)
 
-        if isTower then 1 else 0
+        let isContainer =
+            Map.tryFind structureId snapshot.Spatial.TargetKinds = Some(
+                Structure BuiltKind.Container
+            )
+
+        if isContainer then 2
+        elif isTower then 1
+        else 0
     | Build _
     | Repair _ -> 1
     | Upgrade _ ->

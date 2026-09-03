@@ -136,6 +136,7 @@ type ICreep =
     abstract body: IBodyPartDef[]
     abstract harvest: target: obj -> int
     abstract transfer: target: obj * resource: string -> int
+    abstract withdraw: target: obj * resource: string -> int
     abstract build: target: obj -> int
     abstract repair: target: obj -> int
     abstract upgradeController: target: obj -> int

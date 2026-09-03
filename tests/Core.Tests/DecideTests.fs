@@ -4311,3 +4311,238 @@ let anchorTests =
                 | [] -> failtest "expected the fallback to spawn"
             }
         ]
+
+/// The haul fixture (ADR 0012): a plain corridor y = 10, x = 9..21; the
+/// source embedded in wall at (10,10) with Seats (9,10) and (11,10), the
+/// controller standing at (20,10); the source container "can-src" on the
+/// Seat (11,10) and the controller container "can-ctrl" at (18,10),
+/// inside the Upgrade Work Area. The buffer starts stocked, the source
+/// container empty.
+let haulRoom =
+    { spatial [] [ for x in 9..21 -> { X = x; Y = 10 }, (if x = 10 then Wall else Plain) ] with
+        Obstacles = Set.singleton { X = 20; Y = 10 }
+        Stores = Map.ofList [ "can-src", 0; "can-ctrl", 800 ]
+    }
+    |> withTargets
+        [
+            "src-a", { X = 10; Y = 10 }, Source
+            "ctrl-1", { X = 20; Y = 10 }, Controller
+            "can-src", { X = 11; Y = 10 }, Structure BuiltKind.Container
+            "can-ctrl", { X = 18; Y = 10 }, Structure BuiltKind.Container
+        ]
+
+let haulColony =
+    { bareRespawn with
+        Sources = [ { Id = "src-a" } ]
+        Spatial = haulRoom
+    }
+
+let withdrawTasks tasks =
+    tasks
+    |> List.choose (function
+        | Withdraw containerId -> Some containerId
+        | _ -> None)
+
+let refillTasks tasks =
+    tasks
+    |> List.choose (function
+        | Refill structureId -> Some structureId
+        | _ -> None)
+
+[<Tests>]
+let logisticsTests =
+    testList
+        "logistics"
+        [
+            test "a stocked container yields a Withdraw Task; an empty one yields none" {
+                Expect.equal
+                    (withdrawTasks (planTasks haulColony))
+                    [ "can-ctrl" ]
+                    "the stocked buffer enters the pool; the empty source container does not"
+            }
+
+            test "the controller container with room is a Refill target; source containers never are" {
+                let snapshot =
+                    { haulColony with
+                        Spatial =
+                            { haulRoom with
+                                Stores = Map.ofList [ "can-src", 500; "can-ctrl", 800 ]
+                            }
+                    }
+
+                let tasks = planTasks snapshot
+
+                Expect.equal
+                    (refillTasks tasks)
+                    [ "can-ctrl" ]
+                    "only the buffer is a Refill target, however stocked the source container"
+
+                Expect.equal
+                    (withdrawTasks tasks)
+                    [ "can-ctrl"; "can-src" ]
+                    "both stocked containers stay Withdraw Tasks"
+            }
+
+            test "a full controller container is no Refill target, but stays a Withdraw" {
+                let snapshot =
+                    { haulColony with
+                        Spatial =
+                            { haulRoom with
+                                Stores = Map.ofList [ "can-ctrl", 2000 ]
+                            }
+                    }
+
+                let tasks = planTasks snapshot
+                Expect.isEmpty (refillTasks tasks) "no room left to refill"
+                Expect.equal (withdrawTasks tasks) [ "can-ctrl" ] "still stocked to draw from"
+            }
+
+            test "an empty creep between source and stocked container is matched by travel cost" {
+                // At (15,10) the buffer's Work Area is two steps away, the
+                // nearest Seat four: collect beats dig. At (12,10) the Seat
+                // is one step away: dig beats collect. Same rule both ways.
+                let colonyAt pos =
+                    { haulColony with
+                        Creeps = [ worker "w1" 0 50 ]
+                        Spatial =
+                            { haulRoom with
+                                CreepPositions = Map.ofList [ "w1", pos ]
+                            }
+                    }
+
+                let near =
+                    decide (colonyAt { X = 15; Y = 10 }) Map.empty Set.empty
+
+                Expect.equal
+                    (Map.tryFind "w1" near.Assignments)
+                    (Some(taskId (Withdraw "can-ctrl")))
+                    "the cheaper-to-reach buffer wins the feeding-tier tie"
+
+                Expect.contains
+                    near.Verdicts
+                    (Verdict.Matched("w1", taskId (Withdraw "can-ctrl"), MatchFactor.TravelCost))
+                    "the match speaks its Verdict: travel cost decided"
+
+                let far = decide (colonyAt { X = 12; Y = 10 }) Map.empty Set.empty
+
+                Expect.equal
+                    (Map.tryFind "w1" far.Assignments)
+                    (Some(taskId (Harvest "src-a")))
+                    "nearer the source, digging wins the same tie"
+            }
+
+            test "alternation is emergent: a filled-up creep's Withdraw releases and rematches" {
+                // The creep filled up inside the buffer's Work Area — which
+                // is also the controller's. Withdraw loses applicability;
+                // the rematch sinks the load into Upgrade, never back into
+                // the container it just drew from.
+                let snapshot =
+                    { haulColony with
+                        Creeps = [ worker "w1" 50 0 ]
+                        Spatial =
+                            { haulRoom with
+                                CreepPositions = Map.ofList [ "w1", { X = 17; Y = 10 } ]
+                            }
+                    }
+
+                let remembered = Map.ofList [ "w1", taskId (Withdraw "can-ctrl") ]
+                let { Assignments = assignments; Verdicts = verdicts } =
+                    decide snapshot remembered Set.empty
+
+                Expect.contains
+                    verdicts
+                    (Verdict.Released("w1", taskId (Withdraw "can-ctrl"), ReleaseReason.Inapplicable))
+                    "the full store releases Withdraw"
+
+                Expect.equal
+                    (Map.tryFind "w1" assignments)
+                    (Some(taskId (Upgrade "ctrl-1")))
+                    "the rematch flips to Upgrade, like the Anchor's harvest↔upgrade"
+            }
+
+            test "the alternation's other half: an emptied creep's Upgrade releases into Withdraw" {
+                let snapshot =
+                    { haulColony with
+                        Creeps = [ worker "w1" 0 50 ]
+                        Spatial =
+                            { haulRoom with
+                                CreepPositions = Map.ofList [ "w1", { X = 17; Y = 10 } ]
+                            }
+                    }
+
+                let remembered = Map.ofList [ "w1", taskId (Upgrade "ctrl-1") ]
+                let { Assignments = assignments } = decide snapshot remembered Set.empty
+
+                Expect.equal
+                    (Map.tryFind "w1" assignments)
+                    (Some(taskId (Withdraw "can-ctrl")))
+                    "the empty store tops up from the buffer one tile away"
+            }
+
+            test "spawn-feeding Refill still outranks the buffer Refill" {
+                // The spawn stands mid-corridor, two steps from the loaded
+                // creep; the buffer's Work Area costs nothing at all. Rank
+                // dominates: reproduction is fed before the buffer.
+                let snapshot =
+                    { haulColony with
+                        Refillables = [ refillable "spawn-1" 50 BuiltKind.Spawn ]
+                        Creeps = [ worker "w1" 50 0 ]
+                        Spatial =
+                            { haulRoom with
+                                Obstacles = Set.ofList [ { X = 14; Y = 10 }; { X = 20; Y = 10 } ]
+                                CreepPositions = Map.ofList [ "w1", { X = 17; Y = 10 } ]
+                            }
+                            |> withTargets
+                                [ "spawn-1", { X = 14; Y = 10 }, Structure BuiltKind.Spawn ]
+                    }
+
+                let { Assignments = assignments } = decide snapshot Map.empty Set.empty
+
+                Expect.equal
+                    (Map.tryFind "w1" assignments)
+                    (Some(taskId (Refill "spawn-1")))
+                    "the buffer never outbids feeding the spawn"
+            }
+
+            test "a loaded Carry-only body is the buffer's Refill worker" {
+                // The buffer's tier sits below every surplus Task, so
+                // Work-bodied creeps pass it by — but a full hauler-shaped
+                // body has no surplus work of its own, and the outflow
+                // lands on it.
+                let snapshot =
+                    { haulColony with
+                        Creeps = [ creepWith "h1" 100 0 [ Carry; Carry; Move ] ]
+                        Spatial =
+                            { haulRoom with
+                                CreepPositions = Map.ofList [ "h1", { X = 15; Y = 10 } ]
+                            }
+                    }
+
+                let { Assignments = assignments } = decide snapshot Map.empty Set.empty
+
+                Expect.equal
+                    (Map.tryFind "h1" assignments)
+                    (Some(taskId (Refill "can-ctrl")))
+                    "the buffer Refill is live work for a body that can do nothing better"
+            }
+
+            test "a seated Withdraw emits the engine withdraw call and speaks 📥" {
+                let snapshot =
+                    { haulColony with
+                        Creeps = [ worker "w1" 0 50 ]
+                        Spatial =
+                            { haulRoom with
+                                CreepPositions = Map.ofList [ "w1", { X = 17; Y = 10 } ]
+                            }
+                    }
+
+                let { Intents = intents } = decide snapshot Map.empty Set.empty
+
+                Expect.contains
+                    intents
+                    (WithdrawEnergyFromStructure("w1", "can-ctrl"))
+                    "in range at tick start: the Executor-bound Intent fires"
+
+                Expect.contains intents (SayCreep("w1", "📥")) "the Task's own chat bubble"
+            }
+        ]
