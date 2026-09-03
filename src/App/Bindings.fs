@@ -45,6 +45,9 @@ let structureRoad = "road"
 /// Screeps `STRUCTURE_CONTAINER` constant.
 let structureContainer = "container"
 
+/// Screeps `STRUCTURE_STORAGE` constant.
+let structureStorage = "storage"
+
 /// Screeps `STRUCTURE_RAMPART` constant.
 let structureRampart = "rampart"
 

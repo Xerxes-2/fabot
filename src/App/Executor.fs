@@ -19,6 +19,7 @@ let private structureName =
     | Tower -> structureTower
     | Road -> structureRoad
     | Container -> structureContainer
+    | Storage -> structureStorage
 
 let private outcomeOf code = if code = 0 then Ok else Failed code
 

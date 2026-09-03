@@ -34,6 +34,8 @@ let private builtKindOf structureType =
         BuiltKind.Road
     elif structureType = structureContainer then
         BuiltKind.Container
+    elif structureType = structureStorage then
+        BuiltKind.Storage
     else
         BuiltKind.Other
 
@@ -41,8 +43,15 @@ let private builtKindOf structureType =
 let private refillableTypes = [ structureSpawn; structureExtension; structureTower ]
 
 /// The structure types Repair keeps whole — the kinds whose hits enter
-/// the projection (ADR 0010, ADR 0012).
+/// the projection (ADR 0010, ADR 0012). The Storage is deliberately not
+/// one: it does not decay, so nothing repairs it (ADR 0023).
 let private repairableTypes = [ structureRoad; structureContainer ]
+
+/// The structure types whose stored energy enters the projection: the
+/// containers, whose stock the logistics Tasks judge (ADR 0012), and the
+/// Storage, whose Withdraw and Refill tiers read the same field (ADR
+/// 0023) — a standing Storage's store is read exactly like a container's.
+let private storedTypes = [ structureContainer; structureStorage ]
 
 let private buildSpatial (spawn: ISpawn) : SpatialInfo =
     let room = spawn.room
@@ -152,11 +161,14 @@ let private buildSpatial (spawn: ISpawn) : SpatialInfo =
             |> Array.filter (fun st -> List.contains st.structureType repairableTypes)
             |> Array.map (fun st -> st.id, { Hits = st.hits; HitsMax = st.hitsMax })
             |> Map.ofArray
-        // Stored energy on containers only, same rule: the stock the
-        // logistics Tasks judge a container by (ADR 0012).
+        // Stored energy on the containers, the stock the logistics Tasks
+        // judge one by (ADR 0012), and on the Storage. The Storage is this
+        // projection's one exception to the rule above: no decision reads
+        // its store yet, and it is carried because ADR 0023's Withdraw and
+        // Refill tiers are the named consumer waiting on it.
         Stores =
             structures
-            |> Array.filter (fun st -> st.structureType = structureContainer)
+            |> Array.filter (fun st -> List.contains st.structureType storedTypes)
             |> Array.map (fun st -> st.id, st.store.getUsedCapacity "energy")
             |> Map.ofArray
     }

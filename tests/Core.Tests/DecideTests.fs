@@ -473,18 +473,19 @@ let placementTests =
             test "RCL2 on open terrain places 5 extensions checkerboard, nearest first" {
                 let { Intents = intents } = decide (atLevel 2 (openRoom 3)) Map.empty Set.empty None
 
-                // The nearest checkerboard tile (24,24) is the tower's pick in
-                // the RCL4-horizon Layout, so the extensions start one tile in.
+                // The nearest checkerboard tile (24,24) is the Storage's pick
+                // and (24,26) the tower's in the RCL4-horizon Layout (ADR
+                // 0022), so the extensions start two tiles in.
                 Expect.equal
                     (placedTiles intents)
                     [
-                        { X = 24; Y = 26 }
                         { X = 26; Y = 24 }
                         { X = 26; Y = 26 }
                         { X = 23; Y = 23 }
                         { X = 23; Y = 25 }
+                        { X = 23; Y = 27 }
                     ]
-                    "diagonal neighbours after the tower reserve, then rank-2 checkerboard tiles"
+                    "the last diagonal neighbours, then rank-2 checkerboard tiles"
 
                 for (room, _, kind) in placementIntents intents do
                     Expect.equal room "W1N1" "sites go in the spawn's room"
@@ -694,10 +695,18 @@ let withRoadsBuilt colony =
 
 let chebyshev a b = max (abs (a.X - b.X)) (abs (a.Y - b.Y))
 
-/// The clustered structures of a plan: the tower and every extension, the
-/// tiles one ordering rule picks (ADR 0011).
+/// The clustered structures of a plan: the Storage, the tower and every
+/// extension, the tiles one ordering rule picks (ADR 0011, ADR 0022).
 let clusterTiles intents =
-    sitesOfKind Tower intents @ sitesOfKind Extension intents |> Set.ofList
+    sitesOfKind Storage intents
+    @ sitesOfKind Tower intents
+    @ sitesOfKind Extension intents
+    |> Set.ofList
+
+/// The clustered ordering's sort key for a fixture whose spawn stands at
+/// (25,25): nearest-to-spawn first, ties by x then y (ADR 0011).
+let orderKey tile =
+    chebyshev tile { X = 25; Y = 25 }, tile.X, tile.Y
 
 [<Tests>]
 let layoutTests =
@@ -739,20 +748,20 @@ let layoutTests =
             test "the same fixture at RCL3 adds the tower and extensions 6-10 at once" {
                 let { Intents = intents } = decide (trunkColony 3) Map.empty Set.empty None
 
+                // (24,24) is the ordering's first free tile and the Storage's
+                // reservation (ADR 0022); the tower takes the one after it,
+                // and the fixture's two built extensions hold (24,26)/(26,24).
                 Expect.equal
                     (sitesOfKind Tower intents)
-                    [ { X = 24; Y = 24 } ]
-                    "the tower takes the ordering's first free tile"
+                    [ { X = 26; Y = 26 } ]
+                    "the tower takes the ordering's first free tile after the Storage's"
 
                 let extensions = sitesOfKind Extension intents
                 Expect.hasLength extensions 8 "the RCL3 allowance fills against the two built"
 
-                let spawnPos = { X = 25; Y = 25 }
-                let orderKey tile = chebyshev tile spawnPos, tile.X, tile.Y
-
                 for tile in extensions do
                     Expect.isLessThan
-                        (orderKey { X = 24; Y = 24 })
+                        (orderKey { X = 26; Y = 26 })
                         (orderKey tile)
                         "the tower's pick comes before every extension in the one ordering"
             }
@@ -968,6 +977,192 @@ let layoutTests =
             }
         ]
 
+[<Tests>]
+let storageTests =
+    testList
+        "storage"
+        [
+            test "RCL4 places one Storage on the ordering's first pick, the tower next" {
+                // The cluster's nearest same-colour tile is the Storage's at
+                // every level (ADR 0022) — the tower and the extensions take
+                // the picks after it.
+                let { Intents = intents } = decide (atLevel 4 (openRoom 3)) Map.empty Set.empty None
+
+                Expect.equal
+                    (sitesOfKind Storage intents)
+                    [ { X = 24; Y = 24 } ]
+                    "one Storage, on the ordering's first still-open pick"
+
+                Expect.equal
+                    (sitesOfKind Tower intents)
+                    [ { X = 24; Y = 26 } ]
+                    "the tower's pick is the one after the Storage's"
+
+                for tile in sitesOfKind Extension intents do
+                    Expect.isLessThan
+                        (orderKey { X = 24; Y = 24 })
+                        (orderKey tile)
+                        "the Storage's pick comes before every extension in the one ordering"
+            }
+
+            test "RCL3 places no Storage yet still holds its tile against the cluster" {
+                // The reservation is level-blind (ADR 0022): once an extension
+                // takes that tile it never comes back, so it is held from the
+                // first tick, levels before the engine allows the Storage.
+                let { Intents = intents } = decide (atLevel 3 (openRoom 3)) Map.empty Set.empty None
+
+                Expect.isEmpty
+                    (sitesOfKind Storage intents)
+                    "the engine allows no Storage below RCL4"
+
+                Expect.isNonEmpty (sitesOfKind Extension intents) "the cluster still fills"
+
+                Expect.isFalse
+                    (List.contains { X = 24; Y = 24 } (placedTiles intents))
+                    "nothing at all is placed on the reserved first pick"
+            }
+
+            test "a standing Storage places none, and its tile leaves the ordering" {
+                let standing =
+                    openRoom 3
+                    |> withTargets [ "sto-1", { X = 24; Y = 24 }, Structure BuiltKind.Storage ]
+
+                let { Intents = intents } = decide (atLevel 4 standing) Map.empty Set.empty None
+
+                Expect.isEmpty
+                    (sitesOfKind Storage intents)
+                    "the standing census fills the allowance"
+
+                Expect.isFalse
+                    (List.contains { X = 24; Y = 24 } (placedTiles intents))
+                    "a standing structure's tile is not buildable: nothing is planned onto it"
+            }
+
+            test "a pending Storage site places none" {
+                let pending =
+                    openRoom 3
+                    |> withTargets [ "sto-site", { X = 24; Y = 24 }, Site BuiltKind.Storage ]
+
+                let { Intents = intents } = decide (atLevel 4 pending) Map.empty Set.empty None
+
+                Expect.isEmpty
+                    (sitesOfKind Storage intents)
+                    "the pending census fills the allowance too: nothing re-drops"
+
+                Expect.isFalse
+                    (List.contains { X = 24; Y = 24 } (placedTiles intents))
+                    "a site is a target too: nothing else is planned onto its tile"
+            }
+
+            test "the trunks and both container picks keep off the Storage tile" {
+                // (24,24) is this fixture's cheapest last step from the
+                // source into the spawn: unreserved, the trunk takes it. The
+                // reservation is impassable before the trunks are priced, so
+                // the lane ends on (24,25) instead. The container picks miss
+                // it by construction (ADR 0022): the Storage comes from the
+                // clustered ordering, which excludes the working ground,
+                // while both container picks draw only from working ground —
+                // the Seats and the Upgrade Work Area.
+                let colony = withRoadsBuilt (trunkColony 4)
+                let { Intents = intents } = decide colony Map.empty Set.empty None
+
+                let storage = sitesOfKind Storage intents |> Set.ofList
+                let containers = sitesOfKind Container intents |> Set.ofList
+
+                Expect.isNonEmpty storage "the Storage is planned at RCL4"
+                Expect.isNonEmpty containers "the containers drop once their roads stand"
+
+                Expect.isEmpty
+                    (Set.intersect storage colony.Spatial.Roads)
+                    "no trunk road crosses the Storage's tile"
+
+                Expect.isEmpty
+                    (Set.intersect storage containers)
+                    "the Storage's tile is never a container's"
+            }
+
+            test "the cluster keeps its tiles as the Storage goes from reserved to standing" {
+                // The recomputation that can move something: a standing
+                // Storage leaves the ordering and frees its slot at once, so
+                // the tower and every extension keep the picks they had
+                // while the tile was only reserved (ADR 0022).
+                let planned = decide (atLevel 4 (openRoom 3)) Map.empty Set.empty None
+
+                let storageTile =
+                    match sitesOfKind Storage planned.Intents with
+                    | [ tile ] -> tile
+                    | other -> failtest $"expected one planned Storage, got %A{other}"
+
+                let built =
+                    decide
+                        (atLevel
+                            4
+                            (openRoom 3
+                             |> withTargets [ "sto-1", storageTile, Structure BuiltKind.Storage ]))
+                        Map.empty
+                        Set.empty
+                        None
+
+                Expect.equal
+                    (sitesOfKind Tower built.Intents)
+                    (sitesOfKind Tower planned.Intents)
+                    "the tower's pick is the same tile either way"
+
+                Expect.equal
+                    (sitesOfKind Extension built.Intents)
+                    (sitesOfKind Extension planned.Intents)
+                    "and every extension's, in the same order"
+            }
+
+            test "a standing Storage changes neither the hauler quota nor the trunk plan" {
+                // The spawn stays the trunk hub (ADR 0022): the Storage sits
+                // beside it by construction and hires no haul capacity of its
+                // own — the quota counts source containers (ADR 0012). One
+                // stands on the source's trunk Seat, so the quota is a real
+                // number on both sides of the comparison.
+                let colony =
+                    { trunkColony 4 with
+                        Spatial =
+                            trunkRoom
+                            |> withTargets
+                                [ "can-a", { X = 16; Y = 24 }, Structure BuiltKind.Container ]
+                    }
+
+                let planned = decide colony Map.empty Set.empty None
+
+                Expect.isGreaterThan
+                    planned.Memo.HaulerQuota
+                    0
+                    "the standing source container hires the haulers the Storage must not"
+
+                let storageTile =
+                    match sitesOfKind Storage planned.Intents with
+                    | [ tile ] -> tile
+                    | other -> failtest $"expected one planned Storage, got %A{other}"
+
+                let standing =
+                    { colony with
+                        Spatial =
+                            { colony.Spatial with
+                                Obstacles = Set.add storageTile colony.Spatial.Obstacles
+                            }
+                            |> withTargets [ "sto-1", storageTile, Structure BuiltKind.Storage ]
+                    }
+
+                let built = decide standing Map.empty Set.empty None
+
+                Expect.equal
+                    built.Memo.HaulerQuota
+                    planned.Memo.HaulerQuota
+                    "a Storage hires nothing: the quota reads source containers alone"
+
+                Expect.equal
+                    (sitesOfKind Road built.Intents)
+                    (sitesOfKind Road planned.Intents)
+                    "the trunks keep their endpoints — the spawn stays the hub"
+            }
+        ]
+
 /// The trunk colony with one extra target standing (or pending) anywhere.
 let withTarget id pos kind colony =
     { colony with
@@ -991,6 +1186,21 @@ let censusSignatureTests =
                     (censusSignature perturbed)
                     (censusSignature (trunkColony 2))
                     "the standing census is a signature input"
+            }
+
+            test "a standing Storage is its own kind in the signature" {
+                let standing kind =
+                    trunkColony 2 |> withTarget "sto-1" { X = 24; Y = 24 } (Structure kind)
+
+                Expect.notEqual
+                    (censusSignature (standing BuiltKind.Storage))
+                    (censusSignature (trunkColony 2))
+                    "a Storage is a Structure: the standing census carries it (ADR 0022)"
+
+                Expect.notEqual
+                    (censusSignature (standing BuiltKind.Storage))
+                    (censusSignature (standing BuiltKind.Other))
+                    "and it is a kind of its own, not the unmodelled kind it used to project as"
             }
 
             test "a structure moving moves the signature" {
@@ -2923,6 +3133,17 @@ let repairTests =
                 Expect.isEmpty
                     (repairTasks (planTasks snapshot))
                     "low hits on spawn, extension or tower are a tower's business, not Repair's"
+            }
+
+            test "a Storage never enters the Repair pool: it does not decay" {
+                // Not a repairable kind (ADR 0023): the Planner's kind gate
+                // refuses a Storage's hits even when, as here, the projection
+                // carries them.
+                let snapshot = bareRespawn |> withHits "sto-1" BuiltKind.Storage 1 5000
+
+                Expect.isEmpty
+                    (repairTasks (planTasks snapshot))
+                    "the colony's stock is never patched up"
             }
 
             test "a surplus creep is sent to repair: assignment, intent and bubble" {

@@ -46,6 +46,7 @@ type BuiltKind =
     | Tower
     | Road
     | Container
+    | Storage
     /// Any structure kind the decision layer has no rules for yet.
     | Other
 
@@ -232,6 +233,7 @@ type StructureKind =
     | Tower
     | Road
     | Container
+    | Storage
 
 /// One step of creep movement, engine vocabulary: Top decreases Y.
 type Direction =

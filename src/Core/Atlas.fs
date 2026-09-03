@@ -369,6 +369,16 @@ let builtTowers (atlas: Atlas) : int =
 let pendingTowers (atlas: Atlas) : int =
     targetsOfKind atlas (Site BuiltKind.Tower) |> List.length
 
+/// Storages already standing in the room — at most one, but counted the
+/// way the tower and the extensions are so one gap rule sizes every kind
+/// the ordering picks for (ADR 0022).
+let builtStorages (atlas: Atlas) : int =
+    targetsOfKind atlas (Structure BuiltKind.Storage) |> List.length
+
+/// Storage construction sites already placed in the room.
+let pendingStorages (atlas: Atlas) : int =
+    targetsOfKind atlas (Site BuiltKind.Storage) |> List.length
+
 /// Placed targets of one kind: id and tile, in id order.
 let private placedOfKind (atlas: Atlas) (kind: TargetKind) : (string * Pos) list =
     targetsOfKind atlas kind

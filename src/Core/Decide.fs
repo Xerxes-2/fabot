@@ -554,6 +554,23 @@ let private towerAllowance level =
     | 7 -> 3
     | _ -> 6
 
+/// Storages the controller level allows in the room (Screeps
+/// CONTROLLER_STRUCTURES for "storage").
+let private storageAllowance level =
+    match level with
+    | 0
+    | 1
+    | 2
+    | 3 -> 0
+    | _ -> 1
+
+/// The level the engine unlocks the Storage at. The Layout reserves the
+/// Storage's whole allowance here rather than at the horizon (ADR 0022):
+/// the Storage is not a clustered kind, and its tile never comes back
+/// once an extension takes it, so the reservation must outlive any
+/// revisit of the horizon.
+let private storageLevel = 4
+
 /// The Layout horizon (ADR 0011): the whole plan is computed up to this
 /// level regardless of the current one, so today's roads route around
 /// tomorrow's structures. Deliberately not RCL8 — a wider reservation
@@ -564,11 +581,11 @@ let private horizonLevel = 4
 /// deterministic Layout (ADR 0011), computed whole from the Atlas every
 /// tick and placed all at once — no persisted plan, no pacing. One
 /// ordering rule eats every clustered structure: buildable tiles on the
-/// spawn's checkerboard colour, the working ground excluded (ADR 0022),
-/// nearest-to-spawn first, the tower taking its pick before the
-/// extensions. Trunk roads pave each source to the controller and to each
-/// spawn plus the swamps of the controller's Work Area, priced on raw
-/// terrain and routed around every reserved tile —
+/// spawn's checkerboard colour, nearest-to-spawn first, the working
+/// ground excluded, the Storage's pick coming before the tower's and both
+/// before the extensions' (ADR 0022). Trunk roads pave each source to the
+/// controller and to each spawn plus the swamps of the controller's Work
+/// Area, priced on raw terrain and routed around every reserved tile —
 /// reservations come first, so a road never sits where a structure will.
 /// Placement filters the Layout to what the current level unlocks and
 /// what the projection's censuses say is missing. Sites are not creep
@@ -597,10 +614,13 @@ let private planLayout (snapshot: Snapshot) atlas : Intent list =
 
         // A kind's still-open gap at a level: its allowance there minus the
         // projection's censuses of standing and pending structures. Judged
-        // at the horizon it sizes the reservation; at the current level it
-        // sizes the placement.
+        // at the level the kind is reserved for it sizes the reservation;
+        // at the current level it sizes the placement.
         let gapAt allowanceOf built pending level =
             allowanceOf level - built - pending |> max 0
+
+        let storageGap =
+            gapAt storageAllowance (Atlas.builtStorages atlas) (Atlas.pendingStorages atlas)
 
         let towerGap =
             gapAt towerAllowance (Atlas.builtTowers atlas) (Atlas.pendingTowers atlas)
@@ -608,18 +628,26 @@ let private planLayout (snapshot: Snapshot) atlas : Intent list =
         let extensionGap =
             gapAt extensionAllowance (Atlas.builtExtensions atlas) (Atlas.pendingExtensions atlas)
 
-        // The horizon's still-unclaimed slots, tower first: a built or
-        // pending structure keeps its tile out of the ordering (it is a
-        // target) and its slot off the plan.
+        // The still-unclaimed slots, Storage first and tower next: a built
+        // or pending structure keeps its tile out of the ordering (it is a
+        // target) and its slot off the plan. The clustered kinds are sized
+        // at the horizon; the Storage is not one of them and reads none
+        // (ADR 0022) — its whole allowance is held from level 0, because
+        // once an extension takes that tile it never comes back.
+        let storageSlots = storageGap storageLevel
         let towerSlots = towerGap horizonLevel
         let extensionSlots = extensionGap horizonLevel
 
-        let clustered = ordering |> List.truncate (towerSlots + extensionSlots)
+        let clustered =
+            ordering |> List.truncate (storageSlots + towerSlots + extensionSlots)
+
+        let storageTiles, afterStorage =
+            clustered |> List.splitAt (min storageSlots clustered.Length)
 
         let towerTiles, extensionTiles =
-            clustered |> List.splitAt (min towerSlots clustered.Length)
+            afterStorage |> List.splitAt (min towerSlots afterStorage.Length)
 
-        // Reserved before trunks: a trunk never crosses a tile any horizon
+        // Reserved before trunks: a trunk never crosses a tile a reserved
         // structure will claim.
         let reserved = Set.ofList clustered
 
@@ -727,7 +755,8 @@ let private planLayout (snapshot: Snapshot) atlas : Intent list =
         let place kind tiles =
             tiles |> List.map (fun tile -> PlaceConstructionSite(room, tile, kind))
 
-        place Tower (towerTiles |> List.truncate (towerGap controller.Level))
+        place Storage (storageTiles |> List.truncate (storageGap controller.Level))
+        @ place Tower (towerTiles |> List.truncate (towerGap controller.Level))
         @ place Extension (extensionTiles |> List.truncate (extensionGap controller.Level))
         @ place Road (Set.toList roadGap)
         @ place Container containerGap
