@@ -46,12 +46,20 @@ let private pruneDeadCreepMemory (living: Set<string>) =
             if not (Set.contains name living) then
                 emitJsStatement (creepsMemory, name) "delete $0[$1]"
 
+// The census-keyed plan memo (ADR 0017): heap state only, carried across
+// ticks in this binding and never written to Memory — a global reset
+// starts the next tick at None and decide recomputes from scratch.
+let mutable private planMemo: PlanMemo option = None
+
 // Exported as `loop` on the bundled `main` module; the engine calls it every tick.
 let loop () =
     let snapshot = Snapshot.build ()
     // The verbose list is read fresh from Memory each tick, so a flip from
     // the terminal changes what the very next tick records.
-    let decision = decide snapshot (loadAssignments ()) (ObserveMemory.loadVerbose ())
+    let decision =
+        decide snapshot (loadAssignments ()) (ObserveMemory.loadVerbose ()) planMemo
+
+    planMemo <- Some decision.Memo
     // Memory writes land before the engine calls: a throw inside Executor.run
     // must not discard the tick's anti-thrash state.
     saveAssignments decision.Assignments

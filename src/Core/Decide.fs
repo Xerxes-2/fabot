@@ -395,12 +395,13 @@ let private isHaulerBody (creep: CreepInfo) =
 /// the Workforce target. Spawning is a colony-level need, not a Task creeps
 /// get matched to, so it sits beside the Planner/Matcher pipeline rather
 /// than inside it.
-let private planSpawns (snapshot: Snapshot) atlas : Intent list =
+let private planSpawns (snapshot: Snapshot) atlas (haulerQuota: int) : Intent list =
     // The specialist rows' quota rules (ADR 0006, ADR 0012): one Anchor
-    // per Post, haulers per the throughput arithmetic. Both are addends of
-    // the target itself — inside it by construction, never on top of it.
+    // per Post, haulers per the throughput arithmetic — the hauler quota
+    // arrives memoised on the census signature (ADR 0017), its input set
+    // a subset of the Layout's. Both are addends of the target itself —
+    // inside it by construction, never on top of it.
     let anchorQuota = Atlas.posts atlas |> Set.count
-    let haulerQuota = haulerQuota snapshot atlas
     let target = workforceTarget snapshot atlas anchorQuota haulerQuota
     let deficit = target - List.length snapshot.Creeps
 
@@ -1291,16 +1292,78 @@ let private assignedTasks (tasks: Task list) (assignments: Assignments) : Map<st
     |> List.choose (fun (name, tid) -> Map.tryFind tid byId |> Option.map (fun t -> name, t))
     |> Map.ofList
 
+/// The census signature (ADR 0017): a string over exactly the inputs the
+/// census-derived plans read — the (kind, position) census of standing
+/// structures, the (kind, position) census of pending sites, the
+/// controller level, and the room name. Any one input moving moves the
+/// signature; everything else a Snapshot carries — creeps, stores, hits,
+/// dropped piles, hostiles, banked energy, the tick — is invisible to it.
+/// The hauler quota rides the same signature on one load-bearing
+/// derivation: the RoomEnergy Capacity it sizes bodies from is the
+/// engine's energyCapacityAvailable — a function of the standing
+/// spawn/extension census and the controller level, both covered here. A
+/// colony spanning a second spawn room would outgrow the single RoomName
+/// and must widen the signature before anything census-derived differs
+/// between its rooms.
+let censusSignature (snapshot: Snapshot) : string =
+    let census select =
+        snapshot.Spatial.TargetKinds
+        |> Map.toList
+        |> List.choose (fun (id, kind) ->
+            select kind
+            |> Option.bind (fun (built: BuiltKind) ->
+                Map.tryFind id snapshot.Spatial.TargetPositions
+                |> Option.map (fun pos -> $"{built}@{pos.X},{pos.Y}")))
+        |> List.sort
+        |> String.concat ";"
+
+    let standing =
+        census (function
+            | Structure kind -> Some kind
+            | _ -> None)
+
+    let pending =
+        census (function
+            | Site kind -> Some kind
+            | _ -> None)
+
+    let level =
+        snapshot.Controller
+        |> Option.map (fun c -> string c.Level)
+        |> Option.defaultValue ""
+
+    let room = snapshot.Spatial.RoomName |> Option.defaultValue ""
+    $"{room}|{level}|{standing}|{pending}"
+
 /// The decision seam: Snapshot in — with the verbose list of creep names
-/// owed full candidate scoring — Decision out. The tick's pipeline is visible here — plan, match, emit, resolve —
+/// owed full candidate scoring and the previous tick's plan memo —
+/// Decision out. The tick's pipeline is visible here — plan, match, emit, resolve —
 /// beside the colony steps (spawns, sites), with geometry consulted
 /// through one Atlas built up front, so every step prices from the same
-/// flood (ADR 0004).
-let decide (snapshot: Snapshot) (assignments: Assignments) (verbose: Set<string>) : Decision =
+/// flood (ADR 0004). The census-derived plans — the Layout's site Intents
+/// and the hauler quota — are reused verbatim from a memo whose signature
+/// matches this tick's census, and recomputed otherwise (ADR 0017).
+let decide
+    (snapshot: Snapshot)
+    (assignments: Assignments)
+    (verbose: Set<string>)
+    (memo: PlanMemo option)
+    : Decision =
     let atlas = Atlas.ofSnapshot snapshot
+    let signature = censusSignature snapshot
+
+    let plan =
+        match memo with
+        | Some m when m.Signature = signature -> m
+        | _ ->
+            {
+                Signature = signature
+                SiteIntents = planLayout snapshot atlas
+                HaulerQuota = haulerQuota snapshot atlas
+            }
+
     let defenseIntents = planSafeMode snapshot atlas @ planFire snapshot atlas
-    let spawnIntents = planSpawns snapshot atlas
-    let siteIntents = planLayout snapshot atlas
+    let spawnIntents = planSpawns snapshot atlas plan.HaulerQuota
     let pickupIntents = planPickups snapshot atlas
     let tasks = planTasks snapshot
     let next, verdicts = matchCreeps snapshot atlas tasks assignments verbose
@@ -1311,10 +1374,11 @@ let decide (snapshot: Snapshot) (assignments: Assignments) (verbose: Set<string>
         Intents =
             defenseIntents
             @ spawnIntents
-            @ siteIntents
+            @ plan.SiteIntents
             @ pickupIntents
             @ emit snapshot atlas assigned
             @ moveIntents
         Assignments = next
+        Memo = plan
         Verdicts = verdicts @ moveVerdicts
     }

@@ -292,6 +292,18 @@ type Intent =
 /// Creep name -> task id. The only state remembered between ticks (anti-thrash).
 type Assignments = Map<string, string>
 
+/// The census-keyed plan memo (ADR 0017): the census signature beside the
+/// plans derived from exactly that census — the Layout's site Intents and
+/// the hauler quota. Held by the host in heap across ticks, never written
+/// to Memory: a global reset discards it and the next tick recomputes from
+/// scratch. Same census, same plan, so reuse never changes behaviour.
+type PlanMemo =
+    {
+        Signature: string
+        SiteIntents: Intent list
+        HaulerQuota: int
+    }
+
 /// What decided a fresh match: the first comparison that separated the
 /// winning Task from its closest rival — rank tier, then travel cost, then
 /// current load — or the tie-break when none did (pool order), or the fact
@@ -368,11 +380,12 @@ type Verdict =
     | Rerouted of creep: string
 
 /// What one tick of deciding returns: the Intents to execute, the
-/// Assignments to remember for next tick, and the Verdicts explaining
-/// them (ADR 0009).
+/// Assignments to remember for next tick, the plan memo to hold in heap
+/// for next tick (ADR 0017), and the Verdicts explaining them (ADR 0009).
 type Decision =
     {
         Intents: Intent list
         Assignments: Assignments
+        Memo: PlanMemo
         Verdicts: Verdict list
     }
