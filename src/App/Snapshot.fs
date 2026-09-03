@@ -61,6 +61,13 @@ let private buildSpatial (spawn: ISpawn) : SpatialInfo =
 
     let sources = room.find findSources |> Array.map (fun o -> o :?> ISource)
 
+    // Dropped energy piles, for the pickup reflex: position and kind only —
+    // no decision reads an amount, so none is projected.
+    let dropped =
+        room.find findDroppedResources
+        |> Array.map (fun o -> o :?> IResource)
+        |> Array.filter (fun r -> r.resourceType = "energy")
+
     // The controller travels through FIND_STRUCTURES on live servers, but
     // is projected explicitly so nothing depends on that detail.
     let controllers =
@@ -84,6 +91,7 @@ let private buildSpatial (spawn: ISpawn) : SpatialInfo =
                         structures |> Array.map (fun st -> st.id, posOf st.pos)
                         sites |> Array.map (fun site -> site.id, posOf site.pos)
                         controllers |> Array.map (fun c -> c.id, posOf c.pos)
+                        dropped |> Array.map (fun r -> r.id, posOf r.pos)
                     ]
             )
         // Same array order as TargetPositions, so a controller that also
@@ -98,6 +106,7 @@ let private buildSpatial (spawn: ISpawn) : SpatialInfo =
                         sites
                         |> Array.map (fun site -> site.id, Site(builtKindOf site.structureType))
                         controllers |> Array.map (fun c -> c.id, Controller)
+                        dropped |> Array.map (fun r -> r.id, Dropped)
                     ]
             )
         CreepPositions =

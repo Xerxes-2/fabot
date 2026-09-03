@@ -233,6 +233,29 @@ let placementQueryTests =
                     "free plain and swamp tiles only, sorted by (X, Y)"
             }
 
+            test "droppedEnergy lists placed piles in id order; buildableTiles ignores them" {
+                // A pile is a target the reflex reads, not a thing standing
+                // on the tile: it never keeps a construction site off it.
+                let atlas =
+                    { spatial
+                          [ "pile-b", { X = 10; Y = 11 }; "pile-a", { X = 10; Y = 10 } ]
+                          [ { X = 10; Y = 10 }, Plain; { X = 10; Y = 11 }, Plain ] with
+                        TargetKinds = Map.ofList [ "pile-a", Dropped; "pile-b", Dropped ]
+                    }
+                    |> snapshotWith []
+                    |> ofSnapshot
+
+                Expect.equal
+                    (droppedEnergy atlas)
+                    [ "pile-a", { X = 10; Y = 10 }; "pile-b", { X = 10; Y = 11 } ]
+                    "both piles placed, id order"
+
+                Expect.equal
+                    (buildableTiles atlas)
+                    [ { X = 10; Y = 10 }; { X = 10; Y = 11 } ]
+                    "pile tiles stay buildable"
+            }
+
             test "extension censuses count exactly the built and pending extensions" {
                 let atlas =
                     { SpatialInfo.empty with

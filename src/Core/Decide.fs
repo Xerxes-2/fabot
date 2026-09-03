@@ -401,6 +401,35 @@ let private planLayout (snapshot: Snapshot) atlas : Intent list =
         @ place Road (Set.toList roadGap)
     | _ -> []
 
+/// Colony reflex beside the pipeline, the second after safe mode: every
+/// creep with free carry capacity standing within pickup range of a
+/// dropped energy pile asks to pick it up — beside its assigned Task's
+/// action, since the engine's pickup conflicts with no other action. No
+/// movement, no matching, no threshold: the reflex only recaptures what
+/// is already in reach (death drops, harvest overflow), and duplicate
+/// pickups on one pile are the engine's to settle.
+let private planPickups (snapshot: Snapshot) atlas : Intent list =
+    match Atlas.droppedEnergy atlas with
+    | [] -> []
+    | piles ->
+        let hungry =
+            snapshot.Creeps
+            |> List.filter (fun c -> c.FreeCapacity > 0)
+            |> List.map (fun c -> c.Name)
+            |> Set.ofList
+
+        Atlas.placedCreeps atlas
+        |> List.collect (fun (name, pos) ->
+            if Set.contains name hungry then
+                piles
+                |> List.choose (fun (pile, tile) ->
+                    if range pos tile <= 1 then
+                        Some(PickupEnergy(name, pile))
+                    else
+                        None)
+            else
+                [])
+
 /// Whether a creep can usefully work this Task right now. The body must
 /// physically be able to do it — Work-part tasks need a Work part, energy
 /// delivery needs a Carry part — and the energy state must call for it: a
@@ -929,6 +958,7 @@ let decide (snapshot: Snapshot) (assignments: Assignments) (verbose: Set<string>
     let defenseIntents = planSafeMode snapshot
     let spawnIntents = planSpawns snapshot atlas
     let siteIntents = planLayout snapshot atlas
+    let pickupIntents = planPickups snapshot atlas
     let tasks = planTasks snapshot
     let next, verdicts = matchCreeps snapshot atlas tasks assignments verbose
     let assigned = assignedTasks tasks next
@@ -939,6 +969,7 @@ let decide (snapshot: Snapshot) (assignments: Assignments) (verbose: Set<string>
             defenseIntents
             @ spawnIntents
             @ siteIntents
+            @ pickupIntents
             @ emit snapshot atlas assigned
             @ moveIntents
         Assignments = next

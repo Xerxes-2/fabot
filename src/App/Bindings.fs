@@ -21,6 +21,9 @@ let findMyConstructionSites = 114
 /// Screeps `FIND_HOSTILE_CREEPS` constant.
 let findHostileCreeps = 103
 
+/// Screeps `FIND_DROPPED_RESOURCES` constant.
+let findDroppedResources = 106
+
 /// Screeps `TERRAIN_MASK_WALL` constant.
 let terrainMaskWall = 1
 
@@ -67,6 +70,13 @@ type IStructure =
     abstract hits: int
     /// Maximum hit points.
     abstract hitsMax: int
+
+/// A dropped resource pile lying on the ground.
+type IResource =
+    abstract id: string
+    /// Screeps RESOURCE_* string, e.g. "energy".
+    abstract resourceType: string
+    abstract pos: IRoomPosition
 
 type IConstructionSite =
     abstract id: string
@@ -129,6 +139,7 @@ type ICreep =
     abstract build: target: obj -> int
     abstract repair: target: obj -> int
     abstract upgradeController: target: obj -> int
+    abstract pickup: target: obj -> int
     /// Single-step move by direction constant (TOP = 1, clockwise). The
     /// only movement API the bot uses — moveTo is forbidden (ADR 0001).
     abstract move: direction: int -> int

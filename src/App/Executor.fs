@@ -62,6 +62,8 @@ let private execute (intent: Intent) : Outcome =
         withCreepTarget creepName structureId (fun c t -> c.repair t)
     | UpgradeController(creepName, controllerId) ->
         withCreepTarget creepName controllerId (fun c t -> c.upgradeController t)
+    | PickupEnergy(creepName, resourceId) ->
+        withCreepTarget creepName resourceId (fun c t -> c.pickup t)
     | MoveCreep(creepName, direction) ->
         withCreep creepName (fun c -> c.move (directionCode direction))
     | SayCreep(creepName, message) -> withCreep creepName (fun c -> c.say message)

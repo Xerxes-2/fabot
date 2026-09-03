@@ -281,10 +281,16 @@ let positionOf (atlas: Atlas) (targetId: string) : Pos option =
 
 /// Tiles a construction site may occupy: non-Wall terrain holding no
 /// projected target — anything standing (or being built) on a tile keeps a
-/// site off it; creeps do not. Deterministic (X, Y) order.
+/// site off it; creeps do not, and neither does a dropped pile — a
+/// transient pile perturbing the ordering would break the Layout's
+/// determinism (ADR 0011). Deterministic (X, Y) order.
 let buildableTiles (atlas: Atlas) : Pos list =
     let taken =
-        atlas.Spatial.TargetPositions |> Map.toList |> List.map snd |> Set.ofList
+        atlas.Spatial.TargetPositions
+        |> Map.toList
+        |> List.filter (fun (id, _) -> Map.tryFind id atlas.Spatial.TargetKinds <> Some Dropped)
+        |> List.map snd
+        |> Set.ofList
 
     atlas.Spatial.Terrain
     |> Map.toList
@@ -315,6 +321,13 @@ let builtTowers (atlas: Atlas) : int =
 /// Tower construction sites already placed in the room.
 let pendingTowers (atlas: Atlas) : int =
     targetsOfKind atlas (Site BuiltKind.Tower) |> List.length
+
+/// Dropped energy piles the projection places: id and tile, in id order.
+/// The pickup reflex's whole view of a pile — no amount is projected.
+let droppedEnergy (atlas: Atlas) : (string * Pos) list =
+    targetsOfKind atlas Dropped
+    |> List.choose (fun id ->
+        Map.tryFind id atlas.Spatial.TargetPositions |> Option.map (fun pos -> id, pos))
 
 /// Tiles holding a built road — the projection's road census, one half of
 /// what the Layout's road gap subtracts (ADR 0011).

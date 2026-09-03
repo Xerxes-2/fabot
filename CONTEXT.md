@@ -103,6 +103,9 @@ The glyph an assigned creep says over its head each tick, one fixed glyph per [[
 ### Safe-mode reflex
 The colony reflex (ADR 0007) that emits `ActivateSafeMode` the tick any CLAIM-part [[hostile]] stands in a spawn room — on sight, because the claim tap it is about to land would itself block activation for 1,000 ticks. Gated only on stock remaining and safe mode not already running; hostiles without CLAIM never spend the stock.
 
+### Pickup reflex
+The colony reflex that emits a pickup Intent for every creep with free carry capacity standing within range 1 of a dropped energy pile — beside its assigned [[task]]'s action, since the engine's pickup conflicts with no other action. A reflex, not a Task: no movement, no matching, no threshold — it only recaptures what is already in reach (death drops, harvest overflow). Energy only; tombstones are not covered. Piles are projected as position and kind alone — no amount, since no decision reads one. Like the [[safe-mode reflex]], it speaks no [[verdict]] and shows no [[chat bubble]].
+
 ### Hostile
 A hostile creep as the Snapshot projects it: its body parts, verbatim, and nothing else. What a hostile can do is decided from what it is made of — CLAIM is the only part that threatens the controller, and the controller is the only thing safe mode is spent on (ADR 0007).
 

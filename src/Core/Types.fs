@@ -99,6 +99,9 @@ type TargetKind =
     | Controller
     | Structure of BuiltKind
     | Site of BuiltKind
+    /// A dropped energy pile — read only by the pickup reflex, never a
+    /// Task target; projected as position and kind alone, no amount.
+    | Dropped
 
 /// The Snapshot's spatial projection: the spawn room's terrain plus
 /// positions of the entities decisions need to place on it.
@@ -255,6 +258,7 @@ type Intent =
     | BuildSite of creepName: string * siteId: string
     | RepairStructure of creepName: string * structureId: string
     | UpgradeController of creepName: string * controllerId: string
+    | PickupEnergy of creepName: string * resourceId: string
     | MoveCreep of creepName: string * direction: Direction
     | SayCreep of creepName: string * message: string
     | ActivateSafeMode of controllerId: string

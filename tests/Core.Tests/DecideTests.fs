@@ -3597,6 +3597,125 @@ let safeModeTests =
             }
         ]
 
+let pickups intents =
+    intents
+    |> List.choose (function
+        | PickupEnergy(creep, pile) -> Some(creep, pile)
+        | _ -> None)
+
+/// A colony around a dropped energy pile at (10, 10) on open ground, with
+/// the given creeps standing on the given tiles.
+let pileColony creeps positions =
+    { bareRespawn with
+        Sources = []
+        Creeps = creeps
+        Spatial =
+            { spatial
+                  [ "pile-1", { X = 10; Y = 10 } ]
+                  [
+                      for x in 8..12 do
+                          for y in 8..12 -> { X = x; Y = y }, Plain
+                  ] with
+                TargetKinds = Map.ofList [ "pile-1", Dropped ]
+                CreepPositions = Map.ofList positions
+            }
+    }
+
+[<Tests>]
+let pickupReflexTests =
+    testList
+        "pickup reflex"
+        [
+            test "an adjacent creep with free capacity picks up" {
+                let snapshot = pileColony [ worker "w1" 0 50 ] [ "w1", { X = 10; Y = 11 } ]
+                let { Intents = intents } = decide snapshot Map.empty Set.empty
+                Expect.equal (pickups intents) [ "w1", "pile-1" ] "in reach and hungry: pick up"
+            }
+
+            test "a creep standing on the pile picks up" {
+                let snapshot = pileColony [ worker "w1" 0 50 ] [ "w1", { X = 10; Y = 10 } ]
+                let { Intents = intents } = decide snapshot Map.empty Set.empty
+                Expect.equal (pickups intents) [ "w1", "pile-1" ] "range 0 is within reach"
+            }
+
+            test "a full creep leaves the pile alone" {
+                let snapshot = pileColony [ worker "w1" 50 0 ] [ "w1", { X = 10; Y = 11 } ]
+                let { Intents = intents } = decide snapshot Map.empty Set.empty
+                Expect.isEmpty (pickups intents) "no free capacity, nothing to gain"
+            }
+
+            test "a pile out of reach draws nobody — the reflex never moves a creep" {
+                let snapshot = pileColony [ worker "w1" 0 50 ] [ "w1", { X = 10; Y = 13 } ]
+                let { Intents = intents } = decide snapshot Map.empty Set.empty
+                Expect.isEmpty (pickups intents) "range 3: recapture only what is in reach"
+            }
+
+            test "every adjacent creep picks — the engine settles duplicates" {
+                let snapshot =
+                    pileColony
+                        [ worker "w1" 0 50; worker "w2" 0 50 ]
+                        [ "w1", { X = 10; Y = 11 }; "w2", { X = 9; Y = 10 } ]
+
+                let { Intents = intents } = decide snapshot Map.empty Set.empty
+
+                Expect.equal
+                    (pickups intents |> List.sort)
+                    [ "w1", "pile-1"; "w2", "pile-1" ]
+                    "zero coordination: both reach, both ask"
+            }
+
+            test "the pickup rides beside the task's own action" {
+                // The creep sits on a Seat of src-a with the pile also in
+                // reach: pickup conflicts with no other action, so both
+                // Intents are emitted for the same tick.
+                let snapshot =
+                    { pileColony [ worker "w1" 0 50 ] [ "w1", { X = 10; Y = 11 } ] with
+                        Sources = [ { Id = "src-a" } ]
+                    }
+
+                let withSource =
+                    { snapshot with
+                        Spatial =
+                            { snapshot.Spatial with
+                                Terrain = Map.add { X = 11; Y = 11 } Wall snapshot.Spatial.Terrain
+                                TargetPositions =
+                                    Map.add
+                                        "src-a"
+                                        { X = 11; Y = 11 }
+                                        snapshot.Spatial.TargetPositions
+                                TargetKinds = Map.add "src-a" Source snapshot.Spatial.TargetKinds
+                            }
+                    }
+
+                let { Intents = intents } = decide withSource Map.empty Set.empty
+
+                Expect.equal (pickups intents) [ "w1", "pile-1" ] "the reflex fires"
+
+                Expect.contains
+                    intents
+                    (HarvestSource("w1", "src-a"))
+                    "the assigned task's action still goes out"
+            }
+
+            test "a pile keeps no construction site off its tile" {
+                // Layout determinism (ADR 0011): a transient pile must not
+                // perturb the ordering, so placement with and without the
+                // pile is identical.
+                let bare = atLevel 2 (openRoom 3)
+
+                let strewn =
+                    atLevel 2 (openRoom 3 |> withTargets [ "pile-1", { X = 24; Y = 24 }, Dropped ])
+
+                let placedWith = decide strewn Map.empty Set.empty
+                let placedWithout = decide bare Map.empty Set.empty
+
+                Expect.equal
+                    (placedTiles placedWith.Intents)
+                    (placedTiles placedWithout.Intents)
+                    "the Layout does not see piles"
+            }
+        ]
+
 [<Tests>]
 let downgradeDeadlineTests =
     testList
