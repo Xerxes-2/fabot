@@ -44,10 +44,16 @@ The set of tiles a creep may stand on while performing its current Task, derived
 A creep's movement desire for one tick: candidate standing tiles plus a priority. Input to the [[resolver]] — not an Intent; the Resolver's output (a single-step move) is what becomes an Intent.
 
 ### Resolver
-The pure step that arbitrates a room's Move Intents into actual single-step moves (priority first, most-constrained first, swap when contested). Fourth pure step beside Planner, Matcher, and [[emitter]]; movement is never issued outside it.
+The pure step that arbitrates a room's Move Intents into actual single-step moves (priority first, most-constrained first, swap when contested). Fourth pure step beside Planner, Matcher, and [[emitter]]; movement is never issued outside it. A [[grounded]] creep sits arbitration out: its tile is blocked for the tick and no move Intent is issued to it (ADR 0008).
+
+### Grounded
+A creep still paying off fatigue this tick: the engine would answer any move with ERR_TIRED, so the [[resolver]] neither asks it to move nor lets anyone claim or displace through its tile (ADR 0008). Recomputed each tick from the Snapshot's fatigue — a stationary creep drains 2 fatigue a tick, so grounding is always transient.
 
 ### Travel cost
-The cheapest-path cost from a creep to a Task's Work Area over the [[spatial projection]], in ticks for that creep's body: terrain weights (plain 1, swamp 5, impassable excluded) scaled by the body's fatigue factor (ADR 0002, revised by ADR 0006). Priced from the load carried right now: carried energy loads Carry parts 50 apiece, and an empty Carry generates no fatigue — the engine's own rule. Breaks rank ties in the Matcher; a Work Area with no travel cost — unreachable or empty — makes the Task inapplicable to that creep: never matched fresh, and a remembered assignment to it is released.
+The cheapest-path cost from a creep to a Task's Work Area over the [[spatial projection]], in ticks for that creep's body: terrain weights (plain 1, swamp 5, impassable excluded) scaled by the body's fatigue factor (ADR 0002, revised by ADR 0006), plus the [[occupancy surcharge]] on tiles under standing creeps (ADR 0008). Priced from the load carried right now: carried energy loads Carry parts 50 apiece, and an empty Carry generates no fatigue — the engine's own rule. Breaks rank ties in the Matcher; a Work Area with no travel cost — unreachable or empty — makes the Task inapplicable to that creep: never matched fresh, and a remembered assignment to it is released.
+
+### Occupancy surcharge
+The 5 extra ticks the flood prices onto a step landing on a tile some creep occupies this tick (ADR 0008). Sends travellers around standing traffic when a lane is cheaper, but the tile stays passable — traffic re-prices a route, it never makes a Task inapplicable, unlike an obstacle.
 
 ### Workforce target
 The number of creeps the colony maintains: the total [[seat]] count across all sources, floored at 2. Derived fresh each tick from the Snapshot, never persisted. Spawning fills the gap between living creeps and the target; a source the projection does not place contributes no Seats, so an empty projection leaves only the floor. Seats count by terrain alone (ADR 0001), so an unreachable source still raises the target — the surplus flows to Upgrade.

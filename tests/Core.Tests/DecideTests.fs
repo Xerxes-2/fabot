@@ -1554,6 +1554,29 @@ let arbitrationTests =
                     "the tired harvester still harvests this tick"
             }
 
+            test "a fatigued traveller stands down for the tick instead of failing a move" {
+                // The live -11 spam came from loaded travellers: a creep
+                // mid-journey with fatigue outstanding used to be issued its
+                // next step anyway, which the engine refused every tick.
+                let corridor =
+                    [ for y in 9..15 -> { X = 10; Y = y }, Plain ] @ [ { X = 10; Y = 10 }, Wall ]
+
+                let snapshot =
+                    { bareRespawn with
+                        Sources = [ { Id = "src-a" } ]
+                        Creeps = [ { worker "w1" 0 50 with Fatigue = 4 } ]
+                        Spatial =
+
+                            { spatial [ "src-a", { X = 10; Y = 10 } ] corridor with
+                                CreepPositions = Map.ofList [ "w1", { X = 10; Y = 14 } ]
+                            }
+                    }
+
+                Expect.isEmpty
+                    (resolveOn snapshot [ "w1", Harvest "src-a" ] |> moveIntents)
+                    "a rested copy of this creep would step Top; the tired one is issued nothing"
+            }
+
             test "a travelling builder detours around a seated harvester when a lane is open" {
                 // The corridor grows a parallel lane at y = 13. The straight
                 // path runs through the seated harvester's tile; the flood
