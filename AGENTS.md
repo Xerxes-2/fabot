@@ -10,6 +10,27 @@
 
 This repo uses **jj** (colocated with git). All VCS mutations go through `jj`; git is read-only.
 
+### Shipping an issue
+
+Solo repo: no PRs, no feature branches. Work on `main` directly.
+
+Before pushing (the point of no return — pushed commits become immutable):
+
+1. `npm run format` and `npm run build` / `dotnet test` are clean.
+2. `/code-review` has run on the diff and its findings are resolved.
+
+Then:
+
+3. `jj describe` the change with a conventional-commit subject and a
+   `Fixes #<n>` trailer (one line per issue; the keyword does not
+   distribute across a comma-separated list).
+4. `jj git push`. GitHub closes the referenced issues on push to `main`.
+   jj marks the pushed change immutable and opens a fresh empty change
+   on top.
+
+Squash TDD slices into one change per issue before step 3; push per
+issue, not per slice.
+
 ## Agent skills
 
 ### Issue tracker
