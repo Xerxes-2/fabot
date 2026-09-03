@@ -3814,9 +3814,9 @@ let safeModeTests =
     testList
         "safe-mode reflex"
         [
-            test "a CLAIM-part hostile fires safe mode the tick it is seen" {
-                // A claim tap on the controller blocks activation for 1,000
-                // ticks — waiting until the hostile arrives is waiting too long.
+            test "an unplaced controller falls back to firing on sight" {
+                // No controller tile in the projection means no deadline to
+                // measure — the reflex keeps the old conservative answer.
                 let snapshot =
                     { bareRespawn with
                         Hostiles = [ hostile [ Claim; Claim; Move; Move ] ]
@@ -3824,6 +3824,33 @@ let safeModeTests =
 
                 let { Intents = intents } = decide snapshot Map.empty Set.empty
                 Expect.equal (activations intents) [ "ctrl-1" ] "safe mode fires immediately"
+            }
+
+            test "a claimer beyond reach holds the stock — the towers get their window" {
+                // attackController is range 1 and judged from tick-start
+                // position, so a claimer 4 tiles out cannot tap for at
+                // least 3 more ticks; holding costs nothing (ADR 0015).
+                let snapshot =
+                    { bareRespawn with
+                        Spatial = spatial [ "ctrl-1", { X = 25; Y = 25 } ] []
+                        Hostiles = [ hostileAt "h-1" { X = 25; Y = 29 } [ Claim; Move ] ]
+                    }
+
+                let { Intents = intents } = decide snapshot Map.empty Set.empty
+                Expect.isEmpty (activations intents) "range 4: the tap cannot land yet"
+            }
+
+            test "a claimer at the reach deadline fires safe mode" {
+                // Range 3 = the precise deadline (2) plus one tile of margin
+                // for a skipped tick (ADR 0015).
+                let snapshot =
+                    { bareRespawn with
+                        Spatial = spatial [ "ctrl-1", { X = 25; Y = 25 } ] []
+                        Hostiles = [ hostileAt "h-1" { X = 28; Y = 25 } [ Claim; Move ] ]
+                    }
+
+                let { Intents = intents } = decide snapshot Map.empty Set.empty
+                Expect.equal (activations intents) [ "ctrl-1" ] "the deadline is now"
             }
 
             test "a hostile without CLAIM parts does not spend the activation" {

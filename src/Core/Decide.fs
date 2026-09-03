@@ -469,21 +469,37 @@ let private planSpawns (snapshot: Snapshot) atlas : Intent list =
 
         List.rev intents
 
+/// The claimer range at which safe mode fires (ADR 0015): the precise
+/// deadline is 2 — attackController is range 1 and judged from
+/// tick-start position, and a creep steps at most one tile a tick, so
+/// activating at 2 always lands before the tap — plus one tile of
+/// margin for a skipped tick.
+let private safeModeDeadline = 3
+
 /// Colony reflex beside the pipeline: a CLAIM-part hostile is the one
 /// threat that can disarm safe mode itself — attackController blocks
-/// activation for 1,000 ticks — so the activation fires the tick such a
-/// hostile is seen, while firing is still possible. Fighters without
-/// CLAIM cannot touch the controller and never spend the stock: at RCL2
-/// safe mode outlasts any invader raid 13×, so it keeps for when the
-/// room is actually being taken (ADR 0007).
-let private planSafeMode (snapshot: Snapshot) : Intent list =
+/// activation for 1,000 ticks. But the tap is a range-1 act, so the
+/// activation holds until a claimer stands within reach of landing it
+/// (ADR 0015) — the hold is free (activation still wins the race) and
+/// buys the towers their window to kill the claimer en route. A
+/// controller the projection cannot place has no deadline to measure
+/// and falls back to firing on sight. Fighters without CLAIM cannot
+/// touch the controller and never spend the stock: at RCL2 safe mode
+/// outlasts any invader raid 13×, so it keeps for when the room is
+/// actually being taken (ADR 0007).
+let private planSafeMode (snapshot: Snapshot) atlas : Intent list =
     match snapshot.Controller with
-    | Some controller when
-        controller.SafeModeAvailable > 0
-        && not controller.SafeModeActive
-        && snapshot.Hostiles |> List.exists (fun h -> List.contains Claim h.Body)
-        ->
-        [ ActivateSafeMode controller.Id ]
+    | Some controller when controller.SafeModeAvailable > 0 && not controller.SafeModeActive ->
+        let withinReach (h: HostileInfo) =
+            List.contains Claim h.Body
+            && match Atlas.positionOf atlas controller.Id with
+               | Some pos -> range h.Pos pos <= safeModeDeadline
+               | None -> true
+
+        if snapshot.Hostiles |> List.exists withinReach then
+            [ ActivateSafeMode controller.Id ]
+        else
+            []
     | _ -> []
 
 /// Colony reflex beside the pipeline (ADR 0014): every tower shoots the
@@ -1279,7 +1295,7 @@ let private assignedTasks (tasks: Task list) (assignments: Assignments) : Map<st
 /// flood (ADR 0004).
 let decide (snapshot: Snapshot) (assignments: Assignments) (verbose: Set<string>) : Decision =
     let atlas = Atlas.ofSnapshot snapshot
-    let defenseIntents = planSafeMode snapshot @ planFire snapshot atlas
+    let defenseIntents = planSafeMode snapshot atlas @ planFire snapshot atlas
     let spawnIntents = planSpawns snapshot atlas
     let siteIntents = planLayout snapshot atlas
     let pickupIntents = planPickups snapshot atlas
