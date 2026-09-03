@@ -36,6 +36,13 @@ type Atlas =
             /// flood. Each flood is a distance and a predecessor-index
             /// array over tile indices.
             Floods: Map<Pos * FatigueFactor, Lazy<int[] * int[]>>
+            /// Work Area per Task, built at most once per tick and shared
+            /// by every query that stands a creep in one — the Floods memo
+            /// on a key set the Snapshot does not carry, so a mutable
+            /// table rather than a pre-laid Lazy map. The Atlas is rebuilt
+            /// every tick, so the table is per-tick by construction:
+            /// "Derived fresh each tick, never persisted" stands.
+            WorkAreas: System.Collections.Generic.Dictionary<Task, Set<Pos>>
         }
 
 let private roomSide = 50
@@ -252,6 +259,7 @@ let ofSnapshot (snapshot: Snapshot) : Atlas =
                 let factor = Map.find name factors
                 (pos, factor), lazy (floodFrom weights occupied factor pos))
             |> Map.ofList
+        WorkAreas = System.Collections.Generic.Dictionary()
     }
 
 /// A creep's fatigue factor; a creep the Snapshot does not carry prices
@@ -422,10 +430,7 @@ let seats (atlas: Atlas) (sourceId: string) : int option =
     Map.tryFind sourceId atlas.Spatial.TargetPositions
     |> Option.map (seatTiles atlas.Spatial >> Set.count)
 
-/// Work Area of a Task: the tiles a creep may stand on while performing it —
-/// passable tiles within the action's range of its target. Empty when the
-/// projection cannot place the target.
-let workArea (atlas: Atlas) (task: Task) : Set<Pos> =
+let private buildWorkArea (atlas: Atlas) (task: Task) : Set<Pos> =
     match Map.tryFind (targetOf task) atlas.Spatial.TargetPositions with
     | None -> Set.empty
     | Some target ->
@@ -440,6 +445,20 @@ let workArea (atlas: Atlas) (task: Task) : Set<Pos> =
                         if (stepCost atlas.Spatial tile).IsSome then
                             tile
             ]
+
+/// Work Area of a Task: the tiles a creep may stand on while performing it —
+/// passable tiles within the action's range of its target. Empty when the
+/// projection cannot place the target. Memoised per Task for the tick: the
+/// same area is asked for once per creep the Matcher prices and again by
+/// the Emitter and Resolver, and none of those readers can observe whether
+/// the set was built or recalled.
+let workArea (atlas: Atlas) (task: Task) : Set<Pos> =
+    match atlas.WorkAreas.TryGetValue task with
+    | true, area -> area
+    | _ ->
+        let area = buildWorkArea atlas task
+        atlas.WorkAreas.[task] <- area
+        area
 
 /// Every projected source's Seat tiles, unioned — the seat half behind
 /// dualSeats and posts.
