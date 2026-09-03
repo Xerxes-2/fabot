@@ -760,6 +760,13 @@ let private planPickups (snapshot: Snapshot) atlas : Intent list =
 /// candidate is Harvest and an unmanned Post wins it regardless of
 /// distance. Travel cost pins an Anchor that is at its Post; this gate
 /// is what walks one home past a nearer stocked container.
+/// A second gate stands at the other end of the haul cycle, this one
+/// reading the target's kind beside the body (ADR 0019): only a creep
+/// with a Work part draws from the controller's upgrade buffer. A body without one can spend nothing at the
+/// controller, so its Withdraw there is energy flowing back the way it
+/// came — and with every other sink full, the buffer is also its only
+/// Refill target, which cycled a hauler in and out of one container tick
+/// after tick. Source containers stay open to every carrier.
 let private applicable atlas (creep: CreepInfo) task =
     let has part =
         creep.Body |> Map.tryFind part |> Option.exists (fun n -> n > 0)
@@ -768,7 +775,11 @@ let private applicable atlas (creep: CreepInfo) task =
     | Harvest sourceId ->
         has Work
         && (creep.FreeCapacity > 0 || Atlas.catchesOverflow atlas creep.Name sourceId)
-    | Withdraw _ -> has Carry && creep.FreeCapacity > 0 && not (isAnchorBody creep)
+    | Withdraw containerId ->
+        has Carry
+        && creep.FreeCapacity > 0
+        && not (isAnchorBody creep)
+        && (has Work || not (Set.contains containerId (Atlas.controllerContainers atlas)))
     | Refill _ -> has Carry && creep.Energy > 0
     | Build _
     | Repair _

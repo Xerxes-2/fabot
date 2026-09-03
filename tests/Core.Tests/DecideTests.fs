@@ -5492,6 +5492,99 @@ let haulerTests =
                     "in range at tick start: the withdraw fires"
             }
 
+            test "a hauler's intake is a source container, never the upgrade buffer" {
+                // The buffer stands one step away and the source container
+                // six, yet a body with no Work part can spend nothing at the
+                // controller: drawing from the buffer only sends energy back
+                // the way it came.
+                let snapshot =
+                    { haulColony with
+                        Creeps = [ hauler "h1" 0 100 ]
+                        Spatial =
+                            { haulRoom with
+                                Stores = Map.ofList [ "can-src", 500; "can-ctrl", 800 ]
+                                CreepPositions = Map.ofList [ "h1", { X = 17; Y = 10 } ]
+                            }
+                    }
+
+                let { Assignments = assignments } = decide snapshot Map.empty Set.empty None
+
+                Expect.equal
+                    (Map.tryFind "h1" assignments)
+                    (Some(taskId (Withdraw "can-src")))
+                    "the buffer is inapplicable by body; the far source container is the intake"
+            }
+
+            test "the buffer stays intake for a Work body: the worker row still draws" {
+                // The gate reads the target's kind beside the body, so the
+                // colony's own worker row — four Work, four Carry, four
+                // Move — keeps the buffer it upgrades from.
+                let snapshot =
+                    { haulColony with
+                        Creeps =
+                            [
+                                creepWith
+                                    "w1"
+                                    0
+                                    100
+                                    [
+                                        Work
+                                        Work
+                                        Work
+                                        Work
+                                        Carry
+                                        Carry
+                                        Carry
+                                        Carry
+                                        Move
+                                        Move
+                                        Move
+                                        Move
+                                    ]
+                            ]
+                        Spatial =
+                            { haulRoom with
+                                Stores = Map.ofList [ "can-src", 500; "can-ctrl", 800 ]
+                                CreepPositions = Map.ofList [ "w1", { X = 17; Y = 10 } ]
+                            }
+                    }
+
+                let { Assignments = assignments } = decide snapshot Map.empty Set.empty None
+
+                Expect.equal
+                    (Map.tryFind "w1" assignments)
+                    (Some(taskId (Withdraw "can-ctrl")))
+                    "a body that can spend at the controller draws from the buffer beside it"
+            }
+
+            test "with only the buffer stocked, a hauler idles instead of cycling it" {
+                // The loop this gate closes: every other sink full, the
+                // hauler's only Refill target is the buffer it just drew
+                // from, so it emptied and refilled the same container tick
+                // after tick without ever delivering.
+                let snapshot =
+                    { haulColony with
+                        Creeps = [ hauler "h1" 0 100 ]
+                        Spatial =
+                            { haulRoom with
+                                CreepPositions = Map.ofList [ "h1", { X = 17; Y = 10 } ]
+                            }
+                    }
+
+                let {
+                        Assignments = assignments
+                        Verdicts = verdicts
+                    } =
+                    decide snapshot Map.empty Set.empty None
+
+                Expect.equal (Map.tryFind "h1" assignments) None "no intake a hauler may draw from"
+
+                Expect.contains
+                    verdicts
+                    (Verdict.Unassigned("h1", IdleReason.NoneApplicable))
+                    "the idle Verdict names the body gate"
+            }
+
             test "filled, the hauler's Withdraw releases and rematches to Refill" {
                 // No Work part: Harvest, Build, Upgrade and Repair are
                 // inapplicable by body, so the outflow is the only work

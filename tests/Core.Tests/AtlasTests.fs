@@ -1223,3 +1223,77 @@ let haulRoundTripTests =
                     "unpriceable geometry hires nobody"
             }
         ]
+
+[<Tests>]
+let controllerContainerTests =
+    testList
+        "atlas controllerContainers"
+        [
+            test "the buffer is a built container in the Upgrade area off every Seat" {
+                // Source at (10,10), controller at (14,10): "can-src" sits on
+                // the Seat (11,10), "can-ctrl" at (13,10) inside the Upgrade
+                // Work Area and on no Seat.
+                let atlas =
+                    { spatial
+                          [
+                              "src-a", { X = 10; Y = 10 }
+                              "ctrl-1", { X = 14; Y = 10 }
+                              "can-src", { X = 11; Y = 10 }
+                              "can-ctrl", { X = 13; Y = 10 }
+                          ]
+                          [ for x in 11..13 -> { X = x; Y = 10 }, Plain ] with
+                        TargetKinds =
+                            Map.ofList
+                                [
+                                    "src-a", Source
+                                    "ctrl-1", Controller
+                                    "can-src", Structure BuiltKind.Container
+                                    "can-ctrl", Structure BuiltKind.Container
+                                ]
+                    }
+                    |> snapshotWith []
+                    |> ofSnapshot
+
+                Expect.equal
+                    (controllerContainers atlas)
+                    (Set.singleton "can-ctrl")
+                    "the source container is intake, not buffer, however near the controller"
+            }
+
+            test "a container site, a far container and a controllerless room are no buffer" {
+                let atlasWith kinds ctrlPos =
+                    { spatial
+                          ([ "can-ctrl", { X = 13; Y = 10 } ]
+                           @ (ctrlPos |> Option.toList |> List.map (fun p -> "ctrl-1", p)))
+                          [ for x in 11..20 -> { X = x; Y = 10 }, Plain ] with
+                        TargetKinds = Map.ofList kinds
+                    }
+                    |> snapshotWith []
+                    |> ofSnapshot
+
+                Expect.equal
+                    (controllerContainers (
+                        atlasWith
+                            [ "ctrl-1", Controller; "can-ctrl", Site BuiltKind.Container ]
+                            (Some { X = 14; Y = 10 })
+                    ))
+                    Set.empty
+                    "a pending container buffers nothing"
+
+                Expect.equal
+                    (controllerContainers (
+                        atlasWith
+                            [ "ctrl-1", Controller; "can-ctrl", Structure BuiltKind.Container ]
+                            (Some { X = 20; Y = 10 })
+                    ))
+                    Set.empty
+                    "out of the Upgrade Work Area, a container is nobody's buffer"
+
+                Expect.equal
+                    (controllerContainers (
+                        atlasWith [ "can-ctrl", Structure BuiltKind.Container ] None
+                    ))
+                    Set.empty
+                    "no controller, no buffer — the empty answer opens the gate (ADR 0004)"
+            }
+        ]

@@ -43,6 +43,12 @@ type Atlas =
             /// every tick, so the table is per-tick by construction:
             /// "Derived fresh each tick, never persisted" stands.
             WorkAreas: System.Collections.Generic.Dictionary<Task, Set<Pos>>
+            /// Memoised controller-container census, built at most once per
+            /// tick (ADR 0019): the applicability gate asks per creep and
+            /// per Withdraw candidate, and the answer is a colony fact, not
+            /// a per-creep one. A key set of one, so a cell rather than the
+            /// table WorkAreas needs.
+            mutable Buffers: Set<string> option
         }
 
 let private roomSide = 50
@@ -260,6 +266,7 @@ let ofSnapshot (snapshot: Snapshot) : Atlas =
                 (pos, factor), lazy (floodFrom weights occupied factor pos))
             |> Map.ofList
         WorkAreas = System.Collections.Generic.Dictionary()
+        Buffers = None
     }
 
 /// A creep's fatigue factor; a creep the Snapshot does not carry prices
@@ -469,6 +476,13 @@ let private seatUnion (atlas: Atlas) : Set<Pos> =
         |> Option.map (seatTiles atlas.Spatial))
     |> List.fold Set.union Set.empty
 
+/// Every projected controller's Upgrade Work Area, unioned — the tiles a
+/// creep can upgrade from, behind dualSeats and controllerContainers.
+let private upgradeArea (atlas: Atlas) : Set<Pos> =
+    targetsOfKind atlas Controller
+    |> List.map (Upgrade >> workArea atlas)
+    |> List.fold Set.union Set.empty
+
 /// Dual Seats of the room: tiles inside both some projected source's Seats
 /// and a projected controller's Upgrade Work Area — a creep standing on one
 /// harvests and upgrades without ever moving. Total: a room with no
@@ -476,12 +490,7 @@ let private seatUnion (atlas: Atlas) : Set<Pos> =
 /// which never punishes anything (ADR 0004). Derived fresh each tick,
 /// never persisted.
 let dualSeats (atlas: Atlas) : Set<Pos> =
-    let upgradeArea =
-        targetsOfKind atlas Controller
-        |> List.map (Upgrade >> workArea atlas)
-        |> List.fold Set.union Set.empty
-
-    Set.intersect (seatUnion atlas) upgradeArea
+    Set.intersect (seatUnion atlas) (upgradeArea atlas)
 
 /// Posts of the room: the tiles worth garrisoning with a heavy-WORK body
 /// (ADR 0012) — the Dual Seats plus every Seat under a built container
@@ -495,6 +504,34 @@ let dualSeats (atlas: Atlas) : Set<Pos> =
 let posts (atlas: Atlas) : Set<Pos> =
     Set.intersect (seatUnion atlas) (containerTiles atlas)
     |> Set.union (dualSeats atlas)
+
+/// The controller's upgrade buffers, by id: built containers standing
+/// inside a controller's Upgrade Work Area and on no source's Seat — the
+/// Layout places one (ADR 0012), and the Withdraw gate reads it (ADR
+/// 0019). The Planner spells the same judgement out again over the
+/// Snapshot for its Refill layering; the two agree on every tile a
+/// container can stand on and are not the same predicate off it — an
+/// accepted duplication, named in ADR 0019. Total: a room with no
+/// controller, none placed, or no built container answers with the empty
+/// set, which opens the gate rather than closing it — unplaceable
+/// geometry never costs a creep a Task (ADR 0004).
+let controllerContainers (atlas: Atlas) : Set<string> =
+    match atlas.Buffers with
+    | Some memo -> memo
+    | None ->
+        let area = upgradeArea atlas
+        let seats = seatUnion atlas
+
+        let buffers =
+            targetsOfKind atlas (Structure BuiltKind.Container)
+            |> List.filter (fun id ->
+                match Map.tryFind id atlas.Spatial.TargetPositions with
+                | Some pos -> Set.contains pos area && not (Set.contains pos seats)
+                | None -> false)
+            |> Set.ofList
+
+        atlas.Buffers <- Some buffers
+        buffers
 
 /// Whether a creep's tile catches its harvest overflow: a built container
 /// standing on one of the source's own Seats — the container Post's
