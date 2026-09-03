@@ -5422,10 +5422,13 @@ let containerPostTests =
                     "the feeding-tier dig at cost 0 wins the fresh match too"
             }
 
-            test "the gate is body-blind: a full worker on the container also keeps Harvest" {
-                // ADR 0006: a pattern shapes what a creep is good at, never
-                // what it is assigned. Travel-cost pinning and the workforce
-                // quotas keep the tile an Anchor's home, not this gate.
+            test "a full worker on the container releases Harvest: the garrison is body-aware" {
+                // The squat of #67 (ADR 0024): body-blind, this widening let
+                // a light body that filled up on the Post keep Harvest for
+                // the rest of its life — never Inapplicable, so anti-thrash
+                // never let the tile go — while the Anchor cast for that
+                // Post read `none-free`. Only a garrisoning body's overflow
+                // keeps the dig past a full store.
                 let snapshot =
                     { haulColony with
                         Creeps = [ worker "w1" 50 0 ]
@@ -5436,12 +5439,12 @@ let containerPostTests =
                     }
 
                 let remembered = Map.ofList [ "w1", taskId (Harvest "src-a") ]
-                let { Assignments = assignments } = decide snapshot remembered Set.empty None
+                let { Verdicts = verdicts } = decide snapshot remembered Set.empty None
 
-                Expect.equal
-                    (Map.tryFind "w1" assignments)
-                    (Some(taskId (Harvest "src-a")))
-                    "any full creep on the tile qualifies"
+                Expect.contains
+                    verdicts
+                    (Verdict.Released("w1", taskId (Harvest "src-a"), ReleaseReason.Inapplicable))
+                    "a light body's full store ends its dig, container or no container"
             }
 
             test "a full Anchor on a bare Seat still releases Harvest" {
@@ -5528,6 +5531,114 @@ let containerPostTests =
                     verdicts
                     (Verdict.Released("a1", taskId (Harvest "src-a"), ReleaseReason.Inapplicable))
                     "only that source's own container Seat catches its overflow"
+            }
+        ]
+
+[<Tests>]
+let postCapacityTests =
+    testList
+        "post capacity"
+        [
+            // The over-admission half of #67 (ADR 0024): a Work-heavy body's
+            // Harvest Work Area is that source's Posts (ADR 0020), so the
+            // Seat count admits garrisons to standing room that does not
+            // exist. `haulRoom`'s src-a has two Seats and one Post.
+            test "a source's Posts cap its heavy harvesters, however many Seats it has" {
+                let snapshot =
+                    { haulColony with
+                        Creeps = [ anchor "a1" 50 0; anchor "a2" 0 50 ]
+                        Spatial =
+                            { haulRoom with
+                                CreepPositions =
+                                    Map.ofList
+                                        [ "a1", { X = 11; Y = 10 }; "a2", { X = 12; Y = 10 } ]
+                            }
+                    }
+
+                let remembered =
+                    Map.ofList [ "a1", taskId (Harvest "src-a"); "a2", taskId (Harvest "src-a") ]
+
+                let {
+                        Assignments = assignments
+                        Verdicts = verdicts
+                    } =
+                    decide snapshot remembered Set.empty None
+
+                Expect.contains
+                    verdicts
+                    (Verdict.Released("a2", taskId (Harvest "src-a"), ReleaseReason.OverCapacity))
+                    "one Post seats one garrison: the second Anchor is released, not left to crowd it"
+
+                Expect.equal
+                    (harvesters assignments "src-a")
+                    [ "a1" ]
+                    "the Post's holder keeps the dig"
+            }
+
+            test "a fresh heavy body is not matched to a source whose Post is taken" {
+                // Both gates read the same cap, or the second Anchor would be
+                // released and rematched in alternate ticks.
+                let snapshot =
+                    { haulColony with
+                        Creeps = [ anchor "a1" 0 50; anchor "a2" 0 50 ]
+                        Spatial =
+                            { haulRoom with
+                                CreepPositions =
+                                    Map.ofList
+                                        [ "a1", { X = 11; Y = 10 }; "a2", { X = 12; Y = 10 } ]
+                            }
+                    }
+
+                let { Assignments = assignments } = decide snapshot Map.empty Set.empty None
+
+                Expect.equal
+                    (harvesters assignments "src-a")
+                    [ "a1" ]
+                    "the fresh match stops at the Post count too"
+            }
+
+            test "a light body still fills every Seat: the Post cap governs heavy bodies alone" {
+                let snapshot =
+                    { haulColony with
+                        Creeps = [ worker "w1" 0 50; worker "w2" 0 50 ]
+                        Spatial =
+                            { haulRoom with
+                                CreepPositions =
+                                    Map.ofList [ "w1", { X = 11; Y = 10 }; "w2", { X = 9; Y = 10 } ]
+                            }
+                    }
+
+                let { Assignments = assignments } = decide snapshot Map.empty Set.empty None
+
+                Expect.equal
+                    (harvesters assignments "src-a")
+                    [ "w1"; "w2" ]
+                    "a light body stands on any Seat, so the Seat count is its only cap"
+            }
+
+            test "a source with no Post caps heavy harvesters at its Seats" {
+                // The pre-container fallback (ADR 0020): with nothing built,
+                // a heavy body harvests from any Seat, so a Post cap of zero
+                // would strand the colony instead of ordering it.
+                let snapshot =
+                    { haulColony with
+                        Creeps = [ anchor "a1" 0 50; anchor "a2" 0 50 ]
+                        Spatial =
+                            { haulRoom with
+                                TargetKinds =
+                                    haulRoom.TargetKinds
+                                    |> Map.add "can-src" (Site BuiltKind.Container)
+                                CreepPositions =
+                                    Map.ofList [ "a1", { X = 11; Y = 10 }; "a2", { X = 9; Y = 10 } ]
+                            }
+                    }
+
+                let { Assignments = assignments } = decide snapshot Map.empty Set.empty None
+
+                Expect.equal
+                    (harvesters assignments "src-a")
+                    [ "a1"; "a2" ]
+                    "no Post derives no Post cap: both Seats are open"
             }
         ]
 

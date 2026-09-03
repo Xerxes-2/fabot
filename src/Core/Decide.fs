@@ -766,10 +766,14 @@ let private planPickups (snapshot: Snapshot) atlas : Intent list =
 /// physically be able to do it — Work-part tasks need a Work part, energy
 /// delivery needs a Carry part — and the energy state must call for it: a
 /// full creep is done harvesting; an empty creep has nothing to deliver.
-/// One geometric widening (ADR 0012): a full creep standing on a built
-/// source container keeps Harvest — the engine drops the overflow into
-/// the container underfoot, so the creep effectively has capacity and the
-/// Post stays garrisoned. Gates read part arithmetic, never names or
+/// One geometric widening (ADR 0012), body-aware since ADR 0024: a full
+/// Work-heavy creep standing on a built source container keeps Harvest —
+/// the engine drops the overflow into the container underfoot, so the
+/// creep effectively has capacity and the Post stays garrisoned. A light
+/// body gets no such reprieve: its full store ends its dig wherever it
+/// stands, or it would hold the Post for the rest of its life — never
+/// Inapplicable, so never released — and lock the garrison out of the one
+/// tile it can work from. Gates read part arithmetic, never names or
 /// roles (ADR 0006) — including one comparative gate (ADR 0016): a body
 /// with more Work than Move never Withdraws, so its only feeding-tier
 /// candidate is Harvest and an unmanned Post wins it regardless of
@@ -789,7 +793,9 @@ let private applicable atlas (creep: CreepInfo) task =
     match task with
     | Harvest sourceId ->
         has Work
-        && (creep.FreeCapacity > 0 || Atlas.catchesOverflow atlas creep.Name sourceId)
+        && (creep.FreeCapacity > 0
+            || (Atlas.workHeavy atlas creep.Name
+                && Atlas.catchesOverflow atlas creep.Name sourceId))
     | Withdraw containerId ->
         has Carry
         && creep.FreeCapacity > 0
@@ -889,6 +895,22 @@ let private taskCapacities (snapshot: Snapshot) atlas : Map<string, int> =
     snapshot.Sources
     |> List.choose (fun s ->
         Atlas.seats atlas s.Id |> Option.map (fun count -> taskId (Harvest s.Id), count))
+    |> Map.ofList
+
+/// Concurrent Work-heavy-harvester cap per Harvest task id (ADR 0024): the
+/// source's Post count, the standing room a heavy body actually has — its
+/// Harvest Work Area is that source's Posts alone (ADR 0020), so the Seat
+/// cap would admit garrisons to tiles they may not work from and pile two
+/// Anchors onto one Post. A source with no Post derives no cap: nothing
+/// narrows a heavy body's area there (the pre-container fallback), and the
+/// Seat cap is the only one. Rides beside the Seat cap rather than
+/// replacing it — a Post is a capacity unit of its own, and both must hold.
+let private postCapacities (snapshot: Snapshot) atlas : Map<string, int> =
+    snapshot.Sources
+    |> List.choose (fun s ->
+        match Atlas.postsOf atlas s.Id |> Set.count with
+        | 0 -> None
+        | count -> Some(taskId (Harvest s.Id), count))
     |> Map.ofList
 
 /// Action Intent for one assigned creep: emitted when the Atlas judges the
@@ -1204,14 +1226,34 @@ let matchCreeps
     : Assignments * Verdict list =
     let byId = tasks |> List.map (fun t -> taskId t, t) |> Map.ofList
     let capacities = taskCapacities snapshot atlas
+    let postCaps = postCapacities snapshot atlas
 
     let load (acc: Assignments) tid =
         acc |> Map.filter (fun _ assigned -> assigned = tid) |> Map.count
 
-    let hasCapacity acc tid =
-        match Map.tryFind tid capacities with
-        | Some cap -> load acc tid < cap
-        | None -> true
+    // A heavy body is judged against both caps (ADR 0024): the Seat count
+    // it shares with every other harvester, and the Post count only its own
+    // kind competes for.
+    let heavyLoad (acc: Assignments) tid =
+        acc
+        |> Map.filter (fun name assigned -> assigned = tid && Atlas.workHeavy atlas name)
+        |> Map.count
+
+    let hasCapacity (creep: CreepInfo) acc tid =
+        let withinSeats =
+            match Map.tryFind tid capacities with
+            | Some cap -> load acc tid < cap
+            | None -> true
+
+        let withinPosts =
+            if Atlas.workHeavy atlas creep.Name then
+                match Map.tryFind tid postCaps with
+                | Some cap -> heavyLoad acc tid < cap
+                | None -> true
+            else
+                true
+
+        withinSeats && withinPosts
 
     // Capacity applies to remembered assignments too: memory can carry an
     // oversell from before a cap existed (e.g. across a redeploy). So does
@@ -1233,7 +1275,7 @@ let matchCreeps
                 | None -> release ReleaseReason.TaskGone
                 | Some task when not (applicable atlas creep task) ->
                     release ReleaseReason.Inapplicable
-                | Some _ when not (hasCapacity acc tid) -> release ReleaseReason.OverCapacity
+                | Some _ when not (hasCapacity creep acc tid) -> release ReleaseReason.OverCapacity
                 | Some task when (Atlas.travelCost atlas creep.Name task).IsNone ->
                     release ReleaseReason.Unreachable
                 | Some _ -> Map.add name tid acc, released)
@@ -1248,7 +1290,7 @@ let matchCreeps
 
         if not (applicable atlas creep task) then
             Candidate.Rejected(tid, RejectReason.Inapplicable)
-        elif not (hasCapacity acc tid) then
+        elif not (hasCapacity creep acc tid) then
             Candidate.Rejected(tid, RejectReason.CapacityFull)
         else
             match Atlas.travelCost atlas creep.Name task with
