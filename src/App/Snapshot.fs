@@ -164,10 +164,10 @@ let private buildSpatial (spawn: ISpawn) : SpatialInfo =
             |> Array.map (fun st -> st.id, { Hits = st.hits; HitsMax = st.hitsMax })
             |> Map.ofArray
         // Stored energy on the containers, the stock the logistics Tasks
-        // judge one by (ADR 0012), and on the Storage. The Storage is this
-        // projection's one exception to the rule above: no decision reads
-        // its store yet, and it is carried because ADR 0023's Withdraw and
-        // Refill tiers are the named consumer waiting on it.
+        // judge one by (ADR 0012), and on the Storage, which the Planner
+        // reads the same way: ADR 0023's Refill tier pools a Storage with
+        // room and drops a full one. Its Withdraw tier, the field's other
+        // named consumer, is still ahead.
         Stores =
             structures
             |> Array.filter (fun st -> List.contains st.structureType storedTypes)

@@ -146,8 +146,9 @@ type SpatialInfo =
         /// and containers — ADR 0010, ADR 0012); fields nobody decides
         /// on stay out.
         Hits: Map<string, HitsInfo>
-        /// Target id -> energy currently stored, containers only (ADR
-        /// 0012): the stock the logistics Tasks judge a container by.
+        /// Target id -> energy currently stored, on the containers (ADR
+        /// 0012) and the Storage (ADR 0023): the stock the logistics
+        /// Tasks judge a store by.
         Stores: Map<string, int>
     }
 

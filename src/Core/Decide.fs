@@ -189,6 +189,13 @@ let private range a b = max (abs (a.X - b.X)) (abs (a.Y - b.Y))
 /// line past which the buffer needs no Refill.
 let private containerCapacity = 2000
 
+/// Screeps STORAGE_CAPACITY: what the Storage's store can hold — the line
+/// past which the stock needs no Refill. Read against stored *energy*, as
+/// the container line is, because energy is the only resource this colony
+/// ever holds; the day it holds another, the Storage's free capacity has
+/// to be projected rather than inferred from one resource.
+let private storageCapacity = 1000000
+
 /// Whether a placed tile is a source container's (ADR 0012): within range
 /// 1 of a placed source — the Seat-standing kind the Layout places, which
 /// harvest overflow fills. The one geometry judgement behind both rules
@@ -239,14 +246,15 @@ let planTasks (snapshot: Snapshot) : Task list =
     let stored id =
         snapshot.Spatial.Stores |> Map.tryFind id |> Option.defaultValue 0
 
-    let containers =
+    // The standing structures of one built kind, in id order. Both the
+    // containers and the Storage are pooled by the projection's kind —
+    // never by position, never by name — so the rule is written once.
+    let targetsOfKind kind =
         snapshot.Spatial.TargetKinds
         |> Map.toList
-        |> List.choose (fun (id, kind) ->
-            if kind = Structure BuiltKind.Container then
-                Some id
-            else
-                None)
+        |> List.choose (fun (id, k) -> if k = Structure kind then Some id else None)
+
+    let containers = targetsOfKind BuiltKind.Container
 
     let withdraws =
         containers |> List.filter (fun id -> stored id > 0) |> List.map Withdraw
@@ -272,7 +280,24 @@ let planTasks (snapshot: Snapshot) : Task list =
             |> List.map Refill)
         |> Option.defaultValue []
 
-    harvests @ withdraws @ refills @ builds @ repairs @ upgrades @ containerRefills
+    // The colony's stock is the outflow's last stop (ADR 0023): a standing
+    // Storage with room is one more Refill target, on the deepest tier of
+    // all. Recognised by the projection's kind, as the tier is — the
+    // Layout puts the one Storage on the cluster's first pick, so no
+    // position rule could name it.
+    let storageRefills =
+        targetsOfKind BuiltKind.Storage
+        |> List.filter (fun id -> stored id < storageCapacity)
+        |> List.map Refill
+
+    harvests
+    @ withdraws
+    @ refills
+    @ builds
+    @ repairs
+    @ upgrades
+    @ containerRefills
+    @ storageRefills
 
 /// Screeps CARRY_CAPACITY: energy one Carry part holds.
 let private carryPartCapacity = 50
@@ -1099,7 +1124,7 @@ let private fullDowngradeTimer level =
 let private downgradeDeadline level = fullDowngradeTimer level / 2
 
 /// The tier of work a Task belongs to, once its target is taken into
-/// account (ADR 0010, ADR 0012) — what the matcher ranks by.
+/// account (ADR 0010, ADR 0012, ADR 0023) — what the matcher ranks by.
 type private Tier =
     /// Feeding the economy: Harvest, Withdraw, and the Refill of a spawn
     /// or an extension — the flow the colony's reproduction runs on.
@@ -1114,28 +1139,39 @@ type private Tier =
     /// place, so the buffer is filled by bodies with no surplus work of
     /// their own.
     | UpgradeBuffer
+    /// The Storage's Refill (ADR 0023): the colony's stock, deeper than
+    /// every sink that spends. A load reaches it only when there is
+    /// nowhere else at all to put it, the upgrade buffer included, so the
+    /// stock never outbids the flow, however close beside the spawn it
+    /// stands (ADR 0023's own motivating case).
+    | Stock
 
 /// The matcher's whole tier order, shallowest first — the one place the
-/// ordering lives (ADR 0010, ADR 0012): the economy is fed, then surplus
-/// is spent, then whatever is left sinks into the upgrade buffer.
-/// Exhaustive over Tier on purpose — a tier this sequence forgets is a
-/// build error, not a Task that silently ranks below every other. The
-/// downgrade deadline (ADR 0007) is the one thing above the sequence
-/// rather than in it; `rank` carries it.
+/// ordering lives (ADR 0010, ADR 0012, ADR 0023): the economy is fed,
+/// then surplus is spent, then whatever is left sinks into the upgrade
+/// buffer, and what even the buffer cannot hold is stocked. Exhaustive
+/// over Tier on purpose — a tier this sequence forgets is a build error,
+/// not a Task that silently ranks below every other. The downgrade
+/// deadline (ADR 0007) is the one thing above the sequence rather than in
+/// it; `rank` carries it.
 let private rankOfTier =
     function
     | Feeding -> 0
     | Surplus -> 1
     | UpgradeBuffer -> 2
+    | Stock -> 3
 
 /// The tier a Task sits in. Refill is the one Task whose tier layers by
-/// target (ADR 0010): a container is read off the projection's kind and a
-/// tower off the Refillables census, and the container is asked first —
-/// the two tests are not mutually exclusive by construction. Any
-/// container answers UpgradeBuffer, not the controller's alone; it is the
-/// Planner that pools only the controller's (range 3 of the controller,
-/// never a source container's tile), so no other container reaches here.
-/// Everything the two tests miss is a spawn or an extension: the flow.
+/// target (ADR 0010, ADR 0023): the Storage and the container are each one
+/// projected kind, and the projection holds one kind per id, so those two
+/// answers exclude each other by construction; a tower is read off the
+/// Refillables census instead, which can overlap either. So the kind is
+/// asked first — deepest answer first — and the census only of what the
+/// kind leaves. Any container answers UpgradeBuffer, not the controller's
+/// alone; it is the Planner that pools only the controller's (range 3 of
+/// the controller, never a source container's tile), so no other container
+/// reaches here. Everything the three tests miss is a spawn or an
+/// extension: the flow.
 let private tierOf (snapshot: Snapshot) task =
     match task with
     | Harvest _
@@ -1145,14 +1181,16 @@ let private tierOf (snapshot: Snapshot) task =
             snapshot.Refillables
             |> List.exists (fun r -> r.Id = structureId && r.Kind = BuiltKind.Tower)
 
-        let isContainer =
-            Map.tryFind structureId snapshot.Spatial.TargetKinds = Some(
-                Structure BuiltKind.Container
-            )
+        let kind = Map.tryFind structureId snapshot.Spatial.TargetKinds
 
-        if isContainer then UpgradeBuffer
-        elif isTower then Surplus
-        else Feeding
+        if kind = Some(Structure BuiltKind.Storage) then
+            Stock
+        elif kind = Some(Structure BuiltKind.Container) then
+            UpgradeBuffer
+        elif isTower then
+            Surplus
+        else
+            Feeding
     | Build _
     | Repair _
     | Upgrade _ -> Surplus

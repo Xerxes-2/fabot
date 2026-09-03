@@ -5982,6 +5982,139 @@ let logisticsTests =
             }
         ]
 
+/// The stock fixture: the tier corridor with the Storage standing at
+/// (16,11), between the tower and the buffer and clear of the working
+/// ground the clustered ordering excludes (ADR 0022) — the controller's
+/// Upgrade Work Area reaches back only to x = 17. It blocks its own tile
+/// the way the projection carries a built one, and nothing but the
+/// projection's kind says which structure it is.
+let stockRoom =
+    { tierRoom with
+        Obstacles = Set.add { X = 16; Y = 11 } tierRoom.Obstacles
+    }
+    |> withTargets [ "sto-1", { X = 16; Y = 11 }, Structure BuiltKind.Storage ]
+
+/// The stock colony with the given hunger and stores: one loaded
+/// Carry-only body standing beside the Storage, so the deepest tier of all
+/// costs it nothing to reach and every shallower one — the tower one step
+/// west, the buffer one step east — costs more. Whatever outbids the
+/// stock outbids it against travel cost, and only rank can do that. Each
+/// caller leaves the stock exactly one rival, so the Verdict's factor is
+/// evidence about that pair alone.
+let stockColony refillables stores =
+    { bareRespawn with
+        Sources = []
+        Refillables = refillables
+        Creeps = [ creepWith "h1" 100 0 [ Carry; Carry; Move ] ]
+        Spatial =
+            { stockRoom with
+                Stores = stores
+                CreepPositions = Map.ofList [ "h1", { X = 16; Y = 10 } ]
+            }
+    }
+
+[<Tests>]
+let stockTests =
+    testList
+        "storage stock"
+        [
+            test "a Storage with room is a Refill target; a full one is not" {
+                // Judged from the projection's kind, as the buffer's tier is
+                // (ADR 0023). The buffer is brimming in both colonies, so the
+                // stock is the only thing the pool can be reporting on.
+                let hungry = stockColony [] (Map.ofList [ "can-ctrl", 2000; "sto-1", 0 ])
+                let full = stockColony [] (Map.ofList [ "can-ctrl", 2000; "sto-1", 1000000 ])
+
+                Expect.equal
+                    (refillTasks (planTasks hungry))
+                    [ "sto-1" ]
+                    "the stock with room pools the deepest Refill of all"
+
+                Expect.isEmpty
+                    (refillTasks (planTasks full))
+                    "a full stock pools no Refill: there is nowhere left to put a load"
+            }
+
+            test "the upgrade buffer outbids the stock, however close the stock stands" {
+                // The hauler stands beside the Storage and a step short of
+                // the buffer's Work Area, so travel cost points at the stock
+                // and only rank can overrule it: surplus reaches the colony's
+                // stock once the upgrade buffer is full and not before (ADR
+                // 0023). The tier above the buffer is already pinned by the
+                // rank-tier tests, so this one step completes the sequence.
+                let { Verdicts = verdicts } =
+                    decide
+                        (stockColony [] (Map.ofList [ "can-ctrl", 800; "sto-1", 0 ]))
+                        Map.empty
+                        Set.empty
+                        None
+
+                Expect.equal
+                    verdicts
+                    [ Verdict.Matched("h1", taskId (Refill "can-ctrl"), MatchFactor.Rank) ]
+                    "the buffer is filled before the stock: rank decided"
+            }
+
+            test "a hungry tower outbids the stock, however close the stock stands" {
+                // The buffer is brimming, so the tower is the stock's one
+                // rival and the factor is evidence about that pair alone.
+                let { Verdicts = verdicts } =
+                    decide
+                        (stockColony
+                            [ refillable "tower-1" 500 BuiltKind.Tower ]
+                            (Map.ofList [ "can-ctrl", 2000; "sto-1", 0 ]))
+                        Map.empty
+                        Set.empty
+                        None
+
+                Expect.equal
+                    verdicts
+                    [ Verdict.Matched("h1", taskId (Refill "tower-1"), MatchFactor.Rank) ]
+                    "the guns are fed before the stock: rank decided"
+            }
+
+            test "with every other sink full the stock takes the load" {
+                // Spawn and tower full, buffer brimming: the deepest tier of
+                // all is the one live Refill, and it is served by the same
+                // transfer Intent, the same bubble and the same Verdict
+                // vocabulary as every other Refill (ADR 0023).
+                let colony =
+                    stockColony
+                        [
+                            refillable "spawn-1" 0 BuiltKind.Spawn
+                            refillable "tower-1" 0 BuiltKind.Tower
+                        ]
+                        (Map.ofList [ "can-ctrl", 2000; "sto-1", 500 ])
+
+                let {
+                        Intents = intents
+                        Assignments = assignments
+                        Verdicts = verdicts
+                    } =
+                    decide colony Map.empty Set.empty None
+
+                Expect.equal
+                    (Map.tryFind "h1" assignments)
+                    (Some(taskId (Refill "sto-1")))
+                    "the load the colony has nowhere else to put sinks into the stock"
+
+                Expect.contains
+                    intents
+                    (TransferEnergyToStructure("h1", "sto-1"))
+                    "the ordinary transfer Intent serves the Storage"
+
+                Expect.contains
+                    intents
+                    (SayCreep("h1", "🔋"))
+                    "the ordinary battery bubble shows it"
+
+                Expect.equal
+                    verdicts
+                    [ Verdict.Matched("h1", taskId (Refill "sto-1"), MatchFactor.OnlyCandidate) ]
+                    "a stock deposit speaks the Verdicts every other Refill speaks"
+            }
+        ]
+
 [<Tests>]
 let containerPostTests =
     testList
