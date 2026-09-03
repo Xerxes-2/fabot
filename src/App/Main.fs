@@ -2,6 +2,7 @@ module Fabot.Main
 
 open Fable.Core.JsInterop
 open Fabot.Bindings
+open Fabot.Core
 open Fabot.Core.Types
 open Fabot.Core.Decide
 
@@ -29,16 +30,20 @@ let private saveAssignments (assignments: Assignments) =
 
     Memory?fabot?assignments <- hash
 
+// The one aliveness rule for pruning: present in Game.creeps — unlike the
+// Snapshot, that includes gestating creeps, whose memory and timeline must
+// survive the spawn.
+let private livingCreeps () =
+    objectEntries Game.creeps |> Array.map fst |> Set.ofArray
+
 // Path caches from the moveTo era (or anything else) may linger in
 // Memory.creeps; drop entries of dead creeps so nothing outlives its creep.
-// Alive means present in Game.creeps: unlike the Snapshot, that includes
-// gestating creeps, whose memory must survive the spawn.
-let private pruneDeadCreepMemory () =
+let private pruneDeadCreepMemory (living: Set<string>) =
     let creepsMemory = Memory?creeps
 
     if not (isNull creepsMemory) then
         for (name, _) in objectEntries creepsMemory do
-            if isNull (Game.creeps?(name)) then
+            if not (Set.contains name living) then
                 emitJsStatement (creepsMemory, name) "delete $0[$1]"
 
 // Exported as `loop` on the bundled `main` module; the engine calls it every tick.
@@ -48,6 +53,14 @@ let loop () =
     // Memory writes land before the engine calls: a throw inside Executor.run
     // must not discard the tick's anti-thrash state.
     saveAssignments decision.Assignments
-    pruneDeadCreepMemory ()
+    // Dead creeps' timelines are pruned by the fold under the same
+    // aliveness rule as the memory pruning below.
+    let living = livingCreeps ()
+
+    ObserveMemory.load ()
+    |> Observe.fold Observe.capPerCreep snapshot.Time living decision.Verdicts
+    |> ObserveMemory.save
+
+    pruneDeadCreepMemory living
     // Outcomes go unread here; failures are already logged by the Executor.
     Executor.run decision.Intents |> ignore
