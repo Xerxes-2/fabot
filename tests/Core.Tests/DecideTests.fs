@@ -4511,6 +4511,112 @@ let anchorTests =
     testList
         "anchor"
         [
+            test "an Anchor on a plain Seat walks to the Post instead of digging there" {
+                // The W12S28 bug (ADR 0020): controller far from every Seat,
+                // a built container on the Seat at (9,10) — the source's one
+                // Post — and the Anchor standing on the plain Seat (10,11).
+                // Harvesting there would fill its single Carry in four ticks
+                // and hand it to Upgrade, five tiles away; instead it holds
+                // its dig and walks.
+                let snapshot =
+                    { dualSeatColony with
+                        Creeps = [ anchor "a1" 0 50 ]
+                        Spatial =
+                            { spatial
+                                  [
+                                      "src-a", { X = 10; Y = 10 }
+                                      "ctrl-1", { X = 40; Y = 40 }
+                                      "cont-1", { X = 9; Y = 10 }
+                                  ]
+                                  (openSeats { X = 10; Y = 10 }) with
+                                TargetKinds =
+                                    Map.ofList
+                                        [
+                                            "src-a", Source
+                                            "ctrl-1", Controller
+                                            "cont-1", Structure BuiltKind.Container
+                                        ]
+                                CreepPositions = Map.ofList [ "a1", { X = 10; Y = 11 } ]
+                            }
+                    }
+
+                let {
+                        Intents = intents
+                        Verdicts = verdicts
+                    } =
+                    decide snapshot Map.empty Set.empty None
+
+                Expect.isEmpty
+                    (actionIntents intents
+                     |> List.filter (function
+                         | HarvestSource _ -> true
+                         | _ -> false))
+                    "off the Post a heavy body does not dig, so it never fills"
+
+                Expect.equal
+                    (moveIntentsFor "a1" intents)
+                    [ MoveCreep("a1", TopLeft) ]
+                    "it steps toward the container Seat"
+
+                Expect.contains
+                    verdicts
+                    (Verdict.Matched("a1", taskId (Harvest "src-a"), MatchFactor.OnlyCandidate))
+                    "and stays matched to Harvest the whole walk"
+            }
+
+            test "an Anchor that is already full off-Post commutes once, then settles" {
+                // The deployment path ADR 0020 names: a full store off the
+                // Post still catches no overflow, so Harvest is inapplicable
+                // and the body spends its load at the controller one last
+                // time. Nothing pins it until it is empty again — pinned
+                // here so the one-time heal stays a decision, not a
+                // surprise.
+                let room =
+                    { spatial
+                          [
+                              "src-a", { X = 10; Y = 10 }
+                              "ctrl-1", { X = 14; Y = 11 }
+                              "cont-1", { X = 9; Y = 10 }
+                          ]
+                          (openSeats { X = 10; Y = 10 }
+                           @ [ for x in 11..14 -> { X = x; Y = 11 }, Plain ]) with
+                        TargetKinds =
+                            Map.ofList
+                                [
+                                    "src-a", Source
+                                    "ctrl-1", Controller
+                                    "cont-1", Structure BuiltKind.Container
+                                ]
+                        CreepPositions = Map.ofList [ "a1", { X = 10; Y = 11 } ]
+                    }
+
+                let full =
+                    { dualSeatColony with
+                        Creeps = [ anchor "a1" 50 0 ]
+                        Spatial = room
+                    }
+
+                let { Verdicts = verdicts } = decide full Map.empty Set.empty None
+
+                Expect.contains
+                    verdicts
+                    (Verdict.Matched("a1", taskId (Upgrade "ctrl-1"), MatchFactor.OnlyCandidate))
+                    "a full store off the Post catches no overflow: only Upgrade is left"
+
+                // Emptied at the controller, the same body is pulled home.
+                let emptied =
+                    { full with
+                        Creeps = [ anchor "a1" 0 50 ]
+                    }
+
+                let { Intents = intents } = decide emptied Map.empty Set.empty None
+
+                Expect.equal
+                    (moveIntentsFor "a1" intents)
+                    [ MoveCreep("a1", TopLeft) ]
+                    "empty again, it walks to the Post and stays there"
+            }
+
             test "a Dual Seat and banked capacity plan an Anchor body" {
                 let snapshot =
                     { dualSeatColony with

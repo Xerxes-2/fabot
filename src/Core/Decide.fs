@@ -368,18 +368,6 @@ let private workforceTarget (snapshot: Snapshot) atlas anchorQuota haulerQuota =
 
     anchorQuota + haulerQuota + unpostedSeats + incomeWorkers |> max minWorkforce
 
-/// Whether a living body was cast from the anchor row: more Work than
-/// Move. Fatigue parity keeps every worker body at Work <= Move (ADR
-/// 0003) and the anchor row's floor of two Work over one Move clears it,
-/// so the casting pattern is readable off the body itself — what a creep
-/// is is decided from what it is made of; the row name in a creep's name
-/// is observability only, never read back (ADR 0006).
-let private isAnchorBody (creep: CreepInfo) =
-    let count part =
-        creep.Body |> Map.tryFind part |> Option.defaultValue 0
-
-    count Work > count Move
-
 /// Whether a living body was cast from the hauler row: Carry parts but no
 /// Work. The worker and anchor rows both keep at least one Work, and only
 /// the hauler row casts none (ADR 0012) — so, like the anchor's
@@ -428,7 +416,10 @@ let private planSpawns (snapshot: Snapshot) atlas (haulerQuota: int) : Intent li
         // generalist gaps — the casting order runs Anchor, hauler, worker
         // — and the worker row's quota is whatever the target has left.
         let anchorGap =
-            anchorQuota - (snapshot.Creeps |> List.filter isAnchorBody |> List.length)
+            anchorQuota
+            - (snapshot.Creeps
+               |> List.filter (fun creep -> Atlas.workHeavy atlas creep.Name)
+               |> List.length)
             |> max 0
 
         let haulerGap =
@@ -778,7 +769,7 @@ let private applicable atlas (creep: CreepInfo) task =
     | Withdraw containerId ->
         has Carry
         && creep.FreeCapacity > 0
-        && not (isAnchorBody creep)
+        && not (Atlas.workHeavy atlas creep.Name)
         && (has Work || not (Set.contains containerId (Atlas.controllerContainers atlas)))
     | Refill _ -> has Carry && creep.Energy > 0
     | Build _
@@ -944,7 +935,7 @@ let private moveIntentFor
     match task with
     | None -> parked idleRank
     | Some task ->
-        let area = Atlas.workArea atlas task
+        let area = Atlas.workAreaFor atlas creep task
 
         if Set.contains pos area then
             {

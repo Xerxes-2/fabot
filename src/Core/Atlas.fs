@@ -43,6 +43,18 @@ type Atlas =
             /// every tick, so the table is per-tick by construction:
             /// "Derived fresh each tick, never persisted" stands.
             WorkAreas: System.Collections.Generic.Dictionary<Task, Set<Pos>>
+            /// The Work-heavy variant of the same table (ADR 0020): the
+            /// narrowed area per Task, built at most once per tick. Only
+            /// Harvest narrows, so this holds at most one entry per source,
+            /// and deriving `posts` costs one derivation per source per
+            /// tick rather than one per creep priced.
+            HeavyAreas: System.Collections.Generic.Dictionary<Task, Set<Pos>>
+            /// The creeps whose bodies carry more Work parts than Move
+            /// parts — ADR 0016's predicate, read from the body and never
+            /// from a name or a birth row. The Withdraw gate, the Anchor
+            /// census and Harvest's narrowed Work Area (ADR 0020) all ask
+            /// it, so the arithmetic lives here once.
+            Heavy: Set<string>
             /// Memoised controller-container census, built at most once per
             /// tick (ADR 0019): the applicability gate asks per creep and
             /// per Withdraw candidate, and the answer is a colony fact, not
@@ -266,8 +278,28 @@ let ofSnapshot (snapshot: Snapshot) : Atlas =
                 (pos, factor), lazy (floodFrom weights occupied factor pos))
             |> Map.ofList
         WorkAreas = System.Collections.Generic.Dictionary()
+        HeavyAreas = System.Collections.Generic.Dictionary()
+        Heavy =
+            snapshot.Creeps
+            |> List.filter (fun creep ->
+                let count part =
+                    creep.Body |> Map.tryFind part |> Option.defaultValue 0
+
+                count Work > count Move)
+            |> List.map (fun creep -> creep.Name)
+            |> Set.ofList
         Buffers = None
     }
+
+/// Whether a creep's body was cast from a heavy-Work row: more Work parts
+/// than Move (ADR 0016). Fatigue parity keeps every worker body at
+/// Work <= Move (ADR 0003) and the Anchor row's floor of two Work over one
+/// Move clears it, so the casting pattern is readable off the body itself —
+/// what a creep is is decided from what it is made of; the row name in a
+/// creep's name is observability only, never read back (ADR 0006). A creep
+/// the Snapshot does not carry is not heavy: an unknown body claims no
+/// Post and no exemption.
+let workHeavy (atlas: Atlas) (creep: string) : bool = Set.contains creep atlas.Heavy
 
 /// A creep's fatigue factor; a creep the Snapshot does not carry prices
 /// as a bare one-part-one-Move body — terrain weight verbatim.
@@ -453,19 +485,29 @@ let private buildWorkArea (atlas: Atlas) (task: Task) : Set<Pos> =
                             tile
             ]
 
-/// Work Area of a Task: the tiles a creep may stand on while performing it —
-/// passable tiles within the action's range of its target. Empty when the
+/// Work Area of a Task, body-blind: the passable tiles within the action's
+/// range of its target. The base geometry `posts` itself is derived from
+/// (through the controller's Upgrade area), so it stays a pure function of
+/// the Task; readers that hold a creep want `workAreaFor`, which narrows it
+/// for a Work-heavy harvester (ADR 0020). Empty when the
 /// projection cannot place the target. Memoised per Task for the tick: the
 /// same area is asked for once per creep the Matcher prices and again by
 /// the Emitter and Resolver, and none of those readers can observe whether
 /// the set was built or recalled.
-let workArea (atlas: Atlas) (task: Task) : Set<Pos> =
-    match atlas.WorkAreas.TryGetValue task with
+let private memoised
+    (table: System.Collections.Generic.Dictionary<Task, Set<Pos>>)
+    (task: Task)
+    (build: unit -> Set<Pos>)
+    : Set<Pos> =
+    match table.TryGetValue task with
     | true, area -> area
     | _ ->
-        let area = buildWorkArea atlas task
-        atlas.WorkAreas.[task] <- area
+        let area = build ()
+        table.[task] <- area
         area
+
+let workArea (atlas: Atlas) (task: Task) : Set<Pos> =
+    memoised atlas.WorkAreas task (fun () -> buildWorkArea atlas task)
 
 /// Every projected source's Seat tiles, unioned — the seat half behind
 /// dualSeats and posts.
@@ -504,6 +546,38 @@ let dualSeats (atlas: Atlas) : Set<Pos> =
 let posts (atlas: Atlas) : Set<Pos> =
     Set.intersect (seatUnion atlas) (containerTiles atlas)
     |> Set.union (dualSeats atlas)
+
+/// The Posts of one source: its own Seats that are Posts. Empty for a
+/// source the projection does not place, and for one with neither a built
+/// container on a Seat nor a Dual Seat.
+let postsOf (atlas: Atlas) (sourceId: string) : Set<Pos> =
+    Set.intersect (seatTilesOf atlas sourceId) (posts atlas)
+
+/// Work Area of a Task for one creep — the body-aware query every reader
+/// that has a creep uses (ADR 0020). Ordinarily the Task's own area, but
+/// Harvest for a Work-heavy body is narrowed to that source's Posts when
+/// the source has any: a heavy body digs from the tile that catches its
+/// overflow or lets it upgrade in place, and travel cost walks it there
+/// rather than leaving it on whichever Seat it happened to land on. A
+/// source with no Post narrows nothing — the fallback that carries the
+/// colony before the first container is built. A source that has a Post
+/// narrows to it even when the projection blocks it: an area with nothing
+/// standable in it makes the Task inapplicable, exactly as an unreachable
+/// one does for every Task, rather than silently widening back to the
+/// Seats (ADR 0020). Only Harvest narrows, so
+/// this never re-enters the `posts` derivation that reads the Upgrade
+/// area. Memoised per Task for the tick beside the unnarrowed areas.
+let workAreaFor (atlas: Atlas) (creep: string) (task: Task) : Set<Pos> =
+    match task with
+    | Harvest sourceId when workHeavy atlas creep ->
+        memoised atlas.HeavyAreas task (fun () ->
+            let postTiles = postsOf atlas sourceId
+
+            if Set.isEmpty postTiles then
+                workArea atlas task
+            else
+                Set.intersect (workArea atlas task) postTiles)
+    | _ -> workArea atlas task
 
 /// The controller's upgrade buffers, by id: built containers standing
 /// inside a controller's Upgrade Work Area and on no source's Seat — the
@@ -566,7 +640,7 @@ let travelCost (atlas: Atlas) (creep: string) (task: Task) : int option =
     | None, _
     | _, None -> Some 0
     | Some pos, Some _ ->
-        let area = workArea atlas task
+        let area = workAreaFor atlas creep task
 
         if Set.contains pos area then
             Some 0
@@ -585,16 +659,27 @@ let travelCost (atlas: Atlas) (creep: string) (task: Task) : int option =
 /// Screeps range: Chebyshev distance between two tiles.
 let private range a b = max (abs (a.X - b.X)) (abs (a.Y - b.Y))
 
-/// Whether a creep may perform its Task's action this tick: within the
-/// action's range at tick start (the engine judges range by that
-/// position). A creep or target the projection cannot place never blocks
-/// the action — unpriceable geometry is permissive (ADR 0004).
+/// Whether a creep may perform its Task's action this tick: standing
+/// inside the Task's Work Area for its body at tick start (ADR 0020) — a
+/// creep acts only from where it may stand, which for every ordinary Task
+/// is the passable tiles within the action's range, and for a Work-heavy
+/// harvester is its Post. The gate is what keeps such a body empty on the
+/// way to its Post, so a full store never ends the walk. Two permissive
+/// escapes keep the query total (ADR 0004): a creep or target the
+/// projection cannot place never blocks the action, and neither does a
+/// creep standing on a tile the projection calls impassable — an
+/// obstacle-type construction site dropped under a standing creep, which
+/// the engine lets stay — judged by range as before.
 let mayAct (atlas: Atlas) (creep: string) (task: Task) : bool =
     match
         Map.tryFind creep atlas.Spatial.CreepPositions,
         Map.tryFind (targetOf task) atlas.Spatial.TargetPositions
     with
-    | Some creepPos, Some targetPos -> range creepPos targetPos <= actionRange task
+    | Some creepPos, Some targetPos ->
+        if (stepCost atlas.Spatial creepPos).IsNone then
+            range creepPos targetPos <= actionRange task
+        else
+            Set.contains creepPos (workAreaFor atlas creep task)
     | _ -> true
 
 /// First step toward a Task's Work Area over the given flood, sharing
@@ -616,7 +701,7 @@ let private firstStepVia
     match Map.tryFind creep atlas.Spatial.CreepPositions with
     | None -> None
     | Some pos ->
-        let goals = workArea atlas task
+        let goals = workAreaFor atlas creep task
 
         if Set.isEmpty goals || Set.contains pos goals then
             None

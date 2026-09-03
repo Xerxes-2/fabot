@@ -698,6 +698,158 @@ let firstStepTests =
         ]
 
 [<Tests>]
+let workAreaForTests =
+    testList
+        "atlas workAreaFor"
+        [
+            // Source at (10,10) with three Seats: (9,10) carries a built
+            // container, (11,10) lies inside the controller's Upgrade area,
+            // (10,11) is an ordinary Seat. Both Posts, one plain Seat.
+            let posted creeps =
+                { spatial
+                      [
+                          "src-a", { X = 10; Y = 10 }
+                          "ctrl-1", { X = 14; Y = 10 }
+                          "cont-1", { X = 9; Y = 10 }
+                      ]
+                      [
+                          { X = 9; Y = 10 }, Plain
+                          { X = 11; Y = 10 }, Plain
+                          { X = 10; Y = 11 }, Plain
+                      ] with
+                    TargetKinds =
+                        Map.ofList
+                            [
+                                "src-a", Source
+                                "ctrl-1", Controller
+                                "cont-1", Structure BuiltKind.Container
+                            ]
+                    CreepPositions = Map.ofList creeps
+                }
+
+            let anchor name =
+                creepWith name 0 [ Work; Work; Carry; Move ]
+
+            test "a Work-heavy body harvests a posted source from its Posts alone" {
+                let atlas =
+                    posted [ "a", { X = 10; Y = 11 } ] |> snapshotWith [ anchor "a" ] |> ofSnapshot
+
+                Expect.equal
+                    (workAreaFor atlas "a" (Harvest "src-a"))
+                    (Set.ofList [ { X = 9; Y = 10 }; { X = 11; Y = 10 } ])
+                    "the container Seat and the Dual Seat, not the plain Seat"
+
+                Expect.equal
+                    (workArea atlas (Harvest "src-a"))
+                    (Set.ofList [ { X = 9; Y = 10 }; { X = 11; Y = 10 }; { X = 10; Y = 11 } ])
+                    "the body-blind area keeps every Seat"
+            }
+
+            test "a light body keeps every Seat of the same source" {
+                let atlas =
+                    posted [ "w", { X = 10; Y = 11 } ] |> snapshotWith [ worker "w" ] |> ofSnapshot
+
+                Expect.equal
+                    (workAreaFor atlas "w" (Harvest "src-a"))
+                    (workArea atlas (Harvest "src-a"))
+                    "Work <= Move narrows nothing"
+            }
+
+            test "a source with no Post narrows nothing, heavy body or not" {
+                // Same geometry with the container gone and the controller
+                // out of range: the source has neither kind of Post.
+                let atlas =
+                    { spatial
+                          [ "src-a", { X = 10; Y = 10 } ]
+                          [
+                              { X = 9; Y = 10 }, Plain
+                              { X = 11; Y = 10 }, Plain
+                              { X = 10; Y = 11 }, Plain
+                          ] with
+                        TargetKinds = Map.ofList [ "src-a", Source ]
+                        CreepPositions = Map.ofList [ "a", { X = 10; Y = 11 } ]
+                    }
+                    |> snapshotWith [ anchor "a" ]
+                    |> ofSnapshot
+
+                Expect.equal
+                    (workAreaFor atlas "a" (Harvest "src-a"))
+                    (workArea atlas (Harvest "src-a"))
+                    "the full Seat set is the fallback before the first container"
+            }
+
+            test "only Harvest narrows: the heavy body's Upgrade area is untouched" {
+                let atlas =
+                    posted [ "a", { X = 10; Y = 11 } ] |> snapshotWith [ anchor "a" ] |> ofSnapshot
+
+                Expect.equal
+                    (workAreaFor atlas "a" (Upgrade "ctrl-1"))
+                    (workArea atlas (Upgrade "ctrl-1"))
+                    "Upgrade is body-blind (ADR 0020)"
+            }
+
+            test "an unplaceable source stays empty for a heavy body" {
+                let atlas =
+                    posted [ "a", { X = 10; Y = 11 } ] |> snapshotWith [ anchor "a" ] |> ofSnapshot
+
+                Expect.equal (workAreaFor atlas "a" (Harvest "ghost")) Set.empty "nowhere to stand"
+            }
+
+            test "a blocked Post empties the area rather than widening back to the Seats" {
+                // An obstacle stands on the container Seat: it is still a
+                // Post by census, so the area narrows to it and stays
+                // empty — Harvest goes inapplicable, as an unreachable Work
+                // Area does for every Task (ADR 0020), instead of silently
+                // handing the heavy body every Seat back.
+                let atlas =
+                    { spatial
+                          [ "src-a", { X = 10; Y = 10 }; "cont-1", { X = 9; Y = 10 } ]
+                          [ { X = 9; Y = 10 }, Plain; { X = 10; Y = 11 }, Plain ] with
+                        TargetKinds =
+                            Map.ofList [ "src-a", Source; "cont-1", Structure BuiltKind.Container ]
+                        Obstacles = Set.singleton { X = 9; Y = 10 }
+                        CreepPositions = Map.ofList [ "a", { X = 10; Y = 11 } ]
+                    }
+                    |> snapshotWith [ creepWith "a" 0 [ Work; Work; Carry; Move ] ]
+                    |> ofSnapshot
+
+                Expect.equal
+                    (postsOf atlas "src-a")
+                    (Set.singleton { X = 9; Y = 10 })
+                    "the Seat under the container is a Post by census"
+
+                Expect.equal
+                    (workAreaFor atlas "a" (Harvest "src-a"))
+                    Set.empty
+                    "a Post nothing may stand on leaves nowhere to stand"
+
+                Expect.equal
+                    (travelCost atlas "a" (Harvest "src-a"))
+                    None
+                    "so the Task is inapplicable — no retry with the full Seat set"
+            }
+
+            test "travel cost and first step price the Post, not the nearer Seat" {
+                let atlas =
+                    posted [ "a", { X = 10; Y = 11 } ] |> snapshotWith [ anchor "a" ] |> ofSnapshot
+
+                Expect.isSome
+                    (travelCost atlas "a" (Harvest "src-a"))
+                    "the Post is reachable, so Harvest stays applicable"
+
+                Expect.notEqual
+                    (travelCost atlas "a" (Harvest "src-a"))
+                    (Some 0)
+                    "standing on a plain Seat is no longer standing in the area"
+
+                Expect.equal
+                    (firstStep atlas "a" (Harvest "src-a"))
+                    (Some { X = 9; Y = 10 })
+                    "the step goes to a Post — equally cheap, lowest tile wins"
+            }
+        ]
+
+[<Tests>]
 let mayActTests =
     testList
         "atlas mayAct"
@@ -752,6 +904,51 @@ let mayActTests =
 
                 Expect.isTrue (mayAct atlas "ghost" (Harvest "src-a")) "unplaced creep acts"
                 Expect.isTrue (mayAct atlas "w" (Harvest "ghost")) "unplaced target is acted on"
+            }
+
+            test "a Work-heavy body digs from its Post and nowhere else in range" {
+                // Source at (10,10) with a built container on the Seat at
+                // (9,10) — the source's only Post. The plain Seat (10,11) is
+                // in harvest range all the same.
+                let atlasAt creepPos =
+                    { spatial
+                          [ "src-a", { X = 10; Y = 10 }; "cont-1", { X = 9; Y = 10 } ]
+                          [ { X = 9; Y = 10 }, Plain; { X = 10; Y = 11 }, Plain ] with
+                        TargetKinds =
+                            Map.ofList [ "src-a", Source; "cont-1", Structure BuiltKind.Container ]
+                        CreepPositions = Map.ofList [ "a", creepPos ]
+                    }
+                    |> snapshotWith [ creepWith "a" 0 [ Work; Work; Carry; Move ] ]
+                    |> ofSnapshot
+
+                Expect.isTrue
+                    (mayAct (atlasAt { X = 9; Y = 10 }) "a" (Harvest "src-a"))
+                    "on the Post it digs"
+
+                Expect.isFalse
+                    (mayAct (atlasAt { X = 10; Y = 11 }) "a" (Harvest "src-a"))
+                    "in range but off the Post it does not — so it never fills en route"
+            }
+
+            test "a creep on a tile the projection calls impassable is judged by range" {
+                // An obstacle-type site dropped under a standing creep: the
+                // engine lets it stay, and it keeps working (ADR 0004).
+                let atlas =
+                    { spatial [ "src-a", { X = 10; Y = 10 } ] [ { X = 10; Y = 11 }, Plain ] with
+                        Obstacles = Set.singleton { X = 10; Y = 11 }
+                        CreepPositions = Map.ofList [ "w", { X = 10; Y = 11 } ]
+                    }
+                    |> snapshotWith [ worker "w" ]
+                    |> ofSnapshot
+
+                Expect.equal
+                    (workArea atlas (Harvest "src-a"))
+                    Set.empty
+                    "the creep's own tile is not a standing tile"
+
+                Expect.isTrue
+                    (mayAct atlas "w" (Harvest "src-a"))
+                    "unpriceable footing never blocks the action"
             }
         ]
 
