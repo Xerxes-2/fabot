@@ -19,11 +19,22 @@ let workerPattern =
         Block = [ Work; Carry; Move ]
     }
 
-/// The pattern table: every body the colony casts is a row here repeated
-/// by energy. A future pattern is one more data row plus its own quota
-/// rule — a colony fact deciding when it is cast — never a new code path
-/// (ADR 0006).
-let patternTable = [ workerPattern ]
+/// The Anchor pattern: the heavy-WORK body cast for a Dual Seat (ADR
+/// 0006). The block is its minimal cast — two Work keep the body readable
+/// as an Anchor (Work > Move, which fatigue parity forbids a worker body)
+/// beside the single Carry and the single Move that is the one-time price
+/// of walking to the seat.
+let anchorPattern =
+    {
+        Name = "anchor"
+        Block = [ Work; Work; Carry; Move ]
+    }
+
+/// The pattern table: every body the colony casts is a row here, sized by
+/// energy under the row's own sizing rule. A future pattern is one more
+/// data row plus its own quota rule — a colony fact deciding when it is
+/// cast — never a new code path (ADR 0006).
+let patternTable = [ workerPattern; anchorPattern ]
 
 let bodyCost body =
     body
@@ -37,19 +48,16 @@ let bodyCost body =
         | Claim -> 600
         | Tough -> 10)
 
-/// Body for a pattern at an energy capacity: the largest affordable
-/// repetition of the pattern's block (never below one repeat), with the
-/// remainder spent on Carry/Move at fatigue parity — the padded body is
-/// never slower than the pure-block body, empty or loaded, and within
-/// that buys as much Carry as possible. Fatigue parity is the worker
-/// pattern's padding policy (ADR 0003, narrowed to that pattern by ADR
-/// 0006); a future row arrives with its own padding rule alongside its
-/// quota rule. Parts are grouped Work, Carry, Move so damage strips Work
-/// first and mobility last.
-let bodyFor pattern capacity =
-    // Screeps MAX_CREEP_SIZE: the engine rejects bodies over 50 parts.
-    let maxBodyParts = 50
-    let block = pattern.Block
+// Screeps MAX_CREEP_SIZE: the engine rejects bodies over 50 parts.
+let private maxBodyParts = 50
+
+/// The worker row's sizing rule: the largest affordable repetition of the
+/// block (never below one repeat), with the remainder spent on Carry/Move
+/// at fatigue parity — the padded body is never slower than the pure-block
+/// body, empty or loaded, and within that buys as much Carry as possible
+/// (ADR 0003, narrowed to the worker pattern by ADR 0006). Parts are
+/// grouped Work, Carry, Move so damage strips Work first and mobility last.
+let private parityBodyFor block capacity =
     let blockSize = List.length block
     let carryCost = bodyCost [ Carry ]
     let moveCost = bodyCost [ Move ]
@@ -81,6 +89,28 @@ let bodyFor pattern capacity =
             (maxBodyParts - repeats * blockSize)
 
     List.replicate work Work @ List.replicate carry Carry @ List.replicate move Move
+
+/// The anchor row's sizing rule: one Carry, one Move, and every part slot
+/// the remaining energy affords on Work — nearly all spawn energy buys
+/// output rather than mobility the Dual Seat never uses. Exempt from
+/// fatigue parity (ADR 0006); never below the row's two-Work block.
+let private anchorBodyFor capacity =
+    let work =
+        (capacity - bodyCost [ Carry; Move ]) / bodyCost [ Work ]
+        |> max 2
+        |> min (maxBodyParts - 2)
+
+    List.replicate work Work @ [ Carry; Move ]
+
+/// Body for a pattern at an energy capacity, under the row's own sizing
+/// rule (ADR 0006): the anchor row spends on Work beside its fixed
+/// Carry/Move pair; every block-replicating row pads its remainder at
+/// fatigue parity.
+let bodyFor pattern capacity =
+    if pattern.Name = anchorPattern.Name then
+        anchorBodyFor capacity
+    else
+        parityBodyFor pattern.Block capacity
 
 /// The generalist body: the worker row of the pattern table, sized to
 /// capacity.
@@ -119,31 +149,48 @@ let private workforceTarget (snapshot: Snapshot) atlas =
     |> List.sumBy (fun s -> Atlas.seats atlas s.Id |> Option.defaultValue 0)
     |> max minWorkforce
 
+/// Whether a living body was cast from the anchor row: more Work than
+/// Move. Fatigue parity keeps every worker body at Work <= Move (ADR
+/// 0003) and the anchor row's floor of two Work over one Move clears it,
+/// so the casting pattern is readable off the body itself — what a creep
+/// is is decided from what it is made of; the row name in a creep's name
+/// is observability only, never read back (ADR 0006).
+let private isAnchorBody (creep: CreepInfo) =
+    let count part =
+        creep.Body |> Map.tryFind part |> Option.defaultValue 0
+
+    count Work > count Move
+
 /// Pre-Task bootstrap step: spawn Intents needed to keep the workforce at
 /// the Workforce target. Spawning is a colony-level need, not a Task creeps
 /// get matched to, so it sits beside the Planner/Matcher pipeline rather
 /// than inside it.
 let private planSpawns (snapshot: Snapshot) atlas : Intent list =
-    let deficit = workforceTarget snapshot atlas - List.length snapshot.Creeps
+    let target = workforceTarget snapshot atlas
+    let deficit = target - List.length snapshot.Creeps
 
-    // Which row of the pattern table this colony casts: the first row
-    // whose quota admits another creep. The worker row's quota is the
-    // whole workforce target, so today it always wins; a future row
-    // arrives with its own quota rule deciding when it is chosen
-    // instead (ADR 0006).
-    let pattern = List.head patternTable
+    // The anchor row's quota rule (ADR 0006): one Anchor per Dual Seat,
+    // inside the unchanged workforce target — never on top of it. Its
+    // gaps are filled before generalist gaps; the worker row's quota is
+    // whatever the target has left.
+    let anchorGap =
+        (Atlas.dualSeats atlas |> Set.count |> min target)
+        - (snapshot.Creeps |> List.filter isAnchorBody |> List.length)
+        |> max 0
 
     // Disaster fallback: an empty colony can never refill extensions, so
-    // waiting for full capacity would wait forever — spawn a minimal unit
-    // from whatever energy is banked right now.
-    let bodyFromBank (bank: RoomEnergy) =
+    // waiting for full capacity would wait forever — spawn a minimal
+    // worker unit from whatever energy is banked right now.
+    // Time-to-first-creep outranks specialisation, so the anchor gap
+    // waits (ADR 0006).
+    let castFromBank pattern (bank: RoomEnergy) =
         if List.isEmpty snapshot.Creeps then
-            if bank.Available >= bodyCost pattern.Block then
-                Some pattern.Block
+            if bank.Available >= bodyCost workerPattern.Block then
+                Some(workerPattern, workerPattern.Block)
             else
                 None
         elif bank.Available >= bank.Capacity then
-            Some(bodyFor pattern bank.Capacity)
+            Some(pattern, bodyFor pattern bank.Capacity)
         else
             None
 
@@ -163,8 +210,12 @@ let private planSpawns (snapshot: Snapshot) atlas : Intent list =
                         |> Map.tryFind s.RoomName
                         |> Option.defaultValue { Available = 0; Capacity = 0 }
 
-                    match bodyFromBank bank with
-                    | Some body when List.length intents < deficit ->
+                    let planned = List.length intents
+
+                    let wanted = if planned < anchorGap then anchorPattern else workerPattern
+
+                    match castFromBank wanted bank with
+                    | Some(pattern, body) when planned < deficit ->
                         SpawnCreep(s.Name, body, $"{pattern.Name}-{snapshot.Time}-{s.Name}")
                         :: intents,
                         banks

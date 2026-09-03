@@ -185,7 +185,7 @@ let patternTableTests =
     testList
         "pattern table"
         [
-            test "the worker unit is the table's only row" {
+            test "the worker unit and the Anchor are the table's rows" {
                 Expect.equal
                     patternTable
                     [
@@ -193,8 +193,36 @@ let patternTableTests =
                             Name = "worker"
                             Block = [ Work; Carry; Move ]
                         }
+                        {
+                            Name = "anchor"
+                            Block = [ Work; Work; Carry; Move ]
+                        }
                     ]
-                    "every body the colony casts comes from this one row"
+                    "every body the colony casts comes from these rows"
+            }
+
+            test "the anchor row spends everything on Work beside one Carry and one Move" {
+                // 550 = the RCL2 full bank: 100 buys the Carry/Move pair,
+                // the rest is Work — no parity padding (ADR 0006 exempts
+                // the Anchor from fatigue parity).
+                Expect.equal
+                    (bodyFor anchorPattern 550)
+                    [ Work; Work; Work; Work; Carry; Move ]
+                    "all remaining energy buys Work"
+            }
+
+            test "the anchor row never casts below its block" {
+                Expect.equal
+                    (bodyFor anchorPattern 300)
+                    [ Work; Work; Carry; Move ]
+                    "two Work keep the Anchor readable off its body (Work > Move)"
+            }
+
+            test "the anchor body never exceeds the 50-part engine cap" {
+                Expect.equal
+                    (bodyFor anchorPattern 12900)
+                    (List.replicate 48 Work @ [ Carry; Move ])
+                    "48 Work beside the Carry/Move pair fill exactly 50 parts"
             }
 
             test "spawn planning casts from the pattern table's row" {
@@ -3164,5 +3192,308 @@ let downgradeDeadlineTests =
                     (Map.tryFind "w1" kept)
                     (Some(taskId (Refill "spawn-1")))
                     "a fresh timer changes nothing"
+            }
+        ]
+
+/// A room with one Dual Seat: source at (10,10), controller at (13,10).
+/// The Seat (11,10) sits at range 2 of the controller — inside its Upgrade
+/// Work Area — while (9,10) sits at range 4, an ordinary Seat.
+let dualSeatRoom =
+    { spatial
+          [ "src-a", { X = 10; Y = 10 }; "ctrl-1", { X = 13; Y = 10 } ]
+          [ { X = 9; Y = 10 }, Plain; { X = 11; Y = 10 }, Plain ] with
+        TargetKinds = Map.ofList [ "src-a", Source; "ctrl-1", Controller ]
+    }
+
+/// An Anchor-bodied creep: four Work, one Carry, one Move.
+let anchor name energy freeCapacity =
+    creepWith name energy freeCapacity [ Work; Work; Work; Work; Carry; Move ]
+
+/// The Dual Seat room, one source, controller in place — the base Anchor scenario.
+let dualSeatColony =
+    { bareRespawn with
+        Sources = [ { Id = "src-a" } ]
+        Controller = Some(controllerAt 2)
+        Spatial = dualSeatRoom
+    }
+
+let moveIntentsFor name intents =
+    intents
+    |> List.filter (function
+        | MoveCreep(creep, _) -> creep = name
+        | _ -> false)
+
+[<Tests>]
+let anchorTests =
+    testList
+        "anchor"
+        [
+            test "a Dual Seat and banked capacity plan an Anchor body" {
+                let snapshot =
+                    { dualSeatColony with
+                        Creeps = [ worker "w1" 0 50 ]
+                    }
+
+                let { Intents = intents } = decide snapshot Map.empty Set.empty
+
+                match spawnIntents intents with
+                | [ (_, body, creepName) ] ->
+                    Expect.equal
+                        body
+                        [ Work; Work; Carry; Move ]
+                        "the Anchor row sized to the 300 bank"
+
+                    Expect.stringStarts creepName "anchor-" "the name carries the anchor row"
+                | other -> failtest $"expected exactly one SpawnCreep intent, got %A{other}"
+            }
+
+            test "without a Dual Seat only generalists are planned" {
+                // Same Seats, controller placed far away: no Seat falls in
+                // its Upgrade Work Area, so there is no Dual Seat to cast for.
+                let snapshot =
+                    { dualSeatColony with
+                        Creeps = [ worker "w1" 0 50 ]
+                        Spatial =
+                            { dualSeatRoom with
+                                TargetPositions =
+                                    Map.ofList
+                                        [
+                                            "src-a", { X = 10; Y = 10 }
+                                            "ctrl-1", { X = 40; Y = 40 }
+                                        ]
+                            }
+                    }
+
+                let { Intents = intents } = decide snapshot Map.empty Set.empty
+
+                match spawnIntents intents with
+                | [ (_, body, creepName) ] ->
+                    Expect.equal body (workerBodyFor 300) "the worker row sized to the bank"
+                    Expect.stringStarts creepName "worker-" "the name carries the worker row"
+                | other -> failtest $"expected exactly one SpawnCreep intent, got %A{other}"
+            }
+
+            test "a living Anchor fills the quota: the remaining gap goes generalist" {
+                let snapshot =
+                    { dualSeatColony with
+                        Creeps = [ anchor "a1" 0 50 ]
+                    }
+
+                let { Intents = intents } = decide snapshot Map.empty Set.empty
+
+                match spawnIntents intents with
+                | [ (_, _, creepName) ] ->
+                    Expect.stringStarts creepName "worker-" "the one Dual Seat is already worked"
+                | other -> failtest $"expected exactly one SpawnCreep intent, got %A{other}"
+            }
+
+            // Three Seats — (11,10) the Dual Seat, (9,10) and (9,9) ordinary —
+            // and a second idle spawn drawing from the same bank.
+            let threeSeatRoom =
+                { dualSeatRoom with
+                    Terrain =
+                        Map.ofList
+                            [
+                                { X = 9; Y = 10 }, Plain
+                                { X = 11; Y = 10 }, Plain
+                                { X = 9; Y = 9 }, Plain
+                            ]
+                }
+
+            let secondSpawn =
+                { spawn with
+                    Name = "Spawn2"
+                    Id = "spawn-2"
+                }
+
+            test "the Anchor gap is filled before generalist gaps" {
+                let snapshot =
+                    { dualSeatColony with
+                        Spawns = [ spawn; secondSpawn ]
+                        RoomEnergy = bank 600 300
+                        Creeps = [ worker "w1" 0 50 ]
+                        Spatial = threeSeatRoom
+                    }
+
+                let { Intents = intents } = decide snapshot Map.empty Set.empty
+
+                match spawnIntents intents with
+                | [ (_, firstBody, firstName); (_, _, secondName) ] ->
+                    Expect.stringStarts firstName "anchor-" "the Anchor gap is filled first"
+                    Expect.equal firstBody [ Work; Work; Carry; Move ] "the Anchor row's body"
+                    Expect.stringStarts secondName "worker-" "the generalist fills the remainder"
+                | other -> failtest $"expected exactly two SpawnCreep intents, got %A{other}"
+            }
+
+            test "planned creeps never exceed the workforce target" {
+                // Target 3, two living: one gap — the second idle spawn
+                // must stay quiet even with energy banked for it.
+                let snapshot =
+                    { dualSeatColony with
+                        Spawns = [ spawn; secondSpawn ]
+                        RoomEnergy = bank 600 300
+                        Creeps = [ worker "w1" 0 50; worker "w2" 0 50 ]
+                        Spatial = threeSeatRoom
+                    }
+
+                let { Intents = intents } = decide snapshot Map.empty Set.empty
+
+                Expect.hasLength
+                    (spawnIntents intents)
+                    1
+                    "the Anchor quota lives inside the target, never on top of it"
+            }
+
+            test "an empty Anchor on its Dual Seat is assigned Harvest without moving" {
+                let snapshot =
+                    { dualSeatColony with
+                        Creeps = [ anchor "a1" 0 50 ]
+                        Spatial =
+                            { dualSeatRoom with
+                                CreepPositions = Map.ofList [ "a1", { X = 11; Y = 10 } ]
+                            }
+                    }
+
+                let {
+                        Intents = intents
+                        Assignments = assignments
+                    } =
+                    decide snapshot Map.empty Set.empty
+
+                Expect.equal
+                    (Map.tryFind "a1" assignments)
+                    (Some(taskId (Harvest "src-a")))
+                    "an empty store calls for Harvest"
+
+                Expect.contains intents (HarvestSource("a1", "src-a")) "the action fires in place"
+                Expect.isEmpty (moveIntentsFor "a1" intents) "no movement step is emitted"
+            }
+
+            test "a full Anchor on its Dual Seat is assigned Upgrade without moving" {
+                let snapshot =
+                    { dualSeatColony with
+                        Creeps = [ anchor "a1" 50 0 ]
+                        Spatial =
+                            { dualSeatRoom with
+                                CreepPositions = Map.ofList [ "a1", { X = 11; Y = 10 } ]
+                            }
+                    }
+
+                let {
+                        Intents = intents
+                        Assignments = assignments
+                    } =
+                    decide snapshot Map.empty Set.empty
+
+                Expect.equal
+                    (Map.tryFind "a1" assignments)
+                    (Some(taskId (Upgrade "ctrl-1")))
+                    "a full store calls for Upgrade"
+
+                Expect.contains
+                    intents
+                    (UpgradeController("a1", "ctrl-1"))
+                    "the action fires in place"
+
+                Expect.isEmpty (moveIntentsFor "a1" intents) "no movement step is emitted"
+            }
+
+            test
+                "alternation is emergent: a filled-up Anchor's Harvest releases and rematches to Upgrade" {
+                let snapshot =
+                    { dualSeatColony with
+                        Creeps = [ anchor "a1" 50 0 ]
+                        Spatial =
+                            { dualSeatRoom with
+                                CreepPositions = Map.ofList [ "a1", { X = 11; Y = 10 } ]
+                            }
+                    }
+
+                let remembered = Map.ofList [ "a1", taskId (Harvest "src-a") ]
+                let { Assignments = assignments } = decide snapshot remembered Set.empty
+
+                Expect.equal
+                    (Map.tryFind "a1" assignments)
+                    (Some(taskId (Upgrade "ctrl-1")))
+                    "ordinary applicability release + rematch flips the assignment"
+            }
+
+            // The Dual Seat room extended east: a plain corridor from
+            // (12,10) to (30,10) carrying distant mobile work at its end.
+            let corridorEast extraTargets =
+                { dualSeatRoom with
+                    TargetPositions =
+                        (Map.toList dualSeatRoom.TargetPositions @ extraTargets) |> Map.ofList
+                    Terrain =
+                        (Map.toList dualSeatRoom.Terrain
+                         @ [ for x in 12..30 -> { X = x; Y = 10 }, Plain ])
+                        |> Map.ofList
+                }
+
+            test "a distant Build flows to the generalist; the Anchor upgrades in place" {
+                let snapshot =
+                    { dualSeatColony with
+                        ConstructionSites = [ { Id = "site-1" } ]
+                        Creeps = [ anchor "a1" 50 0; worker "g1" 50 0 ]
+                        Spatial =
+                            { corridorEast [ "site-1", { X = 31; Y = 10 } ] with
+                                CreepPositions =
+                                    Map.ofList
+                                        [ "a1", { X = 11; Y = 10 }; "g1", { X = 29; Y = 10 } ]
+                            }
+                    }
+
+                let { Assignments = assignments } = decide snapshot Map.empty Set.empty
+
+                Expect.equal
+                    (Map.tryFind "g1" assignments)
+                    (Some(taskId (Build "site-1")))
+                    "the mobile body takes the distant site"
+
+                Expect.equal
+                    (Map.tryFind "a1" assignments)
+                    (Some(taskId (Upgrade "ctrl-1")))
+                    "the slow heavy body stays where it is valuable"
+            }
+
+            test "a distant Refill flows to the generalist; the empty Anchor harvests" {
+                let snapshot =
+                    { dualSeatColony with
+                        Refillables = [ { Id = "spawn-1"; FreeCapacity = 300 } ]
+                        Creeps = [ anchor "a1" 0 50; worker "g1" 50 0 ]
+                        Spatial =
+                            { corridorEast [ "spawn-1", { X = 31; Y = 10 } ] with
+                                CreepPositions =
+                                    Map.ofList
+                                        [ "a1", { X = 11; Y = 10 }; "g1", { X = 30; Y = 10 } ]
+                            }
+                    }
+
+                let { Assignments = assignments } = decide snapshot Map.empty Set.empty
+
+                Expect.equal
+                    (Map.tryFind "g1" assignments)
+                    (Some(taskId (Refill "spawn-1")))
+                    "the loaded mobile body delivers"
+
+                Expect.equal
+                    (Map.tryFind "a1" assignments)
+                    (Some(taskId (Harvest "src-a")))
+                    "the empty Anchor works its Seat instead"
+            }
+
+            test "the disaster fallback still spawns bare worker units beside a Dual Seat" {
+                let snapshot = { dualSeatColony with Creeps = [] }
+                let { Intents = intents } = decide snapshot Map.empty Set.empty
+
+                match spawnIntents intents with
+                | (_, body, creepName) :: _ ->
+                    Expect.equal
+                        body
+                        [ Work; Carry; Move ]
+                        "time-to-first-creep outranks specialisation"
+
+                    Expect.stringStarts creepName "worker-" "the fallback casts the worker row"
+                | [] -> failtest "expected the fallback to spawn"
             }
         ]
