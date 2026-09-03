@@ -252,14 +252,6 @@ let planTasks (snapshot: Snapshot) : Task list =
 
     harvests @ withdraws @ refills @ builds @ repairs @ upgrades @ containerRefills
 
-/// Workforce target: how many creeps the colony maintains — the total Seat
-/// count across all sources, floored at minWorkforce. Derived fresh each
-/// tick; a source the projection does not place contributes no Seats.
-let private workforceTarget (snapshot: Snapshot) atlas =
-    snapshot.Sources
-    |> List.sumBy (fun s -> Atlas.seats atlas s.Id |> Option.defaultValue 0)
-    |> max minWorkforce
-
 /// Screeps source regen: 3000 energy per 300 ticks — the output per tick
 /// a continuously drained source yields, and what its container's hauler
 /// share must ship.
@@ -311,6 +303,65 @@ let private haulerQuota (snapshot: Snapshot) atlas : int =
             | [] -> 0
             | quotas -> List.min quotas)
 
+/// Screeps CREEP_LIFE_TIME: the ticks a spawned creep lives — the horizon
+/// a body's replacement cost is amortized over.
+let private creepLifetime = 1500
+
+/// Screeps UPGRADE_CONTROLLER_POWER's energy cost: what one Work part
+/// drains per upgrade tick — the rate an upgrade mouth eats income at.
+let private upgradeDrainPerWork = 1
+
+/// Workforce target (ADR 0012): three addends, each a pattern row's own
+/// colony fact — Anchors one per Post, haulers the throughput quota,
+/// workers the income arithmetic — floored at minWorkforce and derived
+/// fresh each tick. A source whose Post is provided for retires its other
+/// Seats: one heavy body drains it alone, so counting seats after that is
+/// hiring for jobs that no longer exist. An unposted source still
+/// contributes its Seat count as today — its output is spoken for by the
+/// seat crews that walk it, so only the posted sources' output is income.
+/// From that income the anchor and hauler rows' replacement amortization
+/// (body cost spread over a creep's lifetime) is deducted; every energy
+/// per tick left feeds upgrade mouths at one worker body's Work drain —
+/// exactly as many workers as the surplus feeds, bodies priced as the
+/// richest bank would cast them. The arithmetic runs scaled by the
+/// lifetime so the amortization never rounds away.
+let private workforceTarget (snapshot: Snapshot) atlas anchorQuota haulerQuota =
+    let posts = Atlas.posts atlas
+
+    let posted, unposted =
+        snapshot.Sources
+        |> List.partition (fun s ->
+            Atlas.seatTilesOf atlas s.Id |> Set.exists (fun seat -> Set.contains seat posts))
+
+    let unpostedSeats =
+        unposted
+        |> List.sumBy (fun s -> Atlas.seats atlas s.Id |> Option.defaultValue 0)
+
+    let capacity =
+        snapshot.RoomEnergy
+        |> Map.toList
+        |> List.map (fun (_, bank) -> bank.Capacity)
+        |> function
+            | [] -> 0
+            | caps -> List.max caps
+
+    let amortization =
+        anchorQuota * bodyCost (bodyFor anchorPattern capacity)
+        + haulerQuota * bodyCost (bodyFor haulerPattern capacity)
+
+    let workerDrain =
+        bodyFor workerPattern capacity
+        |> List.sumBy (function
+            | Work -> upgradeDrainPerWork
+            | _ -> 0)
+
+    let incomeWorkers =
+        (List.length posted * sourceOutputPerTick * creepLifetime - amortization)
+        / (workerDrain * creepLifetime)
+        |> max 0
+
+    anchorQuota + haulerQuota + unpostedSeats + incomeWorkers |> max minWorkforce
+
 /// Whether a living body was cast from the anchor row: more Work than
 /// Move. Fatigue parity keeps every worker body at Work <= Move (ADR
 /// 0003) and the anchor row's floor of two Work over one Move clears it,
@@ -339,7 +390,12 @@ let private isHaulerBody (creep: CreepInfo) =
 /// get matched to, so it sits beside the Planner/Matcher pipeline rather
 /// than inside it.
 let private planSpawns (snapshot: Snapshot) atlas : Intent list =
-    let target = workforceTarget snapshot atlas
+    // The specialist rows' quota rules (ADR 0006, ADR 0012): one Anchor
+    // per Post, haulers per the throughput arithmetic. Both are addends of
+    // the target itself — inside it by construction, never on top of it.
+    let anchorQuota = Atlas.posts atlas |> Set.count
+    let haulerQuota = haulerQuota snapshot atlas
+    let target = workforceTarget snapshot atlas anchorQuota haulerQuota
     let deficit = target - List.length snapshot.Creeps
 
     // Disaster fallback: an empty colony can never refill extensions, so
@@ -361,25 +417,15 @@ let private planSpawns (snapshot: Snapshot) atlas : Intent list =
     if deficit <= 0 then
         []
     else
-        // The anchor row's quota rule (ADR 0006, generalized by ADR 0012):
-        // one Anchor per Post, inside the unchanged workforce target —
-        // never on top of it. Its gaps are filled before generalist gaps;
-        // the worker row's quota is whatever the target has left.
-        let anchorQuota = Atlas.posts atlas |> Set.count |> min target
-
+        // Anchor gaps are filled before hauler gaps, hauler gaps before
+        // generalist gaps — the casting order runs Anchor, hauler, worker
+        // — and the worker row's quota is whatever the target has left.
         let anchorGap =
             anchorQuota - (snapshot.Creeps |> List.filter isAnchorBody |> List.length)
             |> max 0
 
-        // The hauler row's quota lives inside the target too, behind the
-        // Anchors' claim; its gaps come before generalist gaps, so the
-        // casting order runs Anchor, hauler, worker. Judged only once the
-        // deficit calls for casting at all: the quota's round-trip floods
-        // are the priciest arithmetic here, and a saturated colony never
-        // pays for a number it would discard.
         let haulerGap =
-            (haulerQuota snapshot atlas |> min (target - anchorQuota))
-            - (snapshot.Creeps |> List.filter isHaulerBody |> List.length)
+            haulerQuota - (snapshot.Creeps |> List.filter isHaulerBody |> List.length)
             |> max 0
 
         // Idle spawns draw from their room's one bank in list order — each

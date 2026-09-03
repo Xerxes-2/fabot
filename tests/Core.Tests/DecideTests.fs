@@ -4230,13 +4230,14 @@ let anchorTests =
             }
 
             test "planned creeps never exceed the workforce target" {
-                // Target 3, two living: one gap — the second idle spawn
-                // must stay quiet even with energy banked for it.
+                // One Post and nine income workers make a target of ten
+                // (ADR 0012); nine living leave one gap — the second idle
+                // spawn must stay quiet even with energy banked for it.
                 let snapshot =
                     { dualSeatColony with
                         Spawns = [ spawn; secondSpawn ]
                         RoomEnergy = bank 600 300
-                        Creeps = [ worker "w1" 0 50; worker "w2" 0 50 ]
+                        Creeps = anchor "a1" 0 50 :: [ for i in 1..8 -> worker $"w{i}" 0 50 ]
                         Spatial = threeSeatRoom
                     }
 
@@ -4846,5 +4847,98 @@ let haulerTests =
                     (Map.tryFind "h1" assignments)
                     (Some(taskId (Refill "can-ctrl")))
                     "the rematch flips to the outflow"
+            }
+        ]
+
+/// The W12S28 shape (ADR 0012): a 3-wide plain field y = 9..11 from x = 8
+/// to 32, two sources embedded in wall at (10,10) and (30,10) with their
+/// built containers on the Seats (11,10) and (29,10) — two Posts, no Dual
+/// Seat — and the spawn structure at (20,10), eight steps from either
+/// container.
+let incomeRoom =
+    { spatial
+          [
+              "src-a", { X = 10; Y = 10 }
+              "src-b", { X = 30; Y = 10 }
+              "can-a", { X = 11; Y = 10 }
+              "can-b", { X = 29; Y = 10 }
+              "spawn-1", { X = 20; Y = 10 }
+          ]
+          [
+              for x in 8..32 do
+                  for y in 9..11 ->
+                      { X = x; Y = y }, (if (x = 10 || x = 30) && y = 10 then Wall else Plain)
+          ] with
+        TargetKinds =
+            Map.ofList
+                [
+                    "src-a", Source
+                    "src-b", Source
+                    "can-a", Structure BuiltKind.Container
+                    "can-b", Structure BuiltKind.Container
+                    "spawn-1", Structure BuiltKind.Spawn
+                ]
+        Obstacles = Set.singleton { X = 20; Y = 10 }
+    }
+
+/// The W12S28 colony: four idle spawns on the one 300-capacity bank with
+/// energy to spare — restraint must come from the target, never from the
+/// bank running dry.
+let incomeColony =
+    { bareRespawn with
+        Spawns =
+            [
+                for i in 1..4 ->
+                    { spawn with
+                        Name = $"Spawn{i}"
+                        Id = (if i = 1 then "spawn-1" else $"spawn-{i}")
+                    }
+            ]
+        RoomEnergy = bank 1200 300
+        Sources = [ { Id = "src-a" }; { Id = "src-b" } ]
+        Spatial = incomeRoom
+    }
+
+/// The income-based fleet the W12S28 shape pins (ADR 0012): one Anchor
+/// per Post (2), the throughput quota (1 hauler per container at 8 steps),
+/// and the income workers — 2 posted sources × 10 e/tick × the 1500-tick
+/// lifetime = 30,000, minus the anchor and hauler rows' replacement
+/// amortization (2 × 300 + 2 × 300 = 1,200), over one worker body's Work
+/// drain × lifetime (1 × 1500) → floor(19.2) = 19.
+let incomeFleet =
+    [ anchor "a1" 0 50; anchor "a2" 0 50; hauler "h1" 0 100; hauler "h2" 0 100 ]
+    @ [ for i in 1..19 -> worker $"w{i}" 0 50 ]
+
+[<Tests>]
+let incomeWorkforceTests =
+    testList
+        "income-based workforce"
+        [
+            test "the W12S28 fleet is the whole target: 2 Anchors + 2 haulers + 19 workers" {
+                // Each posted source retires its 8 Seats: a seat base would
+                // add 16 on top and the idle spawns would cast into it.
+                let snapshot =
+                    { incomeColony with
+                        Creeps = incomeFleet
+                    }
+
+                let { Intents = intents } = decide snapshot Map.empty Set.empty
+                Expect.isEmpty (spawnIntents intents) "the fleet already matches the target"
+            }
+
+            test "amortization is deducted: one worker short casts exactly one worker" {
+                // Without the anchor/hauler replacement deduction income
+                // would feed 20 workers and this gap would draw two casts.
+                let snapshot =
+                    { incomeColony with
+                        Creeps = List.truncate (List.length incomeFleet - 1) incomeFleet
+                    }
+
+                let { Intents = intents } = decide snapshot Map.empty Set.empty
+
+                match spawnIntents intents with
+                | [ (_, _, creepName) ] ->
+                    Expect.stringStarts creepName "worker-" "the gap is a worker gap"
+                | other -> failtest $"expected exactly one SpawnCreep intent, got %A{other}"
             }
         ]
