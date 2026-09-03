@@ -595,7 +595,9 @@ let private noTraffic: bool[] = Array.create tileCount false
 /// traffic-blind route, otherwise priced exactly like firstStep. The
 /// Resolver compares the two: a difference attributes the detour to the
 /// occupancy surcharge, which is the only pricing the two floods do not
-/// share (ADR 0008, ADR 0009).
+/// share (ADR 0008, ADR 0009). This is the one flood ADR 0004's memo
+/// cannot serve — each creep's tile is its own key — so the Resolver runs
+/// it only for creeps on the verbose list (ADR 0018).
 let firstStepIgnoringTraffic (atlas: Atlas) (creep: string) (task: Task) : Pos option =
     firstStepVia atlas (floodFrom atlas.Weights noTraffic (factorOf atlas creep)) creep task
 

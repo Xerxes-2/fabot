@@ -2007,11 +2007,18 @@ let stepFrom pos direction =
 /// snapshot's Atlas; a creep absent from the list is idle. Move Intents
 /// only; the movement Verdicts riding beside them are resolveVerdictsOn.
 let resolveOn snapshot assigned =
-    resolve snapshot (Atlas.ofSnapshot snapshot) (Map.ofList assigned) |> fst
+    resolve snapshot (Atlas.ofSnapshot snapshot) (Map.ofList assigned) Set.empty
+    |> fst
 
-/// The Resolver's movement Verdicts at the same seam.
+/// The Resolver's movement Verdicts at the same seam, with the named
+/// creeps on the verbose list (ADR 0018).
+let resolveVerdictsVerboseOn snapshot assigned verbose =
+    resolve snapshot (Atlas.ofSnapshot snapshot) (Map.ofList assigned) (Set.ofList verbose)
+    |> snd
+
+/// The same for a quiet colony: nobody on the verbose list.
 let resolveVerdictsOn snapshot assigned =
-    resolve snapshot (Atlas.ofSnapshot snapshot) (Map.ofList assigned) |> snd
+    resolveVerdictsVerboseOn snapshot assigned []
 
 /// Run the Emitter at its own seam, over the same tick-start Atlas.
 let emitOn snapshot assigned =
@@ -2537,7 +2544,7 @@ let resolverVerdictTests =
                     "the outranked upgrader's wait is attributed to the harvester"
             }
 
-            test "a traveller detoured by the occupancy surcharge gets a reroute Verdict" {
+            test "the reroute Verdict is manufactured only for a creep on the verbose list" {
                 // The two-lane corridor: the builder's straight path runs
                 // through the seated harvester's tile, and the surcharge
                 // sends it into the parallel lane instead. Nobody yields —
@@ -2562,8 +2569,18 @@ let resolverVerdictTests =
                             }
                     }
 
+                let assigned = [ "har", Harvest "src-a"; "bob", Build "site-1" ]
+
+                Expect.isEmpty
+                    (resolveVerdictsOn snapshot assigned)
+                    "a quiet colony pays for no second flood, so it records no reroute"
+
+                Expect.isEmpty
+                    (resolveVerdictsVerboseOn snapshot assigned [ "har" ])
+                    "the list is read per creep: the detourer is not the one being watched"
+
                 Expect.equal
-                    (resolveVerdictsOn snapshot [ "har", Harvest "src-a"; "bob", Build "site-1" ])
+                    (resolveVerdictsVerboseOn snapshot assigned [ "bob" ])
                     [ Verdict.Rerouted "bob" ]
                     "the lane sidestep is attributed to traffic; the seated harvester says nothing"
             }

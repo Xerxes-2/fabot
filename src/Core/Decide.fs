@@ -1073,7 +1073,18 @@ let private directionTo (from: Pos) (dest: Pos) : Direction option =
 /// settled off its preferred candidate. A creep that simply steps toward
 /// its Work Area, a clean swap included, says nothing: both sides of a
 /// swap settle on the tile they asked for.
-let resolve (snapshot: Snapshot) atlas (assigned: Map<string, Task>) : Intent list * Verdict list =
+///
+/// Rerouted alone is evidence that must be manufactured — a second,
+/// traffic-blind flood per traveller, unmemoisable because each creep's
+/// tile is its own key — so it is computed only for creeps on the verbose
+/// list (ADR 0018). Grounded and yielded fall out of work the arbitration
+/// already did and stay always-on.
+let resolve
+    (snapshot: Snapshot)
+    atlas
+    (assigned: Map<string, Task>)
+    (verbose: Set<string>)
+    : Intent list * Verdict list =
     let placed = Atlas.placedCreeps atlas
 
     let tired =
@@ -1132,9 +1143,12 @@ let resolve (snapshot: Snapshot) atlas (assigned: Map<string, Task>) : Intent li
                 [ Verdict.Grounded name ]
             else
                 let reroute =
-                    match Map.tryFind name assigned with
-                    | Some task when rerouted name task -> [ Verdict.Rerouted name ]
-                    | _ -> []
+                    if Set.contains name verbose then
+                        match Map.tryFind name assigned with
+                        | Some task when rerouted name task -> [ Verdict.Rerouted name ]
+                        | _ -> []
+                    else
+                        []
 
                 let yielded =
                     match Map.tryFind name preferences, Map.tryFind name standing with
@@ -1336,8 +1350,8 @@ let censusSignature (snapshot: Snapshot) : string =
     $"{room}|{level}|{standing}|{pending}"
 
 /// The decision seam: Snapshot in — with the verbose list of creep names
-/// owed full candidate scoring and the previous tick's plan memo —
-/// Decision out. The tick's pipeline is visible here — plan, match, emit, resolve —
+/// owed the manufactured-evidence Verdicts (full candidate scoring, reroute
+/// attribution) and the previous tick's plan memo — Decision out. The tick's pipeline is visible here — plan, match, emit, resolve —
 /// beside the colony steps (spawns, sites), with geometry consulted
 /// through one Atlas built up front, so every step prices from the same
 /// flood (ADR 0004). The census-derived plans — the Layout's site Intents
@@ -1368,7 +1382,7 @@ let decide
     let tasks = planTasks snapshot
     let next, verdicts = matchCreeps snapshot atlas tasks assignments verbose
     let assigned = assignedTasks tasks next
-    let moveIntents, moveVerdicts = resolve snapshot atlas assigned
+    let moveIntents, moveVerdicts = resolve snapshot atlas assigned verbose
 
     {
         Intents =
