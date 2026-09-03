@@ -518,7 +518,16 @@ let private directionTo (from: Pos) (dest: Pos) : Direction option =
 /// a creep absent from the map is idle. A fatigued creep sits arbitration
 /// out — the engine would answer its move with ERR_TIRED — and its tile is
 /// blocked for the tick, so nobody plans a step through it.
-let resolve (snapshot: Snapshot) atlas (assigned: Map<string, Task>) : Intent list =
+///
+/// Beside the moves ride the movement Verdicts (ADR 0009), in Snapshot
+/// creep order: grounded for each creep whose tile is blocked by fatigue;
+/// rerouted for a traveller whose step differs from its traffic-blind one
+/// (the occupancy surcharge is the only pricing the two floods do not
+/// share); yielded — naming the counterpart holding the tile — for a creep
+/// settled off its preferred candidate. A creep that simply steps toward
+/// its Work Area, a clean swap included, says nothing: both sides of a
+/// swap settle on the tile they asked for.
+let resolve (snapshot: Snapshot) atlas (assigned: Map<string, Task>) : Intent list * Verdict list =
     let placed = Atlas.placedCreeps atlas
 
     let tired =
@@ -540,11 +549,58 @@ let resolve (snapshot: Snapshot) atlas (assigned: Map<string, Task>) : Intent li
     let occupants = placed |> List.map (fun (name, pos) -> pos, name) |> Map.ofList
     let standing = arbitrate occupants blocked moveIntents
 
-    placed
-    |> List.choose (fun (name, pos) ->
-        Map.tryFind name standing
-        |> Option.bind (directionTo pos)
-        |> Option.map (fun direction -> MoveCreep(name, direction)))
+    let intents =
+        placed
+        |> List.choose (fun (name, pos) ->
+            Map.tryFind name standing
+            |> Option.bind (directionTo pos)
+            |> Option.map (fun direction -> MoveCreep(name, direction)))
+
+    // Each rested creep's preferred standing tile: the head of its
+    // candidate list — a Move Intent's candidates are never empty.
+    let preferences =
+        moveIntents |> List.map (fun i -> i.Creep, List.head i.Candidates) |> Map.ofList
+
+    // Who holds a tile this creep did not get: the creep settled on it, or
+    // the fatigued occupant whose blocked tile pre-claimed it.
+    let counterpartAt tile self =
+        standing
+        |> Map.tryPick (fun name settled ->
+            if settled = tile && name <> self then Some name else None)
+        |> Option.orElse (
+            if Set.contains tile blocked then
+                Map.tryFind tile occupants
+            else
+                None
+        )
+
+    let rerouted name task =
+        match Atlas.firstStep atlas name task, Atlas.firstStepIgnoringTraffic atlas name task with
+        | Some priced, Some blind -> priced <> blind
+        | _ -> false
+
+    let verdicts =
+        placed
+        |> List.collect (fun (name, _) ->
+            if Set.contains name tired then
+                [ Verdict.Grounded name ]
+            else
+                let reroute =
+                    match Map.tryFind name assigned with
+                    | Some task when rerouted name task -> [ Verdict.Rerouted name ]
+                    | _ -> []
+
+                let yielded =
+                    match Map.tryFind name preferences, Map.tryFind name standing with
+                    | Some preferred, Some settled when settled <> preferred ->
+                        counterpartAt preferred name
+                        |> Option.map (fun other -> Verdict.Yielded(name, other))
+                        |> Option.toList
+                    | _ -> []
+
+                reroute @ yielded)
+
+    intents, verdicts
 
 /// Matcher: keep still-valid assignments (anti-thrash) and greedily assign
 /// the rest. Assignments in, Assignments and the Verdicts explaining them
@@ -674,6 +730,7 @@ let decide (snapshot: Snapshot) (assignments: Assignments) (_verbose: Set<string
     let tasks = planTasks snapshot
     let next, verdicts = matchCreeps snapshot atlas tasks assignments
     let assigned = assignedTasks tasks next
+    let moveIntents, moveVerdicts = resolve snapshot atlas assigned
 
     {
         Intents =
@@ -681,7 +738,7 @@ let decide (snapshot: Snapshot) (assignments: Assignments) (_verbose: Set<string
             @ spawnIntents
             @ siteIntents
             @ emit snapshot atlas assigned
-            @ resolve snapshot atlas assigned
+            @ moveIntents
         Assignments = next
-        Verdicts = verdicts
+        Verdicts = verdicts @ moveVerdicts
     }

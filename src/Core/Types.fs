@@ -276,14 +276,21 @@ type IdleReason =
 /// never a log line (ADR 0009). The Matcher speaks at conclusion level:
 /// which Task won a creep and what decided it, a remembered assignment kept
 /// (anti-thrash) as distinct from a fresh match, a release with its reason,
-/// or why nothing was applicable. The Resolver's cases land with movement
-/// attribution. Tasks are named by task id.
+/// or why nothing was applicable. The Resolver speaks only when something
+/// became of a creep's movement: grounded by fatigue (ADR 0008), yielded —
+/// settled off its preferred tile, naming the counterpart creep that holds
+/// it — or rerouted, detoured by the occupancy surcharge. A creep that
+/// simply steps toward its Work Area says nothing: conclusion level means
+/// events, not every step. Tasks are named by task id.
 [<RequireQualifiedAccess>]
 type Verdict =
     | Matched of creep: string * task: string * factor: MatchFactor
     | Kept of creep: string * task: string
     | Released of creep: string * task: string * reason: ReleaseReason
     | Unassigned of creep: string * reason: IdleReason
+    | Grounded of creep: string
+    | Yielded of creep: string * counterpart: string
+    | Rerouted of creep: string
 
 /// What one tick of deciding returns: the Intents to execute, the
 /// Assignments to remember for next tick, and the Verdicts explaining

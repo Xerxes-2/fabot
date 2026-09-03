@@ -1260,13 +1260,39 @@ let stepFrom pos direction =
     | TopLeft -> { X = pos.X - 1; Y = pos.Y - 1 }
 
 /// Run the Resolver at its own seam: assigned Tasks as data over the
-/// snapshot's Atlas; a creep absent from the list is idle.
+/// snapshot's Atlas; a creep absent from the list is idle. Move Intents
+/// only; the movement Verdicts riding beside them are resolveVerdictsOn.
 let resolveOn snapshot assigned =
-    resolve snapshot (Atlas.ofSnapshot snapshot) (Map.ofList assigned)
+    resolve snapshot (Atlas.ofSnapshot snapshot) (Map.ofList assigned) |> fst
+
+/// The Resolver's movement Verdicts at the same seam.
+let resolveVerdictsOn snapshot assigned =
+    resolve snapshot (Atlas.ofSnapshot snapshot) (Map.ofList assigned) |> snd
 
 /// Run the Emitter at its own seam, over the same tick-start Atlas.
 let emitOn snapshot assigned =
     emit snapshot (Atlas.ofSnapshot snapshot) (Map.ofList assigned)
+
+/// Two single-Seat sources at the ends of a two-tile corridor; each creep
+/// stands on the other's Seat.
+let headOnSwap =
+    let terrain =
+        [
+            { X = 10; Y = 10 }, Wall
+            { X = 10; Y = 11 }, Plain
+            { X = 10; Y = 12 }, Plain
+            { X = 10; Y = 13 }, Wall
+        ]
+
+    { bareRespawn with
+        Sources = [ { Id = "src-a" }; { Id = "src-b" } ]
+        Creeps = [ worker "wa" 0 50; worker "wb" 0 50 ]
+        Spatial =
+
+            { spatial [ "src-a", { X = 10; Y = 10 }; "src-b", { X = 10; Y = 13 } ] terrain with
+                CreepPositions = Map.ofList [ "wa", { X = 10; Y = 12 }; "wb", { X = 10; Y = 11 } ]
+            }
+    }
 
 [<Tests>]
 let arbitrationTests =
@@ -1324,30 +1350,6 @@ let arbitrationTests =
                         "the upgrader is displaced to a tile still inside its Work Area"
                 | other -> failtest $"expected exactly one move for the upgrader, got %A{other}"
             }
-
-            // Two single-Seat sources at the ends of a two-tile corridor;
-            // each creep stands on the other's Seat.
-            let headOnSwap =
-                let terrain =
-                    [
-                        { X = 10; Y = 10 }, Wall
-                        { X = 10; Y = 11 }, Plain
-                        { X = 10; Y = 12 }, Plain
-                        { X = 10; Y = 13 }, Wall
-                    ]
-
-                { bareRespawn with
-                    Sources = [ { Id = "src-a" }; { Id = "src-b" } ]
-                    Creeps = [ worker "wa" 0 50; worker "wb" 0 50 ]
-                    Spatial =
-
-                        { spatial
-                              [ "src-a", { X = 10; Y = 10 }; "src-b", { X = 10; Y = 13 } ]
-                              terrain with
-                            CreepPositions =
-                                Map.ofList [ "wa", { X = 10; Y = 12 }; "wb", { X = 10; Y = 11 } ]
-                        }
-                }
 
             test "head-on swap: two creeps blocking each other exchange tiles" {
                 let moves =
@@ -1665,6 +1667,216 @@ let arbitrationTests =
                     (emitOn snapshot assigned)
                     (UpgradeController("upg", "ctrl-1"))
                     "the swapped-out upgrader still upgrades from its tick-start tile"
+            }
+        ]
+
+[<Tests>]
+let resolverVerdictTests =
+    testList
+        "resolver verdicts"
+        [
+            test "a grounded creep gets a grounded Verdict; the creep behind it yields to it" {
+                // The one-lane corridor with a fatigued seated harvester: har
+                // sits arbitration out with its tile blocked, and bob — whose
+                // only path runs through that tile — stands down for the tick.
+                let terrain = [ for x in 8..15 -> { X = x; Y = 12 }, Plain ]
+
+                let snapshot =
+                    { bareRespawn with
+                        Sources = [ { Id = "src-a" } ]
+                        ConstructionSites = [ { Id = "site-1" } ]
+                        Creeps = [ { worker "har" 0 50 with Fatigue = 4 }; worker "bob" 50 0 ]
+                        Spatial =
+
+                            { spatial
+                                  [ "src-a", { X = 10; Y = 11 }; "site-1", { X = 15; Y = 12 } ]
+                                  terrain with
+                                CreepPositions =
+                                    Map.ofList
+                                        [ "har", { X = 10; Y = 12 }; "bob", { X = 9; Y = 12 } ]
+                            }
+                    }
+
+                Expect.equal
+                    (resolveVerdictsOn snapshot [ "har", Harvest "src-a"; "bob", Build "site-1" ])
+                    [ Verdict.Grounded "har"; Verdict.Yielded("bob", "har") ]
+                    "har is grounded; bob's blocked step names the tired creep holding the tile"
+            }
+
+            test "a lone fatigued traveller is grounded, nothing more" {
+                let corridor =
+                    [ for y in 9..15 -> { X = 10; Y = y }, Plain ] @ [ { X = 10; Y = 10 }, Wall ]
+
+                let snapshot =
+                    { bareRespawn with
+                        Sources = [ { Id = "src-a" } ]
+                        Creeps = [ { worker "w1" 0 50 with Fatigue = 4 } ]
+                        Spatial =
+
+                            { spatial [ "src-a", { X = 10; Y = 10 } ] corridor with
+                                CreepPositions = Map.ofList [ "w1", { X = 10; Y = 14 } ]
+                            }
+                    }
+
+                Expect.equal
+                    (resolveVerdictsOn snapshot [ "w1", Harvest "src-a" ])
+                    [ Verdict.Grounded "w1" ]
+                    "grounding is the whole story: no move was asked, none was denied"
+            }
+
+            test "a displaced squatter's Verdict names its displacer" {
+                // The squatting regression's geometry: the upgrader on the
+                // sole Seat is displaced by the inbound harvester.
+                let terrain =
+                    [
+                        { X = 10; Y = 10 }, Wall
+                        { X = 10; Y = 14 }, Wall
+                        { X = 10; Y = 11 }, Plain
+                        { X = 9; Y = 12 }, Plain
+                        { X = 10; Y = 12 }, Plain
+                        { X = 11; Y = 12 }, Plain
+                        { X = 10; Y = 13 }, Plain
+                    ]
+
+                let snapshot =
+                    { bareRespawn with
+                        Sources = [ { Id = "src-a" } ]
+                        Creeps = [ worker "har" 0 50; worker "upg" 50 0 ]
+                        Spatial =
+
+                            { spatial
+                                  [ "src-a", { X = 10; Y = 10 }; "ctrl-1", { X = 10; Y = 14 } ]
+                                  terrain with
+                                CreepPositions =
+                                    Map.ofList
+                                        [ "har", { X = 10; Y = 12 }; "upg", { X = 10; Y = 11 } ]
+                            }
+                    }
+
+                Expect.equal
+                    (resolveVerdictsOn snapshot [ "har", Harvest "src-a"; "upg", Upgrade "ctrl-1" ])
+                    [ Verdict.Yielded("upg", "har") ]
+                    "the displaced upgrader yields to the harvester; the harvester says nothing"
+            }
+
+            test "losing a contested tile to a higher rank is a yield naming the winner" {
+                // The contested-gap geometry: Harvest outranks Upgrade, so
+                // the upgrader waits in place while the harvester takes the
+                // gap it also wanted.
+                let terrain =
+                    [
+                        { X = 10; Y = 10 }, Wall
+                        { X = 10; Y = 8 }, Wall
+                        { X = 10; Y = 11 }, Plain
+                        { X = 10; Y = 12 }, Plain
+                        { X = 10; Y = 13 }, Plain
+                        { X = 11; Y = 13 }, Plain
+                    ]
+
+                let snapshot =
+                    { bareRespawn with
+                        Sources = [ { Id = "src-a" } ]
+                        Creeps = [ worker "h" 0 50; worker "u" 50 0 ]
+                        Spatial =
+
+                            { spatial
+                                  [ "src-a", { X = 10; Y = 10 }; "ctrl-1", { X = 10; Y = 8 } ]
+                                  terrain with
+                                CreepPositions =
+                                    Map.ofList [ "h", { X = 10; Y = 13 }; "u", { X = 11; Y = 13 } ]
+                            }
+                    }
+
+                Expect.equal
+                    (resolveVerdictsOn snapshot [ "h", Harvest "src-a"; "u", Upgrade "ctrl-1" ])
+                    [ Verdict.Yielded("u", "h") ]
+                    "the outranked upgrader's wait is attributed to the harvester"
+            }
+
+            test "a traveller detoured by the occupancy surcharge gets a reroute Verdict" {
+                // The two-lane corridor: the builder's straight path runs
+                // through the seated harvester's tile, and the surcharge
+                // sends it into the parallel lane instead. Nobody yields —
+                // the detour is a pricing event, not an arbitration one.
+                let terrain =
+                    [ for x in 8..15 -> { X = x; Y = 12 }, Plain ]
+                    @ [ for x in 8..15 -> { X = x; Y = 13 }, Plain ]
+
+                let snapshot =
+                    { bareRespawn with
+                        Sources = [ { Id = "src-a" } ]
+                        ConstructionSites = [ { Id = "site-1" } ]
+                        Creeps = [ worker "har" 0 50; worker "bob" 50 0 ]
+                        Spatial =
+
+                            { spatial
+                                  [ "src-a", { X = 10; Y = 11 }; "site-1", { X = 15; Y = 12 } ]
+                                  terrain with
+                                CreepPositions =
+                                    Map.ofList
+                                        [ "har", { X = 10; Y = 12 }; "bob", { X = 9; Y = 12 } ]
+                            }
+                    }
+
+                Expect.equal
+                    (resolveVerdictsOn snapshot [ "har", Harvest "src-a"; "bob", Build "site-1" ])
+                    [ Verdict.Rerouted "bob" ]
+                    "the lane sidestep is attributed to traffic; the seated harvester says nothing"
+            }
+
+            test "a creep simply stepping toward its Work Area produces no movement noise" {
+                let corridor =
+                    [ for y in 9..15 -> { X = 10; Y = y }, Plain ] @ [ { X = 10; Y = 10 }, Wall ]
+
+                let snapshot =
+                    { bareRespawn with
+                        Sources = [ { Id = "src-a" } ]
+                        Creeps = [ worker "w1" 0 50 ]
+                        Spatial =
+
+                            { spatial [ "src-a", { X = 10; Y = 10 } ] corridor with
+                                CreepPositions = Map.ofList [ "w1", { X = 10; Y = 14 } ]
+                            }
+                    }
+
+                Expect.isEmpty
+                    (resolveVerdictsOn snapshot [ "w1", Harvest "src-a" ])
+                    "conclusion level means events, not every step"
+            }
+
+            test "a clean head-on swap is silent: both creeps settle where they asked" {
+                Expect.isEmpty
+                    (resolveVerdictsOn headOnSwap [ "wa", Harvest "src-a"; "wb", Harvest "src-b" ])
+                    "each traveller got exactly its preferred tile; nothing became of either move"
+            }
+
+            test "movement Verdicts ride behind the Matcher's in decide's output" {
+                // A fatigued lone traveller at the decide seam: the Matcher
+                // speaks first (the fresh match), the Resolver after (the
+                // grounding) — one additive list, interleaved downstream.
+                let corridor =
+                    [ for y in 9..15 -> { X = 10; Y = y }, Plain ] @ [ { X = 10; Y = 10 }, Wall ]
+
+                let snapshot =
+                    { bareRespawn with
+                        Sources = [ { Id = "src-a" } ]
+                        Creeps = [ { worker "w1" 0 50 with Fatigue = 4 } ]
+                        Spatial =
+
+                            { spatial [ "src-a", { X = 10; Y = 10 } ] corridor with
+                                CreepPositions = Map.ofList [ "w1", { X = 10; Y = 14 } ]
+                            }
+                    }
+
+                let { Verdicts = verdicts } = decide snapshot Map.empty Set.empty
+
+                Expect.equal
+                    verdicts
+                    [
+                        Verdict.Matched("w1", taskId (Harvest "src-a"), MatchFactor.OnlyCandidate)
+                        Verdict.Grounded "w1"
+                    ]
+                    "matcher verdicts first, then the Resolver's, in one list"
             }
         ]
 

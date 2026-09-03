@@ -424,13 +424,14 @@ let mayAct (atlas: Atlas) (creep: string) (task: Task) : bool =
     | Some creepPos, Some targetPos -> range creepPos targetPos <= actionRange task
     | _ -> true
 
-/// The first step of a cheapest path from a creep to its Task's Work Area,
-/// priced in the creep's own ticks — a slow body may detour differently
-/// than a fast one over the same ground. None when there is nothing
-/// derivable: the creep is unplaced, already inside the area, or the area
-/// is empty or unreachable. Of equally cheap goals the lowest (cost, tile)
-/// wins, matching the flood's tie-breaking.
-let firstStep (atlas: Atlas) (creep: string) (task: Task) : Pos option =
+/// First step toward a Task's Work Area over the given flood, sharing
+/// firstStep's whole contract — that doc governs both public wrappers.
+let private firstStepVia
+    (atlas: Atlas)
+    (floodOf: Pos -> int[] * int[])
+    (creep: string)
+    (task: Task)
+    : Pos option =
     let rec firstStepOf index startIndex (parents: int[]) =
         let parent = parents.[index]
 
@@ -447,7 +448,7 @@ let firstStep (atlas: Atlas) (creep: string) (task: Task) : Pos option =
         if Set.isEmpty goals || Set.contains pos goals then
             None
         else
-            let dist, parents = flood atlas creep pos
+            let dist, parents = floodOf pos
 
             goals
             |> Set.toList
@@ -459,3 +460,24 @@ let firstStep (atlas: Atlas) (creep: string) (task: Task) : Pos option =
                 | reachable ->
                     let _, goal = List.min reachable
                     Some(posAt (firstStepOf (indexOf goal) (indexOf pos) parents))
+
+/// The first step of a cheapest path from a creep to its Task's Work Area,
+/// priced in the creep's own ticks — a slow body may detour differently
+/// than a fast one over the same ground. None when there is nothing
+/// derivable: the creep is unplaced, already inside the area, or the area
+/// is empty or unreachable. Of equally cheap goals the lowest (cost, tile)
+/// wins, matching the flood's tie-breaking.
+let firstStep (atlas: Atlas) (creep: string) (task: Task) : Pos option =
+    firstStepVia atlas (flood atlas creep) creep task
+
+/// No tile occupied: the flood baseline the occupancy surcharge is judged
+/// against.
+let private noTraffic: bool[] = Array.create tileCount false
+
+/// The first step the same body would take were no tile occupied — the
+/// traffic-blind route, otherwise priced exactly like firstStep. The
+/// Resolver compares the two: a difference attributes the detour to the
+/// occupancy surcharge, which is the only pricing the two floods do not
+/// share (ADR 0008, ADR 0009).
+let firstStepIgnoringTraffic (atlas: Atlas) (creep: string) (task: Task) : Pos option =
+    firstStepVia atlas (floodFrom atlas.Weights noTraffic (factorOf atlas creep)) creep task
