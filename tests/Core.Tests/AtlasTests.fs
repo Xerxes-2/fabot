@@ -1136,3 +1136,90 @@ let trunkPathTests =
                 Expect.equal (List.last path) { X = 13; Y = 9 } "ties break on the tile ordering"
             }
         ]
+
+[<Tests>]
+let haulRoundTripTests =
+    testList
+        "atlas haulRoundTripTicks"
+        [
+            // Corridor y = 10, x = 10..20: the container tile at (10,10),
+            // the spawn structure standing at (20,10) — nine steps to the
+            // one spawn-adjacent goal, (19,10).
+            let corridorWith roads creeps =
+                { spatial
+                      [ "spawn-1", { X = 20; Y = 10 } ]
+                      [ for x in 10..20 -> { X = x; Y = 10 }, Plain ] with
+                    Obstacles = Set.singleton { X = 20; Y = 10 }
+                    Roads = roads
+                    CreepPositions = Map.ofList creeps
+                }
+                |> snapshotWith []
+                |> ofSnapshot
+
+            test "the loaded leg out and the empty leg back sum to whole ticks" {
+                // [Carry;Carry;Move] loaded on plain: two full Carry x
+                // weight 2 over one Move is 4 units a step; empty Carry
+                // rides free, so the leg back costs the 1-unit floor. Nine
+                // steps x 5 units = 45 half-ticks, rounded up to 23.
+                Expect.equal
+                    (haulRoundTripTicks
+                        (corridorWith Set.empty [])
+                        [ Carry; Carry; Move ]
+                        { X = 10; Y = 10 }
+                        { X = 20; Y = 10 })
+                    (Some 23)
+                    "both legs are priced by the body's own fatigue factor"
+            }
+
+            test "a road under the trunk discounts the loaded leg" {
+                // Road weight 1 halves the loaded step to 2 units; the
+                // empty leg already rides the floor. Nine steps x 3 units
+                // = 27 half-ticks, rounded up to 14.
+                Expect.equal
+                    (haulRoundTripTicks
+                        (corridorWith (Set.ofList [ for x in 11..19 -> { X = x; Y = 10 } ]) [])
+                        [ Carry; Carry; Move ]
+                        { X = 10; Y = 10 }
+                        { X = 20; Y = 10 })
+                    (Some 14)
+                    "road parity is worth hiring for"
+            }
+
+            test "the pricing is traffic-blind: a standing creep never resizes the fleet" {
+                // The quota is capacity planning, not routing: the same
+                // corridor with a creep parked mid-lane prices identically
+                // — no occupancy surcharge.
+                Expect.equal
+                    (haulRoundTripTicks
+                        (corridorWith Set.empty [ "w", { X = 15; Y = 10 } ])
+                        [ Carry; Carry; Move ]
+                        { X = 10; Y = 10 }
+                        { X = 20; Y = 10 })
+                    (Some 23)
+                    "today's traffic is not tomorrow's throughput"
+            }
+
+            test "an unreachable sink prices no round trip" {
+                let gapped =
+                    { spatial
+                          [ "spawn-1", { X = 20; Y = 10 } ]
+                          [
+                              for x in 10..20 do
+                                  if x <> 15 then
+                                      { X = x; Y = 10 }, Plain
+                          ] with
+                        Obstacles = Set.singleton { X = 20; Y = 10 }
+                    }
+                    |> snapshotWith []
+                    |> ofSnapshot
+
+                Expect.equal
+                    (haulRoundTripTicks
+                        gapped
+                        [ Carry; Carry; Move ]
+                        { X = 10; Y = 10 }
+                        { X = 20; Y = 10 })
+                    None
+                    "unpriceable geometry hires nobody"
+            }
+        ]

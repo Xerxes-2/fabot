@@ -193,7 +193,7 @@ let patternTableTests =
     testList
         "pattern table"
         [
-            test "the worker unit and the Anchor are the table's rows" {
+            test "the worker unit, the Anchor and the hauler are the table's rows" {
                 Expect.equal
                     patternTable
                     [
@@ -204,6 +204,10 @@ let patternTableTests =
                         {
                             Name = "anchor"
                             Block = [ Work; Work; Carry; Move ]
+                        }
+                        {
+                            Name = "hauler"
+                            Block = [ Carry; Carry; Move ]
                         }
                     ]
                     "every body the colony casts comes from these rows"
@@ -231,6 +235,31 @@ let patternTableTests =
                     (bodyFor anchorPattern 12900)
                     (List.replicate 48 Work @ [ Carry; Move ])
                     "48 Work beside the Carry/Move pair fill exactly 50 parts"
+            }
+
+            test "the hauler row builds whole blocks and nothing else" {
+                // 500 buys three whole blocks (450) and strands the rest:
+                // the row's own declaration is road parity, which a padded
+                // lone Carry would break — three Move pay six fatigue a
+                // tick, seven loaded Carry on a road would generate seven.
+                Expect.equal
+                    (bodyFor haulerPattern 500)
+                    (List.replicate 6 Carry @ List.replicate 3 Move)
+                    "capacity buys whole [Carry;Carry;Move] blocks; the remainder stays banked"
+            }
+
+            test "the hauler row never casts below its block" {
+                Expect.equal
+                    (bodyFor haulerPattern 100)
+                    [ Carry; Carry; Move ]
+                    "the block is the row's minimal cast"
+            }
+
+            test "the hauler body never exceeds the 50-part engine cap" {
+                Expect.equal
+                    (bodyFor haulerPattern 9000)
+                    (List.replicate 32 Carry @ List.replicate 16 Move)
+                    "sixteen blocks fill 48 parts"
             }
 
             test "spawn planning casts from the pattern table's row" {
@@ -4613,5 +4642,209 @@ let logisticsTests =
                     "in range at tick start: the Executor-bound Intent fires"
 
                 Expect.contains intents (SayCreep("w1", "📥")) "the Task's own chat bubble"
+            }
+        ]
+
+/// A hauler-unit creep: two Carry, one Move — the hauler row's block.
+let hauler name energy freeCapacity =
+    creepWith name energy freeCapacity [ Carry; Carry; Move ]
+
+/// The hauler quota fixture: a 3-wide field y = 9..11 from x = 8 to one
+/// tile past the spawn, the source embedded in wall at (10,10) with its
+/// eight Seats open — a seat-based target roomy enough to leave the
+/// hauler row slots — the built source container "can-src" on the Seat
+/// (11,10) (a Post), and the spawn structure standing at (spawnX,10).
+let quotaRoom spawnX =
+    { spatial
+          [
+              "src-a", { X = 10; Y = 10 }
+              "can-src", { X = 11; Y = 10 }
+              "spawn-1", { X = spawnX; Y = 10 }
+          ]
+          [
+              for x in 8 .. spawnX + 1 do
+                  for y in 9..11 -> { X = x; Y = y }, (if x = 10 && y = 10 then Wall else Plain)
+          ] with
+        TargetKinds =
+            Map.ofList
+                [
+                    "src-a", Source
+                    "can-src", Structure BuiltKind.Container
+                    "spawn-1", Structure BuiltKind.Spawn
+                ]
+        Obstacles = Set.singleton { X = spawnX; Y = 10 }
+    }
+
+/// The quota fixture's colony: `spawnCount` idle spawns drawing on the one
+/// 300-capacity bank holding `available` energy.
+let quotaColony spawnX spawnCount available =
+    { bareRespawn with
+        Spawns =
+            [
+                for i in 1..spawnCount ->
+                    { spawn with
+                        Name = $"Spawn{i}"
+                        Id = (if i = 1 then "spawn-1" else $"spawn-{i}")
+                    }
+            ]
+        RoomEnergy = bank available 300
+        Sources = [ { Id = "src-a" } ]
+        Spatial = quotaRoom spawnX
+    }
+
+let haulerCasts intents =
+    spawnIntents intents
+    |> List.filter (fun (_, _, name: string) -> name.StartsWith "hauler-")
+    |> List.length
+
+[<Tests>]
+let haulerTests =
+    testList
+        "hauler"
+        [
+            test "a farther source container hires a larger hauler quota" {
+                // Near spawn: 8 steps from the container, [4 Carry; 2 Move]
+                // at the 300-capacity bank — 20 round-trip ticks, quota
+                // ceil(20 x 10 / 200) = 1. Far spawn: 27 steps — 68 ticks,
+                // quota 4. The living Anchor fills the Post, so every
+                // remaining specialist gap is a hauler cast.
+                let decideAt spawnX =
+                    decide
+                        { quotaColony spawnX 4 1200 with
+                            Creeps = [ anchor "a1" 0 50 ]
+                        }
+                        Map.empty
+                        Set.empty
+
+                let near = decideAt 20
+                let far = decideAt 39
+
+                Expect.equal (haulerCasts near.Intents) 1 "8 steps ship in one body"
+                Expect.equal (haulerCasts far.Intents) 4 "27 steps hire four"
+            }
+
+            test "no source containers hires no haulers" {
+                let room = quotaRoom 39
+
+                let snapshot =
+                    { quotaColony 39 4 1200 with
+                        Creeps = [ worker "w1" 0 50 ]
+                        Spatial =
+                            { room with
+                                TargetPositions = Map.remove "can-src" room.TargetPositions
+                                TargetKinds = Map.remove "can-src" room.TargetKinds
+                            }
+                    }
+
+                let { Intents = intents } = decide snapshot Map.empty Set.empty
+
+                Expect.equal (haulerCasts intents) 0 "no container, nothing to ship"
+
+                Expect.all
+                    (spawnIntents intents)
+                    (fun (_, _, name) -> name.StartsWith "worker-")
+                    "every cast is the generalist row"
+            }
+
+            test "casting order runs Anchor, then hauler, then worker from the one debited bank" {
+                let snapshot =
+                    { quotaColony 20 3 900 with
+                        Creeps = [ worker "w1" 0 50 ]
+                    }
+
+                let { Intents = intents } = decide snapshot Map.empty Set.empty
+
+                match spawnIntents intents with
+                | [ (_, firstBody, firstName)
+                    (_, secondBody, secondName)
+                    (_, thirdBody, thirdName) ] ->
+                    Expect.stringStarts firstName "anchor-" "the Post's gap is filled first"
+                    Expect.equal firstBody [ Work; Work; Carry; Move ] "the Anchor row's body"
+                    Expect.stringStarts secondName "hauler-" "the hauler quota comes second"
+
+                    Expect.equal
+                        secondBody
+                        [ Carry; Carry; Carry; Carry; Move; Move ]
+                        "two whole blocks at the 300 bank"
+
+                    Expect.stringStarts thirdName "worker-" "the generalist fills the remainder"
+                    Expect.equal thirdBody (workerBodyFor 300) "the worker row sized to the bank"
+                | other -> failtest $"expected exactly three SpawnCreep intents, got %A{other}"
+            }
+
+            test "the disaster fallback still casts a bare worker unit" {
+                let snapshot =
+                    { quotaColony 20 1 300 with
+                        Creeps = []
+                    }
+
+                let { Intents = intents } = decide snapshot Map.empty Set.empty
+
+                match spawnIntents intents with
+                | [ (_, body, creepName) ] ->
+                    Expect.equal body [ Work; Carry; Move ] "time-to-first-creep outranks the rows"
+                    Expect.stringStarts creepName "worker-" "the fallback casts the worker row"
+                | other -> failtest $"expected exactly one SpawnCreep intent, got %A{other}"
+            }
+
+            test "an empty hauler body is matched into Withdraw" {
+                let snapshot =
+                    { haulColony with
+                        Creeps = [ hauler "h1" 0 100 ]
+                        Spatial =
+                            { haulRoom with
+                                Stores = Map.ofList [ "can-src", 500; "can-ctrl", 800 ]
+                                CreepPositions = Map.ofList [ "h1", { X = 12; Y = 10 } ]
+                            }
+                    }
+
+                let {
+                        Intents = intents
+                        Assignments = assignments
+                    } =
+                    decide snapshot Map.empty Set.empty
+
+                Expect.equal
+                    (Map.tryFind "h1" assignments)
+                    (Some(taskId (Withdraw "can-src")))
+                    "the intake half of the haul cycle: free capacity beside a stocked container"
+
+                Expect.contains
+                    intents
+                    (WithdrawEnergyFromStructure("h1", "can-src"))
+                    "in range at tick start: the withdraw fires"
+            }
+
+            test "filled, the hauler's Withdraw releases and rematches to Refill" {
+                // No Work part: Harvest, Build, Upgrade and Repair are
+                // inapplicable by body, so the outflow is the only work
+                // left — the same emergent alternation as every Task pair.
+                let snapshot =
+                    { haulColony with
+                        Creeps = [ hauler "h1" 100 0 ]
+                        Spatial =
+                            { haulRoom with
+                                Stores = Map.ofList [ "can-src", 500; "can-ctrl", 800 ]
+                                CreepPositions = Map.ofList [ "h1", { X = 12; Y = 10 } ]
+                            }
+                    }
+
+                let remembered = Map.ofList [ "h1", taskId (Withdraw "can-src") ]
+
+                let {
+                        Assignments = assignments
+                        Verdicts = verdicts
+                    } =
+                    decide snapshot remembered Set.empty
+
+                Expect.contains
+                    verdicts
+                    (Verdict.Released("h1", taskId (Withdraw "can-src"), ReleaseReason.Inapplicable))
+                    "the full store releases Withdraw"
+
+                Expect.equal
+                    (Map.tryFind "h1" assignments)
+                    (Some(taskId (Refill "can-ctrl")))
+                    "the rematch flips to the outflow"
             }
         ]

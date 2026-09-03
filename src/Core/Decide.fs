@@ -30,11 +30,22 @@ let anchorPattern =
         Block = [ Work; Work; Carry; Move ]
     }
 
+/// The hauler unit (ADR 0012): 150 energy, full speed loaded on roads —
+/// the row carries its own parity declaration (road parity, not the
+/// worker row's plain parity), because a hauler's whole life is the
+/// trunk. No Work part, so Harvest, Build, Upgrade and Repair are
+/// inapplicable by body; it lives in the Withdraw→Refill cycle.
+let haulerPattern =
+    {
+        Name = "hauler"
+        Block = [ Carry; Carry; Move ]
+    }
+
 /// The pattern table: every body the colony casts is a row here, sized by
 /// energy under the row's own sizing rule. A future pattern is one more
 /// data row plus its own quota rule — a colony fact deciding when it is
 /// cast — never a new code path (ADR 0006).
-let patternTable = [ workerPattern; anchorPattern ]
+let patternTable = [ workerPattern; anchorPattern; haulerPattern ]
 
 let bodyCost body =
     body
@@ -102,13 +113,31 @@ let private anchorBodyFor capacity =
 
     List.replicate work Work @ [ Carry; Move ]
 
+/// The hauler row's sizing rule (ADR 0012): as many whole [Carry; Carry;
+/// Move] blocks as capacity buys (never below one), and nothing else. The
+/// row's parity declaration is road parity — two loaded Carry generate
+/// two fatigue on a road tile, the one Move pays off two a tick — which
+/// the whole block meets and a padded lone Carry would break; the
+/// remainder stays banked. Parts are grouped Carry then Move so damage
+/// strips capacity first and mobility last.
+let private haulerBodyFor capacity =
+    let repeats =
+        capacity / bodyCost haulerPattern.Block
+        |> max 1
+        |> min (maxBodyParts / List.length haulerPattern.Block)
+
+    List.replicate (2 * repeats) Carry @ List.replicate repeats Move
+
 /// Body for a pattern at an energy capacity, under the row's own sizing
 /// rule (ADR 0006): the anchor row spends on Work beside its fixed
-/// Carry/Move pair; every block-replicating row pads its remainder at
-/// fatigue parity.
+/// Carry/Move pair, the hauler row buys whole blocks at its own road
+/// parity, and every other block-replicating row pads its remainder at
+/// plain fatigue parity.
 let bodyFor pattern capacity =
     if pattern.Name = anchorPattern.Name then
         anchorBodyFor capacity
+    elif pattern.Name = haulerPattern.Name then
+        haulerBodyFor capacity
     else
         parityBodyFor pattern.Block capacity
 
@@ -142,6 +171,16 @@ let private range a b = max (abs (a.X - b.X)) (abs (a.Y - b.Y))
 /// Screeps CONTAINER_CAPACITY: what a container's store can hold — the
 /// line past which the buffer needs no Refill.
 let private containerCapacity = 2000
+
+/// Whether a placed tile is a source container's (ADR 0012): within range
+/// 1 of a placed source — the Seat-standing kind the Layout places, which
+/// harvest overflow fills. The one geometry judgement behind both rules
+/// that care: the Planner keeps source containers out of Refill, the
+/// hauler quota counts them. Unplaced geometry classifies nothing.
+let private isSourceContainerTile (snapshot: Snapshot) pos =
+    snapshot.Sources
+    |> List.choose (fun s -> Map.tryFind s.Id snapshot.Spatial.TargetPositions)
+    |> List.exists (fun s -> range pos s <= 1)
 
 /// Planner: rebuild this tick's full Task pool from the Snapshot. Pure and
 /// from scratch every tick — Tasks are never persisted.
@@ -194,13 +233,8 @@ let planTasks (snapshot: Snapshot) : Task list =
     // Refill target (ADR 0010's target layering, widened by ADR 0012).
     // Which container is the controller's is judged by geometry — it
     // stands inside the Upgrade Work Area (range 3) the Layout picked it
-    // from, while a Seat-adjacent (range 1) container is a source's,
-    // which harvest overflow fills and Refill never targets. Unplaced
-    // geometry classifies nothing.
-    let sourcePositions =
-        snapshot.Sources
-        |> List.choose (fun s -> Map.tryFind s.Id snapshot.Spatial.TargetPositions)
-
+    // from, while a source container's tile (the Seat-standing kind) is
+    // never a Refill target.
     let containerRefills =
         snapshot.Controller
         |> Option.bind (fun c -> Map.tryFind c.Id snapshot.Spatial.TargetPositions)
@@ -210,7 +244,7 @@ let planTasks (snapshot: Snapshot) : Task list =
                 match Map.tryFind id snapshot.Spatial.TargetPositions with
                 | Some pos ->
                     range pos controllerPos <= 3
-                    && sourcePositions |> List.forall (fun s -> range pos s > 1)
+                    && not (isSourceContainerTile snapshot pos)
                     && stored id < containerCapacity
                 | None -> false)
             |> List.map Refill)
@@ -226,6 +260,57 @@ let private workforceTarget (snapshot: Snapshot) atlas =
     |> List.sumBy (fun s -> Atlas.seats atlas s.Id |> Option.defaultValue 0)
     |> max minWorkforce
 
+/// Screeps source regen: 3000 energy per 300 ticks — the output per tick
+/// a continuously drained source yields, and what its container's hauler
+/// share must ship.
+let private sourceOutputPerTick = 10
+
+/// Screeps CARRY_CAPACITY: energy one Carry part holds.
+let private carryPartCapacity = 50
+
+/// The hauler row's quota rule (ADR 0012) — the row's colony fact, per
+/// ADR 0006's law that a row arrives with its quota or not at all: per
+/// source container, ceil(round-trip travel ticks to the spawn × source
+/// output ÷ the cast body's carry capacity), so a farther container hires
+/// proportionally more haul capacity and never quietly overflows. The
+/// spawn is the canonical sink because the trunks radiate from it; of
+/// several spawns the cheapest wins. No source containers, no placed
+/// spawns, or unreachable geometry hire nothing.
+let private haulerQuota (snapshot: Snapshot) atlas : int =
+    let sourceContainerTiles =
+        snapshot.Spatial.TargetKinds
+        |> Map.toList
+        |> List.choose (fun (id, kind) ->
+            if kind = Structure BuiltKind.Container then
+                Map.tryFind id snapshot.Spatial.TargetPositions
+            else
+                None)
+        |> List.filter (isSourceContainerTile snapshot)
+
+    let spawns =
+        snapshot.Spawns
+        |> List.choose (fun s ->
+            Atlas.positionOf atlas s.Id |> Option.map (fun pos -> s.RoomName, pos))
+
+    sourceContainerTiles
+    |> List.sumBy (fun tile ->
+        spawns
+        |> List.choose (fun (roomName, spawnPos) ->
+            let bank =
+                snapshot.RoomEnergy
+                |> Map.tryFind roomName
+                |> Option.defaultValue { Available = 0; Capacity = 0 }
+
+            let body = bodyFor haulerPattern bank.Capacity
+
+            let capacity = (body |> List.filter ((=) Carry) |> List.length) * carryPartCapacity
+
+            Atlas.haulRoundTripTicks atlas body tile spawnPos
+            |> Option.map (fun ticks -> (ticks * sourceOutputPerTick + capacity - 1) / capacity))
+        |> function
+            | [] -> 0
+            | quotas -> List.min quotas)
+
 /// Whether a living body was cast from the anchor row: more Work than
 /// Move. Fatigue parity keeps every worker body at Work <= Move (ADR
 /// 0003) and the anchor row's floor of two Work over one Move clears it,
@@ -238,6 +323,17 @@ let private isAnchorBody (creep: CreepInfo) =
 
     count Work > count Move
 
+/// Whether a living body was cast from the hauler row: Carry parts but no
+/// Work. The worker and anchor rows both keep at least one Work, and only
+/// the hauler row casts none (ADR 0012) — so, like the anchor's
+/// Work > Move, the casting pattern is readable off the body itself; the
+/// row name in a creep's name stays observability only.
+let private isHaulerBody (creep: CreepInfo) =
+    let count part =
+        creep.Body |> Map.tryFind part |> Option.defaultValue 0
+
+    count Work = 0 && count Carry > 0
+
 /// Pre-Task bootstrap step: spawn Intents needed to keep the workforce at
 /// the Workforce target. Spawning is a colony-level need, not a Task creeps
 /// get matched to, so it sits beside the Planner/Matcher pipeline rather
@@ -245,15 +341,6 @@ let private isAnchorBody (creep: CreepInfo) =
 let private planSpawns (snapshot: Snapshot) atlas : Intent list =
     let target = workforceTarget snapshot atlas
     let deficit = target - List.length snapshot.Creeps
-
-    // The anchor row's quota rule (ADR 0006, generalized by ADR 0012):
-    // one Anchor per Post, inside the unchanged workforce target — never
-    // on top of it. Its gaps are filled before generalist gaps; the
-    // worker row's quota is whatever the target has left.
-    let anchorGap =
-        (Atlas.posts atlas |> Set.count |> min target)
-        - (snapshot.Creeps |> List.filter isAnchorBody |> List.length)
-        |> max 0
 
     // Disaster fallback: an empty colony can never refill extensions, so
     // waiting for full capacity would wait forever — spawn a minimal
@@ -274,6 +361,27 @@ let private planSpawns (snapshot: Snapshot) atlas : Intent list =
     if deficit <= 0 then
         []
     else
+        // The anchor row's quota rule (ADR 0006, generalized by ADR 0012):
+        // one Anchor per Post, inside the unchanged workforce target —
+        // never on top of it. Its gaps are filled before generalist gaps;
+        // the worker row's quota is whatever the target has left.
+        let anchorQuota = Atlas.posts atlas |> Set.count |> min target
+
+        let anchorGap =
+            anchorQuota - (snapshot.Creeps |> List.filter isAnchorBody |> List.length)
+            |> max 0
+
+        // The hauler row's quota lives inside the target too, behind the
+        // Anchors' claim; its gaps come before generalist gaps, so the
+        // casting order runs Anchor, hauler, worker. Judged only once the
+        // deficit calls for casting at all: the quota's round-trip floods
+        // are the priciest arithmetic here, and a saturated colony never
+        // pays for a number it would discard.
+        let haulerGap =
+            (haulerQuota snapshot atlas |> min (target - anchorQuota))
+            - (snapshot.Creeps |> List.filter isHaulerBody |> List.length)
+            |> max 0
+
         // Idle spawns draw from their room's one bank in list order — each
         // body debits the budget the next spawn sees, so the same energy is
         // never committed twice.
@@ -289,7 +397,10 @@ let private planSpawns (snapshot: Snapshot) atlas : Intent list =
 
                     let planned = List.length intents
 
-                    let wanted = if planned < anchorGap then anchorPattern else workerPattern
+                    let wanted =
+                        if planned < anchorGap then anchorPattern
+                        elif planned < anchorGap + haulerGap then haulerPattern
+                        else workerPattern
 
                     match castFromBank wanted bank with
                     | Some(pattern, body) when planned < deficit ->

@@ -575,6 +575,52 @@ let private noTraffic: bool[] = Array.create tileCount false
 let firstStepIgnoringTraffic (atlas: Atlas) (creep: string) (task: Task) : Pos option =
     firstStepVia atlas (floodFrom atlas.Weights noTraffic (factorOf atlas creep)) creep task
 
+/// Round-trip haul cost in whole ticks for a body between a container's
+/// tile and a sink structure's tile (ADR 0012): the leg out prices every
+/// Carry part loaded, the leg back prices them all empty, both floods over
+/// the same weights as travel cost — a road discounts a road-parity body
+/// exactly as it discounts travel — but traffic-blind: the hauler quota
+/// this feeds is capacity planning, not routing, and today's standing
+/// creeps must never resize the fleet. Goals are the sink's adjacent
+/// walkable tiles (transfer acts at range 1); the origin prices 0 as every
+/// flood origin does. Cost units are half-ticks; the two legs sum and
+/// round up. None when no goal is reachable — unpriceable geometry hires
+/// nobody (ADR 0004).
+let haulRoundTripTicks (atlas: Atlas) (body: BodyPart list) (from: Pos) (sink: Pos) : int option =
+    let count part =
+        body |> List.filter ((=) part) |> List.length
+
+    let goals = adjacentWalkable atlas sink
+
+    let legUnits factor =
+        let dist, _ = floodFrom atlas.Weights noTraffic factor from
+
+        goals
+        |> List.choose (fun goal ->
+            let d = dist.[indexOf goal]
+            if d = unreached then None else Some d)
+        |> function
+            | [] -> None
+            | costs -> Some(List.min costs)
+
+    let loaded =
+        legUnits
+            {
+                FatigueParts = List.length body - count Move
+                MoveParts = count Move
+            }
+
+    let empty =
+        legUnits
+            {
+                FatigueParts = List.length body - count Move - count Carry
+                MoveParts = count Move
+            }
+
+    match loaded, empty with
+    | Some out, Some back -> Some((out + back + 1) / 2)
+    | _ -> None
+
 /// Cheapest raw-terrain path for a trunk road (ADR 0011): plain 2, swamp
 /// 10 — no road discount and no occupancy surcharge, so the line neither
 /// shifts as its own roads get built nor bends around today's traffic.
