@@ -25,6 +25,7 @@ let worker name =
         Name = name
         Energy = 0
         FreeCapacity = 50
+        Body = Map.ofList [ Work, 1; Carry, 1; Move, 1 ]
     }
 
 /// Projection with the given target positions and terrain tiles; no creeps,

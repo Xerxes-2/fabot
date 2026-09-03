@@ -49,12 +49,18 @@ let bareRespawn =
         Spatial = SpatialInfo.empty
     }
 
-let worker name energy freeCapacity =
+/// A creep with the given body's part counts.
+let creepWith name energy freeCapacity body =
     {
         Name = name
         Energy = energy
         FreeCapacity = freeCapacity
+        Body = body |> List.countBy id |> Map.ofList
     }
+
+/// A generalist worker-unit creep: one Work, one Carry, one Move.
+let worker name energy freeCapacity =
+    creepWith name energy freeCapacity [ Work; Carry; Move ]
 
 let spawnIntents intents =
     intents
@@ -610,6 +616,65 @@ let seatTests =
                     (harvesters assignments "src-a")
                     3
                     "no terrain data means no cap — today's room behaviour"
+            }
+        ]
+
+[<Tests>]
+let partApplicabilityTests =
+    testList
+        "part-based applicability"
+        [
+            test "a Work-less body is never matched to Harvest, Build, or Upgrade" {
+                // Energy on board and capacity free: only the missing Work
+                // part can make these tasks inapplicable.
+                let snapshot =
+                    { bareRespawn with
+                        Sources = [ { Id = "src-a" } ]
+                        ConstructionSites = [ { Id = "site-1" } ]
+                        Controller = Some(controllerAt 2)
+                        Creeps = [ creepWith "hauler" 25 25 [ Carry; Move ] ]
+                    }
+
+                let _, assignments = decide snapshot Map.empty
+
+                Expect.isEmpty
+                    (Map.toList assignments)
+                    "a body with no Work part can do none of the Work-part tasks"
+            }
+
+            test "a Carry-less body is never matched to Refill" {
+                // Energy crafted non-zero so only the missing Carry part
+                // can make Refill inapplicable.
+                let snapshot =
+                    { bareRespawn with
+                        Sources = []
+                        Controller = None
+                        Refillables = [ { Id = "spawn-1"; FreeCapacity = 300 } ]
+                        Creeps = [ creepWith "digger" 25 25 [ Work; Move ] ]
+                    }
+
+                let _, assignments = decide snapshot Map.empty
+
+                Expect.isEmpty
+                    (Map.toList assignments)
+                    "a body with no Carry part cannot deliver energy"
+            }
+
+            test "a remembered assignment to a task the body cannot do is released" {
+                let snapshot =
+                    { bareRespawn with
+                        Sources = [ { Id = "src-a" } ]
+                        ConstructionSites = []
+                        Controller = None
+                        Creeps = [ creepWith "hauler" 0 50 [ Carry; Move ] ]
+                    }
+
+                let remembered = Map.ofList [ "hauler", taskId (Harvest "src-a") ]
+                let _, assignments = decide snapshot remembered
+
+                Expect.isEmpty
+                    (Map.toList assignments)
+                    "applicability release covers parts the body lacks"
             }
         ]
 

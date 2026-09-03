@@ -141,6 +141,10 @@ type CreepInfo =
         Energy: int
         /// Carry capacity still free (0 = full).
         FreeCapacity: int
+        /// Part count per body part; a part absent from the map is a part
+        /// the body does not have. What a creep can do is decided from
+        /// what it is made of.
+        Body: Map<BodyPart, int>
     }
 
 /// Immutable projection of the current tick's game state; only what decisions need.

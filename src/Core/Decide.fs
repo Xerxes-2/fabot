@@ -240,14 +240,19 @@ let private planConstructionSites (snapshot: Snapshot) atlas : Intent list =
             |> List.map (fun tile -> PlaceConstructionSite(room, tile, Extension))
     | _ -> []
 
-/// Whether a creep can usefully work this Task right now. A full creep is
-/// done harvesting; an empty creep has nothing to deliver.
+/// Whether a creep can usefully work this Task right now. The body must
+/// physically be able to do it — Work-part tasks need a Work part, energy
+/// delivery needs a Carry part — and the energy state must call for it: a
+/// full creep is done harvesting; an empty creep has nothing to deliver.
 let private applicable (creep: CreepInfo) task =
+    let has part =
+        creep.Body |> Map.tryFind part |> Option.exists (fun n -> n > 0)
+
     match task with
-    | Harvest _ -> creep.FreeCapacity > 0
-    | Refill _
+    | Harvest _ -> has Work && creep.FreeCapacity > 0
+    | Refill _ -> has Carry && creep.Energy > 0
     | Build _
-    | Upgrade _ -> creep.Energy > 0
+    | Upgrade _ -> has Work && creep.Energy > 0
 
 let private intentFor (creep: CreepInfo) task =
     match task with

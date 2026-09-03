@@ -200,6 +200,7 @@ let build () : Snapshot =
                     Name = c.name
                     Energy = c.store.getUsedCapacity "energy"
                     FreeCapacity = c.store.getFreeCapacity "energy"
+                    Body = c.body |> Array.countBy (fun p -> bodyPartOf p.``type``) |> Map.ofArray
                 })
             |> Array.toList
         Hostiles =
