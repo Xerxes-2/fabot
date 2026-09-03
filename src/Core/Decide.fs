@@ -1098,23 +1098,48 @@ let private fullDowngradeTimer level =
 /// ever approached (ADR 0007).
 let private downgradeDeadline level = fullDowngradeTimer level / 2
 
-/// Matching tier between applicable tasks (lower wins): feeding the economy
-/// (Harvest, Withdraw, spawn-feeding Refill) outranks sinking surplus into
-/// construction (Build), upkeep (Repair), the controller (Upgrade), or
-/// the guns — Refill is the one Task whose rank layers by target (ADR
-/// 0010): a tower Refill is
-/// surplus-tier, because the colony feeds its own reproduction before its
-/// guns, and a controller-container Refill (ADR 0012) sits one tier
-/// deeper still — below Upgrade, so a full creep beside the buffer sinks
-/// its load into the controller rather than dumping it back into the
-/// container it just drew from and orbiting in place; the buffer is
-/// filled by bodies with no surplus work of their own. One exception: a
-/// controller inside the downgrade deadline makes Upgrade the colony's
-/// most urgent work, outranking even the feeding tier (ADR 0007).
-let private rank (snapshot: Snapshot) task =
+/// The tier of work a Task belongs to, once its target is taken into
+/// account (ADR 0010, ADR 0012) — what the matcher ranks by.
+type private Tier =
+    /// Feeding the economy: Harvest, Withdraw, and the Refill of a spawn
+    /// or an extension — the flow the colony's reproduction runs on.
+    | Feeding
+    /// Surplus work: a tower Refill (ADR 0010), Build, Repair and
+    /// Upgrade. The colony feeds its own reproduction before its guns,
+    /// and everything it merely spends energy on waits behind the flow.
+    | Surplus
+    /// The controller container's Refill (ADR 0012): a full creep beside
+    /// the buffer sinks its load into the controller rather than dumping
+    /// it back into the container it just drew from and orbiting in
+    /// place, so the buffer is filled by bodies with no surplus work of
+    /// their own.
+    | UpgradeBuffer
+
+/// The matcher's whole tier order, shallowest first — the one place the
+/// ordering lives (ADR 0010, ADR 0012): the economy is fed, then surplus
+/// is spent, then whatever is left sinks into the upgrade buffer.
+/// Exhaustive over Tier on purpose — a tier this sequence forgets is a
+/// build error, not a Task that silently ranks below every other. The
+/// downgrade deadline (ADR 0007) is the one thing above the sequence
+/// rather than in it; `rank` carries it.
+let private rankOfTier =
+    function
+    | Feeding -> 0
+    | Surplus -> 1
+    | UpgradeBuffer -> 2
+
+/// The tier a Task sits in. Refill is the one Task whose tier layers by
+/// target (ADR 0010): a container is read off the projection's kind and a
+/// tower off the Refillables census, and the container is asked first —
+/// the two tests are not mutually exclusive by construction. Any
+/// container answers UpgradeBuffer, not the controller's alone; it is the
+/// Planner that pools only the controller's (range 3 of the controller,
+/// never a source container's tile), so no other container reaches here.
+/// Everything the two tests miss is a spawn or an extension: the flow.
+let private tierOf (snapshot: Snapshot) task =
     match task with
     | Harvest _
-    | Withdraw _ -> 0
+    | Withdraw _ -> Feeding
     | Refill structureId ->
         let isTower =
             snapshot.Refillables
@@ -1125,17 +1150,31 @@ let private rank (snapshot: Snapshot) task =
                 Structure BuiltKind.Container
             )
 
-        if isContainer then 2
-        elif isTower then 1
-        else 0
+        if isContainer then UpgradeBuffer
+        elif isTower then Surplus
+        else Feeding
     | Build _
-    | Repair _ -> 1
-    | Upgrade _ ->
-        let urgent =
-            snapshot.Controller
-            |> Option.exists (fun c -> c.TicksToDowngrade <= downgradeDeadline c.Level)
+    | Repair _
+    | Upgrade _ -> Surplus
 
-        if urgent then -1 else 1
+/// Whether the controller stands inside its downgrade deadline (ADR 0007).
+let private insideDowngradeDeadline (snapshot: Snapshot) =
+    snapshot.Controller
+    |> Option.exists (fun c -> c.TicksToDowngrade <= downgradeDeadline c.Level)
+
+/// One rank above the shallowest tier: where the downgrade deadline puts
+/// Upgrade (ADR 0007). Not a tier of its own — "never let it downgrade"
+/// is an ordering imposed on the sequence, not a tier of work.
+let private deadlineRank = -1
+
+/// Matching tier between applicable tasks (lower wins): the rank of the
+/// Task's tier. One exception: a controller inside the downgrade deadline
+/// makes Upgrade the colony's most urgent work, outranking even the
+/// feeding tier (ADR 0007).
+let private rank (snapshot: Snapshot) task =
+    match task with
+    | Upgrade _ when insideDowngradeDeadline snapshot -> deadlineRank
+    | _ -> tierOf snapshot task |> rankOfTier
 
 /// Concurrent-worker cap per task id; tasks absent from the map are
 /// unbounded. Harvest is capped by its source's Seat count — a source the

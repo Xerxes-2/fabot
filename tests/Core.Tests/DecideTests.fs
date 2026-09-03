@@ -3944,6 +3944,128 @@ let verdictTests =
             }
         ]
 
+/// The tier fixture: a two-row plain corridor, y = 10..11, x = 9..21,
+/// carrying one Refill target per tier — the spawn at (11,10), a tower at
+/// (14,10) and the controller container at (18,10), inside the Work Area
+/// of the controller standing at (20,10). Spawn, tower and controller
+/// stand as obstacles; the second row keeps the corridor open past them.
+let tierRoom =
+    let corridor =
+        [
+            for x in 9..21 do
+                for y in 10..11 -> { X = x; Y = y }, Plain
+        ]
+
+    { spatial [] corridor with
+        Obstacles = Set.ofList [ { X = 11; Y = 10 }; { X = 14; Y = 10 }; { X = 20; Y = 10 } ]
+        Stores = Map.ofList [ "can-ctrl", 800 ]
+    }
+    |> withTargets
+        [
+            "spawn-1", { X = 11; Y = 10 }, Structure BuiltKind.Spawn
+            "tower-1", { X = 14; Y = 10 }, Structure BuiltKind.Tower
+            "can-ctrl", { X = 18; Y = 10 }, Structure BuiltKind.Container
+            "ctrl-1", { X = 20; Y = 10 }, Controller
+        ]
+
+/// The tier colony with the given hunger: one loaded Carry-only body
+/// standing on the buffer, so the deepest tier costs it nothing to reach
+/// and every shallower one costs more. Whatever wins, wins against travel
+/// cost, and only rank can do that.
+let tierColony refillables =
+    { bareRespawn with
+        Sources = []
+        Refillables = refillables
+        Creeps = [ creepWith "h1" 100 0 [ Carry; Carry; Move ] ]
+        Spatial =
+            { tierRoom with
+                CreepPositions = Map.ofList [ "h1", { X = 18; Y = 10 } ]
+            }
+    }
+
+/// The surplus fixture: one loaded generalist and a hungry tower, in a
+/// colony the projection places nothing in — unpriceable geometry never
+/// counts against a Task (ADR 0004), so every candidate ties on travel
+/// cost and load, and rank is the only thing left that can separate a
+/// pair. Each caller adds exactly one rival, so the Verdict's factor is
+/// evidence about that rival alone.
+let surplusColony =
+    { bareRespawn with
+        Sources = []
+        Controller = None
+        Refillables = [ refillable "tower-1" 500 BuiltKind.Tower ]
+        Creeps = [ worker "w1" 50 0 ]
+    }
+
+[<Tests>]
+let rankTierTests =
+    testList
+        "rank tiers"
+        [
+            test "the tier order is one sequence: feeding, then surplus, then the buffer" {
+                // The Refill target layering (ADR 0010, ADR 0012) read top to
+                // bottom by one body, one step at a time: the spawn six steps
+                // away outbids the tower three away, and the tower outbids the
+                // buffer underfoot. The buffer loses the second step, which is
+                // what puts it below the surplus tier rather than beside it —
+                // a tie there would hand the win to the container it stands on.
+                let hungrySpawn = refillable "spawn-1" 50 BuiltKind.Spawn
+                let fullSpawn = refillable "spawn-1" 0 BuiltKind.Spawn
+                let hungryTower = refillable "tower-1" 500 BuiltKind.Tower
+
+                let feeding =
+                    decide (tierColony [ hungrySpawn; hungryTower ]) Map.empty Set.empty None
+
+                Expect.equal
+                    feeding.Verdicts
+                    [ Verdict.Matched("h1", taskId (Refill "spawn-1"), MatchFactor.Rank) ]
+                    "the colony feeds its own reproduction first: rank decided"
+
+                let surplus =
+                    decide (tierColony [ fullSpawn; hungryTower ]) Map.empty Set.empty None
+
+                Expect.equal
+                    surplus.Verdicts
+                    [ Verdict.Matched("h1", taskId (Refill "tower-1"), MatchFactor.Rank) ]
+                    "reproduction fed, the guns outrank the buffer: rank decided"
+            }
+
+            test "tower Refill, Build, Repair and Upgrade are one surplus tier" {
+                // Pairwise, because the deciding factor is read off the winner
+                // and its cheapest rival alone: pool all four at once and the
+                // three-way tie hides whichever one left the tier. So each
+                // surplus Task meets the tower Refill by itself, and pool order
+                // — not rank — has to be what breaks every one of those ties.
+                // Build sits beside Upgrade, not above it.
+                let verdictsFor colony =
+                    (decide colony Map.empty Set.empty None).Verdicts
+
+                let tied =
+                    [ Verdict.Matched("w1", taskId (Refill "tower-1"), MatchFactor.PoolOrder) ]
+
+                Expect.equal
+                    (verdictsFor
+                        { surplusColony with
+                            ConstructionSites = [ { Id = "site-1" } ]
+                        })
+                    tied
+                    "Build ties the tower Refill: pool order broke it, not rank"
+
+                Expect.equal
+                    (verdictsFor (surplusColony |> withHits "road-1" BuiltKind.Road 100 5000))
+                    tied
+                    "Repair ties the tower Refill: pool order broke it, not rank"
+
+                Expect.equal
+                    (verdictsFor
+                        { surplusColony with
+                            Controller = Some(controllerAt 1)
+                        })
+                    tied
+                    "Upgrade ties the tower Refill: pool order broke it, not rank"
+            }
+        ]
+
 [<Tests>]
 let verboseScoringTests =
     testList
