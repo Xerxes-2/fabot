@@ -1,0 +1,28 @@
+# Restock dispatch: a drained source's Harvest is judged at arrival, and a container garrison holds through the empty window
+
+ADR 0013 pools Harvest only for a stocked source and projects nothing but that boolean, deferring the regen timer "until anticipatory dispatch becomes a decision". Two later decisions made it one. ADR 0021 cast the Anchor at saturation plus one Work, so a manned source now empties ~50 ticks before every 300-tick restock by design — the empty window 0013 called an overcrowding symptom is structural. And the Anchor's slowness (ADR 0006: seven fatigue parts over one Move, ~7 ticks per plain tile, 3–4 on a trunk) means a Harvest that appears the tick the source restocks is 60–100 ticks of walking away from a fresh Anchor at the spawn — it idles through the window it could have spent on the road, then arrives after the richest part of the cycle. Meanwhile a container-Post Anchor holding residual energy loses Harvest at the drain, matches Upgrade, and walks toward the controller until the walk back outgrows the wait, then turns around: a wobble every cycle.
+
+We decided **a Task is judged at [[arrival]], not at the current tick**, applied to Harvest through the source's restock:
+
+- The projection carries the source's **ticks to restock** (0 = holds energy now; the engine leaves the timer undefined on a full source, projected as 0). `Stocked` retires — it is `TicksToRestock = 0`.
+- The Planner pools Harvest for every placed source, drained or not; the task no longer flickers with the source's stock.
+- The Matcher makes a drained source's Harvest applicable to a creep only when **its walk covers the wait**: travel ticks (travel cost is priced in half-ticks, ADR 0010) ≥ ticks to restock. No slack — the rule is self-correcting: the wait shrinks by one each tick while the walk stays put, so a creep one tick short departs one tick later and arrives as the energy does. A creep already beside a dry source has no walk to cover anything and is released exactly as 0013 released it. Rejection carries its own reason (`TooEarly`): the body and the energy state fit, only the time doesn't, and `Inapplicable` would make the transition log lie.
+- One exemption, under ADR 0024's condition and no other: a Work-heavy body standing on a built source container keeps Harvest through the window. The full-store reprieve and the empty-source reprieve are one judgement — that tile is the garrison's job, whatever the store or the source holds. A dual-seat Anchor gets no exemption: Upgrade is in place there, it keeps upgrading as 0013 described, and rematches Harvest once its Carry is spent.
+- The Emitter issues no `HarvestSource` while the source is drained — the occupancy surcharge (ADR 0008) prices a walk high, so a creep can arrive a tick or two early, and the `-6` spam 0013 removed must stay structurally impossible.
+
+## Considered Options
+
+- **Replace travel cost with a start tick, `max(travel, restock)`, and gate nothing** — rejected: rank outranks cost, so a light worker beside a dry source would be *assigned to waiting* at the feeding tier — the exact stranding 0013 fixed. Once the walk-covers-the-wait gate holds, `max(travel, restock) = travel` and the start tick is a no-op anyway.
+- **A slack allowance ("within N ticks counts as covered")** — rejected: zero slack already converges within the slack's own width, and N would be a number nobody can derive.
+- **Extend the garrison exemption to every Post** — rejected: on a dual seat Harvest at rank 0 would outrank the Upgrade the Anchor can do in place, and with the Emitter gate it would stand doing nothing for the whole window — worse than today.
+- **Keep `Stocked` beside the timer** — rejected: one fact, one field; two fields would need an invariant between them.
+- **Keep Harvest out of the pool while drained and gate the timer in the Planner with a colony-wide lookahead** — rejected: the Planner is creep-blind; whether the wait is covered depends on the walker's body and position, which is the Matcher's knowledge.
+
+## Consequences
+
+- A fresh Anchor at the spawn is dispatched the tick its walk equals the remaining wait, and reaches its Post as the source restocks; the same rule sends a light body back early only when its walk is long enough to be worth it.
+- The container-Post wobble is gone: the garrison stays `kept` on Harvest through the window, emits nothing, and digs the tick the energy lands. ADR 0013's "a container-Post Anchor may walk during a long empty window" no longer holds.
+- A dry source with an un-garrisoned Post shows up in verbose Scoring as `too-early` rows rather than an absent task — the answer to "why hasn't the Anchor left yet" is a number of ticks, not a missing line.
+- The Post and Seat caps count holders the same whether the source is drained or not; a garrison holds its Post's capacity through the window, as it should.
+- DecideTests: the 0013 "drained source pools no Harvest" tests invert (the task is pooled; a creep beside it is rejected `TooEarly`); the container-Post exemption, the dual-seat non-exemption, the walk-covers-the-wait boundary, and the Emitter gate each get a pin.
+- Sibling decision: ADR 0026 applies the same arrival principle to a creep's remaining life.
