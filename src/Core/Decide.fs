@@ -62,6 +62,22 @@ let bodyCost body =
 // Screeps MAX_CREEP_SIZE: the engine rejects bodies over 50 parts.
 let private maxBodyParts = 50
 
+/// Screeps source regen: 3000 energy per 300 ticks — the output per tick
+/// a continuously drained source yields, and what its container's hauler
+/// share must ship.
+let private sourceOutputPerTick = 10
+
+/// Screeps HARVEST_POWER: energy one Work part digs from a source a tick.
+let private harvestPerWork = 2
+
+/// The Anchor row's Work ceiling (ADR 0021): the Work that saturate one
+/// source — dig its whole regeneration in the regeneration time — plus
+/// one spare. Past saturation a further Work only drains the source
+/// sooner and idles until it regenerates; the spare drains it 50 ticks
+/// early, and those ticks absorb an unmanned Post's gap (death, recast,
+/// the walk back) at no cost in output.
+let private anchorWorkCap = sourceOutputPerTick / harvestPerWork + 1
+
 /// The worker row's sizing rule: the largest affordable repetition of the
 /// block (never below one repeat), with the remainder spent on Carry/Move
 /// at fatigue parity — the padded body is never slower than the pure-block
@@ -102,14 +118,15 @@ let private parityBodyFor block capacity =
     List.replicate work Work @ List.replicate carry Carry @ List.replicate move Move
 
 /// The anchor row's sizing rule: one Carry, one Move, and every part slot
-/// the remaining energy affords on Work — nearly all spawn energy buys
-/// output rather than mobility the Dual Seat never uses. Exempt from
+/// the remaining energy affords on Work up to the row's ceiling — spawn
+/// energy buys output rather than mobility the Post never uses, and
+/// stops where the source has no more to give (ADR 0021). Exempt from
 /// fatigue parity (ADR 0006); never below the row's two-Work block.
 let private anchorBodyFor capacity =
     let work =
         (capacity - bodyCost [ Carry; Move ]) / bodyCost [ Work ]
         |> max 2
-        |> min (maxBodyParts - 2)
+        |> min anchorWorkCap
 
     List.replicate work Work @ [ Carry; Move ]
 
@@ -258,11 +275,6 @@ let planTasks (snapshot: Snapshot) : Task list =
 
     harvests @ withdraws @ refills @ builds @ repairs @ upgrades @ containerRefills
 
-/// Screeps source regen: 3000 energy per 300 ticks — the output per tick
-/// a continuously drained source yields, and what its container's hauler
-/// share must ship.
-let private sourceOutputPerTick = 10
-
 /// Screeps CARRY_CAPACITY: energy one Carry part holds.
 let private carryPartCapacity = 50
 
@@ -393,21 +405,26 @@ let private planSpawns (snapshot: Snapshot) atlas (haulerQuota: int) : Intent li
     let target = workforceTarget snapshot atlas anchorQuota haulerQuota
     let deficit = target - List.length snapshot.Creeps
 
-    // Disaster fallback: an empty colony can never refill extensions, so
-    // waiting for full capacity would wait forever — spawn a minimal
-    // worker unit from whatever energy is banked right now.
-    // Time-to-first-creep outranks specialisation, so the anchor gap
-    // waits (ADR 0006).
+    // A body is sized to the bank's capacity and cast the tick the bank
+    // holds its cost (ADR 0021) — a full bank for rows priced at
+    // capacity, sooner for the capped Anchor row. Disaster fallback: an
+    // empty colony can never refill extensions, so a capacity-sized body
+    // would wait forever — spawn a minimal worker unit from whatever is
+    // banked right now; time-to-first-creep outranks specialisation, so
+    // the anchor gap waits (ADR 0006).
     let castFromBank pattern (bank: RoomEnergy) =
         if List.isEmpty snapshot.Creeps then
             if bank.Available >= bodyCost workerPattern.Block then
                 Some(workerPattern, workerPattern.Block)
             else
                 None
-        elif bank.Available >= bank.Capacity then
-            Some(pattern, bodyFor pattern bank.Capacity)
         else
-            None
+            let body = bodyFor pattern bank.Capacity
+
+            if bank.Available >= bodyCost body then
+                Some(pattern, body)
+            else
+                None
 
     if deficit <= 0 then
         []

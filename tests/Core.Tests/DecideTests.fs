@@ -233,11 +233,22 @@ let patternTableTests =
                     "two Work keep the Anchor readable off its body (Work > Move)"
             }
 
-            test "the anchor body never exceeds the 50-part engine cap" {
+            test "the anchor row stops at source saturation plus one spare Work" {
+                // ADR 0021: a source regenerates 3,000 energy per 300 ticks
+                // and a Work digs 2 a tick, so five Work saturate it; the
+                // sixth is slack for an unmanned Post's gap. RCL4's 1,300
+                // bank would otherwise buy twelve.
+                Expect.equal
+                    (bodyFor anchorPattern 1300)
+                    [ Work; Work; Work; Work; Work; Work; Carry; Move ]
+                    "six Work beside the Carry/Move pair, the rest stays banked"
+            }
+
+            test "the anchor cap holds at the richest bank" {
                 Expect.equal
                     (bodyFor anchorPattern 12900)
-                    (List.replicate 48 Work @ [ Carry; Move ])
-                    "48 Work beside the Carry/Move pair fill exactly 50 parts"
+                    [ Work; Work; Work; Work; Work; Work; Carry; Move ]
+                    "an RCL8 bank casts the same six-Work Anchor"
             }
 
             test "the hauler row builds whole blocks and nothing else" {
@@ -4695,6 +4706,41 @@ let anchorTests =
 
                     Expect.stringStarts creepName "anchor-" "the container Seat is a Post"
                 | other -> failtest $"expected exactly one SpawnCreep intent, got %A{other}"
+            }
+
+            test "a capped Anchor is cast the tick its bank holds the body's cost, not a full bank" {
+                // ADR 0021: at RCL4 the bank caps at 1,300 but the Anchor
+                // row prices at 700 (6W1C1M); waiting for a full bank would
+                // hold every Anchor replacement past RCL3 for nothing.
+                let snapshot =
+                    { dualSeatColony with
+                        RoomEnergy = bank 700 1300
+                        Creeps = [ worker "w1" 0 50 ]
+                    }
+
+                let { Intents = intents } = decide snapshot Map.empty Set.empty None
+
+                match spawnIntents intents with
+                | [ (_, body, creepName) ] ->
+                    Expect.equal
+                        body
+                        [ Work; Work; Work; Work; Work; Work; Carry; Move ]
+                        "the capped Anchor row, priced at exactly the bank's holding"
+
+                    Expect.stringStarts creepName "anchor-" "the name carries the anchor row"
+                | other -> failtest $"expected exactly one SpawnCreep intent, got %A{other}"
+            }
+
+            test "a bank short of the capped Anchor's cost still waits" {
+                let snapshot =
+                    { dualSeatColony with
+                        RoomEnergy = bank 650 1300
+                        Creeps = [ worker "w1" 0 50 ]
+                    }
+
+                let { Intents = intents } = decide snapshot Map.empty Set.empty None
+
+                Expect.isEmpty (spawnIntents intents) "650 does not buy 6W1C1M"
             }
 
             test "the Anchor quota counts Posts: a Dual Seat plus a container Seat want two" {
