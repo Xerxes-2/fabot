@@ -465,7 +465,7 @@ let plannerTests =
         "planner"
         [
             test "one Harvest task per source" {
-                let tasks = planTasks bareRespawn
+                let tasks = planTasks bareRespawn noThreats
 
                 let harvests =
                     tasks
@@ -490,7 +490,7 @@ let plannerTests =
                     }
 
                 let harvests =
-                    planTasks snapshot
+                    planTasks snapshot noThreats
                     |> List.choose (function
                         | Harvest sourceId -> Some sourceId
                         | _ -> None)
@@ -503,7 +503,7 @@ let plannerTests =
 
             test "a controller yields an Upgrade task" {
                 let upgrades =
-                    planTasks bareRespawn
+                    planTasks bareRespawn noThreats
                     |> List.choose (function
                         | Upgrade id -> Some id
                         | _ -> None)
@@ -512,7 +512,7 @@ let plannerTests =
             }
 
             test "no Upgrade task without a controller" {
-                let tasks = planTasks { bareRespawn with Controller = None }
+                let tasks = planTasks { bareRespawn with Controller = None } noThreats
 
                 let upgrades =
                     tasks
@@ -530,7 +530,7 @@ let plannerTests =
                     }
 
                 let builds =
-                    planTasks snapshot
+                    planTasks snapshot noThreats
                     |> List.choose (function
                         | Build siteId -> Some siteId
                         | _ -> None)
@@ -550,7 +550,7 @@ let plannerTests =
                     }
 
                 let refills =
-                    planTasks snapshot
+                    planTasks snapshot noThreats
                     |> List.choose (function
                         | Refill structureId -> Some structureId
                         | _ -> None)
@@ -574,7 +574,7 @@ let plannerTests =
                     }
 
                 let refills =
-                    planTasks snapshot
+                    planTasks snapshot noThreats
                     |> List.choose (function
                         | Refill structureId -> Some structureId
                         | _ -> None)
@@ -3100,13 +3100,18 @@ let stepFrom pos direction =
 /// snapshot's Atlas; a creep absent from the list is idle. Move Intents
 /// only; the movement Verdicts riding beside them are resolveVerdictsOn.
 let resolveOn snapshot assigned =
-    resolve snapshot (Atlas.ofSnapshot snapshot) (Map.ofList assigned) Set.empty
+    resolve snapshot (Atlas.ofSnapshot snapshot) noThreats (Map.ofList assigned) Set.empty
     |> fst
 
 /// The Resolver's movement Verdicts at the same seam, with the named
 /// creeps on the verbose list (ADR 0018).
 let resolveVerdictsVerboseOn snapshot assigned verbose =
-    resolve snapshot (Atlas.ofSnapshot snapshot) (Map.ofList assigned) (Set.ofList verbose)
+    resolve
+        snapshot
+        (Atlas.ofSnapshot snapshot)
+        noThreats
+        (Map.ofList assigned)
+        (Set.ofList verbose)
     |> snd
 
 /// The same for a quiet colony: nobody on the verbose list.
@@ -3115,7 +3120,7 @@ let resolveVerdictsOn snapshot assigned =
 
 /// Run the Emitter at its own seam, over the same tick-start Atlas.
 let emitOn snapshot assigned =
-    emit snapshot (Atlas.ofSnapshot snapshot) (Map.ofList assigned)
+    emit snapshot (Atlas.ofSnapshot snapshot) noThreats (Map.ofList assigned)
 
 /// Two single-Seat sources at the ends of a two-tile corridor; each creep
 /// stands on the other's Seat.
@@ -3923,16 +3928,21 @@ let repairTests =
                 let half = bareRespawn |> withHits "road-1" BuiltKind.Road 2500 5000
 
                 Expect.equal
-                    (repairTasks (planTasks low))
+                    (repairTasks (planTasks low noThreats))
                     [ "road-1" ]
                     "below the trigger: one Repair per ailing road"
 
-                Expect.isEmpty (repairTasks (planTasks half)) "at half hits the road is left alone"
+                Expect.isEmpty
+                    (repairTasks (planTasks half noThreats))
+                    "at half hits the road is left alone"
             }
 
             test "a repaired-whole road leaves the pool" {
                 let whole = bareRespawn |> withHits "road-1" BuiltKind.Road 5000 5000
-                Expect.isEmpty (repairTasks (planTasks whole)) "a whole road needs nothing"
+
+                Expect.isEmpty
+                    (repairTasks (planTasks whole noThreats))
+                    "a whole road needs nothing"
             }
 
             test "kinds with no whole line never enter the pool on low hits" {
@@ -3947,7 +3957,7 @@ let repairTests =
                     |> withHits "rock-1" BuiltKind.Other 1 5000
 
                 Expect.isEmpty
-                    (repairTasks (planTasks snapshot))
+                    (repairTasks (planTasks snapshot noThreats))
                     "an extension, a link and an unmodelled structure are nobody's Repair"
             }
 
@@ -3964,7 +3974,7 @@ let repairTests =
                     |> withHits "sto-1" BuiltKind.Storage 4999 5000
 
                 Expect.equal
-                    (repairTasks (planTasks dented))
+                    (repairTasks (planTasks dented noThreats))
                     [ "spawn-1"; "sto-1"; "tower-1" ]
                     "one hit off max is hungry, on every Keep structure"
 
@@ -3975,7 +3985,7 @@ let repairTests =
                     |> withHits "sto-1" BuiltKind.Storage 5000 5000
 
                 Expect.isEmpty
-                    (repairTasks (planTasks whole))
+                    (repairTasks (planTasks whole noThreats))
                     "a Keep at full hits asks for nothing"
             }
 
@@ -3993,19 +4003,21 @@ let repairTests =
                 let over = bareRespawn |> withHits "ram-1" BuiltKind.Rampart (max / 2) max
 
                 Expect.equal
-                    (repairTasks (planTasks below))
+                    (repairTasks (planTasks below noThreats))
                     [ "ram-1" ]
                     "one hit under the floor is hungry"
 
-                Expect.isEmpty (repairTasks (planTasks at)) "at the floor the rampart is whole"
+                Expect.isEmpty
+                    (repairTasks (planTasks at noThreats))
+                    "at the floor the rampart is whole"
 
                 Expect.equal
-                    (repairTasks (planTasks fresh))
+                    (repairTasks (planTasks fresh noThreats))
                     [ "ram-1" ]
                     "a rampart just built stands at 1 hit and is the pool's business at once"
 
                 Expect.isEmpty
-                    (repairTasks (planTasks over))
+                    (repairTasks (planTasks over noThreats))
                     "half of a rampart's max is far over the floor: nothing to do"
             }
 
@@ -4083,18 +4095,21 @@ let repairTests =
                 let half = bareRespawn |> withHits "cont-1" BuiltKind.Container 125000 250000
 
                 Expect.equal
-                    (repairTasks (planTasks low))
+                    (repairTasks (planTasks low noThreats))
                     [ "cont-1" ]
                     "below the trigger: one Repair per ailing container"
 
                 Expect.isEmpty
-                    (repairTasks (planTasks half))
+                    (repairTasks (planTasks half noThreats))
                     "at half hits the container is left alone"
             }
 
             test "a whole container produces no Repair" {
                 let whole = bareRespawn |> withHits "cont-1" BuiltKind.Container 250000 250000
-                Expect.isEmpty (repairTasks (planTasks whole)) "a whole container needs nothing"
+
+                Expect.isEmpty
+                    (repairTasks (planTasks whole noThreats))
+                    "a whole container needs nothing"
             }
 
             test "container Repair is surplus-tier: feeding still wins the creep" {
@@ -6436,7 +6451,7 @@ let logisticsTests =
         [
             test "a stocked container yields a Withdraw Task; an empty one yields none" {
                 Expect.equal
-                    (withdrawTasks (planTasks haulColony))
+                    (withdrawTasks (planTasks haulColony noThreats))
                     [ "can-ctrl" ]
                     "the stocked buffer enters the pool; the empty source container does not"
             }
@@ -6451,7 +6466,7 @@ let logisticsTests =
                             }
                     }
 
-                let tasks = planTasks snapshot
+                let tasks = planTasks snapshot noThreats
 
                 Expect.equal
                     (refillTasks tasks)
@@ -6473,7 +6488,7 @@ let logisticsTests =
                             }
                     }
 
-                let tasks = planTasks snapshot
+                let tasks = planTasks snapshot noThreats
                 Expect.isEmpty (refillTasks tasks) "no room left to refill"
                 Expect.equal (withdrawTasks tasks) [ "can-ctrl" ] "still stocked to draw from"
             }
@@ -6737,12 +6752,12 @@ let stockTests =
                 let full = stockColony [] (Map.ofList [ "can-ctrl", 2000; "sto-1", 1000000 ])
 
                 Expect.equal
-                    (refillTasks (planTasks hungry))
+                    (refillTasks (planTasks hungry noThreats))
                     [ "sto-1" ]
                     "the stock with room pools the deepest Refill of all"
 
                 Expect.isEmpty
-                    (refillTasks (planTasks full))
+                    (refillTasks (planTasks full noThreats))
                     "a full stock pools no Refill: there is nowhere left to put a load"
             }
 
@@ -6840,11 +6855,11 @@ let stockGateTests =
                 // forever, and a hauler beside it would cycle energy in and
                 // out of one store.
                 let tasks =
-                    planTasks (
-                        stockColony
+                    planTasks
+                        (stockColony
                             [ refillable "spawn-1" 0 BuiltKind.Spawn ]
-                            (Map.ofList [ "can-ctrl", 2000; "sto-1", 500 ])
-                    )
+                            (Map.ofList [ "can-ctrl", 2000; "sto-1", 500 ]))
+                        noThreats
 
                 Expect.equal (refillTasks tasks) [ "sto-1" ] "the stock's own Refill is pooled"
 
@@ -6860,11 +6875,11 @@ let stockGateTests =
                 // drawn for — one Withdraw for the one Storage, never one
                 // per hungry sink.
                 let tasks =
-                    planTasks (
-                        stockColony
+                    planTasks
+                        (stockColony
                             [ refillable "ext-1" 50 BuiltKind.Extension ]
-                            (Map.ofList [ "can-ctrl", 2000; "sto-1", 500 ])
-                    )
+                            (Map.ofList [ "can-ctrl", 2000; "sto-1", 500 ]))
+                        noThreats
 
                 Expect.equal
                     (withdrawTasks tasks)
@@ -6878,11 +6893,11 @@ let stockGateTests =
                 // stock flows to the upgrade buffer when the sources cannot
                 // keep it full (ADR 0023).
                 let tasks =
-                    planTasks (
-                        stockColony
+                    planTasks
+                        (stockColony
                             [ refillable "spawn-1" 0 BuiltKind.Spawn ]
-                            (Map.ofList [ "can-ctrl", 800; "sto-1", 500 ])
-                    )
+                            (Map.ofList [ "can-ctrl", 800; "sto-1", 500 ]))
+                        noThreats
 
                 Expect.equal
                     (refillTasks tasks)
@@ -6899,11 +6914,11 @@ let stockGateTests =
                 // The stock half of ADR 0012's rule, unchanged: a store with
                 // nothing in it is nobody's intake.
                 let tasks =
-                    planTasks (
-                        stockColony
+                    planTasks
+                        (stockColony
                             [ refillable "ext-1" 50 BuiltKind.Extension ]
-                            (Map.ofList [ "can-ctrl", 800; "sto-1", 0 ])
-                    )
+                            (Map.ofList [ "can-ctrl", 800; "sto-1", 0 ]))
+                        noThreats
 
                 Expect.equal
                     (withdrawTasks tasks)
@@ -7063,7 +7078,7 @@ let stockDrawTests =
                         Creeps = [ creepWith "h1" 50 50 [ Carry; Carry; Move ] ]
                     }
 
-                let tasks = planTasks colony
+                let tasks = planTasks colony noThreats
 
                 Expect.contains (withdrawTasks tasks) "sto-1" "the stock is an intake this tick"
                 Expect.contains (refillTasks tasks) "sto-1" "and a sink on the very same tick"
@@ -8927,5 +8942,627 @@ let arrivalCapacityTests =
 
                 bothKept "z-post" "a-far"
                 bothKept "a-post" "z-far"
+            }
+        ]
+
+
+/// The Reach of one tick, read at the seam its three readers share (ADR
+/// 0033) — the Threats are derived once from the Snapshot and the Atlas,
+/// and this is that derivation, not a second one.
+let reachIn snapshot =
+    (threatsOf snapshot (Atlas.ofSnapshot snapshot)).Reach
+
+/// The open colony facing one hostile of the given body on the given tile.
+let facingBody pos body =
+    atLevel 2 (openRoom 8) |> facing [ hostileAt "h-1" pos body ]
+
+[<Tests>]
+let threatTests =
+    testList
+        "threats"
+        [
+            test "a Threat is read off the parts: ATTACK or RANGED_ATTACK, nothing else" {
+                // ADR 0033: nothing but those two hurts a creep, so nothing
+                // else has a Reach. A healer, a scout, a claimer and a
+                // dismantler are hostiles the fire reflex shoots and the Raid
+                // log records, and they gate no Task.
+                let reachOf body =
+                    reachIn (facingBody { X = 25; Y = 30 } body)
+
+                Expect.isFalse (Set.isEmpty (reachOf [ Attack; Move ])) "an ATTACK part is a Threat"
+
+                Expect.isFalse
+                    (Set.isEmpty (reachOf [ RangedAttack; Move ]))
+                    "a RANGED_ATTACK part is a Threat"
+
+                Expect.isEmpty (reachOf [ Heal; Move ]) "a healer reaches nothing"
+                Expect.isEmpty (reachOf [ Claim; Move ]) "a claimer is safe mode's business"
+                Expect.isEmpty (reachOf [ Work; Work; Move ]) "a dismantler hurts no creep"
+                Expect.isEmpty (reachOf [ Tough; Move ]) "armour is not a weapon"
+            }
+
+            test "the owner is not consulted: an invader and a raider reach the same tiles" {
+                // Same body, same tile, different username: the damage per
+                // part is the engine's, not the owner's (ADR 0033).
+                let raider = hostileAt "h-1" { X = 25; Y = 30 } [ Attack; Move ]
+                let invader = { raider with Owner = "Invader" }
+
+                Expect.equal
+                    (reachIn (atLevel 2 (openRoom 8) |> facing [ invader ]))
+                    (reachIn (atLevel 2 (openRoom 8) |> facing [ raider ]))
+                    "the same Reach whoever owns the creep"
+            }
+
+            test "a Reach is the weapon range plus the margin, measured in Chebyshev tiles" {
+                // Melee reaches 1 + 2, ranged 3 + 2 — the margin is one tile
+                // for the hostile's next step and one for our own tick of lag.
+                let melee = reachIn (facingBody { X = 25; Y = 30 } [ Attack; Move ])
+                let ranged = reachIn (facingBody { X = 25; Y = 30 } [ RangedAttack; Move ])
+
+                Expect.isTrue
+                    (Set.contains { X = 25; Y = 27 } melee)
+                    "range 3 is inside a melee Reach"
+
+                Expect.isFalse (Set.contains { X = 25; Y = 26 } melee) "range 4 is outside it"
+
+                Expect.isTrue
+                    (Set.contains { X = 22; Y = 27 } melee)
+                    "and the Reach is a square: the diagonal at range 3 is in it too"
+
+                Expect.isTrue
+                    (Set.contains { X = 25; Y = 25 } ranged)
+                    "range 5 is inside a ranged Reach"
+
+                Expect.isFalse (Set.contains { X = 25; Y = 24 } ranged) "range 6 is outside it"
+
+                Expect.isTrue
+                    (Set.contains
+                        { X = 25; Y = 27 }
+                        (reachIn (facingBody { X = 25; Y = 30 } [ Attack; RangedAttack; Move ])))
+                    "a body carrying both weapons reaches the farther of them"
+            }
+
+            test
+                "a tile under one of our standing ramparts is in no Reach; a foreign one covers nothing" {
+                // Ownership is readable off the projection's hits alone: it
+                // carries them for an ownable kind only when it is ours (ADR
+                // 0034), and a rampart somebody else left standing in a room
+                // we took covers no creep of ours.
+                let room =
+                    openRoom 8
+                    |> withTargets [ "ramp-1", { X = 25; Y = 28 }, Structure BuiltKind.Rampart ]
+
+                let hostiles = [ hostileAt "h-1" { X = 25; Y = 30 } [ Attack; Move ] ]
+
+                let ours =
+                    atLevel 2 room
+                    |> withHits "ramp-1" BuiltKind.Rampart 100000 300000
+                    |> facing hostiles
+
+                let theirs = atLevel 2 room |> facing hostiles
+
+                Expect.isFalse
+                    (Set.contains { X = 25; Y = 28 } (reachIn ours))
+                    "our rampart takes its own tile out of the Reach"
+
+                Expect.isTrue
+                    (Set.contains { X = 25; Y = 27 } (reachIn ours))
+                    "and takes out that tile alone: the tile beside it is still hot"
+
+                Expect.isTrue
+                    (Set.contains { X = 25; Y = 28 } (reachIn theirs))
+                    "a rampart that is not ours excludes nothing"
+            }
+        ]
+
+/// The raid lane: a one-tile plain corridor, x = 25 and y = 20..30, with
+/// the source "src-a" walled in at (25,19) — its single Seat is the lane's
+/// north end, (25,20), and every other tile around it lies outside the
+/// projection.
+let raidLane creeps =
+    { spatial
+          [ "src-a", { X = 25; Y = 19 } ]
+          ([ { X = 25; Y = 19 }, Wall ] @ [ for y in 20..30 -> { X = 25; Y = y }, Plain ]) with
+        CreepPositions = Map.ofList creeps
+    }
+
+/// A colony over the raid lane: one source, no controller and no hungry
+/// structure, so Harvest — and, while a Threat stands in it, Flee — is the
+/// whole pool.
+let laneColony creeps positions =
+    { bareRespawn with
+        Sources = [ source "src-a" ]
+        Refillables = []
+        Controller = None
+        Creeps = creeps
+        Spatial = raidLane positions
+    }
+
+/// The same lane with a built container standing on the Seat: the Post a
+/// Work-heavy body garrisons (ADR 0012, ADR 0020).
+let postLane creeps positions =
+    let colony = laneColony creeps positions
+
+    { colony with
+        Spatial =
+            colony.Spatial
+            |> withTargets [ "can-a", { X = 25; Y = 20 }, Structure BuiltKind.Container ]
+    }
+
+/// A garrison body for the Post tests: two Work over one Move is the
+/// Work-heavy shape, and its store has room, so Harvest fits its body and
+/// its energy state both.
+let garrison name =
+    creepWith name 0 100 [ Work; Work; Carry; Move ]
+
+[<Tests>]
+let threatGateTests =
+    testList
+        "threat gate"
+        [
+            test
+                "a Harvest whose only Seat is in a Reach is inapplicable, and its holder released Threatened" {
+                // The holder stands eight tiles down the lane, well outside
+                // the Reach: it is not running from anything, its Task has
+                // simply lost the one tile it could have been worked from.
+                let colony =
+                    laneColony [ worker "w1" 0 100 ] [ "w1", { X = 25; Y = 30 } ]
+                    |> facing [ hostileAt "h-1" { X = 25; Y = 22 } [ Attack; Move ] ]
+
+                let {
+                        Assignments = kept
+                        Verdicts = verdicts
+                    } =
+                    decide colony (Map.ofList [ "w1", taskId (Harvest "src-a") ]) Set.empty None
+
+                Expect.contains
+                    verdicts
+                    (Verdict.Released("w1", taskId (Harvest "src-a"), ReleaseReason.Threatened))
+                    "the raid's release names the raid, not a Task that vanished"
+
+                Expect.isEmpty (Map.toList kept) "and the Seat is not offered to anyone else"
+
+                Expect.contains
+                    verdicts
+                    (Verdict.Unassigned("w1", IdleReason.NoneApplicable))
+                    "the creep waits rather than walking into the Reach"
+            }
+
+            test "the Scoring Verdict rejects a threatened candidate as Threatened" {
+                let colony =
+                    laneColony [ worker "w1" 0 100 ] [ "w1", { X = 25; Y = 30 } ]
+                    |> facing [ hostileAt "h-1" { X = 25; Y = 22 } [ Attack; Move ] ]
+
+                let { Verdicts = verdicts } = decide colony Map.empty (Set.ofList [ "w1" ]) None
+
+                Expect.contains
+                    verdicts
+                    (Verdict.Scoring(
+                        "w1",
+                        [
+                            Candidate.Rejected(taskId Flee, RejectReason.Inapplicable)
+                            Candidate.Rejected(taskId (Harvest "src-a"), RejectReason.Threatened)
+                        ]
+                    ))
+                    "the whole pool, each Task at the gate it failed"
+            }
+
+            test "a Work-heavy body on a ramparted Post keeps digging with a Threat beside it" {
+                // ADR 0034's exemption, read through the Reach: the tile under
+                // our rampart is in no Reach, so the Post is still standing
+                // room and the narrowed Work Area is not empty.
+                let colony =
+                    postLane [ garrison "a1" ] [ "a1", { X = 25; Y = 20 } ]
+                    |> facing [ hostileAt "h-1" { X = 25; Y = 22 } [ Attack; Move ] ]
+
+                let ramparted =
+                    { colony with
+                        Spatial =
+                            colony.Spatial
+                            |> withTargets
+                                [ "ramp-1", { X = 25; Y = 20 }, Structure BuiltKind.Rampart ]
+                    }
+                    |> withHits "ramp-1" BuiltKind.Rampart 100000 300000
+
+                let {
+                        Assignments = kept
+                        Verdicts = verdicts
+                    } =
+                    decide ramparted (Map.ofList [ "a1", taskId (Harvest "src-a") ]) Set.empty None
+
+                Expect.equal
+                    (Map.tryFind "a1" kept)
+                    (Some(taskId (Harvest "src-a")))
+                    "the Anchor keeps its Post"
+
+                Expect.isEmpty
+                    (verdicts
+                     |> List.filter (function
+                         | Verdict.Released _ -> true
+                         | _ -> false))
+                    "and nothing releases it"
+            }
+
+            test "the same body on a bare Post is released Threatened, and is not matched to Flee" {
+                // A crawling Anchor neither escapes nor digs (ADR 0033), so
+                // Flee is inapplicable to it: it loses the Task and waits.
+                let colony =
+                    postLane [ garrison "a1" ] [ "a1", { X = 25; Y = 20 } ]
+                    |> facing [ hostileAt "h-1" { X = 25; Y = 22 } [ Attack; Move ] ]
+
+                let {
+                        Assignments = kept
+                        Verdicts = verdicts
+                    } =
+                    decide colony (Map.ofList [ "a1", taskId (Harvest "src-a") ]) Set.empty None
+
+                Expect.contains
+                    verdicts
+                    (Verdict.Released("a1", taskId (Harvest "src-a"), ReleaseReason.Threatened))
+                    "an unramparted Post in a Reach is no standing room"
+
+                Expect.isEmpty (Map.toList kept) "and a Work-heavy body does not run"
+
+                Expect.contains
+                    verdicts
+                    (Verdict.Unassigned("a1", IdleReason.NoneApplicable))
+                    "it stays and waits, as ADR 0033 says it must"
+            }
+
+            test "a body standing on a hot Post digs from neither it nor the cold one it walks to" {
+                // Two Posts, one hot: the Task keeps the cold one and stays
+                // applicable, so the Anchor holds it — but a creep acts only
+                // from the tiles it was judged over, so the dig waits until
+                // it has walked out of the Reach.
+                let twoPosts =
+                    postLane [ garrison "a1" ] [ "a1", { X = 25; Y = 20 } ]
+                    |> fun colony ->
+                        { colony with
+                            Spatial =
+                                { colony.Spatial with
+                                    Terrain =
+                                        Map.add { X = 24; Y = 20 } Plain colony.Spatial.Terrain
+                                }
+                                |> withTargets
+                                    [ "can-b", { X = 24; Y = 20 }, Structure BuiltKind.Container ]
+                        }
+
+                let colony =
+                    twoPosts |> facing [ hostileAt "h-1" { X = 28; Y = 20 } [ Attack; Move ] ]
+
+                let {
+                        Intents = intents
+                        Assignments = kept
+                    } =
+                    decide colony (Map.ofList [ "a1", taskId (Harvest "src-a") ]) Set.empty None
+
+                Expect.equal
+                    (Map.tryFind "a1" kept)
+                    (Some(taskId (Harvest "src-a")))
+                    "the cold Post keeps the Task applicable"
+
+                Expect.isEmpty
+                    (actionIntents intents)
+                    "and the hot Post it stands on is no tile to dig from"
+
+                Expect.equal (moveIntents intents) [ "a1", Left ] "it walks to the cold Post"
+            }
+
+            test "a Task whose cold tiles cannot be reached is released Unreachable, not held" {
+                // The source's other Seat is a walled-off pocket: cold, and
+                // no use to a creep on the lane. Reachability is judged over
+                // the tiles the Reach left, so the holder is released rather
+                // than kept on a Task it can never stand for.
+                let pocket creeps positions =
+                    let colony = laneColony creeps positions
+
+                    { colony with
+                        Spatial =
+                            { colony.Spatial with
+                                Terrain = Map.add { X = 24; Y = 18 } Plain colony.Spatial.Terrain
+                            }
+                    }
+
+                let colony =
+                    pocket [ worker "w1" 0 100 ] [ "w1", { X = 25; Y = 30 } ]
+                    |> facing [ hostileAt "h-1" { X = 25; Y = 22 } [ Attack; Move ] ]
+
+                let { Verdicts = verdicts } =
+                    decide colony (Map.ofList [ "w1", taskId (Harvest "src-a") ]) Set.empty None
+
+                Expect.contains
+                    verdicts
+                    (Verdict.Released("w1", taskId (Harvest "src-a"), ReleaseReason.Unreachable))
+                    "cold but unreachable is unreachable, and says so"
+            }
+        ]
+
+/// Two ways into a controller's Upgrade Work Area: the near tile (25,28),
+/// straight up the lane from the creep at (25,29), and the far one
+/// (23,28), around the corner through (24,29) and (23,29). Both lie at
+/// range 3 of the controller at (25,25); the corner tiles do not.
+let hotCornerRoom =
+    { spatial
+          [ "ctrl-1", { X = 25; Y = 25 } ]
+          [
+              { X = 25; Y = 29 }, Plain
+              { X = 25; Y = 28 }, Plain
+              { X = 24; Y = 29 }, Plain
+              { X = 23; Y = 29 }, Plain
+              { X = 23; Y = 28 }, Plain
+          ] with
+        CreepPositions = Map.ofList [ "u1", { X = 25; Y = 29 } ]
+    }
+
+/// The colony over it: one loaded generalist, and Upgrade the whole pool.
+let hotCornerColony =
+    { bareRespawn with
+        Sources = []
+        Refillables = []
+        Controller = Some(controllerAt 2)
+        Creeps = [ worker "u1" 50 0 ]
+        Spatial = hotCornerRoom
+    }
+
+[<Tests>]
+let hotCornerTests =
+    testList
+        "a partly threatened Work Area"
+        [
+            test
+                "an area with one hot corner stays applicable, and the mover is handed the cold tiles" {
+                // ADR 0033's middle case: neither "any tile hot" (which would
+                // stop all upgrading over one corner) nor "every tile hot"
+                // (which would send the creep to the hot one). The Threat at
+                // (27,25) covers the near way in at (25,28) and leaves the far
+                // one at (23,28), so the creep turns the corner instead of
+                // walking up the lane.
+                let {
+                        Intents = quiet
+                        Assignments = before
+                    } =
+                    decide hotCornerColony Map.empty Set.empty None
+
+                Expect.equal
+                    (Map.tryFind "u1" before)
+                    (Some(taskId (Upgrade "ctrl-1")))
+                    "with nothing to run from the creep upgrades"
+
+                Expect.equal
+                    (moveIntents quiet)
+                    [ "u1", Top ]
+                    "and takes the near way in, one step up the lane"
+
+                let raided =
+                    hotCornerColony
+                    |> facing [ hostileAt "h-1" { X = 27; Y = 25 } [ Attack; Move ] ]
+
+                let {
+                        Intents = intents
+                        Assignments = after
+                        Verdicts = verdicts
+                    } =
+                    decide raided Map.empty Set.empty None
+
+                Expect.equal
+                    (Map.tryFind "u1" after)
+                    (Some(taskId (Upgrade "ctrl-1")))
+                    "one hot corner does not stop the upgrading"
+
+                Expect.isEmpty
+                    (verdicts
+                     |> List.filter (function
+                         | Verdict.Unassigned _ -> true
+                         | _ -> false))
+                    "the Task is judged applicable, not threatened"
+
+                Expect.equal
+                    (moveIntents intents)
+                    [ "u1", Left ]
+                    "and the mover walks the long way to the cold tile"
+            }
+        ]
+
+[<Tests>]
+let fleeTests =
+    testList
+        "flee"
+        [
+            test "a creep standing in a Reach flees, outbidding even a deadline Upgrade" {
+                // Safety ranks beneath the downgrade deadline's -1 (ADR 0033):
+                // nothing the colony wants done matters while the creep doing
+                // it is being killed.
+                let colony =
+                    { laneColony [ worker "w1" 50 0 ] [ "w1", { X = 25; Y = 22 } ] with
+                        Refillables = [ refillable "spawn-1" 50 BuiltKind.Spawn ]
+                        Controller =
+                            Some
+                                { controllerAt 2 with
+                                    TicksToDowngrade = 10
+                                }
+                    }
+                    |> facing [ hostileAt "h-1" { X = 25; Y = 20 } [ Attack; Move ] ]
+
+                let {
+                        Assignments = assignments
+                        Verdicts = verdicts
+                    } =
+                    decide colony Map.empty Set.empty None
+
+                Expect.equal (Map.tryFind "w1" assignments) (Some(taskId Flee)) "the creep runs"
+
+                Expect.contains
+                    verdicts
+                    (Verdict.Matched("w1", taskId Flee, MatchFactor.Rank))
+                    "and rank is what decided it against the deadline Upgrade"
+            }
+
+            test "a body with no Work part flees too: no part and no capacity are asked" {
+                let hauler = creepWith "h1" 50 100 [ Carry; Carry; Move ]
+
+                let colony =
+                    { laneColony [ hauler ] [ "h1", { X = 25; Y = 22 } ] with
+                        Refillables = [ refillable "spawn-1" 50 BuiltKind.Spawn ]
+                    }
+                    |> facing [ hostileAt "h-1" { X = 25; Y = 20 } [ Attack; Move ] ]
+
+                let { Assignments = assignments } = decide colony Map.empty Set.empty None
+
+                Expect.equal
+                    (Map.tryFind "h1" assignments)
+                    (Some(taskId Flee))
+                    "a hauler under fire hauls nothing"
+            }
+
+            test "the Move Intent walks toward a safe tile, and no action is emitted" {
+                // The Threat holds the lane's north end, so every tile within
+                // three of it is hot and the safe ground is south: the creep
+                // steps that way, and says the Flee glyph while it does.
+                let colony =
+                    laneColony [ worker "w1" 0 100 ] [ "w1", { X = 25; Y = 22 } ]
+                    |> facing [ hostileAt "h-1" { X = 25; Y = 20 } [ Attack; Move ] ]
+
+                let { Intents = intents } = decide colony Map.empty Set.empty None
+
+                Expect.equal (moveIntents intents) [ "w1", Bottom ] "one step away from the Threat"
+
+                Expect.isEmpty
+                    (actionIntents intents)
+                    "Flee has no action: the Emitter issues movement only"
+
+                Expect.contains (sayIntents intents) ("w1", "🏃") "and the bubble shows the run"
+            }
+
+            test "two creeps in a Reach both flee: Flee is uncapped" {
+                let colony =
+                    laneColony
+                        [ worker "w1" 0 100; worker "w2" 0 100 ]
+                        [ "w1", { X = 25; Y = 22 }; "w2", { X = 25; Y = 23 } ]
+                    |> facing [ hostileAt "h-1" { X = 25; Y = 20 } [ Attack; Move ] ]
+
+                let { Assignments = assignments } = decide colony Map.empty Set.empty None
+
+                Expect.equal
+                    (assignments |> Map.toList |> List.sort)
+                    [ "w1", taskId Flee; "w2", taskId Flee ]
+                    "no worker cap stands between a creep and safety"
+            }
+
+            test "the tick it stands outside the Reach it is released Inapplicable and rematches" {
+                // Flee ends by its own applicability (ADR 0033): the Threat is
+                // still in the room, so the Task is still pooled — this creep
+                // is simply no longer inside its Reach.
+                let colony =
+                    { laneColony [ worker "w1" 50 0 ] [ "w1", { X = 25; Y = 28 } ] with
+                        Refillables = [ refillable "spawn-1" 50 BuiltKind.Spawn ]
+                    }
+                    |> facing [ hostileAt "h-1" { X = 25; Y = 20 } [ Attack; Move ] ]
+
+                let {
+                        Assignments = assignments
+                        Verdicts = verdicts
+                    } =
+                    decide colony (Map.ofList [ "w1", taskId Flee ]) Set.empty None
+
+                Expect.contains
+                    verdicts
+                    (Verdict.Released("w1", taskId Flee, ReleaseReason.Inapplicable))
+                    "out of the Reach, out of the Task"
+
+                Expect.equal
+                    (Map.tryFind "w1" assignments)
+                    (Some(taskId (Refill "spawn-1")))
+                    "and it goes back to work the same tick"
+            }
+
+            test "the Threat leaving takes Flee out of the pool, and its holder with it" {
+                // The other half of Flee's ending: no Reach, no Flee — the
+                // Task exists while the condition holds (ADR 0013's shape),
+                // so a room the raiders have left releases the runner as
+                // task-gone and the transition log tells the two apart.
+                let colony = laneColony [ worker "w1" 0 100 ] [ "w1", { X = 25; Y = 22 } ]
+
+                let {
+                        Assignments = assignments
+                        Verdicts = verdicts
+                    } =
+                    decide colony (Map.ofList [ "w1", taskId Flee ]) Set.empty None
+
+                Expect.contains
+                    verdicts
+                    (Verdict.Released("w1", taskId Flee, ReleaseReason.TaskGone))
+                    "nothing left to run from"
+
+                Expect.equal
+                    (Map.tryFind "w1" assignments)
+                    (Some(taskId (Harvest "src-a")))
+                    "and the Seat is worked again"
+            }
+        ]
+
+[<Tests>]
+let spawnHoldTests =
+    testList
+        "the spawn hold"
+        [
+            test "a Threat beside the spawn holds the cast; one across the room does not" {
+                // A creep born into a Reach is a kill delivered (ADR 0033).
+                let staffed room =
+                    { atLevel 2 room with
+                        Creeps = [ worker "w1" 0 100 ]
+                        Spatial =
+                            { room with
+                                CreepPositions = Map.ofList [ "w1", { X = 25; Y = 27 } ]
+                            }
+                    }
+
+                let colony = staffed (openRoom 6)
+
+                let { Intents = quiet } = decide colony Map.empty Set.empty None
+                Expect.isNonEmpty (spawnIntents quiet) "a quiet colony casts its deficit"
+
+                let { Intents = beside } =
+                    decide
+                        (colony |> facing [ hostileAt "h-1" { X = 25; Y = 29 } [ Attack; Move ] ])
+                        Map.empty
+                        Set.empty
+                        None
+
+                Expect.isEmpty
+                    (spawnIntents beside)
+                    "the doorstep is in the Reach: nothing is cast into it"
+
+                let { Intents = across } =
+                    decide
+                        (colony |> facing [ hostileAt "h-1" { X = 31; Y = 31 } [ Attack; Move ] ])
+                        Map.empty
+                        Set.empty
+                        None
+
+                Expect.isNonEmpty
+                    (spawnIntents across)
+                    "a Threat that reaches no tile beside the spawn holds nothing"
+            }
+
+            test "the disaster fallback holds too: an empty colony casts nothing under fire" {
+                // The one cast that ignores the bank's capacity still does not
+                // ignore the Reach — the first creep of an empty colony is the
+                // one that can least afford to be born under fire.
+                let empty = atLevel 2 (openRoom 6)
+
+                let { Intents = quiet } = decide empty Map.empty Set.empty None
+
+                Expect.isNonEmpty
+                    (spawnIntents quiet)
+                    "an empty colony casts from whatever is banked"
+
+                let { Intents = raided } =
+                    decide
+                        (empty |> facing [ hostileAt "h-1" { X = 25; Y = 29 } [ Attack; Move ] ])
+                        Map.empty
+                        Set.empty
+                        None
+
+                Expect.isEmpty (spawnIntents raided) "and holds while the doorstep is hot"
             }
         ]

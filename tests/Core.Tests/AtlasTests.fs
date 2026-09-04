@@ -49,6 +49,11 @@ let spatial targets tiles =
         TargetPositions = Map.ofList targets
     }
 
+/// `mayAct` over a Task's own Work Area — the tiles the decision layer
+/// hands it on a tick with nothing taken out of one (ADR 0033).
+let mayActFor atlas creep task =
+    mayAct atlas creep task (workAreaFor atlas creep task)
+
 [<Tests>]
 let workAreaTests =
     testList
@@ -156,6 +161,67 @@ let standingTests =
                     (adjacentWalkable atlas { X = 10; Y = 10 })
                     [ { X = 9; Y = 10 }; { X = 10; Y = 11 } ]
                     "unlike Seats, standing respects obstacles"
+            }
+
+            test "walkableTiles is the whole room's standing ground, on adjacentWalkable's rules" {
+                // The same three exclusions over the projection at large —
+                // wall terrain, an obstacle, and everything outside it — and
+                // the road that discounts a tile is standing ground like any
+                // other (ADR 0033's safe set is built out of this).
+                let atlas =
+                    { spatial
+                          []
+                          [
+                              { X = 9; Y = 10 }, Plain
+                              { X = 10; Y = 9 }, Wall
+                              { X = 10; Y = 10 }, Swamp
+                              { X = 10; Y = 11 }, Plain
+                              { X = 11; Y = 10 }, Plain
+                          ] with
+                        Obstacles = Set.singleton { X = 11; Y = 10 }
+                        Roads = Set.singleton { X = 10; Y = 11 }
+                    }
+                    |> snapshotWith []
+                    |> ofSnapshot
+
+                Expect.equal
+                    (walkableTiles atlas)
+                    (Set.ofList [ { X = 9; Y = 10 }; { X = 10; Y = 10 }; { X = 10; Y = 11 } ])
+                    "every tile the floods price and no other"
+            }
+
+            test "mayAct judges the tiles it is handed, not the Task's whole area" {
+                // The area is the caller's (ADR 0033): a tile the decision
+                // layer has taken out of it is no tile to act from, however
+                // well the action's range reaches the target from there.
+                let atlas =
+                    { spatial
+                          [ "src-a", { X = 10; Y = 10 } ]
+                          [ { X = 10; Y = 10 }, Wall; { X = 10; Y = 11 }, Plain ] with
+                        CreepPositions = Map.ofList [ "w", { X = 10; Y = 11 } ]
+                    }
+                    |> snapshotWith [ worker "w" ]
+                    |> ofSnapshot
+
+                Expect.isTrue
+                    (mayActFor atlas "w" (Harvest "src-a"))
+                    "the Seat it stands on is in the Task's own area"
+
+                Expect.isFalse
+                    (mayAct atlas "w" (Harvest "src-a") Set.empty)
+                    "and out of a narrowed one, it acts from nowhere"
+            }
+
+            test "creepTile places a projected creep, and answers nothing for the rest" {
+                let atlas =
+                    { spatial [] [ { X = 5; Y = 5 }, Plain ] with
+                        CreepPositions = Map.ofList [ "amy", { X = 5; Y = 5 } ]
+                    }
+                    |> snapshotWith [ worker "amy"; worker "ghost" ]
+                    |> ofSnapshot
+
+                Expect.equal (creepTile atlas "amy") (Some { X = 5; Y = 5 }) "the tile it stands on"
+                Expect.isNone (creepTile atlas "ghost") "a creep the projection does not place"
             }
 
             test "placedCreeps keeps Snapshot creep order and skips the unplaced" {
@@ -349,7 +415,7 @@ let placementQueryTests =
                     "an unplaced target prices at 0, never against the Task"
 
                 Expect.isTrue
-                    (mayAct atlas "w" (Repair "cont-1"))
+                    (mayActFor atlas "w" (Repair "cont-1"))
                     "an unplaced target never blocks the action"
             }
 
@@ -977,7 +1043,7 @@ let firstStepTests =
                     |> ofSnapshot
 
                 Expect.equal
-                    (firstStep atlas "w" (Harvest "src-a"))
+                    (firstStep atlas "w" (workAreaFor atlas "w" (Harvest "src-a")))
                     (Some { X = 11; Y = 13 })
                     "the step leaves the swamp lane for the plain one"
             }
@@ -1006,7 +1072,7 @@ let firstStepTests =
                     |> ofSnapshot
 
                 Expect.equal
-                    (firstStep atlas "w" (Harvest "src-a"))
+                    (firstStep atlas "w" (workAreaFor atlas "w" (Harvest "src-a")))
                     (Some { X = 11; Y = 13 })
                     "the step leaves the parked creep's lane for the free one"
             }
@@ -1017,7 +1083,10 @@ let firstStepTests =
                     |> snapshotWith [ worker "w" ]
                     |> ofSnapshot
 
-                Expect.equal (firstStep atlas "w" (Harvest "src-a")) None "already there"
+                Expect.equal
+                    (firstStep atlas "w" (workAreaFor atlas "w" (Harvest "src-a")))
+                    None
+                    "already there"
             }
 
             test "an unreachable Work Area yields no step: waiting beats marching at a wall" {
@@ -1030,13 +1099,19 @@ let firstStepTests =
                     |> snapshotWith [ worker "w" ]
                     |> ofSnapshot
 
-                Expect.equal (firstStep atlas "w" (Harvest "src-a")) None "no path, no step"
+                Expect.equal
+                    (firstStep atlas "w" (workAreaFor atlas "w" (Harvest "src-a")))
+                    None
+                    "no path, no step"
             }
 
             test "an unplaced creep has no step: no movement without geometry" {
                 let atlas = corridor [] |> snapshotWith [ worker "w" ] |> ofSnapshot
 
-                Expect.equal (firstStep atlas "w" (Harvest "src-a")) None "nothing derivable"
+                Expect.equal
+                    (firstStep atlas "w" (workAreaFor atlas "w" (Harvest "src-a")))
+                    None
+                    "nothing derivable"
             }
         ]
 
@@ -1071,12 +1146,12 @@ let firstStepIgnoringTrafficTests =
                     |> ofSnapshot
 
                 Expect.equal
-                    (firstStep atlas "w" (Harvest "src-a"))
+                    (firstStep atlas "w" (workAreaFor atlas "w" (Harvest "src-a")))
                     (Some { X = 11; Y = 13 })
                     "the priced step leaves the parked creep's lane"
 
                 Expect.equal
-                    (firstStepIgnoringTraffic atlas "w" (Harvest "src-a"))
+                    (firstStepIgnoringTraffic atlas "w" (workAreaFor atlas "w" (Harvest "src-a")))
                     (Some { X = 10; Y = 13 })
                     "the blind step holds the lane: the detour is the surcharge's doing"
             }
@@ -1124,12 +1199,12 @@ let firstStepIgnoringTrafficTests =
                     "two plain steps beat three road ones in whole ticks"
 
                 Expect.equal
-                    (firstStepIgnoringTraffic atlas "w" (Harvest "src-a"))
-                    (firstStep atlas "w" (Harvest "src-a"))
+                    (firstStepIgnoringTraffic atlas "w" (workAreaFor atlas "w" (Harvest "src-a")))
+                    (firstStep atlas "w" (workAreaFor atlas "w" (Harvest "src-a")))
                     "empty ground: the blind route is the priced one, down the paved lane"
 
                 Expect.equal
-                    (firstStepIgnoringTraffic atlas "w" (Harvest "src-a"))
+                    (firstStepIgnoringTraffic atlas "w" (workAreaFor atlas "w" (Harvest "src-a")))
                     (Some { X = 13; Y = 9 })
                     "the road lane, not the whole-tick lane at (12,11)"
             }
@@ -1281,7 +1356,7 @@ let workAreaForTests =
                     "standing on a plain Seat is no longer standing in the area"
 
                 Expect.equal
-                    (firstStep atlas "a" (Harvest "src-a"))
+                    (firstStep atlas "a" (workAreaFor atlas "a" (Harvest "src-a")))
                     (Some { X = 9; Y = 10 })
                     "the step goes to a Post — equally cheap, lowest tile wins"
             }
@@ -1303,15 +1378,15 @@ let mayActTests =
                     |> ofSnapshot
 
                 Expect.isTrue
-                    (mayAct (atlasAt { X = 10; Y = 11 }) "w" (Harvest "src-a"))
+                    (mayActFor (atlasAt { X = 10; Y = 11 }) "w" (Harvest "src-a"))
                     "harvest reaches at range 1"
 
                 Expect.isFalse
-                    (mayAct (atlasAt { X = 10; Y = 12 }) "w" (Harvest "src-a"))
+                    (mayActFor (atlasAt { X = 10; Y = 12 }) "w" (Harvest "src-a"))
                     "harvest does not reach at range 2"
 
                 Expect.isTrue
-                    (mayAct (atlasAt { X = 18; Y = 17 }) "w" (Upgrade "ctrl-1"))
+                    (mayActFor (atlasAt { X = 18; Y = 17 }) "w" (Upgrade "ctrl-1"))
                     "upgrade reaches at range 3"
             }
 
@@ -1326,11 +1401,11 @@ let mayActTests =
                     |> ofSnapshot
 
                 Expect.isTrue
-                    (mayAct (atlasAt { X = 10; Y = 13 }) "w" (Repair "road-1"))
+                    (mayActFor (atlasAt { X = 10; Y = 13 }) "w" (Repair "road-1"))
                     "repair reaches at range 3"
 
                 Expect.isFalse
-                    (mayAct (atlasAt { X = 10; Y = 14 }) "w" (Repair "road-1"))
+                    (mayActFor (atlasAt { X = 10; Y = 14 }) "w" (Repair "road-1"))
                     "repair does not reach at range 4"
             }
 
@@ -1340,8 +1415,8 @@ let mayActTests =
                     |> snapshotWith [ worker "w" ]
                     |> ofSnapshot
 
-                Expect.isTrue (mayAct atlas "ghost" (Harvest "src-a")) "unplaced creep acts"
-                Expect.isTrue (mayAct atlas "w" (Harvest "ghost")) "unplaced target is acted on"
+                Expect.isTrue (mayActFor atlas "ghost" (Harvest "src-a")) "unplaced creep acts"
+                Expect.isTrue (mayActFor atlas "w" (Harvest "ghost")) "unplaced target is acted on"
             }
 
             test "a Work-heavy body digs from its Post and nowhere else in range" {
@@ -1360,11 +1435,11 @@ let mayActTests =
                     |> ofSnapshot
 
                 Expect.isTrue
-                    (mayAct (atlasAt { X = 9; Y = 10 }) "a" (Harvest "src-a"))
+                    (mayActFor (atlasAt { X = 9; Y = 10 }) "a" (Harvest "src-a"))
                     "on the Post it digs"
 
                 Expect.isFalse
-                    (mayAct (atlasAt { X = 10; Y = 11 }) "a" (Harvest "src-a"))
+                    (mayActFor (atlasAt { X = 10; Y = 11 }) "a" (Harvest "src-a"))
                     "in range but off the Post it does not — so it never fills en route"
             }
 
@@ -1385,7 +1460,7 @@ let mayActTests =
                     "the creep's own tile is not a standing tile"
 
                 Expect.isTrue
-                    (mayAct atlas "w" (Harvest "src-a"))
+                    (mayActFor atlas "w" (Harvest "src-a"))
                     "unpriceable footing never blocks the action"
             }
         ]
@@ -1670,12 +1745,15 @@ let consistencyTests =
 
                     let area = workArea atlas task
                     let cost = travelCost atlas "w" task
-                    let step = firstStep atlas "w" task
+                    let step = firstStep atlas "w" area
 
                     if Set.contains pos area then
                         Expect.equal cost (Some 0) $"inside the Work Area costs 0 at {pos}"
                         Expect.equal step None $"no step inside the Work Area at {pos}"
-                        Expect.isTrue (mayAct atlas "w" task) $"in-area implies in range at {pos}"
+
+                        Expect.isTrue
+                            (mayActFor atlas "w" task)
+                            $"in-area implies in range at {pos}"
                     else
                         match cost, step with
                         | Some c, Some s ->

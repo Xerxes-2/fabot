@@ -171,6 +171,9 @@ let taskId =
     | Build siteId -> $"build:{siteId}"
     | Repair structureId -> $"repair:{structureId}"
     | Upgrade controllerId -> $"upgrade:{controllerId}"
+    // One Flee for the whole colony: it has no target to be identified by,
+    // and every creep inside a Reach is running from the same thing.
+    | Flee -> "flee"
 
 /// The Repair trigger of the decaying kinds: a road or a container enters
 /// the pool when its hits sink strictly below this fraction of max, and
@@ -229,6 +232,99 @@ let private containerCapacity = 2000
 /// to be projected rather than inferred from one resource.
 let private storageCapacity = 1000000
 
+/// The Reach margin (ADR 0033): the tiles a Threat's weapon range is
+/// widened by — one for the hostile's next step, one for our own tick of
+/// lag. A tunable beside `repairTrigger`, not a term of the decision.
+let private reachMargin = 2
+
+/// Screeps weapon ranges: ATTACK strikes at range 1, RANGED_ATTACK at 3.
+let private meleeRange = 1
+let private rangedRange = 3
+
+/// The range a hostile can hurt a creep from, or None for one that cannot
+/// (ADR 0033). A Threat is read off the parts and never off the owner — an
+/// NPC invader and a player's raider do the same damage per part — and
+/// nothing but ATTACK and RANGED_ATTACK hurts a creep at all: a healer, a
+/// scout or a claimer is a hostile the fire reflex shoots and the Raid log
+/// records, and it gates no Task. A body carrying both weapons reaches the
+/// farther of them.
+let private weaponRange (hostile: HostileInfo) : int option =
+    [
+        if List.contains Attack hostile.Body then
+            meleeRange
+        if List.contains RangedAttack hostile.Body then
+            rangedRange
+    ]
+    |> function
+        | [] -> None
+        | ranges -> Some(List.max ranges)
+
+/// The tick's colony-level threat facts (ADR 0033): the tiles a Threat can
+/// hurt, and the walkable tiles no Threat can. Derived once a tick and
+/// shared by the three readers — the applicability gate that takes the
+/// Reach out of every Work Area, Flee's own Work Area, and the spawn hold.
+/// Colony facts, never a change to the spatial projection: hostiles still
+/// block no tiles and price no paths, and nothing in the Atlas reads one.
+type Threats =
+    {
+        Reach: Set<Pos>
+        /// The walkable tiles no Threat reaches — Flee's Work Area. Empty
+        /// on a tick with no Reach, where it stands for "not derived"
+        /// rather than "nowhere is safe": nothing reads it there, because
+        /// the Reach that would pool a Flee is empty too.
+        Safe: Set<Pos>
+    }
+
+/// The tick with nothing to run from: every Work Area stands whole and no
+/// creep flees. What the pipeline is handed for a quiet colony.
+let noThreats = { Reach = Set.empty; Safe = Set.empty }
+
+/// This tick's Threats, off the Snapshot's hostiles and the rampart
+/// census. Each Threat reaches its weapon range plus the margin, in the
+/// Chebyshev tiles every range in the colony is measured in — less every
+/// tile under one of our standing ramparts, which is in no Reach at all: a
+/// creep on its own rampart cannot be attacked, and that exemption is what
+/// lets an Anchor keep digging on a ramparted Post (ADR 0034). The safe set
+/// is derived only when something is unsafe, so a quiet tick pays for no
+/// walk over the room.
+let threatsOf (snapshot: Snapshot) atlas : Threats =
+    // The hostiles are asked first, so a quiet room walks nothing: neither
+    // the rampart census nor the room's own tiles are read on a tick with
+    // nothing in it to run from.
+    match
+        snapshot.Hostiles
+        |> List.choose (fun hostile -> weaponRange hostile |> Option.map (fun r -> hostile.Pos, r))
+    with
+    | [] -> noThreats
+    | threats ->
+        let ramparts = Atlas.ourRampartTiles atlas
+
+        let reach =
+            threats
+            |> List.collect (fun (pos, weapon) ->
+                let r = weapon + reachMargin
+
+                [
+                    for x in pos.X - r .. pos.X + r do
+                        for y in pos.Y - r .. pos.Y + r do
+                            let tile = { X = x; Y = y }
+
+                            if not (Set.contains tile ramparts) then
+                                tile
+                ])
+            |> Set.ofList
+
+        {
+            Reach = reach
+            Safe =
+                // Nothing left to run from once our own ramparts have taken
+                // the whole Reach back: no Reach, no safe set to derive.
+                if Set.isEmpty reach then
+                    Set.empty
+                else
+                    Set.difference (Atlas.walkableTiles atlas) reach
+        }
+
 /// Whether a placed tile is a source container's (ADR 0012): within range
 /// 1 of a placed source — the Seat-standing kind the Layout places, which
 /// harvest overflow fills. The one geometry judgement behind both rules
@@ -241,7 +337,13 @@ let private isSourceContainerTile (snapshot: Snapshot) pos =
 
 /// Planner: rebuild this tick's full Task pool from the Snapshot. Pure and
 /// from scratch every tick — Tasks are never persisted.
-let planTasks (snapshot: Snapshot) : Task list =
+let planTasks (snapshot: Snapshot) (threats: Threats) : Task list =
+    // Flee exists while a Reach does (ADR 0033): one Task for the whole
+    // colony, at the head of the pool as its Safety tier is at the head of
+    // the ranking. No Reach, no Flee — a quiet tick's pool is the pool it
+    // always was.
+    let flees = if Set.isEmpty threats.Reach then [] else [ Flee ]
+
     // Harvest exists for every source, drained or not (ADR 0013, revised
     // by ADR 0025): the task no longer flickers with the source's stock,
     // because whether a dry rock is worth walking to depends on the
@@ -338,7 +440,8 @@ let planTasks (snapshot: Snapshot) : Task list =
         else
             storages |> List.filter (fun id -> stored id > 0) |> List.map Withdraw
 
-    harvests
+    flees
+    @ harvests
     @ withdraws
     @ refills
     @ builds
@@ -539,98 +642,125 @@ let private expiring (snapshot: Snapshot) atlas (creep: CreepInfo) =
 /// the Workforce target. Spawning is a colony-level need, not a Task creeps
 /// get matched to, so it sits beside the Planner/Matcher pipeline rather
 /// than inside it.
-let private planSpawns (snapshot: Snapshot) atlas (haulerQuota: int) : Intent list =
-    // The specialist rows' quota rules (ADR 0006, ADR 0012): one Anchor
-    // per Post, haulers per the throughput arithmetic — the hauler quota
-    // arrives memoised on the census signature (ADR 0017), its input set
-    // a subset of the Layout's. Both are addends of the target itself —
-    // inside it by construction, never on top of it.
-    let anchorQuota = Atlas.posts atlas |> Set.count
-    let target = workforceTarget snapshot atlas anchorQuota haulerQuota
+let private planSpawns
+    (snapshot: Snapshot)
+    atlas
+    (threats: Threats)
+    (haulerQuota: int)
+    : Intent list =
+    // The spawn holds while its doorstep is hot (ADR 0033): a creep born
+    // into a Reach is a kill delivered, so no spawn casts anything while
+    // any tile beside any spawn lies in one — the disaster fallback below
+    // included, since an empty colony's first creep is the one that can
+    // least afford to be born under fire.
+    let doorstepInReach (s: SpawnInfo) =
+        match Atlas.positionOf atlas s.Id with
+        | Some pos ->
+            [
+                for x in pos.X - 1 .. pos.X + 1 do
+                    for y in pos.Y - 1 .. pos.Y + 1 -> { X = x; Y = y }
+            ]
+            |> List.exists (fun tile -> Set.contains tile threats.Reach)
+        | None -> false
 
-    // The deficit and both row gaps count the creeps that will still be
-    // alive when a replacement could arrive: an expiring creep is already
-    // outside the count (ADR 0026), so its successor is cast while it
-    // still works rather than after it dies. The disaster fallback below
-    // still reads the creep list itself — an expiring creep can refill an
-    // extension, and a colony holding one is not the empty one.
-    let living =
-        snapshot.Creeps
-        |> List.filter (fun creep -> not (expiring snapshot atlas creep))
-
-    let deficit = target - List.length living
-
-    // A body is sized to the bank's capacity and cast the tick the bank
-    // holds its cost (ADR 0021) — a full bank for rows priced at
-    // capacity, sooner for the capped Anchor row. Disaster fallback: an
-    // empty colony can never refill extensions, so a capacity-sized body
-    // would wait forever — spawn a minimal worker unit from whatever is
-    // banked right now; time-to-first-creep outranks specialisation, so
-    // the anchor gap waits (ADR 0006).
-    let castFromBank pattern (bank: RoomEnergy) =
-        if List.isEmpty snapshot.Creeps then
-            if bank.Available >= bodyCost workerPattern.Block then
-                Some(workerPattern, workerPattern.Block)
-            else
-                None
-        else
-            let body = bodyFor pattern bank.Capacity
-
-            if bank.Available >= bodyCost body then
-                Some(pattern, body)
-            else
-                None
-
-    if deficit <= 0 then
+    // Asked before anything is priced, the way the reflexes ask their
+    // hostiles first: a held tick derives no Workforce target and floods
+    // no lead.
+    if snapshot.Spawns |> List.exists doorstepInReach then
         []
     else
-        // Anchor gaps are filled before hauler gaps, hauler gaps before
-        // generalist gaps — the casting order runs Anchor, hauler, worker
-        // — and the worker row's quota is whatever the target has left.
-        let anchorGap =
-            anchorQuota
-            - (living
-               |> List.filter (fun creep -> Atlas.workHeavy atlas creep.Name)
-               |> List.length)
-            |> max 0
 
-        let haulerGap =
-            haulerQuota - (living |> List.filter isHaulerBody |> List.length) |> max 0
+        // The specialist rows' quota rules (ADR 0006, ADR 0012): one Anchor
+        // per Post, haulers per the throughput arithmetic — the hauler quota
+        // arrives memoised on the census signature (ADR 0017), its input set
+        // a subset of the Layout's. Both are addends of the target itself —
+        // inside it by construction, never on top of it.
+        let anchorQuota = Atlas.posts atlas |> Set.count
+        let target = workforceTarget snapshot atlas anchorQuota haulerQuota
 
-        // Idle spawns draw from their room's one bank in list order — each
-        // body debits the budget the next spawn sees, so the same energy is
-        // never committed twice.
-        let intents, _ =
-            snapshot.Spawns
-            |> List.filter (fun s -> not s.IsSpawning)
-            |> List.fold
-                (fun (intents, banks: Map<string, RoomEnergy>) s ->
-                    let bank =
-                        banks
-                        |> Map.tryFind s.RoomName
-                        |> Option.defaultValue { Available = 0; Capacity = 0 }
+        // The deficit and both row gaps count the creeps that will still be
+        // alive when a replacement could arrive: an expiring creep is already
+        // outside the count (ADR 0026), so its successor is cast while it
+        // still works rather than after it dies. The disaster fallback below
+        // still reads the creep list itself — an expiring creep can refill an
+        // extension, and a colony holding one is not the empty one.
+        let living =
+            snapshot.Creeps
+            |> List.filter (fun creep -> not (expiring snapshot atlas creep))
 
-                    let planned = List.length intents
+        let deficit = target - List.length living
 
-                    let wanted =
-                        if planned < anchorGap then anchorPattern
-                        elif planned < anchorGap + haulerGap then haulerPattern
-                        else workerPattern
+        // A body is sized to the bank's capacity and cast the tick the bank
+        // holds its cost (ADR 0021) — a full bank for rows priced at
+        // capacity, sooner for the capped Anchor row. Disaster fallback: an
+        // empty colony can never refill extensions, so a capacity-sized body
+        // would wait forever — spawn a minimal worker unit from whatever is
+        // banked right now; time-to-first-creep outranks specialisation, so
+        // the anchor gap waits (ADR 0006).
+        let castFromBank pattern (bank: RoomEnergy) =
+            if List.isEmpty snapshot.Creeps then
+                if bank.Available >= bodyCost workerPattern.Block then
+                    Some(workerPattern, workerPattern.Block)
+                else
+                    None
+            else
+                let body = bodyFor pattern bank.Capacity
 
-                    match castFromBank wanted bank with
-                    | Some(pattern, body) when planned < deficit ->
-                        SpawnCreep(s.Name, body, $"{pattern.Name}-{snapshot.Time}-{s.Name}")
-                        :: intents,
-                        banks
-                        |> Map.add
-                            s.RoomName
-                            { bank with
-                                Available = bank.Available - bodyCost body
-                            }
-                    | _ -> intents, banks)
-                ([], snapshot.RoomEnergy)
+                if bank.Available >= bodyCost body then
+                    Some(pattern, body)
+                else
+                    None
 
-        List.rev intents
+        if deficit <= 0 then
+            []
+        else
+            // Anchor gaps are filled before hauler gaps, hauler gaps before
+            // generalist gaps — the casting order runs Anchor, hauler, worker
+            // — and the worker row's quota is whatever the target has left.
+            let anchorGap =
+                anchorQuota
+                - (living
+                   |> List.filter (fun creep -> Atlas.workHeavy atlas creep.Name)
+                   |> List.length)
+                |> max 0
+
+            let haulerGap =
+                haulerQuota - (living |> List.filter isHaulerBody |> List.length) |> max 0
+
+            // Idle spawns draw from their room's one bank in list order — each
+            // body debits the budget the next spawn sees, so the same energy is
+            // never committed twice.
+            let intents, _ =
+                snapshot.Spawns
+                |> List.filter (fun s -> not s.IsSpawning)
+                |> List.fold
+                    (fun (intents, banks: Map<string, RoomEnergy>) s ->
+                        let bank =
+                            banks
+                            |> Map.tryFind s.RoomName
+                            |> Option.defaultValue { Available = 0; Capacity = 0 }
+
+                        let planned = List.length intents
+
+                        let wanted =
+                            if planned < anchorGap then anchorPattern
+                            elif planned < anchorGap + haulerGap then haulerPattern
+                            else workerPattern
+
+                        match castFromBank wanted bank with
+                        | Some(pattern, body) when planned < deficit ->
+                            SpawnCreep(s.Name, body, $"{pattern.Name}-{snapshot.Time}-{s.Name}")
+                            :: intents,
+                            banks
+                            |> Map.add
+                                s.RoomName
+                                { bank with
+                                    Available = bank.Available - bodyCost body
+                                }
+                        | _ -> intents, banks)
+                    ([], snapshot.RoomEnergy)
+
+            List.rev intents
 
 /// The claimer range at which safe mode fires (ADR 0015): the precise
 /// deadline is 2 — attackController is range 1 and judged from
@@ -1169,7 +1299,54 @@ let private tooEarly (snapshot: Snapshot) atlas (creep: CreepInfo) task (walk: L
     | Refill _
     | Build _
     | Repair _
-    | Upgrade _ -> None
+    | Upgrade _
+    | Flee -> None
+
+/// The tiles a creep may work a Task from this tick (ADR 0033): its Work
+/// Area less the Reach — and for Flee, the safe set, an area of the
+/// colony's own rather than some target's surroundings. The Atlas's
+/// memoised Work Areas are never modified; this is a filter at the point of
+/// judgement, and a tick with no Reach hands the memo back verbatim.
+let private areaFor (threats: Threats) atlas creep task =
+    match task with
+    | Flee -> threats.Safe
+    | _ when Set.isEmpty threats.Reach -> Atlas.workAreaFor atlas creep task
+    | _ ->
+        Atlas.workAreaFor atlas creep task
+        |> Set.filter (fun tile -> not (Set.contains tile threats.Reach))
+
+/// The travel cost of a Task for a creep, priced over the tiles it may
+/// actually work from this tick (ADR 0033): the safe set for Flee, which
+/// has no target, and every other Task's own Work Area less the Reach —
+/// so the reachability gate judges the tiles that are left rather than a
+/// tile the creep may not stand on, and a candidate whose cold remainder
+/// is walled off is rejected as unreachable instead of being held and
+/// never worked. The pricing itself is untouched: same weights, same
+/// surcharge, same flood — only the goals are this tick's.
+/// An area that is empty here was never taken by the Reach — the threat
+/// gate stands ahead of this one in both cascades — so it falls back to
+/// the Task's own price, which carries ADR 0004's escape for a target the
+/// projection cannot place.
+let private travelCostOf (threats: Threats) atlas (creep: string) task =
+    match task with
+    | Flee -> Atlas.travelCostWithin atlas creep threats.Safe
+    | _ ->
+        match areaFor threats atlas creep task with
+        | area when Set.isEmpty area -> Atlas.travelCost atlas creep task
+        | area -> Atlas.travelCostWithin atlas creep area
+
+/// Whether the Reach has taken a creep's whole Work Area for a Task (ADR
+/// 0033): it had somewhere to stand and has nowhere left. That makes the
+/// Task inapplicable to that creep — a Harvest whose only Seat is hot is
+/// no Harvest — and releases a holder under a reason of its own, so the
+/// transition log tells a raid's release from a Task that vanished. An area
+/// that was empty to begin with is not threatened: unplaceable or blocked
+/// geometry is the reachability gate's answer (ADR 0002, ADR 0020) and a
+/// raid must not be blamed for it. Flee is never threatened either — its
+/// area is the safe set, which the Reach has already been taken out of.
+let private threatened (threats: Threats) atlas (creep: CreepInfo) task =
+    not (Set.isEmpty (Atlas.workAreaFor atlas creep.Name task))
+    && Set.isEmpty (areaFor threats atlas creep.Name task)
 
 /// Whether a creep can usefully work this Task right now. The body must
 /// physically be able to do it — Work-part tasks need a Work part, energy
@@ -1198,7 +1375,7 @@ let private tooEarly (snapshot: Snapshot) atlas (creep: CreepInfo) task (walk: L
 /// the Storage: the gate is scoped to the buffer by id, and the stock's own
 /// in-and-out cycle is closed in the Planner instead (ADR 0023), because
 /// the bodies that must feed the spawn from it are the ones with no Work.
-let private applicable atlas (creep: CreepInfo) task =
+let private applicable (threats: Threats) atlas (creep: CreepInfo) task =
     let has part =
         creep.Body |> Map.tryFind part |> Option.exists (fun n -> n > 0)
 
@@ -1213,15 +1390,28 @@ let private applicable atlas (creep: CreepInfo) task =
     | Build _
     | Repair _
     | Upgrade _ -> has Work && creep.Energy > 0
+    // Flee asks for no part and no energy state, only for a creep that is
+    // being shot at and can run (ADR 0033). A Work-heavy body is exempt: at
+    // four to seven ticks a step an Anchor leaving its Post neither escapes
+    // nor digs, and the answer for the Post is a rampart (ADR 0034) — which
+    // is also why the tile under one is in no Reach.
+    | Flee ->
+        not (Atlas.workHeavy atlas creep.Name)
+        && (Atlas.creepTile atlas creep.Name
+            |> Option.exists (fun tile -> Set.contains tile threats.Reach))
 
+/// The action Intent a Task asks of a creep, or None for a Task with no
+/// action: Flee is movement and nothing else (ADR 0033), and the Emitter
+/// issues it none.
 let private intentFor (creep: CreepInfo) task =
     match task with
-    | Harvest sourceId -> HarvestSource(creep.Name, sourceId)
-    | Withdraw storeId -> WithdrawEnergyFromStructure(creep.Name, storeId)
-    | Refill structureId -> TransferEnergyToStructure(creep.Name, structureId)
-    | Build siteId -> BuildSite(creep.Name, siteId)
-    | Repair structureId -> RepairStructure(creep.Name, structureId)
-    | Upgrade controllerId -> UpgradeController(creep.Name, controllerId)
+    | Harvest sourceId -> Some(HarvestSource(creep.Name, sourceId))
+    | Withdraw storeId -> Some(WithdrawEnergyFromStructure(creep.Name, storeId))
+    | Refill structureId -> Some(TransferEnergyToStructure(creep.Name, structureId))
+    | Build siteId -> Some(BuildSite(creep.Name, siteId))
+    | Repair structureId -> Some(RepairStructure(creep.Name, structureId))
+    | Upgrade controllerId -> Some(UpgradeController(creep.Name, controllerId))
+    | Flee -> None
 
 /// Chat-bubble glyph of a Task: the whole colony's current matching is
 /// legible in the viewer at one glyph per creep.
@@ -1233,6 +1423,7 @@ let private glyphFor =
     | Build _ -> "🔨"
     | Repair _ -> "🔧"
     | Upgrade _ -> "⚡"
+    | Flee -> "🏃"
 
 /// The full downgrade timer per controller level (Screeps
 /// CONTROLLER_DOWNGRADE).
@@ -1259,6 +1450,10 @@ let private downgradeDeadline level = fullDowngradeTimer level / 2
 /// The tier of work a Task belongs to, once its target is taken into
 /// account (ADR 0010, ADR 0012, ADR 0023) — what the matcher ranks by.
 type private Tier =
+    /// Getting out of a Reach (ADR 0033): the one Task in it is Flee, and
+    /// it sits above every other tier and above the downgrade deadline
+    /// too, because no other work matters while a creep is being killed.
+    | Safety
     /// Feeding the economy: Harvest, a container's Withdraw, and the
     /// Refill of a spawn or an extension — the flow the colony's
     /// reproduction runs on.
@@ -1302,6 +1497,10 @@ type private Tier =
 /// above the sequence rather than in it; `rank` carries it.
 let private rankOfTier =
     function
+    // One rank beneath `deadlineRank`'s -1, which is itself one beneath the
+    // shallowest tier of work: a fleeing creep outbids even a controller
+    // about to downgrade (ADR 0033).
+    | Safety -> -2
     | Feeding -> 0
     | StockDraw -> 1
     | Surplus -> 2
@@ -1325,6 +1524,7 @@ let private rankOfTier =
 /// alike.
 let private tierOf (snapshot: Snapshot) task =
     match task with
+    | Flee -> Safety
     | Harvest _ -> Feeding
     | Withdraw storeId ->
         let kind = Map.tryFind storeId snapshot.Spatial.TargetKinds
@@ -1404,8 +1604,17 @@ let private postCapacities (snapshot: Snapshot) atlas : Map<string, int> =
 /// land a creep a tick or two early, so the gate is what keeps the
 /// engine's ERR_NOT_ENOUGH_RESOURCES spam structurally impossible. The
 /// garrison gets no exemption here: it stays kept on its Post through the
-/// window, silent, and digs the tick the energy lands.
-let private actionIntents (snapshot: Snapshot) atlas (creep: CreepInfo) (task: Task) : Intent list =
+/// window, silent, and digs the tick the energy lands. The tiles it may
+/// act from are the ones it was judged applicable over — the Work Area
+/// less this tick's Reach (ADR 0033) — so a creep no more works from a
+/// tile a Threat took than it walks to one.
+let private actionIntents
+    (snapshot: Snapshot)
+    atlas
+    (threats: Threats)
+    (creep: CreepInfo)
+    (task: Task)
+    : Intent list =
     let drained =
         match task with
         | Harvest sourceId -> ticksToRestock snapshot sourceId > 0
@@ -1413,10 +1622,14 @@ let private actionIntents (snapshot: Snapshot) atlas (creep: CreepInfo) (task: T
         | Refill _
         | Build _
         | Repair _
-        | Upgrade _ -> false
+        | Upgrade _
+        | Flee -> false
 
-    if Atlas.mayAct atlas creep.Name task && not drained then
-        [ intentFor creep task ]
+    if
+        Atlas.mayAct atlas creep.Name task (areaFor threats atlas creep.Name task)
+        && not drained
+    then
+        intentFor creep task |> Option.toList
     else
         []
 
@@ -1424,12 +1637,12 @@ let private actionIntents (snapshot: Snapshot) atlas (creep: CreepInfo) (task: T
 /// creep's chat bubble, both in Snapshot creep order. Judges actions from
 /// tick-start geometry — it must run against the same Atlas the Matcher
 /// used, never against resolved positions.
-let emit (snapshot: Snapshot) atlas (assigned: Map<string, Task>) : Intent list =
+let emit (snapshot: Snapshot) atlas (threats: Threats) (assigned: Map<string, Task>) : Intent list =
     let actions =
         snapshot.Creeps
         |> List.collect (fun creep ->
             match Map.tryFind creep.Name assigned with
-            | Some task -> actionIntents snapshot atlas creep task
+            | Some task -> actionIntents snapshot atlas threats creep task
             | None -> [])
 
     // Every assigned creep says its Task's glyph every tick; unassigned
@@ -1464,6 +1677,7 @@ let private idleRank = System.Int32.MaxValue
 /// displaceable to any adjacent walkable tile.
 let private moveIntentFor
     (rankOf: Task -> int)
+    (threats: Threats)
     atlas
     (creep: string)
     (pos: Pos)
@@ -1480,7 +1694,10 @@ let private moveIntentFor
     match task with
     | None -> parked idleRank
     | Some task ->
-        let area = Atlas.workAreaFor atlas creep task
+        // The area less this tick's Reach (ADR 0033): a creep works from
+        // the safe half of its Work Area rather than abandoning the Task
+        // because one corner is hot, and its steps go nowhere else.
+        let area = areaFor threats atlas creep task
 
         if Set.contains pos area then
             {
@@ -1493,7 +1710,7 @@ let private moveIntentFor
                         |> List.filter (fun tile -> Set.contains tile area))
             }
         else
-            match Atlas.firstStep atlas creep task with
+            match Atlas.firstStep atlas creep area with
             | Some step ->
                 {
                     Creep = creep
@@ -1630,6 +1847,7 @@ let private directionTo (from: Pos) (dest: Pos) : Direction option =
 let resolve
     (snapshot: Snapshot)
     atlas
+    (threats: Threats)
     (assigned: Map<string, Task>)
     (verbose: Set<string>)
     : Intent list * Verdict list =
@@ -1644,7 +1862,7 @@ let resolve
         placed
         |> List.filter (fun (name, _) -> not (Set.contains name tired))
         |> List.map (fun (name, pos) ->
-            moveIntentFor (rank snapshot) atlas name pos (Map.tryFind name assigned))
+            moveIntentFor (rank snapshot) threats atlas name pos (Map.tryFind name assigned))
 
     let blocked =
         placed
@@ -1680,7 +1898,9 @@ let resolve
         )
 
     let rerouted name task =
-        match Atlas.firstStep atlas name task, Atlas.firstStepIgnoringTraffic atlas name task with
+        let area = areaFor threats atlas name task
+
+        match Atlas.firstStep atlas name area, Atlas.firstStepIgnoringTraffic atlas name area with
         | Some priced, Some blind -> priced <> blind
         | _ -> false
 
@@ -1720,6 +1940,7 @@ let resolve
 let matchCreeps
     (snapshot: Snapshot)
     atlas
+    (threats: Threats)
     (tasks: Task list)
     (assignments: Assignments)
     (verbose: Set<string>)
@@ -1839,7 +2060,12 @@ let matchCreeps
             | Some creep ->
                 match Map.tryFind tid byId with
                 | None -> release ReleaseReason.TaskGone
-                | Some task when not (applicable atlas creep task) ->
+                // The raid's release stands ahead of the ordinary one: a
+                // Task whose whole Work Area is in a Reach is gone for this
+                // creep however well its body fits (ADR 0033).
+                | Some task when threatened threats atlas creep task ->
+                    release ReleaseReason.Threatened
+                | Some task when not (applicable threats atlas creep task) ->
                     release ReleaseReason.Inapplicable
                 | Some task ->
                     // The walk is bound one gate before it is spent, exactly
@@ -1850,7 +2076,7 @@ let matchCreeps
                     // Reachability is still travel cost's answer — the two
                     // floods reach the same tiles, and ADR 0002's release
                     // has no other price.
-                    let cost = Atlas.travelCost atlas creep.Name task
+                    let cost = travelCostOf threats atlas creep.Name task
                     let arrival = lazy (Atlas.walkTicks atlas creep.Name task)
 
                     if
@@ -1884,10 +2110,12 @@ let matchCreeps
     let judge acc (creep: CreepInfo) task =
         let tid = taskId task
 
-        if not (applicable atlas creep task) then
+        if threatened threats atlas creep task then
+            Candidate.Rejected(tid, RejectReason.Threatened)
+        elif not (applicable threats atlas creep task) then
             Candidate.Rejected(tid, RejectReason.Inapplicable)
         else
-            let cost = Atlas.travelCost atlas creep.Name task
+            let cost = travelCostOf threats atlas creep.Name task
             let arrival = lazy (Atlas.walkTicks atlas creep.Name task)
 
             if not (hasCapacity creep acc task arrival) then
@@ -2076,13 +2304,17 @@ let decide
                 Walks = walks
             }
 
+    // The tick's Threats, derived once off the Snapshot's hostiles and the
+    // rampart census, and shared by every reader of them (ADR 0033).
+    let threats = threatsOf snapshot atlas
+
     let defenseIntents = planSafeMode snapshot atlas @ planFire snapshot atlas
-    let spawnIntents = planSpawns snapshot atlas plan.HaulerQuota
+    let spawnIntents = planSpawns snapshot atlas threats plan.HaulerQuota
     let pickupIntents = planPickups snapshot atlas
-    let tasks = planTasks snapshot
-    let next, verdicts = matchCreeps snapshot atlas tasks assignments verbose
+    let tasks = planTasks snapshot threats
+    let next, verdicts = matchCreeps snapshot atlas threats tasks assignments verbose
     let assigned = assignedTasks tasks next
-    let moveIntents, moveVerdicts = resolve snapshot atlas assigned verbose
+    let moveIntents, moveVerdicts = resolve snapshot atlas threats assigned verbose
 
     {
         Intents =
@@ -2090,7 +2322,7 @@ let decide
             @ spawnIntents
             @ plan.SiteIntents
             @ pickupIntents
-            @ emit snapshot atlas assigned
+            @ emit snapshot atlas threats assigned
             @ moveIntents
         Assignments = next
         Memo = plan

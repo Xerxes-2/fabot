@@ -671,6 +671,23 @@ let pendingStorageTiles (atlas: Atlas) : Set<Pos> =
 let rampartTiles (atlas: Atlas) : Set<Pos> =
     tilesOfKind atlas (Structure BuiltKind.Rampart)
 
+/// Tiles holding a standing rampart of ours — the same census asked with
+/// ownership on (ADR 0033). The projection carries hits for an ownable
+/// kind only when it is ours (ADR 0034), so the hits are what tell our
+/// rampart from one somebody else left standing in a room we took: cover
+/// for our creeps is cover we own, while the covering census above, which
+/// only asks whether a tile can take another rampart, is right to ignore
+/// the question.
+let ourRampartTiles (atlas: Atlas) : Set<Pos> =
+    atlas.Spatial.TargetKinds
+    |> Map.toList
+    |> List.choose (fun (id, kind) ->
+        if kind = Structure BuiltKind.Rampart && Map.containsKey id atlas.Spatial.Hits then
+            Map.tryFind id atlas.Spatial.TargetPositions
+        else
+            None)
+    |> Set.ofList
+
 /// Tiles holding a rampart construction site — the census's pending half,
 /// exactly as a road's is: a site standing there is not yet cover, but its
 /// tile needs no second site.
@@ -700,27 +717,41 @@ let isSwamp (atlas: Atlas) (tile: Pos) : bool =
 let adjacentWalkable (atlas: Atlas) (pos: Pos) : Pos list =
     neighbours pos |> List.filter (fun tile -> (stepCost atlas.Spatial tile).IsSome)
 
-/// Chebyshev range at which a Task's action reaches its target (Screeps:
-/// harvest, withdraw and transfer act at range 1; build, repair and
-/// upgrade at range 3).
-let private actionRange =
-    function
-    | Harvest _
-    | Withdraw _
-    | Refill _ -> 1
-    | Build _
-    | Repair _
-    | Upgrade _ -> 3
+/// Every tile of the room a creep may stand on — `adjacentWalkable`'s
+/// answer over the whole projection, read off the weight grid rather than
+/// a tile at a time: the same rules, held together the way the grid itself
+/// is (`stepCost`, and the road and obstacle precedence `ofSnapshot`
+/// spells out). The room-wide half nothing wanted until a Task's Work
+/// Area was the room itself (ADR 0033).
+let walkableTiles (atlas: Atlas) : Set<Pos> =
+    Set.ofList
+        [
+            for index in 0 .. tileCount - 1 do
+                if at index atlas.Weights >= 0 then
+                    posAt index
+        ]
 
-/// Id of the game object a Task acts on.
-let private targetOf =
+/// The tile a creep stands on; None for a creep the projection does not
+/// place. What a judgement about where a creep *is* reads — as
+/// `positionOf` is the same question about a target.
+let creepTile (atlas: Atlas) (creep: string) : Pos option =
+    Map.tryFind creep atlas.Spatial.CreepPositions
+
+/// What a Task acts on, and the Chebyshev range its action reaches from
+/// (Screeps: harvest, withdraw and transfer act at range 1; build, repair
+/// and upgrade at range 3) — the one pair every geometry query starts
+/// from. None for a Task that acts on nothing: Flee has no target and no
+/// action (ADR 0033), so no area of the projection's own is derived for
+/// it and no action is ever permitted.
+let private actionOn =
     function
     | Harvest id
     | Withdraw id
-    | Refill id
+    | Refill id -> Some(id, 1)
     | Build id
     | Repair id
-    | Upgrade id -> id
+    | Upgrade id -> Some(id, 3)
+    | Flee -> None
 
 /// Seat tiles of a placed source: walkable (non-wall) neighbours of its
 /// tile, by terrain alone — structures and creeps do not consume Seats
@@ -750,21 +781,28 @@ let seats (atlas: Atlas) (sourceId: string) : int option =
     Map.tryFind sourceId atlas.Spatial.TargetPositions
     |> Option.map (seatTiles atlas.Spatial >> Set.count)
 
+/// The Work Area geometry behind `workArea`: the passable tiles within
+/// the action's range of its target. Empty for a Task the projection
+/// cannot place a target for — and for Flee, which has no target at all:
+/// the tiles outside every Reach are a colony fact the decision layer
+/// derives and hands its mover, never geometry the projection carries
+/// (ADR 0033).
 let private buildWorkArea (atlas: Atlas) (task: Task) : Set<Pos> =
-    match Map.tryFind (targetOf task) atlas.Spatial.TargetPositions with
+    match actionOn task with
     | None -> Set.empty
-    | Some target ->
-        let r = actionRange task
+    | Some(targetId, r) ->
+        match Map.tryFind targetId atlas.Spatial.TargetPositions with
+        | None -> Set.empty
+        | Some target ->
+            Set.ofList
+                [
+                    for x in target.X - r .. target.X + r do
+                        for y in target.Y - r .. target.Y + r do
+                            let tile = { X = x; Y = y }
 
-        Set.ofList
-            [
-                for x in target.X - r .. target.X + r do
-                    for y in target.Y - r .. target.Y + r do
-                        let tile = { X = x; Y = y }
-
-                        if (stepCost atlas.Spatial tile).IsSome then
-                            tile
-            ]
+                            if (stepCost atlas.Spatial tile).IsSome then
+                                tile
+                ]
 
 /// Build-once-per-tick over one of the Atlas's mutable tables: the shape
 /// every key set the Snapshot does not carry is memoised through — Work
@@ -924,21 +962,27 @@ let catchesOverflow (atlas: Atlas) (creep: string) (sourceId: string) : bool =
         Set.contains pos (containerTiles atlas)
         && Set.contains pos (seatTilesOf atlas sourceId)
 
-/// The cheapest path from a creep to its Task's Work Area under one
-/// pricing — the shape travel cost and the walk share, so the two can
-/// disagree on what a step costs and on nothing else (ADR 0029). Its
-/// totality contract is ADR 0004's and is documented on both wrappers.
-let private pricedPath (atlas: Atlas) (pricing: Pricing) (creep: string) (task: Task) : int option =
-    match
-        Map.tryFind creep atlas.Spatial.CreepPositions,
-        Map.tryFind (targetOf task) atlas.Spatial.TargetPositions
-    with
-    | None, _
-    | _, None -> Some 0
-    | Some pos, Some _ ->
-        let area = workAreaFor atlas creep task
-
-        if Set.contains pos area then
+/// The cheapest path from a creep to a set of tiles under one pricing —
+/// the shape travel cost and the walk share, so the two can disagree on
+/// what a step costs and on nothing else (ADR 0029). The tiles are the
+/// caller's, not a Task's: what a creep may stand on this tick is the
+/// decision layer's judgement, which takes a Reach out of a Work Area and
+/// gives Flee an area of its own (ADR 0033). A creep the projection
+/// cannot place prices at 0; an empty or unreachable set has no price at
+/// all. Its totality contract is ADR 0004's and is documented on every
+/// wrapper.
+let private pricedPathTo
+    (atlas: Atlas)
+    (pricing: Pricing)
+    (creep: string)
+    (area: Set<Pos>)
+    : int option =
+    match Map.tryFind creep atlas.Spatial.CreepPositions with
+    | None -> Some 0
+    | Some pos ->
+        if Set.isEmpty area then
+            None
+        elif Set.contains pos area then
             Some 0
         else
             let dist, _ = flood atlas pricing creep pos
@@ -951,6 +995,15 @@ let private pricedPath (atlas: Atlas) (pricing: Pricing) (creep: string) (task: 
             |> function
                 | [] -> None
                 | costs -> Some(List.min costs)
+
+/// The same path priced for a Task: over the Task's own Work Area, and
+/// with the one escape a bare tile set cannot carry — a target the
+/// projection does not place prices at 0 rather than reading as
+/// unreachable geometry (ADR 0004).
+let private pricedPath (atlas: Atlas) (pricing: Pricing) (creep: string) (task: Task) : int option =
+    match actionOn task with
+    | Some(targetId, _) when (Map.tryFind targetId atlas.Spatial.TargetPositions).IsNone -> Some 0
+    | _ -> pricedPathTo atlas pricing creep (workAreaFor atlas creep task)
 
 /// Travel cost of a Task for a creep (ADR 0002, revised by ADRs 0006 and
 /// 0010): the cost units — half-ticks — the creep's body needs along a
@@ -966,6 +1019,16 @@ let private pricedPath (atlas: Atlas) (pricing: Pricing) (creep: string) (task: 
 /// is the walk's job, and halving this number is not the walk.
 let travelCost (atlas: Atlas) (creep: string) (task: Task) : int option =
     pricedPath atlas TravelCost creep task
+
+/// Travel cost to an explicit set of tiles: the same ranking price over
+/// the area the caller hands in rather than the one the Task derives —
+/// what prices a Task over the tiles the Reach left it, and Flee, whose
+/// Work Area is the safe set and no target's surroundings (ADR 0033). An
+/// unplaced creep prices at 0 as it does for a Task; there is no target,
+/// so there is no unplaced-target escape — an empty or unreachable set is
+/// unreachable, which is the answer a Task with nowhere to stand gets too.
+let travelCostWithin (atlas: Atlas) (creep: string) (area: Set<Pos>) : int option =
+    pricedPathTo atlas TravelCost creep area
 
 /// The creep's walk to a Task's Work Area (ADR 0029): the whole ticks its
 /// body needs along a cheapest path, every step floored at one tick and
@@ -990,18 +1053,26 @@ let walkTicks (atlas: Atlas) (creep: string) (task: Task) : int option =
 /// projection cannot place never blocks the action, and neither does a
 /// creep standing on a tile the projection calls impassable — an
 /// obstacle-type construction site dropped under a standing creep, which
-/// the engine lets stay — judged by range as before.
-let mayAct (atlas: Atlas) (creep: string) (task: Task) : bool =
-    match
-        Map.tryFind creep atlas.Spatial.CreepPositions,
-        Map.tryFind (targetOf task) atlas.Spatial.TargetPositions
-    with
-    | Some creepPos, Some targetPos ->
-        if (stepCost atlas.Spatial creepPos).IsNone then
-            range creepPos targetPos <= actionRange task
-        else
-            Set.contains creepPos (workAreaFor atlas creep task)
-    | _ -> true
+/// the engine lets stay — judged by range as before. The standing tiles
+/// are the caller's, as the mover's and the price's are (ADR 0033): a
+/// creep acts from the area it was actually judged applicable over, so a
+/// tile the Reach took is no more a tile to work from than to walk to.
+/// One case is the Atlas's own and answers before the geometry: a Task
+/// that acts on nothing never acts — Flee is movement and nothing else.
+let mayAct (atlas: Atlas) (creep: string) (task: Task) (area: Set<Pos>) : bool =
+    match actionOn task with
+    | None -> false
+    | Some(targetId, actionRange) ->
+        match
+            Map.tryFind creep atlas.Spatial.CreepPositions,
+            Map.tryFind targetId atlas.Spatial.TargetPositions
+        with
+        | Some creepPos, Some targetPos ->
+            if (stepCost atlas.Spatial creepPos).IsNone then
+                range creepPos targetPos <= actionRange
+            else
+                Set.contains creepPos area
+        | _ -> true
 
 /// First step toward a Task's Work Area over the given flood, sharing
 /// firstStep's whole contract — that doc governs both public wrappers.
@@ -1009,7 +1080,7 @@ let private firstStepVia
     (atlas: Atlas)
     (floodOf: Pos -> int[] * int[])
     (creep: string)
-    (task: Task)
+    (goals: Set<Pos>)
     : Pos option =
     let rec firstStepOf index startIndex (parents: int[]) =
         let parent = parents.[index]
@@ -1022,8 +1093,6 @@ let private firstStepVia
     match Map.tryFind creep atlas.Spatial.CreepPositions with
     | None -> None
     | Some pos ->
-        let goals = workAreaFor atlas creep task
-
         if Set.isEmpty goals || Set.contains pos goals then
             None
         else
@@ -1040,14 +1109,17 @@ let private firstStepVia
                     let _, goal = List.min reachable
                     Some(posAt (firstStepOf (indexOf goal) (indexOf pos) parents))
 
-/// The first step of a cheapest path from a creep to its Task's Work Area,
+/// The first step of a cheapest path from a creep to a set of goal tiles,
 /// priced in the creep's own cost — a slow body may detour differently
-/// than a fast one over the same ground. None when there is nothing
-/// derivable: the creep is unplaced, already inside the area, or the area
-/// is empty or unreachable. Of equally cheap goals the lowest (cost, tile)
-/// wins, matching the flood's tie-breaking.
-let firstStep (atlas: Atlas) (creep: string) (task: Task) : Pos option =
-    firstStepVia atlas (flood atlas TravelCost creep) creep task
+/// than a fast one over the same ground. The goals are the caller's: a
+/// mover is handed the tiles it may stand on this tick, which is its Work
+/// Area less the Reach and, for Flee, the safe set (ADR 0033) — the
+/// Atlas prices the walk and judges none of that. None when there is
+/// nothing derivable: the creep is unplaced, already inside the goals, or
+/// they are empty or unreachable. Of equally cheap goals the lowest
+/// (cost, tile) wins, matching the flood's tie-breaking.
+let firstStep (atlas: Atlas) (creep: string) (goals: Set<Pos>) : Pos option =
+    firstStepVia atlas (flood atlas TravelCost creep) creep goals
 
 /// The first step the same body would take were no tile occupied — the
 /// traffic-blind route, otherwise priced exactly like firstStep. The
@@ -1061,8 +1133,8 @@ let firstStep (atlas: Atlas) (creep: string) (task: Task) : Pos option =
 /// ticks. ADR 0018's decision stands regardless, being about log noise:
 /// the Resolver still asks only for creeps on the verbose list, and the
 /// entry is lazy, so a tick that watches nobody floods for nobody.
-let firstStepIgnoringTraffic (atlas: Atlas) (creep: string) (task: Task) : Pos option =
-    firstStepVia atlas (flood atlas Baseline creep) creep task
+let firstStepIgnoringTraffic (atlas: Atlas) (creep: string) (goals: Set<Pos>) : Pos option =
+    firstStepVia atlas (flood atlas Baseline creep) creep goals
 
 /// Round-trip haul cost in whole ticks for a body between a container's
 /// tile and a sink structure's tile (ADR 0012): the leg out prices every

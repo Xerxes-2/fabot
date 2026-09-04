@@ -263,6 +263,10 @@ type Task =
     | Build of siteId: string
     | Repair of structureId: string
     | Upgrade of controllerId: string
+    /// Getting out of a Threat's Reach (ADR 0033). The one Task with no
+    /// target and no action: its Work Area is the tiles no Threat can
+    /// hurt, and the Emitter issues movement for it and nothing else.
+    | Flee
 
 /// What kind of structure a placement Intent asks for.
 type StructureKind =
@@ -637,10 +641,14 @@ let matchFactorOf =
             MatchFactor.PoolOrder
         ]
 
-/// Why a remembered assignment was released: its Task left the pool, the
-/// creep can no longer usefully work it (body parts or energy state), the
-/// Task's worker cap was already full, its Work Area is unreachable or
-/// empty (ADR 0002), or its time has not come — the creep's walk no
+/// Why a remembered assignment was released: its Task left the pool, a
+/// Threat's Reach has taken the whole of its Work Area (ADR 0033) — the
+/// release a raid writes to the transition log, and the reason asked
+/// first, because a Task with nowhere to stand is gone for this creep
+/// however well its body fits — the creep can no longer usefully work it
+/// (body parts or energy state), the Task's worker cap was already full,
+/// its Work Area is unreachable or empty (ADR 0002), or its time has not
+/// come — the creep's walk no
 /// longer covers a drained source's restock wait (ADR 0025), which is how
 /// a creep beside a dry rock leaves it now that the Task stays pooled.
 /// That last reason carries the two numbers the gate compared, the walk
@@ -653,6 +661,7 @@ type ReleaseReason =
     | Inapplicable
     | OverCapacity
     | Unreachable
+    | Threatened
     | TooEarly of walk: int * wait: int
 
 /// The wire spelling of each ReleaseReason, as `matchFactorName` is
@@ -663,6 +672,7 @@ let releaseReasonName =
     | ReleaseReason.Inapplicable -> "inapplicable"
     | ReleaseReason.OverCapacity -> "over-capacity"
     | ReleaseReason.Unreachable -> "unreachable"
+    | ReleaseReason.Threatened -> "threatened"
     | ReleaseReason.TooEarly _ -> "too-early"
 
 /// The numbers a ReleaseReason carries beside its wire name, or None for
@@ -675,7 +685,8 @@ let releaseReasonNumbers =
     | ReleaseReason.TaskGone
     | ReleaseReason.Inapplicable
     | ReleaseReason.OverCapacity
-    | ReleaseReason.Unreachable -> None
+    | ReleaseReason.Unreachable
+    | ReleaseReason.Threatened -> None
 
 /// The ReleaseReason a wire name spells for the numbers the wire carried
 /// beside it, or None for a name this vocabulary does not have — and for
@@ -689,6 +700,7 @@ let releaseReasonOf =
             (fun _ -> Some ReleaseReason.Inapplicable)
             (fun _ -> Some ReleaseReason.OverCapacity)
             (fun _ -> Some ReleaseReason.Unreachable)
+            (fun _ -> Some ReleaseReason.Threatened)
             Option.map ReleaseReason.TooEarly
         ]
 
@@ -731,9 +743,12 @@ let idleReasonOf =
         ]
 
 /// Why a Task in the pool was rejected for a creep, in a verbose scoring:
-/// it did not fit the creep's body or energy state, its worker cap was
+/// a Threat's Reach has taken the whole of its Work Area (ADR 0033), it
+/// did not fit the creep's body or energy state, its worker cap was
 /// already full, its Work Area is unreachable, or its time has not come —
-/// the matching gates, in the order they are tried. The last is its own
+/// the matching gates, in the order they are tried. The Reach is asked
+/// ahead of the body because it is not a fact about the creep at all: an
+/// area nobody may stand in is no Task for anyone. The last is its own
 /// reason rather than Inapplicable (ADR 0025): the body and the energy
 /// state fit, only the arrival doesn't, and the transition log would lie.
 /// It carries the walk and the wait the gate compared (#88) — the scored
@@ -744,6 +759,7 @@ type RejectReason =
     | Inapplicable
     | CapacityFull
     | Unreachable
+    | Threatened
     | TooEarly of walk: int * wait: int
 
 /// The wire spelling of each RejectReason, as `matchFactorName` is
@@ -753,6 +769,7 @@ let rejectReasonName =
     | RejectReason.Inapplicable -> "inapplicable"
     | RejectReason.CapacityFull -> "capacity-full"
     | RejectReason.Unreachable -> "unreachable"
+    | RejectReason.Threatened -> "threatened"
     | RejectReason.TooEarly _ -> "too-early"
 
 /// The numbers a RejectReason carries, as `releaseReasonNumbers` is
@@ -762,7 +779,8 @@ let rejectReasonNumbers =
     | RejectReason.TooEarly(walk, wait) -> Some(walk, wait)
     | RejectReason.Inapplicable
     | RejectReason.CapacityFull
-    | RejectReason.Unreachable -> None
+    | RejectReason.Unreachable
+    | RejectReason.Threatened -> None
 
 /// The RejectReason a wire name spells for the numbers the wire carried
 /// beside it, as `releaseReasonOf` is ReleaseReason's.
@@ -774,6 +792,7 @@ let rejectReasonOf =
             (fun _ -> Some RejectReason.Inapplicable)
             (fun _ -> Some RejectReason.CapacityFull)
             (fun _ -> Some RejectReason.Unreachable)
+            (fun _ -> Some RejectReason.Threatened)
             Option.map RejectReason.TooEarly
         ]
 
