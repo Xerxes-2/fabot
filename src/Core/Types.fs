@@ -572,13 +572,37 @@ type FootingKind =
 /// guarantee that can degrade in silence is not one.
 type UnservedFooting = { Target: Pos; Kind: FootingKind }
 
+/// A footing target the Layout served (#106): the tile it reserved, beside
+/// the target that tile is held for and that target's kind. The served
+/// counterpart of `UnservedFooting`, which names a target and a kind and
+/// no tile because there was none.
+///
+/// The pairing rather than the bare set of tiles, because the set is a
+/// one-line projection of the pairing and the reverse is a search: a
+/// reservation the bot never emits can otherwise only be cross-checked by
+/// a second derivation (ADR 0035), and handing back tiles alone would
+/// leave that derivation to be written by hand. The fold holds the target
+/// and the kind in scope at the instant it picks the tile, so carrying
+/// them costs nothing.
+///
+/// Two records rather than one whose tile is optional: only the unserved
+/// half crosses the Memory boundary, as the layout record (ADR 0035), and
+/// an optional tile would make every reader of either half ask which case
+/// it holds — the partition is what the two names say.
+type ServedFooting =
+    {
+        Target: Pos
+        Kind: FootingKind
+        Tile: Pos
+    }
+
 /// The census-keyed plan memo (ADR 0017): the census signature beside the
-/// plans derived from exactly that census — the Layout's site Intents and
-/// the footings it could not serve, the hauler quota, and the spawn walks
-/// behind the leads (ADR 0032). Held by the host in heap across ticks,
-/// never written to Memory: a global reset discards it and the next tick
-/// recomputes from scratch. Same census, same plan, so reuse never
-/// changes behaviour.
+/// plans derived from exactly that census — the Layout's site Intents,
+/// the footings it placed and the ones it could not, the hauler quota,
+/// and the spawn walks behind the leads (ADR 0032). Held by the host in
+/// heap across ticks, never written to Memory: a global reset discards it
+/// and the next tick recomputes from scratch. Same census, same plan, so
+/// reuse never changes behaviour.
 type PlanMemo =
     {
         Signature: string
@@ -589,6 +613,15 @@ type PlanMemo =
         /// App writes it every tick, because a channel that says nothing
         /// when nothing is lost cannot be told from one that is not there.
         UnservedFootings: UnservedFooting list
+        /// The footings this plan placed (#106), each naming its target,
+        /// that target's kind and the tile reserved for it — derived from
+        /// the same census as the site Intents and recomputed with them.
+        /// No Intent ever names a link (ADR 0022) and this never crosses
+        /// the Memory boundary, so the heap is the only place the tiles
+        /// the fold reserved are observable at all: the whole-room
+        /// invariant that a footing is off every trunk, off every target
+        /// and off every other footing reads them here (ADR 0036).
+        ServedFootings: ServedFooting list
         HaulerQuota: int
         /// The walks flooded under this signature, filled through the tick
         /// by the Atlas the table was handed to. Dropped whole when the

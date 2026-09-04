@@ -1627,6 +1627,57 @@ let linkFootingTests =
                 Expect.isEmpty memo.UnservedFootings "both footings stand; nothing is lost"
             }
 
+            test "a served target names the tile the fold reserved for it" {
+                // The other half of the record (#106): the fold holds the
+                // target, its kind and the tile in scope at the instant it
+                // reserves one, and hands all three back. A bare set of
+                // tiles would leave the target-to-tile pairing to be
+                // rederived by hand — the second derivation the record
+                // exists to remove (ADR 0035).
+                let { Memo = memo } = decide (atLevel 4 footingRoom) Map.empty Set.empty None
+
+                Expect.equal
+                    memo.ServedFootings
+                    [
+                        {
+                            Target = { X = 24; Y = 23 }
+                            Kind = FootingKind.SourceContainer
+                            Tile = { X = 23; Y = 23 }
+                        }
+                        {
+                            Target = { X = 24; Y = 24 }
+                            Kind = FootingKind.Storage
+                            Tile = { X = 24; Y = 25 }
+                        }
+                    ]
+                    "both targets, each beside the tile held for its link"
+
+                Expect.equal
+                    (memo.ServedFootings |> List.map (fun footing -> footing.Tile) |> Set.ofList)
+                    footingTiles
+                    "and the tiles are the room's own footings, which no site may take"
+            }
+
+            test "the sealed room's four targets split three served to one unserved" {
+                // `sealedPocketColony`'s four targets split three to one:
+                // the sealed source container is the loss (#77) and the
+                // other three stand. Neither list is the whole story alone
+                // — the shortfall says which guarantee went and the served
+                // record says which tiles the rest hold — and no target is
+                // in both, because the fold visits each exactly once.
+                let { Memo = memo } = decide (sealedPocketColony 4) Map.empty Set.empty None
+
+                let served = memo.ServedFootings |> List.map (fun footing -> footing.Target)
+                let unserved = memo.UnservedFootings |> List.map (fun footing -> footing.Target)
+
+                Expect.hasLength served 3 "the three targets the sealed room can still serve"
+                Expect.hasLength unserved 1 "and the one it cannot"
+
+                Expect.isEmpty
+                    (served |> List.filter (fun target -> List.contains target unserved))
+                    "no target is both served and unserved"
+            }
+
             test "a target with no candidate is recorded by tile and kind, never dropped" {
                 // W12S28's `10,43`, synthesised: the pocket source's
                 // container pick has wall on five sides, its own source on
@@ -2125,6 +2176,7 @@ let sentinelMemo snapshot =
         Signature = censusSignature snapshot
         SiteIntents = [ PlaceConstructionSite("W1N1", { X = 1; Y = 1 }, Tower) ]
         UnservedFootings = []
+        ServedFootings = []
         HaulerQuota = 0
         Walks = WalkTable()
     }
@@ -2179,14 +2231,15 @@ let planMemoTests =
             }
 
             test
-                "the unserved footings are census-derived: recalled with the plan, recomputed with it" {
-                // #77's record joins the site Intents and the hauler quota
-                // under ADR 0017's standing invitation — same census, same
-                // shortfall — so it is not rederived per tick. The sentinel
-                // says so in both directions: a memo whose signature holds
-                // hands its own empty record back for a room that has in
-                // fact lost a footing, and a stale one recomputes to the
-                // loss the room really has.
+                "the footing records are census-derived: recalled with the plan, recomputed with it" {
+                // #77's record and #106's join the site Intents and the
+                // hauler quota under ADR 0017's standing invitation — same
+                // census, same footings — so neither is rederived per tick.
+                // The sentinel says so in both directions: a memo whose
+                // signature holds hands its own empty records back for a
+                // room that has in fact lost a footing and reserved three,
+                // and a stale one recomputes to the footings the room
+                // really has.
                 let colony = sealedPocketColony 4
 
                 let lost =
@@ -2203,7 +2256,12 @@ let planMemoTests =
                     matching.Memo.UnservedFootings
                     "a matching signature reuses the memo's record; nothing recomputes"
 
+                Expect.isEmpty
+                    matching.Memo.ServedFootings
+                    "and reuses the served record with it, for a room that reserved three"
+
                 let stale = decide colony Map.empty Set.empty (Some(sentinelMemo (trunkColony 2)))
+                let memoless = decide colony Map.empty Set.empty None
 
                 Expect.equal
                     stale.Memo.UnservedFootings
@@ -2211,9 +2269,19 @@ let planMemoTests =
                     "a moved signature recomputes the record with the rest of the plan"
 
                 Expect.equal
-                    (decide colony Map.empty Set.empty None).Memo.UnservedFootings
+                    memoless.Memo.UnservedFootings
                     lost
                     "and a memoless tick derives the same loss"
+
+                Expect.hasLength
+                    stale.Memo.ServedFootings
+                    3
+                    "the served record is recomputed too, not left at the stale memo's empty"
+
+                Expect.equal
+                    stale.Memo.ServedFootings
+                    memoless.Memo.ServedFootings
+                    "tile for tile what a memoless tick reserves"
             }
 
             test "a level-up invalidates the memo" {

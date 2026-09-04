@@ -254,6 +254,12 @@ type private Case =
         /// The sites the Layout asks for this tick.
         Placed: (Pos * StructureKind) list
         Unserved: UnservedFooting list
+        /// The footings the Layout placed, each naming its target, that
+        /// target's kind and the tile reserved for it (#106). Read off the
+        /// plan this case already computed, like `Unserved`: plans per
+        /// case is the expensive axis of this sweep, and an invariant that
+        /// re-derived one to see the tiles would double it.
+        Served: ServedFooting list
         /// The container sites a tick on, with the road plan standing. A
         /// source container is planned onto the Seat nearest its trunk,
         /// which in practice is the tile the trunk leaves the source by,
@@ -310,6 +316,7 @@ let private sweep =
                             Atlas = atlas
                             Placed = placed
                             Unserved = first.Memo.UnservedFootings
+                            Served = first.Memo.ServedFootings
                             Containers =
                                 decide withRoads Map.empty Set.empty None
                                 |> fun decision ->
@@ -317,6 +324,7 @@ let private sweep =
                             RecallsIdentically =
                                 recalled.Intents = first.Intents
                                 && recalled.Memo.UnservedFootings = first.Memo.UnservedFootings
+                                && recalled.Memo.ServedFootings = first.Memo.ServedFootings
                             ClusterAtRcl2 = clusteredTiles (placementsOf early.Intents)
                         }
         ]
@@ -422,6 +430,71 @@ let invariantTests =
                 Expect.isEmpty
                     (violations miscounts)
                     "a room whose footing targets its sources do not explain"
+            }
+
+            test "every reserved footing is off the trunks, the targets and the others" {
+                // ADR 0036's fourth invariant, unassertable when that ADR
+                // was written and assertable now that the Layout records
+                // the tiles it reserved (#106). The search rule in full:
+                // range 1 of its target, off every tile the Layout paves,
+                // off the footings' own targets, off every other footing
+                // (ADR 0022, ADR 0027). Real terrain is what makes this
+                // worth asserting — a footing is chosen from whatever
+                // handful of tiles a target's ring leaves, and hand-built
+                // fixtures can only pose the collisions their author
+                // imagined.
+                let breaksTheRule (case: Case) =
+                    // The road plan the fold filtered on, read off the
+                    // sites: a swept colony starts with no road standing
+                    // and no road pending, so the gap the first tick asks
+                    // for is the whole plan rather than the remainder of
+                    // one.
+                    let paved = tilesOfKind Road case.Placed |> Set.ofList
+
+                    let targets =
+                        (case.Served |> List.map (fun footing -> footing.Target))
+                        @ (case.Unserved |> List.map (fun footing -> footing.Target))
+                        |> Set.ofList
+
+                    let tiles = case.Served |> List.map (fun footing -> footing.Tile)
+
+                    List.length (List.distinct tiles) <> List.length tiles
+                    || case.Served
+                       |> List.exists (fun footing ->
+                           range footing.Tile footing.Target <> 1
+                           || Set.contains footing.Tile paved
+                           || Set.contains footing.Tile targets)
+
+                Expect.isEmpty
+                    (violations breaksTheRule)
+                    "a room reserving a footing on a road, on a target or on another footing"
+            }
+
+            test "served and unserved footings partition the room's targets" {
+                // The two records are one record read two ways, so their
+                // counts sum to the targets the room actually constructs —
+                // one per planned container plus the Storage (ADR 0022,
+                // ADR 0027) — and no target is in both. Counted off the
+                // room's own arithmetic rather than off sources + 2, which
+                // #104's swamp pocket is a standing counterexample to. The
+                // containers are counted a tick on, where the road plan no
+                // longer defers them, and the Storage off this tick's
+                // sites: the two plans name the same tiles, and no
+                // container pick is ever a Storage pick — one is working
+                // ground and the ordering never offers the other (ADR
+                // 0022) — so nothing collapses between the counts.
+                let miscounts (case: Case) =
+                    let targets =
+                        (case.Served |> List.map (fun footing -> footing.Target))
+                        @ (case.Unserved |> List.map (fun footing -> footing.Target))
+
+                    List.length targets
+                    <> List.length case.Containers + List.length (tilesOfKind Storage case.Placed)
+                    || List.length (List.distinct targets) <> List.length targets
+
+                Expect.isEmpty
+                    (violations miscounts)
+                    "a room whose two footing records do not partition its targets"
             }
 
             test "the clustered ordering never takes working ground" {

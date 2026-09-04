@@ -917,13 +917,20 @@ let private horizonLevel = 4
 /// rampart covers every standing Keep structure and every standing Post
 /// container (ADR 0034), from the level the engine allows one, because a
 /// rampart is no footprint and takes no tile from anything.
-/// Returned beside the Intents: the footing targets the fold could not
-/// serve (#77). A target with no candidate reserves nothing, and the
-/// guarantee of ADR 0022 and ADR 0027 — one footing per target — would
-/// otherwise degrade with nothing anywhere to say so. Not an Intent,
-/// because there is nothing to place; not a Verdict, because a footing has
-/// no creep (ADR 0035).
-let private planLayout (snapshot: Snapshot) atlas : Intent list * UnservedFooting list =
+/// Returned beside the Intents: the footings, served and unserved. A
+/// target with no candidate reserves nothing, and the guarantee of ADR
+/// 0022 and ADR 0027 — one footing per target — would otherwise degrade
+/// with nothing anywhere to say so (#77). Not an Intent, because there is
+/// nothing to place; not a Verdict, because a footing has no creep (ADR
+/// 0035). The tiles it did reserve ride out for the same reason read the
+/// other way (#106): a link is placed by no Intent, so a footing the fold
+/// dropped from the accumulator would be a reservation no reader could
+/// see — and the rule it was chosen by, off the trunks and off every
+/// target and every other footing, could be asserted nowhere (ADR 0036).
+let private planLayout
+    (snapshot: Snapshot)
+    atlas
+    : Intent list * ServedFooting list * UnservedFooting list =
     let anchor = snapshot.Spawns |> List.tryPick (fun s -> Atlas.positionOf atlas s.Id)
 
     match Atlas.roomName atlas, anchor, snapshot.Controller with
@@ -1133,14 +1140,20 @@ let private planLayout (snapshot: Snapshot) atlas : Intent list * UnservedFootin
         // without leaving their tile.
         let footingCandidates = Set.union (Set.ofList buildable) (Atlas.linkTiles atlas)
 
-        // A target with no candidate at all leaves the accumulator alone
-        // and is recorded (#77): the fold reserves what it can, exactly as
+        // A target with no candidate at all leaves the tiles alone and is
+        // recorded (#77): the fold reserves what it can, exactly as
         // before, and the shortfall rides out beside the plan instead of
-        // falling through in silence. Accumulated head-first and reversed
-        // once, so the record reads in the targets' own order.
-        let footings, unservedFootings =
-            ((Set.empty, []), footingTargets)
-            ||> List.fold (fun (taken, unserved) (target, kind) ->
+        // falling through in silence. What it does reserve rides out too
+        // (#106), each tile beside the target and the kind it was
+        // reserved for — both are in scope here, and nowhere else is,
+        // since no Intent ever names a link. Accumulated head-first and
+        // reversed once, so both records read in the targets' own order.
+        // The bare set of reserved tiles rides the accumulator beside the
+        // served entries because the cluster ordering below needs exactly
+        // that, and the filter here reads it per candidate tile.
+        let footingTiles, servedFootings, unservedFootings =
+            ((Set.empty, [], []), footingTargets)
+            ||> List.fold (fun (taken, served, unserved) (target, kind) ->
                 footingCandidates
                 |> Set.filter (fun tile ->
                     range tile target = 1
@@ -1149,11 +1162,19 @@ let private planLayout (snapshot: Snapshot) atlas : Intent list * UnservedFootin
                     && not (Set.contains tile taken))
                 |> Set.toList
                 |> function
-                    | [] -> taken, { Target = target; Kind = kind } :: unserved
+                    | [] -> taken, served, { Target = target; Kind = kind } :: unserved
                     | candidates ->
                         candidates
                         |> List.minBy (fun tile -> range tile spawnPos, tile.X, tile.Y)
-                        |> fun tile -> Set.add tile taken, unserved)
+                        |> fun tile ->
+                            Set.add tile taken,
+                            {
+                                Target = target
+                                Kind = kind
+                                Tile = tile
+                            }
+                            :: served,
+                            unserved)
 
         // The tower and the extensions take the ordering again with the
         // footings held out — a footing outranks both — and the Storage's
@@ -1164,7 +1185,7 @@ let private planLayout (snapshot: Snapshot) atlas : Intent list * UnservedFootin
         let clusterPicks =
             ordering
             |> List.filter (fun tile ->
-                not (List.contains tile storagePick) && not (Set.contains tile footings))
+                not (List.contains tile storagePick) && not (Set.contains tile footingTiles))
             |> List.truncate (towerSlots + extensionSlots)
 
         let towerTiles, extensionTiles =
@@ -1221,11 +1242,12 @@ let private planLayout (snapshot: Snapshot) atlas : Intent list * UnservedFootin
         @ place Road (Set.toList roadGap)
         @ place Container containerGap
         @ place Rampart (Set.toList rampartGap),
+        List.rev servedFootings,
         List.rev unservedFootings
     // A room the Layout cannot even orient itself in plans nothing and
-    // loses nothing: there are no targets to serve, so the record is empty
-    // rather than a shortfall (#77).
-    | _ -> [], []
+    // loses nothing: there are no targets to serve, so both records are
+    // empty rather than either being a shortfall (#77, #106).
+    | _ -> [], [], []
 
 /// Colony reflex beside the pipeline, the second after safe mode: every
 /// creep with free carry capacity standing within pickup range of a
@@ -2324,12 +2346,13 @@ let decide
         match recalled with
         | Some m -> m
         | None ->
-            let siteIntents, unservedFootings = planLayout snapshot atlas
+            let siteIntents, servedFootings, unservedFootings = planLayout snapshot atlas
 
             {
                 Signature = signature
                 SiteIntents = siteIntents
                 UnservedFootings = unservedFootings
+                ServedFootings = servedFootings
                 HaulerQuota = haulerQuota snapshot atlas
                 Walks = walks
             }
