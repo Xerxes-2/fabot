@@ -3830,8 +3830,9 @@ let verdictTests =
                 // release is the arrival gate's rather than TaskGone's, and
                 // Inapplicable would make the transition log lie. No
                 // projection here, so the walk prices at 0 the way ADR 0004
-                // prices unplaced geometry; the same release on real ground
-                // is pinned under "restock dispatch".
+                // prices unplaced geometry — and the reason says so, beside
+                // the wait it was compared against (#88); the same release
+                // on real ground is pinned under "restock dispatch".
                 let snapshot =
                     { bareRespawn with
                         Sources = [ drained "src-a" 120 ]
@@ -3844,7 +3845,11 @@ let verdictTests =
 
                 Expect.contains
                     verdicts
-                    (Verdict.Released("w1", taskId (Harvest "src-a"), ReleaseReason.TooEarly))
+                    (Verdict.Released(
+                        "w1",
+                        taskId (Harvest "src-a"),
+                        ReleaseReason.TooEarly(0, 120)
+                    ))
                     "an arrival that covers no wait leaves the rock, exactly as ADR 0013 did"
             }
 
@@ -7125,7 +7130,11 @@ let restockTests =
                 // The body and the energy state fit and the Seat is reachable
                 // — only the arrival doesn't (ADR 0025), so the row carries
                 // its own reason rather than lying as Inapplicable, and the
-                // always-on Verdict beside it says the same.
+                // always-on Verdict beside it says the same. The reason is
+                // not a bare word (#88): it carries the two numbers the gate
+                // compared, four ticks of walk against sixty of wait, so the
+                // operator reads the answer off the row instead of halving a
+                // cost that no longer means ticks.
                 let snapshot = restockAt "w1" { X = 15; Y = 10 } 60
 
                 let { Verdicts = verdicts } = decide snapshot Map.empty (Set.ofList [ "w1" ]) None
@@ -7136,7 +7145,10 @@ let restockTests =
                         Verdict.Scoring(
                             "w1",
                             [
-                                Candidate.Rejected(taskId (Harvest "src-a"), RejectReason.TooEarly)
+                                Candidate.Rejected(
+                                    taskId (Harvest "src-a"),
+                                    RejectReason.TooEarly(4, 60)
+                                )
                                 Candidate.Rejected(
                                     taskId (Upgrade "ctrl-1"),
                                     RejectReason.Inapplicable
@@ -7179,10 +7191,29 @@ let restockTests =
 
                 Expect.contains
                     verdicts
-                    (Verdict.Released("w1", taskId (Harvest "src-a"), ReleaseReason.TooEarly))
+                    (Verdict.Released("w1", taskId (Harvest "src-a"), ReleaseReason.TooEarly(0, 60)))
                     "an arrival of now covers no wait at all"
 
                 Expect.equal (Map.tryFind "w1" assignments) None "and it is free to work elsewhere"
+            }
+
+            test "a release mid-trip carries the same two numbers the rejection does" {
+                // #88: a creep released on the road owes the same
+                // explanation as one rejected at the gate, so both reasons
+                // carry the pair the gate compared. Four tiles out with
+                // sixty ticks to go, the release says four and sixty —
+                // distinct numbers, neither of them the other, and neither
+                // recoverable from a scored row that is not written for a
+                // rejected candidate at all.
+                let snapshot = restockAt "w1" { X = 15; Y = 10 } 60
+                let remembered = Map.ofList [ "w1", taskId (Harvest "src-a") ]
+
+                let { Verdicts = verdicts } = decide snapshot remembered Set.empty None
+
+                Expect.contains
+                    verdicts
+                    (Verdict.Released("w1", taskId (Harvest "src-a"), ReleaseReason.TooEarly(4, 60)))
+                    "why the creep is not on its way is a walk and a wait, not a bare word"
             }
 
             test "a Work-heavy garrison on a source container keeps Harvest through the window" {
@@ -7321,7 +7352,7 @@ let restockTests =
 
                 Expect.contains
                     verdicts
-                    (Verdict.Released("a1", taskId (Harvest "src-a"), ReleaseReason.TooEarly))
+                    (Verdict.Released("a1", taskId (Harvest "src-a"), ReleaseReason.TooEarly(0, 60)))
                     "no container underfoot, so no garrison exemption"
 
                 Expect.equal

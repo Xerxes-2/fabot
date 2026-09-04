@@ -10,12 +10,34 @@ open Expecto
 open FSharp.Reflection
 open Fabot.Core.Types
 
-/// Every case of a closed union whose cases carry no fields, read off the
-/// union's own metadata: the enumeration no hand-written list can be
-/// trusted to match.
+/// The value a case's i-th field is sampled with: distinct numbers, so a
+/// vocabulary that drops a field — or rebuilds a case with two of them
+/// swapped — fails the round trip rather than passing on a coincidence.
+let private sampleField i = i + 1
+
+/// The numbers handed to a vocabulary that decodes payload-carrying
+/// cases: exactly what `casesOf` builds such a case around, in field
+/// order, so the case that was spelt is the case that must read back.
+let private sampleNumbers = Some(sampleField 0, sampleField 1)
+
+/// Every case of a closed union, read off the union's own metadata: the
+/// enumeration no hand-written list can be trusted to match. A case that
+/// carries fields is built around `sampleField`, so a reason that is no
+/// longer a bare tag is enumerated exactly like one. Only numbers are
+/// sampled; any other field type throws, which is the next author's
+/// notice to widen this rather than a case quietly skipped.
 let private casesOf<'a> () =
     FSharpType.GetUnionCases typeof<'a>
-    |> Array.map (fun case -> FSharpValue.MakeUnion(case, [||]) :?> 'a)
+    |> Array.map (fun case ->
+        let fields =
+            case.GetFields()
+            |> Array.mapi (fun i field ->
+                if field.PropertyType = typeof<int> then
+                    box (sampleField i)
+                else
+                    failwith $"no sample value for a {field.PropertyType.Name} field")
+
+        FSharpValue.MakeUnion(case, fields) :?> 'a)
 
 /// One vocabulary's contract: every case spells a name that reads back as
 /// that same case, and no two cases share a name. A case the encoder's
@@ -45,15 +67,23 @@ let wireVocabularyTests =
                 // compiler cannot see.
                 roundTrips "MatchFactor" (casesOf<MatchFactor> ()) matchFactorName matchFactorOf
 
+                // The two reason vocabularies carry numbers now (#88), so
+                // they are reversed for a payload: the decoder is handed
+                // the very pair `casesOf` spelt, and `too-early` must read
+                // back as that case rather than as a bare tag around zeros.
                 roundTrips
                     "ReleaseReason"
                     (casesOf<ReleaseReason> ())
                     releaseReasonName
-                    releaseReasonOf
+                    (releaseReasonOf sampleNumbers)
 
                 roundTrips "IdleReason" (casesOf<IdleReason> ()) idleReasonName idleReasonOf
 
-                roundTrips "RejectReason" (casesOf<RejectReason> ()) rejectReasonName rejectReasonOf
+                roundTrips
+                    "RejectReason"
+                    (casesOf<RejectReason> ())
+                    rejectReasonName
+                    (rejectReasonOf sampleNumbers)
             }
 
             test "the engine vocabularies round-trip over their own lists" {
@@ -84,8 +114,31 @@ let wireVocabularyTests =
                 // None, so the shell can decide what it costs rather than
                 // silently reading as some other case.
                 Expect.isNone (matchFactorOf "pool-ordre") "a misspelt MatchFactor is no factor"
-                Expect.isNone (releaseReasonOf "no-tasks") "an IdleReason is no ReleaseReason"
+
+                Expect.isNone
+                    (releaseReasonOf sampleNumbers "no-tasks")
+                    "an IdleReason is no ReleaseReason"
+
                 Expect.isNone (idleReasonOf "") "the empty name is no IdleReason"
-                Expect.isNone (rejectReasonOf "task-gone") "a ReleaseReason is no RejectReason"
+
+                Expect.isNone
+                    (rejectReasonOf sampleNumbers "task-gone")
+                    "a ReleaseReason is no RejectReason"
+            }
+
+            test "a payload-carrying name without its numbers reads as nothing" {
+                // The other half of a carrying vocabulary's contract: the
+                // name alone is not the case. A `too-early` row that lost
+                // its numbers — a bundle that predates them, a hand-edit
+                // through the Memory HTTP API — decodes to None, and the
+                // shell drops that row rather than restating a walk and a
+                // wait nobody wrote.
+                Expect.isNone (rejectReasonOf None "too-early") "no numbers, no reason"
+                Expect.isNone (releaseReasonOf None "too-early") "and the same on the other side"
+
+                Expect.equal
+                    (rejectReasonOf None "unreachable")
+                    (Some RejectReason.Unreachable)
+                    "a bare tag needs none, and is unaffected"
             }
         ]

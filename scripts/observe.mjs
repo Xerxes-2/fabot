@@ -217,6 +217,19 @@ if (command === "console") {
     );
   }
 
+  // A reason with whatever numbers it carries (#88): `too-early` rides the
+  // walk and the wait the gate actually compared, so "why hasn't the Anchor
+  // left yet" is answered on the line rather than by halving a cost that
+  // stopped meaning ticks with ADR 0029. Every other reason is the bare
+  // word it has always been. This reads Memory as it stands, not as the
+  // bundle would restate it, so it can also meet a `too-early` row written
+  // before the numbers existed — one the bot drops on its next load — and
+  // prints the bare word for it rather than an invented pair.
+  const describeReason = (row) =>
+    row.walk == null || row.wait == null
+      ? row.reason
+      : `${row.reason}: walk ${row.walk}, wait ${row.wait}`;
+
   // One line of prose per verdict — reasons spelled out, creep name left to
   // the caller's layout. A scoring verdict renders one clause per Candidate.
   const describeVerdict = (v) => {
@@ -226,7 +239,7 @@ if (command === "console") {
       case "kept":
         return `kept ${v.task}`;
       case "released":
-        return `released ${v.task} (${v.reason})`;
+        return `released ${v.task} (${describeReason(v)})`;
       case "unassigned":
         return `idle (${v.reason})`;
       case "scoring":
@@ -235,7 +248,7 @@ if (command === "console") {
           v.candidates
             .map((c) =>
               c.reason
-                ? `${c.task} rejected (${c.reason})`
+                ? `${c.task} rejected (${describeReason(c)})`
                 : `${c.task} rank=${c.rank} cost=${c.cost} load=${c.load}`,
             )
             .join("; ")

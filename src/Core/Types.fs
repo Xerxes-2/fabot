@@ -474,6 +474,24 @@ let reverseOf toName cases =
     let byName = cases |> List.map (fun case -> toName case, case) |> Map.ofList
     fun name -> Map.tryFind name byName
 
+/// The same reversal for a vocabulary whose cases carry numbers beside
+/// their name (#88). The entries are the cases' own constructors rather
+/// than the cases, so each spelling is still written once — the name is
+/// read off the case a constructor builds from a sample payload — and the
+/// numbers the wire actually carried are handed back in on the way out: a
+/// bare tag ignores them, a case that needs them reads as nothing without
+/// them. So a name whose numbers are missing decodes to None exactly as
+/// an unknown name does, and the caller decides what that costs rather
+/// than restating a number nobody wrote.
+let reverseCarrying toName sample (builders: ('p option -> 'a option) list) =
+    let byName =
+        builders
+        |> List.choose (fun build ->
+            build (Some sample) |> Option.map (fun case -> toName case, build))
+        |> Map.ofList
+
+    fun payload name -> Map.tryFind name byName |> Option.bind (fun build -> build payload)
+
 /// What decided a fresh match: the first comparison that separated the
 /// winning Task from its closest rival — rank tier, then travel cost, then
 /// current load — or the tie-break when none did (pool order), or the fact
@@ -518,13 +536,17 @@ let matchFactorOf =
 /// empty (ADR 0002), or its time has not come — the creep's walk no
 /// longer covers a drained source's restock wait (ADR 0025), which is how
 /// a creep beside a dry rock leaves it now that the Task stays pooled.
+/// That last reason carries the two numbers the gate compared, the walk
+/// and the wait (#88): a creep released mid-trip owes the same
+/// explanation as a candidate rejected at the gate, and since ADR 0029
+/// the walk cannot be recovered by halving anything.
 [<RequireQualifiedAccess>]
 type ReleaseReason =
     | TaskGone
     | Inapplicable
     | OverCapacity
     | Unreachable
-    | TooEarly
+    | TooEarly of walk: int * wait: int
 
 /// The wire spelling of each ReleaseReason, as `matchFactorName` is
 /// MatchFactor's.
@@ -534,19 +556,33 @@ let releaseReasonName =
     | ReleaseReason.Inapplicable -> "inapplicable"
     | ReleaseReason.OverCapacity -> "over-capacity"
     | ReleaseReason.Unreachable -> "unreachable"
-    | ReleaseReason.TooEarly -> "too-early"
+    | ReleaseReason.TooEarly _ -> "too-early"
 
-/// The ReleaseReason a wire name spells, or None for a name this
-/// vocabulary does not have.
+/// The numbers a ReleaseReason carries beside its wire name, or None for
+/// a bare tag. The encoder's half of what `releaseReasonOf` reads back,
+/// beside the union the way the name table is: a case's payload is spelt
+/// out in one place, not once per row shape that carries it.
+let releaseReasonNumbers =
+    function
+    | ReleaseReason.TooEarly(walk, wait) -> Some(walk, wait)
+    | ReleaseReason.TaskGone
+    | ReleaseReason.Inapplicable
+    | ReleaseReason.OverCapacity
+    | ReleaseReason.Unreachable -> None
+
+/// The ReleaseReason a wire name spells for the numbers the wire carried
+/// beside it, or None for a name this vocabulary does not have — and for
+/// `too-early` with no numbers to be about.
 let releaseReasonOf =
-    reverseOf
+    reverseCarrying
         releaseReasonName
+        (0, 0)
         [
-            ReleaseReason.TaskGone
-            ReleaseReason.Inapplicable
-            ReleaseReason.OverCapacity
-            ReleaseReason.Unreachable
-            ReleaseReason.TooEarly
+            (fun _ -> Some ReleaseReason.TaskGone)
+            (fun _ -> Some ReleaseReason.Inapplicable)
+            (fun _ -> Some ReleaseReason.OverCapacity)
+            (fun _ -> Some ReleaseReason.Unreachable)
+            Option.map ReleaseReason.TooEarly
         ]
 
 /// Why an unassigned creep got nothing: the pool was empty, no Task fit
@@ -593,12 +629,15 @@ let idleReasonOf =
 /// the matching gates, in the order they are tried. The last is its own
 /// reason rather than Inapplicable (ADR 0025): the body and the energy
 /// state fit, only the arrival doesn't, and the transition log would lie.
+/// It carries the walk and the wait the gate compared (#88) — the scored
+/// row is not widened for it, because only a rejected row raises the
+/// question of how long the creep still has to wait.
 [<RequireQualifiedAccess>]
 type RejectReason =
     | Inapplicable
     | CapacityFull
     | Unreachable
-    | TooEarly
+    | TooEarly of walk: int * wait: int
 
 /// The wire spelling of each RejectReason, as `matchFactorName` is
 /// MatchFactor's.
@@ -607,18 +646,28 @@ let rejectReasonName =
     | RejectReason.Inapplicable -> "inapplicable"
     | RejectReason.CapacityFull -> "capacity-full"
     | RejectReason.Unreachable -> "unreachable"
-    | RejectReason.TooEarly -> "too-early"
+    | RejectReason.TooEarly _ -> "too-early"
 
-/// The RejectReason a wire name spells, or None for a name this
-/// vocabulary does not have.
+/// The numbers a RejectReason carries, as `releaseReasonNumbers` is
+/// ReleaseReason's.
+let rejectReasonNumbers =
+    function
+    | RejectReason.TooEarly(walk, wait) -> Some(walk, wait)
+    | RejectReason.Inapplicable
+    | RejectReason.CapacityFull
+    | RejectReason.Unreachable -> None
+
+/// The RejectReason a wire name spells for the numbers the wire carried
+/// beside it, as `releaseReasonOf` is ReleaseReason's.
 let rejectReasonOf =
-    reverseOf
+    reverseCarrying
         rejectReasonName
+        (0, 0)
         [
-            RejectReason.Inapplicable
-            RejectReason.CapacityFull
-            RejectReason.Unreachable
-            RejectReason.TooEarly
+            (fun _ -> Some RejectReason.Inapplicable)
+            (fun _ -> Some RejectReason.CapacityFull)
+            (fun _ -> Some RejectReason.Unreachable)
+            Option.map RejectReason.TooEarly
         ]
 
 /// One row of a verbose scoring: a Task in the pool, either scored on the

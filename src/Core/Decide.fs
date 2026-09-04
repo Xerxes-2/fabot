@@ -1026,13 +1026,14 @@ let private garrisons atlas (creep: CreepInfo) sourceId =
     Atlas.workHeavy atlas creep.Name
     && Atlas.catchesOverflow atlas creep.Name sourceId
 
-/// Whether a Task's time has not come for this creep (ADR 0025, repriced
-/// by ADR 0029): a drained source's Harvest is applicable only when the
-/// creep's walk covers the restock wait — walk ≥ ticks to restock, with no
-/// slack, because the wait shrinks by one each tick while the walk stays
-/// put, so a creep one tick short departs one tick later and arrives as
-/// the energy does. The walk is the Atlas's own query and nothing here
-/// converts anything: it is already whole ticks, floored at one a tile and
+/// The walk and the wait that hold a Task up for this creep, or None when
+/// its time has come (ADR 0025, repriced by ADR 0029): a drained source's
+/// Harvest is applicable only when the creep's walk covers the restock
+/// wait — walk ≥ ticks to restock, with no slack, because the wait shrinks
+/// by one each tick while the walk stays put, so a creep one tick short
+/// departs one tick later and arrives as the energy does. The walk is the
+/// Atlas's own query and nothing here converts anything: it is already
+/// whole ticks, floored at one a tile and
 /// blind to today's traffic, so a bystander in the lane cannot dispatch a
 /// creep this tick and recall it the next. A creep already beside a dry
 /// rock has no walk to cover anything and is released, exactly as ADR 0013
@@ -1053,6 +1054,10 @@ let private garrisons atlas (creep: CreepInfo) sourceId =
 /// The walk arrives deferred because only this arm and the capacity gate
 /// spend it, and pricing one for every Task in the pool measured at a
 /// third of the tick (ADR 0029).
+/// The answer is that pair rather than a yes because the reason the
+/// rejection and the release carry is exactly what was compared here
+/// (#88): read off the gate, never re-derived by a caller from a price
+/// that no longer converts to ticks.
 let private tooEarly (snapshot: Snapshot) atlas (creep: CreepInfo) task (walk: Lazy<int option>) =
     match task with
     | Harvest sourceId ->
@@ -1060,14 +1065,19 @@ let private tooEarly (snapshot: Snapshot) atlas (creep: CreepInfo) task (walk: L
         // No walk at all is unreachable geometry, which is not earliness:
         // the reachability gate stands ahead of this one in both cascades
         // and names that rejection itself (ADR 0002, ADR 0029).
-        | None -> false
+        | None -> None
         | Some ticks ->
-            ticks < ticksToRestock snapshot sourceId && not (garrisons atlas creep sourceId)
+            let wait = ticksToRestock snapshot sourceId
+
+            if ticks < wait && not (garrisons atlas creep sourceId) then
+                Some(ticks, wait)
+            else
+                None
     | Withdraw _
     | Refill _
     | Build _
     | Repair _
-    | Upgrade _ -> false
+    | Upgrade _ -> None
 
 /// Whether a creep can usefully work this Task right now. The body must
 /// physically be able to do it — Work-part tasks need a Work part, energy
@@ -1755,9 +1765,10 @@ let matchCreeps
                     else
                         match cost with
                         | None -> release ReleaseReason.Unreachable
-                        | Some _ when tooEarly snapshot atlas creep task arrival ->
-                            release ReleaseReason.TooEarly
-                        | Some _ -> Map.add name tid acc, released)
+                        | Some _ ->
+                            match tooEarly snapshot atlas creep task arrival with
+                            | Some(walk, wait) -> release (ReleaseReason.TooEarly(walk, wait))
+                            | None -> Map.add name tid acc, released)
 
     // One gate cascade judges every (creep, Task) pair — rejected at the
     // first matching gate it fails (applicable, capacity, reachable, in
@@ -1788,9 +1799,10 @@ let matchCreeps
             else
                 match cost with
                 | None -> Candidate.Rejected(tid, RejectReason.Unreachable)
-                | Some _ when tooEarly snapshot atlas creep task arrival ->
-                    Candidate.Rejected(tid, RejectReason.TooEarly)
-                | Some cost -> Candidate.Scored(tid, rank snapshot task, cost, load acc tid)
+                | Some cost ->
+                    match tooEarly snapshot atlas creep task arrival with
+                    | Some(walk, wait) -> Candidate.Rejected(tid, RejectReason.TooEarly(walk, wait))
+                    | None -> Candidate.Scored(tid, rank snapshot task, cost, load acc tid)
 
     let assignOne (acc, verdicts) (creep: CreepInfo) =
         let verdicts =
@@ -1825,17 +1837,25 @@ let matchCreeps
                 let rejectedWith wanted =
                     judged
                     |> List.exists (function
-                        | _, Candidate.Rejected(_, reason) -> reason = wanted
+                        | _, Candidate.Rejected(_, reason) -> wanted reason
                         | _ -> false)
+
+                // The arrival gate's reason carries the numbers it compared
+                // (#88), so the depth question asks after the case rather
+                // than after a value it would have to invent to compare to.
+                let isTooEarly =
+                    function
+                    | RejectReason.TooEarly _ -> true
+                    | _ -> false
 
                 let reason =
                     if List.isEmpty tasks then
                         IdleReason.NoTasks
-                    elif rejectedWith RejectReason.TooEarly then
+                    elif rejectedWith isTooEarly then
                         IdleReason.NoneInTime
-                    elif rejectedWith RejectReason.Unreachable then
+                    elif rejectedWith ((=) RejectReason.Unreachable) then
                         IdleReason.NoneReachable
-                    elif rejectedWith RejectReason.CapacityFull then
+                    elif rejectedWith ((=) RejectReason.CapacityFull) then
                         IdleReason.NoneFree
                     else
                         IdleReason.NoneApplicable

@@ -20,8 +20,29 @@ open Fabot.Core.Observe
 // silent decode miss.
 let private partOf = reverseOf partName allBodyParts
 
+// Where a reason's numbers sit on the wire (#88): `walk` and `wait` on
+// the row that names it, beside the reason rather than inside it, so a
+// bare tag adds no fields. Which numbers a case carries is Core's to say,
+// the way its name is — this shell only places them. A row that names a
+// reason needing numbers and carries none reads as no reason at all, and
+// is dropped on decode the way a row with an unknown name is.
+let private writeNumbers (o: obj) =
+    function
+    | Some(walk, wait) ->
+        o?walk <- walk
+        o?wait <- wait
+    | None -> ()
+
+let private readNumbers (raw: obj) =
+    if isNull raw?walk || isNull raw?wait then
+        None
+    else
+        Some(unbox<int> raw?walk, unbox<int> raw?wait)
+
 // A Candidate on the wire: a scored row carries the full matching key, a
 // rejected row its reason — the presence of `reason` tells them apart.
+// The scored row is not widened by #88: only a rejected one raises the
+// question its numbers answer.
 let private encodeCandidate candidate =
     let o = createEmpty<obj>
 
@@ -34,6 +55,7 @@ let private encodeCandidate candidate =
     | Candidate.Rejected(task, reason) ->
         o?task <- task
         o?reason <- rejectReasonName reason
+        writeNumbers o (rejectReasonNumbers reason)
 
     o
 
@@ -46,7 +68,7 @@ let private decodeCandidate (raw: obj) : Candidate =
             unbox<int> raw?load
         )
     else
-        match rejectReasonOf (string raw?reason) with
+        match rejectReasonOf (readNumbers raw) (string raw?reason) with
         | Some reason -> Candidate.Rejected(string raw?task, reason)
         | None -> failwith "unknown wire name"
 
@@ -67,6 +89,7 @@ let private encodeVerdict verdict =
         o?kind <- "released"
         o?task <- task
         o?reason <- releaseReasonName reason
+        writeNumbers o (releaseReasonNumbers reason)
     | Verdict.Unassigned(_, reason) ->
         o?kind <- "unassigned"
         o?reason <- idleReasonName reason
@@ -81,11 +104,13 @@ let private encodeVerdict verdict =
 
     o
 
-// Anything off the expected shape throws, and load's catch drops that one
-// creep's log — bad state is discarded, never repaired.
+// Anything off the expected shape throws, and `decodeCreepLog` drops that
+// one row — bad state is discarded, never repaired.
 let private decodeVerdict creep (raw: obj) : Verdict =
     // A wire name outside the vocabulary is not a Verdict we can restate,
-    // so it throws; Core owns the vocabulary, this shell owns the cost.
+    // so it throws; Core owns the vocabulary, this shell owns the cost. A
+    // name whose numbers are missing misses the same way (#88): a row says
+    // what the gate compared or it does not survive the read.
     let look ofName name =
         match ofName name with
         | Some value -> value
@@ -95,7 +120,11 @@ let private decodeVerdict creep (raw: obj) : Verdict =
     | "matched" -> Verdict.Matched(creep, string raw?task, look matchFactorOf (string raw?factor))
     | "kept" -> Verdict.Kept(creep, string raw?task)
     | "released" ->
-        Verdict.Released(creep, string raw?task, look releaseReasonOf (string raw?reason))
+        Verdict.Released(
+            creep,
+            string raw?task,
+            look (releaseReasonOf (readNumbers raw)) (string raw?reason)
+        )
     | "unassigned" -> Verdict.Unassigned(creep, look idleReasonOf (string raw?reason))
     | "scoring" ->
         Verdict.Scoring(
@@ -130,28 +159,45 @@ let private encodeCreepLog (log: CreepLog) =
     o?lastMove <- log.LastMove |> List.map encodeVerdict |> List.toArray
     o
 
+// A Verdict this bundle cannot restate costs its own row and no more,
+// the way an undecodable episode costs one episode. The wire shape moves
+// with the vocabularies — a `too-early` row written before the reason
+// carried its numbers (#88) is exactly that — and a ring that vanished
+// whole on meeting one would take a creep's history with it on the tick
+// a new bundle lands, which is the history the change wants read. Bad
+// state is still discarded rather than repaired; the discard is just no
+// longer the whole log. A cursor that will not decode reads as no cursor,
+// and costs at most one entry the next tick appends unchanged.
 let private decodeCreepLog creep (raw: obj) : CreepLog =
+    let tryVerdict (raw: obj) =
+        try
+            Some(decodeVerdict creep raw)
+        with _ ->
+            None
+
     {
         Entries =
             raw?log
             |> unbox<obj[]>
-            |> Array.map (fun e ->
-                {
-                    Tick = unbox<int> e?t
-                    Verdict = decodeVerdict creep e?v
-                })
+            |> Array.choose (fun e ->
+                tryVerdict e?v
+                |> Option.map (fun verdict ->
+                    {
+                        Tick = unbox<int> e?t
+                        Verdict = verdict
+                    }))
             |> Array.toList
         LastTask =
             if isNull raw?lastTask then
                 None
             else
-                Some(decodeVerdict creep raw?lastTask)
+                tryVerdict raw?lastTask
         LastScoring =
             if isNull raw?lastScoring then
                 None
             else
-                Some(decodeVerdict creep raw?lastScoring)
-        LastMove = raw?lastMove |> unbox<obj[]> |> Array.map (decodeVerdict creep) |> Array.toList
+                tryVerdict raw?lastScoring
+        LastMove = raw?lastMove |> unbox<obj[]> |> Array.choose tryVerdict |> Array.toList
     }
 
 // One raid episode on the wire: the window, the roster as an array of
@@ -282,7 +328,9 @@ let loadVerbose () : Set<string> =
 /// older bundle, or otherwise unreadable — a discarded log only costs a
 /// restarted timeline. A creep whose log will not decode costs that
 /// creep's timeline alone, the way `loadRaids` degrades episode by
-/// episode: the rest of the map loads.
+/// episode: the rest of the map loads. Inside a log the same holds one
+/// level down — an unreadable row costs itself, not the timeline around
+/// it — so a wire-shape change reads as a gap rather than as amnesia.
 let load () : ObserveState =
     try
         let fabot = Memory?fabot
