@@ -2826,8 +2826,11 @@ let roomTests =
                 // Work Area in the creep's own room gets: the Task does not
                 // apply to this creep. What must never happen is a number,
                 // which is what reading the neighbour's tiles out of this
-                // room's flood would produce. #123 replaces this with the
-                // minimum over the Seam band.
+                // room's flood would produce. Since #123 a border can be
+                // crossed for a price, but only where there is a Seam to
+                // cross at: this projection carries no border ring at all,
+                // so the band is empty, the minimum is over nothing, and
+                // the answers below are the ones they always were.
                 let home =
                     { SpatialInfo.empty with
                         RoomName = Some "W1N1"
@@ -2875,11 +2878,12 @@ let roomTests =
                 // Matcher, the Emitter and the mover reach the flood with
                 // a bare tile set, taken from `workAreaFor`. Were that set
                 // the neighbour's ground, this room's flood would answer
-                // it a number and a first step — a creep ranked against
-                // home rivals on a price it can never spend, walked seven
-                // tiles inside its own room, and pinned on a Task `mayAct`
-                // refuses forever. So the creep-aware Work Area is empty
-                // across a border while the body-blind one above is not.
+                // it a number and a first step off *home* terrain — a
+                // creep priced on ground it is not standing on and walked
+                // seven tiles inside its own room. So the creep-aware Work
+                // Area is empty across a border while the body-blind one
+                // above is not, and #123 left it that way: the price
+                // crosses the border, the standing tiles do not.
                 let area = workAreaFor atlas "w-home" (Harvest "src-out")
 
                 Expect.isEmpty
@@ -3101,5 +3105,375 @@ let roomTests =
                     (creepTile atlas "w-out")
                     (Some { X = 10; Y = 11 })
                     "the other room's creep is still placed — it is the bare list that is home's"
+            }
+        ]
+
+/// A projection carrying the colony's own room and one outpost across its
+/// north border, rings and all. W1N1 is world (-2,-2) and W1N2 (-2,-3), so
+/// stepping onto y=0 at home lands the creep on y=49 there — the pairing
+/// `seams` answers and the join `pricedAcross` sums over. The rings ride
+/// beside the ground and never inside it (ADR 0041), which is what makes a
+/// crossing priceable without any exit tile becoming a tile to stand on.
+let private northOf (home: RoomLayer) homeRing (outpost: RoomLayer) outpostRing kinds creeps =
+    { SpatialInfo.empty with
+        RoomName = Some "W1N1"
+        Borders = Map.ofList [ "W1N1", Map.ofList homeRing; "W1N2", Map.ofList outpostRing ]
+        TargetKinds = Map.ofList kinds
+    }
+    |> withHome (fun _ -> home)
+    |> withOutpost "W1N2" outpost
+    |> snapshotWith creeps
+    |> ofSnapshot
+
+/// The colony's own room as every cross-room case below shapes it: one
+/// plain corridor down column 25 to the exit row, with the creeps standing
+/// in it.
+let private corridorHome creeps =
+    { RoomLayer.empty with
+        Terrain = Map.ofList (plainLine [ for y in 1..48 -> { X = 25; Y = y } ])
+        CreepPositions = Map.ofList creeps
+    }
+
+/// The outpost as the worked example shapes it: the same corridor, with a
+/// source standing on ground the projection does not carry, so its Work
+/// Area is the one tile below it and the arithmetic has one route to count.
+let private corridorOutpost =
+    { RoomLayer.empty with
+        Terrain =
+            Map.ofList (
+                plainLine
+                    [
+                        for y in 1..48 do
+                            if y <> 40 then
+                                { X = 25; Y = y }
+                    ]
+            )
+        TargetPositions = Map.ofList [ "src-out", { X = 25; Y = 40 } ]
+    }
+
+[<Tests>]
+let crossRoomTests =
+    testList
+        "atlas cross-room walk"
+        [
+            test "a walk across the border is the near leg, the exit's own price and the far leg" {
+                // The worked example, countable a tile at a time. The creep
+                // stands at (25,10) of a one-wide plain corridor: nine steps
+                // up to (25,1), one onto the exit at (25,0), then the engine
+                // moves it to (25,49) of the outpost for nothing at the end
+                // of that tick, one step off the landing onto (25,48), and
+                // seven more down to (25,41) — the Work Area of a source at
+                // (25,40) whose own tile the projection carries no ground
+                // for. Eighteen tiles stepped onto, each one tick for a body
+                // at fatigue parity: the crossing charges the exit tile and
+                // the far room's first tile, and never the landing tile,
+                // which the creep arrives on without moving.
+                let atlas =
+                    northOf
+                        (corridorHome [ "w", { X = 25; Y = 10 }; "w-back", { X = 25; Y = 14 } ])
+                        [ { X = 25; Y = 0 }, Plain ]
+                        corridorOutpost
+                        [ { X = 25; Y = 49 }, Plain ]
+                        [ "src-out", Source ]
+                        [ worker "w"; worker "w-back" ]
+
+                Expect.equal
+                    (walkTicks atlas "w" (Harvest "src-out"))
+                    (Some 18)
+                    "nine near, the exit, and eight in the outpost"
+
+                Expect.equal
+                    (travelCost atlas "w" (Harvest "src-out"))
+                    (Some 36)
+                    "and the same join in the ranking price's own units — two a plain step"
+
+                // The far leg is the target's, not the creep's: a second
+                // creep four tiles further back pays four more and not a
+                // tile besides, which is what one flood out of the target
+                // serving the whole colony looks like from outside.
+                Expect.equal
+                    (walkTicks atlas "w-back" (Harvest "src-out"))
+                    (Some 22)
+                    "four tiles further back is four ticks dearer, the far leg unchanged"
+            }
+
+            test "a swamp exit is priced as a swamp step, not counted as one tile" {
+                // ADR 0041 writes the join as `walk_here + 1 + walk_there`,
+                // and #123 narrows that `+1` to the price ADR 0029 gives the
+                // exit tile itself: `max(1, ceil(units / 2))`, the same rule
+                // every other step is priced by. On plain ground under a
+                // body at fatigue parity the two agree, which is why this is
+                // a narrowing and not an overturning; on a swamp exit they
+                // do not, and the engine charges the swamp.
+                let across ring =
+                    northOf
+                        (corridorHome [ "w", { X = 25; Y = 10 } ])
+                        [ { X = 25; Y = 0 }, ring ]
+                        corridorOutpost
+                        [ { X = 25; Y = 49 }, Plain ]
+                        [ "src-out", Source ]
+                        [ worker "w" ]
+
+                Expect.equal
+                    (walkTicks (across Plain) "w" (Harvest "src-out"))
+                    (Some 18)
+                    "a plain exit costs the one tick the ADR's +1 spells"
+
+                Expect.equal
+                    (walkTicks (across Swamp) "w" (Harvest "src-out"))
+                    (Some 22)
+                    "a swamp exit costs five, and the same walk is four ticks dearer"
+
+                Expect.equal
+                    (travelCost (across Swamp) "w" (Harvest "src-out"))
+                    (Some 44)
+                    "the ranking price charges the swamp exit its own ten units"
+            }
+
+            test "the walk takes the cheapest crossing in the band, not the nearest" {
+                // Two exits, and the near one is the wrong one: the creep
+                // reaches (25,0) in nine steps and (27,0) in ten, but the
+                // outpost's column below (25,49) is swamp all the way down
+                // while the one below (27,49) is plain. The minimum is over
+                // the whole band — 10 + 1 + 8 against 9 + 1 + 36 — which is
+                // the arithmetic ADR 0041 pays a Seam band for.
+                let home =
+                    { RoomLayer.empty with
+                        Terrain =
+                            Map.ofList (
+                                plainLine
+                                    [
+                                        for y in 1..10 -> { X = 25; Y = y }
+                                        for x in 26..27 -> { X = x; Y = 10 }
+                                        for y in 1..9 -> { X = 27; Y = y }
+                                    ]
+                            )
+                        CreepPositions = Map.ofList [ "w", { X = 25; Y = 10 } ]
+                    }
+
+                let outpost =
+                    { RoomLayer.empty with
+                        Terrain =
+                            Map.ofList
+                                [
+                                    for x in 25..27 -> { X = x; Y = 41 }, Plain
+                                    for y in 42..48 -> { X = 25; Y = y }, Swamp
+                                    for y in 42..48 -> { X = 27; Y = y }, Plain
+                                ]
+                        TargetPositions = Map.ofList [ "src-out", { X = 26; Y = 40 } ]
+                    }
+
+                let across farRing =
+                    northOf
+                        home
+                        [
+                            { X = 25; Y = 0 }, Plain
+                            { X = 26; Y = 0 }, Wall
+                            { X = 27; Y = 0 }, Plain
+                        ]
+                        outpost
+                        farRing
+                        [ "src-out", Source ]
+                        [ worker "w" ]
+
+                let bothOpen =
+                    across
+                        [
+                            { X = 25; Y = 49 }, Plain
+                            { X = 26; Y = 49 }, Wall
+                            { X = 27; Y = 49 }, Plain
+                        ]
+
+                Expect.hasLength (seams bothOpen "W1N1" "W1N2") 2 "the premise: two crossings"
+
+                Expect.equal
+                    (walkTicks bothOpen "w" (Harvest "src-out"))
+                    (Some 19)
+                    "the farther exit, because the ground behind it is cheaper"
+
+                Expect.equal
+                    (travelCost bothOpen "w" (Harvest "src-out"))
+                    (Some 38)
+                    "and the ranking price joins at that same crossing, in its own units"
+
+                // Take the cheap crossing out and the walk does not vanish:
+                // it falls back to the dear one, which is the band being a
+                // minimum rather than a choice made once.
+                let swampOnly =
+                    across
+                        [
+                            { X = 25; Y = 49 }, Plain
+                            { X = 26; Y = 49 }, Wall
+                            { X = 27; Y = 49 }, Wall
+                        ]
+
+                Expect.equal
+                    (walkTicks swampOnly "w" (Harvest "src-out"))
+                    (Some 46)
+                    "nine near, the exit, and thirty-six down the swamp column"
+            }
+
+            test "a border with no crossing has no price, and the target is still placed" {
+                // A walled ring: the band is empty, so the minimum is over
+                // nothing. That is the answer an unreachable Work Area in
+                // the creep's own room gets — the Task is inapplicable to
+                // this creep — and not the zero an unplaced target gets,
+                // which would count it as free. The same projection with
+                // that one tile of ring opened closes the case at the
+                // bottom: the None is the wall's answer and not something
+                // the two rooms would have said anyway.
+                let across ring =
+                    northOf
+                        (corridorHome [ "w", { X = 25; Y = 10 } ])
+                        [ { X = 25; Y = 0 }, ring ]
+                        corridorOutpost
+                        [ { X = 25; Y = 49 }, Plain ]
+                        [ "src-out", Source ]
+                        [ worker "w" ]
+
+                let atlas = across Wall
+
+                Expect.isEmpty (seams atlas "W1N1" "W1N2") "the premise: the exit is walled"
+
+                Expect.isNonEmpty
+                    (workArea atlas (Harvest "src-out"))
+                    "the target is placed and its ground is real"
+
+                Expect.equal (walkTicks atlas "w" (Harvest "src-out")) None "no crossing, no walk"
+
+                Expect.equal
+                    (travelCost atlas "w" (Harvest "src-out"))
+                    None
+                    "and no ranking price either — one join answers both"
+
+                Expect.equal
+                    (walkTicks (across Plain) "w" (Harvest "src-out"))
+                    (Some 18)
+                    "and it is the wall that answers None: open that tile and the same rooms price"
+            }
+
+            test "a target in a room the projection does not carry has no walk to price" {
+                // ADR 0004's totality, at the seam #123 widens: a room that
+                // is not in the projection at all leaves its targets
+                // unplaced, and unplaceable geometry prices at zero, counts
+                // against no Task and blocks no action. The walk answers it
+                // the way travel cost always has.
+                let atlas =
+                    northOf
+                        (corridorHome [ "w", { X = 25; Y = 10 } ])
+                        [ { X = 25; Y = 0 }, Plain ]
+                        corridorOutpost
+                        [ { X = 25; Y = 49 }, Plain ]
+                        [ "src-out", Source; "src-far", Source ]
+                        [ worker "w" ]
+
+                Expect.equal
+                    (walkTicks atlas "w" (Harvest "src-far"))
+                    (Some 0)
+                    "a target no room places is free, never unreachable"
+
+                Expect.isTrue
+                    (mayActFor atlas "w" (Harvest "src-far"))
+                    "and it blocks nothing (ADR 0004)"
+            }
+
+            test "the price crosses the border and the standing tiles do not" {
+                // ADR 0041's Consequences drawn on one Snapshot: geometry
+                // crosses, arbitration does not. The creep has an honest
+                // number for a Task in the outpost — that is what puts the
+                // outpost's Harvest in the same pool as home's — and no tile
+                // of the outpost is ever handed to it as somewhere to stand,
+                // step to or act from, because a `Set<Pos>` carries no room
+                // and the mover reads it as this room's.
+                let atlas =
+                    northOf
+                        (corridorHome [ "w", { X = 25; Y = 10 } ])
+                        [ { X = 25; Y = 0 }, Plain ]
+                        corridorOutpost
+                        [ { X = 25; Y = 49 }, Plain ]
+                        [ "src-out", Source ]
+                        [ worker "w" ]
+
+                Expect.equal
+                    (walkTicks atlas "w" (Harvest "src-out"))
+                    (Some 18)
+                    "the premise: the Task is priceable across the border"
+
+                let handed = workAreaFor atlas "w" (Harvest "src-out")
+
+                Expect.isEmpty handed "and the creep is handed no tile of the other room"
+
+                Expect.isFalse
+                    (mayAct atlas "w" (Harvest "src-out") handed)
+                    "it may not act on a target a room away"
+
+                Expect.equal
+                    (firstStep atlas "w" handed)
+                    None
+                    "and the mover is given no step toward one (ADR 0001, ADR 0008)"
+            }
+
+            test "a heavy body's far leg is its Post's, not the source's nearest Seat" {
+                // The far leg floods out of the Work Area *for this body*
+                // (ADR 0020), so the narrowing has to cross the border with
+                // the price: a Work-heavy creep is walked to the Seat under
+                // the outpost's container even when a nearer Seat is on the
+                // way. The source at (25,40) seats (25,41), one step off the
+                // corridor, and (24,39), reachable only the long way round
+                // through column 23 — eighteen tiles to the near Seat and
+                // twenty to the Post. Three Work over two Move is heavy by
+                // ADR 0016's predicate; every plain step costs it two ticks,
+                // so the light body's numbers are half of its own.
+                let outpost =
+                    { RoomLayer.empty with
+                        Terrain =
+                            Map.ofList (
+                                plainLine
+                                    [
+                                        for y in 41..48 -> { X = 25; Y = y }
+                                        for y in 39..48 -> { X = 23; Y = y }
+                                        for x in 23..25 -> { X = x; Y = 48 }
+                                        yield { X = 24; Y = 39 }
+                                    ]
+                            )
+                        TargetPositions =
+                            Map.ofList
+                                [ "src-out", { X = 25; Y = 40 }; "cont-out", { X = 24; Y = 39 } ]
+                    }
+
+                let across kinds =
+                    northOf
+                        (corridorHome [ "w", { X = 25; Y = 10 }; "heavy", { X = 25; Y = 10 } ])
+                        [ { X = 25; Y = 0 }, Plain ]
+                        outpost
+                        [ { X = 25; Y = 49 }, Plain ]
+                        kinds
+                        [ worker "w"; creepWith "heavy" 0 [ Work; Work; Work; Move; Move ] ]
+
+                let bare = across [ "src-out", Source ]
+
+                let posted = across [ "src-out", Source; "cont-out", Structure BuiltKind.Container ]
+
+                Expect.isEmpty (postsOf bare "src-out") "the premise: no container, no Post"
+
+                Expect.equal
+                    (postsOf posted "src-out")
+                    (Set.ofList [ { X = 24; Y = 39 } ])
+                    "and with one standing, the far Seat is the source's Post"
+
+                Expect.equal
+                    (walkTicks bare "heavy" (Harvest "src-out"))
+                    (Some 36)
+                    "unposted, the heavy body walks to the nearest Seat: eighteen tiles at two ticks"
+
+                Expect.equal
+                    (walkTicks posted "heavy" (Harvest "src-out"))
+                    (Some 40)
+                    "posted, it walks the long way to the Post — two tiles further, four ticks"
+
+                Expect.equal
+                    (walkTicks posted "w" (Harvest "src-out"))
+                    (Some 18)
+                    "and the light body ignores the Post, over the same border on the same tick"
             }
         ]

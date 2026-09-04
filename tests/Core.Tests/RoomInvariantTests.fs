@@ -768,6 +768,12 @@ type private Border =
         /// The coordinate the border leaves free — the one an exit and its
         /// landing tile share.
         Along: Pos -> int
+        /// What to add to a tile of the neighbour to read it in this
+        /// room's own coordinates — a whole room's width or height, in the
+        /// direction the neighbour lies. The two rooms' grids are fifty
+        /// apart on the world map, which is what makes a Chebyshev
+        /// distance across a border a thing that can be measured at all.
+        Offset: Pos
         /// How wide the band is. The server's own answer, read off the two
         /// committed captures, and the number ADR 0041 sizes the cross-room
         /// walk on — "a minimum over 36 additions, not 36 floods". Named
@@ -790,6 +796,7 @@ let private borders =
             Near = fun tile -> tile.Y = 0
             Far = fun tile -> tile.Y = 49
             Along = fun tile -> tile.X
+            Offset = { X = 0; Y = -50 }
             Exits = 36
         }
         {
@@ -798,6 +805,7 @@ let private borders =
             Near = fun tile -> tile.X = 0
             Far = fun tile -> tile.X = 49
             Along = fun tile -> tile.Y
+            Offset = { X = -50; Y = 0 }
             Exits = 19
         }
     ]
@@ -950,5 +958,137 @@ let seamTests =
                     Expect.isEmpty
                         (seams atlas other.RoomName stranger.RoomName)
                         $"{name} -> W15S25: and none the other way"
+            }
+        ]
+
+/// The Atlas over two captures' ground *and* their rings, with a creep
+/// standing in the near room and the far room's own sources placed under
+/// the loader's ids: the whole input a cross-room walk reads (ADR 0041).
+/// Everything geometric is the server's; the creep and the ids are the
+/// test's, and no expected value comes from either room.
+let private walkingAcross (near: RoomCapture) (far: RoomCapture) (stand: Pos) =
+    { SpatialInfo.empty with
+        RoomName = Some near.RoomName
+        Rooms =
+            Map.ofList
+                [
+                    near.RoomName,
+                    { RoomLayer.empty with
+                        Terrain = near.Terrain
+                        CreepPositions = Map.ofList [ "w", stand ]
+                    }
+                    far.RoomName,
+                    { RoomLayer.empty with
+                        Terrain = far.Terrain
+                        TargetPositions = Map.ofList far.Sources
+                    }
+                ]
+        Borders = Map.ofList [ near.RoomName, near.Border; far.RoomName, far.Border ]
+        TargetKinds = far.Sources |> List.map (fun (id, _) -> id, Source) |> Map.ofList
+    }
+    |> AtlasTests.snapshotWith [ AtlasTests.worker "w" ]
+    |> ofSnapshot
+
+/// How far apart the cross-room sweep's stands are, and the file's second
+/// sampling knob beside `stride` above. Deliberately not that number and
+/// deliberately not that mechanism: `stride` picks tiles by coordinate and
+/// costs a lookup apiece, while a stand here costs a whole Atlas and the
+/// floods a cross-room price runs on it, so this one has to leave a
+/// handful of stands per capture rather than a hundred. It strides the
+/// room's *passable* tiles in `Pos` order — a position in that list, not a
+/// coordinate on the grid — so which tiles come back depends on how much
+/// wall precedes them; that is fine for a sweep whose whole point is that
+/// no tile was chosen for what it proves, and it is written down here so
+/// nobody widens the sweep by editing `stride` and wonders why this one
+/// did not move. Deterministic for `stride`'s own reason: a counterexample
+/// nobody can reproduce is a rumour.
+let private crossRoomStride = 397
+
+/// Standing tiles spread over a capture's own passable ground by
+/// `crossRoomStride`, so no tile is chosen for what it proves — the
+/// sweep's habit, at the smaller scale a cross-room price wants (one Atlas
+/// and its floods per tile).
+let private standingSample (capture: RoomCapture) =
+    capture.Terrain
+    |> Map.toList
+    |> List.filter (fun (_, terrain) -> terrain <> Wall)
+    |> List.mapi (fun index (tile, _) -> index, tile)
+    |> List.filter (fun (index, _) -> index % crossRoomStride = 0)
+    |> List.map snd
+
+[<Tests>]
+let crossRoomWalkTests =
+    testList
+        "cross-room walks on real terrain"
+        [
+            test
+                "no cross-room walk undercuts the rooms' own distance, but for the border's free tile" {
+                // The lower bound ADR 0041's join has to respect, on real
+                // terrain and naming no tile: a creep crosses at most one
+                // tile of Chebyshev distance per tick, so a walk cannot come
+                // in under the distance between where it starts and the
+                // nearest tile it may work from — measured on the world
+                // grid, with the neighbour's coordinates shifted a room's
+                // width into this room's frame.
+                //
+                // Less exactly one tile, and the one is the crossing itself:
+                // the creep pays for stepping onto the exit tile, and the
+                // engine then relocates it onto the landing tile in the
+                // neighbouring room at the end of that tick, for no tick at
+                // all. That free tile is the whole of the slack, it is the
+                // engine's rule and not this join's, and every other tile of
+                // the journey still costs a tick at least (ADR 0029).
+                let mutable priced = 0
+
+                for border in borders do
+                    for from, into, offset in
+                        [
+                            border.From, border.To, border.Offset
+                            border.To,
+                            border.From,
+                            {
+                                X = -border.Offset.X
+                                Y = -border.Offset.Y
+                            }
+                        ] do
+                        let near = load from
+                        let far = load into
+
+                        let shift (tile: Pos) =
+                            {
+                                X = tile.X + offset.X
+                                Y = tile.Y + offset.Y
+                            }
+
+                        for stand in standingSample near do
+                            let atlas = walkingAcross near far stand
+
+                            for sourceId, _ in far.Sources do
+                                let task = Harvest sourceId
+
+                                Expect.equal
+                                    (Option.isSome (travelCost atlas "w" task))
+                                    (Option.isSome (walkTicks atlas "w" task))
+                                    $"{from} -> {into} from {stand.X},{stand.Y}: one join answers both prices"
+
+                                match walkTicks atlas "w" task with
+                                | None -> ()
+                                | Some walk ->
+                                    priced <- priced + 1
+
+                                    let apart =
+                                        workArea atlas task
+                                        |> Set.toList
+                                        |> List.map (shift >> range stand)
+                                        |> List.min
+
+                                    Expect.isTrue
+                                        (walk + 1 >= apart)
+                                        $"{from} -> {into}: a walk of {walk} from {stand.X},{stand.Y} to {sourceId}, {apart} tiles off"
+
+                Expect.isGreaterThan
+                    priced
+                    0
+                    "and the rooms the engine joins really do price across: an empty sweep proves nothing"
             }
         ]

@@ -1559,7 +1559,13 @@ let private areaFor (threats: Threats) atlas creep task =
 /// An area that is empty here was never taken by the Reach — the threat
 /// gate stands ahead of this one in both cascades — so it falls back to
 /// the Task's own price, which carries ADR 0004's escape for a target the
-/// projection cannot place.
+/// projection cannot place, and, since #123, the Seam join for a target
+/// in another room. The Work Area a creep is handed is empty across a
+/// border by construction (ADR 0041): the tiles are the other room's and a
+/// `Set<Pos>` cannot say so, while the price is a minimum over the Seam
+/// band and knows both rooms. So an outpost's Task reaches the Matcher
+/// priced and ranks in the one pool, and it does so through this fallback
+/// rather than through a case of its own.
 let private travelCostOf (threats: Threats) atlas (creep: string) task =
     match task with
     | Flee -> Atlas.travelCostWithin atlas creep threats.Safe

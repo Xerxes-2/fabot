@@ -117,6 +117,33 @@ type Atlas =
             /// one of them reading the other room's distances. The room
             /// picks the table; the tuple keys inside it.
             Floods: Map<string, Map<Pos * FatigueFactor * Pricing, Lazy<int[] * int[]>>>
+            /// Memoised flood *into* a Task's ground — the far leg of a
+            /// cross-room walk (ADR 0041, #123). Its origin is the target
+            /// and not a creep, which is the whole reason it is a table
+            /// beside Floods rather than an entry inside one: one flood
+            /// answers every creep in the colony that prices that Task, so
+            /// a second outpost source costs one more flood and not one
+            /// more per creep — the arithmetic ADR 0041 rests its cost
+            /// argument on. Distances only; the far leg is a price, and
+            /// nothing steps along it (movement stays single-room).
+            ///
+            /// Five fields, each earning its place. The **room**, because a
+            /// flood is one room's weight grid and two rooms hold the same
+            /// coordinates — the trap the Floods table above answers by
+            /// splitting per room, answered here by naming the room in the
+            /// key. The **Task**, because its Work Area is the origin set.
+            /// The **Work-heavy bit**, because ADR 0020 narrows Harvest's
+            /// origins to that source's Posts for such a body, and two
+            /// bodies of one fatigue factor can differ in it — the factor
+            /// alone would hand a heavy body the light body's flood. The
+            /// **factor** and the **pricing** for ADR 0029's own reasons. It
+            /// is deliberately not the ADR 0032 spawn-walk table: that one
+            /// lives across ticks and its key carries no room at all.
+            FarFloods:
+                System.Collections.Generic.Dictionary<
+                    string * Task * bool * FatigueFactor * Pricing,
+                    int[]
+                 >
             /// Memoised traffic-blind flood out of a spawner's tile, per
             /// (spawner tile, fatigue factor), for bodies the Snapshot does
             /// not carry: a lead prices a replacement that has not been
@@ -314,8 +341,9 @@ let private stepTicks (factor: FatigueFactor) weight =
 /// in the flood that helper was ~28% of the tick (#91), re-checking
 /// indices the loop has already proven in range — a neighbour index is
 /// built only after the `0 <= n < roomSide` guard, and the heap's come
-/// from its own `Count`. Used only inside `floodFromAll`; every other
-/// array read in the Atlas stays checked, since none is on the profile.
+/// from its own `Count`. Used only inside `floodFromAllSeeded`; every
+/// other array read in the Atlas stays checked, since none is on the
+/// profile.
 [<Emit("$1[$0]")>]
 let private at (index: int) (array: int[]) : int = array.[index]
 
@@ -332,30 +360,40 @@ let private heapAt (index: int) (heap: ResizeArray<int>) : int = heap.[index]
 let private setHeapAt (index: int) (heap: ResizeArray<int>) (value: int) : unit =
     heap.[index] <- value
 
-/// Dijkstra flood over the weight grid from every tile in `starts`,
-/// priced by `stepPrice` — one body's price for a step onto a tile of a
-/// given terrain weight, and, beside the occupancy the caller passes, the
-/// only thing that differs between the tick's floods (ADR 0029, ADR 0030):
-/// cheapest cost to every reachable tile (`unreached` elsewhere), plus
-/// each tile's predecessor index on a
+/// Dijkstra flood over the weight grid from every tile in `starts`, each
+/// starting at the cost the caller seeds it with, priced by `stepPrice` —
+/// one body's price for a step onto a tile of a given terrain weight, and,
+/// beside the occupancy the caller passes, the only thing that differs
+/// between the tick's floods (ADR 0029, ADR 0030): cheapest cost to every
+/// reachable tile (`unreached` elsewhere), plus each tile's predecessor
+/// index on a
 /// cheapest path (-1 elsewhere). This is the tick's hottest loop, so it
 /// runs on flat arrays with a binary min-heap of dist-then-index keys —
-/// the key ordering also keeps tie-breaking deterministic. Every start
-/// tile costs 0 even when it cannot be stepped onto — a creep already
+/// the key ordering also keeps tie-breaking deterministic. A start tile
+/// takes its seed even when it cannot be stepped onto — a creep already
 /// stands there, or is about to be placed there. Several starts price a
-/// body that may begin anywhere in a set at no step's cost, which is how
-/// a spawner places a finished creep beside itself (ADR 0026). A tile
-/// marked occupied costs occupancyPenalty extra, so paths detour around
-/// standing traffic when a detour is cheaper. The penalty is a number of
-/// cost units, so a caller pricing steps in anything else must pass no
-/// occupancy at all: every traffic-blind caller here passes `noTraffic`,
-/// and for the tick's memoised floods `floodPriced` pairs the two choices
-/// per pricing, so neither can be made without the other.
-let private floodFromAll
+/// body that may begin anywhere in a set, which is how a spawner places a
+/// finished creep beside itself (ADR 0026). A tile marked occupied costs
+/// occupancyPenalty extra, so paths detour around standing traffic when a
+/// detour is cheaper. The penalty is a number of cost units, so a caller
+/// pricing steps in anything else must pass no occupancy at all: every
+/// traffic-blind caller here passes `noTraffic`, and for the tick's
+/// memoised floods `pricingOf` pairs the two choices per pricing, so
+/// neither can be made without the other.
+///
+/// A non-zero seed is what turns a flood *out of* a set into a flood
+/// *into* it (`floodPricedInto`, ADR 0041): the step price is charged on
+/// the tile a step lands on, so a flood read backwards charges the tile it
+/// started from and not the one it ends on. Seeding each origin with its
+/// own entry price puts that missing charge back at the start, where it
+/// cancels the one the read end must drop — see `floodPricedInto` below,
+/// the one caller that seeds anything, whose answer `pricedAcross` then
+/// adds to the near leg's arrival at the border.
+let private floodFromAllSeeded
     (weights: int[])
     (occupied: bool[])
     (stepPrice: int -> int option)
-    (starts: Pos list)
+    (starts: (Pos * int) list)
     : int[] * int[] =
     let dist = Array.create tileCount unreached
     let parents = Array.create tileCount -1
@@ -402,15 +440,15 @@ let private floodFromAll
 
         top
 
-    for start in starts do
+    for start, seed in starts do
         let startIndex = indexOf start
 
         // Checked: a start is the caller's Pos, not an index the flood
         // built, so this is the one access the in-range argument for the
         // accessors above does not cover — and it runs once per start.
-        if dist.[startIndex] <> 0 then
-            dist.[startIndex] <- 0
-            push startIndex
+        if seed < dist.[startIndex] then
+            dist.[startIndex] <- seed
+            push (seed * tileCount + startIndex)
 
     while heap.Count > 0 do
         let key = pop ()
@@ -449,35 +487,94 @@ let private floodFromAll
 
     dist, parents
 
-/// The one-origin flood every query but the lead's walk wants: a creep
-/// prices from the tile it stands on.
+/// The flood every origin starts free at — the shape every caller but the
+/// far leg of a cross-room walk wants, since a creep pays nothing to be
+/// where it already is.
+let private floodFromAll weights occupied stepPrice (starts: Pos list) =
+    floodFromAllSeeded weights occupied stepPrice [ for start in starts -> start, 0 ]
+
+/// The one-origin flood the trunk's router wants, and nothing else does
+/// any more: a raw-terrain flood out of a source's tile with no creep in
+/// it and no traffic seen (`trunkPath`, its only caller). Every priced
+/// flood in the tick reaches `floodFromAll` through `floodPriced` instead,
+/// so a new `Pricing` row is wired into `pricingOf` and never here.
 let private floodFrom weights occupied stepPrice (start: Pos) =
     floodFromAll weights occupied stepPrice [ start ]
 
+/// What a step costs and whether the crowd is seen, for one pricing over
+/// one body: the ranking price sees today's traffic and counts half-ticks,
+/// the clock is blind to it and counts whole ticks (ADR 0029), and the
+/// baseline counts the ranking price's own half-ticks with the crowd taken
+/// out (ADR 0030). The one place the pair is laid side by side, so no
+/// flood can take one half without the other and the memo cannot hold one
+/// where a reader expects another. A caller with no room's occupancy in
+/// hand passes `noTraffic`, which is what two of the three rows answer
+/// anyway.
+let private pricingOf (occupied: bool[]) (factor: FatigueFactor) (pricing: Pricing) =
+    match pricing with
+    | TravelCost -> stepUnits factor, occupied
+    | Walk -> stepTicks factor, noTraffic
+    | Baseline -> stepUnits factor, noTraffic
+
 /// The walk's flood over one body, from anywhere in `starts` (ADR 0029):
-/// whole ticks a step and blind to today's traffic. The one place the
-/// walk's two differences from travel cost are spelled out, so no reader
-/// can take one without the other — every clock in the colony floods
-/// through here, however its origins are chosen.
+/// whole ticks a step and blind to today's traffic — the `Walk` row of
+/// `pricingOf`, reached by the clocks whose origins keep them outside the
+/// tick's pricing memo (the lead's cast walk, the hauler quota's round
+/// trip). Every clock in the colony floods through here or through that
+/// row, and there is only the one row.
 let private walkFloodFromAll weights factor (starts: Pos list) =
-    floodFromAll weights noTraffic (stepTicks factor) starts
+    let stepPrice, traffic = pricingOf noTraffic factor Walk
+    floodFromAll weights traffic stepPrice starts
 
 /// The one-origin walk: a creep, or a container, prices from the tile it
 /// sits on.
 let private walkFloodFrom weights factor (start: Pos) =
     walkFloodFromAll weights factor [ start ]
 
-/// The flood one pricing wants over one body: the ranking price sees
-/// today's traffic and counts half-ticks, the clock is blind to it and
-/// counts whole ticks (ADR 0029), and the baseline counts the ranking
-/// price's own half-ticks with the crowd taken out (ADR 0030). The one
-/// place the set is laid side by side, so the memo cannot hold one where
-/// a reader expects another.
+/// The flood one pricing wants over one body, out of one origin: the
+/// memoised flood a placed creep prices from.
 let private floodPriced weights occupied factor pricing (start: Pos) =
-    match pricing with
-    | TravelCost -> floodFrom weights occupied (stepUnits factor) start
-    | Walk -> walkFloodFrom weights factor start
-    | Baseline -> floodFrom weights noTraffic (stepUnits factor) start
+    let stepPrice, traffic = pricingOf occupied factor pricing
+    floodFromAll weights traffic stepPrice [ start ]
+
+/// What the flood charges for a step landing on a tile — the step price
+/// plus the occupancy surcharge, exactly as the relaxation inside
+/// `floodFromAllSeeded` charges it. None for a tile outside the
+/// projection or one this body cannot step onto at all. Spelled once here
+/// so a seeded flood's origins carry the same charge the loop would have
+/// put on them.
+let private entryCost (weights: int[]) (occupied: bool[]) stepPrice (tile: Pos) : int option =
+    let index = indexOf tile
+    let weight = weights.[index]
+
+    if weight < 0 then
+        None
+    else
+        stepPrice weight
+        |> Option.map (fun step -> step + (if occupied.[index] then occupancyPenalty else 0))
+
+/// The same pricing flooded *into* a set of goals rather than out of one
+/// origin: cheapest cost from every tile of the room to the nearest goal,
+/// counting the step onto the tile it is read at and the step onto the
+/// goal it ends on (ADR 0041, #123). The engine's cost is charged on the
+/// tile a step lands on, so a flood run outward from the goals charges the
+/// wrong end by exactly one tile; seeding each goal with its own entry
+/// cost restores it, and what comes back at a tile `f` is then
+/// `cost(f) + walk(f -> goals)` — the price of standing on `f` *and*
+/// walking in from it. `pricedAcross` adds that to the near leg's arrival
+/// at the border, and every tile the creep steps onto is charged once and
+/// none twice.
+///
+/// Distances only: a route into the far room is not a route anything
+/// steps along, because arbitrated movement stays single-room (ADR 0041).
+let private floodPricedInto weights occupied factor pricing (goals: Pos list) : int[] =
+    let stepPrice, traffic = pricingOf occupied factor pricing
+
+    goals
+    |> List.choose (fun goal ->
+        entryCost weights traffic stepPrice goal |> Option.map (fun cost -> goal, cost))
+    |> floodFromAllSeeded weights traffic stepPrice
+    |> fst
 
 /// The Atlas over a Snapshot, recalling a spawn walk table rather than
 /// laying an empty one (ADR 0032). The caller hands the table the plan
@@ -592,6 +689,7 @@ let ofSnapshotRecalling (walks: WalkTable) (snapshot: Snapshot) : Atlas =
 
                     Map.add room laid table)
                 Map.empty
+        FarFloods = System.Collections.Generic.Dictionary()
         Walks = walks
         WorkAreas = System.Collections.Generic.Dictionary()
         HeavyAreas = System.Collections.Generic.Dictionary()
@@ -1184,8 +1282,8 @@ let private sharesRoom (atlas: Atlas) (creep: string) (task: Task) : bool =
         | Some(creepRoom, _), Some(targetRoom, _) -> creepRoom = targetRoom
         | _ -> true
 
-/// Work Area of a Task for one creep — the body-aware query every reader
-/// that has a creep uses (ADR 0020). Ordinarily the Task's own area, but
+/// The body-aware Work Area, in the target's own room and blind to where
+/// the creep is standing (ADR 0020). Ordinarily the Task's own area, but
 /// Harvest for a Work-heavy body is narrowed to that source's Posts when
 /// the source has any: a heavy body digs from the tile that catches its
 /// overflow or lets it upgrade in place, and travel cost walks it there
@@ -1199,18 +1297,45 @@ let private sharesRoom (atlas: Atlas) (creep: string) (task: Task) : bool =
 /// this never re-enters the `posts` derivation that reads the Upgrade
 /// area. Memoised per Task for the tick beside the unnarrowed areas.
 ///
+/// Two readers, and the split between them is the room: `workAreaFor`
+/// below hands these tiles to a creep already standing in the room they
+/// belong to, and `pricedAcross` floods the far leg of a cross-room price
+/// out of them without handing a creep anything. Only the body decides
+/// what comes back, which is why the far leg's memo carries the Work-heavy
+/// bit and not a creep.
+let private narrowedArea (atlas: Atlas) (creep: string) (task: Task) : Set<Pos> =
+    match task with
+    | Harvest sourceId when workHeavy atlas creep ->
+        memoised atlas.HeavyAreas task (fun () ->
+            let postTiles = postsOf atlas sourceId
+
+            if Set.isEmpty postTiles then
+                workArea atlas task
+            else
+                Set.intersect (workArea atlas task) postTiles)
+    | _ -> workArea atlas task
+
+/// Work Area of a Task for one creep — the body-aware query every reader
+/// that has a creep uses, which is `narrowedArea` above once the rooms
+/// agree.
+///
 /// Empty for a creep standing in a different room from the Task's target
 /// (ADR 0041). The body-blind `workArea` above stays honest — those tiles
 /// are the target's room's ground and it is really there — but a `Set<Pos>`
 /// carries no room, and this is the query every reader that holds a creep
-/// prices, steps and acts over: the ranking price and the walk flood the
-/// *creep's* room, the mover's candidates are its own room's tiles, and a
-/// goal read out of the wrong room's grid answers a number nobody may act
-/// on. So the creep is told what it is told when the Reach takes its last
-/// standing tile — it has nowhere to work this Task from — which is the
-/// answer that makes it inapplicable rather than mispriced. #123 replaces
-/// this with the minimum over the Seam band; until then no Work Area a
-/// creep is handed crosses a border.
+/// steps and acts over: the mover's candidates are its own room's tiles,
+/// and a goal read out of the wrong room's grid answers a step nobody may
+/// take. So the creep is told what it is told when the Reach takes its
+/// last standing tile — it has nowhere to work this Task from, which is
+/// what makes the action gate refuse rather than mislead.
+///
+/// #123 did not widen this, and that is the decision: the cross-room
+/// *price* is a minimum over the Seam band (`pricedAcross`), joined where
+/// the rooms are both in hand, while the *tiles* a creep is handed stay
+/// its own room's. Geometry crosses the border; standing, stepping and
+/// acting do not (ADR 0041's Consequences). A caller that wants the far
+/// room's origins asks `narrowedArea` above, which is the same narrowing
+/// with no creep's room in it.
 ///
 /// Guarded outside the memo, which keys on the Task alone: the room is a
 /// fact about the creep, and two creeps of one Task must not share an
@@ -1219,16 +1344,7 @@ let workAreaFor (atlas: Atlas) (creep: string) (task: Task) : Set<Pos> =
     if not (sharesRoom atlas creep task) then
         Set.empty
     else
-        match task with
-        | Harvest sourceId when workHeavy atlas creep ->
-            memoised atlas.HeavyAreas task (fun () ->
-                let postTiles = postsOf atlas sourceId
-
-                if Set.isEmpty postTiles then
-                    workArea atlas task
-                else
-                    Set.intersect (workArea atlas task) postTiles)
-        | _ -> workArea atlas task
+        narrowedArea atlas creep task
 
 /// The controller's upgrade buffers, by id: built containers standing
 /// inside a controller's Upgrade Work Area and on no source's Seat — the
@@ -1395,6 +1511,138 @@ let seams (atlas: Atlas) (fromRoom: string) (toRoom: string) : (Pos * Pos) list 
         |> List.filter (fun (here, there) -> passable near here && passable far there)
     | _ -> []
 
+/// The tiles of a room's own ground next to one of its exit tiles — the
+/// only tiles a flood can price a Seam's near side from, or step off its
+/// far side onto, because the border ring is not ground and no flood ever
+/// enters it (ADR 0036, ADR 0041). Clipped to the grid rather than to the
+/// projection: a tile the projection does not carry is impassable, so the
+/// flood already answers `unreached` there, and an index off the grid is
+/// no index at all. Diagonals included — the engine lets a creep step onto
+/// an exit diagonally, and onto its first tile in the new room the same
+/// way.
+let private besideExit (tile: Pos) : Pos list =
+    neighbours tile
+    |> List.filter (fun n -> n.X >= 0 && n.X < roomSide && n.Y >= 0 && n.Y < roomSide)
+
+/// What this body pays to step onto an exit tile, priced by the same rule
+/// every other step is (ADR 0029's `max(1, ceil(units / 2))` for the walk,
+/// travel cost's units for the ranking price). This is #123's narrowing of
+/// ADR 0041's literal `+1`: the `+1` is the price of *walking onto the
+/// Seam*, which is one tick only for a plain exit under a body at fatigue
+/// parity — the case the ADR was written on, where the two agree — and a
+/// swamp exit is not free. Read off the border ring, which is the only
+/// terrain the projection has for an exit, and priced at the bare step:
+/// the ring carries no road, so there is no discount to apply, and the
+/// occupancy surcharge is deliberately not charged here even though
+/// the ring can hold a creep — the engine parks one on the far room's ring
+/// tile the tick it crosses, and `Snapshot` files it there. A surcharge
+/// re-ranks a step so a traveller detours around standing traffic, and
+/// there is no detour to buy at a Seam: which crossing is cheapest is a
+/// price the mover never spends, because arbitrated movement stays
+/// single-room (ADR 0041's Consequences). None for an exit the
+/// projection has no terrain for, or a wall, or a body that cannot step at
+/// all — an unpriceable crossing is no crossing (ADR 0004).
+let private exitPrice (atlas: Atlas) (pricing: Pricing) (factor: FatigueFactor) room tile =
+    let stepPrice, _ = pricingOf noTraffic factor pricing
+
+    Map.tryFind room atlas.Spatial.Borders
+    |> Option.bind (Map.tryFind tile)
+    |> Option.map terrainWeight
+    |> Option.filter (fun weight -> weight > 0)
+    |> Option.bind stepPrice
+
+/// The far leg's flood for one Task and one body, memoised colony-wide:
+/// the price, from every tile of the target's room, of stepping onto that
+/// tile and walking in to the Task's Work Area there (`floodPricedInto`).
+/// Its origin is the target, so one entry answers every creep the colony
+/// prices this Task for — ADR 0041's reason the cross-room walk is a
+/// minimum over additions rather than over floods.
+let private farFlood (atlas: Atlas) (pricing: Pricing) (creep: string) (room: string) (task: Task) =
+    let factor = factorOf atlas creep
+
+    memoised atlas.FarFloods (room, task, workHeavy atlas creep, factor, pricing) (fun () ->
+        floodPricedInto
+            (weightsOf atlas room)
+            (occupiedOf atlas room)
+            factor
+            pricing
+            (narrowedArea atlas creep task |> Set.toList))
+
+/// A cross-room price, joined on the Seam: the smallest, over the whole
+/// band between the two rooms, of *walk to the exit tile* + *the exit
+/// tile's own price* + *walk in from the tile it lands on* (ADR 0041,
+/// narrowed by #123). Each leg is a single-room flood on the tables
+/// already laid — the near one out of the creep, the far one into the
+/// Task — so no flood ever leaves its room and the join is a minimum over
+/// thirty-odd additions rather than over thirty-odd floods.
+///
+/// **The convention, spelled out**, because the two legs are read from
+/// opposite ends and a reader has to know which tiles each charges. A step
+/// costs what the tile it *lands on* costs, and the creep's journey is:
+/// walk to a ground tile beside the exit; step onto the exit; be moved to
+/// the landing tile by the engine at the end of that tick, for nothing;
+/// step off it onto the far room's ground; walk in. So exactly three
+/// things are charged beyond the two floods' own interiors — the exit
+/// tile, the far room's first tile, and the Work-Area tile the walk ends
+/// on — and the landing tile is charged nothing, because arriving on it is
+/// the engine's move and not the creep's.
+///
+/// The near flood charges every tile it enters, so `near[n]` is honest as
+/// it stands. The far flood is run *into* the Work Area with each of its
+/// tiles seeded at its own entry cost, so `far[f]` is the price of
+/// stepping onto `f` **plus** the walk in from it, ending with the charge
+/// for the Work-Area tile itself. Adding the two and the exit's price
+/// charges every tile the creep steps onto exactly once and none twice —
+/// which is what the engine charges, and what lets the walk and travel
+/// cost be read off the same join under their own pricings (ADR 0030). It
+/// is a tile cheaper than a flood over the two rooms laid side by side
+/// would answer, and that tile is real: crossing a border displaces a
+/// creep twice for one move, so a cross-room walk can come in one under
+/// the two rooms' own Chebyshev distance (`RoomInvariantTests`).
+///
+/// Total (ADR 0004): a band with no crossing the body can pay for, a near
+/// side no ground of this room reaches, and a far side whose landing tile
+/// opens onto nothing all answer with no price at all — the same answer an
+/// unreachable Work Area in the creep's own room gets, which is the Task
+/// being inapplicable to this creep.
+let private pricedAcross
+    (atlas: Atlas)
+    (pricing: Pricing)
+    (creep: string)
+    (task: Task)
+    (creepRoom: string)
+    (from: Pos)
+    (targetRoom: string)
+    : int option =
+    match seams atlas creepRoom targetRoom with
+    | [] -> None
+    | band ->
+        let factor = factorOf atlas creep
+        let near, _ = flood atlas pricing creepRoom creep from
+        let far = farFlood atlas pricing creep targetRoom task
+
+        let reached (dist: int[]) tiles =
+            tiles
+            |> List.choose (fun tile ->
+                let d = dist.[indexOf tile]
+                if d = unreached then None else Some d)
+            |> function
+                | [] -> None
+                | costs -> Some(List.min costs)
+
+        band
+        |> List.choose (fun (exitTile, landing) ->
+            match
+                reached near (besideExit exitTile),
+                exitPrice atlas pricing factor creepRoom exitTile,
+                reached far (besideExit landing)
+            with
+            | Some approach, Some crossing, Some departure -> Some(approach + crossing + departure)
+            | _ -> None)
+        |> function
+            | [] -> None
+            | sums -> Some(List.min sums)
+
 /// The cheapest path from a creep to a set of tiles under one pricing —
 /// the shape travel cost and the walk share, so the two can disagree on
 /// what a step costs and on nothing else (ADR 0029). The tiles are the
@@ -1407,8 +1655,8 @@ let seams (atlas: Atlas) (fromRoom: string) (toRoom: string) : (Pos * Pos) list 
 ///
 /// The tiles are read as tiles of the creep's own room, because that is
 /// the room the flood runs in and it stops at that room's border
-/// (ADR 0041). Nothing here joins two rooms: the wrappers below settle the
-/// rooms before they price, and the cross-room sum is #123's.
+/// (ADR 0041). Nothing here joins two rooms: `pricedPath` settles the
+/// rooms before it prices, and sends a border crossing to `pricedAcross`.
 let private pricedPathTo
     (atlas: Atlas)
     (pricing: Pricing)
@@ -1442,17 +1690,25 @@ let private pricedPathTo
 /// too: it never counts against the creep, and, having no Work Area, never
 /// lets it act.
 ///
-/// The rooms are settled before this prices, and not here: the flood is
-/// the creep's room's and the goals are `workAreaFor`'s, which is empty
-/// across a border (ADR 0041). So a creep and a target in different rooms
-/// have no price — the same answer an unreachable Work Area in the creep's
-/// own room gets, which is the Task being inapplicable to that creep.
-/// Guarding it a second time here would be the rule with two spellings,
-/// and only one of them is on the path `decide` prices through.
+/// This is where the two rooms are settled, and the one place they are
+/// (ADR 0041, #123): a creep and a target the projection files under
+/// different names are priced by the minimum over their Seam band
+/// (`pricedAcross`), and everything else — one room, an unplaced creep, an
+/// unplaced target, a Task acting on nothing — prices exactly as it did
+/// before there was a second room, off the creep's own flood and the tiles
+/// `workAreaFor` hands it. Travel cost and the walk both arrive here, so
+/// the colony has one join and not two, and one rule turning geometry into
+/// a number across a border as it has one turning units into ticks
+/// (ADR 0030).
 let private pricedPath (atlas: Atlas) (pricing: Pricing) (creep: string) (task: Task) : int option =
     match actionOn task with
     | Some(targetId, _) when not (Map.containsKey targetId atlas.TargetAt) -> Some 0
-    | _ -> pricedPathTo atlas pricing creep (workAreaFor atlas creep task)
+    | Some(targetId, _) ->
+        match Map.tryFind creep atlas.CreepAt, Map.tryFind targetId atlas.TargetAt with
+        | Some(creepRoom, from), Some(targetRoom, _) when creepRoom <> targetRoom ->
+            pricedAcross atlas pricing creep task creepRoom from targetRoom
+        | _ -> pricedPathTo atlas pricing creep (workAreaFor atlas creep task)
+    | None -> pricedPathTo atlas pricing creep (workAreaFor atlas creep task)
 
 /// Travel cost of a Task for a creep (ADR 0002, revised by ADRs 0006 and
 /// 0010): the cost units — half-ticks — the creep's body needs along a
@@ -1466,6 +1722,12 @@ let private pricedPath (atlas: Atlas) (pricing: Pricing) (creep: string) (task: 
 /// 0004). A ranking price and nothing else since ADR 0029: it breaks rank
 /// ties in the Matcher, and no time-aware judgement is made on it — that
 /// is the walk's job, and halving this number is not the walk.
+///
+/// Across a border it is the minimum over the Seam band (`pricedAcross`,
+/// ADR 0041), in its own units and off its own floods: the join is shared
+/// with the walk so that an outpost's Task ranks in the same pool by the
+/// same arithmetic the home room's does, which is what makes "go dig
+/// there" one comparison rather than two.
 let travelCost (atlas: Atlas) (creep: string) (task: Task) : int option =
     pricedPath atlas TravelCost creep task
 
@@ -1491,6 +1753,13 @@ let travelCostWithin (atlas: Atlas) (creep: string) (area: Set<Pos>) : int optio
 /// with. Totality is travel cost's own contract (ADR 0004): an unplaced
 /// creep or target prices 0, and an unreachable or empty Work Area has no
 /// walk at all, which readers take as "no arrival" and count from now.
+///
+/// Across a border it is the minimum over the Seam band (`pricedAcross`,
+/// ADR 0041): the near leg, the exit tile's own price under this same
+/// per-step rule — so a swamp exit costs what a swamp step costs, which is
+/// #123's narrowing of the ADR's literal `+1` — and the far leg, flooded
+/// out of the target so one memo entry serves the whole colony. Same join
+/// as travel cost, different pricing, exactly as at home.
 let walkTicks (atlas: Atlas) (creep: string) (task: Task) : int option =
     pricedPath atlas Walk creep task
 
