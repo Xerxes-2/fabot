@@ -60,10 +60,11 @@ let wireVocabularyTests =
     testList
         "wire vocabularies"
         [
-            test "every Verdict vocabulary round-trips, case by case" {
-                // The four unions that ride the observe channel's Memory
-                // subtree. The encoder is exhaustive by construction; what
-                // is checked here is the other direction, which the
+            test "every observe vocabulary round-trips, case by case" {
+                // The five unions that ride the observe channel's Memory
+                // subtree — the four Verdict vocabularies and the Layout
+                // channel's. The encoder is exhaustive by construction;
+                // what is checked here is the other direction, which the
                 // compiler cannot see.
                 roundTrips "MatchFactor" (casesOf<MatchFactor> ()) matchFactorName matchFactorOf
 
@@ -78,6 +79,12 @@ let wireVocabularyTests =
                     (releaseReasonOf sampleNumbers)
 
                 roundTrips "IdleReason" (casesOf<IdleReason> ()) idleReasonName idleReasonOf
+
+                // The Layout channel's own vocabulary (#77, ADR 0035).
+                // Not a Verdict — the Layout speaks none — but it rides
+                // the same Memory subtree under the same rule, so it is
+                // enumerated here beside them.
+                roundTrips "FootingKind" (casesOf<FootingKind> ()) footingKindName footingKindOf
 
                 roundTrips
                     "RejectReason"
@@ -120,6 +127,8 @@ let wireVocabularyTests =
                     "an IdleReason is no ReleaseReason"
 
                 Expect.isNone (idleReasonOf "") "the empty name is no IdleReason"
+
+                Expect.isNone (footingKindOf "container") "a near miss is no FootingKind"
 
                 Expect.isNone
                     (rejectReasonOf sampleNumbers "task-gone")

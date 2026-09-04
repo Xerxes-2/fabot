@@ -554,16 +554,41 @@ type FatigueFactor = { FatigueParts: int; MoveParts: int }
 /// carries it.
 type WalkTable = System.Collections.Generic.Dictionary<Pos * FatigueFactor, int[]>
 
+/// What a Link footing is held beside (ADR 0022, ADR 0027): each planned
+/// source container, the controller container, the Storage. The Layout
+/// knows a target's kind by construction — the target list is assembled
+/// from exactly those three — and carries it so a footing the fold cannot
+/// serve names the guarantee that was lost, not merely a tile.
+[<RequireQualifiedAccess>]
+type FootingKind =
+    | SourceContainer
+    | ControllerContainer
+    | Storage
+
+/// A footing target the Layout could not serve (#77): every tile within
+/// range 1 of it was a trunk, another target, already taken by a footing,
+/// or not buildable at all, so nothing was reserved for it. Recorded
+/// rather than dropped — one footing per target is a guarantee, and a
+/// guarantee that can degrade in silence is not one.
+type UnservedFooting = { Target: Pos; Kind: FootingKind }
+
 /// The census-keyed plan memo (ADR 0017): the census signature beside the
-/// plans derived from exactly that census — the Layout's site Intents, the
-/// hauler quota, and the spawn walks behind the leads (ADR 0032). Held by
-/// the host in heap across ticks, never written to Memory: a global reset
-/// discards it and the next tick recomputes from scratch. Same census,
-/// same plan, so reuse never changes behaviour.
+/// plans derived from exactly that census — the Layout's site Intents and
+/// the footings it could not serve, the hauler quota, and the spawn walks
+/// behind the leads (ADR 0032). Held by the host in heap across ticks,
+/// never written to Memory: a global reset discards it and the next tick
+/// recomputes from scratch. Same census, same plan, so reuse never
+/// changes behaviour.
 type PlanMemo =
     {
         Signature: string
         SiteIntents: Intent list
+        /// The footing targets this plan left unserved (#77), derived from
+        /// the same census as the site Intents and recomputed with them.
+        /// Empty is the healthy answer and rides here all the same: the
+        /// App writes it every tick, because a channel that says nothing
+        /// when nothing is lost cannot be told from one that is not there.
+        UnservedFootings: UnservedFooting list
         HaulerQuota: int
         /// The walks flooded under this signature, filled through the tick
         /// by the Atlas the table was handed to. Dropped whole when the
@@ -794,6 +819,28 @@ let rejectReasonOf =
             (fun _ -> Some RejectReason.Unreachable)
             (fun _ -> Some RejectReason.Threatened)
             Option.map RejectReason.TooEarly
+        ]
+
+/// The wire spelling of each FootingKind, on the Layout channel's Memory
+/// leaf (#77), as `matchFactorName` is MatchFactor's. Not a Verdict
+/// vocabulary — the Layout speaks no Verdicts, which is the whole reason
+/// its losses need a channel — but the same rule: one spelling, written
+/// once, round-tripped against the union itself by `Core.Tests`.
+let footingKindName =
+    function
+    | FootingKind.SourceContainer -> "source-container"
+    | FootingKind.ControllerContainer -> "controller-container"
+    | FootingKind.Storage -> "storage"
+
+/// The FootingKind a wire name spells, or None for a name this vocabulary
+/// does not have.
+let footingKindOf =
+    reverseOf
+        footingKindName
+        [
+            FootingKind.SourceContainer
+            FootingKind.ControllerContainer
+            FootingKind.Storage
         ]
 
 /// One row of a verbose scoring: a Task in the pool, either scored on the

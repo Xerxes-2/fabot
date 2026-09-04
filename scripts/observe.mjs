@@ -1,7 +1,7 @@
-// One-shot CLI over the observe channels — the Transition log (ADR 0009)
-// and the Raid log (ADR 0028): pull the observe subtree from
-// `Memory.fabot.observe`, flip the verbose list remotely, or watch the
-// console for a bounded window. Config via .env (loaded by
+// One-shot CLI over the observe channels — the Transition log (ADR 0009),
+// the Raid log (ADR 0028) and the Layout record (ADR 0035): pull the
+// observe subtree from `Memory.fabot.observe`, flip the verbose list
+// remotely, or watch the console for a bounded window. Config via .env (loaded by
 // `node --env-file-if-exists=.env`), same as upload.mjs:
 //   SCREEPS_TOKEN   - auth token (required)
 //   SCREEPS_API_URL - API base, default https://screeps.com/season (seasonal server)
@@ -12,6 +12,7 @@
 //   observe.mjs tasks              every creep's current Task with its Verdict reason
 //   observe.mjs timeline <creep>   one creep's Transition log, oldest first
 //   observe.mjs raids              the Raid log's episodes, newest first
+//   observe.mjs layout             the footing targets the Layout could not serve
 //   observe.mjs verbose            the verbose list as stored
 //   observe.mjs verbose add <creep>     put a creep on the verbose list
 //   observe.mjs verbose remove <creep>  take a creep off the verbose list
@@ -30,7 +31,8 @@ const fail = (msg) => {
 
 const usage =
   "usage: observe.mjs tasks [--json] | timeline <creep> [--json] | raids [--json] | " +
-  "verbose [add <creep> | remove <creep> | clear] [--json] | console --seconds N";
+  "layout [--json] | verbose [add <creep> | remove <creep> | clear] [--json] | " +
+  "console --seconds N";
 
 const rawArgs = process.argv.slice(2);
 const json = rawArgs.includes("--json");
@@ -51,7 +53,8 @@ const [command, ...rest] = args;
 const creepArg = rest[0];
 const [action, actionName] = rest;
 
-if (!["tasks", "timeline", "raids", "verbose", "console"].includes(command)) fail(usage);
+if (!["tasks", "timeline", "raids", "layout", "verbose", "console"].includes(command))
+  fail(usage);
 if (command === "timeline" && !creepArg) fail(usage);
 if (command === "verbose" && action !== undefined) {
   if (!["add", "remove", "clear"].includes(action)) fail(usage);
@@ -202,6 +205,51 @@ if (command === "console") {
       );
       console.log(`  damage: ${e.damage ?? 0} hits off the Keep and the ramparts`);
       console.log("");
+    }
+  }
+} else if (command === "layout") {
+  // ---- layout: the footing targets the Layout could not serve -----------
+
+  // The wire shape written by ObserveMemory.fs:
+  //   { unserved: [{ x, y, kind }] }
+  // The current plan's record, not a history: no ring, no fold, the same
+  // list every tick under a stable census. Its three answers are distinct
+  // and all three matter (ADR 0035). A missing leaf is a missing channel —
+  // a bundle predating it — and fails loudly, the way `raids` does, rather
+  // than reporting a confident "nothing lost" off a stale deploy; an empty
+  // list is the guarantee of ADR 0022 / 0027 holding, one footing per
+  // target; a row is a target the fold found no tile for, which is a
+  // reservation the colony no longer has.
+  const stored = await memoryGet("fabot.observe.layout");
+  if (stored == null || typeof stored !== "object") {
+    fail(
+      "no Layout record at Memory.fabot.observe.layout — " +
+        "the deployed bundle predates it, or the colony respawned and hasn't written one yet.",
+    );
+  }
+  // A leaf that is there but shapeless is a fourth answer, and it must not
+  // collapse into the third: reading a missing `unserved` as an empty list
+  // would print "every footing target has its footing" off a hand-edit or a
+  // moved wire shape, which is the confident false negative this channel is
+  // built to avoid (ADR 0035).
+  if (!Array.isArray(stored.unserved)) {
+    fail(
+      "the Layout record at Memory.fabot.observe.layout carries no `unserved` list — " +
+        "the leaf was hand-edited, or its wire shape has moved. Not read as \"nothing lost\".",
+    );
+  }
+  const unserved = stored.unserved;
+
+  if (json) {
+    console.log(JSON.stringify(unserved, null, 2));
+  } else if (unserved.length === 0) {
+    console.log("every footing target has its footing");
+  } else {
+    console.log(
+      `${unserved.length} footing target${unserved.length === 1 ? "" : "s"} with no footing:`,
+    );
+    for (const f of unserved) {
+      console.log(`  (${f.x},${f.y})  ${f.kind}`);
     }
   }
 } else {

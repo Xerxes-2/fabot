@@ -82,6 +82,14 @@ let loop () =
     |> Observe.foldRaids Observe.capEpisodes Observe.quietGap snapshot
     |> ObserveMemory.saveRaids
 
+    // The Layout's own channel (ADR 0035): the footing targets this tick's
+    // plan could not serve. Colony-level for the Raid log's structural
+    // reason — a footing has no creep to key a Verdict on — and off the
+    // memo, so a recalled plan reports exactly what it reported when it was
+    // computed. Written every tick, empty or not, for the same reason the
+    // Raid log's leaf is.
+    ObserveMemory.saveLayout decision.Memo.UnservedFootings
+
     pruneDeadCreepMemory living
     // Outcomes go unread here; failures are already logged by the Executor.
     Executor.run decision.Intents |> ignore

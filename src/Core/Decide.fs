@@ -917,7 +917,13 @@ let private horizonLevel = 4
 /// rampart covers every standing Keep structure and every standing Post
 /// container (ADR 0034), from the level the engine allows one, because a
 /// rampart is no footprint and takes no tile from anything.
-let private planLayout (snapshot: Snapshot) atlas : Intent list =
+/// Returned beside the Intents: the footing targets the fold could not
+/// serve (#77). A target with no candidate reserves nothing, and the
+/// guarantee of ADR 0022 and ADR 0027 — one footing per target — would
+/// otherwise degrade with nothing anywhere to say so. Not an Intent,
+/// because there is nothing to place; not a Verdict, because a footing has
+/// no creep (ADR 0035).
+let private planLayout (snapshot: Snapshot) atlas : Intent list * UnservedFooting list =
     let anchor = snapshot.Spawns |> List.tryPick (fun s -> Atlas.positionOf atlas s.Id)
 
     match Atlas.roomName atlas, anchor, snapshot.Controller with
@@ -1098,13 +1104,25 @@ let private planLayout (snapshot: Snapshot) atlas : Intent list =
         // One footing per target, and a tile is only ever one target: a
         // Seat that is also the controller container's pick would
         // otherwise be served twice and hold two tiles for one link.
+        // Each target carries the kind it is, which the fold knows by
+        // construction — the list is assembled from exactly the three the
+        // guarantee names — so an unserved one below says which guarantee
+        // was lost rather than only which tile (#77). A tile named twice
+        // keeps the first kind that named it, the way `List.distinct`
+        // always kept the first tile.
         let footingTargets =
-            sourceContainerTiles
-            @ Option.toList controllerContainerTile
-            @ storagePick
-            @ (Set.union (Atlas.storageTiles atlas) (Atlas.pendingStorageTiles atlas)
-               |> Set.toList)
-            |> List.distinct
+            [
+                for tile in sourceContainerTiles -> tile, FootingKind.SourceContainer
+                for tile in Option.toList controllerContainerTile ->
+                    tile, FootingKind.ControllerContainer
+                for tile in storagePick -> tile, FootingKind.Storage
+                for tile in
+                    Set.union (Atlas.storageTiles atlas) (Atlas.pendingStorageTiles atlas)
+                    |> Set.toList -> tile, FootingKind.Storage
+            ]
+            |> List.distinctBy fst
+
+        let footingTargetTiles = footingTargets |> List.map fst
 
         // A standing link is a target, so its own footing has stopped
         // being buildable: added back, or the footing would jump the tick
@@ -1115,22 +1133,27 @@ let private planLayout (snapshot: Snapshot) atlas : Intent list =
         // without leaving their tile.
         let footingCandidates = Set.union (Set.ofList buildable) (Atlas.linkTiles atlas)
 
-        let footings =
-            (Set.empty, footingTargets)
-            ||> List.fold (fun taken target ->
+        // A target with no candidate at all leaves the accumulator alone
+        // and is recorded (#77): the fold reserves what it can, exactly as
+        // before, and the shortfall rides out beside the plan instead of
+        // falling through in silence. Accumulated head-first and reversed
+        // once, so the record reads in the targets' own order.
+        let footings, unservedFootings =
+            ((Set.empty, []), footingTargets)
+            ||> List.fold (fun (taken, unserved) (target, kind) ->
                 footingCandidates
                 |> Set.filter (fun tile ->
                     range tile target = 1
                     && not (Set.contains tile roadPlan)
-                    && not (List.contains tile footingTargets)
+                    && not (List.contains tile footingTargetTiles)
                     && not (Set.contains tile taken))
                 |> Set.toList
                 |> function
-                    | [] -> taken
+                    | [] -> taken, { Target = target; Kind = kind } :: unserved
                     | candidates ->
                         candidates
                         |> List.minBy (fun tile -> range tile spawnPos, tile.X, tile.Y)
-                        |> fun tile -> Set.add tile taken)
+                        |> fun tile -> Set.add tile taken, unserved)
 
         // The tower and the extensions take the ordering again with the
         // footings held out — a footing outranks both — and the Storage's
@@ -1197,8 +1220,12 @@ let private planLayout (snapshot: Snapshot) atlas : Intent list =
         @ place Extension (extensionTiles |> List.truncate (extensionGap controller.Level))
         @ place Road (Set.toList roadGap)
         @ place Container containerGap
-        @ place Rampart (Set.toList rampartGap)
-    | _ -> []
+        @ place Rampart (Set.toList rampartGap),
+        List.rev unservedFootings
+    // A room the Layout cannot even orient itself in plans nothing and
+    // loses nothing: there are no targets to serve, so the record is empty
+    // rather than a shortfall (#77).
+    | _ -> [], []
 
 /// Colony reflex beside the pipeline, the second after safe mode: every
 /// creep with free carry capacity standing within pickup range of a
@@ -2297,9 +2324,12 @@ let decide
         match recalled with
         | Some m -> m
         | None ->
+            let siteIntents, unservedFootings = planLayout snapshot atlas
+
             {
                 Signature = signature
-                SiteIntents = planLayout snapshot atlas
+                SiteIntents = siteIntents
+                UnservedFootings = unservedFootings
                 HaulerQuota = haulerQuota snapshot atlas
                 Walks = walks
             }

@@ -1581,11 +1581,88 @@ let withPlanPending colony =
             }
     }
 
+/// W12S28's `10,43` shape, synthesised (#77): the pocket source's only
+/// Seat is its container's pick, and every one of the eight tiles beside
+/// that pick is spoken for — four wall, the source itself, the one trunk
+/// road out, and two standing extensions, which is the live room's own
+/// tile table in proportion. The extensions are the live loss: `11,43`
+/// took one in the RCL4 burst, planned by a bundle that did not yet hold
+/// footings back. Nothing is left for the fold to reserve, so this room's
+/// guarantee is short by one — and `pocketColony`, the same room without
+/// the seal, is the control that serves all four.
+let sealedPocketColony level =
+    let colony = pocketColony level
+    let sealedTiles = [ { X = 21; Y = 29 }; { X = 21; Y = 31 } ]
+
+    let standingExtensions =
+        [ "ext-3", { X = 22; Y = 29 }; "ext-4", { X = 22; Y = 31 } ]
+
+    let walled =
+        { colony.Spatial with
+            Terrain =
+                (colony.Spatial.Terrain, sealedTiles)
+                ||> List.fold (fun acc tile -> Map.add tile Wall acc)
+        }
+
+    { colony with
+        Spatial =
+            (walled, standingExtensions)
+            ||> List.fold (fun room (id, tile) ->
+                withStanding id tile (Structure BuiltKind.Extension) room)
+    }
+
 [<Tests>]
 let linkFootingTests =
     testList
         "link footing"
         [
+            test "every target served records nothing: the empty list is the guarantee holding" {
+                // Both of `footingRoom`'s targets get their tile, so the
+                // record is empty — and empty is an answer rather than an
+                // absence: it is what the Layout channel says while ADR
+                // 0022 and ADR 0027's one-footing-per-target still holds
+                // (#77, ADR 0035).
+                let { Memo = memo } = decide (atLevel 4 footingRoom) Map.empty Set.empty None
+
+                Expect.isEmpty memo.UnservedFootings "both footings stand; nothing is lost"
+            }
+
+            test "a target with no candidate is recorded by tile and kind, never dropped" {
+                // W12S28's `10,43`, synthesised: the pocket source's
+                // container pick has wall on five sides, its own source on
+                // the sixth, the trunk road out on the seventh and a
+                // standing extension on the last, so the fold has nothing
+                // to reserve for it. That used to fall through to `taken`
+                // and leave the room three footings where the ADRs promise
+                // four, with no signal anywhere (#77). The room's other
+                // three targets are absent from the list, which is the
+                // other half of the claim: the fold still reserves
+                // everything it can, and only what it cannot is recorded.
+                let { Memo = memo } = decide (sealedPocketColony 4) Map.empty Set.empty None
+
+                Expect.equal
+                    memo.UnservedFootings
+                    [
+                        {
+                            Target = { X = 21; Y = 30 }
+                            Kind = FootingKind.SourceContainer
+                        }
+                    ]
+                    "one entry: the sealed source container's pick, and nothing else"
+
+                // And the seal is the whole cause. The same room with its
+                // pocket open serves all four targets and records nothing,
+                // so sealing one pick costs exactly that one footing: the
+                // fold reserves everything it still can, which is the other
+                // half of the claim above and cannot be read off a list
+                // that only ever names losses.
+                let { Memo = control } = decide (pocketColony 4) Map.empty Set.empty None
+
+                Expect.isEmpty
+                    control.UnservedFootings
+                    "unsealed, the same four targets all get their tile"
+            }
+
             test "no site lands on a Link footing, at any level" {
                 // The footings are held from level 0, levels before the
                 // engine unlocks links, because the tile never comes back
@@ -2047,6 +2124,7 @@ let sentinelMemo snapshot =
     {
         Signature = censusSignature snapshot
         SiteIntents = [ PlaceConstructionSite("W1N1", { X = 1; Y = 1 }, Tower) ]
+        UnservedFootings = []
         HaulerQuota = 0
         Walks = WalkTable()
     }
@@ -2098,6 +2176,44 @@ let planMemoTests =
                     (placementIntents decision.Intents)
                     (placementIntents fresh.Intents)
                     "a stale memo recomputes to exactly the fresh plan"
+            }
+
+            test
+                "the unserved footings are census-derived: recalled with the plan, recomputed with it" {
+                // #77's record joins the site Intents and the hauler quota
+                // under ADR 0017's standing invitation — same census, same
+                // shortfall — so it is not rederived per tick. The sentinel
+                // says so in both directions: a memo whose signature holds
+                // hands its own empty record back for a room that has in
+                // fact lost a footing, and a stale one recomputes to the
+                // loss the room really has.
+                let colony = sealedPocketColony 4
+
+                let lost =
+                    [
+                        {
+                            Target = { X = 21; Y = 30 }
+                            Kind = FootingKind.SourceContainer
+                        }
+                    ]
+
+                let matching = decide colony Map.empty Set.empty (Some(sentinelMemo colony))
+
+                Expect.isEmpty
+                    matching.Memo.UnservedFootings
+                    "a matching signature reuses the memo's record; nothing recomputes"
+
+                let stale = decide colony Map.empty Set.empty (Some(sentinelMemo (trunkColony 2)))
+
+                Expect.equal
+                    stale.Memo.UnservedFootings
+                    lost
+                    "a moved signature recomputes the record with the rest of the plan"
+
+                Expect.equal
+                    (decide colony Map.empty Set.empty None).Memo.UnservedFootings
+                    lost
+                    "and a memoless tick derives the same loss"
             }
 
             test "a level-up invalidates the memo" {

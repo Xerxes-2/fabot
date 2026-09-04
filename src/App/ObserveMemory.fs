@@ -1,6 +1,9 @@
-/// Serialization shell for the observe channel (ADR 0009, ADR 0028): read
-/// the prior Transition log and Raid log from `Memory.fabot.observe`, hand
-/// each to its pure Core fold, write the results back to their own leaves.
+/// Serialization shell for the observe channels (ADR 0009, ADR 0028,
+/// ADR 0035): read the prior Transition log and Raid log from
+/// `Memory.fabot.observe`, hand each to its pure Core fold, write the
+/// results back to their own leaves — and write the Layout's own leaf,
+/// which has no prior state to read because it records this tick's plan
+/// rather than a history.
 /// The subtree is disposable by construction — absent or unreadable state
 /// is discarded, never repaired, so telemetry can never take the colony
 /// down.
@@ -412,8 +415,8 @@ let loadRaids () : RaidState =
         RaidState.empty
 
 /// Write the Raid log back under `Memory.fabot.observe.raids`, leaving the
-/// rest of the observe subtree — the Transition log and the verbose list —
-/// alone, the same way `save` leaves this leaf alone.
+/// rest of the observe subtree — the Transition log, the verbose list and
+/// the Layout record — alone, the same way `save` leaves this leaf alone.
 let saveRaids (state: RaidState) =
     let raids = createEmpty<obj>
     raids?episodes <- state.Episodes |> List.map encodeEpisode |> List.toArray
@@ -427,3 +430,27 @@ let saveRaids (state: RaidState) =
     raids?hits <- hits
     ensureObserve ()
     Memory?fabot?observe?raids <- raids
+
+/// Write the Layout's unserved footing targets under
+/// `Memory.fabot.observe.layout`, leaving the rest of the observe subtree
+/// alone the way `saveRaids` does. Every tick, the empty list included:
+/// the leaf's presence is what lets `observe.mjs layout` tell "this bundle
+/// records the loss" from "nothing is lost", ADR 0028's reason applied to
+/// a second record (ADR 0035). No load and no fold — the record is the
+/// current plan's, so there is no prior state to degrade from and nothing
+/// a bad leaf could cost.
+let saveLayout (unserved: UnservedFooting list) =
+    let layout = createEmpty<obj>
+
+    layout?unserved <-
+        unserved
+        |> List.map (fun footing ->
+            let o = createEmpty<obj>
+            o?x <- footing.Target.X
+            o?y <- footing.Target.Y
+            o?kind <- footingKindName footing.Kind
+            o)
+        |> List.toArray
+
+    ensureObserve ()
+    Memory?fabot?observe?layout <- layout
