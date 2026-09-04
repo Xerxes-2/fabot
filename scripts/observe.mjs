@@ -1,6 +1,7 @@
 // One-shot CLI over the observe channels — the Transition log (ADR 0009),
-// the Raid log (ADR 0028) and the Layout record (ADR 0035): pull the
-// observe subtree from `Memory.fabot.observe`, flip the verbose list
+// the Raid log (ADR 0028), the Layout record (ADR 0035) and the CPU line
+// (ADR 0041): pull the observe subtree from `Memory.fabot.observe`, flip
+// the verbose list
 // remotely, or watch the console for a bounded window. Config via .env (loaded by
 // `node --env-file-if-exists=.env`), same as upload.mjs:
 //   SCREEPS_TOKEN   - auth token (required)
@@ -13,6 +14,8 @@
 //   observe.mjs timeline <creep>   one creep's Transition log, oldest first
 //   observe.mjs raids              the Raid log's episodes, newest first
 //   observe.mjs layout             what the Layout could not deliver this plan
+//   observe.mjs cpu                the per-tick CPU line, with ADR 0041's
+//                                  revisit trigger read off it
 //   observe.mjs verbose            the verbose list as stored
 //   observe.mjs verbose add <creep>     put a creep on the verbose list
 //   observe.mjs verbose remove <creep>  take a creep off the verbose list
@@ -23,6 +26,7 @@
 //                                       bounded window is the only one-shot read
 // Every read takes --json to emit the raw stored structure for jq.
 import { ScreepsHttpClient } from "screeps-api";
+import { report as cpuReport } from "./cpu-trigger.mjs";
 
 const fail = (msg) => {
   console.error(msg);
@@ -31,7 +35,8 @@ const fail = (msg) => {
 
 const usage =
   "usage: observe.mjs tasks [--json] | timeline <creep> [--json] | raids [--json] | " +
-  "layout [--json] | verbose [add <creep> | remove <creep> | clear] [--json] | " +
+  "layout [--json] | cpu [--json] | " +
+  "verbose [add <creep> | remove <creep> | clear] [--json] | " +
   "console --seconds N";
 
 const rawArgs = process.argv.slice(2);
@@ -53,7 +58,7 @@ const [command, ...rest] = args;
 const creepArg = rest[0];
 const [action, actionName] = rest;
 
-if (!["tasks", "timeline", "raids", "layout", "verbose", "console"].includes(command))
+if (!["tasks", "timeline", "raids", "layout", "cpu", "verbose", "console"].includes(command))
   fail(usage);
 if (command === "timeline" && !creepArg) fail(usage);
 if (command === "verbose" && action !== undefined) {
@@ -313,6 +318,80 @@ if (command === "console") {
         console.log(`  ${targetOf(d)}  wanted ${tileOf(d.pick)}, served by ${tileOf(d.serving)}`);
       }
     }
+  }
+} else if (command === "cpu") {
+  // ---- cpu: the per-tick CPU line ---------------------------------------
+
+  // The wire shape written by ObserveMemory.fs:
+  //   { ticks: [{ t, ms }] }
+  // One row per tick the loop finished, oldest first, capped at the ring
+  // Core keeps (ADR 0041). The tick number rides each row because the
+  // window is only as long as the ticks in it: a tick that threw before
+  // the write reaches Memory leaves no row, and the gap in the numbers is
+  // the record of it. `ms` is what the bot had spent by the time it
+  // stopped looking — after the Executor's intents, before the engine
+  // serializes Memory — so it is the tick's cost minus a constant nobody
+  // can move.
+  //
+  // A missing leaf is a missing channel and fails loudly the way `raids`
+  // and `layout` do: reading it as an empty window would print a
+  // confident "not triggered" off a bundle that measures nothing, which
+  // is the one answer this channel exists to prevent.
+  const stored = await memoryGet("fabot.observe.cpu");
+  if (stored == null || typeof stored !== "object") {
+    fail(
+      "no CPU line at Memory.fabot.observe.cpu — " +
+        "the deployed bundle predates it, or the colony respawned and hasn't written one yet.",
+    );
+  }
+  if (!Array.isArray(stored.ticks)) {
+    fail(
+      "the CPU line at Memory.fabot.observe.cpu carries no `ticks` list — " +
+        'the leaf was hand-edited, or its wire shape has moved. Not read as "nothing measured".',
+    );
+  }
+  // A row off the shape is dropped from the judgement rather than fatal —
+  // a shortened window still has a mean — but it is never dropped in
+  // silence, and it is never dropped from `--json`. A gap in the tick
+  // numbers has exactly one meaning here, a tick the loop did not finish,
+  // and a row this reader hid would be a second one: the same rule the
+  // Layout record's carrying vocabularies are printed under above. So the
+  // count of hidden rows is said out loud beside the judgement, and a leaf
+  // whose rows are all off the shape says how many are there rather than
+  // reporting a bundle that has written nothing.
+  const readable = (row) => row && typeof row.t === "number" && typeof row.ms === "number";
+  const ticks = stored.ticks.filter(readable);
+  const unreadable = stored.ticks.length - ticks.length;
+
+  // `--json` is the stored rows, not the judged ones: the raw structure is
+  // what a jq reader came for, and a row hidden from it could not be seen
+  // anywhere at all.
+  if (json) {
+    console.log(JSON.stringify(stored.ticks, null, 2));
+  } else if (stored.ticks.length === 0) {
+    console.log("the CPU line is empty — the bundle has written no finished tick yet");
+  } else if (ticks.length === 0) {
+    console.log(
+      `${stored.ticks.length} row${stored.ticks.length === 1 ? "" : "s"} at ` +
+        "Memory.fabot.observe.cpu, none of them decodable — the leaf was hand-edited, or " +
+        'its wire shape has moved. Not read as "nothing measured".',
+    );
+  } else {
+    const width = Math.max(...ticks.map((row) => String(row.t).length));
+    for (const row of ticks) {
+      console.log(`${String(row.t).padStart(width)}  ${row.ms.toFixed(3).padStart(8)} ms`);
+    }
+    console.log("");
+
+    if (unreadable > 0) {
+      console.log(
+        `${unreadable} row${unreadable === 1 ? "" : "s"} off the wire shape, not judged — ` +
+          "a hand-edit, or the shape has moved",
+      );
+      console.log("");
+    }
+
+    console.log(cpuReport(ticks));
   }
 } else {
   // ---- tasks / timeline: reads over the Transition log ------------------

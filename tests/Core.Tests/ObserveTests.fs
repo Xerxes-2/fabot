@@ -1006,3 +1006,66 @@ let damageTests =
                     "an open episode carries this tick's hits into the next"
             }
         ]
+
+/// The CPU line as (tick, ms) pairs, oldest first — the shape
+/// `observe.mjs cpu` reads a mean and a max off.
+let private line (state: CpuState) =
+    state.Ticks |> List.map (fun sample -> sample.Tick, sample.Ms)
+
+[<Tests>]
+let cpuTests =
+    testList
+        "observe fold: the CPU line"
+        [
+            test "every tick writes a row, quiet or not, oldest first" {
+                // Unlike the Transition log there is no change detection:
+                // two ticks that cost the same are two rows, because the
+                // distribution is the whole point (ADR 0041).
+                let state =
+                    CpuState.empty |> foldCpu capCpuTicks 100 21.0 |> foldCpu capCpuTicks 101 21.0
+
+                Expect.equal
+                    (line state)
+                    [ 100, 21.0; 101, 21.0 ]
+                    "both ticks are recorded, in the order they ran"
+            }
+
+            test "a tick that finished no loop leaves a gap, not a row" {
+                // The row carries its own tick, so a tick the loop threw on
+                // — writing nothing — is visible as a missing number rather
+                // than as a cheap tick that never happened.
+                let state =
+                    CpuState.empty |> foldCpu capCpuTicks 100 21.0 |> foldCpu capCpuTicks 102 19.5
+
+                Expect.equal
+                    (line state)
+                    [ 100, 21.0; 102, 19.5 ]
+                    "tick 101 is absent; nothing is invented for it"
+            }
+
+            test "the ring keeps the newest cap-many ticks" {
+                let state =
+                    (CpuState.empty, [ 1..5 ])
+                    ||> List.fold (fun state t -> foldCpu 3 t (float t) state)
+
+                Expect.equal
+                    (line state)
+                    [ 3, 3.0; 4, 4.0; 5, 5.0 ]
+                    "the oldest rows fall off the front, the sibling channels' convention"
+            }
+
+            test "a cost is kept to the microsecond" {
+                // Finer than the profiler's own 100µs sampling interval, so
+                // nothing a reader could act on is lost; the digits past it
+                // are Memory paid for noise.
+                let state =
+                    CpuState.empty
+                    |> foldCpu capCpuTicks 100 21.2345674
+                    |> foldCpu capCpuTicks 101 8.0009
+
+                Expect.equal
+                    (line state)
+                    [ 100, 21.235; 101, 8.001 ]
+                    "each cost rounds to three decimal places"
+            }
+        ]

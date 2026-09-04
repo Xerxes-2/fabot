@@ -37,6 +37,7 @@ Or separately: `npm run build` / `npm run upload`.
 npm run build
 npm run profile            # 100 ticks; or: npm run profile -- 500 [top-N]
 npm run profile -- 100 30 --census-every 10   # move the census every 10 ticks
+npm run profile -- --scenario outpost         # the colony and its neighbours
 ```
 
 `npm run profile` drives the compiled `loop()` in Node against a stub colony
@@ -44,16 +45,44 @@ npm run profile -- 100 30 --census-every 10   # move the census every 10 ticks
 plus two hotspot tables (by self and by inclusive time). The raw
 `build/fabot.cpuprofile` opens in Chrome DevTools or speedscope.
 
-The stub keeps the #50 baseline shape — W12S28 at RCL3, 8 creeps — so
-ms/tick stays comparable across commits even as the live colony moves on.
-It implements only the API surface declared in `src/App/Bindings.fs`, the
-terrain is synthetic, the world is frozen between ticks, and engine-side
-costs are not simulated: relative percentages are the signal, absolute
-ms/tick is not.
+Every run also prints ADR 0041's condition to revisit the layered
+projection — **a mean tick above 50 ms, or any single tick above 80** —
+judged against the run's own ticks, tripped or not. The thresholds live in
+`scripts/cpu-trigger.mjs`, shared with `npm run observe cpu`, which reads
+the same judgement off the per-tick line the bot writes to
+`Memory.fabot.observe.cpu`. They are a trigger to re-decide, never a budget
+the bot acts on: ADR 0041 decided CPU is measured, not budgeted. Only one of
+the two readings decides it: `observe cpu` reads the deployed bundle's own
+`Game.cpu.getUsed()`, while the profile's verdict is read off this harness's
+clock, which is a floor for the same reason its ms/tick is (below) — a run
+that prints "not triggered" has failed to trip the trigger, and has not
+cleared it.
+
+Two scenarios:
+
+- **`stub`** (the default) keeps the #50 baseline shape — one synthetic
+  room (`W1N1`) shaped like the live colony at RCL3, 8 creeps — so ms/tick
+  stays comparable across commits even as the live colony moves on. A room
+  it does not model, such as a declared outpost, answers as solid rock: a
+  neighbour with no exits, which is the fiction its walled border ring
+  already tells.
+- **`outpost`** builds the colony's own room and its two declared
+  neighbours from the committed room captures (`W12S28`, `W12S27`,
+  `W13S28`), on real terrain rather than synthetic (ADR 0036), with 13
+  creeps across the three. It is the world ADR 0041's layered projection is
+  sized against, and the run says how much of it the bundle actually
+  projected: while `Outpost.declared` stands empty the scan set is the
+  spawn room alone, so today its ms are one room's and the harness is
+  waiting on the constant (ADR 0042).
+
+Both implement only the API surface declared in `src/App/Bindings.fs`, the
+world is frozen between ticks, and engine-side costs are not simulated:
+relative percentages are the signal, absolute ms/tick is not.
 
 `--census-every N` lifts the freeze on the one axis that hides work: every
-Nth tick it paves one tile of the unpaved lane to the far source (and, once
-the lane is paved, lifts those tiles again one at a time), so the census
+Nth tick it paves one tile of the scenario's spare lane — the ground no
+trunk paves — (and, once the lane is paved, lifts those tiles again one at
+a time), so the census
 signature moves and the census-keyed memos — the Layout and the hauler
 quota (ADR 0017), the spawn walks (ADR 0032) — are made to recompute.
 Without it those paths recompute once, in a warm-up tick, and are measured
@@ -75,8 +104,8 @@ things about that split are worth knowing:
 
 Samples the profiler parks at the root — the garbage collector, and its own
 start and stop — belong to no tick, so they are in neither class and each
-table's percentages are on its own class's base. Only unflagged runs are
-comparable with the #50 baseline.
+table's percentages are on its own class's base. Only unflagged `stub` runs
+are comparable with the #50 baseline.
 
 Current numbers, the live CPU history, and the per-hotspot attribution are
 tracked in #50 — read that, not this file, for where the time goes.

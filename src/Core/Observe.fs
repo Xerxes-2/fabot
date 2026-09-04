@@ -1,8 +1,9 @@
 /// The observe channel's pure folds: the Transition log's, keyed by creep
-/// (ADR 0009), and the Raid log's, colony-level and episodic (ADR 0028).
-/// Change detection, the ring caps, timeline interleaving, dead-creep
-/// pruning and the episode's quiet gap all live here; the App shell only
-/// serializes the state to and from `Memory.fabot.observe`.
+/// (ADR 0009); the Raid log's, colony-level and episodic (ADR 0028); and
+/// the CPU line's, one row per tick (ADR 0041). Change detection, the ring
+/// caps, timeline interleaving, dead-creep pruning and the episode's quiet
+/// gap all live here; the App shell only serializes the state to and from
+/// `Memory.fabot.observe`.
 module Fabot.Core.Observe
 
 open Fabot.Core.Types
@@ -474,4 +475,61 @@ let foldRaids (cap: int) (gap: int) (snapshot: Snapshot) (prior: RaidState) : Ra
             | None -> earlier
         Living = if Option.isSome episode then surviving else Set.empty
         Hits = if Option.isSome episode then defended else Map.empty
+    }
+
+/// One tick's cost, as the engine measured it: the tick it was measured
+/// on, and the milliseconds the bot had spent by the time it stopped
+/// looking (ADR 0041). The tick number rides the row rather than being
+/// implied by its place in the ring, because a tick the loop never
+/// finished writes no row at all — a gap in the numbers is the one thing
+/// this line can say that a bare list of costs cannot.
+type CpuSample = { Tick: int; Ms: float }
+
+/// The whole persisted CPU line: oldest first, capped, exactly as the
+/// other two rings are. A record rather than a bare list so the leaf can
+/// grow a second key without moving the one that is there.
+type CpuState = { Ticks: CpuSample list }
+
+[<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
+module CpuState =
+    /// The empty CPU line — what an absent, malformed or foreign-shaped
+    /// leaf reads as, the way `RaidState.empty` is.
+    let empty = { Ticks = [] }
+
+/// The CPU line's ring cap. ADR 0041 states the condition to revisit the
+/// layered projection as two numbers — a mean tick above 50 ms, or any
+/// single tick above 80 — and both are read off this window, so the
+/// window has to be long enough that the mean is not one tick's opinion.
+/// The census-keyed memos (ADR 0017, ADR 0032) make one tick in a while
+/// several times the cost of its neighbours; at the sibling channels'
+/// twenty that recompute is a twentieth of the mean, and at a hundred it
+/// is a percent. A hundred rows of `{ t, ms }` is about 2.5KB against the
+/// 2MB Memory, which is what buys the longer window.
+let capCpuTicks = 100
+
+/// The measured cost, kept to the microsecond. The engine hands back a
+/// float with more digits than anyone reads and Memory pays for every one
+/// of them; a microsecond is finer than the profiler's own 100µs sampling
+/// interval, so nothing a reader could act on is rounded away. Written as
+/// arithmetic rather than as `Math.Round`, whose .NET and JS answers part
+/// company on a half.
+let private toMicrosecond (ms: float) = floor (ms * 1000.0 + 0.5) / 1000.0
+
+/// The CPU line's fold (ADR 0041): this tick's cost joins the ring, oldest
+/// first, and the newest `cap` rows survive. No change detection and no
+/// episode — every tick costs something and the whole point is the shape
+/// of the distribution, so unlike the Transition log a quiet tick still
+/// writes a row.
+///
+/// The judgement over the ring is deliberately not here. ADR 0041 decided
+/// CPU is *measured, not budgeted* — a budget exists to size a territory
+/// and this colony's territory is a constant — so the two thresholds are
+/// the reader's and live with the readers (`scripts/cpu-trigger.mjs`).
+/// A threshold in Core is a thing the bot could act on, and the bot must
+/// not: skipping a tick collides with the safe-mode reflex (ADR 0007,
+/// ADR 0015), which has to be able to fire on the very tick a guard would
+/// skip.
+let foldCpu (cap: int) (tick: int) (ms: float) (prior: CpuState) : CpuState =
+    {
+        Ticks = prior.Ticks @ [ { Tick = tick; Ms = toMicrosecond ms } ] |> trim cap
     }

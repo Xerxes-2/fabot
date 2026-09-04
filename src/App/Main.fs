@@ -99,3 +99,21 @@ let loop () =
     pruneDeadCreepMemory living
     // Outcomes go unread here; failures are already logged by the Executor.
     Executor.run decision.Intents |> ignore
+
+    // The CPU line (ADR 0041): one row per tick, so the condition that
+    // sends the layered projection back to the drawing board — a mean tick
+    // above 50 ms, or any single tick above 80 — is a number somebody can
+    // read rather than a feeling. Measured, never budgeted: nothing in the
+    // bot reads this back, and the thresholds live with the readers
+    // (`scripts/cpu-trigger.mjs`).
+    //
+    // Deliberately last, after the Executor, because the intents are most
+    // of what a tick costs and a measurement taken before them would flatter
+    // every tick. What it therefore excludes is this write and the engine's
+    // own serialization of Memory once `loop` returns — both outside what
+    // the bot can move — and any tick that throws before reaching here,
+    // which writes no row at all: the gap in the tick numbers is the record
+    // of it.
+    ObserveMemory.loadCpu ()
+    |> Observe.foldCpu Observe.capCpuTicks snapshot.Time (Game.cpu.getUsed ())
+    |> ObserveMemory.saveCpu

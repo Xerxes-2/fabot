@@ -1,9 +1,9 @@
 /// Serialization shell for the observe channels (ADR 0009, ADR 0028,
-/// ADR 0035): read the prior Transition log and Raid log from
-/// `Memory.fabot.observe`, hand each to its pure Core fold, write the
-/// results back to their own leaves — and write the Layout's own leaf,
-/// which has no prior state to read because it records this tick's plan
-/// rather than a history.
+/// ADR 0035, ADR 0041): read the prior Transition log, Raid log and CPU
+/// line from `Memory.fabot.observe`, hand each to its pure Core fold,
+/// write the results back to their own leaves — and write the Layout's own
+/// leaf, which has no prior state to read because it records this tick's
+/// plan rather than a history.
 /// The subtree is disposable by construction — absent or unreadable state
 /// is discarded, never repaired, so telemetry can never take the colony
 /// down.
@@ -415,8 +415,9 @@ let loadRaids () : RaidState =
         RaidState.empty
 
 /// Write the Raid log back under `Memory.fabot.observe.raids`, leaving the
-/// rest of the observe subtree — the Transition log, the verbose list and
-/// the Layout record — alone, the same way `save` leaves this leaf alone.
+/// rest of the observe subtree — the Transition log, the verbose list, the
+/// Layout record and the CPU line — alone, the same way `save` leaves this
+/// leaf alone.
 let saveRaids (state: RaidState) =
     let raids = createEmpty<obj>
     raids?episodes <- state.Episodes |> List.map encodeEpisode |> List.toArray
@@ -508,3 +509,76 @@ let saveLayout
 
     ensureObserve ()
     Memory?fabot?observe?layout <- layout
+
+/// The prior CPU line, or empty when the leaf is absent, from an older
+/// bundle, or otherwise unreadable — a discarded line costs the ticks it
+/// held and nothing else. A row that will not decode costs that row alone,
+/// the way `loadRaids` degrades episode by episode: the window shortens
+/// rather than vanishing, so a rollback across a wire-shape change still
+/// leaves a mean to read.
+let loadCpu () : CpuState =
+    try
+        let fabot = Memory?fabot
+        let observe = if isNull fabot then null else fabot?observe
+        let cpu = if isNull observe then null else observe?cpu
+
+        if isNull cpu then
+            CpuState.empty
+        else
+            {
+                Ticks =
+                    cpu?ticks
+                    |> unbox<obj[]>
+                    |> Array.choose (fun raw ->
+                        try
+                            // The wire types are checked rather than
+                            // assumed, and that check is what makes the
+                            // row-by-row degradation above real. `unbox` is
+                            // erased by Fable, so without it a row of a
+                            // foreign shape is not rejected but *built*:
+                            // `Tick` is coerced through `| 0` to tick zero
+                            // and `Ms` stays undefined, and the ring then
+                            // carries that row — and writes it back out as
+                            // the bundle's own `{ t: 0 }` — for a hundred
+                            // ticks, crowding out the window ADR 0041's
+                            // mean is read off.
+                            if jsTypeof raw?t = "number" && jsTypeof raw?ms = "number" then
+                                Some
+                                    {
+                                        Tick = unbox<int> raw?t
+                                        Ms = unbox<float> raw?ms
+                                    }
+                            else
+                                None
+                        with _ ->
+                            None)
+                    |> Array.toList
+            }
+    with _ ->
+        CpuState.empty
+
+/// Write the CPU line back under `Memory.fabot.observe.cpu`, leaving the
+/// rest of the observe subtree alone the way `saveRaids` does. Every tick,
+/// like the Raid log and the Layout record: the leaf's presence is what
+/// lets `observe.mjs cpu` tell "this bundle keeps the line" from "the
+/// colony has been quiet", and a tick that throws before reaching this
+/// call simply leaves no row — the gap in the tick numbers says so.
+///
+/// The rows ride as `{ t, ms }` rather than as a bare array of costs
+/// because the tick number is the half a reader cannot reconstruct: the
+/// window is only as long as the ticks in it, and a missing tick is a tick
+/// the loop did not finish.
+let saveCpu (state: CpuState) =
+    let cpu = createEmpty<obj>
+
+    cpu?ticks <-
+        state.Ticks
+        |> List.map (fun sample ->
+            let o = createEmpty<obj>
+            o?t <- sample.Tick
+            o?ms <- sample.Ms
+            o)
+        |> List.toArray
+
+    ensureObserve ()
+    Memory?fabot?observe?cpu <- cpu
