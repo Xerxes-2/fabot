@@ -2112,6 +2112,83 @@ let castWalkTicksTests =
         ]
 
 [<Tests>]
+let walkRecallTests =
+    testList
+        "atlas walk table recall"
+        [
+            // The castWalkTicks corridor: the spawn structure stands at
+            // (20,10), so (19,10) is the one tile a body is born on, and
+            // (10,10) lies nine steps further west.
+            let corridorSnapshot () =
+                { spatial
+                      [ "spawn-1", { X = 20; Y = 10 } ]
+                      [ for x in 10..20 -> { X = x; Y = 10 }, Plain ] with
+                    Obstacles = Set.singleton { X = 20; Y = 10 }
+                }
+                |> snapshotWith []
+
+            let hauler = [ Carry; Carry; Move ]
+            let spawnTile = { X = 20; Y = 10 }
+            let goal = { X = 10; Y = 10 }
+
+            /// The one flood a corridor's lead pricing lays, read off the
+            /// table by value: the array itself, so a table that was read
+            /// rather than refilled is visible as the very array the first
+            /// Atlas allocated.
+            let flood (walks: WalkTable) =
+                walks |> Seq.map (fun entry -> entry.Value) |> Seq.exactlyOne
+
+            test "a table handed in is filled once and recalled by the next Atlas over it" {
+                // ADR 0032: every input of this flood is in the census, so
+                // an Atlas handed a filled table reads the entry instead of
+                // running the Dijkstra a second time.
+                let walks = WalkTable()
+                let first = corridorSnapshot () |> ofSnapshotRecalling walks
+
+                Expect.equal
+                    (castWalkTicks first hauler spawnTile goal)
+                    (Some 9)
+                    "the first Atlas floods to price the lead"
+
+                Expect.equal walks.Count 1 "and leaves the flood in the table it was handed"
+                let flooded = flood walks
+
+                let second = corridorSnapshot () |> ofSnapshotRecalling walks
+
+                Expect.equal
+                    (castWalkTicks second hauler spawnTile goal)
+                    (Some 9)
+                    "the recalled walk prices the same lead"
+
+                Expect.equal walks.Count 1 "no second entry under the same key"
+
+                Expect.isTrue
+                    (obj.ReferenceEquals(flood walks, flooded))
+                    "the second Atlas read the first's flood rather than running its own"
+            }
+
+            test "an Atlas with nothing to recall floods for itself" {
+                // The other half of the seam: a table with nothing in it is
+                // flooded into, so a caller that dropped its memo prices the
+                // same lead off its own Dijkstra.
+                let fresh = WalkTable()
+                let atlas = corridorSnapshot () |> ofSnapshotRecalling fresh
+
+                Expect.equal
+                    (castWalkTicks atlas hauler spawnTile goal)
+                    (Some 9)
+                    "an empty table is flooded into, and prices the lead identically"
+
+                Expect.equal fresh.Count 1 "the flood it ran is left in it"
+
+                Expect.equal
+                    (castWalkTicks (corridorSnapshot () |> ofSnapshot) hauler spawnTile goal)
+                    (Some 9)
+                    "and the plain entry point, which lays its own table, agrees"
+            }
+        ]
+
+[<Tests>]
 let controllerContainerTests =
     testList
         "atlas controllerContainers"

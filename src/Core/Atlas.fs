@@ -3,12 +3,6 @@ module Fabot.Core.Atlas
 open Fabot.Core.Types
 open Fable.Core
 
-/// A body's fatigue factor (ADR 0006): the parts that generate fatigue
-/// when moving and the Move parts that pay it off. Terrain weight scales
-/// by their ratio to price travel in cost units — half-ticks under the
-/// engine-native weights (ADR 0010).
-type private FatigueFactor = { FatigueParts: int; MoveParts: int }
-
 /// Which of the tick's floods a memo entry holds (ADR 0029, widened by
 /// ADR 0030). One dimension separates them because they differ in the two
 /// ways their readers differ — granularity and traffic — and no reader
@@ -77,18 +71,25 @@ type Atlas =
             /// not carry: a lead prices a replacement that has not been
             /// cast yet (ADR 0026), so its factor is in no creep's entry
             /// and the Floods memo cannot be laid for it in advance. One
-            /// flood per row per spawn a tick, however many creeps that row
-            /// is deriving a lead for. The hauler quota's round trip, the
-            /// other traffic-blind query, keeps its own uncached floods:
-            /// its origins are containers rather than spawners, so it
-            /// shares no key, and it is itself memoised on the census
-            /// signature (ADR 0017) — it runs only when the room changes.
-            /// A mutable table for the same reason WorkAreas is one, and
-            /// per-tick by the same construction. Priced in the walk's
-            /// whole ticks (ADR 0029), like every clock in the colony; it
-            /// is the origin set, never the pricing, that keeps this memo
-            /// beside the Floods table rather than inside it.
-            Walks: System.Collections.Generic.Dictionary<Pos * FatigueFactor, int[]>
+            /// flood per row per spawn, however many creeps that row is
+            /// deriving a lead for — and, since ADR 0032, one per census
+            /// rather than one per tick: this is the table the Atlas is
+            /// handed rather than one it lays, recalled from the plan memo
+            /// while the census signature holds and dropped whole when it
+            /// moves. Every input the flood reads is in that
+            /// signature — the weights, and the successor's body through
+            /// the Capacity that sizes it (ADR 0017) — so a recalled entry
+            /// is the entry this tick would have flooded. The hauler
+            /// quota's round trip, the other traffic-blind query, keeps its
+            /// own uncached floods: its origins are containers rather than
+            /// spawners, so it shares no key, and it is itself memoised on
+            /// the census signature — it runs only when the room changes. A
+            /// mutable table for the same reason WorkAreas is one. Priced
+            /// in the walk's whole ticks (ADR 0029), like every clock in
+            /// the colony; it is the origin set, never the pricing, that
+            /// keeps this memo beside the Floods table rather than inside
+            /// it.
+            Walks: WalkTable
             /// Work Area per Task, built at most once per tick and shared
             /// by every query that stands a creep in one — the Floods memo
             /// on a key set the Snapshot does not carry, so a mutable
@@ -157,7 +158,7 @@ let private neighbours pos =
 /// The weight of raw ground (ADR 0010): plain 2, swamp 10, wall
 /// impassable — written as the -1 the flood's weight table marks an
 /// impassable tile with. The one place the engine's terrain prices live:
-/// stepCost's single-tile answer, the table ofSnapshot lays and the
+/// stepCost's single-tile answer, the table the Atlas lays and the
 /// trunk's raw-terrain flood all price off it, which is what keeps them
 /// from drifting apart.
 let private terrainWeight terrain =
@@ -171,7 +172,7 @@ let private terrainWeight terrain =
 /// structures and tiles outside the projection are impassable (ADR 0001).
 /// A built road overrides the terrain under it; a road on a wall (a
 /// tunnel) is not modeled and stays impassable. The single-tile query —
-/// the flood reads the table ofSnapshot lays to the same rules.
+/// the flood reads the table the Atlas lays to the same rules.
 let private stepCost (spatial: SpatialInfo) tile =
     if Set.contains tile spatial.Obstacles then
         None
@@ -414,7 +415,15 @@ let private floodPriced weights occupied factor pricing (start: Pos) =
     | Walk -> walkFloodFrom weights factor start
     | Baseline -> floodFrom weights noTraffic (stepUnits factor) start
 
-let ofSnapshot (snapshot: Snapshot) : Atlas =
+/// The Atlas over a Snapshot, recalling a spawn walk table rather than
+/// laying an empty one (ADR 0032). The caller hands the table the plan
+/// memo carried when the census signature is unchanged, and a fresh one
+/// when it moved: every entry is a pure function of the census, so a
+/// recalled flood is the flood this tick would have run, and a table
+/// dropped at a signature change leaves nothing stale to reason about.
+/// Every other table here is still laid empty — they key on this tick's
+/// creeps, or on this tick's traffic.
+let ofSnapshotRecalling (walks: WalkTable) (snapshot: Snapshot) : Atlas =
     let spatial = snapshot.Spatial
 
     let placed =
@@ -474,7 +483,7 @@ let ofSnapshot (snapshot: Snapshot) : Atlas =
                 |> List.map (fun pricing ->
                     (pos, factor, pricing), lazy (floodPriced weights occupied factor pricing pos)))
             |> Map.ofList
-        Walks = System.Collections.Generic.Dictionary()
+        Walks = walks
         WorkAreas = System.Collections.Generic.Dictionary()
         HeavyAreas = System.Collections.Generic.Dictionary()
         Heavy =
@@ -488,6 +497,22 @@ let ofSnapshot (snapshot: Snapshot) : Atlas =
             |> Set.ofList
         Buffers = None
     }
+
+/// The Atlas over a Snapshot with nothing recalled: a fresh spawn walk
+/// table, filled from scratch as this tick prices its leads. The tick loop
+/// always has a memo to hand over, so this is the shape a reader building
+/// an Atlas over a Snapshot alone — a test, or a one-off — asks for.
+let ofSnapshot (snapshot: Snapshot) : Atlas =
+    ofSnapshotRecalling (WalkTable()) snapshot
+
+/// A copy of the step weight per tile index — the grid every flood in the
+/// Atlas prices from, -1 impassable. Read by the census guard (ADR 0032)
+/// and nothing else: the spawn walks are recalled across ticks on the
+/// census signature alone, so two Snapshots the signature calls equal have
+/// to lay the same grid, and a weights input the signature misses would
+/// price leads off a stale one until a global reset. A copy because the
+/// grid is the flood's own working state: read it, never hold it.
+let stepWeights (atlas: Atlas) : int[] = Array.copy atlas.Weights
 
 /// Whether a creep's body was cast from a heavy-Work row: more Work parts
 /// than Move (ADR 0016). Fatigue parity keeps every worker body at

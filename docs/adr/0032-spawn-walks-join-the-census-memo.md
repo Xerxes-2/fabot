@@ -13,7 +13,7 @@ Profiling after the Atlas landed (#50, fifth comment) showed `planSpawns` at ~24
 
 ## Consequences
 
-- `PlanMemo` gains the walk table; `Atlas.ofSnapshot` receives it (or a fresh one) rather than always creating one. The `decide` seam is unchanged.
+- `PlanMemo` gains the walk table, and the Atlas is built over one rather than always creating one: `ofSnapshotRecalling` takes the table the memo carried, and `ofSnapshot` lays a fresh one for a caller with nothing to recall. The `decide` seam is unchanged.
 - The guard inverts ADR 0017's: beside the tests that every census input perturbs the signature, a test asserts that two Snapshots with equal signatures yield bitwise-equal weights, perturbing only non-census fields. A signature gap for a weights input would otherwise price leads off a stale grid until a reset.
 - The **Lead**, **Census signature** and **Atlas** glossary entries say the spawn walks are recalled while the census holds.
 - The profiling harness's frozen stub now measures the spawn walks at zero, as it does the Layout; the census-change tick's cost is a harness concern tracked separately.

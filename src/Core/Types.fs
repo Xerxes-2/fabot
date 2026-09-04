@@ -451,16 +451,42 @@ type Intent =
 /// Creep name -> task id. The only state remembered between ticks (anti-thrash).
 type Assignments = Map<string, string>
 
+/// A body's fatigue factor (ADR 0006): the parts that generate fatigue
+/// when moving and the Move parts that pay it off. Terrain weight scales
+/// by their ratio to price travel in cost units — half-ticks under the
+/// engine-native weights (ADR 0010). The Atlas's own arithmetic, spelled
+/// out here because the walk table below is keyed on it and outlives the
+/// Atlas that fills it (ADR 0032).
+type FatigueFactor = { FatigueParts: int; MoveParts: int }
+
+/// The spawn-origin walk table (ADR 0032): the traffic-blind flood out of
+/// the tiles beside a spawner, for a body's fatigue factor, as whole-tick
+/// distances per tile index (ADR 0026, ADR 0029) — the half of a lead paid
+/// after the cast. Filled on demand by the Atlas as leads are priced, and
+/// handed to the next tick's Atlas while the census signature holds: every
+/// input the flood reads is in the census, so it runs once per census
+/// rather than once per tick. Mutable, and heap-only like the memo that
+/// carries it.
+type WalkTable = System.Collections.Generic.Dictionary<Pos * FatigueFactor, int[]>
+
 /// The census-keyed plan memo (ADR 0017): the census signature beside the
-/// plans derived from exactly that census — the Layout's site Intents and
-/// the hauler quota. Held by the host in heap across ticks, never written
-/// to Memory: a global reset discards it and the next tick recomputes from
-/// scratch. Same census, same plan, so reuse never changes behaviour.
+/// plans derived from exactly that census — the Layout's site Intents, the
+/// hauler quota, and the spawn walks behind the leads (ADR 0032). Held by
+/// the host in heap across ticks, never written to Memory: a global reset
+/// discards it and the next tick recomputes from scratch. Same census,
+/// same plan, so reuse never changes behaviour.
 type PlanMemo =
     {
         Signature: string
         SiteIntents: Intent list
         HaulerQuota: int
+        /// The walks flooded under this signature, filled through the tick
+        /// by the Atlas the table was handed to. Dropped whole when the
+        /// signature moves — the Layout's own granularity, never per entry:
+        /// a moved signature may have moved the weights or the body the
+        /// walk is priced for, and telling which is a dependency tracker
+        /// this memo deliberately does not have.
+        Walks: WalkTable
     }
 
 /// The reverse of a wire-name table, derived from the table itself: each

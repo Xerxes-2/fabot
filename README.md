@@ -54,29 +54,32 @@ colony has since moved on (RCL4 with a Storage, 7 creeps as of 2026-09-04);
 the stub deliberately keeps the #50 shape so ms/tick stays comparable
 across commits.
 
-Where the time goes (2026-09-04, the machine that recorded the #50
-baseline, 500 ticks): ~2.9 ms/tick (~3.1 over the default 100), down from
-~15 at the #50 baseline, ~6 after the #51 optimisations and ~4.3 before the
-weight table stopped being built a tile at a time (#96). The profile is now
-the Atlas floods and little else: `floodFromAll` ~43% self / ~63%
-inclusive, reached through `matchCreeps` → `travelCost` (~49% inclusive)
-and `planSpawns` (~35% inclusive, ~28% of it in `expiring` →
-`castWalkTicks`). `planLayout` no longer shows up at all — the
-census-signature memo (#53) means the frozen stub never recomputes it after
-the first tick, so the live cost of a census change is one thing this
-harness does not measure — and `resolve` is ~4% inclusive now that reroute
-attribution is verbose-only (#54). The Fable structural-comparison family
-(`compare` / `recordCompareTo` / `sameConstructor` and the `Map` / `Set`
-tree ops behind them) is down to ~10% of self time from ~40%:
-`Atlas.ofSnapshot` used to rebuild the flat weight grid every tick by
-calling `stepCost` on each of the 2500 tiles, three tree lookups apiece,
-and now fills it by walking the terrain, road and obstacle collections
-instead (#96) — walking a tree compares nothing, only a lookup does. It is
-off both hotspot tables. What remains beside the flood's own loop is
-arithmetic: `stepUnits` ~6% self, the heap's `swap` and `push` ~7%, and
-`max` — the per-step floors — ~4%. Live (same day, W12S28 at RCL4, 7
-creeps): ~13.6 CPU/tick against a limit of 100, bucket full; the history is
-in #50.
+Where the time goes (2026-09-04, the machine that recorded the #50 baseline,
+500 ticks): ~2.1 ms/tick (~2.4 over the default 100), down from ~15 at the
+#50 baseline, ~6 after the #51 optimisations, ~4.3 before the weight table
+stopped being built a tile at a time (#96) and ~2.9 before the spawn walks
+joined the census memo (#97). The profile is now the Atlas floods and little
+else: `floodFromAll` ~38% self / ~55% inclusive, reached through
+`matchCreeps` → `travelCost` (~60% inclusive) and almost nothing else.
+`planLayout` does not show up at all — the census-signature memo (#53) means
+the frozen stub never recomputes it after the first tick — and since #97
+neither do `expiring` → `leadOf` → `castWalkTicks`: the spawn walks ride the
+same memo (ADR 0032), so the stub floods them on the first tick and recalls
+them for the other 499, which leaves `planSpawns` at ~11% inclusive, most of
+it the Post census rather than any flood. The live cost of a census change
+is one thing this harness measures for neither. `resolve` is ~5% inclusive now
+that reroute attribution is verbose-only (#54). The Fable
+structural-comparison family (`compare` / `recordCompareTo` /
+`sameConstructor` and the `Map` / `Set` tree ops behind them) is down to
+~10% of self time from ~40%: `Atlas.ofSnapshot` used to rebuild the flat
+weight grid every tick by calling `stepCost` on each of the 2500 tiles,
+three tree lookups apiece, and now fills it by walking the terrain, road and
+obstacle collections instead (#96) — walking a tree compares nothing, only a
+lookup does. It is off both hotspot tables. What remains beside the flood's
+own loop is arithmetic: `stepUnits` ~6% self, the heap's `swap` and `push`
+~6%, and `max` — the per-step floors — ~2%. Live (same day, W12S28 at RCL4,
+7 creeps): ~13.6 CPU/tick against a limit of 100, bucket full; the history
+is in #50.
 
 Limits to keep in mind when reading the numbers:
 

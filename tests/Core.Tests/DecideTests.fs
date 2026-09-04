@@ -1654,6 +1654,12 @@ let censusSignatureTests =
             test "everything outside the census leaves the signature alone" {
                 let colony = trunkColony 2
 
+                // The bank is perturbed in its Available alone: the
+                // Capacity beside it is a function of the standing
+                // spawn/extension census and the controller level, so it is
+                // covered rather than absent (ADR 0017) — which is what
+                // lets the successor body a lead is priced for ride this
+                // signature too (ADR 0032).
                 let perturbed =
                     { colony with
                         Time = colony.Time + 100
@@ -1683,8 +1689,112 @@ let censusSignatureTests =
                     (censusSignature perturbed)
                     (censusSignature colony)
                     "creeps, stores, hits, drops, hostiles, bank and tick are not census"
+
+                // ADR 0032's guard, the inverse of every test above: the
+                // spawn walks behind the leads are recalled on this
+                // signature alone, so two Snapshots it calls equal have to
+                // lay the same weight grid. A weights input the signature
+                // missed would price leads off a stale grid until a global
+                // reset, and would fail here rather than in the colony.
+                Expect.sequenceEqual
+                    (Atlas.stepWeights (Atlas.ofSnapshot perturbed))
+                    (Atlas.stepWeights (Atlas.ofSnapshot colony))
+                    "and the grid the walks flood over is bitwise the same"
+            }
+
+            // The three weights inputs beside the terrain, each perturbed
+            // alone (ADR 0032). Each test asserts the pairing rather than
+            // the signature alone: the perturbation moves the grid the
+            // recalled walks flood over, and it moves the signature they
+            // are recalled on. A census that held still through one of them
+            // would price leads off a grid the room has left.
+            test "a built road moves the signature" {
+                let colony = trunkColony 2
+                let tile = { X = 22; Y = 25 }
+
+                let paved =
+                    let placed = colony |> withTarget "road-1" tile (Structure BuiltKind.Road)
+
+                    { placed with
+                        Spatial =
+                            { placed.Spatial with
+                                Roads = Set.add tile placed.Spatial.Roads
+                            }
+                    }
+
+                Expect.notEqual
+                    (Atlas.stepWeights (Atlas.ofSnapshot paved))
+                    (Atlas.stepWeights (Atlas.ofSnapshot colony))
+                    "a road discounts the ground under it"
+
+                Expect.notEqual
+                    (censusSignature paved)
+                    (censusSignature colony)
+                    "and the standing census carries it, so the signature moves with it (ADR 0010)"
+            }
+
+            test "an obstacle structure moves the signature" {
+                let colony = trunkColony 2
+                let tile = { X = 22; Y = 25 }
+
+                let blocked =
+                    let placed = colony |> withTarget "twr-1" tile (Structure BuiltKind.Tower)
+
+                    { placed with
+                        Spatial =
+                            { placed.Spatial with
+                                Obstacles = Set.add tile placed.Spatial.Obstacles
+                            }
+                    }
+
+                Expect.notEqual
+                    (Atlas.stepWeights (Atlas.ofSnapshot blocked))
+                    (Atlas.stepWeights (Atlas.ofSnapshot colony))
+                    "an obstacle closes its tile to every flood"
+
+                Expect.notEqual
+                    (censusSignature blocked)
+                    (censusSignature colony)
+                    "and the standing census carries it, so the signature moves with it"
+            }
+
+            test "an obstacle site moves the signature" {
+                let colony = trunkColony 2
+                let tile = { X = 22; Y = 25 }
+
+                let pending =
+                    let placed = colony |> withTarget "twr-site" tile (Site BuiltKind.Tower)
+
+                    { placed with
+                        Spatial =
+                            { placed.Spatial with
+                                Obstacles = Set.add tile placed.Spatial.Obstacles
+                            }
+                    }
+
+                Expect.notEqual
+                    (Atlas.stepWeights (Atlas.ofSnapshot pending))
+                    (Atlas.stepWeights (Atlas.ofSnapshot colony))
+                    "the engine refuses a creep its own obstacle site, so it blocks like the structure"
+
+                Expect.notEqual
+                    (censusSignature pending)
+                    (censusSignature colony)
+                    "and the pending census carries it, so the signature moves with it"
             }
         ]
+
+/// The colony with the given creeps standing on the given tiles. A placed
+/// creep beside a placed spawn is all it takes to price a lead, and pricing
+/// one floods out of the spawner (ADR 0026).
+let staffedColony creeps positions colony =
+    { colony with
+        Creeps = creeps
+        Spatial =
+            { colony.Spatial with
+                CreepPositions = Map.ofList positions
+            }
+    }
 
 /// A memo whose site Intents are a sentinel no computation would produce:
 /// reuse is then observable verbatim at the decide seam.
@@ -1693,6 +1803,7 @@ let sentinelMemo snapshot =
         Signature = censusSignature snapshot
         SiteIntents = [ PlaceConstructionSite("W1N1", { X = 1; Y = 1 }, Tower) ]
         HaulerQuota = 0
+        Walks = WalkTable()
     }
 
 [<Tests>]
@@ -1804,6 +1915,85 @@ let planMemoTests =
                     next.Intents
                     decision.Intents
                     "feeding the memo back reproduces the tick verbatim"
+            }
+
+            test "the spawn walks ride the memo while the census holds" {
+                // ADR 0032. The flood a lead is priced off reads nothing
+                // but the census, so the next tick under the same signature
+                // fills the table it was handed rather than one of its own:
+                // a row the first tick never priced lands beside the first
+                // tick's entry instead of in a table nobody keeps.
+                let heavy name =
+                    creepWith name 0 50 [ Work; Work; Work; Work; Carry; Move ]
+
+                let lone =
+                    trunkColony 2 |> staffedColony [ worker "w1" 0 50 ] [ "w1", { X = 22; Y = 25 } ]
+
+                let joined =
+                    trunkColony 2
+                    |> staffedColony
+                        [ worker "w1" 0 50; heavy "a1" ]
+                        [ "w1", { X = 22; Y = 25 }; "a1", { X = 23; Y = 25 } ]
+
+                Expect.equal
+                    (censusSignature joined)
+                    (censusSignature lone)
+                    "a creep arriving is not a census change"
+
+                let first = decide lone Map.empty Set.empty None
+
+                Expect.equal
+                    first.Memo.Walks.Count
+                    1
+                    "the tick flooded once out of the spawn, into the table the memo carries"
+
+                let workerFlood =
+                    first.Memo.Walks |> Seq.map (fun entry -> entry.Value) |> Seq.exactlyOne
+
+                let second = decide joined Map.empty Set.empty (Some first.Memo)
+
+                Expect.isTrue
+                    (obj.ReferenceEquals(second.Memo.Walks, first.Memo.Walks))
+                    "an unchanged census hands the same table on"
+
+                Expect.equal
+                    second.Memo.Walks.Count
+                    2
+                    "and the second row's flood lands in it, beside the first tick's"
+
+                Expect.isTrue
+                    (second.Memo.Walks
+                     |> Seq.exists (fun entry -> obj.ReferenceEquals(entry.Value, workerFlood)))
+                    "the row the first tick priced was recalled, not flooded again"
+
+                Expect.equal
+                    second.Intents
+                    (decide joined Map.empty Set.empty None).Intents
+                    "a recalled walk decides exactly what a fresh flood decides"
+            }
+
+            test "a moved census drops the whole walk table" {
+                // The Layout's own granularity (ADR 0032): a moved
+                // signature may have moved the weights or the body the walk
+                // is priced for, and telling which is a dependency tracker
+                // the memo does not have.
+                let staffed = staffedColony [ worker "w1" 0 50 ] [ "w1", { X = 22; Y = 25 } ]
+
+                let first = decide (staffed (trunkColony 2)) Map.empty Set.empty None
+
+                let levelled =
+                    decide (staffed (trunkColony 3)) Map.empty Set.empty (Some first.Memo)
+
+                Expect.isFalse
+                    (obj.ReferenceEquals(levelled.Memo.Walks, first.Memo.Walks))
+                    "a level-up gets a table of its own"
+
+                // The same moved census over a colony with no creep to lead
+                // shows what "dropped whole" means: nothing at all rides
+                // across, not merely a stale entry priced again.
+                let emptied = decide (trunkColony 3) Map.empty Set.empty (Some first.Memo)
+
+                Expect.equal emptied.Memo.Walks.Count 0 "the memo's table went with its signature"
             }
         ]
 

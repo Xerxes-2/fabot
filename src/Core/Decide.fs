@@ -1949,24 +1949,39 @@ let censusSignature (snapshot: Snapshot) : string =
 /// through one Atlas built up front, so every step prices from the same
 /// flood (ADR 0004). The census-derived plans — the Layout's site Intents
 /// and the hauler quota — are reused verbatim from a memo whose signature
-/// matches this tick's census, and recomputed otherwise (ADR 0017).
+/// matches this tick's census, and recomputed otherwise (ADR 0017); the
+/// same memo hands the Atlas the spawn walks behind the leads, recalled
+/// under an unchanged signature and dropped whole under a moved one
+/// (ADR 0032).
 let decide
     (snapshot: Snapshot)
     (assignments: Assignments)
     (verbose: Set<string>)
     (memo: PlanMemo option)
     : Decision =
-    let atlas = Atlas.ofSnapshot snapshot
     let signature = censusSignature snapshot
+    // The signature is read before the Atlas is built, because the Atlas
+    // is one of the things it decides: a memo whose census still stands
+    // hands over its spawn walk table, and a memo that has gone stale —
+    // or none at all — leaves the Atlas a fresh one (ADR 0032).
+    let recalled = memo |> Option.filter (fun m -> m.Signature = signature)
+
+    let walks =
+        match recalled with
+        | Some m -> m.Walks
+        | None -> WalkTable()
+
+    let atlas = Atlas.ofSnapshotRecalling walks snapshot
 
     let plan =
-        match memo with
-        | Some m when m.Signature = signature -> m
-        | _ ->
+        match recalled with
+        | Some m -> m
+        | None ->
             {
                 Signature = signature
                 SiteIntents = planLayout snapshot atlas
                 HaulerQuota = haulerQuota snapshot atlas
+                Walks = walks
             }
 
     let defenseIntents = planSafeMode snapshot atlas @ planFire snapshot atlas
