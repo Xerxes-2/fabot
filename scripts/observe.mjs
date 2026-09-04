@@ -21,7 +21,7 @@
 //                                       the console keeps no history, so a
 //                                       bounded window is the only one-shot read
 // Every read takes --json to emit the raw stored structure for jq.
-import { ScreepsAPI } from "screeps-api";
+import { ScreepsHttpClient } from "screeps-api";
 
 const fail = (msg) => {
   console.error(msg);
@@ -67,7 +67,7 @@ if (!token) {
   fail("SCREEPS_TOKEN is not set. Copy .env.example to .env and fill in your token.");
 }
 const url = (process.env.SCREEPS_API_URL ?? "https://screeps.com/season").replace(/\/$/, "") + "/";
-const api = new ScreepsAPI({ token, url });
+const api = new ScreepsHttpClient({ token, url });
 
 let shard = process.env.SCREEPS_SHARD;
 if (!shard) {
@@ -82,7 +82,7 @@ if (!shard) {
 }
 
 const memoryGet = async (path) => {
-  const res = await api.memory.get(path, shard).catch((err) => {
+  const res = await api.userMemoryGet(path, shard).catch((err) => {
     fail(`memory read failed: ${err.message ?? err}`);
   });
   if (res.ok !== 1) fail(`memory read failed: ${JSON.stringify(res)}`);
@@ -124,7 +124,7 @@ if (command === "console") {
       action === "add" ? [...new Set([...current, actionName])] :
       current.filter((n) => n !== actionName);
 
-    const res = await api.memory.set("fabot.observe.verbose", next, shard).catch((err) => {
+    const res = await api.userMemorySet("fabot.observe.verbose", next, shard).catch((err) => {
       fail(`memory write failed: ${err.message ?? err}`);
     });
     if (res.ok !== 1) fail(`memory write failed: ${JSON.stringify(res)}`);
