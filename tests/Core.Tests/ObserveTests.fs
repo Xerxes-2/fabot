@@ -757,3 +757,172 @@ let lossTests =
                     "peacetime attrition opens no episode and leaves no loss behind"
             }
         ]
+
+/// The colony with one structure of the given kind standing at the given
+/// hits — what the damage fold reads: the kind decides whether it is
+/// charged, the number is what moves tick over tick.
+let withHits id kind hits (colony: Snapshot) =
+    { colony with
+        Spatial =
+            { colony.Spatial with
+                TargetKinds = Map.add id (Structure kind) colony.Spatial.TargetKinds
+                Hits = Map.add id { Hits = hits; HitsMax = 3_000_000 } colony.Spatial.Hits
+            }
+    }
+
+/// Every episode's recorded damage, oldest episode first.
+let damages (state: RaidState) =
+    state.Episodes |> List.map (fun e -> e.Damage)
+
+[<Tests>]
+let damageTests =
+    testList
+        "raid fold: damage"
+        [
+            test "the hits lost over an episode are summed tick over tick" {
+                // What ADR 0028 deferred until a decision read hits (ADR
+                // 0034): the raid's cost in hits, folded from the previous
+                // tick's the way the losses are folded from its names.
+                let state =
+                    RaidState.empty
+                    |> raidTick 10 (raid squad |> withHits "ram-1" BuiltKind.Rampart 100_000)
+                    |> raidTick 11 (raid squad |> withHits "ram-1" BuiltKind.Rampart 99_400)
+                    |> raidTick 12 (raid squad |> withHits "ram-1" BuiltKind.Rampart 98_000)
+
+                Expect.equal
+                    (damages state)
+                    [ 2_000 ]
+                    "600 hits and then 1,400, charged to the one open episode"
+            }
+
+            test "a repair is not negative damage" {
+                // Decreases summed, increases ignored: the record answers
+                // what the raid took off, not where the hits stood at the
+                // end — a rampart raised back over its floor mid-raid must
+                // not subtract the damage that made it necessary.
+                let state =
+                    RaidState.empty
+                    |> raidTick 10 (raid squad |> withHits "ram-1" BuiltKind.Rampart 100_000)
+                    |> raidTick 11 (raid squad |> withHits "ram-1" BuiltKind.Rampart 90_000)
+                    |> raidTick 12 (raid squad |> withHits "ram-1" BuiltKind.Rampart 100_000)
+
+                Expect.equal (damages state) [ 10_000 ] "the repair leaves the total where it was"
+            }
+
+            test "a probe that touches nothing records no damage" {
+                let state =
+                    RaidState.empty
+                    |> raidTick 10 (raid squad |> withHits "spawn-1" BuiltKind.Spawn 5_000)
+                    |> raidTick 11 (raid squad |> withHits "spawn-1" BuiltKind.Spawn 5_000)
+
+                Expect.equal (damages state) [ 0 ] "an episode that cost nothing says so"
+            }
+
+            test "the Keep and the ramparts are charged; the decaying kinds are not" {
+                // The measure is the Keep's and its cover's (ADR 0034). A
+                // road wearing down under a raid is the colony's ordinary
+                // decay, and charging it would drown the number the record
+                // exists for.
+                let dented kind hits = raid squad |> withHits "s-1" kind hits
+
+                let over kind first second =
+                    RaidState.empty
+                    |> raidTick 10 (dented kind first)
+                    |> raidTick 11 (dented kind second)
+                    |> damages
+
+                Expect.equal (over BuiltKind.Spawn 5_000 4_000) [ 1_000 ] "the spawn is charged"
+                Expect.equal (over BuiltKind.Tower 5_000 4_000) [ 1_000 ] "the tower is charged"
+                Expect.equal (over BuiltKind.Storage 5_000 4_000) [ 1_000 ] "the Storage is charged"
+
+                Expect.equal
+                    (over BuiltKind.Rampart 100_000 99_000)
+                    [ 1_000 ]
+                    "and the ramparts over them"
+
+                Expect.equal (over BuiltKind.Road 5_000 4_000) [ 0 ] "a chewed road is not the Keep"
+
+                Expect.equal
+                    (over BuiltKind.Container 5_000 4_000)
+                    [ 0 ]
+                    "and neither is a chewed container, ramparted or not"
+            }
+
+            test "damage is not charged across the seam between two episodes" {
+                // The baseline is carried only while an episode is open, and
+                // a freshly opened one is charged nothing on its opening
+                // tick: whatever the hits did while nobody was in the room
+                // belongs to no raid.
+                let state =
+                    RaidState.empty
+                    |> raidTick 10 (raid squad |> withHits "ram-1" BuiltKind.Rampart 100_000)
+                    |> raidTick 11 (raid squad |> withHits "ram-1" BuiltKind.Rampart 99_000)
+                    |> raidTick 20 (raid squad |> withHits "ram-1" BuiltKind.Rampart 50_000)
+
+                Expect.equal
+                    (windows state)
+                    [ (10, 11); (20, 20) ]
+                    "the quiet gap closed the first episode before the second opened"
+
+                Expect.equal
+                    (damages state)
+                    [ 1_000; 0 ]
+                    "the 49,000 hits that went missing between the two are charged to neither"
+            }
+
+            test "a rampart raised mid-episode is no damage on the tick it stands" {
+                // A structure the baseline does not carry costs nothing: the
+                // fold reads decreases, and appearing is not one.
+                let state =
+                    RaidState.empty
+                    |> raidTick 10 (raid squad)
+                    |> raidTick 11 (raid squad |> withHits "ram-1" BuiltKind.Rampart 1)
+
+                Expect.equal (damages state) [ 0 ] "a rampart at 1 hit has lost nothing yet"
+            }
+
+            test "the decay of a quiet gap is charged to no raid" {
+                // An episode stays open through the quiet gap, and a rampart
+                // ticks down 300 hits every 100 ticks whoever is watching.
+                // Damage is read over the window the losses are — a hostile
+                // standing there, or the tick straight after a sighting — so
+                // the gap's own decay never lands in the record.
+                let state =
+                    RaidState.empty
+                    |> raidTick 10 (raid squad |> withHits "ram-1" BuiltKind.Rampart 100_000)
+                    |> raidTick 11 (raid squad |> withHits "ram-1" BuiltKind.Rampart 99_000)
+                    |> raidTick 12 (quiet |> withHits "ram-1" BuiltKind.Rampart 98_700)
+                    |> raidTick 13 (quiet |> withHits "ram-1" BuiltKind.Rampart 98_400)
+                    |> raidTick 14 (quiet |> withHits "ram-1" BuiltKind.Rampart 98_100)
+
+                Expect.equal
+                    (windows state)
+                    [ (10, 11) ]
+                    "the episode is still open, and its window still ends at the last sighting"
+
+                Expect.equal
+                    (damages state)
+                    [ 1_300 ]
+                    "the raid's 1,000 and the 300 read one tick late; the rest of the gap is decay"
+            }
+
+            test "the baseline is dropped in peacetime" {
+                // Carried exactly as `Living` is: hits lost while no episode
+                // is open are charged to nobody, and the next raid opens
+                // against the hits it finds.
+                let state =
+                    RaidState.empty
+                    |> raidTick 10 (quiet |> withHits "ram-1" BuiltKind.Rampart 100_000)
+
+                Expect.equal state.Hits Map.empty "a quiet tick keeps no baseline"
+
+                let raiding =
+                    RaidState.empty
+                    |> raidTick 10 (raid squad |> withHits "ram-1" BuiltKind.Rampart 100_000)
+
+                Expect.equal
+                    raiding.Hits
+                    (Map.ofList [ "ram-1", 100_000 ])
+                    "an open episode carries this tick's hits into the next"
+            }
+        ]

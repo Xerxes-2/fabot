@@ -80,6 +80,15 @@ let private buildSpatial (spawn: ISpawn) : SpatialInfo =
             let site = o :?> IConstructionSite
             site, builtKindOf site.structureType)
 
+    // The ids of the structures we own — what the kinds that ask for an
+    // owner are checked against (`needsOwner`, ADR 0034): FIND_STRUCTURES
+    // carries every owner's, and a rampart is the one projected kind whose
+    // ownership changes the answer.
+    let ours =
+        room.find findMyStructures
+        |> Array.map (fun o -> (o :?> IStructure).id)
+        |> Set.ofArray
+
     let sources = room.find findSources |> Array.map (fun o -> o :?> ISource)
 
     // Dropped energy piles, for the pickup reflex: position and kind only —
@@ -154,11 +163,17 @@ let private buildSpatial (spawn: ISpawn) : SpatialInfo =
             |> Array.filter (fun (_, kind) -> kind = BuiltKind.Road)
             |> Array.map (fun (st, _) -> posOf st.pos)
             |> Set.ofArray
-        // Hits on repairable kinds only — roads and containers (ADR 0010,
-        // ADR 0012): fields nobody decides on stay out of the projection.
+        // Hits on the repairable kinds only — the decaying roads and
+        // containers (ADR 0010, ADR 0012), the Keep and our own ramparts
+        // (ADR 0034): fields nobody decides on stay out, and the Repair
+        // pool and the Raid log's damage decide on these (the safe-mode
+        // arm is the third reader, #102). Which line each kind is whole at
+        // and which kind wants an owner are both Core's; asking the engine
+        // who owns one is the shell's.
         Hits =
             structures
-            |> Array.filter (fun (_, kind) -> isRepairable kind)
+            |> Array.filter (fun (st, kind) ->
+                (wholeLine kind).IsSome && (not (needsOwner kind) || Set.contains st.id ours))
             |> Array.map (fun (st, _) -> st.id, { Hits = st.hits; HitsMax = st.hitsMax })
             |> Map.ofArray
         // Stored energy on the containers, the stock the logistics Tasks

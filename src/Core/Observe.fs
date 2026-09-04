@@ -195,6 +195,14 @@ type RaidEpisode =
         /// Owned creeps lost inside the window, oldest first — every one
         /// stamped at a tick between `Opened` and `LastSeen`.
         Losses: Loss list
+        /// Hits lost across the Keep and the ramparts inside the window
+        /// (ADR 0034): decreases summed tick over tick, repairs ignored.
+        /// Read on the ticks the window covers and no others — a hostile
+        /// standing there, or the tick straight after a sighting, exactly
+        /// as a Loss is — so the decay of a long quiet gap is charged to
+        /// nobody. Decay inside the raid's own ticks does ride along, at
+        /// 3 hits a tick per rampart against the hundreds a raid takes.
+        Damage: int
     }
 
 /// The whole persisted Raid log.
@@ -209,13 +217,23 @@ type RaidState =
         /// creep that dies in peacetime is read against an empty baseline
         /// and recorded nowhere.
         Living: Set<string>
+        /// The previous tick's hits per structure id across the Keep and
+        /// the ramparts: the baseline this tick's damage is read against,
+        /// carried exactly as `Living` is — only while an episode is open,
+        /// so hits lost in peacetime are charged to nobody.
+        Hits: Map<string, int>
     }
 
 [<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
 module RaidState =
-    /// The empty Raid log: no episodes, no baseline — what an absent,
-    /// malformed or foreign-shaped subtree reads as.
-    let empty = { Episodes = []; Living = Set.empty }
+    /// The empty Raid log: no episodes, neither baseline — what an
+    /// absent, malformed or foreign-shaped subtree reads as.
+    let empty =
+        {
+            Episodes = []
+            Living = Set.empty
+            Hits = Map.empty
+        }
 
 /// The episode ring cap: one ring for the whole colony rather than one
 /// per creep, so twenty episodes the size of #66's raid — a five-row
@@ -241,9 +259,12 @@ let quietGap = 50
 /// engine; the Storage can, and is left out, because ADR 0022 puts it on
 /// the cluster's first pick — a tile or two from the spawn, inside the
 /// ring the Refillables already cover — so it moves no measured minimum.
-/// Ramparts (#66) would, and this derivation is the thing that would then
-/// have to change. An id the projection cannot place contributes nothing
-/// (ADR 0004).
+/// The ramparts stand now (ADR 0034) and are deliberately still out: they
+/// cover the Keep and the Posts, tiles this measure already reaches
+/// through the Refillables, and a rampart over a Post would pull the
+/// number out to the sources and answer a different question. What the
+/// Keep is losing is watched through its hits instead — the damage below.
+/// An id the projection cannot place contributes nothing (ADR 0004).
 let private ourTiles (snapshot: Snapshot) =
     let structures =
         (snapshot.Refillables |> List.map (fun r -> r.Id))
@@ -307,6 +328,9 @@ let private enrol roster (hostile: HostileInfo) =
 /// spawn room holds a hostile, stays open while hostiles keep appearing,
 /// and closes after `gap` quiet ticks; the ring keeps the newest `cap`
 /// episodes. A tick with no hostile and no open episode records nothing.
+/// Two baselines are carried across ticks while an episode is open and
+/// dropped with it: the names this tick's losses are read against, and the
+/// hits this tick's damage is (ADR 0034).
 let foldRaids (cap: int) (gap: int) (snapshot: Snapshot) (prior: RaidState) : RaidState =
     // The baseline the next tick reads its losses against: this tick's
     // names, less the creeps whose clock runs out on it. A name gone
@@ -318,6 +342,31 @@ let foldRaids (cap: int) (gap: int) (snapshot: Snapshot) (prior: RaidState) : Ra
         |> List.filter (fun creep -> creep.TicksToLive > 1)
         |> List.map (fun creep -> creep.Name)
         |> Set.ofList
+
+    // This tick's hits across the Keep and the ramparts, the next tick's
+    // baseline. The kinds are the rule's, never a list of ids: a rampart
+    // raised mid-episode joins it the tick it stands.
+    let defended =
+        snapshot.Spatial.Hits
+        |> Map.toList
+        |> List.choose (fun (id, hits) ->
+            match Map.tryFind id snapshot.Spatial.TargetKinds with
+            | Some(Structure kind) when isDefence kind -> Some(id, hits.Hits)
+            | _ -> None)
+        |> Map.ofList
+
+    // Hits lost since the previous tick's baseline: decreases summed,
+    // increases ignored — a repair is not negative damage. A structure the
+    // baseline does not carry costs nothing, which is what keeps a rampart
+    // raised mid-raid from reading as damage on the tick it stands, and
+    // one destroyed outright charged only what it lost while it stood.
+    let lostHits =
+        defended
+        |> Map.toList
+        |> List.sumBy (fun (id, hits) ->
+            match Map.tryFind id prior.Hits with
+            | Some before when before > hits -> before - hits
+            | _ -> 0)
 
     // Only the ring's last episode can still be open, and openness is the
     // quiet gap measured from its last sighting — never a stored flag.
@@ -354,6 +403,22 @@ let foldRaids (cap: int) (gap: int) (snapshot: Snapshot) (prior: RaidState) : Ra
         | current, hostiles ->
             let lost = current |> Option.map lostSince |> Option.defaultValue []
 
+            // Damage is charged against the previous tick's baseline, and
+            // only an episode that was already open has one: a freshly
+            // opened episode is charged nothing on its opening tick, so
+            // nothing crosses the seam between two episodes. The window is
+            // the same one the losses are read over — a hostile standing
+            // there now, or a sighting on the previous tick, the reading
+            // that lags its cause by a tick — so the decay ticking away
+            // through a fifty-tick quiet gap is charged to no raid.
+            let damage =
+                match current with
+                | Some episode when
+                    not (List.isEmpty hostiles) || snapshot.Time - episode.LastSeen <= 1
+                    ->
+                    lostHits
+                | _ -> 0
+
             let episode =
                 current
                 |> Option.defaultValue
@@ -363,6 +428,7 @@ let foldRaids (cap: int) (gap: int) (snapshot: Snapshot) (prior: RaidState) : Ra
                         Roster = Map.empty
                         Closest = None
                         Losses = []
+                        Damage = 0
                     }
 
             Some
@@ -375,6 +441,7 @@ let foldRaids (cap: int) (gap: int) (snapshot: Snapshot) (prior: RaidState) : Ra
                     Roster = (episode.Roster, hostiles) ||> List.fold enrol
                     Closest = nearer episode.Closest (approachAt snapshot)
                     Losses = episode.Losses @ lost
+                    Damage = episode.Damage + damage
                 }
 
     {
@@ -383,4 +450,5 @@ let foldRaids (cap: int) (gap: int) (snapshot: Snapshot) (prior: RaidState) : Ra
             | Some episode -> earlier @ [ episode ] |> trim cap
             | None -> earlier
         Living = if Option.isSome episode then surviving else Set.empty
+        Hits = if Option.isSome episode then defended else Map.empty
     }

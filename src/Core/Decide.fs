@@ -172,10 +172,35 @@ let taskId =
     | Repair structureId -> $"repair:{structureId}"
     | Upgrade controllerId -> $"upgrade:{controllerId}"
 
-/// The Repair trigger: a repairable structure enters the pool when its
-/// hits sink strictly below this fraction of max, and leaves it once
-/// repaired back over the line. A tunable, not part of ADR 0010.
+/// The Repair trigger of the decaying kinds: a road or a container enters
+/// the pool when its hits sink strictly below this fraction of max, and
+/// leaves it once repaired back over the line. A tunable, not part of
+/// ADR 0010.
 let private repairTrigger = 0.5
+
+/// The rampart floor (ADR 0034): a rampart is hungry below this many hits
+/// and whole at it. A tunable, and a derived one — the ticks the room must
+/// hold times the damage per tick it must hold against. Against the squad
+/// of #66, 180 hits a tick, 100,000 hits is 555 ticks, two and a half
+/// times the raid that was seen. That costs 1,000 energy to raise and, at
+/// 300 hits of decay per 100 ticks, one Repair visit per rampart every 200
+/// ticks to hold — so no hysteresis is needed: one visit at 600 hits a
+/// tick puts a rampart that just dipped back over the line.
+let private rampartFloor = 100_000
+
+/// Whether a structure of this kind, carrying these hits, is hungry: its
+/// own whole line, read off the kind (ADR 0034). The decaying kinds sit
+/// below a fraction of max (ADR 0010), a rampart below the floor, the Keep
+/// below full — it does not decay, so below max means damaged. A kind with
+/// no line is never hungry. The floor is capped at the structure's own max
+/// so a rampart whose max is somehow under it can still be whole; today's
+/// engine puts a rampart's max at 300,000 from RCL2, well clear.
+let private isHungry kind (hits: HitsInfo) =
+    match wholeLine kind with
+    | Some WholeLine.Fraction -> float hits.Hits < repairTrigger * float hits.HitsMax
+    | Some WholeLine.Floor -> hits.Hits < min rampartFloor hits.HitsMax
+    | Some WholeLine.Full -> hits.Hits < hits.HitsMax
+    | None -> false
 
 /// Screeps CONTAINER_CAPACITY: what a container's store can hold — the
 /// line past which the buffer needs no Refill.
@@ -215,17 +240,16 @@ let planTasks (snapshot: Snapshot) : Task list =
 
     let builds = snapshot.ConstructionSites |> List.map (fun site -> Build site.Id)
 
-    // A Repair per repairable structure below the trigger, in id order.
-    // The projection carries hits on repairable kinds only, but the kind
-    // gate is judged here — the Planner owns what enters the pool, off the
-    // same predicate the projection filtered by (ADR 0010, ADR 0012).
+    // A Repair per repairable structure below its kind's whole line, in id
+    // order. The projection carries hits on repairable kinds only, but the
+    // kind gate is judged here — the Planner owns what enters the pool,
+    // off the same table the projection filtered by (ADR 0010, ADR 0034).
     let repairs =
         snapshot.Spatial.Hits
         |> Map.toList
         |> List.filter (fun (id, hits) ->
             match Map.tryFind id snapshot.Spatial.TargetKinds with
-            | Some(Structure kind) when isRepairable kind ->
-                float hits.Hits < repairTrigger * float hits.HitsMax
+            | Some(Structure kind) -> isHungry kind hits
             | _ -> false)
         |> List.map (fst >> Repair)
 
@@ -694,6 +718,13 @@ let private storageAllowance level =
 /// revisit of the horizon.
 let private storageLevel = 4
 
+/// The level the engine unlocks ramparts at (Screeps CONTROLLER_STRUCTURES
+/// for "rampart": none at RCL1, 2,500 from RCL2 up). The covering rule's
+/// one gate, and a level rather than an allowance because the count is
+/// never what constrains it — the Keep and the Posts are a handful of
+/// tiles against thousands (ADR 0034).
+let private rampartLevel = 2
+
 /// The Layout horizon (ADR 0011): the whole plan is computed up to this
 /// level regardless of the current one, so today's roads route around
 /// tomorrow's structures. Deliberately not RCL8 — a wider reservation
@@ -719,6 +750,10 @@ let private horizonLevel = 4
 /// Placement filters the Layout to what the current level unlocks and
 /// what the projection's censuses say is missing. Sites are not creep
 /// work, so this emits Intents directly rather than Tasks.
+/// Beside all of that runs one rule that reads no tile of the ordering: a
+/// rampart covers every standing Keep structure and every standing Post
+/// container (ADR 0034), from the level the engine allows one, because a
+/// rampart is no footprint and takes no tile from anything.
 let private planLayout (snapshot: Snapshot) atlas : Intent list =
     let anchor = snapshot.Spawns |> List.tryPick (fun s -> Atlas.positionOf atlas s.Id)
 
@@ -968,6 +1003,29 @@ let private planLayout (snapshot: Snapshot) atlas : Intent list =
             sourceContainerTiles @ Option.toList controllerContainerTile
             |> List.filter (fun tile -> not (Set.contains tile claimed))
 
+        // The ramparts (ADR 0034): one over every standing Keep structure
+        // and every standing Post container, the tick the thing it covers
+        // stands — a site is not covered until it is a structure. No
+        // allowance to size against: the rule is the whole plan, so the
+        // gap is the covering census alone, standing ramparts and pending
+        // sites subtracted the way the roads' is. The one gate is the
+        // level the engine allows a rampart at, which is the level after
+        // the first: below it every site would be refused, every tick. The
+        // working-ground exclusion does not apply — a rampart is no
+        // footprint, walkable, blocking nothing, taking no tile from the
+        // Post it covers (ADR 0022 as ADR 0034 revises it) — which is why
+        // these tiles are read off the census and not off the ordering.
+        let covered =
+            if controller.Level >= rampartLevel then
+                Set.union (Atlas.keepTiles atlas) (Atlas.postContainerTiles atlas)
+            else
+                Set.empty
+
+        let rampartGap =
+            Set.difference
+                covered
+                (Set.union (Atlas.rampartTiles atlas) (Atlas.pendingRampartTiles atlas))
+
         let place kind tiles =
             tiles |> List.map (fun tile -> PlaceConstructionSite(room, tile, kind))
 
@@ -976,6 +1034,7 @@ let private planLayout (snapshot: Snapshot) atlas : Intent list =
         @ place Extension (extensionTiles |> List.truncate (extensionGap controller.Level))
         @ place Road (Set.toList roadGap)
         @ place Container containerGap
+        @ place Rampart (Set.toList rampartGap)
     | _ -> []
 
 /// Colony reflex beside the pipeline, the second after safe mode: every

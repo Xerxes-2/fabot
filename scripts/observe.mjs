@@ -153,16 +153,19 @@ if (command === "console") {
 
   // The wire shape written by ObserveMemory.fs:
   //   { episodes: [{ opened, last, roster: [{ id, owner, body: { part: n } }],
-  //                  closest?: { range, x, y, t }, losses: [{ creep, t }] }],
-  //     living: [creep] }
+  //                  closest?: { range, x, y, t }, losses: [{ creep, t }],
+  //                  damage }],
+  //     living: [creep], hits: { <structure id>: hits } }
   // Stored oldest first like the Transition log's ring, printed newest
   // first. `closest` is simply absent when nothing of ours could be placed.
   // The bot writes this leaf every tick, raid or no raid, so an absent leaf
   // is a missing channel and never an empty one — a missing leaf comes back
   // with no data, a missing intermediate (fresh respawn, no Memory.fabot at
   // all) as the string "Incorrect memory path", and both fail loudly rather
-  // than reporting no raids. `living` is the fold's own baseline, scratch
-  // state and not part of the record, so --json prints the episodes alone.
+  // than reporting no raids. `living` and `hits` are the fold's own
+  // baselines, scratch state and not part of the record, so --json prints
+  // the episodes alone. `damage` is absent on an episode written before
+  // ADR 0034 and reads as zero.
   const stored = await memoryGet("fabot.observe.raids");
   if (stored == null || typeof stored !== "object") {
     fail(
@@ -197,6 +200,7 @@ if (command === "console") {
           ? "  lost nothing"
           : `  lost: ${losses.map((l) => `${l.creep} (t${l.t})`).join(", ")}`,
       );
+      console.log(`  damage: ${e.damage ?? 0} hits off the Keep and the ramparts`);
       console.log("");
     }
   }

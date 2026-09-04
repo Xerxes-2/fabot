@@ -622,11 +622,21 @@ let droppedEnergy (atlas: Atlas) : (string * Pos) list = placedOfKind atlas Drop
 /// what the Layout's road gap subtracts (ADR 0011).
 let roadTiles (atlas: Atlas) : Set<Pos> = atlas.Spatial.Roads
 
-/// Tiles of every placed target of one kind.
-let private tilesOfKind (atlas: Atlas) (kind: TargetKind) : Set<Pos> =
-    targetsOfKind atlas kind
-    |> List.choose (fun id -> Map.tryFind id atlas.Spatial.TargetPositions)
+/// Tiles of every placed target whose kind answers a predicate — the one
+/// join between the projection's two maps, for the censuses read as tiles
+/// rather than as counts.
+let private tilesWhere (atlas: Atlas) (matches: TargetKind -> bool) : Set<Pos> =
+    atlas.Spatial.TargetKinds
+    |> Map.toList
+    |> List.choose (fun (id, kind) ->
+        if matches kind then
+            Map.tryFind id atlas.Spatial.TargetPositions
+        else
+            None)
     |> Set.ofList
+
+/// Tiles of every placed target of one kind.
+let private tilesOfKind (atlas: Atlas) (kind: TargetKind) : Set<Pos> = tilesWhere atlas ((=) kind)
 
 /// Tiles holding a road construction site — the census's other half: a
 /// pending road is not yet a road (ADR 0010) but its tile needs no new site.
@@ -652,6 +662,28 @@ let storageTiles (atlas: Atlas) : Set<Pos> =
 /// site is still being built.
 let pendingStorageTiles (atlas: Atlas) : Set<Pos> =
     tilesOfKind atlas (Site BuiltKind.Storage)
+
+/// Tiles holding a standing rampart — the covering census (ADR 0034): a
+/// tile already ramparted needs no rampart site. Ownership is not asked,
+/// unlike the hits (which are ours alone): a tile takes one rampart
+/// whoever raised it, so a foreign one left over in a room we took is a
+/// tile the engine would refuse a second site on anyway.
+let rampartTiles (atlas: Atlas) : Set<Pos> =
+    tilesOfKind atlas (Structure BuiltKind.Rampart)
+
+/// Tiles holding a rampart construction site — the census's pending half,
+/// exactly as a road's is: a site standing there is not yet cover, but its
+/// tile needs no second site.
+let pendingRampartTiles (atlas: Atlas) : Set<Pos> =
+    tilesOfKind atlas (Site BuiltKind.Rampart)
+
+/// Tiles holding a standing Keep structure — the spawn, the tower and the
+/// Storage (ADR 0034): what a rampart covers, the tick the structure
+/// stands. A site is not covered until it is a structure.
+let keepTiles (atlas: Atlas) : Set<Pos> =
+    tilesWhere atlas (function
+        | Structure built -> isKeep built
+        | _ -> false)
 
 /// Tiles holding a standing link. A link is a target, so its tile is no
 /// longer buildable; the Layout adds these back as footing candidates so
@@ -809,6 +841,13 @@ let dualSeats (atlas: Atlas) : Set<Pos> =
 let posts (atlas: Atlas) : Set<Pos> =
     Set.intersect (seatUnion atlas) (containerTiles atlas)
     |> Set.union (dualSeats atlas)
+
+/// Tiles holding a standing container on a Post — the tiles a work-heavy
+/// body garrisons and cannot flee from (ADR 0033), ramparted beside the
+/// Keep (ADR 0034). A Post that is a bare Dual Seat is not one of these:
+/// what the rule covers is a structure standing, and there is none there.
+let postContainerTiles (atlas: Atlas) : Set<Pos> =
+    Set.intersect (containerTiles atlas) (posts atlas)
 
 /// The Posts of one source: its own Seats that are Posts. Empty for a
 /// source the projection does not place, and for one with neither a built

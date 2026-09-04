@@ -163,30 +163,79 @@ let builtKindTests =
                     "an unmodelled kind is no Refillable: the projection reads no free capacity off it"
             }
 
-            test "the Storage is stored but never repaired; a container is both" {
-                // Repair keeps the decaying kinds whole (ADR 0010, ADR 0012)
-                // and the Storage is deliberately not one — it does not decay
-                // (ADR 0023) — while its store is read exactly like a
-                // container's. Both rules were comments in the Snapshot shell
-                // until #75; here Core can state them.
+            test "each kind is whole at its own line: half of max, a floor, or full" {
+                // The whole line per kind (ADR 0034), which is also the list
+                // of kinds whose hits the projection carries at all: the
+                // decaying roads and containers sit at a fraction of max
+                // (ADR 0010), a rampart at its floor, and the Keep at full —
+                // it does not decay, so below max means damaged. The numbers
+                // themselves are the Repair pool's tunables and are not here.
                 Expect.equal
-                    (allBuiltKinds |> List.filter isRepairable)
-                    [ BuiltKind.Road; BuiltKind.Container ]
-                    "roads and containers alone put hits in the projection and enter the Repair pool"
+                    (allBuiltKinds |> List.map (fun kind -> kind, wholeLine kind))
+                    [
+                        BuiltKind.Spawn, Some WholeLine.Full
+                        BuiltKind.Extension, None
+                        BuiltKind.Tower, Some WholeLine.Full
+                        BuiltKind.Road, Some WholeLine.Fraction
+                        BuiltKind.Container, Some WholeLine.Fraction
+                        BuiltKind.Storage, Some WholeLine.Full
+                        BuiltKind.Link, None
+                        BuiltKind.Rampart, Some WholeLine.Floor
+                    ]
+                    "one line per kind, and none for the kinds Repair never touches"
+
+                // The Keep is the list the other two rules hang off (the
+                // rampart covering and, from #102, safe mode), so it must be
+                // exactly the kinds repaired to full: a Keep kind repaired to
+                // half would leave the safe-mode trigger armed for every
+                // hostile that wandered through afterwards.
+                Expect.equal
+                    (allBuiltKinds |> List.filter isKeep)
+                    (allBuiltKinds |> List.filter (fun kind -> wholeLine kind = Some WholeLine.Full))
+                    "the Keep is exactly the kinds whose whole line is full hits"
+
+                Expect.equal
+                    (allBuiltKinds |> List.filter isKeep)
+                    [ BuiltKind.Spawn; BuiltKind.Tower; BuiltKind.Storage ]
+                    "the spawn, the tower and the Storage are the Keep"
 
                 Expect.equal
                     (allBuiltKinds |> List.filter isStored)
                     [ BuiltKind.Container; BuiltKind.Storage ]
                     "the containers and the Storage alone put a store in the projection"
 
-                // `allBuiltKinds` leaves Other out, so neither filter above
-                // can say anything about it — and Other is the arm with the
-                // worst reach: the projection reads hits and a store off
-                // every kind these two admit, and an unmodelled structure
-                // carries neither.
+                // `allBuiltKinds` leaves Other out, so no filter above can
+                // say anything about it — and Other is the arm with the worst
+                // reach: the projection reads hits and a store off every kind
+                // these admit, and an unmodelled structure carries neither.
+                Expect.isNone
+                    (wholeLine BuiltKind.Other)
+                    "an unmodelled kind has no whole line and never enters the Repair pool"
+
+                Expect.isFalse (isKeep BuiltKind.Other) "an unmodelled kind is no Keep structure"
+
+                // The Raid log charges damage on the Keep and its cover
+                // (ADR 0034) and on nothing else: a chewed road is the
+                // colony's ordinary decay, not a raid's cost.
+                Expect.equal
+                    (allBuiltKinds |> List.filter isDefence)
+                    [ BuiltKind.Spawn; BuiltKind.Tower; BuiltKind.Storage; BuiltKind.Rampart ]
+                    "the Keep and the ramparts over it are what a raid's damage is read on"
+
+                // Ownership is asked of every kind that has an owner and a
+                // whole line: what stands in a room we took is not
+                // automatically ours. The decaying kinds have no owner in
+                // the engine, so asking would drop every road and container.
+                Expect.equal
+                    (allBuiltKinds |> List.filter needsOwner)
+                    (allBuiltKinds |> List.filter isDefence)
+                    "the ownable repairable kinds are exactly the Keep and the ramparts"
+
                 Expect.isFalse
-                    (isRepairable BuiltKind.Other)
-                    "an unmodelled kind never enters the Repair pool"
+                    (needsOwner BuiltKind.Road)
+                    "a road has no owner to ask about: it would vanish from the projection"
+
+                Expect.isFalse (isDefence BuiltKind.Other) "an unmodelled kind is charged no damage"
 
                 Expect.isFalse
                     (isStored BuiltKind.Other)
@@ -576,6 +625,11 @@ let placementIntents intents =
 let placedTiles intents =
     placementIntents intents |> List.map (fun (_, pos, _) -> pos)
 
+/// The tiles a plan places one kind of site on, in plan order.
+let sitesOfKind kind intents =
+    placementIntents intents
+    |> List.choose (fun (_, pos, k) -> if k = kind then Some pos else None)
+
 let atLevel level room =
     { bareRespawn with
         Controller = Some(controllerAt level)
@@ -594,7 +648,7 @@ let placementTests =
                 // and (24,26) the tower's in the RCL4-horizon Layout (ADR
                 // 0022), so the extensions start two tiles in.
                 Expect.equal
-                    (placedTiles intents)
+                    (sitesOfKind Extension intents)
                     [
                         { X = 26; Y = 24 }
                         { X = 26; Y = 26 }
@@ -606,12 +660,18 @@ let placementTests =
 
                 for (room, _, kind) in placementIntents intents do
                     Expect.equal room "W1N1" "sites go in the spawn's room"
-                    Expect.equal kind Extension "only extensions are placed at RCL2"
+
+                    Expect.isTrue
+                        (kind = Extension || kind = Rampart)
+                        "the extensions the level unlocks, and the spawn's own rampart"
             }
 
             test "below RCL2 no placement Intents are emitted" {
                 let { Intents = intents } = decide (atLevel 1 (openRoom 3)) Map.empty Set.empty None
-                Expect.isEmpty (placementIntents intents) "no extensions allowed at RCL1"
+
+                Expect.isEmpty
+                    (placementIntents intents)
+                    "no extensions allowed at RCL1, and no rampart either: the engine allows neither"
             }
 
             test "unwalkable tiles are skipped" {
@@ -628,7 +688,10 @@ let placementTests =
                     (List.contains { X = 24; Y = 24 } (placedTiles intents))
                     "wall tile is never chosen"
 
-                Expect.hasLength (placementIntents intents) 5 "the cap is still reached elsewhere"
+                Expect.hasLength
+                    (sitesOfKind Extension intents)
+                    5
+                    "the cap is still reached elsewhere"
             }
 
             test "occupied tiles are skipped" {
@@ -642,7 +705,10 @@ let placementTests =
                     (List.contains { X = 24; Y = 24 } (placedTiles intents))
                     "occupied tile is never chosen"
 
-                Expect.hasLength (placementIntents intents) 5 "the cap is still reached elsewhere"
+                Expect.hasLength
+                    (sitesOfKind Extension intents)
+                    5
+                    "the cap is still reached elsewhere"
             }
 
             test "built extensions and pending sites count against the cap" {
@@ -657,7 +723,8 @@ let placementTests =
                         ]
 
                 let { Intents = intents } = decide (atLevel 2 room) Map.empty Set.empty None
-                Expect.hasLength (placementIntents intents) 1 "only the shortfall is placed"
+
+                Expect.hasLength (sitesOfKind Extension intents) 1 "only the shortfall is placed"
             }
 
             test "no placement Intents once the allowance is exhausted" {
@@ -670,7 +737,7 @@ let placementTests =
                         ]
 
                 let { Intents = intents } = decide (atLevel 2 room) Map.empty Set.empty None
-                Expect.isEmpty (placementIntents intents) "allowance already used up"
+                Expect.isEmpty (sitesOfKind Extension intents) "allowance already used up"
             }
 
             test "the controller's tile is never chosen" {
@@ -684,7 +751,10 @@ let placementTests =
                     (List.contains { X = 24; Y = 24 } (placedTiles intents))
                     "a target's tile is never chosen"
 
-                Expect.hasLength (placementIntents intents) 5 "the cap is still reached elsewhere"
+                Expect.hasLength
+                    (sitesOfKind Extension intents)
+                    5
+                    "the cap is still reached elsewhere"
             }
 
             test "no placement Intents without a projected room" {
@@ -792,10 +862,6 @@ let pocketColony level =
         Sources = [ source "src-a"; source "src-b" ]
         Spatial = room
     }
-
-let sitesOfKind kind intents =
-    placementIntents intents
-    |> List.choose (fun (_, pos, k) -> if k = kind then Some pos else None)
 
 /// The colony with its own road plan already standing: the state the
 /// source containers drop in — a container defers to a road site on its
@@ -1151,8 +1217,16 @@ let storageTests =
                     "the standing census fills the allowance"
 
                 Expect.isFalse
-                    (List.contains { X = 24; Y = 24 } (placedTiles intents))
-                    "a standing structure's tile is not buildable: nothing is planned onto it"
+                    (Set.contains { X = 24; Y = 24 } (clusterTiles intents))
+                    "a standing structure's tile is not buildable: no cluster pick lands on it"
+
+                // The one thing that is planned onto it: its rampart. A
+                // rampart is no footprint, so the Storage's own tile is where
+                // it belongs (ADR 0034).
+                Expect.contains
+                    (sitesOfKind Rampart intents)
+                    { X = 24; Y = 24 }
+                    "a standing Storage is a Keep structure and gets its cover"
             }
 
             test "a pending Storage site places none" {
@@ -1286,6 +1360,177 @@ let storageTests =
 /// (24,24). The tile the container's Link footing wants, (23,23), is one
 /// of the cluster's own same-colour tiles — the collision the reservation
 /// exists to settle (ADR 0022).
+/// A room with the whole Keep standing and a Post container at each of
+/// the two sources — what the rampart rule covers (ADR 0034). The spawn
+/// stands at (25,25) from `openRoom`, the tower and the Storage beside it,
+/// and each source's container on the Seat between the source and the
+/// spawn, which is working ground and covered all the same.
+let keepRoom =
+    openRoom 6
+    |> withTargets
+        [
+            "tower-1", { X = 24; Y = 24 }, Structure BuiltKind.Tower
+            "sto-1", { X = 26; Y = 26 }, Structure BuiltKind.Storage
+            "src-a", { X = 20; Y = 25 }, Source
+            "src-b", { X = 30; Y = 25 }, Source
+            "con-a", { X = 21; Y = 25 }, Structure BuiltKind.Container
+            "con-b", { X = 29; Y = 25 }, Structure BuiltKind.Container
+        ]
+
+/// The tiles that room's rule covers, in the plan's own (x, y) order: the
+/// Keep — spawn, tower, Storage — and the two Post containers.
+let keepCover =
+    [
+        { X = 21; Y = 25 }
+        { X = 24; Y = 24 }
+        { X = 25; Y = 25 }
+        { X = 26; Y = 26 }
+        { X = 29; Y = 25 }
+    ]
+
+[<Tests>]
+let rampartTests =
+    testList
+        "ramparts"
+        [
+            test "every standing Keep structure and Post container is covered, and nothing else" {
+                // The rule, whole (ADR 0034): the spawn, the tower and the
+                // Storage because they are what a raid is for, the Post
+                // containers because a work-heavy body cannot flee its Post.
+                // Not the extensions, not the room at large — the equality
+                // is what says no rampart lands anywhere else.
+                let { Intents = intents } = decide (atLevel 4 keepRoom) Map.empty Set.empty None
+
+                Expect.equal
+                    (sitesOfKind Rampart intents)
+                    keepCover
+                    "five tiles: the Keep and both Posts"
+            }
+
+            test "the working-ground exclusion does not reach a rampart" {
+                // A Post container stands on a Seat, which the clustered
+                // ordering never offers (ADR 0022). A rampart is no
+                // footprint — walkable, blocking nothing, taking no tile from
+                // the Post it covers — so it is placed there regardless,
+                // while the cluster still keeps off (ADR 0034 revising 0022).
+                let { Intents = intents } = decide (atLevel 4 keepRoom) Map.empty Set.empty None
+                let seats = Set.ofList [ { X = 21; Y = 25 }; { X = 29; Y = 25 } ]
+
+                Expect.isTrue
+                    (seats
+                     |> Set.forall (fun seat -> List.contains seat (sitesOfKind Rampart intents)))
+                    "both Seats under a container are ramparted"
+
+                Expect.isEmpty
+                    (Set.intersect seats (clusterTiles intents))
+                    "and no clustered structure follows the rampart onto working ground"
+            }
+
+            test "a Storage that is only a site is not covered yet" {
+                // Standing is the built census: a site is not covered until
+                // it is a structure, so the Storage's own tile waits.
+                let pending =
+                    { keepRoom with
+                        TargetKinds = Map.add "sto-1" (Site BuiltKind.Storage) keepRoom.TargetKinds
+                    }
+
+                let { Intents = intents } = decide (atLevel 4 pending) Map.empty Set.empty None
+
+                Expect.equal
+                    (sitesOfKind Rampart intents)
+                    (keepCover |> List.filter (fun tile -> tile <> { X = 26; Y = 26 }))
+                    "the four standing things are covered; the site is not"
+            }
+
+            test "a tile already ramparted, or already owed a site, emits nothing" {
+                // The covering census, both halves — the road gap's own
+                // shape: a standing rampart is cover, and a pending one is a
+                // tile that needs no second site.
+                let standing =
+                    keepRoom
+                    |> withTargets [ "ram-1", { X = 25; Y = 25 }, Structure BuiltKind.Rampart ]
+
+                let pending =
+                    keepRoom |> withTargets [ "ram-1", { X = 24; Y = 24 }, Site BuiltKind.Rampart ]
+
+                let { Intents = afterStanding } =
+                    decide (atLevel 4 standing) Map.empty Set.empty None
+
+                let { Intents = afterPending } = decide (atLevel 4 pending) Map.empty Set.empty None
+
+                Expect.equal
+                    (sitesOfKind Rampart afterStanding)
+                    (keepCover |> List.filter (fun tile -> tile <> { X = 25; Y = 25 }))
+                    "the spawn's own rampart stands: nothing is re-placed on it"
+
+                Expect.equal
+                    (sitesOfKind Rampart afterPending)
+                    (keepCover |> List.filter (fun tile -> tile <> { X = 24; Y = 24 }))
+                    "the tower's site is already owed: nothing is re-placed on it"
+            }
+
+            test "the set is the rule's: a three-source room ramparts three Posts" {
+                let room =
+                    keepRoom
+                    |> withTargets
+                        [
+                            "src-c", { X = 25; Y = 20 }, Source
+                            "con-c", { X = 25; Y = 21 }, Structure BuiltKind.Container
+                        ]
+
+                let colony =
+                    { atLevel 4 room with
+                        Sources = [ source "src-a"; source "src-b"; source "src-c" ]
+                    }
+
+                let { Intents = intents } = decide colony Map.empty Set.empty None
+
+                Expect.equal
+                    (sitesOfKind Rampart intents)
+                    [
+                        { X = 21; Y = 25 }
+                        { X = 24; Y = 24 }
+                        { X = 25; Y = 21 }
+                        { X = 25; Y = 25 }
+                        { X = 26; Y = 26 }
+                        { X = 29; Y = 25 }
+                    ]
+                    "three Posts and the Keep, from the rule and not a count"
+            }
+
+            test "a container that is no Post is left bare" {
+                // The rule covers the Keep and the Posts, and a container off
+                // every Seat is neither: the upgrade buffer's own container
+                // stands where its upgraders run, and they can flee.
+                let room =
+                    keepRoom
+                    |> withTargets [ "con-far", { X = 25; Y = 29 }, Structure BuiltKind.Container ]
+
+                let { Intents = intents } = decide (atLevel 4 room) Map.empty Set.empty None
+
+                Expect.equal
+                    (sitesOfKind Rampart intents)
+                    keepCover
+                    "a container adjacent to no source gets no cover"
+            }
+
+            test "the cover waits for RCL2 and then never grows" {
+                // The rule is placed the tick the thing it covers stands and
+                // needs no level of its own past the one the engine allows a
+                // rampart at — none at RCL1, 2,500 from RCL2 up. Below it
+                // every site would be refused, every tick (ADR 0034).
+                let at level =
+                    let { Intents = intents } =
+                        decide (atLevel level keepRoom) Map.empty Set.empty None
+
+                    sitesOfKind Rampart intents
+
+                Expect.isEmpty (at 1) "at RCL1 the engine allows no rampart, so none is planned"
+                Expect.equal (at 2) keepCover "at RCL2 the whole cover is planned at once"
+                Expect.equal (at 8) keepCover "and RCL8 adds nothing to it"
+            }
+        ]
+
 let footingRoom = openRoom 6 |> withTargets [ "src-a", { X = 25; Y = 22 }, Source ]
 
 /// The two tiles `footingRoom` holds as Link footings: one beside the
@@ -3690,29 +3935,78 @@ let repairTests =
                 Expect.isEmpty (repairTasks (planTasks whole)) "a whole road needs nothing"
             }
 
-            test "non-repairable kinds never enter the pool on low hits" {
+            test "kinds with no whole line never enter the pool on low hits" {
                 // The Snapshot projects hits on repairable kinds only, but the
                 // kind gate holds in the Planner regardless of what arrives.
+                // The extensions are deliberately outside the Keep (ADR
+                // 0034): cheap, twenty of them, and no creep lives on one.
                 let snapshot =
                     bareRespawn
-                    |> withHits "spawn-1" BuiltKind.Spawn 1 5000
                     |> withHits "ext-1" BuiltKind.Extension 1 5000
-                    |> withHits "tower-1" BuiltKind.Tower 1 5000
+                    |> withHits "link-1" BuiltKind.Link 1 5000
+                    |> withHits "rock-1" BuiltKind.Other 1 5000
 
                 Expect.isEmpty
                     (repairTasks (planTasks snapshot))
-                    "low hits on spawn, extension or tower are a tower's business, not Repair's"
+                    "an extension, a link and an unmodelled structure are nobody's Repair"
             }
 
-            test "a Storage never enters the Repair pool: it does not decay" {
-                // Not a repairable kind (ADR 0023): the Planner's kind gate
-                // refuses a Storage's hits even when, as here, the projection
-                // carries them.
-                let snapshot = bareRespawn |> withHits "sto-1" BuiltKind.Storage 1 5000
+            test "a dented Keep structure enters the pool; a whole one does not" {
+                // The Keep is repaired to full (ADR 0034): it does not decay,
+                // so below max means it was damaged — the same fact the
+                // safe-mode arm reads, which is why a dented Keep is never
+                // left standing. This revises ADR 0023's "nothing repairs the
+                // Storage".
+                let dented =
+                    bareRespawn
+                    |> withHits "spawn-1" BuiltKind.Spawn 4999 5000
+                    |> withHits "tower-1" BuiltKind.Tower 4999 5000
+                    |> withHits "sto-1" BuiltKind.Storage 4999 5000
+
+                Expect.equal
+                    (repairTasks (planTasks dented))
+                    [ "spawn-1"; "sto-1"; "tower-1" ]
+                    "one hit off max is hungry, on every Keep structure"
+
+                let whole =
+                    bareRespawn
+                    |> withHits "spawn-1" BuiltKind.Spawn 5000 5000
+                    |> withHits "tower-1" BuiltKind.Tower 5000 5000
+                    |> withHits "sto-1" BuiltKind.Storage 5000 5000
 
                 Expect.isEmpty
-                    (repairTasks (planTasks snapshot))
-                    "the colony's stock is never patched up"
+                    (repairTasks (planTasks whole))
+                    "a Keep at full hits asks for nothing"
+            }
+
+            test "a rampart is hungry below its floor and whole at it" {
+                // The floor, not half of max (ADR 0034): a rampart's max is
+                // three million at RCL4, so the decaying kinds' fraction
+                // would leave it hungry forever. The number restates the
+                // tunable, exactly as the road tests restate the half.
+                let floor = 100_000
+                let max = 3_000_000
+
+                let below = bareRespawn |> withHits "ram-1" BuiltKind.Rampart (floor - 1) max
+                let at = bareRespawn |> withHits "ram-1" BuiltKind.Rampart floor max
+                let fresh = bareRespawn |> withHits "ram-1" BuiltKind.Rampart 1 max
+                let over = bareRespawn |> withHits "ram-1" BuiltKind.Rampart (max / 2) max
+
+                Expect.equal
+                    (repairTasks (planTasks below))
+                    [ "ram-1" ]
+                    "one hit under the floor is hungry"
+
+                Expect.isEmpty (repairTasks (planTasks at)) "at the floor the rampart is whole"
+
+                Expect.equal
+                    (repairTasks (planTasks fresh))
+                    [ "ram-1" ]
+                    "a rampart just built stands at 1 hit and is the pool's business at once"
+
+                Expect.isEmpty
+                    (repairTasks (planTasks over))
+                    "half of a rampart's max is far over the floor: nothing to do"
             }
 
             test "a surplus creep is sent to repair: assignment, intent and bubble" {

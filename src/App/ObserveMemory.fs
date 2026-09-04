@@ -202,7 +202,8 @@ let private decodeCreepLog creep (raw: obj) : CreepLog =
 
 // One raid episode on the wire: the window, the roster as an array of
 // rows (the id is a field here, not a key, so a roster reads in order),
-// the closest approach when one was measured, and the losses.
+// the closest approach when one was measured, the losses, and the damage
+// in hits (ADR 0034).
 let private encodeEpisode (episode: RaidEpisode) =
     let o = createEmpty<obj>
     o?opened <- episode.Opened
@@ -243,6 +244,7 @@ let private encodeEpisode (episode: RaidEpisode) =
             d)
         |> List.toArray
 
+    o?damage <- episode.Damage
     o
 
 let private decodeEpisode (raw: obj) : RaidEpisode =
@@ -288,6 +290,11 @@ let private decodeEpisode (raw: obj) : RaidEpisode =
                     Tick = unbox<int> d?t
                 })
             |> Array.toList
+        // An episode written before the damage was recorded reads as zero
+        // rather than costing its row: the field is missing, not wrong,
+        // and dropping the episode would lose the roster and the approach
+        // that were written correctly (ADR 0028's per-episode degradation).
+        Damage = if isNull raw?damage then 0 else unbox<int> raw?damage
     }
 
 // The observe subtree is created on demand and replaced whole only when
@@ -389,6 +396,17 @@ let loadRaids () : RaidState =
                             None)
                     |> Array.toList
                 Living = raids?living |> unbox<string[]> |> Set.ofArray
+                // The damage baseline, absent from a bundle written before
+                // it existed: an empty baseline charges the next tick
+                // nothing, which is what a fresh episode starts from
+                // anyway.
+                Hits =
+                    if isNull raids?hits then
+                        Map.empty
+                    else
+                        objectEntries raids?hits
+                        |> Array.map (fun (id, hits) -> id, unbox<int> hits)
+                        |> Map.ofArray
             }
     with _ ->
         RaidState.empty
@@ -400,5 +418,12 @@ let saveRaids (state: RaidState) =
     let raids = createEmpty<obj>
     raids?episodes <- state.Episodes |> List.map encodeEpisode |> List.toArray
     raids?living <- state.Living |> Set.toArray
+
+    let hits = createEmpty<obj>
+
+    for KeyValue(id, value) in state.Hits do
+        hits?(id) <- value
+
+    raids?hits <- hits
     ensureObserve ()
     Memory?fabot?observe?raids <- raids

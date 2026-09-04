@@ -52,10 +52,10 @@ type BuiltKind =
     /// because the Layout holds a footing for one but never places it
     /// (ADR 0022).
     | Link
-    /// A rampart. No Task targets one and the Layout never places one,
-    /// but walkability must answer for it: a creep may stand on a
-    /// rampart, and folding it into Other would make every kind the
-    /// decision layer does not model walkable with it.
+    /// A rampart, the walkable defence over the Keep and the Posts (ADR
+    /// 0034). Walkability answers for it before anything else does: a
+    /// creep may stand on a rampart, and folding it into Other would make
+    /// every kind the decision layer does not model walkable with it.
     | Rampart
     /// Any structure kind the decision layer has no rules for yet.
     | Other
@@ -110,8 +110,8 @@ type Pos = { X: int; Y: int }
 /// Raid log's closest approach all measure with it.
 let range (a: Pos) (b: Pos) = max (abs (a.X - b.X)) (abs (a.Y - b.Y))
 
-/// Current and maximum hit points of a repairable structure — what the
-/// Repair trigger is judged from (ADR 0010).
+/// Current and maximum hit points of a repairable structure — what a
+/// kind's whole line is judged against (ADR 0010, ADR 0034).
 type HitsInfo = { Hits: int; HitsMax: int }
 
 /// Three-state terrain of one room tile.
@@ -153,9 +153,12 @@ type SpatialInfo =
         /// Tiles holding a built road — built structures only, a road
         /// construction site is not yet a road (ADR 0010).
         Roads: Set<Pos>
-        /// Target id -> current/max hits, repairable kinds only (roads
-        /// and containers — ADR 0010, ADR 0012); fields nobody decides
-        /// on stay out.
+        /// Target id -> current/max hits, repairable kinds only — the
+        /// decaying roads and containers (ADR 0010, ADR 0012), the Keep
+        /// and our own ramparts (ADR 0034); fields nobody decides on stay
+        /// out. Each kind is judged against its own whole line
+        /// (`wholeLine`), and three readers now share these hits: the
+        /// Repair pool, the safe-mode reflex and the Raid log's damage.
         Hits: Map<string, HitsInfo>
         /// Target id -> energy currently stored, on the containers (ADR
         /// 0012) and the Storage (ADR 0023): the stock the logistics
@@ -268,6 +271,10 @@ type StructureKind =
     | Road
     | Container
     | Storage
+    /// A rampart, over the Keep and the Posts (ADR 0034). The one
+    /// defensive kind the Layout places, and the only placeable kind that
+    /// goes on a tile something already stands on.
+    | Rampart
 
 /// One step of creep movement, engine vocabulary: Top decreases Y.
 type Direction =
@@ -354,6 +361,7 @@ let builtKindOfPlaceable =
     | Road -> BuiltKind.Road
     | Container -> BuiltKind.Container
     | Storage -> BuiltKind.Storage
+    | Rampart -> BuiltKind.Rampart
 
 /// The kinds Refill keeps fed (ADR 0010): the spawn-energy feeders and the
 /// towers, the structures the Snapshot projects as Refillables. The
@@ -372,21 +380,94 @@ let isRefillable =
     | BuiltKind.Rampart
     | BuiltKind.Other -> false
 
-/// The kinds Repair keeps whole (ADR 0010, ADR 0012) — the decaying ones,
-/// and so the only kinds whose hits the projection carries at all. The
-/// Storage is deliberately not one: it does not decay, so nothing repairs
-/// it (ADR 0023).
-let isRepairable =
+/// The Keep (ADR 0034): the structures worth defending — the spawn, the
+/// tower and the Storage. One list, three rules hang off it: a rampart
+/// covers each of them, Repair keeps each at full hits, and any one of
+/// them below full while a hostile stands in the room fires the safe-mode
+/// reflex. The Posts are ramparted with the Keep but are not of it: a
+/// container's hits never spend the stock.
+let isKeep =
     function
-    | BuiltKind.Road
-    | BuiltKind.Container -> true
     | BuiltKind.Spawn
-    | BuiltKind.Extension
     | BuiltKind.Tower
-    | BuiltKind.Storage
+    | BuiltKind.Storage -> true
+    | BuiltKind.Extension
+    | BuiltKind.Road
+    | BuiltKind.Container
     | BuiltKind.Link
     | BuiltKind.Rampart
     | BuiltKind.Other -> false
+
+/// The kinds a raid's damage is charged on (ADR 0034): the Keep and the
+/// ramparts that cover it. Not the roads and the containers, whose hits
+/// the projection also carries — a chewed road is the colony's ordinary
+/// decay, and charging it would drown the number the Raid log exists for.
+/// Enumerated rather than written as "the Keep or a rampart" so that a
+/// kind added to the union has to answer this question too.
+let isDefence =
+    function
+    | BuiltKind.Spawn
+    | BuiltKind.Tower
+    | BuiltKind.Storage
+    | BuiltKind.Rampart -> true
+    | BuiltKind.Extension
+    | BuiltKind.Road
+    | BuiltKind.Container
+    | BuiltKind.Link
+    | BuiltKind.Other -> false
+
+/// The kinds whose projection has to ask the engine who owns them: every
+/// ownable kind whose hits a decision reads (ADR 0034). A structure of
+/// another owner left standing in a room we took is neither ours to repair
+/// nor ours to charge a raid's damage on, and "it stands in our spawn
+/// room" is not the same fact as "it is ours". The decaying kinds are
+/// deliberately not among them: a road and a container have no owner in
+/// the engine at all, so asking would drop every one of them.
+let needsOwner =
+    function
+    | BuiltKind.Spawn
+    | BuiltKind.Tower
+    | BuiltKind.Storage
+    | BuiltKind.Rampart -> true
+    | BuiltKind.Extension
+    | BuiltKind.Road
+    | BuiltKind.Container
+    | BuiltKind.Link
+    | BuiltKind.Other -> false
+
+/// Where a kind is whole — which of the three rules judges its hits (ADR
+/// 0034), never the numbers themselves: the fraction and the floor are the
+/// Repair pool's tunables, stated where the pool that reads them is.
+[<RequireQualifiedAccess>]
+type WholeLine =
+    /// A fraction of max hits: the decaying kinds (ADR 0010) — a road and
+    /// a container are hungry below half of max and whole at it.
+    | Fraction
+    /// A fixed floor of hits: the rampart (ADR 0034). Half of max is the
+    /// wrong shape for a structure whose max is three million at RCL4 and
+    /// grows to three hundred — it would be hungry forever.
+    | Floor
+    /// Full hits: the Keep (ADR 0034). It does not decay, so below max
+    /// means it was damaged and nothing else — and the safe-mode arm
+    /// reads that same fact off the same hits.
+    | Full
+
+/// The line a kind is whole at, or None for a kind Repair never touches —
+/// the extensions, a link, and every kind the decision layer does not
+/// model (ADR 0010, widened by ADR 0034). The repairable kinds are exactly
+/// the kinds whose hits the projection carries at all: fields nobody
+/// decides on stay out.
+let wholeLine =
+    function
+    | BuiltKind.Road
+    | BuiltKind.Container -> Some WholeLine.Fraction
+    | BuiltKind.Rampart -> Some WholeLine.Floor
+    | BuiltKind.Spawn
+    | BuiltKind.Tower
+    | BuiltKind.Storage -> Some WholeLine.Full
+    | BuiltKind.Extension
+    | BuiltKind.Link
+    | BuiltKind.Other -> None
 
 /// The kinds whose stored energy enters the projection: the containers,
 /// whose stock the logistics Tasks judge (ADR 0012), and the Storage,
