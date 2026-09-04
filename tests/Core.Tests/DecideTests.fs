@@ -1193,6 +1193,175 @@ let layoutTests =
                     (sitesOfKind Road planned.Intents)
                     "standing containers never perturb the road plan"
             }
+
+            test "a container off its source's pick serves that source (#74)" {
+                // The pick moves when the trunk moves, and the container
+                // standing on the old pick is still the only container this
+                // source has (ADR 0040). The target is served wherever the
+                // thing serving it sits, so no second site drops beside it.
+                let srcPos = { X = 15; Y = 25 }
+                let colony = withRoadsBuilt (trunkColony 4)
+                let planned = decide colony Map.empty Set.empty None
+
+                let pick =
+                    sitesOfKind Container planned.Intents
+                    |> List.find (fun tile -> chebyshev tile srcPos <= 1)
+
+                // (14,24) is a Seat of the same source and not the pick —
+                // the container a previous plan left standing.
+                let orphan = { X = 14; Y = 24 }
+
+                let offPick =
+                    { colony with
+                        Spatial =
+                            colony.Spatial
+                            |> withTargets [ "can-old", orphan, Structure BuiltKind.Container ]
+                    }
+
+                let after = decide offPick Map.empty Set.empty None
+
+                Expect.isEmpty
+                    (sitesOfKind Container after.Intents
+                     |> List.filter (fun tile -> chebyshev tile srcPos <= 1))
+                    "the standing container serves the source: its own pick is not placed"
+
+                Expect.equal
+                    after.Memo.DeferredContainers
+                    [
+                        {
+                            Target = ContainerTarget.Source "src-a"
+                            Pick = pick
+                            Serving = orphan
+                        }
+                    ]
+                    "the record names the target, the tile the plan picked and the tile serving it"
+
+                // The tick after the plan runs: everything it placed now
+                // stands. This is where the defect was paid for — a second
+                // container on the pick is a second Post and a second term
+                // in the hauler quota, forever.
+                let built =
+                    { offPick with
+                        Spatial =
+                            offPick.Spatial
+                            |> withTargets
+                                [
+                                    for i, tile in
+                                        List.indexed (sitesOfKind Container after.Intents) ->
+                                        $"can-new-{i}", tile, Structure BuiltKind.Container
+                                ]
+                    }
+
+                Expect.equal
+                    (Atlas.posts (Atlas.ofSnapshot built))
+                    (Set.singleton orphan)
+                    "one Post, on the Seat the container actually stands on"
+
+                Expect.equal
+                    (decide built Map.empty Set.empty None).Memo.HaulerQuota
+                    2
+                    "the hauler row is sized for one source container — the orphan's own term"
+            }
+
+            test "a pending container site off the pick serves the source too (#74)" {
+                // A site is already going up: judging the target from
+                // standing containers alone would drop a second site beside
+                // a site, the same defect one tick earlier (ADR 0040).
+                let srcPos = { X = 15; Y = 25 }
+                let colony = withRoadsBuilt (trunkColony 4)
+                let orphan = { X = 14; Y = 24 }
+
+                let offPick =
+                    { colony with
+                        Spatial =
+                            colony.Spatial
+                            |> withTargets [ "can-site-old", orphan, Site BuiltKind.Container ]
+                    }
+
+                let after = decide offPick Map.empty Set.empty None
+
+                Expect.isEmpty
+                    (sitesOfKind Container after.Intents
+                     |> List.filter (fun tile -> chebyshev tile srcPos <= 1))
+                    "the pending site serves the source: its own pick is not placed"
+
+                Expect.equal
+                    (after.Memo.DeferredContainers |> List.map (fun d -> d.Target, d.Serving))
+                    [ ContainerTarget.Source "src-a", orphan ]
+                    "the deferral is recorded for a pending site as for a standing container"
+            }
+
+            test "a container anywhere in the Work Area serves the controller (#74)" {
+                let controllerPos = { X = 35; Y = 25 }
+                let colony = withRoadsBuilt (trunkColony 4)
+                let planned = decide colony Map.empty Set.empty None
+
+                let pick =
+                    sitesOfKind Container planned.Intents
+                    |> List.find (fun tile -> chebyshev tile controllerPos <= 3)
+
+                // An Upgrade Work Area tile that is not the pick: the
+                // controller's container, left where an older plan put it.
+                let orphan =
+                    [
+                        for x in controllerPos.X - 3 .. controllerPos.X + 3 do
+                            for y in controllerPos.Y - 3 .. controllerPos.Y + 3 do
+                                { X = x; Y = y }
+                    ]
+                    |> List.find (fun tile -> tile <> pick && tile <> controllerPos)
+
+                let offPick =
+                    { colony with
+                        Spatial =
+                            colony.Spatial
+                            |> withTargets [ "can-ctrl", orphan, Structure BuiltKind.Container ]
+                    }
+
+                let after = decide offPick Map.empty Set.empty None
+
+                Expect.isEmpty
+                    (sitesOfKind Container after.Intents
+                     |> List.filter (fun tile -> chebyshev tile controllerPos <= 3))
+                    "the standing container serves the controller: its own pick is not placed"
+
+                Expect.equal
+                    after.Memo.DeferredContainers
+                    [
+                        {
+                            Target = ContainerTarget.Controller
+                            Pick = pick
+                            Serving = orphan
+                        }
+                    ]
+                    "the controller's deferral is recorded beside the sources'"
+            }
+
+            test "a container on its own pick is served, not deferred (#74)" {
+                // The coinciding case: the plan wants exactly the tile the
+                // container stands on, so nothing is lost and the record
+                // stays empty (ADR 0040).
+                let colony = withRoadsBuilt (trunkColony 4)
+                let planned = decide colony Map.empty Set.empty None
+
+                let standing =
+                    sitesOfKind Container planned.Intents
+                    |> List.mapi (fun i tile -> $"can-{i}", tile, Structure BuiltKind.Container)
+
+                let after =
+                    decide
+                        { colony with
+                            Spatial = colony.Spatial |> withTargets standing
+                        }
+                        Map.empty
+                        Set.empty
+                        None
+
+                Expect.isEmpty (sitesOfKind Container after.Intents) "nothing re-drops"
+
+                Expect.isEmpty
+                    after.Memo.DeferredContainers
+                    "a pick that never moved lost nothing and records nothing"
+            }
         ]
 
 [<Tests>]
@@ -2323,6 +2492,7 @@ let sentinelMemo snapshot =
         UnservedFootings = []
         ServedFootings = []
         UnroutedTrunks = []
+        DeferredContainers = []
         HaulerQuota = 0
         Walks = WalkTable()
     }

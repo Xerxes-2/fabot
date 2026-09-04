@@ -12,7 +12,7 @@
 //   observe.mjs tasks              every creep's current Task with its Verdict reason
 //   observe.mjs timeline <creep>   one creep's Transition log, oldest first
 //   observe.mjs raids              the Raid log's episodes, newest first
-//   observe.mjs layout             the footing targets the Layout could not serve
+//   observe.mjs layout             what the Layout could not deliver this plan
 //   observe.mjs verbose            the verbose list as stored
 //   observe.mjs verbose add <creep>     put a creep on the verbose list
 //   observe.mjs verbose remove <creep>  take a creep off the verbose list
@@ -212,17 +212,21 @@ if (command === "console") {
 
   // The wire shape written by ObserveMemory.fs:
   //   { unserved: [{ x, y, kind }],
-  //     unrouted: [{ source, goal, spawn? }] }
-  // Two lists in one leaf, both the Layout's own losses: the footing
-  // targets the fold found no tile for (#77) and the trunks the router
-  // found no path for (#107). The current plan's record, not a history: no
-  // ring, no fold, the same lists every tick under a stable census. Its
-  // three answers are distinct and all three matter (ADR 0035). A missing
-  // leaf is a missing channel — a bundle predating it — and fails loudly,
-  // the way `raids` does, rather than reporting a confident "nothing lost"
-  // off a stale deploy; an empty list is the guarantee holding, one footing
-  // per target and one trunk per (source, goal); a row is something the
-  // colony no longer has.
+  //     unrouted: [{ source, goal, spawn? }],
+  //     deferred: [{ target, source?, pick: { x, y }, serving: { x, y } }] }
+  // Three lists in one leaf, all the Layout's own losses: the footing
+  // targets the fold found no tile for (#77), the trunks the router found
+  // no path for (#107), and the container picks the plan gave up because
+  // something already serves their target (ADR 0040). The current plan's
+  // record, not a history: no ring, no fold, the same lists every tick
+  // under a stable census. What a list can say is three distinct answers
+  // and every one of them matters (ADR 0035). A missing leaf is a missing
+  // channel — a bundle
+  // predating it — and fails loudly, the way `raids` does, rather than
+  // reporting a confident "nothing lost" off a stale deploy; an empty list
+  // is the guarantee holding, one footing per target, one trunk per
+  // (source, goal) and every container target served by the tile the plan
+  // picked; a row is something the colony no longer has.
   const stored = await memoryGet("fabot.observe.layout");
   if (stored == null || typeof stored !== "object") {
     fail(
@@ -249,20 +253,29 @@ if (command === "console") {
   };
   const unserved = listOrFail("unserved");
   const unrouted = listOrFail("unrouted");
+  const deferred = listOrFail("deferred");
 
-  // The goal as it reads back: the spawn's id rides beside the name, so a
-  // `spawn` row that lost it says so rather than naming some other goal.
-  // Flagged and printed rather than dropped — Core's decoder reads such a
-  // row as no goal at all, and this is the operator's tool: a row it hid
-  // would be one more silence.
-  const goalOf = (t) =>
-    t.goal === "spawn" ? (t.spawn ? `spawn ${t.spawn}` : "spawn (no id)") : t.goal;
+  // A carrying vocabulary as it reads back: one case spells a name and
+  // carries an id beside it, so a row that lost the id says so rather than
+  // naming some other case. Flagged and printed rather than dropped —
+  // Core's decoder reads such a row as nothing at all, and this is the
+  // operator's tool: a row it hid would be one more silence. Both of the
+  // Layout channel's carrying vocabularies read this way, a trunk's goal
+  // (#107) and a deferral's target (ADR 0040).
+  const carrying = (name, carries, carried) =>
+    !carries ? name : carried ? `${name} ${carried}` : `${name} (no id)`;
 
-  // `--json` carries both lists under their own keys. It used to be the
-  // bare `unserved` array, back when the leaf held one list; a reader of
-  // the old shape wants `.unserved`.
+  const goalOf = (t) => carrying(t.goal, t.goal === "spawn", t.spawn);
+
+  const targetOf = (d) => carrying(d.target, d.target === "source", d.source);
+
+  const tileOf = (p) => (p && typeof p === "object" ? `(${p.x},${p.y})` : "(no tile)");
+
+  // `--json` carries every list under its own key. It used to be the bare
+  // `unserved` array, back when the leaf held one list; a reader of the
+  // old shape wants `.unserved`.
   if (json) {
-    console.log(JSON.stringify({ unserved, unrouted }, null, 2));
+    console.log(JSON.stringify({ unserved, unrouted, deferred }, null, 2));
   } else {
     if (unserved.length === 0) {
       console.log("every footing target has its footing");
@@ -283,6 +296,21 @@ if (command === "console") {
       );
       for (const t of unrouted) {
         console.log(`  ${t.source} -> ${goalOf(t)}`);
+      }
+    }
+
+    // A row here is an orphan standing in the room: the plan wanted `pick`
+    // and the colony keeps what is on `serving` instead (ADR 0040). Nothing
+    // demolishes it, so the row stands until #114 does — it is the
+    // condition that ticket waits on, not a transient.
+    if (deferred.length === 0) {
+      console.log("every container target is served by the tile the plan picked");
+    } else {
+      console.log(
+        `${deferred.length} container pick${deferred.length === 1 ? "" : "s"} deferred to a container already standing:`,
+      );
+      for (const d of deferred) {
+        console.log(`  ${targetOf(d)}  wanted ${tileOf(d.pick)}, served by ${tileOf(d.serving)}`);
       }
     }
   }

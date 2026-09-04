@@ -73,9 +73,9 @@ let wireVocabularyTests =
         "wire vocabularies"
         [
             test "every observe vocabulary round-trips, case by case" {
-                // The six unions that ride the observe channel's Memory
+                // The seven unions that ride the observe channel's Memory
                 // subtree — the four Verdict vocabularies and the Layout
-                // channel's two. The encoder is exhaustive by construction;
+                // channel's three. The encoder is exhaustive by construction;
                 // what is checked here is the other direction, which the
                 // compiler cannot see.
                 roundTrips "MatchFactor" (casesOf<MatchFactor> ()) matchFactorName matchFactorOf
@@ -107,6 +107,16 @@ let wireVocabularyTests =
                     (casesOf<TrunkGoal> ())
                     trunkGoalName
                     (trunkGoalOf sampleName)
+
+                // The Layout channel's third vocabulary (ADR 0040), and
+                // its second carrying one: a container target is a source
+                // or the controller, and the source's id rides beside the
+                // name as a trunk goal's spawn does.
+                roundTrips
+                    "ContainerTarget"
+                    (casesOf<ContainerTarget> ())
+                    containerTargetName
+                    (containerTargetOf sampleName)
 
                 roundTrips
                     "RejectReason"

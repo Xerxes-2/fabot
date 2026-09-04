@@ -626,6 +626,40 @@ type TrunkGoal =
 /// no creep to key a Verdict on either.
 type UnroutedTrunk = { Source: string; Goal: TrunkGoal }
 
+/// What a container is planned for (ADR 0012): a source, named by its id,
+/// or the controller. The two targets the container plan judges, and it
+/// judges them independently — a tile can satisfy both at once (a [[dual
+/// seat]] is within range 1 of a source and inside the Upgrade Work Area),
+/// and ADR 0040 names that edge and leaves it rather than merging them.
+/// The source carries its id where the controller needs none, the way a
+/// `TrunkGoal`'s spawn does: a room has one controller (ADR 0005) and
+/// several sources.
+[<RequireQualifiedAccess>]
+type ContainerTarget =
+    | Source of source: string
+    | Controller
+
+/// A container pick the plan did not place because its target is already
+/// served by a container standing somewhere else (ADR 0040): the target,
+/// the tile the plan picked, and the tile actually serving it. The pick
+/// moves when the trunk moves — a commit, not a tick — and the container
+/// left on the old tile keeps serving the target, so the colony carries a
+/// container on a worse tile rather than two containers.
+///
+/// Recorded rather than dropped, on the layout record beside the unserved
+/// footings (#106) and the unroutable trunks (#107): nothing in this
+/// colony demolishes anything (ADR 0040 keeps the orphan and #114 owns the
+/// removal), so the difference between the plan and the room is permanent,
+/// and an orphan no line anywhere names is a room whose Post and hauler
+/// counts are read off geometry the plan no longer wants. Not a Verdict —
+/// a container has no creep to key one on (ADR 0035).
+type DeferredContainer =
+    {
+        Target: ContainerTarget
+        Pick: Pos
+        Serving: Pos
+    }
+
 /// The census-keyed plan memo (ADR 0017): the census signature beside the
 /// plans derived from exactly that census — the Layout's site Intents,
 /// the footings it placed and the ones it could not, the hauler quota,
@@ -658,6 +692,12 @@ type PlanMemo =
         /// is the healthy answer and rides here all the same, for the
         /// reason `UnservedFootings` does: the App writes it every tick.
         UnroutedTrunks: UnroutedTrunk list
+        /// The container picks this plan deferred to a container already
+        /// serving their targets (ADR 0040), derived from the same census
+        /// as the site Intents and recomputed with them. Empty is the
+        /// healthy answer and rides here all the same, for the reason
+        /// `UnservedFootings` does: the App writes it every tick.
+        DeferredContainers: DeferredContainer list
         HaulerQuota: int
         /// The walks flooded under this signature, filled through the tick
         /// by the Atlas the table was handed to. Dropped whole when the
@@ -941,6 +981,37 @@ let trunkGoalOf =
         trunkGoalName
         ""
         [ (fun _ -> Some TrunkGoal.UpgradeArea); Option.map TrunkGoal.Spawn ]
+
+/// The wire spelling of each ContainerTarget, on the Layout channel's
+/// Memory leaf beside `trunkGoalName` (ADR 0040). A carrying vocabulary
+/// like it, and for the same reason: the source's id rides beside the
+/// name rather than inside it, so a target is one spelling and not one
+/// per source.
+let containerTargetName =
+    function
+    | ContainerTarget.Source _ -> "source"
+    | ContainerTarget.Controller -> "controller"
+
+/// The source a ContainerTarget names beside its wire name, or None for
+/// the controller, which names none. The encoder's half of what
+/// `containerTargetOf` reads back, as `trunkGoalSpawn` is TrunkGoal's.
+let containerTargetSource =
+    function
+    | ContainerTarget.Source source -> Some source
+    | ContainerTarget.Controller -> None
+
+/// The ContainerTarget a wire name spells for the source the wire carried
+/// beside it, or None for a name this vocabulary does not have — and for
+/// `source` with no id carried beside it at all, which is a row that lost
+/// its source rather than another target.
+let containerTargetOf =
+    reverseCarrying
+        containerTargetName
+        ""
+        [
+            Option.map ContainerTarget.Source
+            (fun _ -> Some ContainerTarget.Controller)
+        ]
 
 /// One row of a verbose scoring: a Task in the pool, either scored on the
 /// full matching key — rank tier, travel cost, current load — or rejected

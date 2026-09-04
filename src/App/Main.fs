@@ -83,13 +83,18 @@ let loop () =
     |> ObserveMemory.saveRaids
 
     // The Layout's own channel (ADR 0035): the footing targets this tick's
-    // plan could not serve, and the trunks it could not route (#107).
+    // plan could not serve, the trunks it could not route (#107), and the
+    // container picks it deferred to a container already serving their
+    // target (ADR 0040).
     // Colony-level for the Raid log's structural reason — neither a footing
     // nor a trunk has a creep to key a Verdict on — and off the memo, so a
     // recalled plan reports exactly what it reported when it was computed.
     // Written every tick, empty or not, for the same reason the Raid log's
     // leaf is.
-    ObserveMemory.saveLayout decision.Memo.UnservedFootings decision.Memo.UnroutedTrunks
+    ObserveMemory.saveLayout
+        decision.Memo.UnservedFootings
+        decision.Memo.UnroutedTrunks
+        decision.Memo.DeferredContainers
 
     pruneDeadCreepMemory living
     // Outcomes go unread here; failures are already logged by the Executor.

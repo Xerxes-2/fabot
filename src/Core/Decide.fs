@@ -325,15 +325,23 @@ let threatsOf (snapshot: Snapshot) atlas : Threats =
                     Set.difference (Atlas.walkableTiles atlas) reach
         }
 
-/// Whether a placed tile is a source container's (ADR 0012): within range
-/// 1 of a placed source — the Seat-standing kind the Layout places, which
-/// harvest overflow fills. The one geometry judgement behind both rules
-/// that care: the Planner keeps source containers out of Refill, the
-/// hauler quota counts them. Unplaced geometry classifies nothing.
+/// The source container geometry (ADR 0012): a tile within range 1 of the
+/// given source is that source's container tile — the Seat-standing kind
+/// the Layout places, which harvest overflow fills. The one range this
+/// colony calls a source container, asked of one source: the Layout asks
+/// it per target to know whether that source is served (ADR 0040), and
+/// the two rules below ask it of every source at once.
+let private servesSource (sourcePos: Pos) (tile: Pos) = range tile sourcePos <= 1
+
+/// Whether a placed tile is a source container's: within range 1 of any
+/// placed source. The one geometry judgement behind both rules that care
+/// about the kind and not the source — the Planner keeps source containers
+/// out of Refill, the hauler quota counts them. Unplaced geometry
+/// classifies nothing.
 let private isSourceContainerTile (snapshot: Snapshot) pos =
     snapshot.Sources
     |> List.choose (fun s -> Map.tryFind s.Id snapshot.Spatial.TargetPositions)
-    |> List.exists (fun s -> range pos s <= 1)
+    |> List.exists (fun s -> servesSource s pos)
 
 /// Planner: rebuild this tick's full Task pool from the Snapshot. Pure and
 /// from scratch every tick — Tasks are never persisted.
@@ -948,10 +956,19 @@ let private horizonLevel = 5
 /// dropped from the accumulator would be a reservation no reader could
 /// see — and the rule it was chosen by, off the trunks and off every
 /// target and every other footing, could be asserted nowhere (ADR 0036).
+/// Beside them, the container picks the plan deferred to a container that
+/// already serves their target (ADR 0040): the room keeps the container it
+/// has, and what the plan wanted instead is a colony fact no other channel
+/// carries — nothing demolishes the orphan, so the difference is permanent.
 let private planLayout
     (snapshot: Snapshot)
     atlas
-    : Intent list * ServedFooting list * UnservedFooting list * UnroutedTrunk list =
+    : Intent list *
+      ServedFooting list *
+      UnservedFooting list *
+      UnroutedTrunk list *
+      DeferredContainer list
+    =
     let anchor = snapshot.Spawns |> List.tryPick (fun s -> Atlas.positionOf atlas s.Id)
 
     match Atlas.roomName atlas, anchor, snapshot.Controller with
@@ -1106,7 +1123,11 @@ let private planLayout
         // the container itself gets built. Seats need no reservation dodge:
         // they are working ground, which the clustered ordering never
         // offered (ADR 0022).
-        let sourceContainerTiles =
+        //
+        // The pick rides beside the source it is for: the target clause
+        // below asks whether *that* source is served, and downstream there
+        // is only a tile (ADR 0040).
+        let sourceContainerPicks =
             sourceTrunks
             |> List.choose (fun (sourceId, trunk) ->
                 let seats = Atlas.seatTilesOf atlas sourceId
@@ -1118,7 +1139,9 @@ let private planLayout
                     |> Set.toList
                     |> List.minBy (fun seat ->
                         trunk |> Set.toList |> List.map (range seat) |> List.min, seat.X, seat.Y)
-                    |> Some)
+                    |> fun seat -> Some(sourceId, seat))
+
+        let sourceContainerTiles = sourceContainerPicks |> List.map snd
 
         // The controller container: an Upgrade-Work-Area tile beside a
         // trunk and off the road itself — the buffer upgraders work from
@@ -1243,24 +1266,76 @@ let private planLayout
         let towerTiles, extensionTiles =
             clusterPicks |> List.splitAt (min towerSlots clusterPicks.Length)
 
-        // The container gap reads the projection's container census, tile
-        // for tile (ADR 0012): a built or pending container already
-        // claims its spot. A tile still owed its road defers the
-        // container too — the engine takes one construction site per
-        // tile, so the source container (planned onto the trunk's first
-        // tile) waits for the road to stand and then coexists with it.
-        let claimed =
+        // The container census the target clause is judged against: a
+        // container standing, or a site already going up. The asymmetry
+        // with `Atlas.posts`, which counts standing containers alone, is
+        // deliberate (ADR 0040) — the plan asks whether another one must
+        // be built, and a site answers that; a Post asks what is catching
+        // overflow on a Seat right now, and a site catches nothing.
+        let containerCensus =
+            Set.union (Atlas.containerTiles atlas) (Atlas.pendingContainerTiles atlas)
+
+        // The target clause (ADR 0040): a source is served when a
+        // container stands or is pending within range 1 of it, the
+        // controller when one stands or is pending in its Upgrade Work
+        // Area — the geometry each rule already reads a container by, not
+        // the tile this plan happens to have picked. A served target is
+        // planned for no further container, wherever the thing serving it
+        // sits; an unserved one is planned onto its pick as before.
+        //
+        // A pick the clause defers because something else serves its
+        // target is a loss the room keeps — nothing demolishes the
+        // orphan — so it rides out beside the footings and the trunks.
+        // The tile it names is the lowest of a served target's
+        // containers, which is one tile in every room we hold; a target
+        // with two already had the defect this closes. A container on the
+        // pick itself is the coinciding case and no loss at all: the plan
+        // wanted exactly what stands there.
+        let servingSource sourceId =
+            Atlas.positionOf atlas sourceId
+            |> Option.map (fun sourcePos -> Set.filter (servesSource sourcePos) containerCensus)
+            |> Option.defaultValue Set.empty
+
+        // Every target beside its pick and the containers already serving
+        // it. Both answers below are read off this one list, so each
+        // target is judged once and the same judgement decides whether it
+        // is planned for and whether it lost its pick.
+        let targets =
             [
-                Atlas.containerTiles atlas
-                Atlas.pendingContainerTiles atlas
-                Atlas.pendingRoadTiles atlas
-                roadGap
+                for sourceId, pick in sourceContainerPicks ->
+                    ContainerTarget.Source sourceId, pick, servingSource sourceId
+                for pick in Option.toList controllerContainerTile ->
+                    ContainerTarget.Controller, pick, Set.intersect containerCensus upgradeArea
             ]
-            |> List.fold Set.union Set.empty
+
+        let unservedPicks =
+            targets
+            |> List.choose (fun (_, pick, serving) ->
+                if Set.isEmpty serving then Some pick else None)
+
+        let deferredContainers =
+            targets
+            |> List.choose (fun (target, pick, serving) ->
+                if Set.isEmpty serving || Set.contains pick serving then
+                    None
+                else
+                    Some
+                        {
+                            Target = target
+                            Pick = pick
+                            Serving = Set.minElement serving
+                        })
+
+        // The tile clause (ADR 0040), and only it: a pick whose tile is
+        // still owed a road waits, for the reason it always did — the
+        // engine takes one construction site per tile, so the source
+        // container (planned onto the trunk's first tile) waits for the
+        // road to stand and then coexists with it. This is about the tile
+        // and moves with no target.
+        let owedRoad = Set.union (Atlas.pendingRoadTiles atlas) roadGap
 
         let containerGap =
-            sourceContainerTiles @ Option.toList controllerContainerTile
-            |> List.filter (fun tile -> not (Set.contains tile claimed))
+            unservedPicks |> List.filter (fun tile -> not (Set.contains tile owedRoad))
 
         // The ramparts (ADR 0034): one over every standing Keep structure
         // and every standing Post container, the tick the thing it covers
@@ -1296,12 +1371,13 @@ let private planLayout
         @ place Rampart (Set.toList rampartGap),
         List.rev servedFootings,
         List.rev unservedFootings,
-        unroutedTrunks
+        unroutedTrunks,
+        deferredContainers
     // A room the Layout cannot even orient itself in plans nothing and
     // loses nothing: there are no targets to serve and no trunk was ever
     // asked for, so every record is empty rather than any of them being a
     // shortfall (#77, #106, #107).
-    | _ -> [], [], [], []
+    | _ -> [], [], [], [], []
 
 /// Colony reflex beside the pipeline, the second after safe mode: every
 /// creep with free carry capacity standing within pickup range of a
@@ -2400,7 +2476,7 @@ let decide
         match recalled with
         | Some m -> m
         | None ->
-            let siteIntents, servedFootings, unservedFootings, unroutedTrunks =
+            let siteIntents, servedFootings, unservedFootings, unroutedTrunks, deferredContainers =
                 planLayout snapshot atlas
 
             {
@@ -2409,6 +2485,7 @@ let decide
                 UnservedFootings = unservedFootings
                 ServedFootings = servedFootings
                 UnroutedTrunks = unroutedTrunks
+                DeferredContainers = deferredContainers
                 HaulerQuota = haulerQuota snapshot atlas
                 Walks = walks
             }

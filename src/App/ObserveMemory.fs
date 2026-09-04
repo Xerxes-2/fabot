@@ -433,16 +433,29 @@ let saveRaids (state: RaidState) =
 
 /// Write the Layout's own losses under `Memory.fabot.observe.layout`,
 /// leaving the rest of the observe subtree alone the way `saveRaids` does:
-/// the footing targets it could not serve (#77) and the trunks it could
-/// not route (#107). Two lists in one leaf and not two leaves — both are
-/// the Layout's, both are the current plan's, and a reader asking what
-/// this room lost asks once (ADR 0035). Every tick, the empty lists
-/// included: the leaf's presence is what lets `observe.mjs layout` tell
-/// "this bundle records the loss" from "nothing is lost", ADR 0028's
-/// reason applied to a second record. No load and no fold — the record is
+/// the footing targets it could not serve (#77), the trunks it could not
+/// route (#107) and the container picks it deferred to a container that
+/// already serves their target (ADR 0040). Three lists in one leaf and not
+/// three leaves — all are the Layout's, all are the current plan's, and a
+/// reader asking what this room lost asks once (ADR 0035). Every tick,
+/// the empty lists included: the leaf's presence is what lets
+/// `observe.mjs layout` tell "this bundle records the loss" from "nothing
+/// is lost", ADR 0028's reason applied to a second record. No load and no fold — the record is
 /// the current plan's, so there is no prior state to degrade from and
 /// nothing a bad leaf could cost.
-let saveLayout (unserved: UnservedFooting list) (unrouted: UnroutedTrunk list) =
+/// One tile as a wire object. The deferral rows carry two of them and a
+/// tile named `x`/`y` twice over would say which is which nowhere.
+let private tileObject (tile: Pos) =
+    let o = createEmpty<obj>
+    o?x <- tile.X
+    o?y <- tile.Y
+    o
+
+let saveLayout
+    (unserved: UnservedFooting list)
+    (unrouted: UnroutedTrunk list)
+    (deferred: DeferredContainer list)
+    =
     let layout = createEmpty<obj>
 
     layout?unserved <-
@@ -470,6 +483,26 @@ let saveLayout (unserved: UnservedFooting list) (unrouted: UnroutedTrunk list) =
             | Some spawn -> o?spawn <- spawn
             | None -> ()
 
+            o)
+        |> List.toArray
+
+    // The two tiles ride as objects rather than as four flat keys: a
+    // deferral is about the distance between them, and `pick` and
+    // `serving` say which is which where `x2` would not. The target's
+    // source rides beside its name the way a trunk goal's spawn does — a
+    // `controller` row carries no `source` key at all.
+    layout?deferred <-
+        deferred
+        |> List.map (fun entry ->
+            let o = createEmpty<obj>
+            o?target <- containerTargetName entry.Target
+
+            match containerTargetSource entry.Target with
+            | Some source -> o?source <- source
+            | None -> ()
+
+            o?pick <- tileObject entry.Pick
+            o?serving <- tileObject entry.Serving
             o)
         |> List.toArray
 
