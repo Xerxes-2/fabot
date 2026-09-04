@@ -15,17 +15,27 @@ open Fabot.Core.Types
 /// swapped — fails the round trip rather than passing on a coincidence.
 let private sampleField i = i + 1
 
+/// The value a case's i-th text field is sampled with, as `sampleField` is
+/// its numeric one: distinct per position for the same reason, and
+/// recognisable in a failure message.
+let private sampleText i = $"field-{i}"
+
 /// The numbers handed to a vocabulary that decodes payload-carrying
 /// cases: exactly what `casesOf` builds such a case around, in field
 /// order, so the case that was spelt is the case that must read back.
 let private sampleNumbers = Some(sampleField 0, sampleField 1)
 
+/// The same, for a vocabulary whose payload is a name rather than
+/// numbers: the Layout channel's TrunkGoal carries the spawn's id (#107).
+let private sampleName = Some(sampleText 0)
+
 /// Every case of a closed union, read off the union's own metadata: the
 /// enumeration no hand-written list can be trusted to match. A case that
-/// carries fields is built around `sampleField`, so a reason that is no
-/// longer a bare tag is enumerated exactly like one. Only numbers are
-/// sampled; any other field type throws, which is the next author's
-/// notice to widen this rather than a case quietly skipped.
+/// carries fields is built around `sampleField` or `sampleText`, so a
+/// reason that is no longer a bare tag is enumerated exactly like one.
+/// Numbers and names are sampled; any other field type throws, which is
+/// the next author's notice to widen this rather than a case quietly
+/// skipped.
 let private casesOf<'a> () =
     FSharpType.GetUnionCases typeof<'a>
     |> Array.map (fun case ->
@@ -34,6 +44,8 @@ let private casesOf<'a> () =
             |> Array.mapi (fun i field ->
                 if field.PropertyType = typeof<int> then
                     box (sampleField i)
+                elif field.PropertyType = typeof<string> then
+                    box (sampleText i)
                 else
                     failwith $"no sample value for a {field.PropertyType.Name} field")
 
@@ -61,9 +73,9 @@ let wireVocabularyTests =
         "wire vocabularies"
         [
             test "every observe vocabulary round-trips, case by case" {
-                // The five unions that ride the observe channel's Memory
+                // The six unions that ride the observe channel's Memory
                 // subtree — the four Verdict vocabularies and the Layout
-                // channel's. The encoder is exhaustive by construction;
+                // channel's two. The encoder is exhaustive by construction;
                 // what is checked here is the other direction, which the
                 // compiler cannot see.
                 roundTrips "MatchFactor" (casesOf<MatchFactor> ()) matchFactorName matchFactorOf
@@ -85,6 +97,16 @@ let wireVocabularyTests =
                 // the same Memory subtree under the same rule, so it is
                 // enumerated here beside them.
                 roundTrips "FootingKind" (casesOf<FootingKind> ()) footingKindName footingKindOf
+
+                // The Layout channel's second vocabulary (#107), and its
+                // first carrying one: a trunk goal is the Upgrade Work
+                // Area or a spawn, and the spawn's id rides beside the
+                // name the way a reason's numbers do.
+                roundTrips
+                    "TrunkGoal"
+                    (casesOf<TrunkGoal> ())
+                    trunkGoalName
+                    (trunkGoalOf sampleName)
 
                 roundTrips
                     "RejectReason"
@@ -130,6 +152,8 @@ let wireVocabularyTests =
 
                 Expect.isNone (footingKindOf "container") "a near miss is no FootingKind"
 
+                Expect.isNone (trunkGoalOf sampleName "upgrade") "a near miss is no TrunkGoal"
+
                 Expect.isNone
                     (rejectReasonOf sampleNumbers "task-gone")
                     "a ReleaseReason is no RejectReason"
@@ -144,6 +168,16 @@ let wireVocabularyTests =
                 // wait nobody wrote.
                 Expect.isNone (rejectReasonOf None "too-early") "no numbers, no reason"
                 Expect.isNone (releaseReasonOf None "too-early") "and the same on the other side"
+
+                // The Layout channel's carrying vocabulary under the same
+                // rule: a `spawn` row that lost its id names no goal, and
+                // must not read back as the goal that carries none.
+                Expect.isNone (trunkGoalOf None "spawn") "no spawn id, no goal"
+
+                Expect.equal
+                    (trunkGoalOf None "upgrade-area")
+                    (Some TrunkGoal.UpgradeArea)
+                    "while the goal that carries nothing needs nothing"
 
                 Expect.equal
                     (rejectReasonOf None "unreachable")

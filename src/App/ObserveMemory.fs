@@ -431,15 +431,18 @@ let saveRaids (state: RaidState) =
     ensureObserve ()
     Memory?fabot?observe?raids <- raids
 
-/// Write the Layout's unserved footing targets under
-/// `Memory.fabot.observe.layout`, leaving the rest of the observe subtree
-/// alone the way `saveRaids` does. Every tick, the empty list included:
-/// the leaf's presence is what lets `observe.mjs layout` tell "this bundle
-/// records the loss" from "nothing is lost", ADR 0028's reason applied to
-/// a second record (ADR 0035). No load and no fold — the record is the
-/// current plan's, so there is no prior state to degrade from and nothing
-/// a bad leaf could cost.
-let saveLayout (unserved: UnservedFooting list) =
+/// Write the Layout's own losses under `Memory.fabot.observe.layout`,
+/// leaving the rest of the observe subtree alone the way `saveRaids` does:
+/// the footing targets it could not serve (#77) and the trunks it could
+/// not route (#107). Two lists in one leaf and not two leaves — both are
+/// the Layout's, both are the current plan's, and a reader asking what
+/// this room lost asks once (ADR 0035). Every tick, the empty lists
+/// included: the leaf's presence is what lets `observe.mjs layout` tell
+/// "this bundle records the loss" from "nothing is lost", ADR 0028's
+/// reason applied to a second record. No load and no fold — the record is
+/// the current plan's, so there is no prior state to degrade from and
+/// nothing a bad leaf could cost.
+let saveLayout (unserved: UnservedFooting list) (unrouted: UnroutedTrunk list) =
     let layout = createEmpty<obj>
 
     layout?unserved <-
@@ -449,6 +452,24 @@ let saveLayout (unserved: UnservedFooting list) =
             o?x <- footing.Target.X
             o?y <- footing.Target.Y
             o?kind <- footingKindName footing.Kind
+            o)
+        |> List.toArray
+
+    // The goal's spawn rides beside its name rather than inside it, the
+    // way a Verdict's numbers do (#88): a row whose goal is the Upgrade
+    // Work Area carries no `spawn` key at all, and a `spawn` row without
+    // one decodes to nothing rather than to some other goal.
+    layout?unrouted <-
+        unrouted
+        |> List.map (fun trunk ->
+            let o = createEmpty<obj>
+            o?source <- trunk.Source
+            o?goal <- trunkGoalName trunk.Goal
+
+            match trunkGoalSpawn trunk.Goal with
+            | Some spawn -> o?spawn <- spawn
+            | None -> ()
+
             o)
         |> List.toArray
 

@@ -208,18 +208,21 @@ if (command === "console") {
     }
   }
 } else if (command === "layout") {
-  // ---- layout: the footing targets the Layout could not serve -----------
+  // ---- layout: what the Layout could not deliver ------------------------
 
   // The wire shape written by ObserveMemory.fs:
-  //   { unserved: [{ x, y, kind }] }
-  // The current plan's record, not a history: no ring, no fold, the same
-  // list every tick under a stable census. Its three answers are distinct
-  // and all three matter (ADR 0035). A missing leaf is a missing channel —
-  // a bundle predating it — and fails loudly, the way `raids` does, rather
-  // than reporting a confident "nothing lost" off a stale deploy; an empty
-  // list is the guarantee of ADR 0022 / 0027 holding, one footing per
-  // target; a row is a target the fold found no tile for, which is a
-  // reservation the colony no longer has.
+  //   { unserved: [{ x, y, kind }],
+  //     unrouted: [{ source, goal, spawn? }] }
+  // Two lists in one leaf, both the Layout's own losses: the footing
+  // targets the fold found no tile for (#77) and the trunks the router
+  // found no path for (#107). The current plan's record, not a history: no
+  // ring, no fold, the same lists every tick under a stable census. Its
+  // three answers are distinct and all three matter (ADR 0035). A missing
+  // leaf is a missing channel — a bundle predating it — and fails loudly,
+  // the way `raids` does, rather than reporting a confident "nothing lost"
+  // off a stale deploy; an empty list is the guarantee holding, one footing
+  // per target and one trunk per (source, goal); a row is something the
+  // colony no longer has.
   const stored = await memoryGet("fabot.observe.layout");
   if (stored == null || typeof stored !== "object") {
     fail(
@@ -228,28 +231,59 @@ if (command === "console") {
     );
   }
   // A leaf that is there but shapeless is a fourth answer, and it must not
-  // collapse into the third: reading a missing `unserved` as an empty list
-  // would print "every footing target has its footing" off a hand-edit or a
-  // moved wire shape, which is the confident false negative this channel is
-  // built to avoid (ADR 0035).
-  if (!Array.isArray(stored.unserved)) {
-    fail(
-      "the Layout record at Memory.fabot.observe.layout carries no `unserved` list — " +
-        "the leaf was hand-edited, or its wire shape has moved. Not read as \"nothing lost\".",
-    );
-  }
-  const unserved = stored.unserved;
+  // collapse into the third: reading a missing list as an empty one would
+  // print "every footing target has its footing" off a hand-edit or a moved
+  // wire shape, which is the confident false negative this channel is built
+  // to avoid (ADR 0035). Each list is guarded in its own right — a bundle
+  // that writes one and not the other is exactly a moved wire shape, and
+  // the half that is there must not vouch for the half that is not.
+  const listOrFail = (name) => {
+    const list = stored[name];
+    if (!Array.isArray(list)) {
+      fail(
+        `the Layout record at Memory.fabot.observe.layout carries no \`${name}\` list — ` +
+          'the leaf was hand-edited, or its wire shape has moved. Not read as "nothing lost".',
+      );
+    }
+    return list;
+  };
+  const unserved = listOrFail("unserved");
+  const unrouted = listOrFail("unrouted");
 
+  // The goal as it reads back: the spawn's id rides beside the name, so a
+  // `spawn` row that lost it says so rather than naming some other goal.
+  // Flagged and printed rather than dropped — Core's decoder reads such a
+  // row as no goal at all, and this is the operator's tool: a row it hid
+  // would be one more silence.
+  const goalOf = (t) =>
+    t.goal === "spawn" ? (t.spawn ? `spawn ${t.spawn}` : "spawn (no id)") : t.goal;
+
+  // `--json` carries both lists under their own keys. It used to be the
+  // bare `unserved` array, back when the leaf held one list; a reader of
+  // the old shape wants `.unserved`.
   if (json) {
-    console.log(JSON.stringify(unserved, null, 2));
-  } else if (unserved.length === 0) {
-    console.log("every footing target has its footing");
+    console.log(JSON.stringify({ unserved, unrouted }, null, 2));
   } else {
-    console.log(
-      `${unserved.length} footing target${unserved.length === 1 ? "" : "s"} with no footing:`,
-    );
-    for (const f of unserved) {
-      console.log(`  (${f.x},${f.y})  ${f.kind}`);
+    if (unserved.length === 0) {
+      console.log("every footing target has its footing");
+    } else {
+      console.log(
+        `${unserved.length} footing target${unserved.length === 1 ? "" : "s"} with no footing:`,
+      );
+      for (const f of unserved) {
+        console.log(`  (${f.x},${f.y})  ${f.kind}`);
+      }
+    }
+
+    if (unrouted.length === 0) {
+      console.log("every trunk routes");
+    } else {
+      console.log(
+        `${unrouted.length} trunk${unrouted.length === 1 ? "" : "s"} the Layout could not route:`,
+      );
+      for (const t of unrouted) {
+        console.log(`  ${t.source} -> ${goalOf(t)}`);
+      }
     }
   }
 } else {

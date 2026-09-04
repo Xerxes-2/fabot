@@ -1914,6 +1914,115 @@ let linkFootingTests =
             }
         ]
 
+/// The trunk fixture cut in two: a wall ridge down x=30 severs the
+/// controller and its whole Upgrade Work Area from the rest of the room,
+/// leaving the source and the spawn together on the west side. `src-a`
+/// still routes its trunk to the spawn and can route none to the Work
+/// Area — the per-goal shape #107 records, and the one a record keyed on
+/// the source alone would get wrong.
+let severedControllerColony level =
+    let colony = trunkColony level
+
+    let ridge = [ for y in 15..35 -> { X = 30; Y = y } ]
+
+    { colony with
+        Spatial =
+            { colony.Spatial with
+                Terrain =
+                    (colony.Spatial.Terrain, ridge)
+                    ||> List.fold (fun acc tile -> Map.add tile Wall acc)
+            }
+    }
+
+/// The pocket fixture with its one Seat walled shut: every one of `src-b`'s
+/// eight neighbours is wall, so no goal is reachable from it at all and
+/// both its trunks are dropped. `src-a`, in the open, keeps both — the
+/// record names the source as well as the goal.
+let enclosedSourceColony level =
+    let colony = pocketColony level
+
+    { colony with
+        Spatial =
+            { colony.Spatial with
+                Terrain = Map.add { X = 21; Y = 30 } Wall colony.Spatial.Terrain
+            }
+    }
+
+[<Tests>]
+let unroutedTrunkTests =
+    testList
+        "unrouted trunk"
+        [
+            test "every trunk routed records nothing: the empty list is the guarantee holding" {
+                // The trunk fixture's one source reaches both goals, so the
+                // record is empty — and empty is an answer rather than an
+                // absence, exactly as it is for the footing shortfall it
+                // rides beside (#107, ADR 0035).
+                let { Memo = memo } = decide (trunkColony 4) Map.empty Set.empty None
+
+                Expect.isEmpty memo.UnroutedTrunks "both trunks route; nothing is lost"
+            }
+
+            test "a source that loses one goal and keeps the other records exactly one entry" {
+                // The detail a careless record gets wrong. The goals are
+                // collected per source, so the loss is per (source, goal):
+                // with the controller walled off, `src-a` loses its line to
+                // the Upgrade Work Area and keeps the one to the spawn.
+                // W12S27 from 6,18 is the live counterexample the other way
+                // round (#105), and a record keyed on the source alone
+                // would be false in both.
+                let colony = severedControllerColony 4
+                let { Memo = memo; Intents = intents } = decide colony Map.empty Set.empty None
+
+                Expect.equal
+                    memo.UnroutedTrunks
+                    [
+                        {
+                            Source = "src-a"
+                            Goal = TrunkGoal.UpgradeArea
+                        }
+                    ]
+                    "one entry: the goal that was lost, named beside the source that lost it"
+
+                // And the trunk it kept is paved, which is what makes the
+                // entry a loss of one line rather than of the source: a
+                // room that paved nothing would be a different claim.
+                Expect.isNonEmpty
+                    (sitesOfKind Road intents)
+                    "the line to the spawn is still routed and still paved"
+            }
+
+            test "a source no goal is reachable from records both its goals" {
+                // `src-b` walled in on all eight sides: the router hands
+                // back the empty path for each goal in turn, and each is an
+                // entry of its own. The spawn carries its id because the
+                // spawn list is a list (RCL7 adds a second one), where the
+                // Upgrade Work Area is the controller's alone.
+                let { Memo = memo } = decide (enclosedSourceColony 4) Map.empty Set.empty None
+
+                Expect.equal
+                    memo.UnroutedTrunks
+                    [
+                        {
+                            Source = "src-b"
+                            Goal = TrunkGoal.UpgradeArea
+                        }
+                        {
+                            Source = "src-b"
+                            Goal = TrunkGoal.Spawn "spawn-1"
+                        }
+                    ]
+                    "both goals, and only the enclosed source's"
+
+                // The open source is the control: sealing one source costs
+                // exactly that source's trunks, and the same room with the
+                // pocket's Seat open loses nothing at all.
+                let { Memo = control } = decide (pocketColony 4) Map.empty Set.empty None
+
+                Expect.isEmpty control.UnroutedTrunks "unsealed, every source reaches every goal"
+            }
+        ]
+
 /// The trunk colony with one extra target standing (or pending) anywhere.
 let withTarget id pos kind colony =
     { colony with
@@ -2177,6 +2286,7 @@ let sentinelMemo snapshot =
         SiteIntents = [ PlaceConstructionSite("W1N1", { X = 1; Y = 1 }, Tower) ]
         UnservedFootings = []
         ServedFootings = []
+        UnroutedTrunks = []
         HaulerQuota = 0
         Walks = WalkTable()
     }
@@ -2231,15 +2341,14 @@ let planMemoTests =
             }
 
             test
-                "the footing records are census-derived: recalled with the plan, recomputed with it" {
-                // #77's record and #106's join the site Intents and the
-                // hauler quota under ADR 0017's standing invitation — same
-                // census, same footings — so neither is rederived per tick.
+                "the Layout's records are census-derived: recalled with the plan, recomputed with it" {
+                // #77's record, #106's and #107's join the site Intents and
+                // the hauler quota under ADR 0017's standing invitation —
+                // same census, same losses — so none is rederived per tick.
                 // The sentinel says so in both directions: a memo whose
                 // signature holds hands its own empty records back for a
                 // room that has in fact lost a footing and reserved three,
-                // and a stale one recomputes to the footings the room
-                // really has.
+                // and a stale one recomputes to what the room really has.
                 let colony = sealedPocketColony 4
 
                 let lost =
@@ -2282,6 +2391,48 @@ let planMemoTests =
                     stale.Memo.ServedFootings
                     memoless.Memo.ServedFootings
                     "tile for tile what a memoless tick reserves"
+            }
+
+            test "the unrouted trunks ride the memo with the rest of the plan" {
+                // #107's record on the same seam, over a room that has in
+                // fact lost a trunk: a matching signature hands back the
+                // memo's own empty list rather than rederiving the loss,
+                // and a moved one recomputes to exactly what a memoless
+                // tick finds. ADR 0017's guarantee is that a recalled plan
+                // reports what it reported when it was computed, and a
+                // record that quietly recomputed itself would break it.
+                let colony = enclosedSourceColony 4
+
+                let dropped =
+                    [
+                        {
+                            Source = "src-b"
+                            Goal = TrunkGoal.UpgradeArea
+                        }
+                        {
+                            Source = "src-b"
+                            Goal = TrunkGoal.Spawn "spawn-1"
+                        }
+                    ]
+
+                let matching = decide colony Map.empty Set.empty (Some(sentinelMemo colony))
+
+                Expect.isEmpty
+                    matching.Memo.UnroutedTrunks
+                    "a matching signature reuses the memo's record; nothing recomputes"
+
+                let stale = decide colony Map.empty Set.empty (Some(sentinelMemo (trunkColony 2)))
+                let memoless = decide colony Map.empty Set.empty None
+
+                Expect.equal
+                    stale.Memo.UnroutedTrunks
+                    dropped
+                    "a moved signature recomputes the record with the rest of the plan"
+
+                Expect.equal
+                    memoless.Memo.UnroutedTrunks
+                    dropped
+                    "and a memoless tick derives the same loss"
             }
 
             test "a level-up invalidates the memo" {

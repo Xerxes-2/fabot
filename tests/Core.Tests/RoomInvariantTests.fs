@@ -248,7 +248,14 @@ type private Case =
         Room: Room
         Spawn: Pos
         SourceCount: int
-        SourceTiles: Pos list
+        /// The room's sources, each under the id the Layout records a
+        /// dropped trunk against beside the tile the roads are checked
+        /// from: the two halves of the cross-check below have to be about
+        /// the same source, and only the id says so.
+        Sources: (string * Pos) list
+        /// The id of the spawn the case is planned from, for the same
+        /// reason: a trunk goal names its spawn (#107).
+        SpawnId: string
         ControllerId: string option
         Atlas: Atlas
         /// The sites the Layout asks for this tick.
@@ -260,6 +267,10 @@ type private Case =
         /// case is the expensive axis of this sweep, and an invariant that
         /// re-derived one to see the tiles would double it.
         Served: ServedFooting list
+        /// The trunks the Layout could not route (#107), one entry per
+        /// (source, goal) the router found no path for. Read off the same
+        /// plan for the same reason as the two footing records.
+        Unrouted: UnroutedTrunk list
         /// The container sites a tick on, with the road plan standing. A
         /// source container is planned onto the Seat nearest its trunk,
         /// which in practice is the tile the trunk leaves the source by,
@@ -311,12 +322,17 @@ let private sweep =
                             Room = room
                             Spawn = spawn
                             SourceCount = List.length loaded.SourceIds
-                            SourceTiles = loaded.SourceIds |> List.choose (positionOf atlas)
+                            Sources =
+                                loaded.SourceIds
+                                |> List.choose (fun id ->
+                                    positionOf atlas id |> Option.map (fun pos -> id, pos))
+                            SpawnId = (List.head colony.Spawns).Id
                             ControllerId = loaded.ControllerId
                             Atlas = atlas
                             Placed = placed
                             Unserved = first.Memo.UnservedFootings
                             Served = first.Memo.ServedFootings
+                            Unrouted = first.Memo.UnroutedTrunks
                             Containers =
                                 decide withRoads Map.empty Set.empty None
                                 |> fun decision ->
@@ -325,6 +341,7 @@ let private sweep =
                                 recalled.Intents = first.Intents
                                 && recalled.Memo.UnservedFootings = first.Memo.UnservedFootings
                                 && recalled.Memo.ServedFootings = first.Memo.ServedFootings
+                                && recalled.Memo.UnroutedTrunks = first.Memo.UnroutedTrunks
                             ClusterAtRcl2 = clusteredTiles (placementsOf early.Intents)
                         }
         ]
@@ -337,45 +354,75 @@ let private describe (case: Case) =
 let private violations pick =
     sweep.Value |> List.filter pick |> List.map describe
 
+/// The (source, goal) pairs a case's road plan does *not* carry, derived
+/// from the paved tiles alone (ADR 0011): the road tiles beside the source
+/// must reach the goal over roads alone, both ways a trunk goes — to the
+/// spawn, and to the controller's Upgrade Work Area. A second derivation
+/// of the same fact the Layout records for itself (#107), which is the
+/// only kind of check worth making against a record: one that agreed with
+/// itself would pin nothing (ADR 0035, ADR 0036).
+///
+/// Independent of the record and *not* of the plan: the roads are read off
+/// this tick's sites, which are the road gap and not the road plan (ADR
+/// 0010). A swept colony starts with no road standing and no road pending,
+/// so the two coincide — the same premise the footing-rule invariant above
+/// rests on. A sweep case that started with roads already built would seed
+/// this BFS off a hole and call every trunk lost.
+///
+/// A room the Layout cannot orient itself in plans nothing and loses
+/// nothing, so it carries nothing to check — the same gate `planLayout`
+/// opens on, stated once more here rather than assumed.
+let private unroutedByRoads (case: Case) : UnroutedTrunk list =
+    match case.ControllerId with
+    | None -> []
+    | Some controllerId ->
+        let roads = tilesOfKind Road case.Placed |> Set.ofList
+
+        let goals =
+            [
+                TrunkGoal.UpgradeArea, workArea case.Atlas (Upgrade controllerId)
+                TrunkGoal.Spawn case.SpawnId, Set.singleton case.Spawn
+            ]
+
+        let reached (source: Pos) =
+            let seen = System.Collections.Generic.HashSet<Pos>()
+            let queue = System.Collections.Generic.Queue<Pos>()
+
+            for tile in roads |> Set.filter (fun tile -> range tile source = 1) do
+                if seen.Add tile then
+                    queue.Enqueue tile
+
+            while queue.Count > 0 do
+                let tile = queue.Dequeue()
+
+                for dx in -1 .. 1 do
+                    for dy in -1 .. 1 do
+                        let step = { X = tile.X + dx; Y = tile.Y + dy }
+
+                        if Set.contains step roads && seen.Add step then
+                            queue.Enqueue step
+
+            seen
+
+        case.Sources
+        |> List.collect (fun (id, source) ->
+            let seen = reached source
+
+            goals
+            |> List.choose (fun (goal, area) ->
+                if
+                    seen
+                    |> Seq.exists (fun tile -> area |> Set.exists (fun g -> range tile g <= 1))
+                then
+                    None
+                else
+                    Some { Source = id; Goal = goal }))
+
 /// Whether a case's road plan carries every source both ways a trunk goes
 /// (ADR 0011): to the spawn, and to the controller's Upgrade Work Area.
-/// The road tiles beside the source must reach each over roads alone.
-let private trunksCarryEverySource (case: Case) =
-    let roads = tilesOfKind Road case.Placed |> Set.ofList
-
-    let goals =
-        case.ControllerId
-        |> Option.map (fun id -> workArea case.Atlas (Upgrade id))
-        |> Option.toList
-        |> List.append [ Set.singleton case.Spawn ]
-
-    let reached (source: Pos) =
-        let seen = System.Collections.Generic.HashSet<Pos>()
-        let queue = System.Collections.Generic.Queue<Pos>()
-
-        for tile in roads |> Set.filter (fun tile -> range tile source = 1) do
-            if seen.Add tile then
-                queue.Enqueue tile
-
-        while queue.Count > 0 do
-            let tile = queue.Dequeue()
-
-            for dx in -1 .. 1 do
-                for dy in -1 .. 1 do
-                    let step = { X = tile.X + dx; Y = tile.Y + dy }
-
-                    if Set.contains step roads && seen.Add step then
-                        queue.Enqueue step
-
-        seen
-
-    case.SourceTiles
-    |> List.forall (fun source ->
-        let seen = reached source
-
-        goals
-        |> List.forall (fun goal ->
-            seen |> Seq.exists (fun tile -> goal |> Set.exists (fun g -> range tile g <= 1))))
+/// The shape ADR 0036's trunk invariant is stated in, kept beside the
+/// pair-wise answer it now reads off rather than flooding a second time.
+let private trunksCarryEverySource (case: Case) = List.isEmpty (unroutedByRoads case)
 
 [<Tests>]
 let invariantTests =
@@ -564,6 +611,24 @@ let invariantTests =
                 Expect.isEmpty (violations shrinks) "a room dropping a clustered tile as it levels"
             }
 
+            test "the dropped trunks the Layout records are the ones its roads show" {
+                // #107's record, pinned against an independent derivation
+                // rather than against itself. The Layout says which
+                // (source, goal) pairs it could not route; the road plan
+                // says which sources its paved tiles do not carry to which
+                // goal, and the two must name the same pairs in every case
+                // — the sealed doorstep included, which is the whole point
+                // of recording the loss instead of dropping it (#105).
+                // Compared as sets, so the invariant is about the pairs and
+                // not about the order the fold happens to accumulate them.
+                let disagrees (case: Case) =
+                    Set.ofList (unroutedByRoads case) <> Set.ofList case.Unrouted
+
+                Expect.isEmpty
+                    (violations disagrees)
+                    "a room whose dropped trunks and whose road plan tell different stories"
+            }
+
             test "a plan recalled from its memo is the plan that was computed" {
                 // ADR 0017's guarantee, stated over rooms big enough for it
                 // to be worth something: under an unchanged census the memo
@@ -619,5 +684,24 @@ let knownLossTests =
                     sealed'
                     (trunksCarryEverySource >> not)
                     "the trunk is still dropped; delete the pin and the exclusion when #105 lands"
+
+                // And the drop is no longer silent (#107). The loss is per
+                // (source, goal), which this room is the live counterexample
+                // for: the source→spawn trunk is dropped and the
+                // source→controller trunk is routed and paved, so the record
+                // names the spawn alone. A record keyed on the source would
+                // be false here, and one that named both goals would claim a
+                // haul the colony does in fact have.
+                Expect.all
+                    sealed'
+                    (fun case -> not (List.isEmpty case.Unrouted))
+                    "the room says so on the layout record rather than only in its road plan"
+
+                Expect.all
+                    sealed'
+                    (fun case ->
+                        case.Unrouted
+                        |> List.forall (fun trunk -> trunk.Goal = TrunkGoal.Spawn case.SpawnId))
+                    "and names the spawn alone: the controller's trunk is routed and paved"
             }
         ]

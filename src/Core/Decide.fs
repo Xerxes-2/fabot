@@ -946,7 +946,7 @@ let private horizonLevel = 4
 let private planLayout
     (snapshot: Snapshot)
     atlas
-    : Intent list * ServedFooting list * UnservedFooting list =
+    : Intent list * ServedFooting list * UnservedFooting list * UnroutedTrunk list =
     let anchor = snapshot.Spawns |> List.tryPick (fun s -> Atlas.positionOf atlas s.Id)
 
     match Atlas.roomName atlas, anchor, snapshot.Controller with
@@ -1022,23 +1022,54 @@ let private planLayout
 
         let upgradeArea = Atlas.workArea atlas (Upgrade controller.Id)
 
-        let spawnAreas =
-            snapshot.Spawns
-            |> List.choose (fun s -> Atlas.positionOf atlas s.Id)
-            |> List.map (Atlas.adjacentWalkable atlas >> Set.ofList)
+        // Each goal beside the name it is recorded under when a source
+        // cannot reach it (#107). The Upgrade Work Area first and the
+        // spawns after, which is the order the routes are collected in and
+        // therefore the order a loss reads in.
+        let trunkGoals =
+            (TrunkGoal.UpgradeArea, upgradeArea)
+            :: (snapshot.Spawns
+                |> List.choose (fun s ->
+                    Atlas.positionOf atlas s.Id
+                    |> Option.map (fun spawn ->
+                        TrunkGoal.Spawn s.Id, Atlas.adjacentWalkable atlas spawn |> Set.ofList)))
 
-        // Trunks kept per source: the union paves the roads, and each
-        // source's own trunk anchors its container (ADR 0012).
-        let sourceTrunks =
+        // Every route the Layout asks for, kept per source and per goal:
+        // the union paves the roads and each source's own trunk anchors
+        // its container (ADR 0012), while the goals stay apart for the
+        // reason `TrunkGoal` is a type — the loss below is per goal.
+        let sourceRoutes =
             snapshot.Sources
             |> List.sortBy (fun s -> s.Id)
             |> List.choose (fun s ->
                 Atlas.positionOf atlas s.Id
                 |> Option.map (fun sourcePos ->
                     s.Id,
-                    upgradeArea :: spawnAreas
-                    |> List.collect (Atlas.trunkPath atlas reserved sourcePos)
-                    |> Set.ofList))
+                    trunkGoals
+                    |> List.map (fun (goal, area) ->
+                        goal, Atlas.trunkPath atlas reserved sourcePos area)))
+
+        let sourceTrunks =
+            sourceRoutes
+            |> List.map (fun (id, routes) -> id, routes |> List.collect snd |> Set.ofList)
+
+        // The empty path is the router's answer for a goal it paved nothing
+        // for, and it unions into the road plan contributing nothing
+        // (#107). Recorded here, where the source and the goal are both
+        // still in scope: downstream there is only a set of tiles, and a
+        // trunk that was dropped whole looks exactly like one that was
+        // never asked for. The predicate is the paving and not the flood
+        // on purpose — what the colony lost is the line, however the
+        // geometry failed to draw it.
+        let unroutedTrunks =
+            sourceRoutes
+            |> List.collect (fun (id, routes) ->
+                routes
+                |> List.choose (fun (goal, path) ->
+                    if List.isEmpty path then
+                        Some { Source = id; Goal = goal }
+                    else
+                        None))
 
         let trunkTiles = sourceTrunks |> List.map snd |> List.fold Set.union Set.empty
 
@@ -1259,11 +1290,13 @@ let private planLayout
         @ place Container containerGap
         @ place Rampart (Set.toList rampartGap),
         List.rev servedFootings,
-        List.rev unservedFootings
+        List.rev unservedFootings,
+        unroutedTrunks
     // A room the Layout cannot even orient itself in plans nothing and
-    // loses nothing: there are no targets to serve, so both records are
-    // empty rather than either being a shortfall (#77, #106).
-    | _ -> [], [], []
+    // loses nothing: there are no targets to serve and no trunk was ever
+    // asked for, so every record is empty rather than any of them being a
+    // shortfall (#77, #106, #107).
+    | _ -> [], [], [], []
 
 /// Colony reflex beside the pipeline, the second after safe mode: every
 /// creep with free carry capacity standing within pickup range of a
@@ -2362,13 +2395,15 @@ let decide
         match recalled with
         | Some m -> m
         | None ->
-            let siteIntents, servedFootings, unservedFootings = planLayout snapshot atlas
+            let siteIntents, servedFootings, unservedFootings, unroutedTrunks =
+                planLayout snapshot atlas
 
             {
                 Signature = signature
                 SiteIntents = siteIntents
                 UnservedFootings = unservedFootings
                 ServedFootings = servedFootings
+                UnroutedTrunks = unroutedTrunks
                 HaulerQuota = haulerQuota snapshot atlas
                 Walks = walks
             }

@@ -596,6 +596,36 @@ type ServedFooting =
         Tile: Pos
     }
 
+/// The two ends a trunk is routed to (ADR 0011): the controller's
+/// Upgrade Work Area, and each spawn's walkable ring. A type of its own
+/// because the loss is per goal and not per source — the goals are
+/// collected per source, so one source can lose its line to the spawn and
+/// keep the one to the controller. The spawn carries its id — the spawn
+/// list is a list, and RCL7 adds a second one — where the Upgrade Work
+/// Area is the controller's alone (ADR 0005) and needs no name beside its
+/// own.
+[<RequireQualifiedAccess>]
+type TrunkGoal =
+    | UpgradeArea
+    | Spawn of spawn: string
+
+/// A trunk the Layout could not route (#107): the router paved nothing
+/// for this goal, because no tile of it was reachable from the source
+/// once the clustered reservation was marked impassable — or because the
+/// goal holds no tile at all, an unprojected controller or a spawn whose
+/// every neighbour is wall. The two are one answer on purpose: a line
+/// that carries nothing is the loss, and which way the geometry failed is
+/// not something the colony can act on differently.
+///
+/// Recorded rather than dropped in silence — an empty path unions into
+/// the road plan contributing nothing, so a source paved to nothing is
+/// indistinguishable from a trunk that was never asked for. The room is
+/// not fixed by saying so: the tiles paved and the tiles reserved are
+/// exactly what they were (#105 owns the fix). ADR 0035's argument for
+/// the footing shortfall, on the same channel and unchanged: a trunk has
+/// no creep to key a Verdict on either.
+type UnroutedTrunk = { Source: string; Goal: TrunkGoal }
+
 /// The census-keyed plan memo (ADR 0017): the census signature beside the
 /// plans derived from exactly that census — the Layout's site Intents,
 /// the footings it placed and the ones it could not, the hauler quota,
@@ -622,6 +652,12 @@ type PlanMemo =
         /// invariant that a footing is off every trunk, off every target
         /// and off every other footing reads them here (ADR 0036).
         ServedFootings: ServedFooting list
+        /// The trunks this plan could not route (#107), one entry per
+        /// (source, goal) the router found no path for — derived from the
+        /// same census as the site Intents and recomputed with them. Empty
+        /// is the healthy answer and rides here all the same, for the
+        /// reason `UnservedFootings` does: the App writes it every tick.
+        UnroutedTrunks: UnroutedTrunk list
         HaulerQuota: int
         /// The walks flooded under this signature, filled through the tick
         /// by the Atlas the table was handed to. Dropped whole when the
@@ -875,6 +911,36 @@ let footingKindOf =
             FootingKind.ControllerContainer
             FootingKind.Storage
         ]
+
+/// The wire spelling of each TrunkGoal, on the Layout channel's Memory
+/// leaf beside `footingKindName` (#107). A carrying vocabulary, like the
+/// two reason vocabularies (#88): the spawn's id rides beside the name
+/// rather than inside it, so a goal is one spelling and not one per
+/// spawn.
+let trunkGoalName =
+    function
+    | TrunkGoal.UpgradeArea -> "upgrade-area"
+    | TrunkGoal.Spawn _ -> "spawn"
+
+/// The spawn a TrunkGoal names beside its wire name, or None for the goal
+/// that names none. The encoder's half of what `trunkGoalOf` reads back,
+/// as `releaseReasonNumbers` is ReleaseReason's.
+let trunkGoalSpawn =
+    function
+    | TrunkGoal.Spawn spawn -> Some spawn
+    | TrunkGoal.UpgradeArea -> None
+
+/// The TrunkGoal a wire name spells for the spawn the wire carried beside
+/// it, or None for a name this vocabulary does not have — and for `spawn`
+/// with no id carried beside it at all, which is a row that lost its
+/// spawn rather than a goal. An id that is carried but empty is a spawn
+/// like any other here; the vocabulary spells names, and what counts as a
+/// usable id is the caller's question.
+let trunkGoalOf =
+    reverseCarrying
+        trunkGoalName
+        ""
+        [ (fun _ -> Some TrunkGoal.UpgradeArea); Option.map TrunkGoal.Spawn ]
 
 /// One row of a verbose scoring: a Task in the pool, either scored on the
 /// full matching key — rank tier, travel cost, current load — or rejected
