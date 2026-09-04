@@ -245,7 +245,7 @@ let placementQueryTests =
     testList
         "atlas placement queries"
         [
-            test "roomName passes the projection's room through, absent when empty" {
+            test "homeRoom passes the projection's room through, absent when empty" {
                 let named =
                     { SpatialInfo.empty with
                         RoomName = Some "W1N1"
@@ -253,10 +253,10 @@ let placementQueryTests =
                     |> snapshotWith []
                     |> ofSnapshot
 
-                Expect.equal (roomName named) (Some "W1N1") "the projection names its room"
+                Expect.equal (homeRoom named) (Some "W1N1") "the projection names its room"
 
                 let bare = SpatialInfo.empty |> snapshotWith [] |> ofSnapshot
-                Expect.equal (roomName bare) None "an empty projection covers no room"
+                Expect.equal (homeRoom bare) None "an empty projection covers no room"
             }
 
             test "positionOf finds a projected target and misses an absent one" {
@@ -2588,7 +2588,10 @@ let seamTests =
                     (walkableTiles corner |> Set.filter onTheBorder)
                     "no exit is walkable"
 
-                let weights = stepWeights corner
+                // The projection names no room, so its ground is filed
+                // under the empty name — the room the census signature
+                // already spells that way (ADR 0041).
+                let weights = stepWeights corner ""
 
                 Expect.isTrue
                     (List.forall
@@ -2600,5 +2603,351 @@ let seamTests =
                                         { X = x; Y = y }
                         ])
                     "and the flood's weight table marks every exit impassable"
+            }
+        ]
+
+/// A projection carrying two rooms: the colony's own written flat, the
+/// shape every hand-built projection takes, and the outpost written
+/// straight into the layer, which is the only shape that can carry a
+/// second room at all (ADR 0041). The bridge fills the home entry from the
+/// flat fields on the way into the Atlas, so the two rooms arrive exactly
+/// as the shell's projection and an outpost's will.
+let private withOutpost (room: string) (layer: RoomLayer) (spatial: SpatialInfo) =
+    { spatial with
+        Rooms = Map.add room layer spatial.Rooms
+    }
+
+/// A straight line of Plain ground, for geometry that has to differ
+/// between two rooms in a way a reader can count.
+let private plainLine tiles =
+    tiles |> List.map (fun tile -> tile, Plain)
+
+[<Tests>]
+let roomTests =
+    testList
+        "atlas rooms"
+        [
+            test "two rooms' floods do not meet on one tile" {
+                // ADR 0041's reason for a flood table per room while the
+                // memo key keeps the three fields ADR 0029 gave it: two
+                // rooms hold the same coordinates, so two creeps of one
+                // fatigue factor standing on the same tile of different
+                // rooms key alike. One table would hand one of them the
+                // other room's distances. The two rooms' ground is shaped
+                // differently on purpose — a corridor south at home, a
+                // corridor west in the outpost — so a flood run over the
+                // wrong grid cannot reach the Work Area at all and answers
+                // None rather than a number that happens to agree.
+                let home =
+                    { SpatialInfo.empty with
+                        RoomName = Some "W1N1"
+                        Terrain = Map.ofList (plainLine [ for y in 10..17 -> { X = 10; Y = y } ])
+                        TargetPositions = Map.ofList [ "src-home", { X = 10; Y = 18 } ]
+                        TargetKinds = Map.ofList [ "src-home", Source; "src-out", Source ]
+                        CreepPositions = Map.ofList [ "w-home", { X = 10; Y = 10 } ]
+                    }
+
+                let outpost =
+                    { RoomLayer.empty with
+                        Terrain = Map.ofList (plainLine [ for x in 5..10 -> { X = x; Y = 10 } ])
+                        TargetPositions = Map.ofList [ "src-out", { X = 4; Y = 10 } ]
+                        CreepPositions = Map.ofList [ "w-out", { X = 10; Y = 10 } ]
+                    }
+
+                let atlas =
+                    home
+                    |> withOutpost "W2N1" outpost
+                    |> snapshotWith [ worker "w-home"; worker "w-out" ]
+                    |> ofSnapshot
+
+                Expect.equal
+                    (creepTile atlas "w-home", creepTile atlas "w-out")
+                    (Some { X = 10; Y = 10 }, Some { X = 10; Y = 10 })
+                    "the premise: one coordinate, two rooms, one body between them"
+
+                Expect.equal
+                    (travelCost atlas "w-home" (Harvest "src-home"))
+                    (Some 14)
+                    "seven plain steps down its own corridor"
+
+                Expect.equal
+                    (travelCost atlas "w-out" (Harvest "src-out"))
+                    (Some 10)
+                    "five plain steps down the other room's, priced off the other room's ground"
+
+                Expect.equal
+                    (firstStep atlas "w-home" (workArea atlas (Harvest "src-home")))
+                    (Some { X = 10; Y = 11 })
+                    "and the route each one walks is its own room's, predecessors and all"
+
+                Expect.equal
+                    (firstStep atlas "w-out" (workArea atlas (Harvest "src-out")))
+                    (Some { X = 9; Y = 10 })
+                    "the other way entirely, out of the same coordinate"
+            }
+
+            test "a Task in the neighbouring room is inapplicable, not mispriced" {
+                // Every flood stops at its room's border (ADR 0041), so a
+                // creep here and a target there have no priced path between
+                // them — and the honest answer is the one an unreachable
+                // Work Area in the creep's own room gets: the Task does not
+                // apply to this creep. What must never happen is a number,
+                // which is what reading the neighbour's tiles out of this
+                // room's flood would produce. #123 replaces this with the
+                // minimum over the Seam band.
+                let home =
+                    { SpatialInfo.empty with
+                        RoomName = Some "W1N1"
+                        Terrain = Map.ofList (plainLine [ for y in 10..17 -> { X = 10; Y = y } ])
+                        TargetKinds = Map.ofList [ "src-out", Source ]
+                        CreepPositions = Map.ofList [ "w-home", { X = 10; Y = 10 } ]
+                    }
+
+                let outpost =
+                    { RoomLayer.empty with
+                        Terrain = Map.ofList (plainLine [ for y in 10..17 -> { X = 10; Y = y } ])
+                        TargetPositions = Map.ofList [ "src-out", { X = 10; Y = 18 } ]
+                    }
+
+                let atlas =
+                    home
+                    |> withOutpost "W2N1" outpost
+                    |> snapshotWith [ worker "w-home" ]
+                    |> ofSnapshot
+
+                Expect.isNonEmpty
+                    (workArea atlas (Harvest "src-out"))
+                    "the target is placed, and its Work Area is the room it stands in"
+
+                Expect.equal
+                    (travelCost atlas "w-home" (Harvest "src-out"))
+                    None
+                    "no ranking price across a border"
+
+                Expect.equal
+                    (walkTicks atlas "w-home" (Harvest "src-out"))
+                    None
+                    "and no clock either — the walk and the price agree (ADR 0030)"
+
+                Expect.isFalse
+                    (mayActFor atlas "w-home" (Harvest "src-out"))
+                    "and no action reaches across one: the engine's ranges are room-local"
+
+                // The seam `decide` actually prices through. `travelCost`
+                // and `walkTicks` are the Task-shaped wrappers; the
+                // Matcher, the Emitter and the mover reach the flood with
+                // a bare tile set, taken from `workAreaFor`. Were that set
+                // the neighbour's ground, this room's flood would answer
+                // it a number and a first step — a creep ranked against
+                // home rivals on a price it can never spend, walked seven
+                // tiles inside its own room, and pinned on a Task `mayAct`
+                // refuses forever. So the creep-aware Work Area is empty
+                // across a border while the body-blind one above is not.
+                let area = workAreaFor atlas "w-home" (Harvest "src-out")
+
+                Expect.isEmpty
+                    area
+                    "the creep has nowhere it may stand: the Work Area it is handed is the empty one"
+
+                Expect.equal
+                    (travelCostWithin atlas "w-home" area)
+                    None
+                    "so the tile-shaped price refuses too, not only the Task-shaped one"
+
+                Expect.equal
+                    (firstStep atlas "w-home" area)
+                    None
+                    "and the mover is given no step toward it"
+
+                Expect.equal
+                    (firstStepIgnoringTraffic atlas "w-home" area)
+                    None
+                    "nor the traffic-blind route the reroute attribution compares against"
+            }
+
+            test "one room's traffic never surcharges another room's flood" {
+                // The occupancy half of the per-room split (ADR 0008's
+                // surcharge inside ADR 0041's layering). Both rooms hold
+                // the same corridor, and the outpost parks a creep partway
+                // down the coordinate the home creep must cross. One
+                // shared occupancy grid would price that step ten dearer —
+                // a one-wide corridor has no detour — and reprice a home
+                // creep off a creep it can never meet.
+                let home =
+                    { SpatialInfo.empty with
+                        RoomName = Some "W1N1"
+                        Terrain = Map.ofList (plainLine [ for y in 10..17 -> { X = 10; Y = y } ])
+                        TargetPositions = Map.ofList [ "src-home", { X = 10; Y = 18 } ]
+                        TargetKinds = Map.ofList [ "src-home", Source ]
+                        CreepPositions = Map.ofList [ "w-home", { X = 10; Y = 10 } ]
+                    }
+
+                let outpost =
+                    { RoomLayer.empty with
+                        Terrain = Map.ofList (plainLine [ for y in 10..17 -> { X = 10; Y = y } ])
+                        CreepPositions = Map.ofList [ "w-out", { X = 10; Y = 13 } ]
+                    }
+
+                let atlas =
+                    home
+                    |> withOutpost "W2N1" outpost
+                    |> snapshotWith [ worker "w-home"; worker "w-out" ]
+                    |> ofSnapshot
+
+                Expect.equal
+                    (creepTile atlas "w-out")
+                    (Some { X = 10; Y = 13 })
+                    "the premise: the other room's creep stands on a coordinate this path crosses"
+
+                Expect.equal
+                    (travelCost atlas "w-home" (Harvest "src-home"))
+                    (Some 14)
+                    "seven plain steps, and not one of them surcharged"
+            }
+
+            test "a target in a room the projection does not carry is absent, entry by entry" {
+                // ADR 0004 read a room at a time: a room with no layer and a
+                // room whose every container is empty are one answer, and it
+                // is the answer an unplaced target has always had — not
+                // priceable, counted against no Task, blocking no action.
+                // Both shapes are asserted because the layer admits both and
+                // nothing may tell them apart.
+                let home =
+                    { SpatialInfo.empty with
+                        RoomName = Some "W1N1"
+                        Terrain = Map.ofList (plainLine [ for y in 10..17 -> { X = 10; Y = y } ])
+                        TargetKinds = Map.ofList [ "src-far", Source ]
+                        CreepPositions = Map.ofList [ "w-home", { X = 10; Y = 10 } ]
+                    }
+
+                for label, spatial in
+                    [
+                        "a room with no layer at all", home
+                        "a room named and empty", home |> withOutpost "W3N1" RoomLayer.empty
+                    ] do
+                    let atlas = spatial |> snapshotWith [ worker "w-home" ] |> ofSnapshot
+
+                    Expect.equal (positionOf atlas "src-far") None $"{label}: nowhere to place it"
+                    Expect.equal (seats atlas "src-far") None $"{label}: no Seats to derive"
+
+                    Expect.isEmpty
+                        (workArea atlas (Harvest "src-far"))
+                        $"{label}: and no ground to work it from"
+
+                    Expect.equal
+                        (travelCost atlas "w-home" (Harvest "src-far"))
+                        (Some 0)
+                        $"{label}: unpriceable geometry never counts against a Task"
+
+                    Expect.isTrue
+                        (mayActFor atlas "w-home" (Harvest "src-far"))
+                        $"{label}: and never blocks an action"
+            }
+
+            test "one coordinate standing in two rooms is no Post and no Dual Seat" {
+                // The bleed a `Set<Pos>` invites, refused where the sets are
+                // built (ADR 0041): the outpost's controller puts (10,10)
+                // inside an Upgrade area and its container stands on that
+                // tile, while at home (10,10) is one of a source's Seats.
+                // Unioned across rooms that coordinate would read as a Dual
+                // Seat and as a container Post — a Post nothing stands on,
+                // an Anchor place nothing can fill, and a source reading as
+                // posted with no container of its own.
+                let home =
+                    { SpatialInfo.empty with
+                        RoomName = Some "W1N1"
+                        Terrain =
+                            Map.ofList
+                                [
+                                    for x in 9..11 do
+                                        for y in 9..11 do
+                                            { X = x; Y = y }, Plain
+                                ]
+                        TargetPositions = Map.ofList [ "src-home", { X = 10; Y = 9 } ]
+                        TargetKinds =
+                            Map.ofList
+                                [
+                                    "src-home", Source
+                                    "ctrl-out", Controller
+                                    "cont-out", Structure BuiltKind.Container
+                                ]
+                        CreepPositions = Map.ofList [ "w-home", { X = 10; Y = 10 } ]
+                    }
+
+                let outpost =
+                    { RoomLayer.empty with
+                        Terrain =
+                            Map.ofList
+                                [
+                                    for x in 9..11 do
+                                        for y in 9..12 do
+                                            { X = x; Y = y }, Plain
+                                ]
+                        TargetPositions =
+                            Map.ofList
+                                [ "ctrl-out", { X = 10; Y = 12 }; "cont-out", { X = 10; Y = 10 } ]
+                    }
+
+                let atlas =
+                    home
+                    |> withOutpost "W2N1" outpost
+                    |> snapshotWith [ worker "w-home" ]
+                    |> ofSnapshot
+
+                Expect.isTrue
+                    (Set.contains { X = 10; Y = 10 } (seatTilesOf atlas "src-home"))
+                    "the premise: the home source seats that coordinate"
+
+                Expect.isTrue
+                    (Set.contains { X = 10; Y = 10 } (workArea atlas (Upgrade "ctrl-out")))
+                    "and the outpost controller's Upgrade area holds it too"
+
+                Expect.isEmpty (dualSeats atlas) "no Dual Seat is made out of two rooms"
+                Expect.isEmpty (posts atlas) "and no Post"
+                Expect.isEmpty (postsOf atlas "src-home") "the home source has none of its own"
+
+                Expect.isFalse
+                    (catchesOverflow atlas "w-home" "src-home")
+                    "and the other room's container catches nothing this creep digs"
+            }
+
+            test "placedCreeps answers the room the mover moves in" {
+                // ADR 0041's Consequences: arbitrated movement (ADR 0001,
+                // ADR 0008) and the occupancy surcharge stay single-room,
+                // unchanged. The Resolver unions these tiles into a
+                // `Set<Pos>` and a `Map<Pos, string>`, the pickup reflex
+                // measures range against home piles, and the lead prices
+                // the tile off the home room's flood — all three of which
+                // read a second room's creep as a creep of this one when
+                // the coordinates agree. The floods still get every room's
+                // creep; this query is what the mover sees.
+                let home =
+                    { SpatialInfo.empty with
+                        RoomName = Some "W1N1"
+                        Terrain = Map.ofList (plainLine [ for y in 10..17 -> { X = 10; Y = y } ])
+                        CreepPositions = Map.ofList [ "w-home", { X = 10; Y = 10 } ]
+                    }
+
+                let outpost =
+                    { RoomLayer.empty with
+                        Terrain = Map.ofList (plainLine [ for y in 10..17 -> { X = 10; Y = y } ])
+                        CreepPositions = Map.ofList [ "w-out", { X = 10; Y = 11 } ]
+                    }
+
+                let atlas =
+                    home
+                    |> withOutpost "W2N1" outpost
+                    |> snapshotWith [ worker "w-home"; worker "w-out" ]
+                    |> ofSnapshot
+
+                Expect.equal
+                    (placedCreeps atlas)
+                    [ "w-home", { X = 10; Y = 10 } ]
+                    "the home room's creeps and no other"
+
+                Expect.equal
+                    (creepTile atlas "w-out")
+                    (Some { X = 10; Y = 11 })
+                    "the other room's creep is still placed — it is the bare list that is home's"
             }
         ]

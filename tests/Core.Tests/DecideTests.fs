@@ -2234,6 +2234,15 @@ let withTarget id pos kind colony =
         Spatial = colony.Spatial |> withTargets [ id, pos, kind ]
     }
 
+/// The step-weight grid ADR 0032's guard compares, for the room the
+/// fixture itself names. Read off the projection rather than retyped as a
+/// literal: `stepWeights` answers every tile impassable for a room the
+/// projection does not carry (ADR 0004, ADR 0041), so a literal that
+/// drifted from its fixture would leave the one `sequenceEqual` in the
+/// group comparing two empty grids and passing whatever the census did.
+let private stepGridOf (snapshot: Snapshot) =
+    Atlas.stepWeights (Atlas.ofSnapshot snapshot) (SpatialInfo.homeName snapshot.Spatial)
+
 [<Tests>]
 let censusSignatureTests =
     testList
@@ -2384,8 +2393,8 @@ let censusSignatureTests =
                 // missed would price leads off a stale grid until a global
                 // reset, and would fail here rather than in the colony.
                 Expect.sequenceEqual
-                    (Atlas.stepWeights (Atlas.ofSnapshot perturbed))
-                    (Atlas.stepWeights (Atlas.ofSnapshot colony))
+                    (stepGridOf perturbed)
+                    (stepGridOf colony)
                     "and the grid the walks flood over is bitwise the same"
             }
 
@@ -2410,8 +2419,8 @@ let censusSignatureTests =
                     }
 
                 Expect.notEqual
-                    (Atlas.stepWeights (Atlas.ofSnapshot paved))
-                    (Atlas.stepWeights (Atlas.ofSnapshot colony))
+                    (stepGridOf paved)
+                    (stepGridOf colony)
                     "a road discounts the ground under it"
 
                 Expect.notEqual
@@ -2435,8 +2444,8 @@ let censusSignatureTests =
                     }
 
                 Expect.notEqual
-                    (Atlas.stepWeights (Atlas.ofSnapshot blocked))
-                    (Atlas.stepWeights (Atlas.ofSnapshot colony))
+                    (stepGridOf blocked)
+                    (stepGridOf colony)
                     "an obstacle closes its tile to every flood"
 
                 Expect.notEqual
@@ -2460,8 +2469,8 @@ let censusSignatureTests =
                     }
 
                 Expect.notEqual
-                    (Atlas.stepWeights (Atlas.ofSnapshot pending))
-                    (Atlas.stepWeights (Atlas.ofSnapshot colony))
+                    (stepGridOf pending)
+                    (stepGridOf colony)
                     "the engine refuses a creep its own obstacle site, so it blocks like the structure"
 
                 Expect.notEqual
@@ -10164,5 +10173,137 @@ let spawnHoldTests =
                         None
 
                 Expect.isEmpty (spawnIntents raided) "and holds while the doorstep is hot"
+            }
+        ]
+
+/// A plain corridor down one column, the shape a two-room fixture needs
+/// twice: geometry a reader can count steps along, in a room the flood
+/// must not leave (ADR 0041).
+let private corridor x y0 y1 =
+    [ for y in y0..y1 -> { X = x; Y = y }, Plain ]
+
+/// The same projection with a second room's layer beside the colony's own
+/// — the only shape that can carry an outpost at all, since a hand-built
+/// projection writes the home room flat and the bridge files it on the way
+/// in (ADR 0041).
+let private withNeighbour room layer (spatial: SpatialInfo) =
+    { spatial with
+        Rooms = Map.add room layer spatial.Rooms
+    }
+
+[<Tests>]
+let neighbouringRoomTests =
+    testList
+        "decide across a border"
+        [
+            test "a source in the neighbouring room is no Task this creep can be given" {
+                // The seam the Atlas's own `travelCost` test cannot reach:
+                // the Matcher prices through the Work Area, not through the
+                // Task-shaped wrapper, so a guard that sits only on the
+                // wrapper leaves the ranking price to be invented off this
+                // room's flood. Priced that way the neighbour's source is
+                // cost 0 or a handful of units — cheaper than every home
+                // rival — and the creep is assigned a Task `mayAct` refuses
+                // for the rest of its life, walking inside its own room
+                // toward ground it will never stand on. Until #123 sums the
+                // legs over the Seam band the honest answer is that the
+                // Task does not apply to this creep.
+                let home =
+                    { SpatialInfo.empty with
+                        RoomName = Some "W1N1"
+                        Terrain = Map.ofList (corridor 10 10 17)
+                        TargetKinds = Map.ofList [ "src-out", Source ]
+                        CreepPositions = Map.ofList [ "w-home", { X = 10; Y = 10 } ]
+                    }
+
+                let outpost =
+                    { RoomLayer.empty with
+                        Terrain = Map.ofList (corridor 10 10 17)
+                        TargetPositions = Map.ofList [ "src-out", { X = 10; Y = 18 } ]
+                    }
+
+                let snapshot =
+                    { bareRespawn with
+                        Spawns = []
+                        Sources = [ source "src-out" ]
+                        Controller = None
+                        Refillables = []
+                        Creeps = [ worker "w-home" 0 50 ]
+                        Spatial = home |> withNeighbour "W2N1" outpost
+                    }
+
+                let {
+                        Assignments = assignments
+                        Intents = intents
+                    } =
+                    decide snapshot Map.empty Set.empty None
+
+                Expect.equal
+                    (Map.tryFind "w-home" assignments)
+                    None
+                    "the neighbour's Harvest is inapplicable, so nothing is assigned"
+
+                Expect.isEmpty
+                    (moveIntents intents)
+                    "and nobody is walked toward a border they cannot cross"
+            }
+
+            test "a grounded creep in the neighbouring room grounds nobody here" {
+                // ADR 0041's Consequences keep arbitrated movement and the
+                // occupancy surcharge single-room, unchanged. The Resolver
+                // pre-claims a fatigued creep's tile through a `Set<Pos>`
+                // that has no room dimension (ADR 0008), so a creep on the
+                // same coordinate of another room would deny a step here
+                // on evidence from fifty tiles away. The two projections
+                // differ only in what the neighbour holds, and this room
+                // decides identically.
+                let home =
+                    { SpatialInfo.empty with
+                        RoomName = Some "W1N1"
+                        Terrain = Map.ofList (corridor 10 10 18)
+                        TargetPositions = Map.ofList [ "src-home", { X = 10; Y = 18 } ]
+                        TargetKinds = Map.ofList [ "src-home", Source ]
+                        CreepPositions = Map.ofList [ "w-home", { X = 10; Y = 10 } ]
+                    }
+
+                let colony creeps layer =
+                    { bareRespawn with
+                        Spawns = []
+                        Sources = [ source "src-home" ]
+                        Controller = None
+                        Refillables = []
+                        Creeps = creeps
+                        Spatial = home |> withNeighbour "W2N1" layer
+                    }
+
+                let assigned = Map.ofList [ "w-home", "harvest:src-home" ]
+
+                let { Intents = alone } =
+                    decide (colony [ worker "w-home" 0 50 ] RoomLayer.empty) assigned Set.empty None
+
+                let neighbour =
+                    { RoomLayer.empty with
+                        Terrain = Map.ofList (corridor 10 10 18)
+                        CreepPositions = Map.ofList [ "w-out", { X = 10; Y = 11 } ]
+                    }
+
+                let { Intents = crowded } =
+                    decide
+                        (colony
+                            [ worker "w-home" 0 50; { worker "w-out" 0 50 with Fatigue = 5 } ]
+                            neighbour)
+                        assigned
+                        Set.empty
+                        None
+
+                Expect.equal
+                    (moveIntents alone)
+                    [ "w-home", Bottom ]
+                    "the premise: with the neighbour empty the home creep steps down its corridor"
+
+                Expect.equal
+                    (moveIntents crowded)
+                    (moveIntents alone)
+                    "and a creep paying off fatigue in another room changes nothing here"
             }
         ]

@@ -971,7 +971,7 @@ let private planLayout
     =
     let anchor = snapshot.Spawns |> List.tryPick (fun s -> Atlas.positionOf atlas s.Id)
 
-    match Atlas.roomName atlas, anchor, snapshot.Controller with
+    match Atlas.homeRoom atlas, anchor, snapshot.Controller with
     | Some room, Some spawnPos, Some controller ->
         // Same checkerboard colour as the spawn: clustered structures sit on
         // the spawn's colour, leaving the other colour free for movement.
@@ -2438,7 +2438,7 @@ let censusSignature (snapshot: Snapshot) : string =
         |> Option.map (fun c -> string c.Level)
         |> Option.defaultValue ""
 
-    let room = snapshot.Spatial.RoomName |> Option.defaultValue ""
+    let room = SpatialInfo.homeName snapshot.Spatial
     $"{room}|{level}|{standing}|{pending}"
 
 /// The decision seam: Snapshot in — with the verbose list of creep names
@@ -2458,6 +2458,21 @@ let decide
     (verbose: Set<string>)
     (memo: PlanMemo option)
     : Decision =
+    // The projection's second entry into Core, beside the Atlas's own
+    // constructor: a flat projection grows its room layer here, once, and
+    // before anything reads it (ADR 0041). It changes nothing any step
+    // below sees today — the census signature reads the flat fields alone,
+    // and the Atlas normalises its own input — so this is groundwork, not
+    // a dependency: every step of the tick receives this Snapshot, and the
+    // ones #121 and #122 move onto the layer find it already grown rather
+    // than each having to grow it. Idempotent under a fixed room name, so
+    // normalising twice files nothing twice; it goes when the flat fields
+    // go, at the end of the migration.
+    let snapshot =
+        { snapshot with
+            Spatial = SpatialInfo.normalise snapshot.Spatial
+        }
+
     let signature = censusSignature snapshot
     // The signature is read before the Atlas is built, because the Atlas
     // is one of the things it decides: a memo whose census still stands

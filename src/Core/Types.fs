@@ -309,8 +309,19 @@ module SpatialInfo =
     ///
     /// Temporary by construction: it goes when the flat fields go, at the
     /// end of the migration, so nothing new should be written to need it.
+    /// The name the projection's own room is filed under: `RoomName`, and
+    /// the empty name when it names none — the name the census signature
+    /// has always spelled that way (`Decide.censusSignature`). Decided
+    /// here, once, so the convention has one implementation rather than a
+    /// copy at every reader that has to resolve the home layer; a site
+    /// that spelled it differently would file the home room under one name
+    /// and read it under another, and ADR 0004 would answer every home
+    /// query with the empty set rather than throwing.
+    let homeName (spatial: SpatialInfo) : string =
+        spatial.RoomName |> Option.defaultValue ""
+
     let normalise (spatial: SpatialInfo) : SpatialInfo =
-        let home = spatial.RoomName |> Option.defaultValue ""
+        let home = homeName spatial
 
         let flat: RoomLayer =
             {
