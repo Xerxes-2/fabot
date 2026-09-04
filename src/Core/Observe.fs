@@ -355,16 +355,6 @@ let private enrol roster (hostile: HostileInfo) =
 /// dropped with it: the names this tick's losses are read against, and the
 /// hits this tick's damage is (ADR 0034).
 let foldRaids (cap: int) (gap: int) (snapshot: Snapshot) (prior: RaidState) : RaidState =
-    // The bridge (ADR 0041, #119): the closest approach reads the room
-    // layer, and this is a public entry point a caller may reach with a
-    // projection written flat, exactly as `Decide.planTasks` and the
-    // Atlas's constructor are. Idempotent under a fixed room name; it goes
-    // when the flat fields go.
-    let snapshot =
-        { snapshot with
-            Spatial = SpatialInfo.normalise snapshot.Spatial
-        }
-
     // The baseline the next tick reads its losses against: this tick's
     // names, less the creeps whose clock runs out on it. A name gone
     // tomorrow because CREEP_LIFE_TIME ran down is old age, and this

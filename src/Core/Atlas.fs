@@ -488,14 +488,7 @@ let private floodPriced weights occupied factor pricing (start: Pos) =
 /// Every other table here is still laid empty — they key on this tick's
 /// creeps, or on this tick's traffic.
 let ofSnapshotRecalling (walks: WalkTable) (snapshot: Snapshot) : Atlas =
-    // The funnel the projection enters Core through, so the room layer is
-    // grown here (ADR 0041): every query below reads `Rooms` and nothing
-    // else, while a projection written flat — the shape the shell's own
-    // assembly ends in, and the shape every hand-written one takes — still
-    // carries its geometry in the flat fields. `decide` normalises once
-    // more for the same reason, so the census signature and the Atlas
-    // cannot read two different shapes of one Snapshot.
-    let spatial = SpatialInfo.normalise snapshot.Spatial
+    let spatial = snapshot.Spatial
 
     // The home room, spelled the one way the convention is spelled
     // (`SpatialInfo.homeName`): the projection's name, and the empty name
@@ -628,7 +621,7 @@ let ofSnapshot (snapshot: Snapshot) : Atlas =
 /// exactly the room a projection names and holds nothing for.
 ///
 /// The rule itself is `SpatialInfo.layerOf`'s, spelled once there and
-/// reached from here with the Atlas's own projection, so the tick #122
+/// reached from here with the Atlas's own projection, so the tick that
 /// changes what a room with no entry answers there is the tick these
 /// fourteen call sites change with it.
 let private layerOf (atlas: Atlas) (room: string) : RoomLayer =

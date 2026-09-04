@@ -397,8 +397,19 @@ let placed =
         Creeps = [ ours "w1" ]
         Spatial =
             { quiet.Spatial with
-                TargetPositions = Map.ofList [ "spawn-1", { X = 10; Y = 40 } ]
-                CreepPositions = Map.ofList [ "w1", { X = 9; Y = 44 } ]
+                // Under the room's own name, which is the only place tiles
+                // live since ADR 0041 — and the name the hostiles above
+                // stand in, because the closest approach joins the two
+                // before it measures anything.
+                Rooms =
+                    Map.ofList
+                        [
+                            raidRoom,
+                            { RoomLayer.empty with
+                                TargetPositions = Map.ofList [ "spawn-1", { X = 10; Y = 40 } ]
+                                CreepPositions = Map.ofList [ "w1", { X = 9; Y = 44 } ]
+                            }
+                        ]
             }
     }
 
@@ -655,7 +666,7 @@ let approachTests =
                         Hostiles = [ raider "TWX" "giaco" { X = 38; Y = 47 } [ Attack; Move ] ]
                         Spatial =
                             { placed.Spatial with
-                                Rooms = Map.ofList [ "W12S27", outpost ]
+                                Rooms = Map.add "W12S27" outpost placed.Spatial.Rooms
                             }
                     }
 

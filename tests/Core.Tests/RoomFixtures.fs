@@ -184,7 +184,31 @@ let project (capture: RoomCapture) (spawn: Pos) (fallbackController: Pos option)
         Spatial =
             { SpatialInfo.empty with
                 RoomName = Some capture.RoomName
-                Terrain = capture.Terrain
+                // The captured room's geometry under the captured room's
+                // name, which is the shape `buildSpatial` produces and the
+                // only shape there is (ADR 0041).
+                Rooms =
+                    Map.ofList
+                        [
+                            capture.RoomName,
+                            { RoomLayer.empty with
+                                Terrain = capture.Terrain
+                                TargetPositions =
+                                    targets |> List.map (fun (id, pos, _) -> id, pos) |> Map.ofList
+                                // The obstacle rule is the shell's, read off
+                                // the Core's own table rather than restated:
+                                // a structure a creep cannot stand on blocks
+                                // its tile, and so does the controller.
+                                Obstacles =
+                                    targets
+                                    |> List.choose (fun (_, pos, kind) ->
+                                        match kind with
+                                        | Structure built when not (isWalkable built) -> Some pos
+                                        | Controller -> Some pos
+                                        | _ -> None)
+                                    |> Set.ofList
+                            }
+                        ]
                 // Beside the ground, never inside it, exactly as the shell
                 // delivers it (ADR 0041): one room's ring under its own
                 // name, which is the shape `buildSpatial` produces. One
@@ -193,19 +217,7 @@ let project (capture: RoomCapture) (spawn: Pos) (fallbackController: Pos option)
                 // can answer one is composed by merging two captures'
                 // rings, as `RoomInvariantTests.acrossFrom` does.
                 Borders = Map.ofList [ capture.RoomName, capture.Border ]
-                TargetPositions = targets |> List.map (fun (id, pos, _) -> id, pos) |> Map.ofList
                 TargetKinds = targets |> List.map (fun (id, _, kind) -> id, kind) |> Map.ofList
-                // The obstacle rule is the shell's, read off the Core's own
-                // table rather than restated: a structure a creep cannot
-                // stand on blocks its tile, and so does the controller.
-                Obstacles =
-                    targets
-                    |> List.choose (fun (_, pos, kind) ->
-                        match kind with
-                        | Structure built when not (isWalkable built) -> Some pos
-                        | Controller -> Some pos
-                        | _ -> None)
-                    |> Set.ofList
             }
         SourceIds = capture.Sources |> List.map fst
         ControllerId = controllerTarget |> Option.map fst

@@ -355,17 +355,6 @@ let private isSourceContainerTile (snapshot: Snapshot) (room: string) (pos: Pos)
 /// Planner: rebuild this tick's full Task pool from the Snapshot. Pure and
 /// from scratch every tick — Tasks are never persisted.
 let planTasks (snapshot: Snapshot) (threats: Threats) : Task list =
-    // The bridge (ADR 0041, #119), for the same reason the Atlas's own
-    // constructor carries one: the container rules below read the room
-    // layer, and this is a public entry point a caller may reach with a
-    // projection written flat. `decide` has already normalised what it
-    // hands in, and normalising twice under a fixed room name files
-    // nothing twice. It goes when the flat fields go.
-    let snapshot =
-        { snapshot with
-            Spatial = SpatialInfo.normalise snapshot.Spatial
-        }
-
     // Flee exists while a Reach does (ADR 0033): one Task for the whole
     // colony, at the head of the pool as its Safety tier is at the head of
     // the ranking. No Reach, no Flee — a quiet tick's pool is the pool it
@@ -2509,11 +2498,7 @@ let private assignedTasks (tasks: Task list) (assignments: Assignments) : Map<st
 /// rooms hold the same coordinates and `Container@16,44` in either would
 /// otherwise be the same census.
 let censusSignature (snapshot: Snapshot) : string =
-    // The bridge (ADR 0041, #119): a public entry point reachable with a
-    // projection written flat, as `planTasks` and the Atlas's constructor
-    // are. Idempotent under a fixed room name; it goes with the flat
-    // fields.
-    let spatial = SpatialInfo.normalise snapshot.Spatial
+    let spatial = snapshot.Spatial
     let home = SpatialInfo.homeName spatial
     let placed = (SpatialInfo.layerOf spatial home).TargetPositions
 
@@ -2561,23 +2546,6 @@ let decide
     (verbose: Set<string>)
     (memo: PlanMemo option)
     : Decision =
-    // The projection's second entry into Core, beside the Atlas's own
-    // constructor: a flat projection grows its room layer here, once, and
-    // before anything reads it (ADR 0041). Load-bearing since the readers
-    // moved onto the layer, and not only tidy: the hauler quota is private
-    // to this seam and reads the home room's layer for the containers it
-    // prices, so a projection handed in flat and left unnormalised would
-    // hire nobody. The public readers below — the Planner and the census
-    // signature — carry the same bridge for the callers that reach them
-    // directly, and it costs nothing here because normalising a projection
-    // that already carries its home entry returns it untouched. Idempotent
-    // under a fixed room name, so normalising twice files nothing twice; it
-    // goes when the flat fields go, at the end of the migration (#122).
-    let snapshot =
-        { snapshot with
-            Spatial = SpatialInfo.normalise snapshot.Spatial
-        }
-
     let signature = censusSignature snapshot
     // The signature is read before the Atlas is built, because the Atlas
     // is one of the things it decides: a memo whose census still stands

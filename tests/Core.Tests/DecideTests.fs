@@ -586,6 +586,29 @@ let plannerTests =
             }
         ]
 
+/// The home room's geometry, read back off a projection: the room
+/// `RoomName` names, and the one the empty name files when it names none
+/// (`SpatialInfo.homeName`). Absent geometry reads as an empty layer, never
+/// as a lookup that throws (ADR 0004). The twin of `AtlasTests.homeLayer`;
+/// the two suites share no module, as their `spatial` funnels already do
+/// not.
+let homeLayer (spatial: SpatialInfo) : RoomLayer =
+    SpatialInfo.layerOf spatial (SpatialInfo.homeName spatial)
+
+/// The same projection with the home room's layer changed. Since ADR 0041's
+/// contract step the tile-shaped containers live under a room name and
+/// nowhere else, so a test that used to copy-update the projection itself
+/// — `{ colony.Spatial with CreepPositions = … }` — reaches through this
+/// instead. It merges into whatever layer is already there, so composing it
+/// with `withTargets` and `withOutpost` is order-blind. Apply it after
+/// `RoomName` is final: the home name is resolved when it runs, and a
+/// projection layered then renamed leaves its geometry filed under the old
+/// name.
+let withHome (change: RoomLayer -> RoomLayer) (spatial: SpatialInfo) : SpatialInfo =
+    { spatial with
+        Rooms = Map.add (SpatialInfo.homeName spatial) (change (homeLayer spatial)) spatial.Rooms
+    }
+
 /// Synthetic open room: every tile within `radius` of (25,25) is Plain,
 /// with the spawn structure "spawn-1" standing at the centre.
 let openRoom radius =
@@ -593,28 +616,34 @@ let openRoom radius =
 
     { SpatialInfo.empty with
         RoomName = Some "W1N1"
-        Terrain =
-            Map.ofList
-                [
-                    for x in 25 - radius .. 25 + radius do
-                        for y in 25 - radius .. 25 + radius do
-                            { X = x; Y = y }, Plain
-                ]
-        TargetPositions = Map.ofList [ "spawn-1", spawnPos ]
         TargetKinds = Map.ofList [ "spawn-1", Structure BuiltKind.Spawn ]
-        Obstacles = Set.singleton spawnPos
     }
+    |> withHome (fun layer ->
+        { layer with
+            Terrain =
+                Map.ofList
+                    [
+                        for x in 25 - radius .. 25 + radius do
+                            for y in 25 - radius .. 25 + radius do
+                                { X = x; Y = y }, Plain
+                    ]
+            TargetPositions = Map.ofList [ "spawn-1", spawnPos ]
+            Obstacles = Set.singleton spawnPos
+        })
 
 /// The room with extra targets standing (or being built) on given tiles.
 let withTargets targets room =
     { room with
-        TargetPositions =
-            (room.TargetPositions, targets)
-            ||> List.fold (fun acc (id, pos, _) -> Map.add id pos acc)
         TargetKinds =
             (room.TargetKinds, targets)
             ||> List.fold (fun acc (id, _, kind) -> Map.add id kind acc)
     }
+    |> withHome (fun layer ->
+        { layer with
+            TargetPositions =
+                (layer.TargetPositions, targets)
+                ||> List.fold (fun acc (id, pos, _) -> Map.add id pos acc)
+        })
 
 let placementIntents intents =
     intents
@@ -704,9 +733,11 @@ let placementTests =
                 let room = openRoom 3
 
                 let holed =
-                    { room with
-                        Terrain = Map.add { X = 24; Y = 24 } Wall room.Terrain
-                    }
+                    room
+                    |> withHome (fun layer ->
+                        { layer with
+                            Terrain = Map.add { X = 24; Y = 24 } Wall layer.Terrain
+                        })
 
                 let { Intents = intents } = decide (atLevel 2 holed) Map.empty Set.empty None
 
@@ -813,30 +844,6 @@ let trunkRoom =
 
     { SpatialInfo.empty with
         RoomName = Some "W1N1"
-        Terrain =
-            Map.ofList
-                [
-                    for x in 10..40 do
-                        for y in 15..35 do
-                            let tile = { X = x; Y = y }
-
-                            tile,
-                            (if tile = sourcePos then
-                                 Wall
-                             elif List.contains tile areaSwamps || tile = { X = 20; Y = 20 } then
-                                 Swamp
-                             else
-                                 Plain)
-                ]
-        TargetPositions =
-            Map.ofList
-                [
-                    "spawn-1", spawnPos
-                    "ctrl-1", controllerPos
-                    "src-a", sourcePos
-                    "ext-1", builtExtensions.[0]
-                    "ext-2", builtExtensions.[1]
-                ]
         TargetKinds =
             Map.ofList
                 [
@@ -846,8 +853,37 @@ let trunkRoom =
                     "ext-1", Structure BuiltKind.Extension
                     "ext-2", Structure BuiltKind.Extension
                 ]
-        Obstacles = Set.ofList (spawnPos :: controllerPos :: builtExtensions)
     }
+    |> withHome (fun layer ->
+        { layer with
+            Terrain =
+                Map.ofList
+                    [
+                        for x in 10..40 do
+                            for y in 15..35 do
+                                let tile = { X = x; Y = y }
+
+                                tile,
+                                (if tile = sourcePos then
+                                     Wall
+                                 elif
+                                     List.contains tile areaSwamps || tile = { X = 20; Y = 20 }
+                                 then
+                                     Swamp
+                                 else
+                                     Plain)
+                    ]
+            TargetPositions =
+                Map.ofList
+                    [
+                        "spawn-1", spawnPos
+                        "ctrl-1", controllerPos
+                        "src-a", sourcePos
+                        "ext-1", builtExtensions.[0]
+                        "ext-2", builtExtensions.[1]
+                    ]
+            Obstacles = Set.ofList (spawnPos :: controllerPos :: builtExtensions)
+        })
 
 /// The trunk fixture's colony at a controller level.
 let trunkColony level =
@@ -863,9 +899,12 @@ let noSourceColony level =
         Sources = []
         Spatial =
             { trunkRoom with
-                TargetPositions = Map.remove "src-a" trunkRoom.TargetPositions
                 TargetKinds = Map.remove "src-a" trunkRoom.TargetKinds
             }
+            |> withHome (fun layer ->
+                { layer with
+                    TargetPositions = Map.remove "src-a" layer.TargetPositions
+                })
     }
 
 /// The trunk fixture with a second source walled into a pocket: every
@@ -884,9 +923,11 @@ let pocketColony level =
         |> List.filter (fun tile -> tile <> seat)
 
     let room =
-        { trunkRoom with
-            Terrain = (trunkRoom.Terrain, walled) ||> List.fold (fun acc t -> Map.add t Wall acc)
-        }
+        trunkRoom
+        |> withHome (fun layer ->
+            { layer with
+                Terrain = (layer.Terrain, walled) ||> List.fold (fun acc t -> Map.add t Wall acc)
+            })
         |> withTargets [ "src-b", srcB, Source ]
 
     { trunkColony level with
@@ -902,9 +943,11 @@ let withRoadsBuilt colony =
 
     { colony with
         Spatial =
-            { colony.Spatial with
-                Roads = sitesOfKind Road intents |> Set.ofList
-            }
+            colony.Spatial
+            |> withHome (fun layer ->
+                { layer with
+                    Roads = sitesOfKind Road intents |> Set.ofList
+                })
     }
 
 let chebyshev a b = max (abs (a.X - b.X)) (abs (a.Y - b.Y))
@@ -1081,9 +1124,11 @@ let layoutTests =
                 let snapshot =
                     { colony with
                         Spatial =
-                            { colony.Spatial with
-                                Roads = Set.singleton { X = 33; Y = 27 }
-                            }
+                            colony.Spatial
+                            |> withHome (fun layer ->
+                                { layer with
+                                    Roads = Set.singleton { X = 33; Y = 27 }
+                                })
                             |> withTargets
                                 [ "road-site-1", { X = 34; Y = 24 }, Site BuiltKind.Road ]
                     }
@@ -1106,7 +1151,7 @@ let layoutTests =
                 Expect.hasLength sourceContainers 1 "one container per source"
 
                 Expect.contains
-                    colony.Spatial.Roads
+                    (homeLayer colony.Spatial).Roads
                     sourceContainers.Head
                     "the Seat nearest the trunk is the trunk's own first tile"
             }
@@ -1468,7 +1513,7 @@ let storageTests =
                 Expect.isNonEmpty containers "the containers drop once their roads stand"
 
                 Expect.isEmpty
-                    (Set.intersect storage colony.Spatial.Roads)
+                    (Set.intersect storage (homeLayer colony.Spatial).Roads)
                     "no trunk road crosses the Storage's tile"
 
                 Expect.isEmpty
@@ -1538,9 +1583,11 @@ let storageTests =
                 let standing =
                     { colony with
                         Spatial =
-                            { colony.Spatial with
-                                Obstacles = Set.add storageTile colony.Spatial.Obstacles
-                            }
+                            colony.Spatial
+                            |> withHome (fun layer ->
+                                { layer with
+                                    Obstacles = Set.add storageTile layer.Obstacles
+                                })
                             |> withTargets [ "sto-1", storageTile, Structure BuiltKind.Storage ]
                     }
 
@@ -1747,9 +1794,11 @@ let footingTiles = Set.ofList [ { X = 23; Y = 23 }; { X = 24; Y = 25 } ]
 /// The room with a target standing on a tile and blocking it, the way the
 /// projection carries a built Storage or link: a target and an obstacle.
 let withStanding id pos kind room =
-    { withTargets [ id, pos, kind ] room with
-        Obstacles = Set.add pos room.Obstacles
-    }
+    withTargets [ id, pos, kind ] room
+    |> withHome (fun layer ->
+        { layer with
+            Obstacles = Set.add pos layer.Obstacles
+        })
 
 /// A footing fixture whose trunks run through the clustered ring: the
 /// source stands against the room's east edge and the controller against
@@ -1777,12 +1826,14 @@ let withPlanPending colony =
 
     { colony with
         Spatial =
-            { withTargets [ for id, pos, kind in sites -> id, pos, Site kind ] colony.Spatial with
-                Obstacles =
-                    (colony.Spatial.Obstacles, sites)
-                    ||> List.fold (fun acc (_, pos, kind) ->
-                        if isWalkable kind then acc else Set.add pos acc)
-            }
+            withTargets [ for id, pos, kind in sites -> id, pos, Site kind ] colony.Spatial
+            |> withHome (fun layer ->
+                { layer with
+                    Obstacles =
+                        (layer.Obstacles, sites)
+                        ||> List.fold (fun acc (_, pos, kind) ->
+                            if isWalkable kind then acc else Set.add pos acc)
+                })
     }
 
 /// W12S28's `10,43` shape, synthesised (#77): the pocket source's only
@@ -1802,11 +1853,13 @@ let sealedPocketColony level =
         [ "ext-3", { X = 22; Y = 29 }; "ext-4", { X = 22; Y = 31 } ]
 
     let walled =
-        { colony.Spatial with
-            Terrain =
-                (colony.Spatial.Terrain, sealedTiles)
-                ||> List.fold (fun acc tile -> Map.add tile Wall acc)
-        }
+        colony.Spatial
+        |> withHome (fun layer ->
+            { layer with
+                Terrain =
+                    (layer.Terrain, sealedTiles)
+                    ||> List.fold (fun acc tile -> Map.add tile Wall acc)
+            })
 
     { colony with
         Spatial =
@@ -2132,11 +2185,13 @@ let severedControllerColony level =
 
     { colony with
         Spatial =
-            { colony.Spatial with
-                Terrain =
-                    (colony.Spatial.Terrain, ridge)
-                    ||> List.fold (fun acc tile -> Map.add tile Wall acc)
-            }
+            colony.Spatial
+            |> withHome (fun layer ->
+                { layer with
+                    Terrain =
+                        (layer.Terrain, ridge)
+                        ||> List.fold (fun acc tile -> Map.add tile Wall acc)
+                })
     }
 
 /// The pocket fixture with its one Seat walled shut: every one of `src-b`'s
@@ -2148,9 +2203,11 @@ let enclosedSourceColony level =
 
     { colony with
         Spatial =
-            { colony.Spatial with
-                Terrain = Map.add { X = 21; Y = 30 } Wall colony.Spatial.Terrain
-            }
+            colony.Spatial
+            |> withHome (fun layer ->
+                { layer with
+                    Terrain = Map.add { X = 21; Y = 30 } Wall layer.Terrain
+                })
     }
 
 [<Tests>]
@@ -2243,17 +2300,14 @@ let withTarget id pos kind colony =
 let private stepGridOf (snapshot: Snapshot) =
     Atlas.stepWeights (Atlas.ofSnapshot snapshot) (SpatialInfo.homeName snapshot.Spatial)
 
-/// The same colony with a second room's geometry beside its own: a layer
-/// written straight into `Rooms`, because the flat fields have no room to
-/// put a second room in (ADR 0041). The kind census stays flat and
-/// world-unique, exactly as the projection keeps it — which is what makes
-/// these fixtures able to ask whether a reader joins a kind to the right
-/// room's tile. The colony's own room stays flat and is filed by the
-/// bridge on the way into a reader, exactly as `AtlasTests.withOutpost`
-/// leaves it: `SpatialInfo.normalise` files the home room on the *home*
-/// key rather than on `Rooms` being empty, so a second room's entry never
-/// costs the first one — and leaving it flat is what keeps this helper
-/// order-blind, so a `withTarget` composed after it is still read.
+/// The same colony with a second room's geometry beside its own: one more
+/// entry in `Rooms`, under that room's name (ADR 0041). The kind census
+/// stays unlayered and world-unique, exactly as the projection keeps it —
+/// which is what makes these fixtures able to ask whether a reader joins a
+/// kind to the right room's tile. It adds the outpost's entry and never
+/// replaces the map, so the colony's own layer survives it and the helper
+/// is order-blind: a `withTarget` composed either side of it is still
+/// read.
 let withOutpost room targets tiles (colony: Snapshot) =
     { colony with
         Spatial =
@@ -2313,13 +2367,12 @@ let censusSignatureTests =
                 let moved =
                     { colony with
                         Spatial =
-                            { colony.Spatial with
-                                TargetPositions =
-                                    Map.add
-                                        "ext-1"
-                                        { X = 24; Y = 27 }
-                                        colony.Spatial.TargetPositions
-                            }
+                            colony.Spatial
+                            |> withHome (fun layer ->
+                                { layer with
+                                    TargetPositions =
+                                        Map.add "ext-1" { X = 24; Y = 27 } layer.TargetPositions
+                                })
                     }
 
                 Expect.notEqual
@@ -2404,11 +2457,17 @@ let censusSignatureTests =
             test "the room name moves the signature" {
                 let colony = trunkColony 2
 
+                // The same geometry, carried under the new name: the layer
+                // is keyed by room (ADR 0041), so a rename that left the
+                // tiles filed under the old key would move the signature by
+                // emptying the room rather than by naming it — and the
+                // input under test would go unmeasured.
                 let renamed =
                     { colony with
                         Spatial =
                             { colony.Spatial with
                                 RoomName = Some "W2N2"
+                                Rooms = Map.ofList [ "W2N2", homeLayer colony.Spatial ]
                             }
                     }
 
@@ -2445,12 +2504,15 @@ let censusSignatureTests =
                             ]
                         ConstructionSites = [ { Id = "site-9" } ]
                         Spatial =
-                            ({ colony.Spatial with
-                                CreepPositions = Map.ofList [ "w1", { X = 20; Y = 25 } ]
+                            { colony.Spatial with
                                 Hits = Map.ofList [ "ext-1", { Hits = 1; HitsMax = 3000 } ]
                                 Stores = Map.ofList [ "ext-1", 50 ]
-                             }
-                             |> withTargets [ "pile-1", { X = 22; Y = 25 }, Dropped ])
+                            }
+                            |> withHome (fun layer ->
+                                { layer with
+                                    CreepPositions = Map.ofList [ "w1", { X = 20; Y = 25 } ]
+                                })
+                            |> withTargets [ "pile-1", { X = 22; Y = 25 }, Dropped ]
                     }
 
                 Expect.equal
@@ -2485,9 +2547,11 @@ let censusSignatureTests =
 
                     { placed with
                         Spatial =
-                            { placed.Spatial with
-                                Roads = Set.add tile placed.Spatial.Roads
-                            }
+                            placed.Spatial
+                            |> withHome (fun layer ->
+                                { layer with
+                                    Roads = Set.add tile layer.Roads
+                                })
                     }
 
                 Expect.notEqual
@@ -2510,9 +2574,11 @@ let censusSignatureTests =
 
                     { placed with
                         Spatial =
-                            { placed.Spatial with
-                                Obstacles = Set.add tile placed.Spatial.Obstacles
-                            }
+                            placed.Spatial
+                            |> withHome (fun layer ->
+                                { layer with
+                                    Obstacles = Set.add tile layer.Obstacles
+                                })
                     }
 
                 Expect.notEqual
@@ -2535,9 +2601,11 @@ let censusSignatureTests =
 
                     { placed with
                         Spatial =
-                            { placed.Spatial with
-                                Obstacles = Set.add tile placed.Spatial.Obstacles
-                            }
+                            placed.Spatial
+                            |> withHome (fun layer ->
+                                { layer with
+                                    Obstacles = Set.add tile layer.Obstacles
+                                })
                     }
 
                 Expect.notEqual
@@ -2559,9 +2627,11 @@ let staffedColony creeps positions colony =
     { colony with
         Creeps = creeps
         Spatial =
-            { colony.Spatial with
-                CreepPositions = Map.ofList positions
-            }
+            colony.Spatial
+            |> withHome (fun layer ->
+                { layer with
+                    CreepPositions = Map.ofList positions
+                })
     }
 
 /// A memo whose site Intents are a sentinel no computation would produce:
@@ -2866,12 +2936,24 @@ let planMemoTests =
 
 /// Spatial projection holding exactly the given terrain tiles and target
 /// positions; absent tiles are outside the projection (impassable). No
-/// creep positions and no obstacles — movement tests add those on top.
+/// creep positions and no obstacles — movement tests add those on top. It
+/// files them through `withHome` and inherits its ordering rule, which
+/// bites hardest here because this funnel starts from `SpatialInfo.empty`:
+/// the home name it resolves is the empty one, so a projection built by
+/// this and *then* given a `RoomName` carries its geometry under the empty
+/// name while `RoomName` says another, and every reader that asks by
+/// *room* — the weight grid, the census signature, the hauler quota —
+/// answers off `RoomLayer.empty`. The target-keyed queries still find it,
+/// because `SpatialInfo.placementOf` scans every layer, which is what
+/// makes the mistake quiet. Name the room first, then build: `openRoom` is
+/// what that looks like.
 let spatial targets tiles =
-    { SpatialInfo.empty with
-        Terrain = Map.ofList tiles
-        TargetPositions = Map.ofList targets
-    }
+    SpatialInfo.empty
+    |> withHome (fun layer ->
+        { layer with
+            Terrain = Map.ofList tiles
+            TargetPositions = Map.ofList targets
+        })
 
 /// The 8 tiles around a position, all Plain: an open-ground source site.
 let openSeats pos =
@@ -3094,13 +3176,15 @@ let partApplicabilityTests =
 /// at each end (source tiles are walls): "src-far" at (10, 10), "src-near"
 /// at (10, 20).
 let nearFarCorridor creepPositions =
-    { spatial
-          [ "src-far", { X = 10; Y = 10 }; "src-near", { X = 10; Y = 20 } ]
-          [
-              for y in 9..21 -> { X = 10; Y = y }, (if y = 10 || y = 20 then Wall else Plain)
-          ] with
-        CreepPositions = Map.ofList creepPositions
-    }
+    spatial
+        [ "src-far", { X = 10; Y = 10 }; "src-near", { X = 10; Y = 20 } ]
+        [
+            for y in 9..21 -> { X = 10; Y = y }, (if y = 10 || y = 20 then Wall else Plain)
+        ]
+    |> withHome (fun layer ->
+        { layer with
+            CreepPositions = Map.ofList creepPositions
+        })
 
 [<Tests>]
 let travelCostTests =
@@ -3154,14 +3238,13 @@ let travelCostTests =
                         Creeps = [ worker "w1" 0 50 ]
                         Spatial =
 
-                            { spatial
-                                  [
-                                      "src-swamp", { X = 10; Y = 12 }
-                                      "src-plain", { X = 10; Y = 20 }
-                                  ]
-                                  corridor with
-                                CreepPositions = Map.ofList [ "w1", { X = 10; Y = 15 } ]
-                            }
+                            spatial
+                                [ "src-swamp", { X = 10; Y = 12 }; "src-plain", { X = 10; Y = 20 } ]
+                                corridor
+                            |> withHome (fun layer ->
+                                { layer with
+                                    CreepPositions = Map.ofList [ "w1", { X = 10; Y = 15 } ]
+                                })
                     }
 
                 let { Assignments = assignments } = decide snapshot Map.empty Set.empty None
@@ -3185,12 +3268,14 @@ let travelCostTests =
                         Creeps = [ worker "w1" 50 0 ]
                         Spatial =
 
-                            { spatial
-                                  [ "spawn-1", { X = 10; Y = 10 }; "site-1", { X = 10; Y = 16 } ]
-                                  corridor with
-                                CreepPositions = Map.ofList [ "w1", { X = 10; Y = 15 } ]
-                                Obstacles = Set.singleton { X = 10; Y = 10 }
-                            }
+                            spatial
+                                [ "spawn-1", { X = 10; Y = 10 }; "site-1", { X = 10; Y = 16 } ]
+                                corridor
+                            |> withHome (fun layer ->
+                                { layer with
+                                    CreepPositions = Map.ofList [ "w1", { X = 10; Y = 15 } ]
+                                    Obstacles = Set.singleton { X = 10; Y = 10 }
+                                })
                     }
 
                 let { Assignments = assignments } = decide snapshot Map.empty Set.empty None
@@ -3259,11 +3344,13 @@ let travelCostTests =
                         Creeps = [ worker "w1" 25 25 ]
                         Spatial =
 
-                            { spatial
-                                  [ "src-a", { X = 10; Y = 10 }; "ctrl-1", { X = 10; Y = 16 } ]
-                                  terrain with
-                                CreepPositions = Map.ofList [ "w1", { X = 10; Y = 14 } ]
-                            }
+                            spatial
+                                [ "src-a", { X = 10; Y = 10 }; "ctrl-1", { X = 10; Y = 16 } ]
+                                terrain
+                            |> withHome (fun layer ->
+                                { layer with
+                                    CreepPositions = Map.ofList [ "w1", { X = 10; Y = 14 } ]
+                                })
                     }
 
                 let { Assignments = assignments } = decide snapshot Map.empty Set.empty None
@@ -3302,13 +3389,18 @@ let travelCostTests =
                         Creeps = [ heavy; worker "runner" 0 50 ]
                         Spatial =
 
-                            { spatial
-                                  [ "src-near", { X = 10; Y = 10 }; "src-far", { X = 10; Y = 23 } ]
-                                  terrain with
-                                CreepPositions =
-                                    Map.ofList
-                                        [ "mule", { X = 10; Y = 13 }; "runner", { X = 11; Y = 13 } ]
-                            }
+                            spatial
+                                [ "src-near", { X = 10; Y = 10 }; "src-far", { X = 10; Y = 23 } ]
+                                terrain
+                            |> withHome (fun layer ->
+                                { layer with
+                                    CreepPositions =
+                                        Map.ofList
+                                            [
+                                                "mule", { X = 10; Y = 13 }
+                                                "runner", { X = 11; Y = 13 }
+                                            ]
+                                })
                     }
 
                 let { Assignments = assignments } = decide snapshot Map.empty Set.empty None
@@ -3365,9 +3457,11 @@ let movementTests =
                         Creeps = [ worker "w1" 0 50 ]
                         Spatial =
 
-                            { spatial [ "src-a", { X = 10; Y = 10 } ] corridor with
-                                CreepPositions = Map.ofList [ "w1", { X = 10; Y = 14 } ]
-                            }
+                            spatial [ "src-a", { X = 10; Y = 10 } ] corridor
+                            |> withHome (fun layer ->
+                                { layer with
+                                    CreepPositions = Map.ofList [ "w1", { X = 10; Y = 14 } ]
+                                })
                     }
 
                 let { Intents = intents } = decide snapshot Map.empty Set.empty None
@@ -3387,9 +3481,11 @@ let movementTests =
                         Creeps = [ worker "w1" 0 50 ]
                         Spatial =
 
-                            { spatial [ "src-a", { X = 10; Y = 10 } ] (openSeats { X = 10; Y = 10 }) with
-                                CreepPositions = Map.ofList [ "w1", { X = 10; Y = 11 } ]
-                            }
+                            spatial [ "src-a", { X = 10; Y = 10 } ] (openSeats { X = 10; Y = 10 })
+                            |> withHome (fun layer ->
+                                { layer with
+                                    CreepPositions = Map.ofList [ "w1", { X = 10; Y = 11 } ]
+                                })
                     }
 
                 let { Intents = intents } = decide snapshot Map.empty Set.empty None
@@ -3420,9 +3516,11 @@ let movementTests =
                         Creeps = [ worker "w1" 0 50 ]
                         Spatial =
 
-                            { spatial [ "src-a", { X = 10; Y = 10 } ] terrain with
-                                CreepPositions = Map.ofList [ "w1", { X = 10; Y = 14 } ]
-                            }
+                            spatial [ "src-a", { X = 10; Y = 10 } ] terrain
+                            |> withHome (fun layer ->
+                                { layer with
+                                    CreepPositions = Map.ofList [ "w1", { X = 10; Y = 14 } ]
+                                })
                     }
 
                 let { Intents = intents } = decide snapshot Map.empty Set.empty None
@@ -3471,10 +3569,12 @@ let movementTests =
                         Creeps = [ worker "w1" 25 25 ]
                         Spatial =
 
-                            { spatial [ "src-a", { X = 10; Y = 10 } ] terrain with
-                                CreepPositions = Map.ofList [ "w1", { X = 10; Y = 14 } ]
-                                Roads = paved
-                            }
+                            spatial [ "src-a", { X = 10; Y = 10 } ] terrain
+                            |> withHome (fun layer ->
+                                { layer with
+                                    CreepPositions = Map.ofList [ "w1", { X = 10; Y = 14 } ]
+                                    Roads = paved
+                                })
                     }
 
                 let { Intents = intents } = decide snapshot Map.empty Set.empty None
@@ -3495,16 +3595,19 @@ let movementTests =
                         Creeps = [ worker "w1" 50 0 ]
                         Spatial =
 
-                            { spatial
-                                  [ "ctrl-1", { X = 10; Y = 10 } ]
-                                  [
-                                      { X = 10; Y = 10 }, Plain
-                                      { X = 10; Y = 11 }, Plain
-                                      { X = 10; Y = 12 }, Plain
-                                  ] with
-                                CreepPositions = Map.ofList [ "w1", { X = 10; Y = 12 } ]
-                                Obstacles = Set.ofList [ { X = 10; Y = 10 }; { X = 10; Y = 12 } ]
-                            }
+                            spatial
+                                [ "ctrl-1", { X = 10; Y = 10 } ]
+                                [
+                                    { X = 10; Y = 10 }, Plain
+                                    { X = 10; Y = 11 }, Plain
+                                    { X = 10; Y = 12 }, Plain
+                                ]
+                            |> withHome (fun layer ->
+                                { layer with
+                                    CreepPositions = Map.ofList [ "w1", { X = 10; Y = 12 } ]
+                                    Obstacles =
+                                        Set.ofList [ { X = 10; Y = 10 }; { X = 10; Y = 12 } ]
+                                })
                     }
 
                 let { Intents = intents } = decide snapshot Map.empty Set.empty None
@@ -3530,11 +3633,13 @@ let movementTests =
                         Creeps = [ worker "w1" 0 50 ]
                         Spatial =
 
-                            { spatial
-                                  [ "src-a", { X = 10; Y = 10 } ]
-                                  [ { X = 10; Y = 11 }, Plain; { X = 10; Y = 14 }, Plain ] with
-                                CreepPositions = Map.ofList [ "w1", { X = 10; Y = 14 } ]
-                            }
+                            spatial
+                                [ "src-a", { X = 10; Y = 10 } ]
+                                [ { X = 10; Y = 11 }, Plain; { X = 10; Y = 14 }, Plain ]
+                            |> withHome (fun layer ->
+                                { layer with
+                                    CreepPositions = Map.ofList [ "w1", { X = 10; Y = 14 } ]
+                                })
                     }
 
                 let { Intents = intents } = decide snapshot Map.empty Set.empty None
@@ -3550,11 +3655,13 @@ let movementTests =
                         Creeps = [ worker "w1" 50 0 ]
                         Spatial =
 
-                            { spatial
-                                  [ "site-1", { X = 10; Y = 10 } ]
-                                  [ for y in 10..13 -> { X = 10; Y = y }, Plain ] with
-                                CreepPositions = Map.ofList [ "w1", { X = 10; Y = 13 } ]
-                            }
+                            spatial
+                                [ "site-1", { X = 10; Y = 10 } ]
+                                [ for y in 10..13 -> { X = 10; Y = y }, Plain ]
+                            |> withHome (fun layer ->
+                                { layer with
+                                    CreepPositions = Map.ofList [ "w1", { X = 10; Y = 13 } ]
+                                })
                     }
 
                 let { Intents = intents } = decide snapshot Map.empty Set.empty None
@@ -3570,12 +3677,14 @@ let movementTests =
                         Creeps = [ worker "w1" 50 0 ]
                         Spatial =
 
-                            { spatial
-                                  [ "spawn-1", { X = 10; Y = 10 } ]
-                                  [ for y in 10..12 -> { X = 10; Y = y }, Plain ] with
-                                CreepPositions = Map.ofList [ "w1", { X = 10; Y = 12 } ]
-                                Obstacles = Set.singleton { X = 10; Y = 10 }
-                            }
+                            spatial
+                                [ "spawn-1", { X = 10; Y = 10 } ]
+                                [ for y in 10..12 -> { X = 10; Y = y }, Plain ]
+                            |> withHome (fun layer ->
+                                { layer with
+                                    CreepPositions = Map.ofList [ "w1", { X = 10; Y = 12 } ]
+                                    Obstacles = Set.singleton { X = 10; Y = 10 }
+                                })
                     }
 
                 let { Intents = intents } = decide snapshot Map.empty Set.empty None
@@ -3612,11 +3721,13 @@ let unreachableTests =
                         Creeps = [ worker "w1" 25 25; worker "w2" 0 50 ]
                         Spatial =
 
-                            { spatial [ "src-a", { X = 10; Y = 10 } ] terrain with
-                                CreepPositions =
-                                    Map.ofList
-                                        [ "w1", { X = 20; Y = 20 }; "w2", { X = 10; Y = 12 } ]
-                            }
+                            spatial [ "src-a", { X = 10; Y = 10 } ] terrain
+                            |> withHome (fun layer ->
+                                { layer with
+                                    CreepPositions =
+                                        Map.ofList
+                                            [ "w1", { X = 20; Y = 20 }; "w2", { X = 10; Y = 12 } ]
+                                })
                     }
 
                 let sticky = Map.ofList [ "w1", (taskId (Harvest "src-a")) ]
@@ -3642,9 +3753,11 @@ let unreachableTests =
                         Creeps = [ worker "w1" 0 50 ]
                         Spatial =
 
-                            { spatial [ "src-a", { X = 10; Y = 10 } ] terrain with
-                                CreepPositions = Map.ofList [ "w1", { X = 20; Y = 20 } ]
-                            }
+                            spatial [ "src-a", { X = 10; Y = 10 } ] terrain
+                            |> withHome (fun layer ->
+                                { layer with
+                                    CreepPositions = Map.ofList [ "w1", { X = 20; Y = 20 } ]
+                                })
                     }
 
                 let sticky = Map.ofList [ "w1", (taskId (Harvest "src-a")) ]
@@ -3672,9 +3785,11 @@ let unreachableTests =
                         Creeps = [ worker "w1" 50 0 ]
                         Spatial =
 
-                            { spatial [ "ctrl-1", { X = 10; Y = 10 } ] [ { X = 20; Y = 20 }, Plain ] with
-                                CreepPositions = Map.ofList [ "w1", { X = 20; Y = 20 } ]
-                            }
+                            spatial [ "ctrl-1", { X = 10; Y = 10 } ] [ { X = 20; Y = 20 }, Plain ]
+                            |> withHome (fun layer ->
+                                { layer with
+                                    CreepPositions = Map.ofList [ "w1", { X = 20; Y = 20 } ]
+                                })
                     }
 
                 let sticky = Map.ofList [ "w1", (taskId (Upgrade "ctrl-1")) ]
@@ -3760,9 +3875,12 @@ let headOnSwap =
         Creeps = [ worker "wa" 0 50; worker "wb" 0 50 ]
         Spatial =
 
-            { spatial [ "src-a", { X = 10; Y = 10 }; "src-b", { X = 10; Y = 13 } ] terrain with
-                CreepPositions = Map.ofList [ "wa", { X = 10; Y = 12 }; "wb", { X = 10; Y = 11 } ]
-            }
+            spatial [ "src-a", { X = 10; Y = 10 }; "src-b", { X = 10; Y = 13 } ] terrain
+            |> withHome (fun layer ->
+                { layer with
+                    CreepPositions =
+                        Map.ofList [ "wa", { X = 10; Y = 12 }; "wb", { X = 10; Y = 11 } ]
+                })
     }
 
 [<Tests>]
@@ -3792,13 +3910,18 @@ let arbitrationTests =
                         Creeps = [ worker "har" 0 50; worker "upg" 50 0 ]
                         Spatial =
 
-                            { spatial
-                                  [ "src-a", { X = 10; Y = 10 }; "ctrl-1", { X = 10; Y = 14 } ]
-                                  terrain with
-                                CreepPositions =
-                                    Map.ofList
-                                        [ "har", { X = 10; Y = 12 }; "upg", { X = 10; Y = 11 } ]
-                            }
+                            spatial
+                                [ "src-a", { X = 10; Y = 10 }; "ctrl-1", { X = 10; Y = 14 } ]
+                                terrain
+                            |> withHome (fun layer ->
+                                { layer with
+                                    CreepPositions =
+                                        Map.ofList
+                                            [
+                                                "har", { X = 10; Y = 12 }
+                                                "upg", { X = 10; Y = 11 }
+                                            ]
+                                })
                     }
 
                 let assigned = [ "har", Harvest "src-a"; "upg", Upgrade "ctrl-1" ]
@@ -3877,11 +4000,13 @@ let arbitrationTests =
                         Creeps = [ worker "w1" 0 50; worker "w2" 50 0 ]
                         Spatial =
 
-                            { spatial [ "src-a", { X = 10; Y = 10 } ] terrain with
-                                CreepPositions =
-                                    Map.ofList
-                                        [ "w1", { X = 10; Y = 13 }; "w2", { X = 10; Y = 12 } ]
-                            }
+                            spatial [ "src-a", { X = 10; Y = 10 } ] terrain
+                            |> withHome (fun layer ->
+                                { layer with
+                                    CreepPositions =
+                                        Map.ofList
+                                            [ "w1", { X = 10; Y = 13 }; "w2", { X = 10; Y = 12 } ]
+                                })
                     }
 
                 let moves = resolveOn snapshot [ "w1", Harvest "src-a" ] |> moveIntents
@@ -3913,12 +4038,15 @@ let arbitrationTests =
                         Creeps = [ worker "h" 0 50; worker "u" 50 0 ]
                         Spatial =
 
-                            { spatial
-                                  [ "src-a", { X = 10; Y = 10 }; "ctrl-1", { X = 10; Y = 8 } ]
-                                  terrain with
-                                CreepPositions =
-                                    Map.ofList [ "h", { X = 10; Y = 13 }; "u", { X = 11; Y = 13 } ]
-                            }
+                            spatial
+                                [ "src-a", { X = 10; Y = 10 }; "ctrl-1", { X = 10; Y = 8 } ]
+                                terrain
+                            |> withHome (fun layer ->
+                                { layer with
+                                    CreepPositions =
+                                        Map.ofList
+                                            [ "h", { X = 10; Y = 13 }; "u", { X = 11; Y = 13 } ]
+                                })
                     }
 
                 let moves =
@@ -3949,10 +4077,13 @@ let arbitrationTests =
                         Creeps = [ worker "h1" 0 50; worker "h2" 0 50 ]
                         Spatial =
 
-                            { spatial [ "src-a", { X = 10; Y = 10 } ] terrain with
-                                CreepPositions =
-                                    Map.ofList [ "h1", { X = 10; Y = 11 }; "h2", { X = 9; Y = 12 } ]
-                            }
+                            spatial [ "src-a", { X = 10; Y = 10 } ] terrain
+                            |> withHome (fun layer ->
+                                { layer with
+                                    CreepPositions =
+                                        Map.ofList
+                                            [ "h1", { X = 10; Y = 11 }; "h2", { X = 9; Y = 12 } ]
+                                })
                     }
 
                 let assigned = [ "h1", Harvest "src-a"; "h2", Harvest "src-a" ]
@@ -3983,13 +4114,15 @@ let arbitrationTests =
                         Creeps = [ worker "har" 0 50; worker "bob" 50 0 ]
                         Spatial =
 
-                            { spatial
-                                  [ "src-a", { X = 10; Y = 11 }; "site-1", { X = 15; Y = 12 } ]
-                                  terrain with
-                                CreepPositions =
-                                    Map.ofList
-                                        [ "har", { X = 10; Y = 12 }; "bob", { X = 9; Y = 12 } ]
-                            }
+                            spatial
+                                [ "src-a", { X = 10; Y = 11 }; "site-1", { X = 15; Y = 12 } ]
+                                terrain
+                            |> withHome (fun layer ->
+                                { layer with
+                                    CreepPositions =
+                                        Map.ofList
+                                            [ "har", { X = 10; Y = 12 }; "bob", { X = 9; Y = 12 } ]
+                                })
                     }
 
                 let assigned = [ "har", Harvest "src-a"; "bob", Build "site-1" ]
@@ -4020,13 +4153,15 @@ let arbitrationTests =
                         Creeps = [ { worker "har" 0 50 with Fatigue = 4 }; worker "bob" 50 0 ]
                         Spatial =
 
-                            { spatial
-                                  [ "src-a", { X = 10; Y = 11 }; "site-1", { X = 15; Y = 12 } ]
-                                  terrain with
-                                CreepPositions =
-                                    Map.ofList
-                                        [ "har", { X = 10; Y = 12 }; "bob", { X = 9; Y = 12 } ]
-                            }
+                            spatial
+                                [ "src-a", { X = 10; Y = 11 }; "site-1", { X = 15; Y = 12 } ]
+                                terrain
+                            |> withHome (fun layer ->
+                                { layer with
+                                    CreepPositions =
+                                        Map.ofList
+                                            [ "har", { X = 10; Y = 12 }; "bob", { X = 9; Y = 12 } ]
+                                })
                     }
 
                 let assigned = [ "har", Harvest "src-a"; "bob", Build "site-1" ]
@@ -4054,9 +4189,11 @@ let arbitrationTests =
                         Creeps = [ { worker "w1" 0 50 with Fatigue = 4 } ]
                         Spatial =
 
-                            { spatial [ "src-a", { X = 10; Y = 10 } ] corridor with
-                                CreepPositions = Map.ofList [ "w1", { X = 10; Y = 14 } ]
-                            }
+                            spatial [ "src-a", { X = 10; Y = 10 } ] corridor
+                            |> withHome (fun layer ->
+                                { layer with
+                                    CreepPositions = Map.ofList [ "w1", { X = 10; Y = 14 } ]
+                                })
                     }
 
                 Expect.isEmpty
@@ -4081,13 +4218,15 @@ let arbitrationTests =
                         Creeps = [ worker "har" 0 50; worker "bob" 50 0 ]
                         Spatial =
 
-                            { spatial
-                                  [ "src-a", { X = 10; Y = 11 }; "site-1", { X = 15; Y = 12 } ]
-                                  terrain with
-                                CreepPositions =
-                                    Map.ofList
-                                        [ "har", { X = 10; Y = 12 }; "bob", { X = 9; Y = 12 } ]
-                            }
+                            spatial
+                                [ "src-a", { X = 10; Y = 11 }; "site-1", { X = 15; Y = 12 } ]
+                                terrain
+                            |> withHome (fun layer ->
+                                { layer with
+                                    CreepPositions =
+                                        Map.ofList
+                                            [ "har", { X = 10; Y = 12 }; "bob", { X = 9; Y = 12 } ]
+                                })
                     }
 
                 let assigned = [ "har", Harvest "src-a"; "bob", Build "site-1" ]
@@ -4118,13 +4257,15 @@ let arbitrationTests =
                         Creeps = [ worker "har" 0 50; worker "upg" 50 0 ]
                         Spatial =
 
-                            { spatial
-                                  [ "src-a", { X = 11; Y = 12 }; "ctrl-1", { X = 13; Y = 12 } ]
-                                  terrain with
-                                CreepPositions =
-                                    Map.ofList
-                                        [ "har", { X = 9; Y = 12 }; "upg", { X = 10; Y = 12 } ]
-                            }
+                            spatial
+                                [ "src-a", { X = 11; Y = 12 }; "ctrl-1", { X = 13; Y = 12 } ]
+                                terrain
+                            |> withHome (fun layer ->
+                                { layer with
+                                    CreepPositions =
+                                        Map.ofList
+                                            [ "har", { X = 9; Y = 12 }; "upg", { X = 10; Y = 12 } ]
+                                })
                     }
 
                 let assigned = [ "har", Harvest "src-a"; "upg", Upgrade "ctrl-1" ]
@@ -4159,13 +4300,15 @@ let resolverVerdictTests =
                         Creeps = [ { worker "har" 0 50 with Fatigue = 4 }; worker "bob" 50 0 ]
                         Spatial =
 
-                            { spatial
-                                  [ "src-a", { X = 10; Y = 11 }; "site-1", { X = 15; Y = 12 } ]
-                                  terrain with
-                                CreepPositions =
-                                    Map.ofList
-                                        [ "har", { X = 10; Y = 12 }; "bob", { X = 9; Y = 12 } ]
-                            }
+                            spatial
+                                [ "src-a", { X = 10; Y = 11 }; "site-1", { X = 15; Y = 12 } ]
+                                terrain
+                            |> withHome (fun layer ->
+                                { layer with
+                                    CreepPositions =
+                                        Map.ofList
+                                            [ "har", { X = 10; Y = 12 }; "bob", { X = 9; Y = 12 } ]
+                                })
                     }
 
                 Expect.equal
@@ -4184,9 +4327,11 @@ let resolverVerdictTests =
                         Creeps = [ { worker "w1" 0 50 with Fatigue = 4 } ]
                         Spatial =
 
-                            { spatial [ "src-a", { X = 10; Y = 10 } ] corridor with
-                                CreepPositions = Map.ofList [ "w1", { X = 10; Y = 14 } ]
-                            }
+                            spatial [ "src-a", { X = 10; Y = 10 } ] corridor
+                            |> withHome (fun layer ->
+                                { layer with
+                                    CreepPositions = Map.ofList [ "w1", { X = 10; Y = 14 } ]
+                                })
                     }
 
                 Expect.equal
@@ -4215,13 +4360,18 @@ let resolverVerdictTests =
                         Creeps = [ worker "har" 0 50; worker "upg" 50 0 ]
                         Spatial =
 
-                            { spatial
-                                  [ "src-a", { X = 10; Y = 10 }; "ctrl-1", { X = 10; Y = 14 } ]
-                                  terrain with
-                                CreepPositions =
-                                    Map.ofList
-                                        [ "har", { X = 10; Y = 12 }; "upg", { X = 10; Y = 11 } ]
-                            }
+                            spatial
+                                [ "src-a", { X = 10; Y = 10 }; "ctrl-1", { X = 10; Y = 14 } ]
+                                terrain
+                            |> withHome (fun layer ->
+                                { layer with
+                                    CreepPositions =
+                                        Map.ofList
+                                            [
+                                                "har", { X = 10; Y = 12 }
+                                                "upg", { X = 10; Y = 11 }
+                                            ]
+                                })
                     }
 
                 Expect.equal
@@ -4250,12 +4400,15 @@ let resolverVerdictTests =
                         Creeps = [ worker "h" 0 50; worker "u" 50 0 ]
                         Spatial =
 
-                            { spatial
-                                  [ "src-a", { X = 10; Y = 10 }; "ctrl-1", { X = 10; Y = 8 } ]
-                                  terrain with
-                                CreepPositions =
-                                    Map.ofList [ "h", { X = 10; Y = 13 }; "u", { X = 11; Y = 13 } ]
-                            }
+                            spatial
+                                [ "src-a", { X = 10; Y = 10 }; "ctrl-1", { X = 10; Y = 8 } ]
+                                terrain
+                            |> withHome (fun layer ->
+                                { layer with
+                                    CreepPositions =
+                                        Map.ofList
+                                            [ "h", { X = 10; Y = 13 }; "u", { X = 11; Y = 13 } ]
+                                })
                     }
 
                 Expect.equal
@@ -4280,13 +4433,15 @@ let resolverVerdictTests =
                         Creeps = [ worker "har" 0 50; worker "bob" 50 0 ]
                         Spatial =
 
-                            { spatial
-                                  [ "src-a", { X = 10; Y = 11 }; "site-1", { X = 15; Y = 12 } ]
-                                  terrain with
-                                CreepPositions =
-                                    Map.ofList
-                                        [ "har", { X = 10; Y = 12 }; "bob", { X = 9; Y = 12 } ]
-                            }
+                            spatial
+                                [ "src-a", { X = 10; Y = 11 }; "site-1", { X = 15; Y = 12 } ]
+                                terrain
+                            |> withHome (fun layer ->
+                                { layer with
+                                    CreepPositions =
+                                        Map.ofList
+                                            [ "har", { X = 10; Y = 12 }; "bob", { X = 9; Y = 12 } ]
+                                })
                     }
 
                 let assigned = [ "har", Harvest "src-a"; "bob", Build "site-1" ]
@@ -4315,9 +4470,11 @@ let resolverVerdictTests =
                         Creeps = [ worker "w1" 0 50 ]
                         Spatial =
 
-                            { spatial [ "src-a", { X = 10; Y = 10 } ] corridor with
-                                CreepPositions = Map.ofList [ "w1", { X = 10; Y = 14 } ]
-                            }
+                            spatial [ "src-a", { X = 10; Y = 10 } ] corridor
+                            |> withHome (fun layer ->
+                                { layer with
+                                    CreepPositions = Map.ofList [ "w1", { X = 10; Y = 14 } ]
+                                })
                     }
 
                 Expect.isEmpty
@@ -4344,9 +4501,11 @@ let resolverVerdictTests =
                         Creeps = [ { worker "w1" 0 50 with Fatigue = 4 } ]
                         Spatial =
 
-                            { spatial [ "src-a", { X = 10; Y = 10 } ] corridor with
-                                CreepPositions = Map.ofList [ "w1", { X = 10; Y = 14 } ]
-                            }
+                            spatial [ "src-a", { X = 10; Y = 10 } ] corridor
+                            |> withHome (fun layer ->
+                                { layer with
+                                    CreepPositions = Map.ofList [ "w1", { X = 10; Y = 14 } ]
+                                })
                     }
 
                 let { Verdicts = verdicts } = decide snapshot Map.empty Set.empty None
@@ -4509,9 +4668,11 @@ let sayTests =
                         Creeps = [ worker "w1" 0 50 ]
                         Spatial =
 
-                            { spatial [ "src-a", { X = 10; Y = 10 } ] corridor with
-                                CreepPositions = Map.ofList [ "w1", { X = 10; Y = 14 } ]
-                            }
+                            spatial [ "src-a", { X = 10; Y = 10 } ] corridor
+                            |> withHome (fun layer ->
+                                { layer with
+                                    CreepPositions = Map.ofList [ "w1", { X = 10; Y = 14 } ]
+                                })
                     }
 
                 let { Intents = intents } = decide snapshot Map.empty Set.empty None
@@ -5033,11 +5194,13 @@ let verdictTests =
                         Creeps = [ worker "w1" 25 25 ]
                         Spatial =
 
-                            { spatial
-                                  [ "src-a", { X = 10; Y = 10 }; "ctrl-1", { X = 10; Y = 16 } ]
-                                  terrain with
-                                CreepPositions = Map.ofList [ "w1", { X = 10; Y = 14 } ]
-                            }
+                            spatial
+                                [ "src-a", { X = 10; Y = 10 }; "ctrl-1", { X = 10; Y = 16 } ]
+                                terrain
+                            |> withHome (fun layer ->
+                                { layer with
+                                    CreepPositions = Map.ofList [ "w1", { X = 10; Y = 14 } ]
+                                })
                     }
 
                 let sticky = Map.ofList [ "w1", taskId (Harvest "src-a") ]
@@ -5062,11 +5225,13 @@ let verdictTests =
                         Creeps = [ worker "w1" 0 50; worker "w2" 0 50 ]
                         Spatial =
 
-                            { spatial [ "src-a", { X = 10; Y = 10 } ] corridor with
-                                CreepPositions =
-                                    Map.ofList
-                                        [ "w1", { X = 10; Y = 12 }; "w2", { X = 10; Y = 13 } ]
-                            }
+                            spatial [ "src-a", { X = 10; Y = 10 } ] corridor
+                            |> withHome (fun layer ->
+                                { layer with
+                                    CreepPositions =
+                                        Map.ofList
+                                            [ "w1", { X = 10; Y = 12 }; "w2", { X = 10; Y = 13 } ]
+                                })
                     }
 
                 let sticky =
@@ -5133,9 +5298,11 @@ let verdictTests =
                         Creeps = [ worker "w1" 0 50 ]
                         Spatial =
 
-                            { spatial [ "src-a", { X = 10; Y = 10 } ] terrain with
-                                CreepPositions = Map.ofList [ "w1", { X = 10; Y = 14 } ]
-                            }
+                            spatial [ "src-a", { X = 10; Y = 10 } ] terrain
+                            |> withHome (fun layer ->
+                                { layer with
+                                    CreepPositions = Map.ofList [ "w1", { X = 10; Y = 14 } ]
+                                })
                     }
 
                 let { Verdicts = verdicts } = decide snapshot Map.empty Set.empty None
@@ -5180,9 +5347,12 @@ let tierRoom =
         ]
 
     { spatial [] corridor with
-        Obstacles = Set.ofList [ { X = 11; Y = 10 }; { X = 14; Y = 10 }; { X = 20; Y = 10 } ]
         Stores = Map.ofList [ "can-ctrl", 800 ]
     }
+    |> withHome (fun layer ->
+        { layer with
+            Obstacles = Set.ofList [ { X = 11; Y = 10 }; { X = 14; Y = 10 }; { X = 20; Y = 10 } ]
+        })
     |> withTargets
         [
             "spawn-1", { X = 11; Y = 10 }, Structure BuiltKind.Spawn
@@ -5201,9 +5371,11 @@ let tierColony refillables =
         Refillables = refillables
         Creeps = [ creepWith "h1" 100 0 [ Carry; Carry; Move ] ]
         Spatial =
-            { tierRoom with
-                CreepPositions = Map.ofList [ "h1", { X = 18; Y = 10 } ]
-            }
+            tierRoom
+            |> withHome (fun layer ->
+                { layer with
+                    CreepPositions = Map.ofList [ "h1", { X = 18; Y = 10 } ]
+                })
     }
 
 /// The surplus fixture: one loaded generalist and a hungry tower, in a
@@ -5339,11 +5511,13 @@ let verboseScoringTests =
                         Creeps = [ worker "w1" 0 50; worker "w2" 0 50 ]
                         Spatial =
 
-                            { spatial [ "src-a", { X = 10; Y = 10 } ] corridor with
-                                CreepPositions =
-                                    Map.ofList
-                                        [ "w1", { X = 10; Y = 12 }; "w2", { X = 10; Y = 13 } ]
-                            }
+                            spatial [ "src-a", { X = 10; Y = 10 } ] corridor
+                            |> withHome (fun layer ->
+                                { layer with
+                                    CreepPositions =
+                                        Map.ofList
+                                            [ "w1", { X = 10; Y = 12 }; "w2", { X = 10; Y = 13 } ]
+                                })
                     }
 
                 let { Verdicts = verdicts } = decide snapshot Map.empty (Set.ofList [ "w2" ]) None
@@ -5383,9 +5557,11 @@ let verboseScoringTests =
                         Creeps = [ worker "w1" 0 50 ]
                         Spatial =
 
-                            { spatial [ "src-a", { X = 10; Y = 10 } ] corridor with
-                                CreepPositions = Map.ofList [ "w1", { X = 10; Y = 11 } ]
-                            }
+                            spatial [ "src-a", { X = 10; Y = 10 } ] corridor
+                            |> withHome (fun layer ->
+                                { layer with
+                                    CreepPositions = Map.ofList [ "w1", { X = 10; Y = 11 } ]
+                                })
                     }
 
                 let sticky = Map.ofList [ "w1", taskId (Harvest "src-a") ]
@@ -5426,9 +5602,11 @@ let verboseScoringTests =
                         Creeps = [ worker "w1" 0 50 ]
                         Spatial =
 
-                            { spatial [ "src-a", { X = 10; Y = 10 } ] terrain with
-                                CreepPositions = Map.ofList [ "w1", { X = 10; Y = 14 } ]
-                            }
+                            spatial [ "src-a", { X = 10; Y = 10 } ] terrain
+                            |> withHome (fun layer ->
+                                { layer with
+                                    CreepPositions = Map.ofList [ "w1", { X = 10; Y = 14 } ]
+                                })
                     }
 
                 let { Verdicts = verdicts } = decide snapshot Map.empty (Set.ofList [ "w1" ]) None
@@ -6359,8 +6537,11 @@ let pileColony creeps positions =
                           for y in 8..12 -> { X = x; Y = y }, Plain
                   ] with
                 TargetKinds = Map.ofList [ "pile-1", Dropped ]
-                CreepPositions = Map.ofList positions
             }
+            |> withHome (fun layer ->
+                { layer with
+                    CreepPositions = Map.ofList positions
+                })
     }
 
 [<Tests>]
@@ -6419,14 +6600,14 @@ let pickupReflexTests =
                     { snapshot with
                         Spatial =
                             { snapshot.Spatial with
-                                Terrain = Map.add { X = 11; Y = 11 } Wall snapshot.Spatial.Terrain
-                                TargetPositions =
-                                    Map.add
-                                        "src-a"
-                                        { X = 11; Y = 11 }
-                                        snapshot.Spatial.TargetPositions
                                 TargetKinds = Map.add "src-a" Source snapshot.Spatial.TargetKinds
                             }
+                            |> withHome (fun layer ->
+                                { layer with
+                                    Terrain = Map.add { X = 11; Y = 11 } Wall layer.Terrain
+                                    TargetPositions =
+                                        Map.add "src-a" { X = 11; Y = 11 } layer.TargetPositions
+                                })
                     }
 
                 let { Intents = intents } = decide withSource Map.empty Set.empty None
@@ -6603,8 +6784,11 @@ let anchorTests =
                                             "ctrl-1", Controller
                                             "cont-1", Structure BuiltKind.Container
                                         ]
-                                CreepPositions = Map.ofList [ "a1", { X = 10; Y = 11 } ]
                             }
+                            |> withHome (fun layer ->
+                                { layer with
+                                    CreepPositions = Map.ofList [ "a1", { X = 10; Y = 11 } ]
+                                })
                     }
 
                 let {
@@ -6654,8 +6838,11 @@ let anchorTests =
                                     "ctrl-1", Controller
                                     "cont-1", Structure BuiltKind.Container
                                 ]
-                        CreepPositions = Map.ofList [ "a1", { X = 10; Y = 11 } ]
                     }
+                    |> withHome (fun layer ->
+                        { layer with
+                            CreepPositions = Map.ofList [ "a1", { X = 10; Y = 11 } ]
+                        })
 
                 let full =
                     { dualSeatColony with
@@ -6710,14 +6897,16 @@ let anchorTests =
                     { dualSeatColony with
                         Creeps = [ worker "w1" 0 50 ]
                         Spatial =
-                            { dualSeatRoom with
-                                TargetPositions =
-                                    Map.ofList
-                                        [
-                                            "src-a", { X = 10; Y = 10 }
-                                            "ctrl-1", { X = 40; Y = 40 }
-                                        ]
-                            }
+                            dualSeatRoom
+                            |> withHome (fun layer ->
+                                { layer with
+                                    TargetPositions =
+                                        Map.ofList
+                                            [
+                                                "src-a", { X = 10; Y = 10 }
+                                                "ctrl-1", { X = 40; Y = 40 }
+                                            ]
+                                })
                     }
 
                 let { Intents = intents } = decide snapshot Map.empty Set.empty None
@@ -6738,17 +6927,20 @@ let anchorTests =
                         Creeps = [ worker "w1" 0 50 ]
                         Spatial =
                             { dualSeatRoom with
-                                TargetPositions =
-                                    Map.ofList
-                                        [
-                                            "src-a", { X = 10; Y = 10 }
-                                            "ctrl-1", { X = 40; Y = 40 }
-                                            "cont-1", { X = 9; Y = 10 }
-                                        ]
                                 TargetKinds =
                                     dualSeatRoom.TargetKinds
                                     |> Map.add "cont-1" (Structure BuiltKind.Container)
                             }
+                            |> withHome (fun layer ->
+                                { layer with
+                                    TargetPositions =
+                                        Map.ofList
+                                            [
+                                                "src-a", { X = 10; Y = 10 }
+                                                "ctrl-1", { X = 40; Y = 40 }
+                                                "cont-1", { X = 9; Y = 10 }
+                                            ]
+                                })
                     }
 
                 let { Intents = intents } = decide snapshot Map.empty Set.empty None
@@ -6808,13 +7000,15 @@ let anchorTests =
                         Creeps = [ anchor "a1" 0 50 ]
                         Spatial =
                             { dualSeatRoom with
-                                TargetPositions =
-                                    dualSeatRoom.TargetPositions
-                                    |> Map.add "cont-1" { X = 9; Y = 10 }
                                 TargetKinds =
                                     dualSeatRoom.TargetKinds
                                     |> Map.add "cont-1" (Structure BuiltKind.Container)
                             }
+                            |> withHome (fun layer ->
+                                { layer with
+                                    TargetPositions =
+                                        layer.TargetPositions |> Map.add "cont-1" { X = 9; Y = 10 }
+                                })
                     }
 
                 let { Intents = intents } = decide snapshot Map.empty Set.empty None
@@ -6842,15 +7036,17 @@ let anchorTests =
             // Three Seats — (11,10) the Dual Seat, (9,10) and (9,9) ordinary —
             // and a second idle spawn drawing from the same bank.
             let threeSeatRoom =
-                { dualSeatRoom with
-                    Terrain =
-                        Map.ofList
-                            [
-                                { X = 9; Y = 10 }, Plain
-                                { X = 11; Y = 10 }, Plain
-                                { X = 9; Y = 9 }, Plain
-                            ]
-                }
+                dualSeatRoom
+                |> withHome (fun layer ->
+                    { layer with
+                        Terrain =
+                            Map.ofList
+                                [
+                                    { X = 9; Y = 10 }, Plain
+                                    { X = 11; Y = 10 }, Plain
+                                    { X = 9; Y = 9 }, Plain
+                                ]
+                    })
 
             let secondSpawn =
                 { spawn with
@@ -6905,9 +7101,11 @@ let anchorTests =
                     { dualSeatColony with
                         Creeps = [ anchor "a1" 0 50 ]
                         Spatial =
-                            { dualSeatRoom with
-                                CreepPositions = Map.ofList [ "a1", { X = 11; Y = 10 } ]
-                            }
+                            dualSeatRoom
+                            |> withHome (fun layer ->
+                                { layer with
+                                    CreepPositions = Map.ofList [ "a1", { X = 11; Y = 10 } ]
+                                })
                     }
 
                 let {
@@ -6930,9 +7128,11 @@ let anchorTests =
                     { dualSeatColony with
                         Creeps = [ anchor "a1" 50 0 ]
                         Spatial =
-                            { dualSeatRoom with
-                                CreepPositions = Map.ofList [ "a1", { X = 11; Y = 10 } ]
-                            }
+                            dualSeatRoom
+                            |> withHome (fun layer ->
+                                { layer with
+                                    CreepPositions = Map.ofList [ "a1", { X = 11; Y = 10 } ]
+                                })
                     }
 
                 let {
@@ -6960,9 +7160,11 @@ let anchorTests =
                     { dualSeatColony with
                         Creeps = [ anchor "a1" 50 0 ]
                         Spatial =
-                            { dualSeatRoom with
-                                CreepPositions = Map.ofList [ "a1", { X = 11; Y = 10 } ]
-                            }
+                            dualSeatRoom
+                            |> withHome (fun layer ->
+                                { layer with
+                                    CreepPositions = Map.ofList [ "a1", { X = 11; Y = 10 } ]
+                                })
                     }
 
                 let remembered = Map.ofList [ "a1", taskId (Harvest "src-a") ]
@@ -6977,14 +7179,16 @@ let anchorTests =
             // The Dual Seat room extended east: a plain corridor from
             // (12,10) to (30,10) carrying distant mobile work at its end.
             let corridorEast extraTargets =
-                { dualSeatRoom with
-                    TargetPositions =
-                        (Map.toList dualSeatRoom.TargetPositions @ extraTargets) |> Map.ofList
-                    Terrain =
-                        (Map.toList dualSeatRoom.Terrain
-                         @ [ for x in 12..30 -> { X = x; Y = 10 }, Plain ])
-                        |> Map.ofList
-                }
+                dualSeatRoom
+                |> withHome (fun layer ->
+                    { layer with
+                        TargetPositions =
+                            (Map.toList layer.TargetPositions @ extraTargets) |> Map.ofList
+                        Terrain =
+                            (Map.toList layer.Terrain
+                             @ [ for x in 12..30 -> { X = x; Y = 10 }, Plain ])
+                            |> Map.ofList
+                    })
 
             test "a distant Build flows to the generalist; the Anchor upgrades in place" {
                 let snapshot =
@@ -6992,11 +7196,13 @@ let anchorTests =
                         ConstructionSites = [ { Id = "site-1" } ]
                         Creeps = [ anchor "a1" 50 0; worker "g1" 50 0 ]
                         Spatial =
-                            { corridorEast [ "site-1", { X = 31; Y = 10 } ] with
-                                CreepPositions =
-                                    Map.ofList
-                                        [ "a1", { X = 11; Y = 10 }; "g1", { X = 29; Y = 10 } ]
-                            }
+                            corridorEast [ "site-1", { X = 31; Y = 10 } ]
+                            |> withHome (fun layer ->
+                                { layer with
+                                    CreepPositions =
+                                        Map.ofList
+                                            [ "a1", { X = 11; Y = 10 }; "g1", { X = 29; Y = 10 } ]
+                                })
                     }
 
                 let { Assignments = assignments } = decide snapshot Map.empty Set.empty None
@@ -7018,11 +7224,13 @@ let anchorTests =
                         Refillables = [ refillable "spawn-1" 300 BuiltKind.Spawn ]
                         Creeps = [ anchor "a1" 0 50; worker "g1" 50 0 ]
                         Spatial =
-                            { corridorEast [ "spawn-1", { X = 31; Y = 10 } ] with
-                                CreepPositions =
-                                    Map.ofList
-                                        [ "a1", { X = 11; Y = 10 }; "g1", { X = 30; Y = 10 } ]
-                            }
+                            corridorEast [ "spawn-1", { X = 31; Y = 10 } ]
+                            |> withHome (fun layer ->
+                                { layer with
+                                    CreepPositions =
+                                        Map.ofList
+                                            [ "a1", { X = 11; Y = 10 }; "g1", { X = 30; Y = 10 } ]
+                                })
                     }
 
                 let { Assignments = assignments } = decide snapshot Map.empty Set.empty None
@@ -7062,9 +7270,12 @@ let anchorTests =
 /// container empty.
 let haulRoom =
     { spatial [] [ for x in 9..21 -> { X = x; Y = 10 }, (if x = 10 then Wall else Plain) ] with
-        Obstacles = Set.singleton { X = 20; Y = 10 }
         Stores = Map.ofList [ "can-src", 0; "can-ctrl", 800 ]
     }
+    |> withHome (fun layer ->
+        { layer with
+            Obstacles = Set.singleton { X = 20; Y = 10 }
+        })
     |> withTargets
         [
             "src-a", { X = 10; Y = 10 }, Source
@@ -7148,9 +7359,11 @@ let logisticsTests =
                     { haulColony with
                         Creeps = [ worker "w1" 0 50 ]
                         Spatial =
-                            { haulRoom with
-                                CreepPositions = Map.ofList [ "w1", pos ]
-                            }
+                            haulRoom
+                            |> withHome (fun layer ->
+                                { layer with
+                                    CreepPositions = Map.ofList [ "w1", pos ]
+                                })
                     }
 
                 let near = decide (colonyAt { X = 15; Y = 10 }) Map.empty Set.empty None
@@ -7183,9 +7396,11 @@ let logisticsTests =
                     { haulColony with
                         Creeps = [ anchor "a1" 0 50 ]
                         Spatial =
-                            { haulRoom with
-                                CreepPositions = Map.ofList [ "a1", { X = 15; Y = 10 } ]
-                            }
+                            haulRoom
+                            |> withHome (fun layer ->
+                                { layer with
+                                    CreepPositions = Map.ofList [ "a1", { X = 15; Y = 10 } ]
+                                })
                     }
 
                 let { Assignments = assignments } = decide snapshot Map.empty Set.empty None
@@ -7203,9 +7418,11 @@ let logisticsTests =
                     { haulColony with
                         Creeps = [ anchor "a1" 0 50 ]
                         Spatial =
-                            { haulRoom with
-                                CreepPositions = Map.ofList [ "a1", { X = 15; Y = 10 } ]
-                            }
+                            haulRoom
+                            |> withHome (fun layer ->
+                                { layer with
+                                    CreepPositions = Map.ofList [ "a1", { X = 15; Y = 10 } ]
+                                })
                     }
 
                 let remembered = Map.ofList [ "a1", taskId (Withdraw "can-ctrl") ]
@@ -7240,9 +7457,11 @@ let logisticsTests =
                     { haulColony with
                         Creeps = [ worker "w1" 50 0 ]
                         Spatial =
-                            { haulRoom with
-                                CreepPositions = Map.ofList [ "w1", { X = 17; Y = 10 } ]
-                            }
+                            haulRoom
+                            |> withHome (fun layer ->
+                                { layer with
+                                    CreepPositions = Map.ofList [ "w1", { X = 17; Y = 10 } ]
+                                })
                     }
 
                 let remembered = Map.ofList [ "w1", taskId (Withdraw "can-ctrl") ]
@@ -7273,9 +7492,11 @@ let logisticsTests =
                     { haulColony with
                         Creeps = [ worker "w1" 0 50 ]
                         Spatial =
-                            { haulRoom with
-                                CreepPositions = Map.ofList [ "w1", { X = 17; Y = 10 } ]
-                            }
+                            haulRoom
+                            |> withHome (fun layer ->
+                                { layer with
+                                    CreepPositions = Map.ofList [ "w1", { X = 17; Y = 10 } ]
+                                })
                     }
 
                 let remembered = Map.ofList [ "w1", taskId (Upgrade "ctrl-1") ]
@@ -7296,10 +7517,13 @@ let logisticsTests =
                         Refillables = [ refillable "spawn-1" 50 BuiltKind.Spawn ]
                         Creeps = [ worker "w1" 50 0 ]
                         Spatial =
-                            { haulRoom with
-                                Obstacles = Set.ofList [ { X = 14; Y = 10 }; { X = 20; Y = 10 } ]
-                                CreepPositions = Map.ofList [ "w1", { X = 17; Y = 10 } ]
-                            }
+                            haulRoom
+                            |> withHome (fun layer ->
+                                { layer with
+                                    Obstacles =
+                                        Set.ofList [ { X = 14; Y = 10 }; { X = 20; Y = 10 } ]
+                                    CreepPositions = Map.ofList [ "w1", { X = 17; Y = 10 } ]
+                                })
                             |> withTargets
                                 [ "spawn-1", { X = 14; Y = 10 }, Structure BuiltKind.Spawn ]
                     }
@@ -7321,9 +7545,11 @@ let logisticsTests =
                     { haulColony with
                         Creeps = [ creepWith "h1" 100 0 [ Carry; Carry; Move ] ]
                         Spatial =
-                            { haulRoom with
-                                CreepPositions = Map.ofList [ "h1", { X = 15; Y = 10 } ]
-                            }
+                            haulRoom
+                            |> withHome (fun layer ->
+                                { layer with
+                                    CreepPositions = Map.ofList [ "h1", { X = 15; Y = 10 } ]
+                                })
                     }
 
                 let { Assignments = assignments } = decide snapshot Map.empty Set.empty None
@@ -7339,9 +7565,11 @@ let logisticsTests =
                     { haulColony with
                         Creeps = [ worker "w1" 0 50 ]
                         Spatial =
-                            { haulRoom with
-                                CreepPositions = Map.ofList [ "w1", { X = 17; Y = 10 } ]
-                            }
+                            haulRoom
+                            |> withHome (fun layer ->
+                                { layer with
+                                    CreepPositions = Map.ofList [ "w1", { X = 17; Y = 10 } ]
+                                })
                     }
 
                 let { Intents = intents } = decide snapshot Map.empty Set.empty None
@@ -7362,9 +7590,11 @@ let logisticsTests =
 /// the way the projection carries a built one, and nothing but the
 /// projection's kind says which structure it is.
 let stockRoom =
-    { tierRoom with
-        Obstacles = Set.add { X = 16; Y = 11 } tierRoom.Obstacles
-    }
+    tierRoom
+    |> withHome (fun layer ->
+        { layer with
+            Obstacles = Set.add { X = 16; Y = 11 } layer.Obstacles
+        })
     |> withTargets [ "sto-1", { X = 16; Y = 11 }, Structure BuiltKind.Storage ]
 
 /// The stock colony with the given hunger and stores: one loaded
@@ -7380,10 +7610,11 @@ let stockColony refillables stores =
         Refillables = refillables
         Creeps = [ creepWith "h1" 100 0 [ Carry; Carry; Move ] ]
         Spatial =
-            { stockRoom with
-                Stores = stores
-                CreepPositions = Map.ofList [ "h1", { X = 16; Y = 10 } ]
-            }
+            { stockRoom with Stores = stores }
+            |> withHome (fun layer ->
+                { layer with
+                    CreepPositions = Map.ofList [ "h1", { X = 16; Y = 10 } ]
+                })
     }
 
 [<Tests>]
@@ -7592,9 +7823,11 @@ let drawRoom =
                 for y in 10..11 -> { X = x; Y = y }, (if x = 8 && y = 10 then Wall else Plain)
         ]
 
-    { spatial [] lane with
-        Obstacles = Set.ofList [ { X = 17; Y = 11 }; { X = 22; Y = 10 } ]
-    }
+    spatial [] lane
+    |> withHome (fun layer ->
+        { layer with
+            Obstacles = Set.ofList [ { X = 17; Y = 11 }; { X = 22; Y = 10 } ]
+        })
     |> withTargets
         [
             "src-a", { X = 8; Y = 10 }, Source
@@ -7613,10 +7846,11 @@ let drawColony stores (creep: CreepInfo) pos =
         Refillables = [ refillable "spawn-1" 0 BuiltKind.Spawn ]
         Creeps = [ creep ]
         Spatial =
-            { drawRoom with
-                Stores = stores
-                CreepPositions = Map.ofList [ creep.Name, pos ]
-            }
+            { drawRoom with Stores = stores }
+            |> withHome (fun layer ->
+                { layer with
+                    CreepPositions = Map.ofList [ creep.Name, pos ]
+                })
     }
 
 [<Tests>]
@@ -7980,9 +8214,11 @@ let containerPostTests =
                     { haulColony with
                         Creeps = [ anchor "a1" 50 0 ]
                         Spatial =
-                            { haulRoom with
-                                CreepPositions = Map.ofList [ "a1", { X = 11; Y = 10 } ]
-                            }
+                            haulRoom
+                            |> withHome (fun layer ->
+                                { layer with
+                                    CreepPositions = Map.ofList [ "a1", { X = 11; Y = 10 } ]
+                                })
                     }
 
                 let remembered = Map.ofList [ "a1", taskId (Harvest "src-a") ]
@@ -8020,9 +8256,11 @@ let containerPostTests =
                     { haulColony with
                         Creeps = [ anchor "a1" 50 0 ]
                         Spatial =
-                            { haulRoom with
-                                CreepPositions = Map.ofList [ "a1", { X = 11; Y = 10 } ]
-                            }
+                            haulRoom
+                            |> withHome (fun layer ->
+                                { layer with
+                                    CreepPositions = Map.ofList [ "a1", { X = 11; Y = 10 } ]
+                                })
                     }
 
                 let { Assignments = assignments } = decide snapshot Map.empty Set.empty None
@@ -8044,9 +8282,11 @@ let containerPostTests =
                     { haulColony with
                         Creeps = [ worker "w1" 50 0 ]
                         Spatial =
-                            { haulRoom with
-                                CreepPositions = Map.ofList [ "w1", { X = 11; Y = 10 } ]
-                            }
+                            haulRoom
+                            |> withHome (fun layer ->
+                                { layer with
+                                    CreepPositions = Map.ofList [ "w1", { X = 11; Y = 10 } ]
+                                })
                     }
 
                 let remembered = Map.ofList [ "w1", taskId (Harvest "src-a") ]
@@ -8065,9 +8305,11 @@ let containerPostTests =
                     { haulColony with
                         Creeps = [ anchor "a1" 50 0 ]
                         Spatial =
-                            { haulRoom with
-                                CreepPositions = Map.ofList [ "a1", { X = 9; Y = 10 } ]
-                            }
+                            haulRoom
+                            |> withHome (fun layer ->
+                                { layer with
+                                    CreepPositions = Map.ofList [ "a1", { X = 9; Y = 10 } ]
+                                })
                     }
 
                 let remembered = Map.ofList [ "a1", taskId (Harvest "src-a") ]
@@ -8086,9 +8328,11 @@ let containerPostTests =
                     { haulColony with
                         Creeps = [ anchor "a1" 50 0 ]
                         Spatial =
-                            { haulRoom with
-                                CreepPositions = Map.ofList [ "a1", { X = 12; Y = 10 } ]
-                            }
+                            haulRoom
+                            |> withHome (fun layer ->
+                                { layer with
+                                    CreepPositions = Map.ofList [ "a1", { X = 12; Y = 10 } ]
+                                })
                     }
 
                 let remembered = Map.ofList [ "a1", taskId (Harvest "src-a") ]
@@ -8109,8 +8353,11 @@ let containerPostTests =
                                 TargetKinds =
                                     haulRoom.TargetKinds
                                     |> Map.add "can-src" (Site BuiltKind.Container)
-                                CreepPositions = Map.ofList [ "a1", { X = 11; Y = 10 } ]
                             }
+                            |> withHome (fun layer ->
+                                { layer with
+                                    CreepPositions = Map.ofList [ "a1", { X = 11; Y = 10 } ]
+                                })
                     }
 
                 let remembered = Map.ofList [ "a1", taskId (Harvest "src-a") ]
@@ -8130,9 +8377,11 @@ let containerPostTests =
                     { haulColony with
                         Creeps = [ anchor "a1" 50 0 ]
                         Spatial =
-                            { haulRoom with
-                                CreepPositions = Map.ofList [ "a1", { X = 18; Y = 10 } ]
-                            }
+                            haulRoom
+                            |> withHome (fun layer ->
+                                { layer with
+                                    CreepPositions = Map.ofList [ "a1", { X = 18; Y = 10 } ]
+                                })
                     }
 
                 let remembered = Map.ofList [ "a1", taskId (Harvest "src-a") ]
@@ -8159,11 +8408,13 @@ let postCapacityTests =
                     { haulColony with
                         Creeps = [ anchor "a1" 50 0; anchor "a2" 0 50 ]
                         Spatial =
-                            { haulRoom with
-                                CreepPositions =
-                                    Map.ofList
-                                        [ "a1", { X = 11; Y = 10 }; "a2", { X = 12; Y = 10 } ]
-                            }
+                            haulRoom
+                            |> withHome (fun layer ->
+                                { layer with
+                                    CreepPositions =
+                                        Map.ofList
+                                            [ "a1", { X = 11; Y = 10 }; "a2", { X = 12; Y = 10 } ]
+                                })
                     }
 
                 let remembered =
@@ -8193,11 +8444,13 @@ let postCapacityTests =
                     { haulColony with
                         Creeps = [ anchor "a1" 0 50; anchor "a2" 0 50 ]
                         Spatial =
-                            { haulRoom with
-                                CreepPositions =
-                                    Map.ofList
-                                        [ "a1", { X = 11; Y = 10 }; "a2", { X = 12; Y = 10 } ]
-                            }
+                            haulRoom
+                            |> withHome (fun layer ->
+                                { layer with
+                                    CreepPositions =
+                                        Map.ofList
+                                            [ "a1", { X = 11; Y = 10 }; "a2", { X = 12; Y = 10 } ]
+                                })
                     }
 
                 let { Assignments = assignments } = decide snapshot Map.empty Set.empty None
@@ -8213,10 +8466,13 @@ let postCapacityTests =
                     { haulColony with
                         Creeps = [ worker "w1" 0 50; worker "w2" 0 50 ]
                         Spatial =
-                            { haulRoom with
-                                CreepPositions =
-                                    Map.ofList [ "w1", { X = 11; Y = 10 }; "w2", { X = 9; Y = 10 } ]
-                            }
+                            haulRoom
+                            |> withHome (fun layer ->
+                                { layer with
+                                    CreepPositions =
+                                        Map.ofList
+                                            [ "w1", { X = 11; Y = 10 }; "w2", { X = 9; Y = 10 } ]
+                                })
                     }
 
                 let { Assignments = assignments } = decide snapshot Map.empty Set.empty None
@@ -8239,9 +8495,13 @@ let postCapacityTests =
                                 TargetKinds =
                                     haulRoom.TargetKinds
                                     |> Map.add "can-src" (Site BuiltKind.Container)
-                                CreepPositions =
-                                    Map.ofList [ "a1", { X = 11; Y = 10 }; "a2", { X = 9; Y = 10 } ]
                             }
+                            |> withHome (fun layer ->
+                                { layer with
+                                    CreepPositions =
+                                        Map.ofList
+                                            [ "a1", { X = 11; Y = 10 }; "a2", { X = 9; Y = 10 } ]
+                                })
                     }
 
                 let { Assignments = assignments } = decide snapshot Map.empty Set.empty None
@@ -8272,9 +8532,11 @@ let restockAt name pos ticks =
         Sources = [ drained "src-a" ticks ]
         Creeps = [ worker name 0 50 ]
         Spatial =
-            { restockRoom with
-                CreepPositions = Map.ofList [ name, pos ]
-            }
+            restockRoom
+            |> withHome (fun layer ->
+                { layer with
+                    CreepPositions = Map.ofList [ name, pos ]
+                })
     }
 
 [<Tests>]
@@ -8337,9 +8599,11 @@ let restockTests =
                 let snapshot =
                     { snapshot with
                         Spatial =
-                            { snapshot.Spatial with
-                                Roads = Set.singleton { X = 14; Y = 10 }
-                            }
+                            snapshot.Spatial
+                            |> withHome (fun layer ->
+                                { layer with
+                                    Roads = Set.singleton { X = 14; Y = 10 }
+                                })
                     }
 
                 let { Assignments = assignments } = decide snapshot Map.empty Set.empty None
@@ -8361,9 +8625,11 @@ let restockTests =
                 let snapshot =
                     { snapshot with
                         Spatial =
-                            { snapshot.Spatial with
-                                Obstacles = Set.singleton { X = 16; Y = 10 }
-                            }
+                            snapshot.Spatial
+                            |> withHome (fun layer ->
+                                { layer with
+                                    Obstacles = Set.singleton { X = 16; Y = 10 }
+                                })
                     }
 
                 let { Verdicts = verdicts } = decide snapshot Map.empty (Set.ofList [ "w1" ]) None
@@ -8488,9 +8754,11 @@ let restockTests =
                         Sources = [ drained "src-a" 60 ]
                         Creeps = [ anchor "a1" 50 0 ]
                         Spatial =
-                            { haulRoom with
-                                CreepPositions = Map.ofList [ "a1", { X = 11; Y = 10 } ]
-                            }
+                            haulRoom
+                            |> withHome (fun layer ->
+                                { layer with
+                                    CreepPositions = Map.ofList [ "a1", { X = 11; Y = 10 } ]
+                                })
                     }
 
                 let remembered = Map.ofList [ "a1", taskId (Harvest "src-a") ]
@@ -8526,9 +8794,11 @@ let restockTests =
                         Sources = [ drained "src-a" 60 ]
                         Creeps = [ anchor "a1" 20 30 ]
                         Spatial =
-                            { haulRoom with
-                                CreepPositions = Map.ofList [ "a1", { X = 11; Y = 10 } ]
-                            }
+                            haulRoom
+                            |> withHome (fun layer ->
+                                { layer with
+                                    CreepPositions = Map.ofList [ "a1", { X = 11; Y = 10 } ]
+                                })
                     }
 
                 let remembered = Map.ofList [ "a1", taskId (Harvest "src-a") ]
@@ -8564,9 +8834,11 @@ let restockTests =
                         Sources = [ drained "src-a" 1 ]
                         Creeps = [ anchor "a1" 50 0 ]
                         Spatial =
-                            { haulRoom with
-                                CreepPositions = Map.ofList [ "a1", { X = 11; Y = 10 } ]
-                            }
+                            haulRoom
+                            |> withHome (fun layer ->
+                                { layer with
+                                    CreepPositions = Map.ofList [ "a1", { X = 11; Y = 10 } ]
+                                })
                     }
 
                 let remembered = Map.ofList [ "a1", taskId (Harvest "src-a") ]
@@ -8599,9 +8871,11 @@ let restockTests =
                         Sources = [ drained "src-a" 60 ]
                         Creeps = [ anchor "a1" 50 10 ]
                         Spatial =
-                            { dualSeatRoom with
-                                CreepPositions = Map.ofList [ "a1", { X = 11; Y = 10 } ]
-                            }
+                            dualSeatRoom
+                            |> withHome (fun layer ->
+                                { layer with
+                                    CreepPositions = Map.ofList [ "a1", { X = 11; Y = 10 } ]
+                                })
                     }
 
                 let remembered = Map.ofList [ "a1", taskId (Harvest "src-a") ]
@@ -8641,9 +8915,11 @@ let restockTests =
 
                     { snapshot with
                         Spatial =
-                            { snapshot.Spatial with
-                                Roads = Set.ofList [ for x in 11..21 -> { X = x; Y = 10 } ]
-                            }
+                            snapshot.Spatial
+                            |> withHome (fun layer ->
+                                { layer with
+                                    Roads = Set.ofList [ for x in 11..21 -> { X = x; Y = 10 } ]
+                                })
                     }
 
                 let { Assignments = assignments } =
@@ -8683,11 +8959,13 @@ let restockTests =
                                     snapshot.Creeps
                                     @ [ creepWith "b1" 0 100 [ Carry; Carry; Move ] ]
                                 Spatial =
-                                    { snapshot.Spatial with
-                                        CreepPositions =
-                                            snapshot.Spatial.CreepPositions
-                                            |> Map.add "b1" { X = 14; Y = 10 }
-                                    }
+                                    snapshot.Spatial
+                                    |> withHome (fun layer ->
+                                        { layer with
+                                            CreepPositions =
+                                                layer.CreepPositions
+                                                |> Map.add "b1" { X = 14; Y = 10 }
+                                        })
                             }
                         else
                             snapshot
@@ -8740,8 +9018,11 @@ let quotaRoom spawnX =
                     "can-src", Structure BuiltKind.Container
                     "spawn-1", Structure BuiltKind.Spawn
                 ]
-        Obstacles = Set.singleton { X = spawnX; Y = 10 }
     }
+    |> withHome (fun layer ->
+        { layer with
+            Obstacles = Set.singleton { X = spawnX; Y = 10 }
+        })
 
 /// The quota fixture's colony: `spawnCount` idle spawns drawing on the one
 /// 300-capacity bank holding `available` energy.
@@ -8793,9 +9074,12 @@ let shortHaulRoom =
                     "can-b", Structure BuiltKind.Container
                     "spawn-1", Structure BuiltKind.Spawn
                 ]
-        Roads = Set.ofList [ for x in 9..16 -> { X = x; Y = 10 } ]
-        Obstacles = Set.singleton { X = 12; Y = 10 }
     }
+    |> withHome (fun layer ->
+        { layer with
+            Roads = Set.ofList [ for x in 9..16 -> { X = x; Y = 10 } ]
+            Obstacles = Set.singleton { X = 12; Y = 10 }
+        })
 
 [<Tests>]
 let haulerTests =
@@ -8885,9 +9169,12 @@ let haulerTests =
                         Creeps = [ worker "w1" 0 50 ]
                         Spatial =
                             { room with
-                                TargetPositions = Map.remove "can-src" room.TargetPositions
                                 TargetKinds = Map.remove "can-src" room.TargetKinds
                             }
+                            |> withHome (fun layer ->
+                                { layer with
+                                    TargetPositions = Map.remove "can-src" layer.TargetPositions
+                                })
                     }
 
                 let { Intents = intents } = decide snapshot Map.empty Set.empty None
@@ -8958,8 +9245,11 @@ let haulerTests =
                         Spatial =
                             { haulRoom with
                                 Stores = Map.ofList [ "can-src", 500; "can-ctrl", 800 ]
-                                CreepPositions = Map.ofList [ "h1", { X = 12; Y = 10 } ]
                             }
+                            |> withHome (fun layer ->
+                                { layer with
+                                    CreepPositions = Map.ofList [ "h1", { X = 12; Y = 10 } ]
+                                })
                     }
 
                 let {
@@ -8990,8 +9280,11 @@ let haulerTests =
                         Spatial =
                             { haulRoom with
                                 Stores = Map.ofList [ "can-src", 500; "can-ctrl", 800 ]
-                                CreepPositions = Map.ofList [ "h1", { X = 17; Y = 10 } ]
                             }
+                            |> withHome (fun layer ->
+                                { layer with
+                                    CreepPositions = Map.ofList [ "h1", { X = 17; Y = 10 } ]
+                                })
                     }
 
                 let { Assignments = assignments } = decide snapshot Map.empty Set.empty None
@@ -9032,8 +9325,11 @@ let haulerTests =
                         Spatial =
                             { haulRoom with
                                 Stores = Map.ofList [ "can-src", 500; "can-ctrl", 800 ]
-                                CreepPositions = Map.ofList [ "w1", { X = 17; Y = 10 } ]
                             }
+                            |> withHome (fun layer ->
+                                { layer with
+                                    CreepPositions = Map.ofList [ "w1", { X = 17; Y = 10 } ]
+                                })
                     }
 
                 let { Assignments = assignments } = decide snapshot Map.empty Set.empty None
@@ -9053,9 +9349,11 @@ let haulerTests =
                     { haulColony with
                         Creeps = [ hauler "h1" 0 100 ]
                         Spatial =
-                            { haulRoom with
-                                CreepPositions = Map.ofList [ "h1", { X = 17; Y = 10 } ]
-                            }
+                            haulRoom
+                            |> withHome (fun layer ->
+                                { layer with
+                                    CreepPositions = Map.ofList [ "h1", { X = 17; Y = 10 } ]
+                                })
                     }
 
                 let {
@@ -9082,8 +9380,11 @@ let haulerTests =
                         Spatial =
                             { haulRoom with
                                 Stores = Map.ofList [ "can-src", 500; "can-ctrl", 800 ]
-                                CreepPositions = Map.ofList [ "h1", { X = 12; Y = 10 } ]
                             }
+                            |> withHome (fun layer ->
+                                { layer with
+                                    CreepPositions = Map.ofList [ "h1", { X = 12; Y = 10 } ]
+                                })
                     }
 
                 let remembered = Map.ofList [ "h1", taskId (Withdraw "can-src") ]
@@ -9232,45 +9533,16 @@ let roomLayerTests =
                     "a container the home room does not place hires nobody"
             }
 
-            test "a projection written flat reaches the readers that read the layer" {
-                // The bridge #119 laid, load-bearing here for the first
-                // time: the hauler quota is private to `decide`, reads the
-                // home room's layer, and is handed a projection every
-                // fixture in this file writes flat. `decide` normalising at
-                // its entry is the whole reason it finds anything —
-                // without it the layer is empty, and an empty layer places
-                // no container and hires nobody (ADR 0004).
-                let flat =
-                    { quotaColony 20 5 1500 with
-                        Creeps = [ anchor "a1" 0 50 ]
-                    }
-
-                let layered =
-                    { flat with
-                        Spatial = SpatialInfo.normalise flat.Spatial
-                    }
-
-                Expect.isTrue
-                    (Map.isEmpty flat.Spatial.Rooms)
-                    "the fixture carries the flat fields and no layer at all"
-
-                Expect.equal
-                    (quotaOf flat)
-                    (quotaOf layered)
-                    "a projection bridged at the seam decides what one bridged by hand does"
-
-                Expect.equal (quotaOf flat) 2 "and it is the 8-step room's quota, not zero"
-            }
-
-            test "the bridge still files the home room after a second one has joined" {
-                // `SpatialInfo.normalise` bails on the *home* key, never on
-                // `Rooms` being non-empty, so a projection that grew an
-                // outpost layer first still carries its own room's flat
-                // fields into every reader. Worth pinning because the
-                // failure is silent in the direction a fixture cannot see:
-                // a home container the bridge missed produces no Refill and
-                // no quota, and reads as "the room rule rejected it" when
-                // in fact no reader was ever shown it.
+            test "the home room keeps its own targets after a second one has joined" {
+                // A target added to the home room after an outpost layer is
+                // already in the projection lands beside that layer, never
+                // over it — `Rooms` is a map keyed by room name and every
+                // funnel here merges into the entry it names. Worth pinning
+                // because the failure is silent in the direction a fixture
+                // cannot see: a home container the projection dropped
+                // produces no Refill and no quota, and reads as "the room
+                // rule rejected it" when in fact no reader was ever shown
+                // it.
                 let late =
                     collidingRooms
                     |> withTarget "can-late" { X = 26; Y = 22 } (Structure BuiltKind.Container)
@@ -9285,7 +9557,40 @@ let roomLayerTests =
                 Expect.equal
                     refills
                     [ "can-home"; "can-late" ]
-                    "a container written flat after the outpost joined is still the controller's"
+                    "a container added after the outpost joined is still the controller's"
+            }
+
+            test "a projection that names no room files and reads under the empty name" {
+                // The convention `SpatialInfo.homeName` spells, and the one
+                // every fixture here that never sets `RoomName` rests on:
+                // tiles and no room name is this colony's own room written
+                // without saying so, and the empty name is both where its
+                // geometry is filed and where every home query looks for
+                // it. Its only pin used to be a test of the bridge, so it
+                // went when the bridge did; the convention did not go with
+                // it. A site that spelled the unnamed room differently
+                // would file the home room under one name and read it under
+                // another, and ADR 0004 would answer every home query with
+                // the empty set rather than throwing — silent in the one
+                // direction a fixture cannot see.
+                let unnamed = spatial [ "src-a", { X = 10; Y = 10 } ] [ { X = 9; Y = 10 }, Plain ]
+
+                Expect.equal (SpatialInfo.homeName unnamed) "" "the unnamed room's own name"
+
+                Expect.equal
+                    (unnamed.Rooms |> Map.toList |> List.map fst)
+                    [ "" ]
+                    "and the one room it carries is filed under it"
+
+                Expect.equal
+                    (homeLayer unnamed).TargetPositions
+                    (Map.ofList [ "src-a", { X = 10; Y = 10 } ])
+                    "so a home query reads that geometry back, not an empty layer"
+
+                Expect.stringStarts
+                    (censusSignature { bareRespawn with Spatial = unnamed })
+                    "|"
+                    "and the census signature spells that room the same empty name"
             }
         ]
 
@@ -9317,8 +9622,11 @@ let incomeRoom =
                     "can-b", Structure BuiltKind.Container
                     "spawn-1", Structure BuiltKind.Spawn
                 ]
-        Obstacles = Set.singleton { X = 20; Y = 10 }
     }
+    |> withHome (fun layer ->
+        { layer with
+            Obstacles = Set.singleton { X = 20; Y = 10 }
+        })
 
 /// The W12S28 colony: four idle spawns on the one 300-capacity bank with
 /// energy to spare — restraint must come from the target, never from the
@@ -9456,9 +9764,12 @@ let incomeWorkforceTests =
 /// replacement's own body, not just its cast time, prices the lead.
 let successionRoom =
     { spatial [] [ for x in 9..21 -> { X = x; Y = 10 }, (if x = 10 then Wall else Plain) ] with
-        Obstacles = Set.singleton { X = 21; Y = 10 }
         Stores = Map.ofList [ "can-src", 0 ]
     }
+    |> withHome (fun layer ->
+        { layer with
+            Obstacles = Set.singleton { X = 21; Y = 10 }
+        })
     |> withTargets
         [
             "src-a", { X = 10; Y = 10 }, Source
@@ -9480,10 +9791,12 @@ let succession incumbent successor life =
     { successionColony with
         Creeps = [ anchor incumbent 0 50 |> withLife life; anchor successor 0 50 ]
         Spatial =
-            { successionRoom with
-                CreepPositions =
-                    Map.ofList [ incumbent, { X = 11; Y = 10 }; successor, { X = 20; Y = 10 } ]
-            }
+            successionRoom
+            |> withHome (fun layer ->
+                { layer with
+                    CreepPositions =
+                        Map.ofList [ incumbent, { X = 11; Y = 10 }; successor, { X = 20; Y = 10 } ]
+                })
     }
 
 /// The same lane at an RCL3 bank, where the Anchor row's body is five
@@ -9498,10 +9811,12 @@ let rcl3Succession incumbent successor life =
         RoomEnergy = bank 600 600
         Creeps = [ rcl3Anchor incumbent |> withLife life; rcl3Anchor successor ]
         Spatial =
-            { successionRoom with
-                CreepPositions =
-                    Map.ofList [ incumbent, { X = 11; Y = 10 }; successor, { X = 20; Y = 10 } ]
-            }
+            successionRoom
+            |> withHome (fun layer ->
+                { layer with
+                    CreepPositions =
+                        Map.ofList [ incumbent, { X = 11; Y = 10 }; successor, { X = 20; Y = 10 } ]
+                })
     }
 
 /// The creeps a tick released and why — the release fold's own output,
@@ -9534,9 +9849,11 @@ let expiringTests =
                             List.truncate (List.length incomeFleet - 1) incomeFleet
                             @ [ worker "w19" 0 50 |> withLife life ]
                         Spatial =
-                            { incomeRoom with
-                                CreepPositions = Map.ofList [ "w19", { X = 12; Y = 10 } ]
-                            }
+                            incomeRoom
+                            |> withHome (fun layer ->
+                                { layer with
+                                    CreepPositions = Map.ofList [ "w19", { X = 12; Y = 10 } ]
+                                })
                     }
 
                 let casts life =
@@ -9563,9 +9880,11 @@ let expiringTests =
                         { successionColony with
                             Creeps = [ anchor "a1" 0 50 |> withLife life ]
                             Spatial =
-                                { successionRoom with
-                                    CreepPositions = Map.ofList [ "a1", { X = 11; Y = 10 } ]
-                                }
+                                successionRoom
+                                |> withHome (fun layer ->
+                                    { layer with
+                                        CreepPositions = Map.ofList [ "a1", { X = 11; Y = 10 } ]
+                                    })
                         }
 
                     let { Intents = intents } = decide snapshot Map.empty Set.empty None
@@ -9602,11 +9921,13 @@ let expiringTests =
                                 else
                                     creep)
                         Spatial =
-                            { incomeRoom with
-                                CreepPositions =
-                                    Map.ofList
-                                        [ "a1", { X = 11; Y = 10 }; "h1", { X = 29; Y = 10 } ]
-                            }
+                            incomeRoom
+                            |> withHome (fun layer ->
+                                { layer with
+                                    CreepPositions =
+                                        Map.ofList
+                                            [ "a1", { X = 11; Y = 10 }; "h1", { X = 29; Y = 10 } ]
+                                })
                     }
 
                 let casts life =
@@ -9969,11 +10290,13 @@ let threatTests =
 /// north end, (25,20), and every other tile around it lies outside the
 /// projection.
 let raidLane creeps =
-    { spatial
-          [ "src-a", { X = 25; Y = 19 } ]
-          ([ { X = 25; Y = 19 }, Wall ] @ [ for y in 20..30 -> { X = 25; Y = y }, Plain ]) with
-        CreepPositions = Map.ofList creeps
-    }
+    spatial
+        [ "src-a", { X = 25; Y = 19 } ]
+        ([ { X = 25; Y = 19 }, Wall ] @ [ for y in 20..30 -> { X = 25; Y = y }, Plain ])
+    |> withHome (fun layer ->
+        { layer with
+            CreepPositions = Map.ofList creeps
+        })
 
 /// A colony over the raid lane: one source, no controller and no hungry
 /// structure, so Harvest — and, while a Threat stands in it, Flee — is the
@@ -10128,10 +10451,11 @@ let threatGateTests =
                     |> fun colony ->
                         { colony with
                             Spatial =
-                                { colony.Spatial with
-                                    Terrain =
-                                        Map.add { X = 24; Y = 20 } Plain colony.Spatial.Terrain
-                                }
+                                colony.Spatial
+                                |> withHome (fun layer ->
+                                    { layer with
+                                        Terrain = Map.add { X = 24; Y = 20 } Plain layer.Terrain
+                                    })
                                 |> withTargets
                                     [ "can-b", { X = 24; Y = 20 }, Structure BuiltKind.Container ]
                         }
@@ -10167,9 +10491,11 @@ let threatGateTests =
 
                     { colony with
                         Spatial =
-                            { colony.Spatial with
-                                Terrain = Map.add { X = 24; Y = 18 } Plain colony.Spatial.Terrain
-                            }
+                            colony.Spatial
+                            |> withHome (fun layer ->
+                                { layer with
+                                    Terrain = Map.add { X = 24; Y = 18 } Plain layer.Terrain
+                                })
                     }
 
                 let colony =
@@ -10191,17 +10517,19 @@ let threatGateTests =
 /// (23,28), around the corner through (24,29) and (23,29). Both lie at
 /// range 3 of the controller at (25,25); the corner tiles do not.
 let hotCornerRoom =
-    { spatial
-          [ "ctrl-1", { X = 25; Y = 25 } ]
-          [
-              { X = 25; Y = 29 }, Plain
-              { X = 25; Y = 28 }, Plain
-              { X = 24; Y = 29 }, Plain
-              { X = 23; Y = 29 }, Plain
-              { X = 23; Y = 28 }, Plain
-          ] with
-        CreepPositions = Map.ofList [ "u1", { X = 25; Y = 29 } ]
-    }
+    spatial
+        [ "ctrl-1", { X = 25; Y = 25 } ]
+        [
+            { X = 25; Y = 29 }, Plain
+            { X = 25; Y = 28 }, Plain
+            { X = 24; Y = 29 }, Plain
+            { X = 23; Y = 29 }, Plain
+            { X = 23; Y = 28 }, Plain
+        ]
+    |> withHome (fun layer ->
+        { layer with
+            CreepPositions = Map.ofList [ "u1", { X = 25; Y = 29 } ]
+        })
 
 /// The colony over it: one loaded generalist, and Upgrade the whole pool.
 let hotCornerColony =
@@ -10420,9 +10748,11 @@ let spawnHoldTests =
                     { atLevel 2 room with
                         Creeps = [ worker "w1" 0 100 ]
                         Spatial =
-                            { room with
-                                CreepPositions = Map.ofList [ "w1", { X = 25; Y = 27 } ]
-                            }
+                            room
+                            |> withHome (fun layer ->
+                                { layer with
+                                    CreepPositions = Map.ofList [ "w1", { X = 25; Y = 27 } ]
+                                })
                     }
 
                 let colony = staffed (openRoom 6)
@@ -10482,10 +10812,10 @@ let spawnHoldTests =
 let private corridor x y0 y1 =
     [ for y in y0..y1 -> { X = x; Y = y }, Plain ]
 
-/// The same projection with a second room's layer beside the colony's own
-/// — the only shape that can carry an outpost at all, since a hand-built
-/// projection writes the home room flat and the bridge files it on the way
-/// in (ADR 0041).
+/// The same projection with a second room's layer beside the colony's own,
+/// under that room's name — the shape an outpost arrives in, and the only
+/// one there is since the tile-shaped containers moved under a room name
+/// (ADR 0041).
 let private withNeighbour room layer (spatial: SpatialInfo) =
     { spatial with
         Rooms = Map.add room layer spatial.Rooms
@@ -10511,10 +10841,13 @@ let neighbouringRoomTests =
                 let home =
                     { SpatialInfo.empty with
                         RoomName = Some "W1N1"
-                        Terrain = Map.ofList (corridor 10 10 17)
                         TargetKinds = Map.ofList [ "src-out", Source ]
-                        CreepPositions = Map.ofList [ "w-home", { X = 10; Y = 10 } ]
                     }
+                    |> withHome (fun layer ->
+                        { layer with
+                            Terrain = Map.ofList (corridor 10 10 17)
+                            CreepPositions = Map.ofList [ "w-home", { X = 10; Y = 10 } ]
+                        })
 
                 let outpost =
                     { RoomLayer.empty with
@@ -10560,11 +10893,14 @@ let neighbouringRoomTests =
                 let home =
                     { SpatialInfo.empty with
                         RoomName = Some "W1N1"
-                        Terrain = Map.ofList (corridor 10 10 18)
-                        TargetPositions = Map.ofList [ "src-home", { X = 10; Y = 18 } ]
                         TargetKinds = Map.ofList [ "src-home", Source ]
-                        CreepPositions = Map.ofList [ "w-home", { X = 10; Y = 10 } ]
                     }
+                    |> withHome (fun layer ->
+                        { layer with
+                            Terrain = Map.ofList (corridor 10 10 18)
+                            TargetPositions = Map.ofList [ "src-home", { X = 10; Y = 18 } ]
+                            CreepPositions = Map.ofList [ "w-home", { X = 10; Y = 10 } ]
+                        })
 
                 let colony creeps layer =
                     { bareRespawn with

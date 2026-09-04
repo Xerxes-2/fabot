@@ -193,34 +193,30 @@ type SpatialInfo =
         /// Which entry of `Rooms` is home — the spawn room (ADR 0041) —
         /// and still the room name the census signature and the Layout
         /// read (ADR 0017). None for a projection that does not say which
-        /// room it is, whose geometry the bridge files under the empty
-        /// name, exactly as `Decide.censusSignature` spells that room.
+        /// room it is, whose geometry is filed under the empty name,
+        /// exactly as `Decide.censusSignature` spells that room.
         RoomName: string option
-        /// Room name -> that room's geometry. The layer ADR 0041 adds, and
-        /// where the tile-shaped containers end up: the flat fields below
-        /// still carry the home room's copy of the same five while the
-        /// readers migrate onto this one, and it is those that go away at
-        /// the end of the migration, not this. `RoomName` says which entry
-        /// is home; every other entry is an outpost — so a projection
-        /// carrying a `Borders` entry has to name its home room too, or
-        /// that one room lands here under the empty name and in `Borders`
-        /// under its real one. Read an entry with `Map.tryFind`, defaulting
-        /// to `RoomLayer.empty`: a room with no geometry has no entry here
-        /// at all, and that is the same answer (ADR 0004).
+        /// Room name -> that room's geometry: every container the
+        /// projection keys by `Pos` or fills with `Pos`es, and since ADR
+        /// 0041's contract step the *only* place any of them lives. There
+        /// is one projection and one shape of it (ADR 0005) — the flat
+        /// copies of these five that carried the home room through the
+        /// migration are gone, and with them the bridge that filled them.
+        /// `RoomName` says which entry is home; every other entry is an
+        /// outpost — so a projection carrying a `Borders` entry has to name
+        /// its home room too, or `SpatialInfo.homeName` is the empty name
+        /// and every home query reads `RoomLayer.empty` however the
+        /// geometry here is filed. Read an entry with `Map.tryFind`,
+        /// defaulting to `RoomLayer.empty`: a room with no geometry has no
+        /// entry here at all, and that is the same answer (ADR 0004).
         Rooms: Map<string, RoomLayer>
-        /// Terrain per tile over the projection's ground (x,y in 1..48); a
-        /// tile absent from the map is impassable. Absent is not the same
-        /// as outside the projection since ADR 0041: the border ring is
-        /// projected too, in `Borders` beside this, and is impassable here
-        /// because it is not ground.
-        Terrain: Map<Pos, Terrain>
         /// Room name -> the terrain of that room's border ring: the exit
-        /// rows and columns (x or y of 0 or 49) `Terrain` deliberately
-        /// leaves out. A layer of its own and never ground (ADR 0041): a
-        /// creep that ends its tick on an exit tile is moved into the
-        /// neighbouring room by the engine, so admitting one as walkable
-        /// would let a Seat, a Work Area or a standing candidate teleport
-        /// the creep out from under its Task — which is exactly what ADR
+        /// rows and columns (x or y of 0 or 49) a layer's `Terrain`
+        /// deliberately leaves out. A layer of its own and never ground
+        /// (ADR 0041): a creep that ends its tick on an exit tile is moved
+        /// into the neighbouring room by the engine, so admitting one as
+        /// walkable would let a Seat, a Work Area or a standing candidate
+        /// teleport the creep out from under its Task — which is what ADR
         /// 0036's 1..48 trim prevents and this layer must not undo. It
         /// enters no weight grid, no walkable or buildable set and no Work
         /// Area; the Atlas's Seam query is its one reader. Keyed by room
@@ -228,19 +224,12 @@ type SpatialInfo =
         /// not cover is simply absent here, and answers no Seam at all
         /// (ADR 0004).
         Borders: Map<string, Map<Pos, Terrain>>
-        /// Task-target id (source, refillable structure, construction site,
-        /// controller) -> that target's tile.
-        TargetPositions: Map<string, Pos>
-        /// Task-target id -> what kind of thing stands (or will stand) there.
+        /// Task-target id -> what kind of thing stands (or will stand)
+        /// there. Id-keyed and so unlayered (ADR 0041): an object id is
+        /// already unique across the world, and the layer that places the
+        /// id *is* the room it stands in (`SpatialInfo.placementOf`), so a
+        /// room dimension here would key a unique thing twice.
         TargetKinds: Map<string, TargetKind>
-        /// Creep name -> the tile the creep stands on.
-        CreepPositions: Map<string, Pos>
-        /// Tiles blocked by obstacle structures (spawn, extension,
-        /// controller, ...); impassable regardless of terrain.
-        Obstacles: Set<Pos>
-        /// Tiles holding a built road — built structures only, a road
-        /// construction site is not yet a road (ADR 0010).
-        Roads: Set<Pos>
         /// Target id -> current/max hits, repairable kinds only — the
         /// decaying roads and containers (ADR 0010, ADR 0012), the Keep
         /// and our own ramparts (ADR 0034); fields nobody decides on stay
@@ -261,54 +250,12 @@ module SpatialInfo =
         {
             RoomName = None
             Rooms = Map.empty
-            Terrain = Map.empty
             Borders = Map.empty
-            TargetPositions = Map.empty
             TargetKinds = Map.empty
-            CreepPositions = Map.empty
-            Obstacles = Set.empty
-            Roads = Set.empty
             Hits = Map.empty
             Stores = Map.empty
         }
 
-    /// The home room's layer, built from the flat fields when the layer
-    /// does not already carry one. The bridge ADR 0041's migration rests
-    /// on: while both shapes exist, a projection written either way reads
-    /// the same through this, so a reader can move onto the layer without
-    /// the same commit rewriting every projection ever written flat.
-    ///
-    /// Three rules, and each one is a decision:
-    ///
-    /// A projection that already carries the home room's entry is returned
-    /// untouched, layer and all. The layer is the truth and the flat
-    /// fields are the copy, so nothing here ever writes one over the
-    /// other — a projection carrying both a home layer and flat fields
-    /// that disagree means the layer, which is what makes the migration
-    /// one-way.
-    ///
-    /// Flat fields holding nothing bridge nothing. The empty projection is
-    /// every entry absent (ADR 0004), and that now includes the layer: a
-    /// projection with no ground, no targets, no creeps, no obstacles and
-    /// no roads projects no room, whether or not it names one. A room
-    /// named but empty answers absent from either shape, so the two agree
-    /// without an entry standing for it.
-    ///
-    /// The home room is `RoomName`, and the empty name when it names none.
-    /// A projection with tiles but no room name is a colony's own room
-    /// written without saying so — the shape most hand-built projections
-    /// take — and the census signature already spells that room's name the
-    /// empty string (`Decide.censusSignature`). Filing its tiles under the
-    /// same name is what lets those projections reach a migrated reader at
-    /// all; the alternative is a room's geometry the layer cannot hold.
-    ///
-    /// Apply it once, and after `RoomName` is final: a projection
-    /// normalised, then named, then normalised again carries its home room
-    /// twice, under the empty name and under its real one. Under a fixed
-    /// name it is idempotent.
-    ///
-    /// Temporary by construction: it goes when the flat fields go, at the
-    /// end of the migration, so nothing new should be written to need it.
     /// The name the projection's own room is filed under: `RoomName`, and
     /// the empty name when it names none — the name the census signature
     /// has always spelled that way (`Decide.censusSignature`). Decided
@@ -319,32 +266,6 @@ module SpatialInfo =
     /// query with the empty set rather than throwing.
     let homeName (spatial: SpatialInfo) : string =
         spatial.RoomName |> Option.defaultValue ""
-
-    let normalise (spatial: SpatialInfo) : SpatialInfo =
-        let home = homeName spatial
-
-        let flat: RoomLayer =
-            {
-                Terrain = spatial.Terrain
-                TargetPositions = spatial.TargetPositions
-                CreepPositions = spatial.CreepPositions
-                Obstacles = spatial.Obstacles
-                Roads = spatial.Roads
-            }
-
-        let carriesNothing =
-            Map.isEmpty flat.Terrain
-            && Map.isEmpty flat.TargetPositions
-            && Map.isEmpty flat.CreepPositions
-            && Set.isEmpty flat.Obstacles
-            && Set.isEmpty flat.Roads
-
-        if carriesNothing || Map.containsKey home spatial.Rooms then
-            spatial
-        else
-            { spatial with
-                Rooms = Map.add home flat spatial.Rooms
-            }
 
     /// One room's geometry, as ADR 0004 has every other absence: a room
     /// the projection carries no layer for reads as a room whose every

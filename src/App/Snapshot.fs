@@ -151,35 +151,84 @@ let private buildSpatial (spawn: ISpawn) : SpatialInfo =
 
     let terrain = terrainOf room.name
 
+    // This room's geometry, under this room's name: the one shape the
+    // projection has since ADR 0041's contract step, so what the shell
+    // assembles and what every reader reads are the same record and not a
+    // pair kept in step.
+    let layer: RoomLayer =
+        {
+            Terrain = terrain.Ground
+            TargetPositions =
+                Map.ofArray (
+                    Array.concat
+                        [
+                            sources |> Array.map (fun s -> s.id, posOf s.pos)
+                            structures |> Array.map (fun (st, _) -> st.id, posOf st.pos)
+                            sites |> Array.map (fun (site, _) -> site.id, posOf site.pos)
+                            controllers |> Array.map (fun c -> c.id, posOf c.pos)
+                            dropped |> Array.map (fun r -> r.id, posOf r.pos)
+                        ]
+                )
+            // This room's creeps, not the world's: `Game.creeps` is every
+            // creep we own wherever it stands, and a layer keyed by room
+            // name may only hold the tiles of the room it is filed under
+            // (ADR 0041). Every other field here is already room-scoped
+            // through `room.find`; without the same scope on this one, a
+            // creep standing in another room would be filed at home under
+            // that room's coordinates — a phantom occupant the Resolver
+            // arbitrates against (ADR 0001) and a tile the Raid log
+            // measures a raider's closest approach to. A creep the
+            // projection cannot place is ADR 0004's absence, which is the
+            // answer `Atlas.placedCreeps` already gives it. Unreachable
+            // today (one spawn room, and no Task ever stands a creep on an
+            // exit tile), so this holds the invariant rather than fixing a
+            // live symptom.
+            CreepPositions =
+                objectValues<ICreep> Game.creeps
+                |> Array.filter (fun c -> not c.spawning && c.room.name = room.name)
+                |> Array.map (fun c -> c.name, posOf c.pos)
+                |> Map.ofArray
+            // Structures a creep cannot stand on block their tile; the
+            // kinds it can are the Core's own predicate (Screeps
+            // OBSTACLE_OBJECT_TYPES).
+            Obstacles =
+                Set.ofArray (
+                    Array.concat
+                        [
+                            structures
+                            |> Array.filter (fun (_, kind) -> not (isWalkable kind))
+                            |> Array.map (fun (st, _) -> posOf st.pos)
+                            // The engine refuses to move a creep onto its
+                            // own obstacle-type construction site, so those
+                            // tiles block exactly like the finished
+                            // structure would.
+                            sites
+                            |> Array.filter (fun (_, kind) -> not (isWalkable kind))
+                            |> Array.map (fun (site, _) -> posOf site.pos)
+                            controllers |> Array.map (fun c -> posOf c.pos)
+                        ]
+                )
+            // Built roads only: a road construction site is not yet a road,
+            // so it never enters the pricing (ADR 0010).
+            Roads =
+                structures
+                |> Array.filter (fun (_, kind) -> kind = BuiltKind.Road)
+                |> Array.map (fun (st, _) -> posOf st.pos)
+                |> Set.ofArray
+        }
+
     {
         RoomName = Some room.name
-        // Filled from the five fields below by the `normalise` this
-        // assembly ends with, rather than written out a second time here:
-        // the layer is derived from the flat fields in exactly one place
-        // (ADR 0041), so what the shell projects and what a hand-written
-        // projection bridges to cannot drift apart. The maps themselves
-        // are shared, not copied — the layer costs one record.
-        Rooms = Map.empty
-        Terrain = terrain.Ground
+        Rooms = Map.ofList [ room.name, layer ]
         // The border ring of every room the projection covers, under its
         // own name: the Atlas answers a Seam from these and from nothing
         // else (ADR 0041). One room today, so every Seam query answers
         // empty — the neighbour is not projected — which is ADR 0004's
         // per-entry absence and not a special case.
         Borders = Map.ofList [ room.name, terrain.Border ]
-        TargetPositions =
-            Map.ofArray (
-                Array.concat
-                    [
-                        sources |> Array.map (fun s -> s.id, posOf s.pos)
-                        structures |> Array.map (fun (st, _) -> st.id, posOf st.pos)
-                        sites |> Array.map (fun (site, _) -> site.id, posOf site.pos)
-                        controllers |> Array.map (fun c -> c.id, posOf c.pos)
-                        dropped |> Array.map (fun r -> r.id, posOf r.pos)
-                    ]
-            )
-        // Same array order as TargetPositions, so a controller that also
-        // travels through FIND_STRUCTURES resolves to Controller both times.
+        // Same array order as the layer's TargetPositions, so a controller
+        // that also travels through FIND_STRUCTURES resolves to Controller
+        // both times.
         TargetKinds =
             Map.ofArray (
                 Array.concat
@@ -191,49 +240,6 @@ let private buildSpatial (spawn: ISpawn) : SpatialInfo =
                         dropped |> Array.map (fun r -> r.id, Dropped)
                     ]
             )
-        // This room's creeps, not the world's: `Game.creeps` is every creep
-        // we own wherever it stands, and a layer keyed by room name may
-        // only hold the tiles of the room it is filed under (ADR 0041).
-        // Every other field here is already room-scoped through
-        // `room.find`; without the same scope on this one, a creep standing
-        // in another room would be filed at home under that room's
-        // coordinates — a phantom occupant the Resolver arbitrates against
-        // (ADR 0001) and a tile the Raid log measures a raider's closest
-        // approach to. A creep the projection cannot place is ADR 0004's
-        // absence, which is the answer `Atlas.placedCreeps` already gives
-        // it. Unreachable today (one spawn room, and no Task ever stands a
-        // creep on an exit tile), so this holds the invariant rather than
-        // fixing a live symptom.
-        CreepPositions =
-            objectValues<ICreep> Game.creeps
-            |> Array.filter (fun c -> not c.spawning && c.room.name = room.name)
-            |> Array.map (fun c -> c.name, posOf c.pos)
-            |> Map.ofArray
-        // Structures a creep cannot stand on block their tile; the kinds it
-        // can are the Core's own predicate (Screeps OBSTACLE_OBJECT_TYPES).
-        Obstacles =
-            Set.ofArray (
-                Array.concat
-                    [
-                        structures
-                        |> Array.filter (fun (_, kind) -> not (isWalkable kind))
-                        |> Array.map (fun (st, _) -> posOf st.pos)
-                        // The engine refuses to move a creep onto its own
-                        // obstacle-type construction site, so those tiles
-                        // block exactly like the finished structure would.
-                        sites
-                        |> Array.filter (fun (_, kind) -> not (isWalkable kind))
-                        |> Array.map (fun (site, _) -> posOf site.pos)
-                        controllers |> Array.map (fun c -> posOf c.pos)
-                    ]
-            )
-        // Built roads only: a road construction site is not yet a road,
-        // so it never enters the pricing (ADR 0010).
-        Roads =
-            structures
-            |> Array.filter (fun (_, kind) -> kind = BuiltKind.Road)
-            |> Array.map (fun (st, _) -> posOf st.pos)
-            |> Set.ofArray
         // Hits on the repairable kinds only — the decaying roads and
         // containers (ADR 0010, ADR 0012), the Keep and our own ramparts
         // (ADR 0034): fields nobody decides on stay out, and the Repair
@@ -259,11 +265,6 @@ let private buildSpatial (spawn: ISpawn) : SpatialInfo =
             |> Array.map (fun (st, _) -> st.id, st.store.getUsedCapacity "energy")
             |> Map.ofArray
     }
-    // The spawn room's layer, beside the flat fields it was built from
-    // (ADR 0041). Both shapes carry this room until the readers have
-    // moved; the layer is what an outpost's geometry will arrive as, and
-    // the flat fields have no room to put a second room in.
-    |> SpatialInfo.normalise
 
 let build () : Snapshot =
     let spawns = objectValues<ISpawn> Game.spawns

@@ -41,13 +41,44 @@ let creepWith name energy body =
         Body = body |> List.countBy id |> Map.ofList
     }
 
-/// Projection with the given target positions and terrain tiles; no creeps,
-/// no obstacles — tests layer those on top.
-let spatial targets tiles =
-    { SpatialInfo.empty with
-        Terrain = Map.ofList tiles
-        TargetPositions = Map.ofList targets
+/// The home room's geometry, read back off a projection: the room
+/// `RoomName` names, and the one the empty name files when it names none
+/// (`SpatialInfo.homeName`). Absent geometry reads as an empty layer, never
+/// as a lookup that throws (ADR 0004).
+let homeLayer (spatial: SpatialInfo) : RoomLayer =
+    SpatialInfo.layerOf spatial (SpatialInfo.homeName spatial)
+
+/// The same projection with the home room's layer changed. Since ADR 0041's
+/// contract step the tile-shaped containers live under a room name and
+/// nowhere else, so a test that used to copy-update the projection itself
+/// — `{ spatial … with CreepPositions = … }` — reaches through this
+/// instead. It merges into whatever layer is already there, so composing it
+/// with the target funnels below is order-blind. Apply it after `RoomName`
+/// is final: the home name is resolved when it runs, and a projection
+/// layered then renamed leaves its geometry filed under the old name.
+let withHome (change: RoomLayer -> RoomLayer) (spatial: SpatialInfo) : SpatialInfo =
+    { spatial with
+        Rooms = Map.add (SpatialInfo.homeName spatial) (change (homeLayer spatial)) spatial.Rooms
     }
+
+/// Projection with the given target positions and terrain tiles; no creeps,
+/// no obstacles — tests layer those on top. It files them through
+/// `withHome` and inherits its ordering rule, which bites hardest here
+/// because this funnel starts from `SpatialInfo.empty`: the home name it
+/// resolves is the empty one, so a projection built by this and *then*
+/// given a `RoomName` carries its geometry under the empty name while
+/// `RoomName` says another, and every reader that asks by *room* — the
+/// weight grid, the census signature, the hauler quota — answers off
+/// `RoomLayer.empty`. The target-keyed queries still find it, because
+/// `SpatialInfo.placementOf` scans every layer, which is what makes the
+/// mistake quiet. Name the room first, then build.
+let spatial targets tiles =
+    SpatialInfo.empty
+    |> withHome (fun layer ->
+        { layer with
+            Terrain = Map.ofList tiles
+            TargetPositions = Map.ofList targets
+        })
 
 /// `mayAct` over a Task's own Work Area — the tiles the decision layer
 /// hands it on a tick with nothing taken out of one (ADR 0033).
@@ -112,15 +143,17 @@ let seatTests =
                 // absent; an obstacle sits on a walkable neighbour but does
                 // not consume the Seat (ADR 0001: terrain only).
                 let atlas =
-                    { spatial
-                          [ "src-a", { X = 10; Y = 10 } ]
-                          [
-                              { X = 9; Y = 10 }, Plain
-                              { X = 11; Y = 10 }, Swamp
-                              { X = 10; Y = 9 }, Wall
-                          ] with
-                        Obstacles = Set.singleton { X = 9; Y = 10 }
-                    }
+                    spatial
+                        [ "src-a", { X = 10; Y = 10 } ]
+                        [
+                            { X = 9; Y = 10 }, Plain
+                            { X = 11; Y = 10 }, Swamp
+                            { X = 10; Y = 9 }, Wall
+                        ]
+                    |> withHome (fun layer ->
+                        { layer with
+                            Obstacles = Set.singleton { X = 9; Y = 10 }
+                        })
                     |> snapshotWith []
                     |> ofSnapshot
 
@@ -144,16 +177,18 @@ let standingTests =
         [
             test "adjacentWalkable excludes walls, obstacles and absent tiles, in (X, Y) order" {
                 let atlas =
-                    { spatial
-                          []
-                          [
-                              { X = 9; Y = 10 }, Plain
-                              { X = 10; Y = 9 }, Wall
-                              { X = 10; Y = 11 }, Swamp
-                              { X = 11; Y = 10 }, Plain
-                          ] with
-                        Obstacles = Set.singleton { X = 11; Y = 10 }
-                    }
+                    spatial
+                        []
+                        [
+                            { X = 9; Y = 10 }, Plain
+                            { X = 10; Y = 9 }, Wall
+                            { X = 10; Y = 11 }, Swamp
+                            { X = 11; Y = 10 }, Plain
+                        ]
+                    |> withHome (fun layer ->
+                        { layer with
+                            Obstacles = Set.singleton { X = 11; Y = 10 }
+                        })
                     |> snapshotWith []
                     |> ofSnapshot
 
@@ -169,18 +204,20 @@ let standingTests =
                 // the road that discounts a tile is standing ground like any
                 // other (ADR 0033's safe set is built out of this).
                 let atlas =
-                    { spatial
-                          []
-                          [
-                              { X = 9; Y = 10 }, Plain
-                              { X = 10; Y = 9 }, Wall
-                              { X = 10; Y = 10 }, Swamp
-                              { X = 10; Y = 11 }, Plain
-                              { X = 11; Y = 10 }, Plain
-                          ] with
-                        Obstacles = Set.singleton { X = 11; Y = 10 }
-                        Roads = Set.singleton { X = 10; Y = 11 }
-                    }
+                    spatial
+                        []
+                        [
+                            { X = 9; Y = 10 }, Plain
+                            { X = 10; Y = 9 }, Wall
+                            { X = 10; Y = 10 }, Swamp
+                            { X = 10; Y = 11 }, Plain
+                            { X = 11; Y = 10 }, Plain
+                        ]
+                    |> withHome (fun layer ->
+                        { layer with
+                            Obstacles = Set.singleton { X = 11; Y = 10 }
+                            Roads = Set.singleton { X = 10; Y = 11 }
+                        })
                     |> snapshotWith []
                     |> ofSnapshot
 
@@ -195,11 +232,13 @@ let standingTests =
                 // layer has taken out of it is no tile to act from, however
                 // well the action's range reaches the target from there.
                 let atlas =
-                    { spatial
-                          [ "src-a", { X = 10; Y = 10 } ]
-                          [ { X = 10; Y = 10 }, Wall; { X = 10; Y = 11 }, Plain ] with
-                        CreepPositions = Map.ofList [ "w", { X = 10; Y = 11 } ]
-                    }
+                    spatial
+                        [ "src-a", { X = 10; Y = 10 } ]
+                        [ { X = 10; Y = 10 }, Wall; { X = 10; Y = 11 }, Plain ]
+                    |> withHome (fun layer ->
+                        { layer with
+                            CreepPositions = Map.ofList [ "w", { X = 10; Y = 11 } ]
+                        })
                     |> snapshotWith [ worker "w" ]
                     |> ofSnapshot
 
@@ -214,9 +253,11 @@ let standingTests =
 
             test "creepTile places a projected creep, and answers nothing for the rest" {
                 let atlas =
-                    { spatial [] [ { X = 5; Y = 5 }, Plain ] with
-                        CreepPositions = Map.ofList [ "amy", { X = 5; Y = 5 } ]
-                    }
+                    spatial [] [ { X = 5; Y = 5 }, Plain ]
+                    |> withHome (fun layer ->
+                        { layer with
+                            CreepPositions = Map.ofList [ "amy", { X = 5; Y = 5 } ]
+                        })
                     |> snapshotWith [ worker "amy"; worker "ghost" ]
                     |> ofSnapshot
 
@@ -226,10 +267,12 @@ let standingTests =
 
             test "placedCreeps keeps Snapshot creep order and skips the unplaced" {
                 let atlas =
-                    { spatial [] [ { X = 5; Y = 5 }, Plain ] with
-                        CreepPositions =
-                            Map.ofList [ "zed", { X = 5; Y = 5 }; "amy", { X = 6; Y = 6 } ]
-                    }
+                    spatial [] [ { X = 5; Y = 5 }, Plain ]
+                    |> withHome (fun layer ->
+                        { layer with
+                            CreepPositions =
+                                Map.ofList [ "zed", { X = 5; Y = 5 }; "amy", { X = 6; Y = 6 } ]
+                        })
                     |> snapshotWith [ worker "zed"; worker "ghost"; worker "amy" ]
                     |> ofSnapshot
 
@@ -290,8 +333,11 @@ let placementQueryTests =
                                     "ext-1", Structure BuiltKind.Extension
                                     "site-1", Site BuiltKind.Extension
                                 ]
-                        CreepPositions = Map.ofList [ "w", { X = 10; Y = 10 } ]
                     }
+                    |> withHome (fun layer ->
+                        { layer with
+                            CreepPositions = Map.ofList [ "w", { X = 10; Y = 10 } ]
+                        })
                     |> snapshotWith [ worker "w" ]
                     |> ofSnapshot
 
@@ -373,8 +419,11 @@ let placementQueryTests =
                         TargetKinds = Map.ofList [ "cont-1", Structure BuiltKind.Container ]
                         Hits = Map.ofList [ "cont-1", { Hits = 100; HitsMax = 250000 } ]
                         Stores = Map.ofList [ "cont-1", 800 ]
-                        CreepPositions = Map.ofList [ "w", { X = 7; Y = 7 } ]
                     }
+                    |> withHome (fun layer ->
+                        { layer with
+                            CreepPositions = Map.ofList [ "w", { X = 7; Y = 7 } ]
+                        })
                     |> snapshotWith [ worker "w" ]
                     |> ofSnapshot
 
@@ -402,8 +451,11 @@ let placementQueryTests =
                     { spatial [] [ { X = 10; Y = 10 }, Plain ] with
                         TargetKinds = Map.ofList [ "cont-1", Structure BuiltKind.Container ]
                         Hits = Map.ofList [ "cont-1", { Hits = 100; HitsMax = 250000 } ]
-                        CreepPositions = Map.ofList [ "w", { X = 10; Y = 10 } ]
                     }
+                    |> withHome (fun layer ->
+                        { layer with
+                            CreepPositions = Map.ofList [ "w", { X = 10; Y = 10 } ]
+                        })
                     |> snapshotWith [ worker "w" ]
                     |> ofSnapshot
 
@@ -450,18 +502,20 @@ let placementQueryTests =
 /// Source at (10,12) on a wall; its Work Area is a swamp Seat at (10,13)
 /// and a plain Seat at (11,13). A plain lane runs down to (10,15).
 let corridor creeps =
-    { spatial
-          [ "src-a", { X = 10; Y = 12 } ]
-          [
-              { X = 10; Y = 12 }, Wall
-              { X = 10; Y = 13 }, Swamp
-              { X = 11; Y = 13 }, Plain
-              { X = 10; Y = 14 }, Plain
-              { X = 11; Y = 14 }, Plain
-              { X = 10; Y = 15 }, Plain
-          ] with
-        CreepPositions = Map.ofList creeps
-    }
+    spatial
+        [ "src-a", { X = 10; Y = 12 } ]
+        [
+            { X = 10; Y = 12 }, Wall
+            { X = 10; Y = 13 }, Swamp
+            { X = 11; Y = 13 }, Plain
+            { X = 10; Y = 14 }, Plain
+            { X = 11; Y = 14 }, Plain
+            { X = 10; Y = 15 }, Plain
+        ]
+    |> withHome (fun layer ->
+        { layer with
+            CreepPositions = Map.ofList creeps
+        })
 
 [<Tests>]
 let travelCostTests =
@@ -494,9 +548,11 @@ let travelCostTests =
                 let projection = corridor [ "w", { X = 20; Y = 20 } ]
 
                 let atlas =
-                    { projection with
-                        Terrain = Map.add { X = 20; Y = 20 } Plain projection.Terrain
-                    }
+                    projection
+                    |> withHome (fun layer ->
+                        { layer with
+                            Terrain = Map.add { X = 20; Y = 20 } Plain layer.Terrain
+                        })
                     |> snapshotWith [ worker "w" ]
                     |> ofSnapshot
 
@@ -548,34 +604,38 @@ let travelCostTests =
 /// and roads; the creep "w" stands one step below on plain — the cost is
 /// exactly one step onto that Seat.
 let seatPriced terrain roads =
-    { spatial
-          [ "src-a", { X = 10; Y = 10 } ]
-          [
-              { X = 10; Y = 10 }, Wall
-              { X = 10; Y = 11 }, terrain
-              { X = 10; Y = 12 }, Plain
-          ] with
-        CreepPositions = Map.ofList [ "w", { X = 10; Y = 12 } ]
-        Roads = roads
-    }
+    spatial
+        [ "src-a", { X = 10; Y = 10 } ]
+        [
+            { X = 10; Y = 10 }, Wall
+            { X = 10; Y = 11 }, terrain
+            { X = 10; Y = 12 }, Plain
+        ]
+    |> withHome (fun layer ->
+        { layer with
+            CreepPositions = Map.ofList [ "w", { X = 10; Y = 12 } ]
+            Roads = roads
+        })
 
 /// Source at (10,10) behind a Seat at (10,11); the creep "w" stands two
 /// steps below it at (10,13), so its only route runs through (10,12) —
 /// the tile each corridor test dresses. Nothing else is projected, so the
 /// corridor is one tile wide and no diagonal skirts the dressed tile.
 let corridorThrough middle roads obstacles =
-    { spatial
-          [ "src-a", { X = 10; Y = 10 } ]
-          ([
-              { X = 10; Y = 10 }, Wall
-              { X = 10; Y = 11 }, Plain
-              { X = 10; Y = 13 }, Plain
-           ]
-           @ middle) with
-        CreepPositions = Map.ofList [ "w", { X = 10; Y = 13 } ]
-        Roads = roads
-        Obstacles = obstacles
-    }
+    spatial
+        [ "src-a", { X = 10; Y = 10 } ]
+        ([
+            { X = 10; Y = 10 }, Wall
+            { X = 10; Y = 11 }, Plain
+            { X = 10; Y = 13 }, Plain
+         ]
+         @ middle)
+    |> withHome (fun layer ->
+        { layer with
+            CreepPositions = Map.ofList [ "w", { X = 10; Y = 13 } ]
+            Roads = roads
+            Obstacles = obstacles
+        })
 
 [<Tests>]
 let roadPricingTests =
@@ -606,10 +666,12 @@ let roadPricingTests =
                 // costs its plain weight plus the surcharge — 2 + 10, the
                 // 10 being the same price as stepping into swamp (ADR 0010).
                 let atlas =
-                    { seatPriced Plain Set.empty with
-                        CreepPositions =
-                            Map.ofList [ "w", { X = 10; Y = 12 }; "b", { X = 10; Y = 11 } ]
-                    }
+                    seatPriced Plain Set.empty
+                    |> withHome (fun layer ->
+                        { layer with
+                            CreepPositions =
+                                Map.ofList [ "w", { X = 10; Y = 12 }; "b", { X = 10; Y = 11 } ]
+                        })
                     |> snapshotWith [ worker "w"; worker "b" ]
                     |> ofSnapshot
 
@@ -624,10 +686,14 @@ let roadPricingTests =
                 // into Roads — the tile keeps pricing by its terrain.
                 let atlas =
                     { seatPriced Plain Set.empty with
-                        TargetPositions =
-                            Map.ofList [ "src-a", { X = 10; Y = 10 }; "site-1", { X = 10; Y = 11 } ]
                         TargetKinds = Map.ofList [ "src-a", Source; "site-1", Site BuiltKind.Other ]
                     }
+                    |> withHome (fun layer ->
+                        { layer with
+                            TargetPositions =
+                                Map.ofList
+                                    [ "src-a", { X = 10; Y = 10 }; "site-1", { X = 10; Y = 11 } ]
+                        })
                     |> snapshotWith [ worker "w" ]
                     |> ofSnapshot
 
@@ -772,20 +838,24 @@ let travelUnitTests =
 /// (19,10). A creep at (19,10) is eight road steps from the Seat —
 /// #79's corridor.
 let roadCorridor creeps =
-    { spatial
-          [ "src-a", { X = 10; Y = 10 } ]
-          [ for x in 10..19 -> { X = x; Y = 10 }, (if x = 10 then Wall else Plain) ] with
-        Roads = Set.ofList [ for x in 11..19 -> { X = x; Y = 10 } ]
-        CreepPositions = Map.ofList creeps
-    }
+    spatial
+        [ "src-a", { X = 10; Y = 10 } ]
+        [ for x in 10..19 -> { X = x; Y = 10 }, (if x = 10 then Wall else Plain) ]
+    |> withHome (fun layer ->
+        { layer with
+            Roads = Set.ofList [ for x in 11..19 -> { X = x; Y = 10 } ]
+            CreepPositions = Map.ofList creeps
+        })
 
 /// The same lane unpaved: six plain steps from (17,10) to the Seat.
 let plainCorridor creeps =
-    { spatial
-          [ "src-a", { X = 10; Y = 10 } ]
-          [ for x in 10..17 -> { X = x; Y = 10 }, (if x = 10 then Wall else Plain) ] with
-        CreepPositions = Map.ofList creeps
-    }
+    spatial
+        [ "src-a", { X = 10; Y = 10 } ]
+        [ for x in 10..17 -> { X = x; Y = 10 }, (if x = 10 then Wall else Plain) ]
+    |> withHome (fun layer ->
+        { layer with
+            CreepPositions = Map.ofList creeps
+        })
 
 /// A varied room for the walk's floor property: 15 × 15 of mixed terrain
 /// with scattered single walls — spaced four apart, so no two touch and
@@ -802,22 +872,24 @@ let mixedRoom creeps =
                     else { X = x; Y = y }, Plain
         ]
 
-    { spatial
-          [
-              for i, tile in List.indexed [ { X = 3; Y = 3 }; { X = 11; Y = 4 }; { X = 6; Y = 12 } ] ->
-                  $"src-%d{i}", tile
-          ]
-          tiles with
-        Roads =
-            Set.ofList
-                [
-                    for x in 0..14 do
-                        for y in 0..14 do
-                            if (2 * x + y) % 5 = 0 then
-                                { X = x; Y = y }
-                ]
-        CreepPositions = Map.ofList creeps
-    }
+    spatial
+        [
+            for i, tile in List.indexed [ { X = 3; Y = 3 }; { X = 11; Y = 4 }; { X = 6; Y = 12 } ] ->
+                $"src-%d{i}", tile
+        ]
+        tiles
+    |> withHome (fun layer ->
+        { layer with
+            Roads =
+                Set.ofList
+                    [
+                        for x in 0..14 do
+                            for y in 0..14 do
+                                if (2 * x + y) % 5 = 0 then
+                                    { X = x; Y = y }
+                    ]
+            CreepPositions = Map.ofList creeps
+        })
 
 [<Tests>]
 let walkTests =
@@ -1003,9 +1075,11 @@ let walkTests =
                 let island = corridor [ "w", { X = 20; Y = 20 } ]
 
                 let stranded =
-                    { island with
-                        Terrain = Map.add { X = 20; Y = 20 } Plain island.Terrain
-                    }
+                    island
+                    |> withHome (fun layer ->
+                        { layer with
+                            Terrain = Map.add { X = 20; Y = 20 } Plain layer.Terrain
+                        })
                     |> snapshotWith [ worker "w" ]
                     |> ofSnapshot
 
@@ -1025,20 +1099,22 @@ let firstStepTests =
                 // Straight lane x = 10 is swamp; the lane at x = 11 is plain
                 // and reaches a Seat in as many steps.
                 let atlas =
-                    { spatial
-                          [ "src-a", { X = 10; Y = 10 } ]
-                          [
-                              { X = 10; Y = 10 }, Wall
-                              { X = 10; Y = 11 }, Plain
-                              { X = 10; Y = 12 }, Swamp
-                              { X = 10; Y = 13 }, Swamp
-                              { X = 10; Y = 14 }, Plain
-                              { X = 11; Y = 11 }, Plain
-                              { X = 11; Y = 12 }, Plain
-                              { X = 11; Y = 13 }, Plain
-                          ] with
-                        CreepPositions = Map.ofList [ "w", { X = 10; Y = 14 } ]
-                    }
+                    spatial
+                        [ "src-a", { X = 10; Y = 10 } ]
+                        [
+                            { X = 10; Y = 10 }, Wall
+                            { X = 10; Y = 11 }, Plain
+                            { X = 10; Y = 12 }, Swamp
+                            { X = 10; Y = 13 }, Swamp
+                            { X = 10; Y = 14 }, Plain
+                            { X = 11; Y = 11 }, Plain
+                            { X = 11; Y = 12 }, Plain
+                            { X = 11; Y = 13 }, Plain
+                        ]
+                    |> withHome (fun layer ->
+                        { layer with
+                            CreepPositions = Map.ofList [ "w", { X = 10; Y = 14 } ]
+                        })
                     |> snapshotWith [ worker "w" ]
                     |> ofSnapshot
 
@@ -1053,21 +1129,23 @@ let firstStepTests =
                 // with a creep parked mid-lane: the occupancy surcharge
                 // sends the first step into the free lane at x = 11.
                 let atlas =
-                    { spatial
-                          [ "src-a", { X = 10; Y = 10 } ]
-                          [
-                              { X = 10; Y = 10 }, Wall
-                              { X = 10; Y = 11 }, Plain
-                              { X = 10; Y = 12 }, Plain
-                              { X = 10; Y = 13 }, Plain
-                              { X = 10; Y = 14 }, Plain
-                              { X = 11; Y = 11 }, Plain
-                              { X = 11; Y = 12 }, Plain
-                              { X = 11; Y = 13 }, Plain
-                          ] with
-                        CreepPositions =
-                            Map.ofList [ "w", { X = 10; Y = 14 }; "b", { X = 10; Y = 13 } ]
-                    }
+                    spatial
+                        [ "src-a", { X = 10; Y = 10 } ]
+                        [
+                            { X = 10; Y = 10 }, Wall
+                            { X = 10; Y = 11 }, Plain
+                            { X = 10; Y = 12 }, Plain
+                            { X = 10; Y = 13 }, Plain
+                            { X = 10; Y = 14 }, Plain
+                            { X = 11; Y = 11 }, Plain
+                            { X = 11; Y = 12 }, Plain
+                            { X = 11; Y = 13 }, Plain
+                        ]
+                    |> withHome (fun layer ->
+                        { layer with
+                            CreepPositions =
+                                Map.ofList [ "w", { X = 10; Y = 14 }; "b", { X = 10; Y = 13 } ]
+                        })
                     |> snapshotWith [ worker "w"; worker "b" ]
                     |> ofSnapshot
 
@@ -1093,9 +1171,11 @@ let firstStepTests =
                 let projection = corridor [ "w", { X = 20; Y = 20 } ]
 
                 let atlas =
-                    { projection with
-                        Terrain = Map.add { X = 20; Y = 20 } Plain projection.Terrain
-                    }
+                    projection
+                    |> withHome (fun layer ->
+                        { layer with
+                            Terrain = Map.add { X = 20; Y = 20 } Plain layer.Terrain
+                        })
                     |> snapshotWith [ worker "w" ]
                     |> ofSnapshot
 
@@ -1127,21 +1207,23 @@ let firstStepIgnoringTrafficTests =
                 // mid-lane bends the priced step into the parallel lane;
                 // the blind step walks straight at it.
                 let atlas =
-                    { spatial
-                          [ "src-a", { X = 10; Y = 10 } ]
-                          [
-                              { X = 10; Y = 10 }, Wall
-                              { X = 10; Y = 11 }, Plain
-                              { X = 10; Y = 12 }, Plain
-                              { X = 10; Y = 13 }, Plain
-                              { X = 10; Y = 14 }, Plain
-                              { X = 11; Y = 11 }, Plain
-                              { X = 11; Y = 12 }, Plain
-                              { X = 11; Y = 13 }, Plain
-                          ] with
-                        CreepPositions =
-                            Map.ofList [ "w", { X = 10; Y = 14 }; "b", { X = 10; Y = 13 } ]
-                    }
+                    spatial
+                        [ "src-a", { X = 10; Y = 10 } ]
+                        [
+                            { X = 10; Y = 10 }, Wall
+                            { X = 10; Y = 11 }, Plain
+                            { X = 10; Y = 12 }, Plain
+                            { X = 10; Y = 13 }, Plain
+                            { X = 10; Y = 14 }, Plain
+                            { X = 11; Y = 11 }, Plain
+                            { X = 11; Y = 12 }, Plain
+                            { X = 11; Y = 13 }, Plain
+                        ]
+                    |> withHome (fun layer ->
+                        { layer with
+                            CreepPositions =
+                                Map.ofList [ "w", { X = 10; Y = 14 }; "b", { X = 10; Y = 13 } ]
+                        })
                     |> snapshotWith [ worker "w"; worker "b" ]
                     |> ofSnapshot
 
@@ -1167,24 +1249,27 @@ let firstStepIgnoringTrafficTests =
                 // route, so it must read the units: the shared memo's
                 // traffic-blind entries are two, and this is the other one.
                 let atlas =
-                    { spatial
-                          [ "src-a", { X = 10; Y = 10 } ]
-                          [
-                              { X = 10; Y = 10 }, Wall
-                              { X = 11; Y = 9 }, Plain
-                              { X = 11; Y = 10 }, Wall
-                              { X = 11; Y = 11 }, Plain
-                              { X = 12; Y = 8 }, Plain
-                              { X = 12; Y = 9 }, Wall
-                              { X = 12; Y = 10 }, Wall
-                              { X = 12; Y = 11 }, Plain
-                              { X = 13; Y = 9 }, Plain
-                              { X = 13; Y = 10 }, Plain
-                          ] with
-                        Roads =
-                            Set.ofList [ { X = 13; Y = 9 }; { X = 12; Y = 8 }; { X = 11; Y = 9 } ]
-                        CreepPositions = Map.ofList [ "w", { X = 13; Y = 10 } ]
-                    }
+                    spatial
+                        [ "src-a", { X = 10; Y = 10 } ]
+                        [
+                            { X = 10; Y = 10 }, Wall
+                            { X = 11; Y = 9 }, Plain
+                            { X = 11; Y = 10 }, Wall
+                            { X = 11; Y = 11 }, Plain
+                            { X = 12; Y = 8 }, Plain
+                            { X = 12; Y = 9 }, Wall
+                            { X = 12; Y = 10 }, Wall
+                            { X = 12; Y = 11 }, Plain
+                            { X = 13; Y = 9 }, Plain
+                            { X = 13; Y = 10 }, Plain
+                        ]
+                    |> withHome (fun layer ->
+                        { layer with
+                            Roads =
+                                Set.ofList
+                                    [ { X = 13; Y = 9 }; { X = 12; Y = 8 }; { X = 11; Y = 9 } ]
+                            CreepPositions = Map.ofList [ "w", { X = 13; Y = 10 } ]
+                        })
                     |> snapshotWith [ worker "w" ]
                     |> ofSnapshot
 
@@ -1237,8 +1322,11 @@ let workAreaForTests =
                                 "ctrl-1", Controller
                                 "cont-1", Structure BuiltKind.Container
                             ]
-                    CreepPositions = Map.ofList creeps
                 }
+                |> withHome (fun layer ->
+                    { layer with
+                        CreepPositions = Map.ofList creeps
+                    })
 
             let anchor name =
                 creepWith name 0 [ Work; Work; Carry; Move ]
@@ -1280,8 +1368,11 @@ let workAreaForTests =
                               { X = 10; Y = 11 }, Plain
                           ] with
                         TargetKinds = Map.ofList [ "src-a", Source ]
-                        CreepPositions = Map.ofList [ "a", { X = 10; Y = 11 } ]
                     }
+                    |> withHome (fun layer ->
+                        { layer with
+                            CreepPositions = Map.ofList [ "a", { X = 10; Y = 11 } ]
+                        })
                     |> snapshotWith [ anchor "a" ]
                     |> ofSnapshot
 
@@ -1320,9 +1411,12 @@ let workAreaForTests =
                           [ { X = 9; Y = 10 }, Plain; { X = 10; Y = 11 }, Plain ] with
                         TargetKinds =
                             Map.ofList [ "src-a", Source; "cont-1", Structure BuiltKind.Container ]
-                        Obstacles = Set.singleton { X = 9; Y = 10 }
-                        CreepPositions = Map.ofList [ "a", { X = 10; Y = 11 } ]
                     }
+                    |> withHome (fun layer ->
+                        { layer with
+                            Obstacles = Set.singleton { X = 9; Y = 10 }
+                            CreepPositions = Map.ofList [ "a", { X = 10; Y = 11 } ]
+                        })
                     |> snapshotWith [ creepWith "a" 0 [ Work; Work; Carry; Move ] ]
                     |> ofSnapshot
 
@@ -1369,11 +1463,13 @@ let mayActTests =
         [
             test "acting is judged by the action's range from the tick-start position" {
                 let atlasAt creepPos =
-                    { spatial
-                          [ "src-a", { X = 10; Y = 10 }; "ctrl-1", { X = 20; Y = 20 } ]
-                          [ for y in 11..15 -> { X = 10; Y = y }, Plain ] with
-                        CreepPositions = Map.ofList [ "w", creepPos ]
-                    }
+                    spatial
+                        [ "src-a", { X = 10; Y = 10 }; "ctrl-1", { X = 20; Y = 20 } ]
+                        [ for y in 11..15 -> { X = 10; Y = y }, Plain ]
+                    |> withHome (fun layer ->
+                        { layer with
+                            CreepPositions = Map.ofList [ "w", creepPos ]
+                        })
                     |> snapshotWith [ worker "w" ]
                     |> ofSnapshot
 
@@ -1392,11 +1488,13 @@ let mayActTests =
 
             test "repair reaches at range 3, like build and upgrade" {
                 let atlasAt creepPos =
-                    { spatial
-                          [ "road-1", { X = 10; Y = 10 } ]
-                          [ for y in 10..15 -> { X = 10; Y = y }, Plain ] with
-                        CreepPositions = Map.ofList [ "w", creepPos ]
-                    }
+                    spatial
+                        [ "road-1", { X = 10; Y = 10 } ]
+                        [ for y in 10..15 -> { X = 10; Y = y }, Plain ]
+                    |> withHome (fun layer ->
+                        { layer with
+                            CreepPositions = Map.ofList [ "w", creepPos ]
+                        })
                     |> snapshotWith [ worker "w" ]
                     |> ofSnapshot
 
@@ -1429,8 +1527,11 @@ let mayActTests =
                           [ { X = 9; Y = 10 }, Plain; { X = 10; Y = 11 }, Plain ] with
                         TargetKinds =
                             Map.ofList [ "src-a", Source; "cont-1", Structure BuiltKind.Container ]
-                        CreepPositions = Map.ofList [ "a", creepPos ]
                     }
+                    |> withHome (fun layer ->
+                        { layer with
+                            CreepPositions = Map.ofList [ "a", creepPos ]
+                        })
                     |> snapshotWith [ creepWith "a" 0 [ Work; Work; Carry; Move ] ]
                     |> ofSnapshot
 
@@ -1447,10 +1548,12 @@ let mayActTests =
                 // An obstacle-type site dropped under a standing creep: the
                 // engine lets it stay, and it keeps working (ADR 0004).
                 let atlas =
-                    { spatial [ "src-a", { X = 10; Y = 10 } ] [ { X = 10; Y = 11 }, Plain ] with
-                        Obstacles = Set.singleton { X = 10; Y = 11 }
-                        CreepPositions = Map.ofList [ "w", { X = 10; Y = 11 } ]
-                    }
+                    spatial [ "src-a", { X = 10; Y = 10 } ] [ { X = 10; Y = 11 }, Plain ]
+                    |> withHome (fun layer ->
+                        { layer with
+                            Obstacles = Set.singleton { X = 10; Y = 11 }
+                            CreepPositions = Map.ofList [ "w", { X = 10; Y = 11 } ]
+                        })
                     |> snapshotWith [ worker "w" ]
                     |> ofSnapshot
 
@@ -1510,8 +1613,11 @@ let dualSeatTests =
                           [ "src-a", { X = 10; Y = 10 }; "ctrl-1", { X = 13; Y = 10 } ]
                           [ { X = 9; Y = 10 }, Plain; { X = 11; Y = 10 }, Plain ] with
                         TargetKinds = Map.ofList [ "src-a", Source; "ctrl-1", Controller ]
-                        Obstacles = Set.singleton { X = 11; Y = 10 }
                     }
+                    |> withHome (fun layer ->
+                        { layer with
+                            Obstacles = Set.singleton { X = 11; Y = 10 }
+                        })
                     |> snapshotWith []
                     |> ofSnapshot
 
@@ -1705,30 +1811,35 @@ let consistencyTests =
                 // dead lane, an obstacle, and an unreachable island — the
                 // sweep stands one creep on every standing tile in turn.
                 let projection =
-                    { spatial
-                          [ "src-a", { X = 10; Y = 10 } ]
-                          [
-                              { X = 10; Y = 10 }, Wall
-                              { X = 9; Y = 10 }, Plain
-                              { X = 10; Y = 11 }, Swamp
-                              { X = 11; Y = 11 }, Plain
-                              { X = 9; Y = 11 }, Plain
-                              { X = 9; Y = 12 }, Plain
-                              { X = 10; Y = 12 }, Plain
-                              { X = 11; Y = 12 }, Plain
-                              { X = 8; Y = 10 }, Plain
-                              { X = 8; Y = 9 }, Swamp
-                              { X = 20; Y = 20 }, Plain
-                              { X = 21; Y = 20 }, Plain
-                          ] with
-                        Obstacles = Set.singleton { X = 11; Y = 12 }
-                    }
+                    spatial
+                        [ "src-a", { X = 10; Y = 10 } ]
+                        [
+                            { X = 10; Y = 10 }, Wall
+                            { X = 9; Y = 10 }, Plain
+                            { X = 10; Y = 11 }, Swamp
+                            { X = 11; Y = 11 }, Plain
+                            { X = 9; Y = 11 }, Plain
+                            { X = 9; Y = 12 }, Plain
+                            { X = 10; Y = 12 }, Plain
+                            { X = 11; Y = 12 }, Plain
+                            { X = 8; Y = 10 }, Plain
+                            { X = 8; Y = 9 }, Swamp
+                            { X = 20; Y = 20 }, Plain
+                            { X = 21; Y = 20 }, Plain
+                        ]
+                    |> withHome (fun layer ->
+                        { layer with
+                            Obstacles = Set.singleton { X = 11; Y = 12 }
+                        })
 
                 let standing =
-                    projection.Terrain
+                    (homeLayer projection).Terrain
                     |> Map.toList
                     |> List.choose (fun (tile, kind) ->
-                        if kind <> Wall && not (Set.contains tile projection.Obstacles) then
+                        if
+                            kind <> Wall
+                            && not (Set.contains tile (homeLayer projection).Obstacles)
+                        then
                             Some tile
                         else
                             None)
@@ -1737,9 +1848,11 @@ let consistencyTests =
 
                 for pos in standing do
                     let atlas =
-                        { projection with
-                            CreepPositions = Map.ofList [ "w", pos ]
-                        }
+                        projection
+                        |> withHome (fun layer ->
+                            { layer with
+                                CreepPositions = Map.ofList [ "w", pos ]
+                            })
                         |> snapshotWith [ worker "w" ]
                         |> ofSnapshot
 
@@ -1772,15 +1885,17 @@ let consistencyTests =
                 // under an obstacle — standing loses it, the Seat count
                 // keeps it (ADR 0001), so standing never exceeds Seats.
                 let atlas =
-                    { spatial
-                          [ "src-a", { X = 10; Y = 10 } ]
-                          [
-                              { X = 9; Y = 10 }, Plain
-                              { X = 11; Y = 10 }, Swamp
-                              { X = 10; Y = 9 }, Wall
-                          ] with
-                        Obstacles = Set.singleton { X = 9; Y = 10 }
-                    }
+                    spatial
+                        [ "src-a", { X = 10; Y = 10 } ]
+                        [
+                            { X = 9; Y = 10 }, Plain
+                            { X = 11; Y = 10 }, Swamp
+                            { X = 10; Y = 9 }, Wall
+                        ]
+                    |> withHome (fun layer ->
+                        { layer with
+                            Obstacles = Set.singleton { X = 9; Y = 10 }
+                        })
                     |> snapshotWith []
                     |> ofSnapshot
 
@@ -1863,10 +1978,12 @@ let trunkPathTests =
                 // road; normal pricing would make it the cheap lane, but
                 // trunk pricing reads the ground under it (ADR 0011).
                 let atlas =
-                    { corridor with
-                        Terrain = Map.add { X = 12; Y = 10 } Swamp corridor.Terrain
-                        Roads = Set.singleton { X = 12; Y = 10 }
-                    }
+                    corridor
+                    |> withHome (fun layer ->
+                        { layer with
+                            Terrain = Map.add { X = 12; Y = 10 } Swamp layer.Terrain
+                            Roads = Set.singleton { X = 12; Y = 10 }
+                        })
                     |> snapshotWith []
                     |> ofSnapshot
 
@@ -1911,13 +2028,15 @@ let haulRoundTripTests =
             // the spawn structure standing at (20,10) — nine steps to the
             // one spawn-adjacent goal, (19,10).
             let corridorWith roads creeps =
-                { spatial
-                      [ "spawn-1", { X = 20; Y = 10 } ]
-                      [ for x in 10..20 -> { X = x; Y = 10 }, Plain ] with
-                    Obstacles = Set.singleton { X = 20; Y = 10 }
-                    Roads = roads
-                    CreepPositions = Map.ofList creeps
-                }
+                spatial
+                    [ "spawn-1", { X = 20; Y = 10 } ]
+                    [ for x in 10..20 -> { X = x; Y = 10 }, Plain ]
+                |> withHome (fun layer ->
+                    { layer with
+                        Obstacles = Set.singleton { X = 20; Y = 10 }
+                        Roads = roads
+                        CreepPositions = Map.ofList creeps
+                    })
                 |> snapshotWith []
                 |> ofSnapshot
 
@@ -1998,15 +2117,17 @@ let haulRoundTripTests =
 
             test "an unreachable sink prices no round trip" {
                 let gapped =
-                    { spatial
-                          [ "spawn-1", { X = 20; Y = 10 } ]
-                          [
-                              for x in 10..20 do
-                                  if x <> 15 then
-                                      { X = x; Y = 10 }, Plain
-                          ] with
-                        Obstacles = Set.singleton { X = 20; Y = 10 }
-                    }
+                    spatial
+                        [ "spawn-1", { X = 20; Y = 10 } ]
+                        [
+                            for x in 10..20 do
+                                if x <> 15 then
+                                    { X = x; Y = 10 }, Plain
+                        ]
+                    |> withHome (fun layer ->
+                        { layer with
+                            Obstacles = Set.singleton { X = 20; Y = 10 }
+                        })
                     |> snapshotWith []
                     |> ofSnapshot
 
@@ -2031,13 +2152,15 @@ let castWalkTicksTests =
             // born on is (19,10) — and the tile it must reach nine steps
             // further on at (10,10).
             let corridorWith roads creeps =
-                { spatial
-                      [ "spawn-1", { X = 20; Y = 10 } ]
-                      [ for x in 10..20 -> { X = x; Y = 10 }, Plain ] with
-                    Obstacles = Set.singleton { X = 20; Y = 10 }
-                    Roads = roads
-                    CreepPositions = Map.ofList creeps
-                }
+                spatial
+                    [ "spawn-1", { X = 20; Y = 10 } ]
+                    [ for x in 10..20 -> { X = x; Y = 10 }, Plain ]
+                |> withHome (fun layer ->
+                    { layer with
+                        Obstacles = Set.singleton { X = 20; Y = 10 }
+                        Roads = roads
+                        CreepPositions = Map.ofList creeps
+                    })
                 |> snapshotWith []
                 |> ofSnapshot
 
@@ -2143,15 +2266,17 @@ let castWalkTicksTests =
 
             test "an unreachable tile prices no walk" {
                 let gapped =
-                    { spatial
-                          [ "spawn-1", { X = 20; Y = 10 } ]
-                          [
-                              for x in 10..20 do
-                                  if x <> 15 then
-                                      { X = x; Y = 10 }, Plain
-                          ] with
-                        Obstacles = Set.singleton { X = 20; Y = 10 }
-                    }
+                    spatial
+                        [ "spawn-1", { X = 20; Y = 10 } ]
+                        [
+                            for x in 10..20 do
+                                if x <> 15 then
+                                    { X = x; Y = 10 }, Plain
+                        ]
+                    |> withHome (fun layer ->
+                        { layer with
+                            Obstacles = Set.singleton { X = 20; Y = 10 }
+                        })
                     |> snapshotWith []
                     |> ofSnapshot
 
@@ -2170,11 +2295,13 @@ let castWalkTicksTests =
                 // for the replacement to be born, so the walk is
                 // unpriceable and the row leads nobody.
                 let walled =
-                    { spatial
-                          [ "spawn-1", { X = 20; Y = 10 } ]
-                          [ for x in 10..20 -> { X = x; Y = 10 }, Plain ] with
-                        Obstacles = Set.ofList [ { X = 20; Y = 10 }; { X = 19; Y = 10 } ]
-                    }
+                    spatial
+                        [ "spawn-1", { X = 20; Y = 10 } ]
+                        [ for x in 10..20 -> { X = x; Y = 10 }, Plain ]
+                    |> withHome (fun layer ->
+                        { layer with
+                            Obstacles = Set.ofList [ { X = 20; Y = 10 }; { X = 19; Y = 10 } ]
+                        })
                     |> snapshotWith []
                     |> ofSnapshot
 
@@ -2198,11 +2325,13 @@ let walkRecallTests =
             // (20,10), so (19,10) is the one tile a body is born on, and
             // (10,10) lies nine steps further west.
             let corridorSnapshot () =
-                { spatial
-                      [ "spawn-1", { X = 20; Y = 10 } ]
-                      [ for x in 10..20 -> { X = x; Y = 10 }, Plain ] with
-                    Obstacles = Set.singleton { X = 20; Y = 10 }
-                }
+                spatial
+                    [ "spawn-1", { X = 20; Y = 10 } ]
+                    [ for x in 10..20 -> { X = x; Y = 10 }, Plain ]
+                |> withHome (fun layer ->
+                    { layer with
+                        Obstacles = Set.singleton { X = 20; Y = 10 }
+                    })
                 |> snapshotWith []
 
             let hauler = [ Carry; Carry; Move ]
@@ -2606,12 +2735,12 @@ let seamTests =
             }
         ]
 
-/// A projection carrying two rooms: the colony's own written flat, the
-/// shape every hand-built projection takes, and the outpost written
-/// straight into the layer, which is the only shape that can carry a
-/// second room at all (ADR 0041). The bridge fills the home entry from the
-/// flat fields on the way into the Atlas, so the two rooms arrive exactly
-/// as the shell's projection and an outpost's will.
+/// A projection carrying two rooms: the colony's own, filed by `withHome`
+/// under the name the projection gives it, and the outpost added beside it
+/// under its own (ADR 0041). It adds an entry and never replaces the map,
+/// so the home room's geometry survives an outpost joining after it — the
+/// two rooms arrive exactly as the shell's projection and an outpost's
+/// will.
 let private withOutpost (room: string) (layer: RoomLayer) (spatial: SpatialInfo) =
     { spatial with
         Rooms = Map.add room layer spatial.Rooms
@@ -2641,11 +2770,15 @@ let roomTests =
                 let home =
                     { SpatialInfo.empty with
                         RoomName = Some "W1N1"
-                        Terrain = Map.ofList (plainLine [ for y in 10..17 -> { X = 10; Y = y } ])
-                        TargetPositions = Map.ofList [ "src-home", { X = 10; Y = 18 } ]
                         TargetKinds = Map.ofList [ "src-home", Source; "src-out", Source ]
-                        CreepPositions = Map.ofList [ "w-home", { X = 10; Y = 10 } ]
                     }
+                    |> withHome (fun layer ->
+                        { layer with
+                            Terrain =
+                                Map.ofList (plainLine [ for y in 10..17 -> { X = 10; Y = y } ])
+                            TargetPositions = Map.ofList [ "src-home", { X = 10; Y = 18 } ]
+                            CreepPositions = Map.ofList [ "w-home", { X = 10; Y = 10 } ]
+                        })
 
                 let outpost =
                     { RoomLayer.empty with
@@ -2698,10 +2831,14 @@ let roomTests =
                 let home =
                     { SpatialInfo.empty with
                         RoomName = Some "W1N1"
-                        Terrain = Map.ofList (plainLine [ for y in 10..17 -> { X = 10; Y = y } ])
                         TargetKinds = Map.ofList [ "src-out", Source ]
-                        CreepPositions = Map.ofList [ "w-home", { X = 10; Y = 10 } ]
                     }
+                    |> withHome (fun layer ->
+                        { layer with
+                            Terrain =
+                                Map.ofList (plainLine [ for y in 10..17 -> { X = 10; Y = y } ])
+                            CreepPositions = Map.ofList [ "w-home", { X = 10; Y = 10 } ]
+                        })
 
                 let outpost =
                     { RoomLayer.empty with
@@ -2776,11 +2913,15 @@ let roomTests =
                 let home =
                     { SpatialInfo.empty with
                         RoomName = Some "W1N1"
-                        Terrain = Map.ofList (plainLine [ for y in 10..17 -> { X = 10; Y = y } ])
-                        TargetPositions = Map.ofList [ "src-home", { X = 10; Y = 18 } ]
                         TargetKinds = Map.ofList [ "src-home", Source ]
-                        CreepPositions = Map.ofList [ "w-home", { X = 10; Y = 10 } ]
                     }
+                    |> withHome (fun layer ->
+                        { layer with
+                            Terrain =
+                                Map.ofList (plainLine [ for y in 10..17 -> { X = 10; Y = y } ])
+                            TargetPositions = Map.ofList [ "src-home", { X = 10; Y = 18 } ]
+                            CreepPositions = Map.ofList [ "w-home", { X = 10; Y = 10 } ]
+                        })
 
                 let outpost =
                     { RoomLayer.empty with
@@ -2815,10 +2956,14 @@ let roomTests =
                 let home =
                     { SpatialInfo.empty with
                         RoomName = Some "W1N1"
-                        Terrain = Map.ofList (plainLine [ for y in 10..17 -> { X = 10; Y = y } ])
                         TargetKinds = Map.ofList [ "src-far", Source ]
-                        CreepPositions = Map.ofList [ "w-home", { X = 10; Y = 10 } ]
                     }
+                    |> withHome (fun layer ->
+                        { layer with
+                            Terrain =
+                                Map.ofList (plainLine [ for y in 10..17 -> { X = 10; Y = y } ])
+                            CreepPositions = Map.ofList [ "w-home", { X = 10; Y = 10 } ]
+                        })
 
                 for label, spatial in
                     [
@@ -2856,14 +3001,6 @@ let roomTests =
                 let home =
                     { SpatialInfo.empty with
                         RoomName = Some "W1N1"
-                        Terrain =
-                            Map.ofList
-                                [
-                                    for x in 9..11 do
-                                        for y in 9..11 do
-                                            { X = x; Y = y }, Plain
-                                ]
-                        TargetPositions = Map.ofList [ "src-home", { X = 10; Y = 9 } ]
                         TargetKinds =
                             Map.ofList
                                 [
@@ -2871,8 +3008,19 @@ let roomTests =
                                     "ctrl-out", Controller
                                     "cont-out", Structure BuiltKind.Container
                                 ]
-                        CreepPositions = Map.ofList [ "w-home", { X = 10; Y = 10 } ]
                     }
+                    |> withHome (fun layer ->
+                        { layer with
+                            Terrain =
+                                Map.ofList
+                                    [
+                                        for x in 9..11 do
+                                            for y in 9..11 do
+                                                { X = x; Y = y }, Plain
+                                    ]
+                            TargetPositions = Map.ofList [ "src-home", { X = 10; Y = 9 } ]
+                            CreepPositions = Map.ofList [ "w-home", { X = 10; Y = 10 } ]
+                        })
 
                 let outpost =
                     { RoomLayer.empty with
@@ -2924,9 +3072,13 @@ let roomTests =
                 let home =
                     { SpatialInfo.empty with
                         RoomName = Some "W1N1"
-                        Terrain = Map.ofList (plainLine [ for y in 10..17 -> { X = 10; Y = y } ])
-                        CreepPositions = Map.ofList [ "w-home", { X = 10; Y = 10 } ]
                     }
+                    |> withHome (fun layer ->
+                        { layer with
+                            Terrain =
+                                Map.ofList (plainLine [ for y in 10..17 -> { X = 10; Y = y } ])
+                            CreepPositions = Map.ofList [ "w-home", { X = 10; Y = 10 } ]
+                        })
 
                 let outpost =
                     { RoomLayer.empty with
