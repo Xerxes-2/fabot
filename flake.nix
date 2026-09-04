@@ -1,5 +1,5 @@
 {
-  description = "fabot devshell: dotnet SDK 10 + Node.js 22";
+  description = "fabot devshell: dotnet SDK 10 + Node.js 24";
 
   inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
 
@@ -21,7 +21,7 @@
           pkgs.mkShell {
             packages = [
               dotnet
-              pkgs.nodejs_22
+              pkgs.nodejs_24
             ];
 
             # dotnet tools (fable, fantomas) are restored per-repo via
