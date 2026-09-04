@@ -44,3 +44,7 @@ Default five-role vocabulary (`needs-triage`, `needs-info`, `ready-for-agent`, `
 ### Domain docs
 
 Single-context: `CONTEXT.md` + `docs/adr/` at the repo root. See `docs/agents/domain.md`.
+
+### Orchestration
+
+Queueing several `ready-for-agent` issues through subagents. See `docs/agents/orchestration.md`.
