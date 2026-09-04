@@ -4,10 +4,15 @@
     <IsPackable>false</IsPackable>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="RoomFixtures.fs" />
     <Compile Include="AtlasTests.fs" />
     <Compile Include="DecideTests.fs" />
     <Compile Include="ObserveTests.fs" />
     <Compile Include="WireTests.fs" />
+    <Compile Include="RoomInvariantTests.fs" />
+  </ItemGroup>
+  <ItemGroup>
+    <Content Include="rooms/*.room" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="../../src/Core/Core.fsproj" />

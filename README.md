@@ -53,13 +53,28 @@ relative percentages are the signal, absolute ms/tick is not.
 Current numbers, the live CPU history, and the per-hotspot attribution are
 tracked in #50 — read that, not this file, for where the time goes.
 
+## Room fixtures
+
+```sh
+npm run capture-room -- W12S28   # writes tests/Core.Tests/rooms/W12S28.room
+```
+
+Captures one room's fixed shape — terrain plus its sources, controller and
+mineral, no structures — as reviewable text for the Layout's whole-room
+invariant suite (ADR 0036). The API is an authoring tool, never a test
+dependency: the suite loads the committed file and calls nothing. Terrain
+never changes, so a re-capture of unchanged terrain diffs on nothing but
+the header's `tick`, which is there to say when the furniture was last
+read. Pass `--force` to overwrite an existing fixture deliberately.
+
 ## Layout
 
 - `src/Core` — pure decision layer (no JS/Fable deps). Single seam:
   `decide : Snapshot -> Assignments -> Intent list * Assignments`.
 - `src/App` — Fable entry point: bindings, Snapshot construction, Executor
   (the only code calling the game API).
-- `tests/Core.Tests` — Expecto tests driving the `decide` seam.
+- `tests/Core.Tests` — Expecto tests driving the `decide` seam; `rooms/`
+  holds the committed room captures the Layout's invariant sweep runs on.
 
 The bundle is a single CommonJS `main` module exporting `loop`, uploaded via
 `POST <SCREEPS_API_URL>/api/user/code`. Server contract details and sources:
