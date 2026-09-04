@@ -645,18 +645,22 @@ let placementTests =
                 let { Intents = intents } = decide (atLevel 2 (openRoom 3)) Map.empty Set.empty None
 
                 // The nearest checkerboard tile (24,24) is the Storage's pick
-                // and (24,26) the tower's in the RCL4-horizon Layout (ADR
-                // 0022), so the extensions start two tiles in.
+                // and (24,26) and (26,24) are the two towers' under the RCL5
+                // horizon (ADR 0039) — reservations, not sites: RCL2 allows
+                // no tower, but their picks still come first in the one
+                // ordering — so the extensions start three tiles in. A golden
+                // value of the horizon, not an assertion about the ordering:
+                // the rule is unchanged, the list moved.
                 Expect.equal
                     (sitesOfKind Extension intents)
                     [
-                        { X = 26; Y = 24 }
                         { X = 26; Y = 26 }
                         { X = 23; Y = 23 }
                         { X = 23; Y = 25 }
                         { X = 23; Y = 27 }
+                        { X = 25; Y = 23 }
                     ]
-                    "the last diagonal neighbours, then rank-2 checkerboard tiles"
+                    "the last diagonal neighbour, then rank-2 checkerboard tiles"
 
                 for (room, _, kind) in placementIntents intents do
                     Expect.equal room "W1N1" "sites go in the spawn's room"
@@ -664,6 +668,28 @@ let placementTests =
                     Expect.isTrue
                         (kind = Extension || kind = Rampart)
                         "the extensions the level unlocks, and the spawn's own rampart"
+            }
+
+            test "RCL5 on open terrain plans the whole level: 30 extensions, two towers" {
+                // The clustered kinds are sized at the horizon and filtered at
+                // the current level, so a room standing at the horizon's own
+                // level plans everything the engine unlocked there (ADR 0039).
+                // A horizon left behind computes a gap of zero here and asks
+                // for none of it. The room is a ring wider than the fixtures
+                // beside it for the same reason: thirty extensions, two
+                // towers, the Storage and the footings want more same-colour
+                // tiles than `openRoom 3` has.
+                let { Intents = intents } = decide (atLevel 5 (openRoom 5)) Map.empty Set.empty None
+
+                Expect.hasLength
+                    (sitesOfKind Extension intents)
+                    30
+                    "RCL5's whole extension allowance, the ten the level adds included"
+
+                Expect.hasLength
+                    (sitesOfKind Tower intents)
+                    2
+                    "both towers RCL5 allows, the second one the horizon held a tile for"
             }
 
             test "below RCL2 no placement Intents are emitted" {
@@ -751,10 +777,15 @@ let placementTests =
                     (List.contains { X = 24; Y = 24 } (placedTiles intents))
                     "a target's tile is never chosen"
 
+                // One short of RCL2's cap, and that is the horizon's price
+                // paid at today's level (ADR 0039): the controller's own
+                // Upgrade Work Area is working ground, so this room offers
+                // seven tiles, and the second tower's reservation sits ahead
+                // of the extensions in the one ordering.
                 Expect.hasLength
                     (sitesOfKind Extension intents)
-                    5
-                    "the cap is still reached elsewhere"
+                    4
+                    "the cap is not reached: no tile is spare for the second tower's reservation"
             }
 
             test "no placement Intents without a projected room" {
@@ -959,12 +990,16 @@ let layoutTests =
                     "the Layout is deterministic — sites never jitter between computations"
             }
 
-            test "trunks route around every RCL4-horizon reservation" {
+            test "trunks route around every horizon reservation" {
                 let rcl2 = decide (trunkColony 2) Map.empty Set.empty None
                 let rcl4 = decide (trunkColony 4) Map.empty Set.empty None
                 let roads = sitesOfKind Road rcl2.Intents |> Set.ofList
 
-                let cluster = clusterTiles rcl4.Intents
+                // Read off the horizon's own level, where the whole
+                // reservation is on the ground — the second tower and the
+                // ten extensions RCL5 adds included (ADR 0039). Below it the
+                // check only ever saw the part the level had placed.
+                let cluster = clusterTiles (decide (trunkColony 5) Map.empty Set.empty None).Intents
 
                 Expect.equal
                     (sitesOfKind Road rcl4.Intents |> Set.ofList)
@@ -1897,10 +1932,11 @@ let linkFootingTests =
             }
 
             test "the footings survive the placement burst: the next tick asks for nothing" {
-                // RCL4 places the whole horizon at once, so the tick after
-                // it every gap is zero and the reservation is carried by
-                // the sites themselves — except the footings, which no site
-                // ever stands on. The widened window is what still holds
+                // RCL4 places everything its own level unlocks in one
+                // burst, so the tick after it every gap at that level is
+                // zero and the tiles it took are carried by the sites
+                // themselves — except the footings, which no site ever
+                // stands on. The widened window is what still holds
                 // them (ADR 0027); without it the trunk flood is free to
                 // take a footing the moment the cluster is placed, and the
                 // Layout emits a road on the tile it had been reserving

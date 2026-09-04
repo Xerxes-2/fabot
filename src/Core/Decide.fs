@@ -904,11 +904,16 @@ let private storageLevel = 4
 /// tiles against thousands (ADR 0034).
 let private rampartLevel = 2
 
-/// The Layout horizon (ADR 0011): the whole plan is computed up to this
-/// level regardless of the current one, so today's roads route around
-/// tomorrow's structures. Deliberately not RCL8 — a wider reservation
-/// would tax today's trunks with detours for structures five levels away.
-let private horizonLevel = 4
+/// The Layout horizon (ADR 0011, moved to RCL5 by ADR 0039): the whole
+/// plan is computed up to this level regardless of the current one, so
+/// today's roads route around tomorrow's structures. One level of
+/// lookahead is the standing bargain — RCL8 would tax today's trunks
+/// with detours for structures four levels away, and a horizon the room
+/// has already passed sizes every clustered gap at zero, so the room
+/// stops growing without saying why. Declared and not computed from the
+/// current level, which is what keeps it stepping once, in a commit
+/// (ADR 0039).
+let private horizonLevel = 5
 
 /// Colony-level planning step beside the Planner/Matcher pipeline: the
 /// deterministic Layout (ADR 0011), computed whole from the Atlas every
@@ -924,8 +929,8 @@ let private horizonLevel = 4
 /// a Link footing (ADR 0022) and outranks the tower and the extensions;
 /// the reservation is widened by the footing count so the tiles they push
 /// the cluster onto are reserved too (ADR 0027). No link is ever placed
-/// on one — Link is a built kind only, and which footings are filled is
-/// RCL5's decision.
+/// on one — Link is a built kind only, and this room fills none of them
+/// (ADR 0038).
 /// Placement filters the Layout to what the current level unlocks and
 /// what the projection's censuses say is missing. Sites are not creep
 /// work, so this emits Intents directly rather than Tasks.
