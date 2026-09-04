@@ -282,10 +282,11 @@ type Direction =
 
 /// Every BodyPart — the closed set, for building tables over the
 /// vocabulary. A literal, and so not compiler-checked: a part added to
-/// the union has to be added here by hand, which is issue #80's open
-/// hole. A successor chain does not close it — the compiler checks such a
-/// function for exhaustiveness, never for reachability, so a dangling
-/// `| NewPart -> None` compiles clean and still leaves the list short.
+/// the union has to be added here by hand. A successor chain does not
+/// close that — the compiler checks such a function for exhaustiveness,
+/// never for reachability, so a dangling `| NewPart -> None` compiles
+/// clean and still leaves the list short. What closes it is `Core.Tests`,
+/// which enumerates the union itself and fails when this list is short.
 let allBodyParts = [ Work; Carry; Move; Attack; RangedAttack; Heal; Claim; Tough ]
 
 /// Screeps body-part strings as the engine spells them, in `spawnCreep`
@@ -307,8 +308,8 @@ let partName =
 /// spelling outside it classifies to Other, which is why Other is not one
 /// of them: it is the absence of a modelled kind, never a kind with a
 /// spelling of its own. A literal, and so not compiler-checked: a kind
-/// added to the union has to be added here by hand, the same hole
-/// `allBodyParts` has (issue #80).
+/// added to the union has to be added here by hand, and `Core.Tests`
+/// closes that the same way it does for `allBodyParts`.
 let allBuiltKinds =
     [
         BuiltKind.Spawn
@@ -462,6 +463,17 @@ type PlanMemo =
         HaulerQuota: int
     }
 
+/// The reverse of a wire-name table, derived from the table itself: each
+/// spelling is written once, in the name table, and the decoder reads
+/// back what falls out of it. A name the vocabulary does not have reads
+/// as None — the caller decides what a miss costs. The one builder: the
+/// vocabularies below, the serialization shell's part table and the test
+/// that round-trips them all call this, so no reverse is hand-rolled a
+/// second time.
+let reverseOf toName cases =
+    let byName = cases |> List.map (fun case -> toName case, case) |> Map.ofList
+    fun name -> Map.tryFind name byName
+
 /// What decided a fresh match: the first comparison that separated the
 /// winning Task from its closest rival — rank tier, then travel cost, then
 /// current load — or the tie-break when none did (pool order), or the fact
@@ -473,6 +485,32 @@ type MatchFactor =
     | TravelCost
     | Load
     | PoolOrder
+
+/// The wire spelling of each MatchFactor, in the observe channel's Memory
+/// subtree (ADR 0009) — the one place the spelling lives, beside the
+/// union it spells, the way `partName` holds the engine's part spelling.
+let matchFactorName =
+    function
+    | MatchFactor.OnlyCandidate -> "only-candidate"
+    | MatchFactor.Rank -> "rank"
+    | MatchFactor.TravelCost -> "travel-cost"
+    | MatchFactor.Load -> "load"
+    | MatchFactor.PoolOrder -> "pool-order"
+
+/// The MatchFactor a wire name spells, or None for a name this vocabulary
+/// does not have. The case list is a literal, so a case added without its
+/// entry decodes to nothing; `Core.Tests` round-trips the union itself and
+/// fails on exactly that.
+let matchFactorOf =
+    reverseOf
+        matchFactorName
+        [
+            MatchFactor.OnlyCandidate
+            MatchFactor.Rank
+            MatchFactor.TravelCost
+            MatchFactor.Load
+            MatchFactor.PoolOrder
+        ]
 
 /// Why a remembered assignment was released: its Task left the pool, the
 /// creep can no longer usefully work it (body parts or energy state), the
@@ -487,6 +525,29 @@ type ReleaseReason =
     | OverCapacity
     | Unreachable
     | TooEarly
+
+/// The wire spelling of each ReleaseReason, as `matchFactorName` is
+/// MatchFactor's.
+let releaseReasonName =
+    function
+    | ReleaseReason.TaskGone -> "task-gone"
+    | ReleaseReason.Inapplicable -> "inapplicable"
+    | ReleaseReason.OverCapacity -> "over-capacity"
+    | ReleaseReason.Unreachable -> "unreachable"
+    | ReleaseReason.TooEarly -> "too-early"
+
+/// The ReleaseReason a wire name spells, or None for a name this
+/// vocabulary does not have.
+let releaseReasonOf =
+    reverseOf
+        releaseReasonName
+        [
+            ReleaseReason.TaskGone
+            ReleaseReason.Inapplicable
+            ReleaseReason.OverCapacity
+            ReleaseReason.Unreachable
+            ReleaseReason.TooEarly
+        ]
 
 /// Why an unassigned creep got nothing: the pool was empty, no Task fit
 /// its body or energy state, every fitting Task's worker cap was full,
@@ -503,6 +564,29 @@ type IdleReason =
     | NoneReachable
     | NoneInTime
 
+/// The wire spelling of each IdleReason, as `matchFactorName` is
+/// MatchFactor's.
+let idleReasonName =
+    function
+    | IdleReason.NoTasks -> "no-tasks"
+    | IdleReason.NoneApplicable -> "none-applicable"
+    | IdleReason.NoneFree -> "none-free"
+    | IdleReason.NoneReachable -> "none-reachable"
+    | IdleReason.NoneInTime -> "none-in-time"
+
+/// The IdleReason a wire name spells, or None for a name this vocabulary
+/// does not have.
+let idleReasonOf =
+    reverseOf
+        idleReasonName
+        [
+            IdleReason.NoTasks
+            IdleReason.NoneApplicable
+            IdleReason.NoneFree
+            IdleReason.NoneReachable
+            IdleReason.NoneInTime
+        ]
+
 /// Why a Task in the pool was rejected for a creep, in a verbose scoring:
 /// it did not fit the creep's body or energy state, its worker cap was
 /// already full, its Work Area is unreachable, or its time has not come —
@@ -515,6 +599,27 @@ type RejectReason =
     | CapacityFull
     | Unreachable
     | TooEarly
+
+/// The wire spelling of each RejectReason, as `matchFactorName` is
+/// MatchFactor's.
+let rejectReasonName =
+    function
+    | RejectReason.Inapplicable -> "inapplicable"
+    | RejectReason.CapacityFull -> "capacity-full"
+    | RejectReason.Unreachable -> "unreachable"
+    | RejectReason.TooEarly -> "too-early"
+
+/// The RejectReason a wire name spells, or None for a name this
+/// vocabulary does not have.
+let rejectReasonOf =
+    reverseOf
+        rejectReasonName
+        [
+            RejectReason.Inapplicable
+            RejectReason.CapacityFull
+            RejectReason.Unreachable
+            RejectReason.TooEarly
+        ]
 
 /// One row of a verbose scoring: a Task in the pool, either scored on the
 /// full matching key — rank tier, travel cost, current load — or rejected

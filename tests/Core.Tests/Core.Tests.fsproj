@@ -7,6 +7,7 @@
     <Compile Include="AtlasTests.fs" />
     <Compile Include="DecideTests.fs" />
     <Compile Include="ObserveTests.fs" />
+    <Compile Include="WireTests.fs" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="../../src/Core/Core.fsproj" />

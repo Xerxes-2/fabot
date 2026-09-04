@@ -12,91 +12,13 @@ open Fabot.Bindings
 open Fabot.Core.Types
 open Fabot.Core.Observe
 
-// The wire spelling of each closed vocabulary, one table per type; the
-// reverse maps are derived from these, never written twice.
-let private factorName =
-    function
-    | MatchFactor.OnlyCandidate -> "only-candidate"
-    | MatchFactor.Rank -> "rank"
-    | MatchFactor.TravelCost -> "travel-cost"
-    | MatchFactor.Load -> "load"
-    | MatchFactor.PoolOrder -> "pool-order"
-
-let private releaseName =
-    function
-    | ReleaseReason.TaskGone -> "task-gone"
-    | ReleaseReason.Inapplicable -> "inapplicable"
-    | ReleaseReason.OverCapacity -> "over-capacity"
-    | ReleaseReason.Unreachable -> "unreachable"
-    | ReleaseReason.TooEarly -> "too-early"
-
-let private idleName =
-    function
-    | IdleReason.NoTasks -> "no-tasks"
-    | IdleReason.NoneApplicable -> "none-applicable"
-    | IdleReason.NoneFree -> "none-free"
-    | IdleReason.NoneReachable -> "none-reachable"
-    | IdleReason.NoneInTime -> "none-in-time"
-
-let private rejectName =
-    function
-    | RejectReason.Inapplicable -> "inapplicable"
-    | RejectReason.CapacityFull -> "capacity-full"
-    | RejectReason.Unreachable -> "unreachable"
-    | RejectReason.TooEarly -> "too-early"
-
-let private reverse toName values =
-    values |> List.map (fun v -> toName v, v) |> Map.ofList
-
-let private factorOf =
-    reverse
-        factorName
-        [
-            MatchFactor.OnlyCandidate
-            MatchFactor.Rank
-            MatchFactor.TravelCost
-            MatchFactor.Load
-            MatchFactor.PoolOrder
-        ]
-
-let private releaseOf =
-    reverse
-        releaseName
-        [
-            ReleaseReason.TaskGone
-            ReleaseReason.Inapplicable
-            ReleaseReason.OverCapacity
-            ReleaseReason.Unreachable
-            ReleaseReason.TooEarly
-        ]
-
-let private idleOf =
-    reverse
-        idleName
-        [
-            IdleReason.NoTasks
-            IdleReason.NoneApplicable
-            IdleReason.NoneFree
-            IdleReason.NoneReachable
-            IdleReason.NoneInTime
-        ]
-
-let private rejectOf =
-    reverse
-        rejectName
-        [
-            RejectReason.Inapplicable
-            RejectReason.CapacityFull
-            RejectReason.Unreachable
-            RejectReason.TooEarly
-        ]
-
 // Body parts ride the Core's own part-name table in both directions, over
-// its own closed set. `allBodyParts` is a hand-written literal, so this
-// reverse can fall behind the union (#80); what is bounded here instead is
-// the damage — `loadRaids` decodes episode by episode, so a name this
-// table lacks costs that episode and not the ring.
-let private partOf = reverse partName allBodyParts
+// its own closed set, reversed by the Core's own builder — the same shape
+// as the Verdict vocabularies, whose tables Core now holds outright.
+// `Core.Tests` round-trips every one of them against the union itself, so
+// a case added without its wire name is a test failure rather than a
+// silent decode miss.
+let private partOf = reverseOf partName allBodyParts
 
 // A Candidate on the wire: a scored row carries the full matching key, a
 // rejected row its reason — the presence of `reason` tells them apart.
@@ -111,7 +33,7 @@ let private encodeCandidate candidate =
         o?load <- load
     | Candidate.Rejected(task, reason) ->
         o?task <- task
-        o?reason <- rejectName reason
+        o?reason <- rejectReasonName reason
 
     o
 
@@ -124,7 +46,7 @@ let private decodeCandidate (raw: obj) : Candidate =
             unbox<int> raw?load
         )
     else
-        match Map.tryFind (string raw?reason) rejectOf with
+        match rejectReasonOf (string raw?reason) with
         | Some reason -> Candidate.Rejected(string raw?task, reason)
         | None -> failwith "unknown wire name"
 
@@ -137,17 +59,17 @@ let private encodeVerdict verdict =
     | Verdict.Matched(_, task, factor) ->
         o?kind <- "matched"
         o?task <- task
-        o?factor <- factorName factor
+        o?factor <- matchFactorName factor
     | Verdict.Kept(_, task) ->
         o?kind <- "kept"
         o?task <- task
     | Verdict.Released(_, task, reason) ->
         o?kind <- "released"
         o?task <- task
-        o?reason <- releaseName reason
+        o?reason <- releaseReasonName reason
     | Verdict.Unassigned(_, reason) ->
         o?kind <- "unassigned"
-        o?reason <- idleName reason
+        o?reason <- idleReasonName reason
     | Verdict.Scoring(_, candidates) ->
         o?kind <- "scoring"
         o?candidates <- candidates |> List.map encodeCandidate |> List.toArray
@@ -159,19 +81,22 @@ let private encodeVerdict verdict =
 
     o
 
-// Anything off the expected shape throws, and load's catch discards the
-// whole subtree — bad state is dropped, never repaired.
+// Anything off the expected shape throws, and load's catch drops that one
+// creep's log — bad state is discarded, never repaired.
 let private decodeVerdict creep (raw: obj) : Verdict =
-    let look (table: Map<string, 'a>) key =
-        match Map.tryFind key table with
+    // A wire name outside the vocabulary is not a Verdict we can restate,
+    // so it throws; Core owns the vocabulary, this shell owns the cost.
+    let look ofName name =
+        match ofName name with
         | Some value -> value
         | None -> failwith "unknown wire name"
 
     match string raw?kind with
-    | "matched" -> Verdict.Matched(creep, string raw?task, look factorOf (string raw?factor))
+    | "matched" -> Verdict.Matched(creep, string raw?task, look matchFactorOf (string raw?factor))
     | "kept" -> Verdict.Kept(creep, string raw?task)
-    | "released" -> Verdict.Released(creep, string raw?task, look releaseOf (string raw?reason))
-    | "unassigned" -> Verdict.Unassigned(creep, look idleOf (string raw?reason))
+    | "released" ->
+        Verdict.Released(creep, string raw?task, look releaseReasonOf (string raw?reason))
+    | "unassigned" -> Verdict.Unassigned(creep, look idleReasonOf (string raw?reason))
     | "scoring" ->
         Verdict.Scoring(
             creep,
@@ -288,7 +213,7 @@ let private decodeEpisode (raw: obj) : RaidEpisode =
                     Body =
                         objectEntries row?body
                         |> Array.map (fun (name, count) ->
-                            match Map.tryFind name partOf with
+                            match partOf name with
                             | Some part -> part, unbox<int> count
                             | None -> failwith "unknown wire name")
                         |> Map.ofArray
@@ -355,7 +280,9 @@ let loadVerbose () : Set<string> =
 
 /// The prior observe state, or empty when the subtree is absent, from an
 /// older bundle, or otherwise unreadable — a discarded log only costs a
-/// restarted timeline.
+/// restarted timeline. A creep whose log will not decode costs that
+/// creep's timeline alone, the way `loadRaids` degrades episode by
+/// episode: the rest of the map loads.
 let load () : ObserveState =
     try
         let fabot = Memory?fabot
@@ -366,7 +293,11 @@ let load () : ObserveState =
             Map.empty
         else
             objectEntries creeps
-            |> Array.map (fun (name, raw) -> name, decodeCreepLog name raw)
+            |> Array.choose (fun (name, raw) ->
+                try
+                    Some(name, decodeCreepLog name raw)
+                with _ ->
+                    None)
             |> Map.ofArray
     with _ ->
         Map.empty
