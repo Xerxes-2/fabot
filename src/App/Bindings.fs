@@ -126,6 +126,11 @@ type IOwner =
 type ICreep =
     abstract id: string
     abstract name: string
+    /// The room the creep is standing in this tick. Read to keep the
+    /// projection's creep table inside the room it is filed under
+    /// (ADR 0041): `Game.creeps` is world-wide and the projection is one
+    /// room's.
+    abstract room: IRoom
     /// Whose creep this is. Read only off hostiles, for the Raid log's
     /// roster (ADR 0028); our own creeps' ownership is never in question.
     abstract owner: IOwner

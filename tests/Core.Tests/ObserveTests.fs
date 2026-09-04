@@ -323,6 +323,13 @@ let pruneTests =
             }
         ]
 
+/// The room the raid fixtures project — the colony's own, which is the
+/// only room `Snapshot.Hostiles` sweeps (ADR 0028). Named rather than left
+/// to `SpatialInfo.homeName`'s empty string, because the closest approach
+/// now joins a hostile's room to the projection's layer (ADR 0041) and a
+/// fixture whose two halves agreed by both being blank would prove nothing.
+let raidRoom = "W12S28"
+
 /// A colony nobody is raiding: the Raid fold reads hostiles, our creeps
 /// and the tiles of what is ours, so everything else stays empty.
 let quiet: Snapshot =
@@ -336,14 +343,19 @@ let quiet: Snapshot =
         ConstructionSites = []
         Creeps = []
         Hostiles = []
-        Spatial = SpatialInfo.empty
+        Spatial =
+            { SpatialInfo.empty with
+                RoomName = Some raidRoom
+            }
     }
 
-/// A hostile creep of the given owner and body standing on a tile.
+/// A hostile creep of the given owner and body standing on a tile of the
+/// colony's own room.
 let raider id owner pos body : HostileInfo =
     {
         Id = id
         Owner = owner
+        RoomName = raidRoom
         Pos = pos
         Body = body
     }
@@ -384,7 +396,7 @@ let placed =
             ]
         Creeps = [ ours "w1" ]
         Spatial =
-            { SpatialInfo.empty with
+            { quiet.Spatial with
                 TargetPositions = Map.ofList [ "spawn-1", { X = 10; Y = 40 } ]
                 CreepPositions = Map.ofList [ "w1", { X = 9; Y = 44 } ]
             }
@@ -622,6 +634,63 @@ let approachTests =
                     (state.Episodes |> List.map (fun e -> e.Closest))
                     [ None ]
                     "absence is per-entry: an unmeasurable approach is None, never a zero range"
+            }
+
+            test "one of ours in another room is not a raider at range 0" {
+                // What layering the projection would otherwise cost this
+                // record (ADR 0041): a `Pos` carries no room, so a creep of
+                // ours standing on the raider's coordinates in the outpost
+                // reads as touching it without either creep leaving its
+                // room. The raider is at the bottom exit band, 28 tiles off
+                // the spawn — the non-event the first test above uses — so
+                // a room-blind union would show up as an unmissable 0.
+                let outpost =
+                    { RoomLayer.empty with
+                        CreepPositions = Map.ofList [ "w2", { X = 38; Y = 47 } ]
+                    }
+
+                let colony =
+                    { placed with
+                        Creeps = [ ours "w1"; ours "w2" ]
+                        Hostiles = [ raider "TWX" "giaco" { X = 38; Y = 47 } [ Attack; Move ] ]
+                        Spatial =
+                            { placed.Spatial with
+                                Rooms = Map.ofList [ "W12S27", outpost ]
+                            }
+                    }
+
+                let state = RaidState.empty |> raidTick 10 colony
+
+                Expect.equal
+                    (state.Episodes |> List.map (fun e -> e.Closest))
+                    [
+                        Some
+                            {
+                                Range = 28
+                                Pos = { X = 38; Y = 47 }
+                                Tick = 10
+                            }
+                    ]
+                    "the spawn in the raider's own room is the nearest thing of ours there"
+            }
+
+            test "a raider in a room the projection places nothing of ours in measures nothing" {
+                // The other half of the same rule, and the one that says
+                // the room is read off the raider rather than assumed to be
+                // the colony's: everything of ours stands in W12S28, so a
+                // raider filed under the outpost has nothing to close on —
+                // ADR 0004's absence, not a zero range.
+                let elsewhere =
+                    { raider "TWX" "giaco" { X = 9; Y = 46 } [ Attack; Move ] with
+                        RoomName = "W12S27"
+                    }
+
+                let state = RaidState.empty |> raidTick 10 { placed with Hostiles = [ elsewhere ] }
+
+                Expect.equal
+                    (state.Episodes |> List.map (fun e -> e.Closest))
+                    [ None ]
+                    "the same tile that measured range 2 at home measures nothing from the outpost"
             }
         ]
 

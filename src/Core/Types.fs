@@ -346,15 +346,40 @@ module SpatialInfo =
                 Rooms = Map.add home flat spatial.Rooms
             }
 
+    /// One room's geometry, as ADR 0004 has every other absence: a room
+    /// the projection carries no layer for reads as a room whose every
+    /// entry is absent, never as a lookup that throws. The one spelling of
+    /// the read the `RoomLayer` doc prescribes, so no reader has to
+    /// remember the default.
+    let layerOf (spatial: SpatialInfo) (room: string) : RoomLayer =
+        Map.tryFind room spatial.Rooms |> Option.defaultValue RoomLayer.empty
+
+    /// The room the projection files a target id under, with its tile
+    /// there. The id-to-room join on the projection itself, beside the one
+    /// the Atlas precomputes (`TargetAt`) for the readers that hold an
+    /// Atlas: a target id is unique across the world, so the layer holding
+    /// it *is* the room it stands in, and a reader that has only a
+    /// Snapshot — the Planner, which is handed no Atlas — resolves it
+    /// here. None for a target the projection does not place, which
+    /// classifies nothing and blocks nothing (ADR 0004).
+    ///
+    /// Deterministic under a collision that cannot happen: `Map.tryPick`
+    /// walks the rooms in name order, and one id stands in one room.
+    let placementOf (spatial: SpatialInfo) (id: string) : (string * Pos) option =
+        spatial.Rooms
+        |> Map.tryPick (fun room (layer: RoomLayer) ->
+            Map.tryFind id layer.TargetPositions |> Option.map (fun pos -> room, pos))
+
 /// What the decision layer knows about one construction site this tick.
 type ConstructionSiteInfo = { Id: string }
 
 /// What the decision layer knows about one hostile creep in a spawn room
 /// this tick: its id and tile — what the fire reflex aims at (ADR 0014) —
 /// its body parts, verbatim, because what a hostile can do is decided
-/// from what it is made of, and its owner, which the Raid log's roster
-/// reads (ADR 0028). Hostiles stay out of the spatial projection: they
-/// block no tiles, price no paths, gate no tasks.
+/// from what it is made of, its owner, which the Raid log's roster reads
+/// (ADR 0028), and the room it stands in, which the Raid log's closest
+/// approach reads (ADR 0041). Hostiles stay out of the spatial projection:
+/// they block no tiles, price no paths, gate no tasks.
 type HostileInfo =
     {
         Id: string
@@ -364,6 +389,18 @@ type HostileInfo =
         /// Raid log's roster is attribution, and attribution is a name.
         /// No reflex reads it.
         Owner: string
+        /// The room this hostile stands in. ADR 0028 left this field out
+        /// in as many words — "a room name on `HostileInfo` is a field no
+        /// decision reads, and there is one spawn" — and ADR 0041 is what
+        /// gives it a reader: a `Pos` carries no room, so the Raid log's
+        /// closest approach measures a hostile against the tiles of *its*
+        /// room, and one of ours standing on the same coordinate of
+        /// another room is not at range 0. The sweep behind it is
+        /// unchanged (`Snapshot.Hostiles` is still the spawn rooms
+        /// alone), so today every hostile names the colony's own room; the
+        /// reflexes still read none of this, and their Reach stays the
+        /// home room's until #117.
+        RoomName: string
         Pos: Pos
         Body: BodyPart list
     }

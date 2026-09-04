@@ -191,9 +191,22 @@ let private buildSpatial (spawn: ISpawn) : SpatialInfo =
                         dropped |> Array.map (fun r -> r.id, Dropped)
                     ]
             )
+        // This room's creeps, not the world's: `Game.creeps` is every creep
+        // we own wherever it stands, and a layer keyed by room name may
+        // only hold the tiles of the room it is filed under (ADR 0041).
+        // Every other field here is already room-scoped through
+        // `room.find`; without the same scope on this one, a creep standing
+        // in another room would be filed at home under that room's
+        // coordinates — a phantom occupant the Resolver arbitrates against
+        // (ADR 0001) and a tile the Raid log measures a raider's closest
+        // approach to. A creep the projection cannot place is ADR 0004's
+        // absence, which is the answer `Atlas.placedCreeps` already gives
+        // it. Unreachable today (one spawn room, and no Task ever stands a
+        // creep on an exit tile), so this holds the invariant rather than
+        // fixing a live symptom.
         CreepPositions =
             objectValues<ICreep> Game.creeps
-            |> Array.filter (fun c -> not c.spawning)
+            |> Array.filter (fun c -> not c.spawning && c.room.name = room.name)
             |> Array.map (fun c -> c.name, posOf c.pos)
             |> Map.ofArray
         // Structures a creep cannot stand on block their tile; the kinds it
@@ -357,19 +370,26 @@ let build () : Snapshot =
                     Body = c.body |> Array.countBy (fun p -> bodyPartOf p.``type``) |> Map.ofArray
                 })
             |> Array.toList
+        // The spawn rooms and no others, unchanged by ADR 0041: what the
+        // layering adds is that each hostile now says which of them it
+        // stands in, so the Raid log measures it against that room's
+        // tiles rather than against every room's unioned (ADR 0028).
         Hostiles =
             spawnRooms
-            |> Array.collect (fun r -> r.find findHostileCreeps)
-            |> Array.map (fun o ->
-                let c = o :?> ICreep
+            |> Array.collect (fun r ->
+                r.find findHostileCreeps
+                |> Array.map (fun o ->
+                    let c = o :?> ICreep
 
-                {
-                    Id = c.id
-                    Owner = c.owner.username
-                    Pos = posOf c.pos
-                    Body = c.body |> Array.map (fun p -> bodyPartOf p.``type``) |> Array.toList
-                }
-                : HostileInfo)
+                    {
+                        Id = c.id
+                        Owner = c.owner.username
+                        RoomName = r.name
+                        Pos = posOf c.pos
+                        Body =
+                            c.body |> Array.map (fun p -> bodyPartOf p.``type``) |> Array.toList
+                    }
+                    : HostileInfo))
             |> Array.toList
         // Single-colony assumption: only the first spawn's room is projected.
         Spatial =

@@ -330,22 +330,42 @@ let threatsOf (snapshot: Snapshot) atlas : Threats =
 /// the Layout places, which harvest overflow fills. The one range this
 /// colony calls a source container, asked of one source: the Layout asks
 /// it per target to know whether that source is served (ADR 0040), and
-/// the two rules below ask it of every source at once.
+/// the two rules below ask it of every source of one room at once.
 let private servesSource (sourcePos: Pos) (tile: Pos) = range tile sourcePos <= 1
 
-/// Whether a placed tile is a source container's: within range 1 of any
-/// placed source. The one geometry judgement behind both rules that care
-/// about the kind and not the source — the Planner keeps source containers
-/// out of Refill, the hauler quota counts them. Unplaced geometry
-/// classifies nothing.
-let private isSourceContainerTile (snapshot: Snapshot) pos =
+/// Whether a tile of the named room is a source container's: within range
+/// 1 of a placed source **standing in that same room**. The one geometry
+/// judgement behind both rules that care about the kind and not the source
+/// — the Planner keeps source containers out of Refill, the hauler quota
+/// counts them. Unplaced geometry classifies nothing (ADR 0004).
+///
+/// The room is matched before the range, and it has to be (ADR 0041): a
+/// `Pos` carries no room, so a fold over every source compares a home
+/// container's coordinates against an outpost source's and answers yes on
+/// a collision that is fifty tiles and a room boundary away. That one
+/// wrong answer costs twice over — the container enters the hauler quota
+/// as a source's, and drops out of the Refill pool as one — so the two
+/// rules below hand in the room the tile came out of rather than the tile
+/// alone.
+let private isSourceContainerTile (snapshot: Snapshot) (room: string) (pos: Pos) =
     snapshot.Sources
-    |> List.choose (fun s -> Map.tryFind s.Id snapshot.Spatial.TargetPositions)
-    |> List.exists (fun s -> servesSource s pos)
+    |> List.choose (fun s -> SpatialInfo.placementOf snapshot.Spatial s.Id)
+    |> List.exists (fun (sourceRoom, sourcePos) -> sourceRoom = room && servesSource sourcePos pos)
 
 /// Planner: rebuild this tick's full Task pool from the Snapshot. Pure and
 /// from scratch every tick — Tasks are never persisted.
 let planTasks (snapshot: Snapshot) (threats: Threats) : Task list =
+    // The bridge (ADR 0041, #119), for the same reason the Atlas's own
+    // constructor carries one: the container rules below read the room
+    // layer, and this is a public entry point a caller may reach with a
+    // projection written flat. `decide` has already normalised what it
+    // hands in, and normalising twice under a fixed room name files
+    // nothing twice. It goes when the flat fields go.
+    let snapshot =
+        { snapshot with
+            Spatial = SpatialInfo.normalise snapshot.Spatial
+        }
+
     // Flee exists while a Reach does (ADR 0033): one Task for the whole
     // colony, at the head of the pool as its Safety tier is at the head of
     // the ranking. No Reach, no Flee — a quiet tick's pool is the pool it
@@ -400,16 +420,27 @@ let planTasks (snapshot: Snapshot) (threats: Threats) : Task list =
     // stands inside the Upgrade Work Area (range 3) the Layout picked it
     // from, while a source container's tile (the Seat-standing kind) is
     // never a Refill target.
+    //
+    // The controller fixes the room, and the containers are then read out
+    // of that room's layer rather than out of the kind census's whole id
+    // space (ADR 0041). Range 3 is a distance inside one room: a container
+    // in another room is not the buffer this controller's upgraders draw
+    // from however near its coordinates fall, and pooling it as one would
+    // send a hauler to fill a store nobody upgrades out of. A container
+    // the controller's room does not place drops out, exactly as an
+    // unplaced one always has (ADR 0004).
     let containerRefills =
         snapshot.Controller
-        |> Option.bind (fun c -> Map.tryFind c.Id snapshot.Spatial.TargetPositions)
-        |> Option.map (fun controllerPos ->
+        |> Option.bind (fun c -> SpatialInfo.placementOf snapshot.Spatial c.Id)
+        |> Option.map (fun (controllerRoom, controllerPos) ->
+            let placed = (SpatialInfo.layerOf snapshot.Spatial controllerRoom).TargetPositions
+
             containers
             |> List.filter (fun id ->
-                match Map.tryFind id snapshot.Spatial.TargetPositions with
+                match Map.tryFind id placed with
                 | Some pos ->
                     range pos controllerPos <= 3
-                    && not (isSourceContainerTile snapshot pos)
+                    && not (isSourceContainerTile snapshot controllerRoom pos)
                     && stored id < containerCapacity
                 | None -> false)
             |> List.map Refill)
@@ -478,16 +509,31 @@ let private ceilDiv numerator divisor = (numerator + divisor - 1) / divisor
 /// spawn is the canonical sink because the trunks radiate from it; of
 /// several spawns the cheapest wins. No source containers, no placed
 /// spawns, or unreachable geometry hire nothing.
+///
+/// The colony's own room and no other (ADR 0041). The kind census spans
+/// every room the projection carries, so the containers are read out of
+/// the home layer to pick the room, and the source judgement is then made
+/// inside it. Both halves have to be home: the round trip is priced by
+/// `Atlas.haulRoundTripTicks`, which floods the home room's grid, so an
+/// outpost container handed to it would be walked over home terrain and
+/// hire a fleet for a haul nobody makes. The honest cross-room price is a
+/// minimum over the Seam band (#123), and the outpost's own quota is the
+/// economics ADR 0042 owns; until both land, a container the home room
+/// does not place hires nobody, which is ADR 0004's answer for geometry
+/// this query cannot price.
 let private haulerQuota (snapshot: Snapshot) atlas : int =
+    let home = SpatialInfo.homeName snapshot.Spatial
+    let placed = (SpatialInfo.layerOf snapshot.Spatial home).TargetPositions
+
     let sourceContainerTiles =
         snapshot.Spatial.TargetKinds
         |> Map.toList
         |> List.choose (fun (id, kind) ->
             if kind = Structure BuiltKind.Container then
-                Map.tryFind id snapshot.Spatial.TargetPositions
+                Map.tryFind id placed
             else
                 None)
-        |> List.filter (isSourceContainerTile snapshot)
+        |> List.filter (isSourceContainerTile snapshot home)
 
     let spawns =
         snapshot.Spawns
@@ -624,6 +670,16 @@ let private patternOf atlas (creep: CreepInfo) =
 /// creep the projection cannot place, a colony whose spawns it cannot
 /// place, and a tile no spawn can reach each answer 0, and a lead of 0
 /// leaves every living creep counted.
+///
+/// Priced in the colony's own room (ADR 0041): the tile comes from
+/// `Atlas.placedCreeps`, which answers home, and the walk from
+/// `Atlas.castWalkTicks`, which floods the home grid and rides a memo ADR
+/// 0032 keys on the census signature — a key with no room on it, because
+/// no flood leaves the room it started in. So a creep the home room does
+/// not place answers 0 and is never expiring: its successor is not cast
+/// early, which is the safe direction of the two while a spawn cannot
+/// walk to it at all. The honest cross-room lead is the minimum over the
+/// Seam band (#123).
 let private leadOf (snapshot: Snapshot) atlas (creep: CreepInfo) : int =
     let pattern = patternOf atlas creep
 
@@ -1386,6 +1442,15 @@ let private planLayout
 /// movement, no matching, no threshold: the reflex only recaptures what
 /// is already in reach (death drops, harvest overflow), and duplicate
 /// pickups on one pile are the engine's to settle.
+///
+/// Both sides come out of the colony's own room, and they have to come out
+/// of the same one (ADR 0041): the piles and the creeps are bare `Pos`es,
+/// so a pile in one room and a creep in another at the same coordinate
+/// would read as range 0 and emit a pickup the engine answers
+/// ERR_NOT_IN_RANGE. `Atlas.droppedEnergy` and `Atlas.placedCreeps` both
+/// answer home, so the pairing never crosses a border; an outpost's
+/// overflow is left where it lies until a cross-room reflex has a walk to
+/// price (#123).
 let private planPickups (snapshot: Snapshot) atlas : Intent list =
     match Atlas.droppedEnergy atlas with
     | [] -> []
@@ -1854,6 +1919,11 @@ let private idleRank = System.Int32.MaxValue
 /// within the Work Area"; one with no Task — or no way to reach its
 /// area, which is just as immobilising — is parked: stay put,
 /// displaceable to any adjacent walkable tile.
+///
+/// The parked branch's displacement tiles are the colony's own room's
+/// (`Atlas.adjacentWalkable`), which costs nothing to be sure of: every
+/// creep reaching this is one the Resolver placed, and the Resolver
+/// arbitrates the home room alone (ADR 0041).
 let private moveIntentFor
     (rankOf: Task -> int)
     (threats: Threats)
@@ -2023,6 +2093,17 @@ let private directionTo (from: Pos) (dest: Pos) : Direction option =
 /// stands now that the flood comes off the Atlas's shared memo (ADR 0030).
 /// Grounded and yielded fall out of work the arbitration already did and
 /// stay always-on.
+///
+/// The colony's own room and no other, which ADR 0041's Consequences
+/// decide rather than defer: geometry crosses the Seam and arbitration
+/// does not. `occupants` is a `Map<Pos, string>` and `blocked` a
+/// `Set<Pos>`, both keyed on a tile with no room on it, so a second room's
+/// creeps unioned in would collapse two creeps standing on one coordinate
+/// of two rooms into one occupant and let a fatigued outpost creep
+/// pre-claim a home tile — deleting a home creep's `MoveCreep` outright.
+/// `Atlas.placedCreeps` answers home for exactly that reason, so an
+/// outpost creep is registered nowhere and moves nowhere; giving it a
+/// mover is the cross-room walk's business (#123), not the Resolver's.
 let resolve
     (snapshot: Snapshot)
     atlas
@@ -2407,19 +2488,42 @@ let private assignedTasks (tasks: Task list) (assignments: Assignments) : Map<st
 /// The hauler quota rides the same signature on one load-bearing
 /// derivation: the RoomEnergy Capacity it sizes bodies from is the
 /// engine's energyCapacityAvailable — a function of the standing
-/// spawn/extension census and the controller level, both covered here. A
-/// colony spanning a second spawn room would outgrow the single RoomName
-/// and must widen the signature before anything census-derived differs
-/// between its rooms.
+/// spawn/extension census and the controller level, both covered here.
+///
+/// It signs **one room**, and since ADR 0041 it says which: the home
+/// entry of the layer, the room `RoomName` names and `SpatialInfo.homeName`
+/// spells the empty string when it names none. The single `RoomName` no
+/// longer has a colony to outgrow, because everything the memo carries is
+/// that one room's — the Layout is anchored in it and stamps it onto every
+/// site, the spawn walks flood its grid alone (ADR 0032), and the hauler
+/// quota prices its containers alone. A second room's structures entering
+/// the kind census must therefore leave this string alone: they move
+/// nothing the memo holds, and a signature that flinched at them would
+/// throw the whole Layout and the whole walk table away for geometry no
+/// entry of the memo reads. What makes them *not* enter is the position
+/// join — the census is (kind, position), and the position is read out of
+/// the home room's layer, so an id the home room does not place carries no
+/// entry. The tick that a memo entry does read a second room — the outpost
+/// container plan and its quota (ADR 0042) — is the tick this has to
+/// widen, and widening it means naming the room in the entry, because two
+/// rooms hold the same coordinates and `Container@16,44` in either would
+/// otherwise be the same census.
 let censusSignature (snapshot: Snapshot) : string =
+    // The bridge (ADR 0041, #119): a public entry point reachable with a
+    // projection written flat, as `planTasks` and the Atlas's constructor
+    // are. Idempotent under a fixed room name; it goes with the flat
+    // fields.
+    let spatial = SpatialInfo.normalise snapshot.Spatial
+    let home = SpatialInfo.homeName spatial
+    let placed = (SpatialInfo.layerOf spatial home).TargetPositions
+
     let census select =
-        snapshot.Spatial.TargetKinds
+        spatial.TargetKinds
         |> Map.toList
         |> List.choose (fun (id, kind) ->
             select kind
             |> Option.bind (fun (built: BuiltKind) ->
-                Map.tryFind id snapshot.Spatial.TargetPositions
-                |> Option.map (fun pos -> $"{built}@{pos.X},{pos.Y}")))
+                Map.tryFind id placed |> Option.map (fun pos -> $"{built}@{pos.X},{pos.Y}")))
         |> List.sort
         |> String.concat ";"
 
@@ -2438,8 +2542,7 @@ let censusSignature (snapshot: Snapshot) : string =
         |> Option.map (fun c -> string c.Level)
         |> Option.defaultValue ""
 
-    let room = SpatialInfo.homeName snapshot.Spatial
-    $"{room}|{level}|{standing}|{pending}"
+    $"{home}|{level}|{standing}|{pending}"
 
 /// The decision seam: Snapshot in — with the verbose list of creep names
 /// owed the manufactured-evidence Verdicts (full candidate scoring, reroute
@@ -2460,14 +2563,16 @@ let decide
     : Decision =
     // The projection's second entry into Core, beside the Atlas's own
     // constructor: a flat projection grows its room layer here, once, and
-    // before anything reads it (ADR 0041). It changes nothing any step
-    // below sees today — the census signature reads the flat fields alone,
-    // and the Atlas normalises its own input — so this is groundwork, not
-    // a dependency: every step of the tick receives this Snapshot, and the
-    // ones #121 and #122 move onto the layer find it already grown rather
-    // than each having to grow it. Idempotent under a fixed room name, so
-    // normalising twice files nothing twice; it goes when the flat fields
-    // go, at the end of the migration.
+    // before anything reads it (ADR 0041). Load-bearing since the readers
+    // moved onto the layer, and not only tidy: the hauler quota is private
+    // to this seam and reads the home room's layer for the containers it
+    // prices, so a projection handed in flat and left unnormalised would
+    // hire nobody. The public readers below — the Planner and the census
+    // signature — carry the same bridge for the callers that reach them
+    // directly, and it costs nothing here because normalising a projection
+    // that already carries its home entry returns it untouched. Idempotent
+    // under a fixed room name, so normalising twice files nothing twice; it
+    // goes when the flat fields go, at the end of the migration (#122).
     let snapshot =
         { snapshot with
             Spatial = SpatialInfo.normalise snapshot.Spatial

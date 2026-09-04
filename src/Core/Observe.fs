@@ -265,28 +265,51 @@ let quietGap = 50
 /// number out to the sources and answer a different question. What the
 /// Keep is losing is watched through its hits instead — the damage below.
 /// An id the projection cannot place contributes nothing (ADR 0004).
-let private ourTiles (snapshot: Snapshot) =
+///
+/// Of one room, named by the caller (ADR 0041). Range is Chebyshev over a
+/// bare `Pos`, which carries no room, so a set unioned across the
+/// projection would put one of ours in the outpost on the same coordinate
+/// as a raider at home and record a raid that reached range 0 without a
+/// creep of theirs ever standing beside a creep of ours. A room the
+/// projection holds no layer for places nothing of ours, which is the same
+/// answer as a room holding nothing (ADR 0004).
+let private ourTilesIn (snapshot: Snapshot) (room: string) =
+    let layer = SpatialInfo.layerOf snapshot.Spatial room
+
     let structures =
         (snapshot.Refillables |> List.map (fun r -> r.Id))
         @ (snapshot.Controller |> Option.toList |> List.map (fun c -> c.Id))
-        |> List.choose (fun id -> Map.tryFind id snapshot.Spatial.TargetPositions)
+        |> List.choose (fun id -> Map.tryFind id layer.TargetPositions)
 
-    (snapshot.Spatial.CreepPositions |> Map.toList |> List.map snd) @ structures
+    (layer.CreepPositions |> Map.toList |> List.map snd) @ structures
 
 /// This tick's closest approach, if there is both a hostile and something
 /// of ours to measure it against. The hostile-free tick is the common one
 /// — every tick of an open episode's quiet gap is one — so it answers
 /// before the owned set is built.
+///
+/// Each hostile is measured against the room it stands in and no other,
+/// and the owned set is built once per room a hostile is in rather than
+/// once per hostile: one room in the single-spawn colony ADR 0005 assumes,
+/// and the right shape already for the tick a hostile stands somewhere
+/// else (#117).
 let private approachAt (snapshot: Snapshot) : Approach option =
     if List.isEmpty snapshot.Hostiles then
         None
     else
-        let ours = ourTiles snapshot
+        let ours =
+            snapshot.Hostiles
+            |> List.map (fun hostile -> hostile.RoomName)
+            |> List.distinct
+            |> List.map (fun room -> room, ourTilesIn snapshot room)
+            |> Map.ofList
 
         let measured =
             snapshot.Hostiles
             |> List.collect (fun hostile ->
-                ours |> List.map (fun tile -> range hostile.Pos tile, hostile.Pos))
+                Map.tryFind hostile.RoomName ours
+                |> Option.defaultValue []
+                |> List.map (fun tile -> range hostile.Pos tile, hostile.Pos))
 
         if List.isEmpty measured then
             None
@@ -332,6 +355,16 @@ let private enrol roster (hostile: HostileInfo) =
 /// dropped with it: the names this tick's losses are read against, and the
 /// hits this tick's damage is (ADR 0034).
 let foldRaids (cap: int) (gap: int) (snapshot: Snapshot) (prior: RaidState) : RaidState =
+    // The bridge (ADR 0041, #119): the closest approach reads the room
+    // layer, and this is a public entry point a caller may reach with a
+    // projection written flat, exactly as `Decide.planTasks` and the
+    // Atlas's constructor are. Idempotent under a fixed room name; it goes
+    // when the flat fields go.
+    let snapshot =
+        { snapshot with
+            Spatial = SpatialInfo.normalise snapshot.Spatial
+        }
+
     // The baseline the next tick reads its losses against: this tick's
     // names, less the creeps whose clock runs out on it. A name gone
     // tomorrow because CREEP_LIFE_TIME ran down is old age, and this

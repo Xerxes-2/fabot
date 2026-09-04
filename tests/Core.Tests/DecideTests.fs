@@ -2243,6 +2243,36 @@ let withTarget id pos kind colony =
 let private stepGridOf (snapshot: Snapshot) =
     Atlas.stepWeights (Atlas.ofSnapshot snapshot) (SpatialInfo.homeName snapshot.Spatial)
 
+/// The same colony with a second room's geometry beside its own: a layer
+/// written straight into `Rooms`, because the flat fields have no room to
+/// put a second room in (ADR 0041). The kind census stays flat and
+/// world-unique, exactly as the projection keeps it — which is what makes
+/// these fixtures able to ask whether a reader joins a kind to the right
+/// room's tile. The colony's own room stays flat and is filed by the
+/// bridge on the way into a reader, exactly as `AtlasTests.withOutpost`
+/// leaves it: `SpatialInfo.normalise` files the home room on the *home*
+/// key rather than on `Rooms` being empty, so a second room's entry never
+/// costs the first one — and leaving it flat is what keeps this helper
+/// order-blind, so a `withTarget` composed after it is still read.
+let withOutpost room targets tiles (colony: Snapshot) =
+    { colony with
+        Spatial =
+            { colony.Spatial with
+                Rooms =
+                    Map.add
+                        room
+                        { RoomLayer.empty with
+                            Terrain = Map.ofList tiles
+                            TargetPositions =
+                                targets |> List.map (fun (id, pos, _) -> id, pos) |> Map.ofList
+                        }
+                        colony.Spatial.Rooms
+                TargetKinds =
+                    (colony.Spatial.TargetKinds, targets)
+                    ||> List.fold (fun acc (id, _, kind) -> Map.add id kind acc)
+            }
+    }
+
 [<Tests>]
 let censusSignatureTests =
     testList
@@ -2330,6 +2360,47 @@ let censusSignatureTests =
                     "the level gates allowances, so it is a signature input"
             }
 
+            test "a second room joining the projection leaves the signature alone" {
+                // The signature signs one room (ADR 0041), and every entry
+                // of the memo it gates is that room's: the Layout is
+                // anchored in it, the spawn walks flood its grid, and the
+                // hauler quota prices its containers. So an outpost
+                // arriving with terrain, a source and a standing container
+                // must not throw all three away — a census that flinched
+                // at geometry no memo entry reads would recompute the
+                // Layout for a room it never plans in.
+                let colony = trunkColony 2
+
+                let joined =
+                    colony
+                    |> withOutpost
+                        "W1N2"
+                        [
+                            "src-out", { X = 24; Y = 24 }, Source
+                            "can-out", { X = 24; Y = 25 }, Structure BuiltKind.Container
+                        ]
+                        [
+                            for x in 23..26 do
+                                for y in 23..26 -> { X = x; Y = y }, Plain
+                        ]
+
+                Expect.equal
+                    (censusSignature joined)
+                    (censusSignature colony)
+                    "the census is the home room's, and a second room's structures are not in it"
+
+                // The pair the equality above would also pass by signing
+                // nothing at all: the same container standing at the same
+                // coordinates *at home* is a census change.
+                Expect.notEqual
+                    (censusSignature (
+                        colony
+                        |> withTarget "can-out" { X = 24; Y = 25 } (Structure BuiltKind.Container)
+                    ))
+                    (censusSignature colony)
+                    "the home room's own container still moves it"
+            }
+
             test "the room name moves the signature" {
                 let colony = trunkColony 2
 
@@ -2367,6 +2438,7 @@ let censusSignatureTests =
                                 {
                                     Id = "h1"
                                     Owner = "raider"
+                                    RoomName = "W1N1"
                                     Pos = { X = 30; Y = 25 }
                                     Body = [ Attack; Move ]
                                 }
@@ -5927,12 +5999,19 @@ let activations intents =
         | _ -> None)
 
 /// A hostile creep of the given body standing on the given tile. Its
-/// owner is immaterial to both reflexes — the Raid log is the only reader
-/// of that field (ADR 0028).
+/// owner and its room are both immaterial to the reflexes — the Raid log
+/// is the only reader of either (ADR 0028, ADR 0041) — and the room is
+/// spelled the empty string, the name `SpatialInfo.homeName` gives a
+/// projection that names none, which is what the colonies assigning
+/// `Hostiles` directly here are built on (`bareRespawn`, `spatial`,
+/// `towerColony`). A colony that *does* name its room gets that name
+/// stamped on by `facing`, so no fixture files a hostile in a room its
+/// own projection has no layer for.
 let hostileAt id pos body : HostileInfo =
     {
         Id = id
         Owner = "raider"
+        RoomName = ""
         Pos = pos
         Body = body
     }
@@ -5940,8 +6019,23 @@ let hostileAt id pos body : HostileInfo =
 /// A hostile creep of the given body, position immaterial.
 let hostile body = hostileAt "h-1" { X = 25; Y = 25 } body
 
-/// The same colony with the given hostiles standing in its room.
-let facing hostiles (snapshot: Snapshot) = { snapshot with Hostiles = hostiles }
+/// The same colony with the given hostiles standing in its room — in
+/// **its** room, which is why the name is stamped on here rather than left
+/// to `hostileAt` (ADR 0041). The colonies this composes onto are built on
+/// `openRoom`, which names its projection "W1N1"; a hostile carrying the
+/// empty name would be filed in a room those projections hold no layer
+/// for, so every reader that joins a hostile to the geometry around it —
+/// the Raid log's closest approach today, the reflexes' Reach at #117 —
+/// would measure it against nothing.
+let facing hostiles (snapshot: Snapshot) =
+    { snapshot with
+        Hostiles =
+            hostiles
+            |> List.map (fun (h: HostileInfo) ->
+                { h with
+                    RoomName = SpatialInfo.homeName snapshot.Spatial
+                })
+    }
 
 /// The same colony reading its safe-mode gates off the given controller.
 let governedBy controller (snapshot: Snapshot) =
@@ -9012,6 +9106,189 @@ let haulerTests =
             }
         ]
 
+/// The hauler quota this Snapshot decides, read off the plan memo `decide`
+/// returns — the quota's only seam, since the rule itself is private to
+/// that pipeline.
+let quotaOf snapshot =
+    let { Memo = memo } = decide snapshot Map.empty Set.empty None
+    memo.HaulerQuota
+
+/// Two rooms whose coordinates collide on purpose (ADR 0041). At home:
+/// the controller at (25,22), the buffer container "can-home" two tiles
+/// off it, and a source far away at (20,30) — so the buffer is the
+/// controller's and no source's. In the outpost: a source at (25,25),
+/// range 1 from the home buffer's coordinates, and a container at
+/// (25,23), range 1 from the home controller's. Nothing here is nearer
+/// than a room boundary to anything it collides with.
+let collidingRooms =
+    { atLevel
+          2
+          (openRoom 8
+           |> withTargets
+               [
+                   "ctrl-1", { X = 25; Y = 22 }, Controller
+                   "can-home", { X = 25; Y = 24 }, Structure BuiltKind.Container
+                   "src-a", { X = 20; Y = 30 }, Source
+               ]) with
+        Sources = [ source "src-a"; source "src-out" ]
+    }
+    |> withOutpost
+        "W1N2"
+        [
+            "src-out", { X = 25; Y = 25 }, Source
+            "can-out", { X = 25; Y = 23 }, Structure BuiltKind.Container
+        ]
+        [
+            for x in 20..30 do
+                for y in 20..30 -> { X = x; Y = y }, Plain
+        ]
+
+/// A home container stranded six tiles from the spawn and serving no home
+/// source, with an outpost source one tile from its coordinates — the
+/// hauler quota's half of the same collision. Six tiles because the quota
+/// is a round trip: a container beside the spawn prices at zero and would
+/// hire nobody whichever room the source stood in.
+let strandedContainer sourceRoom =
+    let home =
+        openRoom 8
+        |> withTargets
+            [
+                "can-far", { X = 25; Y = 31 }, Structure BuiltKind.Container
+                "src-a", { X = 19; Y = 19 }, Source
+            ]
+
+    let colony =
+        { bareRespawn with
+            Sources = [ source "src-a"; source "src-out" ]
+            Spatial = home
+        }
+
+    let strayed = "src-out", { X = 25; Y = 32 }, Source
+
+    if Some sourceRoom = home.RoomName then
+        { colony with
+            Spatial = colony.Spatial |> withTargets [ strayed ]
+        }
+    else
+        colony |> withOutpost sourceRoom [ strayed ] []
+
+/// The mirror of the collision: a home source at (25,31) and an outpost
+/// container one tile off its coordinates, in the outpost. The quota is
+/// flooded over the home room's grid, so a container it does not place
+/// must never reach the arithmetic at all.
+let outpostContainerColony =
+    { bareRespawn with
+        Sources = [ source "src-a" ]
+        Spatial = openRoom 8 |> withTargets [ "src-a", { X = 25; Y = 31 }, Source ]
+    }
+    |> withOutpost "W1N2" [ "can-out", { X = 25; Y = 32 }, Structure BuiltKind.Container ] []
+
+[<Tests>]
+let roomLayerTests =
+    testList
+        "room layer"
+        [
+            test "a container belongs to the source and the controller of its own room" {
+                let refills =
+                    planTasks collidingRooms noThreats
+                    |> List.choose (function
+                        | Refill id -> Some id
+                        | _ -> None)
+
+                // Room-blind, both judgements invert: the home buffer reads
+                // as the outpost source's container and drops out of the
+                // pool, and the outpost's container reads as the home
+                // controller's buffer and enters it.
+                Expect.equal
+                    refills
+                    [ "can-home" ]
+                    "the upgrade buffer is the container in the controller's own room"
+            }
+
+            test "an outpost source's coordinates hire no haulers at home" {
+                // Pairwise, one rival at a time: the same container, the
+                // same source, the same coordinates — only the room the
+                // source stands in moves.
+                Expect.equal
+                    (quotaOf (strandedContainer "W1N2"))
+                    0
+                    "a source across a room boundary makes no container a source container"
+
+                Expect.isGreaterThan
+                    (quotaOf (strandedContainer "W1N1"))
+                    0
+                    "the same source at home does, and hires for the haul"
+
+                // And the mirror, because the quota picks a room twice
+                // over: the containers it folds come out of the home
+                // layer, so an outpost container beside a home source's
+                // coordinates is not the home room's to price. Its round
+                // trip would be flooded over home terrain, hiring a fleet
+                // for a haul nobody makes — the honest cross-room price is
+                // a minimum over the Seam band (#123).
+                Expect.equal
+                    (quotaOf outpostContainerColony)
+                    0
+                    "a container the home room does not place hires nobody"
+            }
+
+            test "a projection written flat reaches the readers that read the layer" {
+                // The bridge #119 laid, load-bearing here for the first
+                // time: the hauler quota is private to `decide`, reads the
+                // home room's layer, and is handed a projection every
+                // fixture in this file writes flat. `decide` normalising at
+                // its entry is the whole reason it finds anything —
+                // without it the layer is empty, and an empty layer places
+                // no container and hires nobody (ADR 0004).
+                let flat =
+                    { quotaColony 20 5 1500 with
+                        Creeps = [ anchor "a1" 0 50 ]
+                    }
+
+                let layered =
+                    { flat with
+                        Spatial = SpatialInfo.normalise flat.Spatial
+                    }
+
+                Expect.isTrue
+                    (Map.isEmpty flat.Spatial.Rooms)
+                    "the fixture carries the flat fields and no layer at all"
+
+                Expect.equal
+                    (quotaOf flat)
+                    (quotaOf layered)
+                    "a projection bridged at the seam decides what one bridged by hand does"
+
+                Expect.equal (quotaOf flat) 2 "and it is the 8-step room's quota, not zero"
+            }
+
+            test "the bridge still files the home room after a second one has joined" {
+                // `SpatialInfo.normalise` bails on the *home* key, never on
+                // `Rooms` being non-empty, so a projection that grew an
+                // outpost layer first still carries its own room's flat
+                // fields into every reader. Worth pinning because the
+                // failure is silent in the direction a fixture cannot see:
+                // a home container the bridge missed produces no Refill and
+                // no quota, and reads as "the room rule rejected it" when
+                // in fact no reader was ever shown it.
+                let late =
+                    collidingRooms
+                    |> withTarget "can-late" { X = 26; Y = 22 } (Structure BuiltKind.Container)
+
+                let refills =
+                    planTasks late noThreats
+                    |> List.choose (function
+                        | Refill id -> Some id
+                        | _ -> None)
+                    |> List.sort
+
+                Expect.equal
+                    refills
+                    [ "can-home"; "can-late" ]
+                    "a container written flat after the outpost joined is still the controller's"
+            }
+        ]
+
 /// The W12S28 shape (ADR 0012): a 3-wide plain field y = 9..11 from x = 8
 /// to 32, two sources embedded in wall at (10,10) and (30,10) with their
 /// built containers on the Seats (11,10) and (29,10) — two Posts, no Dual
@@ -9570,6 +9847,29 @@ let threatTests =
     testList
         "threats"
         [
+            test "a fixture's hostiles stand in the room its own projection names" {
+                // ADR 0041 joins a hostile to the geometry around it by room
+                // name, and the join is silent when it misses: a hostile
+                // filed under a name the projection carries no layer for
+                // measures against nothing at all (ADR 0004) rather than
+                // failing. These colonies are built on `openRoom`, which
+                // names its projection, so the empty default `hostileAt`
+                // carries for the unnamed fixtures would be wrong here —
+                // wrong today only in the Raid log, and in every reflex the
+                // tick #117 gives the Reach a room to read.
+                let colony = facingBody { X = 25; Y = 22 } [ Attack; Move ]
+
+                Expect.equal
+                    (colony.Hostiles |> List.map (fun h -> h.RoomName))
+                    [ "W1N1" ]
+                    "the hostile names the room, not the empty default"
+
+                Expect.equal
+                    (colony.Hostiles |> List.map (fun h -> h.RoomName))
+                    [ SpatialInfo.homeName colony.Spatial ]
+                    "and it is the room the projection files its own geometry under"
+            }
+
             test "a Threat is read off the parts: ATTACK or RANGED_ATTACK, nothing else" {
                 // ADR 0033: nothing but those two hurts a creep, so nothing
                 // else has a Reach. A healer, a scout, a claimer and a

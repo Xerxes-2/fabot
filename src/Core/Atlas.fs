@@ -626,8 +626,13 @@ let ofSnapshot (snapshot: Snapshot) : Atlas =
 /// the same answer as an entry whose every container is empty (ADR 0004) —
 /// so `tryFind` and the empty layer, never the indexer, which throws on
 /// exactly the room a projection names and holds nothing for.
+///
+/// The rule itself is `SpatialInfo.layerOf`'s, spelled once there and
+/// reached from here with the Atlas's own projection, so the tick #122
+/// changes what a room with no entry answers there is the tick these
+/// fourteen call sites change with it.
 let private layerOf (atlas: Atlas) (room: string) : RoomLayer =
-    Map.tryFind room atlas.Spatial.Rooms |> Option.defaultValue RoomLayer.empty
+    SpatialInfo.layerOf atlas.Spatial room
 
 /// One room's step-weight grid, and the all-impassable grid for a room the
 /// projection does not carry.
@@ -696,8 +701,12 @@ let private flood (atlas: Atlas) (pricing: Pricing) (room: string) (creep: strin
 /// reflex measures range against home-room piles, and the lead prices the
 /// tile off the home room's flood. A second room's creep unioned in would
 /// ground a home creep from another room, collapse two creeps onto one
-/// occupant, and price an outpost tile on home terrain. #121 is where the
-/// mover learns the room; until then this answers the room it moves in.
+/// occupant, and price an outpost tile on home terrain. The mover does not
+/// learn the room later either: ADR 0041 settles arbitration at one room,
+/// so this is the answer, not a placeholder for one. A creep the colony's
+/// own room does not place is simply not arbitrated and not led — the
+/// answer ADR 0004 gives for geometry a query cannot place, here reached
+/// by picking the room rather than by failing to find the tile.
 let placedCreeps (atlas: Atlas) : (string * Pos) list =
     atlas.Placed
     |> List.choose (fun (name, room, pos) -> if room = atlas.Home then Some(name, pos) else None)
