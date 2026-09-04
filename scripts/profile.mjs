@@ -5,7 +5,9 @@
 // The stub touches only the API surface declared in src/App/Bindings.fs and
 // never the Screeps network API. The world is frozen: intents are accepted
 // (return code 0) but nothing mutates between ticks except Game.time and
-// whatever the bot writes into Memory.
+// whatever the bot writes into Memory — unless --census-every N is given,
+// which moves the structure census every Nth tick so the census-keyed
+// memos (ADR 0017, ADR 0032) are made to pay their recompute.
 
 import { createRequire } from "node:module";
 import { Session } from "node:inspector/promises";
@@ -14,10 +16,23 @@ import { writeFileSync, mkdirSync, existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 
-const TICKS = Number(process.argv[2] ?? 100);
-const TOP = Number(process.argv[3] ?? 30);
-if (!Number.isInteger(TICKS) || TICKS < 1 || !Number.isInteger(TOP) || TOP < 1) {
-  console.error("usage: npm run profile -- [ticks] [top-N]  (positive integers)");
+const USAGE = "usage: npm run profile -- [ticks] [top-N] [--census-every N]  (positive integers)";
+
+// Positional [ticks] [top-N] as before, with --census-every N pulled out
+// from anywhere in the line.
+const positional = [];
+let censusEvery = 0; // absent: the frozen world, and no perturbation report
+for (let i = 2; i < process.argv.length; i++) {
+  if (process.argv[i] === "--census-every") censusEvery = Number(process.argv[++i]);
+  else positional.push(process.argv[i]);
+}
+
+const TICKS = Number(positional[0] ?? 100);
+const TOP = Number(positional[1] ?? 30);
+const CENSUS_EVERY = censusEvery;
+const notPositive = (n) => !Number.isInteger(n) || n < 1;
+if (notPositive(TICKS) || notPositive(TOP) || (CENSUS_EVERY !== 0 && notPositive(CENSUS_EVERY))) {
+  console.error(USAGE);
   process.exit(1);
 }
 const WARMUP = 3; // unprofiled JIT warm-up ticks
@@ -246,6 +261,35 @@ function buildWorld() {
     106: [], // FIND_DROPPED_RESOURCES
   };
 
+  // --- census perturbation (--census-every) ------------------------------
+  // The lane to source B is carved but unpaved — the room's spare line.
+  // Each perturbation paves the next tile of it, and once the lane is
+  // fully paved lifts the tiles again one at a time, so a run of any
+  // length keeps moving the census by exactly one standing structure —
+  // enough to move the signature (ADR 0017) and drop the walk table (ADR
+  // 0032), while the world stays the same size and shape. The paved tile
+  // stands at the default 4000/5000 hits, above the repair trigger, so what
+  // a perturbed tick pays for is the recompute and not a new Repair task.
+  const spare = line(SPAWN_POS, SOURCE_B).filter((p) => !occupied.has(`${p.x},${p.y}`));
+  const structures = findTables[107];
+  const spareRoads = new Map();
+  let spareNext = 0;
+  const perturb = () => {
+    if (!spare.length) throw new Error("--census-every: no unpaved tile left to move the census");
+    const pos = spare[spareNext++ % spare.length];
+    const key = `${pos.x},${pos.y}`;
+    const standing = spareRoads.get(key);
+    if (standing) {
+      spareRoads.delete(key);
+      byId.delete(standing.id);
+      structures.splice(structures.indexOf(standing), 1);
+      return;
+    }
+    const road = structure(`road-spare-${key}`, "road", pos);
+    spareRoads.set(key, road);
+    structures.push(road);
+  };
+
   const room = {
     name: ROOM,
     energyAvailable: 250,
@@ -276,8 +320,20 @@ function buildWorld() {
     creeps: Object.fromEntries(creeps.map((c) => [c.name, c])),
     getObjectById: (id) => byId.get(id) ?? null,
   };
-  return { game, roadCount: roads.length, terrainReads: () => terrainReads };
+  return {
+    game,
+    roadCount: roads.length,
+    terrainReads: () => terrainReads,
+    perturb,
+    spareTiles: spare.length,
+  };
 }
+
+// The frames the census-keyed memos exist to skip: the Layout and the
+// hauler quota behind the plan memo (ADR 0017), and the spawn walks behind
+// the walk table (ADR 0032). Named rather than ranked, so the perturbation
+// report always shows them however far down the hotspot tables they sit.
+const CENSUS_KEYED = ["planLayout", "haulerQuota", "trunkPath", "castWalkTicks"];
 
 // ---------------------------------------------------------------------------
 // .cpuprofile aggregation: self and inclusive sampled time per call frame.
@@ -285,7 +341,7 @@ function buildWorld() {
 
 const META = new Set(["(root)", "(program)", "(idle)"]);
 
-function summarize(profile) {
+function summarize(profile, keepSample = () => true) {
   const nodes = new Map(profile.nodes.map((n) => [n.id, n]));
   const parent = new Map();
   for (const n of profile.nodes) {
@@ -323,7 +379,7 @@ function summarize(profile) {
     // at a 100µs interval.
     const dt = Math.max(0, timeDeltas[i] ?? 0);
     const node = nodes.get(samples[i]);
-    if (!node) continue;
+    if (!node || !keepSample(samples[i])) continue;
     const key = keyOf(node);
     if (node.callFrame.functionName === "(idle)") continue;
     active += dt;
@@ -345,36 +401,137 @@ function summarize(profile) {
   return { rows, activeUs: active };
 }
 
-function printReport(tickMs, summary, roadCount) {
-  const sorted = [...tickMs].sort((a, b) => a - b);
-  const mean = tickMs.reduce((a, b) => a + b, 0) / tickMs.length;
-  const median = sorted[Math.floor(sorted.length / 2)];
+// Which class of tick each call node sits under, read off the marker frame
+// the profiled loop() is called through (see perturbedTick below). Nodes
+// outside the tick — the profiler's own start/stop — belong to neither.
+function tickClasses(profile) {
+  const marks = { perturbedTick: "perturbed", quietTick: "quiet" };
+  const nodes = new Map(profile.nodes.map((n) => [n.id, n]));
+  const parented = new Set();
+  for (const n of profile.nodes) for (const c of n.children ?? []) parented.add(c);
 
-  console.log(
-    `fabot profile — ${tickMs.length} ticks, stub colony ` +
-      `(2 sources, spawn, controller, ${roadCount} roads, 2 containers, ${SITES.length} sites, 8 creeps)`
-  );
-  console.log(
-    `ms/tick: mean ${mean.toFixed(2)}  median ${median.toFixed(2)}  ` +
-      `min ${sorted[0].toFixed(2)}  max ${sorted[sorted.length - 1].toFixed(2)}`
-  );
-  console.log(`sampled ${(summary.activeUs / 1000).toFixed(0)} ms at ${SAMPLE_INTERVAL_US}µs\n`);
+  const cls = new Map();
+  const walk = (id, inherited) => {
+    const node = nodes.get(id);
+    if (!node) return;
+    const here = marks[node.callFrame.functionName] ?? inherited;
+    cls.set(id, here);
+    for (const child of node.children ?? []) walk(child, here);
+  };
+  for (const n of profile.nodes) if (!parented.has(n.id)) walk(n.id, undefined);
+  return cls;
+}
 
-  const pct = (us) => ((100 * us) / summary.activeUs).toFixed(1).padStart(5);
-  const table = (title, rows) => {
-    console.log(`${title}\n  self%  incl%   self ms  function`);
-    for (const row of rows.slice(0, TOP)) {
+function stats(msList) {
+  const sorted = [...msList].sort((a, b) => a - b);
+  return {
+    n: msList.length,
+    mean: msList.reduce((a, b) => a + b, 0) / msList.length,
+    median: sorted[Math.floor(sorted.length / 2)],
+    min: sorted[0],
+    max: sorted[sorted.length - 1],
+  };
+}
+
+// What the memos are worth: the sampled inclusive cost of each census-keyed
+// frame on a tick that has to recompute it, against a tick that recalls it.
+// The rows nest — trunkPath's ms are inside planLayout's — so read them one
+// at a time; the column is not a sum and does not add up to the tick.
+function printCensusKeyed(classes) {
+  const msPerTick = ({ summary, ms }, name) =>
+    summary.rows
+      .filter((row) => row.name === name)
+      .reduce((total, row) => total + row.inclusiveUs, 0) /
+    1000 /
+    ms.length;
+
+  console.log("\ncensus-keyed frames — inclusive ms per tick of each class");
+  console.log(`  ${classes.map((c) => c.label.padStart(9)).join("  ")}  function`);
+  for (const name of CENSUS_KEYED) {
+    console.log(
+      `  ${classes.map((c) => msPerTick(c, name).toFixed(2).padStart(9)).join("  ")}  ${name}`
+    );
+  }
+}
+
+function printReport(classes, pooled, stub) {
+  console.log(
+    `fabot profile — ${TICKS} ticks, stub colony ` +
+      `(2 sources, spawn, controller, ${stub.roadCount} roads, 2 containers, ` +
+      `${SITES.length} sites, 8 creeps)` +
+      (CENSUS_EVERY
+        ? `, census moved every ${CENSUS_EVERY} ticks over a ${stub.spareTiles}-tile lane`
+        : "")
+  );
+
+  // Under perturbation the two classes of tick are different workloads — one
+  // pays the census-keyed recompute, the other recalls it — so ms/tick, the
+  // hotspot tables and the census-keyed frames are all reported per class.
+  // One mean over the two would hide both.
+  if (CENSUS_EVERY) {
+    for (const { label, ms } of classes) {
+      const s = stats(ms);
+      console.log(
+        `ms/tick ${label.padEnd(9)} (${String(s.n).padStart(4)} ticks): ` +
+          `mean ${s.mean.toFixed(2)}  median ${s.median.toFixed(2)}  ` +
+          `min ${s.min.toFixed(2)}  max ${s.max.toFixed(2)}`
+      );
+    }
+    printCensusKeyed(classes);
+  } else {
+    const s = stats(classes[0].ms);
+    console.log(
+      `ms/tick: mean ${s.mean.toFixed(2)}  median ${s.median.toFixed(2)}  ` +
+        `min ${s.min.toFixed(2)}  max ${s.max.toFixed(2)}`
+    );
+  }
+
+  // Samples V8 parents at the root — the garbage collector, and the
+  // profiler's own start and stop — sit under no tick marker, so they are in
+  // neither class and each class's percentages are on its own base.
+  const outside = pooled.activeUs - classes.reduce((total, c) => total + c.summary.activeUs, 0);
+  if (outside > 0) {
+    console.log(
+      `\n${(outside / 1000).toFixed(0)} ms sampled outside both classes ` +
+        "(root-parented GC, and the profiler's own start and stop)"
+    );
+  }
+  if (CENSUS_EVERY) console.log("");
+
+  for (const { label, summary } of classes) {
+    const head = CENSUS_EVERY ? `${label} ticks — sampled` : "sampled";
+    console.log(`${head} ${(summary.activeUs / 1000).toFixed(0)} ms at ${SAMPLE_INTERVAL_US}µs\n`);
+
+    const pct = (us) => ((100 * us) / summary.activeUs).toFixed(1).padStart(5);
+    const line = (row) => {
       const ms = (row.selfUs / 1000).toFixed(1).padStart(9);
       const loc = row.location ? `  [${row.location}]` : "";
-      console.log(`  ${pct(row.selfUs)}  ${pct(row.inclusiveUs)} ${ms}  ${row.name}${loc}`);
-    }
-    console.log("");
-  };
+      return `  ${pct(row.selfUs)}  ${pct(row.inclusiveUs)} ${ms}  ${row.name}${loc}`;
+    };
+    // `always` names rows to print even when they rank below the cut: the
+    // census-keyed frames are the point of a perturbed run and are easily
+    // outranked by the F# runtime plumbing they pass through.
+    const table = (title, rows, always = []) => {
+      console.log(`${title}\n  self%  incl%   self ms  function`);
+      const shown = rows.slice(0, TOP);
+      for (const row of shown) console.log(line(row));
+      const below = rows.filter((row) => always.includes(row.name) && !shown.includes(row));
+      if (below.length) {
+        console.log("  census-keyed frames below the cut:");
+        for (const row of below) console.log(line(row));
+      }
+      console.log("");
+    };
 
-  // Self time names where samples land (runtime primitives, floods); the
-  // inclusive view names the phases paying for them (decide, planLayout, …).
-  table("hot by self time", [...summary.rows].sort((a, b) => b.selfUs - a.selfUs));
-  table("hot by inclusive time", [...summary.rows].sort((a, b) => b.inclusiveUs - a.inclusiveUs));
+    // Self time names where samples land (runtime primitives, floods); the
+    // inclusive view names the phases paying for them (decide, planLayout, …).
+    table("hot by self time", [...summary.rows].sort((a, b) => b.selfUs - a.selfUs));
+    table(
+      "hot by inclusive time",
+      [...summary.rows].sort((a, b) => b.inclusiveUs - a.inclusiveUs),
+      CENSUS_EVERY ? CENSUS_KEYED : []
+    );
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -388,15 +545,38 @@ if (!existsSync(bundle)) {
   process.exit(1);
 }
 
-const { game, roadCount, terrainReads } = buildWorld();
+const { game, terrainReads, perturb, ...stub } = buildWorld();
 globalThis.Game = game;
 globalThis.Memory = {};
 
 const { loop } = createRequire(import.meta.url)(bundle);
 
-for (let i = 0; i < WARMUP; i++) {
+// One counter over warm-up and profiled ticks alike, so the recompute path
+// is JIT-warm before it is measured.
+let tick = 0;
+const movesCensus = () => CENSUS_EVERY > 0 && tick % CENSUS_EVERY === 0;
+
+// Tick-class markers. Under --census-every the tick is run through one of
+// these, so every sample's stack names the class of tick it was taken in
+// and the hotspot tables can be split. The marker is picked before the
+// call, never around it: an unflagged run calls loop() itself, so its
+// stacks — and its numbers — are exactly what they were.
+function perturbedTick() {
   loop();
+}
+
+function quietTick() {
+  loop();
+}
+
+const tickThrough = (moved) => (!CENSUS_EVERY ? loop : moved ? perturbedTick : quietTick);
+
+for (let i = 0; i < WARMUP; i++) {
+  const moved = movesCensus();
+  if (moved) perturb();
+  tickThrough(moved)();
   game.time++;
+  tick++;
 }
 
 const session = new Session();
@@ -405,12 +585,18 @@ await session.post("Profiler.enable");
 await session.post("Profiler.setSamplingInterval", { interval: SAMPLE_INTERVAL_US });
 await session.post("Profiler.start");
 
-const tickMs = [];
+const ticks = { all: [], perturbed: [], quiet: [] };
 for (let i = 0; i < TICKS; i++) {
+  const moved = movesCensus();
+  if (moved) perturb();
+  const run = tickThrough(moved);
   const start = performance.now();
-  loop();
-  tickMs.push(performance.now() - start);
+  run();
+  const ms = performance.now() - start;
+  ticks.all.push(ms);
+  (moved ? ticks.perturbed : ticks.quiet).push(ms);
   game.time++;
+  tick++;
 }
 
 const { profile } = await session.post("Profiler.stop");
@@ -420,6 +606,19 @@ mkdirSync(path.join(here, "..", "build"), { recursive: true });
 const profilePath = path.join(here, "..", "build", "fabot.cpuprofile");
 writeFileSync(profilePath, JSON.stringify(profile));
 
-printReport(tickMs, summarize(profile), roadCount);
+// One entry per class of tick worth reporting apart: the whole run when the
+// world is frozen, the perturbed and the quiet ticks when it is not.
+const pooled = summarize(profile);
+const classOf = CENSUS_EVERY ? tickClasses(profile) : null;
+const classes = CENSUS_EVERY
+  ? [
+      { label: "perturbed", ms: ticks.perturbed },
+      { label: "quiet", ms: ticks.quiet },
+    ]
+      .filter((c) => c.ms.length)
+      .map((c) => ({ ...c, summary: summarize(profile, (id) => classOf.get(id) === c.label) }))
+  : [{ label: "all", ms: ticks.all, summary: pooled }];
+
+printReport(classes, pooled, stub);
 console.log(`engine terrain reads: ${terrainReads()} over ${WARMUP + TICKS} ticks (Game.map.getRoomTerrain)`);
 console.log(`\nraw profile: ${path.relative(process.cwd(), profilePath)} (open in Chrome DevTools / speedscope)`);

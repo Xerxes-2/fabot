@@ -36,6 +36,7 @@ Or separately: `npm run build` / `npm run upload`.
 ```sh
 npm run build
 npm run profile            # 100 ticks; or: npm run profile -- 500 [top-N]
+npm run profile -- 100 30 --census-every 10   # move the census every 10 ticks
 ```
 
 `npm run profile` drives the compiled `loop()` in Node against a stub colony
@@ -46,9 +47,36 @@ plus two hotspot tables (by self and by inclusive time). The raw
 The stub keeps the #50 baseline shape — W12S28 at RCL3, 8 creeps — so
 ms/tick stays comparable across commits even as the live colony moves on.
 It implements only the API surface declared in `src/App/Bindings.fs`, the
-terrain is synthetic, the world is frozen between ticks (so census-keyed
-memos are measured at zero), and engine-side costs are not simulated:
-relative percentages are the signal, absolute ms/tick is not.
+terrain is synthetic, the world is frozen between ticks, and engine-side
+costs are not simulated: relative percentages are the signal, absolute
+ms/tick is not.
+
+`--census-every N` lifts the freeze on the one axis that hides work: every
+Nth tick it paves one tile of the unpaved lane to the far source (and, once
+the lane is paved, lifts those tiles again one at a time), so the census
+signature moves and the census-keyed memos — the Layout and the hauler
+quota (ADR 0017), the spawn walks (ADR 0032) — are made to recompute.
+Without it those paths recompute once, in a warm-up tick, and are measured
+at zero forever after.
+
+Read a perturbed run by class, never by a pooled mean: ms/tick, the hotspot
+tables, and the `census-keyed frames` table all split into the perturbed
+ticks that pay the recompute and the quiet ticks that recall it. Three
+things about that split are worth knowing:
+
+- The perturbed column is a per-recompute price, not a per-tick one —
+  divide it by N for what the memos cost a colony whose census moves that
+  often.
+- Its rows are inclusive and they nest (`trunkPath` runs inside
+  `planLayout`), so read them one at a time; the column is not a sum.
+- The census-keyed frames are printed in each inclusive table even when
+  they rank below the top-N cut, under a `below the cut` line — they are
+  easily outranked by the F# runtime plumbing they call through.
+
+Samples the profiler parks at the root — the garbage collector, and its own
+start and stop — belong to no tick, so they are in neither class and each
+table's percentages are on its own class's base. Only unflagged runs are
+comparable with the #50 baseline.
 
 Current numbers, the live CPU history, and the per-hotspot attribution are
 tracked in #50 — read that, not this file, for where the time goes.
