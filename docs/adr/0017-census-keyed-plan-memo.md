@@ -15,3 +15,4 @@ Profiling (#50) falsified ADR 0011's premise that "for a deterministic planner t
 - A signature gap is the failure mode: a census input the signature misses means sites stop dropping until a reset. The spec's test surface must construct one case per census input asserting the signature moves.
 - The hauler quota rides the same memo only because its input set is a subset of the Layout's; anything census-derived added later may join, anything reading creep state may not.
 - The memo is the codebase's first cross-tick computed state; ADRs 0001/0002's "cross-tick path caching deferred" stands — floods and paths still rebuild per tick.
+  Narrowed by ADR 0032: the spawn walks, whose inputs are the census alone, join the memo.
