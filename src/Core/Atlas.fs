@@ -1,6 +1,7 @@
 module Fabot.Core.Atlas
 
 open Fabot.Core.Types
+open Fable.Core
 
 /// A body's fatigue factor (ADR 0006): the parts that generate fatigue
 /// when moving and the Move parts that pay it off. Terrain weight scales
@@ -226,6 +227,32 @@ let private stepUnits (factor: FatigueFactor) weight =
 let private stepTicks (factor: FatigueFactor) weight =
     stepUnits factor weight |> Option.map (fun units -> max 1 ((units + 1) / 2))
 
+/// The flood's array accessors: checked on .NET (the F# body is the
+/// ordinary index, so `dotnet test` runs the flood bounds-checked) and a
+/// bare JS index under Fable, where the `[<Emit>]` template replaces the
+/// call. Fable 4.12+ compiles every `arr.[i]` to a helper that re-tests
+/// the index and carries a throw path, and offers no switch to drop it;
+/// in the flood that helper was ~28% of the tick (#91), re-checking
+/// indices the loop has already proven in range — a neighbour index is
+/// built only after the `0 <= n < roomSide` guard, and the heap's come
+/// from its own `Count`. Used only inside `floodFromAll`; every other
+/// array read in the Atlas stays checked, since none is on the profile.
+[<Emit("$1[$0]")>]
+let private at (index: int) (array: int[]) : int = array.[index]
+
+[<Emit("$1[$0] = $2")>]
+let private setAt (index: int) (array: int[]) (value: int) : unit = array.[index] <- value
+
+[<Emit("$1[$0]")>]
+let private flagAt (index: int) (array: bool[]) : bool = array.[index]
+
+[<Emit("$1[$0]")>]
+let private heapAt (index: int) (heap: ResizeArray<int>) : int = heap.[index]
+
+[<Emit("$1[$0] = $2")>]
+let private setHeapAt (index: int) (heap: ResizeArray<int>) (value: int) : unit =
+    heap.[index] <- value
+
 /// Dijkstra flood over the weight grid from every tile in `starts`,
 /// priced by `stepPrice` — one body's price for a step onto a tile of a
 /// given terrain weight, and, beside the occupancy the caller passes, the
@@ -258,21 +285,21 @@ let private floodFromAll
     let heap = ResizeArray<int>()
 
     let swap i j =
-        let t = heap.[i]
-        heap.[i] <- heap.[j]
-        heap.[j] <- t
+        let t = heapAt i heap
+        setHeapAt i heap (heapAt j heap)
+        setHeapAt j heap t
 
     let push key =
         heap.Add key
         let mutable i = heap.Count - 1
 
-        while i > 0 && heap.[(i - 1) / 2] > heap.[i] do
+        while i > 0 && heapAt ((i - 1) / 2) heap > heapAt i heap do
             swap ((i - 1) / 2) i
             i <- (i - 1) / 2
 
     let pop () =
-        let top = heap.[0]
-        heap.[0] <- heap.[heap.Count - 1]
+        let top = heapAt 0 heap
+        setHeapAt 0 heap (heapAt (heap.Count - 1) heap)
         heap.RemoveAt(heap.Count - 1)
         let mutable i = 0
         let mutable sinking = true
@@ -282,10 +309,10 @@ let private floodFromAll
             let r = 2 * i + 2
             let mutable smallest = i
 
-            if l < heap.Count && heap.[l] < heap.[smallest] then
+            if l < heap.Count && heapAt l heap < heapAt smallest heap then
                 smallest <- l
 
-            if r < heap.Count && heap.[r] < heap.[smallest] then
+            if r < heap.Count && heapAt r heap < heapAt smallest heap then
                 smallest <- r
 
             if smallest = i then
@@ -299,6 +326,9 @@ let private floodFromAll
     for start in starts do
         let startIndex = indexOf start
 
+        // Checked: a start is the caller's Pos, not an index the flood
+        // built, so this is the one access the in-range argument for the
+        // accessors above does not cover — and it runs once per start.
         if dist.[startIndex] <> 0 then
             dist.[startIndex] <- 0
             push startIndex
@@ -309,7 +339,7 @@ let private floodFromAll
         let d = key / tileCount
 
         // Stale heap entry when unequal: the tile was reached cheaper meanwhile.
-        if dist.[index] = d then
+        if at index dist = d then
             let x = index / roomSide
             let y = index % roomSide
 
@@ -322,17 +352,20 @@ let private floodFromAll
                         (dx <> 0 || dy <> 0) && nx >= 0 && nx < roomSide && ny >= 0 && ny < roomSide
                     then
                         let next = nx * roomSide + ny
+                        let weight = at next weights
 
-                        if weights.[next] >= 0 then
-                            match stepPrice weights.[next] with
+                        if weight >= 0 then
+                            match stepPrice weight with
                             | None -> ()
                             | Some step ->
                                 let candidate =
-                                    d + step + (if occupied.[next] then occupancyPenalty else 0)
+                                    d
+                                    + step
+                                    + (if flagAt next occupied then occupancyPenalty else 0)
 
-                                if candidate < dist.[next] then
-                                    dist.[next] <- candidate
-                                    parents.[next] <- index
+                                if candidate < at next dist then
+                                    setAt next dist candidate
+                                    setAt next parents index
                                     push (candidate * tileCount + next)
 
     dist, parents

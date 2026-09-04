@@ -9,4 +9,9 @@
     <Compile Include="Decide.fs" />
     <Compile Include="Observe.fs" />
   </ItemGroup>
+  <ItemGroup>
+    <!-- Atlas's flood declares its unchecked Fable accessors with
+         [<Emit>]; on .NET the package contributes attributes only. -->
+    <PackageReference Include="Fable.Core" Version="5.2.0" />
+  </ItemGroup>
 </Project>
