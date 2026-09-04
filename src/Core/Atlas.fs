@@ -49,8 +49,13 @@ type Atlas =
             /// Each creep's fatigue factor — what turns terrain weight
             /// into travel cost for that body (ADR 0006).
             Factors: Map<string, FatigueFactor>
-            /// Step weight per tile index (stepCost flattened once for the
-            /// flood's hot loop): -1 impassable, else the terrain weight.
+            /// Step weight per tile index, laid once a tick for the
+            /// flood's hot loop: -1 impassable, else the terrain weight.
+            /// stepCost's rules over the whole room, reached by walking
+            /// the projection's collections rather than by querying it a
+            /// tile at a time (#96) — the same rules, not the same code,
+            /// so the two are held together by terrainWeight and by the
+            /// road and obstacle precedence ofSnapshot spells out.
             Weights: int[]
             /// Whether a creep stands on each tile index this tick; the
             /// flood prices these tiles dearer so paths detour around
@@ -149,22 +154,31 @@ let private neighbours pos =
                     { X = pos.X + dx; Y = pos.Y + dy }
     ]
 
+/// The weight of raw ground (ADR 0010): plain 2, swamp 10, wall
+/// impassable — written as the -1 the flood's weight table marks an
+/// impassable tile with. The one place the engine's terrain prices live:
+/// stepCost's single-tile answer, the table ofSnapshot lays and the
+/// trunk's raw-terrain flood all price off it, which is what keeps them
+/// from drifting apart.
+let private terrainWeight terrain =
+    match terrain with
+    | Plain -> 2
+    | Swamp -> swampWeight
+    | Wall -> -1
+
 /// Cost of stepping onto a tile — the engine's own per-part fatigue
 /// values (ADR 0010): road 1, plain 2, swamp 10; walls, obstacle
 /// structures and tiles outside the projection are impassable (ADR 0001).
 /// A built road overrides the terrain under it; a road on a wall (a
-/// tunnel) is not modeled and stays impassable.
+/// tunnel) is not modeled and stays impassable. The single-tile query —
+/// the flood reads the table ofSnapshot lays to the same rules.
 let private stepCost (spatial: SpatialInfo) tile =
     if Set.contains tile spatial.Obstacles then
         None
     else
-        match Map.tryFind tile spatial.Terrain with
-        | Some Plain
-        | Some Swamp when Set.contains tile spatial.Roads -> Some 1
-        | Some Plain -> Some 2
-        | Some Swamp -> Some swampWeight
-        | Some Wall
-        | None -> None
+        match Map.tryFind tile spatial.Terrain |> Option.map terrainWeight with
+        | Some weight when weight > 0 -> Some(if Set.contains tile spatial.Roads then 1 else weight)
+        | _ -> None
 
 /// A creep's fatigue factor from its body and current load: every part
 /// except Move and except empty Carry generates fatigue — the engine
@@ -414,11 +428,31 @@ let ofSnapshot (snapshot: Snapshot) : Atlas =
         |> List.map (fun creep -> creep.Name, fatigueFactorOf creep)
         |> Map.ofList
 
+    // The flood's weight table, filled by walking the three collections
+    // rather than by asking stepCost per tile. Walking a tree compares
+    // nothing; only a lookup does, and the per-tile form cost three
+    // Pos-keyed lookups a tile — 2500 tiles' worth of structural
+    // comparison, the largest single cost in the tick (#96). The passes
+    // layer in stepCost's own precedence: terrain first, then roads over
+    // the passable ground they discount, then obstacles over everything.
+    // The array's initial -1 is the answer for every tile outside the
+    // projection, which is stepCost's answer for one too.
     let weights = Array.create tileCount -1
 
     spatial.Terrain
-    |> Map.iter (fun tile _ ->
-        weights.[indexOf tile] <- stepCost spatial tile |> Option.defaultValue -1)
+    |> Map.iter (fun tile terrain -> weights.[indexOf tile] <- terrainWeight terrain)
+
+    // A road discounts the ground under it, never ground the projection
+    // calls impassable: a road on a wall (a tunnel, which ADR 0010 does
+    // not model) or off the terrain projection stays impassable.
+    spatial.Roads
+    |> Set.iter (fun tile ->
+        let index = indexOf tile
+
+        if weights.[index] > 0 then
+            weights.[index] <- 1)
+
+    spatial.Obstacles |> Set.iter (fun tile -> weights.[indexOf tile] <- -1)
 
     let occupied = Array.create tileCount false
 
@@ -1061,10 +1095,7 @@ let trunkPath (atlas: Atlas) (avoid: Set<Pos>) (origin: Pos) (goals: Set<Pos>) :
     atlas.Spatial.Terrain
     |> Map.iter (fun tile terrain ->
         if not (Set.contains tile atlas.Spatial.Obstacles) && not (Set.contains tile avoid) then
-            match terrain with
-            | Plain -> weights.[indexOf tile] <- 2
-            | Swamp -> weights.[indexOf tile] <- swampWeight
-            | Wall -> ())
+            weights.[indexOf tile] <- terrainWeight terrain)
 
     let dist, parents =
         floodFrom weights noTraffic (stepUnits { FatigueParts = 1; MoveParts = 1 }) origin

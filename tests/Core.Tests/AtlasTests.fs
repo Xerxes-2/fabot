@@ -493,6 +493,24 @@ let seatPriced terrain roads =
         Roads = roads
     }
 
+/// Source at (10,10) behind a Seat at (10,11); the creep "w" stands two
+/// steps below it at (10,13), so its only route runs through (10,12) —
+/// the tile each corridor test dresses. Nothing else is projected, so the
+/// corridor is one tile wide and no diagonal skirts the dressed tile.
+let corridorThrough middle roads obstacles =
+    { spatial
+          [ "src-a", { X = 10; Y = 10 } ]
+          ([
+              { X = 10; Y = 10 }, Wall
+              { X = 10; Y = 11 }, Plain
+              { X = 10; Y = 13 }, Plain
+           ]
+           @ middle) with
+        CreepPositions = Map.ofList [ "w", { X = 10; Y = 13 } ]
+        Roads = roads
+        Obstacles = obstacles
+    }
+
 [<Tests>]
 let roadPricingTests =
     testList
@@ -551,6 +569,46 @@ let roadPricingTests =
                     (travelCost atlas "w" (Harvest "src-a"))
                     (Some 2)
                     "the unbuilt road's tile still prices as plain"
+            }
+
+            test "a road discounts passable ground only, and an obstacle overrides it" {
+                // The flood prices off a weight table laid once per tick,
+                // not off a per-tile query, so the three tiles where a road
+                // does not win are pinned here: on a wall (a tunnel, which
+                // the projection does not model), off the terrain
+                // projection, and under an obstacle.
+                let costThrough middle roads obstacles =
+                    let atlas =
+                        corridorThrough middle roads obstacles
+                        |> snapshotWith [ worker "w" ]
+                        |> ofSnapshot
+
+                    travelCost atlas "w" (Harvest "src-a")
+
+                let road = Set.singleton { X = 10; Y = 12 }
+                let blocked = Set.singleton { X = 10; Y = 12 }
+                let plain = [ { X = 10; Y = 12 }, Plain ]
+                let wall = [ { X = 10; Y = 12 }, Wall ]
+
+                Expect.equal
+                    (costThrough plain road Set.empty)
+                    (Some 3)
+                    "a road on plain carries the corridor: one road step, then a plain Seat"
+
+                Expect.equal
+                    (costThrough wall road Set.empty)
+                    None
+                    "a road on a wall is a tunnel the projection does not model: impassable"
+
+                Expect.equal
+                    (costThrough [] road Set.empty)
+                    None
+                    "a road on a tile outside the terrain projection stays impassable"
+
+                Expect.equal
+                    (costThrough plain road blocked)
+                    None
+                    "an obstacle over a road blocks the tile: the obstacle wins"
             }
         ]
 
