@@ -189,3 +189,11 @@ let objectValues<'T> (_o: obj) : 'T[] = jsNative
 
 [<Emit("Object.entries($0)")>]
 let objectEntries (_o: obj) : (string * obj)[] = jsNative
+
+/// One value out of a JS hash by key, or null when the hash holds no such
+/// entry. Read against `Game.rooms`, which is keyed by room name and holds
+/// only the rooms we have vision in this tick — so a null here is exactly
+/// "no vision", which the projection expresses as absence entry by entry
+/// (ADR 0004) rather than as a state of its own.
+[<Emit("$0[$1]")>]
+let objectItem<'T> (_o: obj) (_key: string) : 'T = jsNative

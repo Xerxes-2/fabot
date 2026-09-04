@@ -116,6 +116,76 @@ let loaderTests =
                     "the controller the room has"
             }
 
+            test "the engine's own ids ride beside the readable ones" {
+                // The decision #124 had to make and this pins: an outpost
+                // is declared in the *engine's* ids, because a live
+                // projection keys every target by the id the server hands
+                // back — `TargetKinds`, `Hits`, `Stores` and
+                // `Snapshot.Sources` all do. A declaration written in the
+                // readable names above would match nothing online, and
+                // would do it in silence: an id the projection does not
+                // place is unpriceable geometry, so the outpost would never
+                // enter a Task rather than fail (ADR 0004). These are what
+                // ADR 0042's declaration of this very room is written from,
+                // and what a Snapshot built to meet it has to carry — so
+                // they are pinned here, with the furniture, against the
+                // committed capture.
+                let room = load "W12S27"
+
+                Expect.equal
+                    room.RealSources
+                    [ "6a8caabadd4872bccd3194a6", { X = 16; Y = 45 } ]
+                    "the one source, under the id the server gave it"
+
+                Expect.equal
+                    room.RealController
+                    (Some("6a8caabadd4872bccd3194a5", { X = 37; Y = 43 }))
+                    "and the controller a reserver would hold (ADR 0042)"
+
+                // Read on the multi-source rooms by literal, in capture
+                // order, because that is the only reading of order that can
+                // fail: `Sources` and `RealSources` are two `List.map`s of
+                // one list, so comparing them to each other is `x = x` and
+                // a loader that sorted the objects would reorder both
+                // together and stay green. The order is a claim — ADR
+                // 0042's declaration of W13S28 pairs `…362` with (16,7) and
+                // `…361` with (18,4), the reverse of the order its prose
+                // reads in — and a reorder here would have a declaration
+                // and the Snapshot built beside it name two different
+                // rocks.
+                Expect.equal
+                    (load "W13S28").RealSources
+                    [
+                        "6a8caaaddd4872bccd319362", { X = 16; Y = 7 }
+                        "6a8caaaddd4872bccd319361", { X = 18; Y = 4 }
+                    ]
+                    "the west outpost's two sources, paired as ADR 0042 declares them"
+
+                let centre = load "W15S25"
+
+                Expect.equal
+                    centre.RealSources
+                    [
+                        "6a8caa95dd4872bccd319003", { X = 16; Y = 14 }
+                        "6a8caa95dd4872bccd319002", { X = 32; Y = 10 }
+                        "6a8caa95dd4872bccd319004", { X = 45; Y = 42 }
+                    ]
+                    "and the three-source room's, where the ids do not run in tile order either"
+
+                Expect.equal
+                    centre.Sources
+                    [
+                        "src-0", { X = 16; Y = 14 }
+                        "src-1", { X = 32; Y = 10 }
+                        "src-2", { X = 45; Y = 42 }
+                    ]
+                    "the rename renames and does not reorder — src-0 is the first row"
+
+                Expect.isNone
+                    centre.RealController
+                    "and a room with no controller has no id for one"
+            }
+
             test "a three-source room loads three sources and no controller" {
                 // Measured, not assumed: claimable rooms carry one or two
                 // sources, and the rooms that carry three — sector centres

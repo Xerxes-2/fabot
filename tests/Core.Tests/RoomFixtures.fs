@@ -35,6 +35,19 @@ type RoomCapture =
         /// sector centre or Source Keeper room — has none, and cannot be
         /// owned.
         Controller: (string * Pos) option
+        /// The same sources, in the same order, under the ids the *engine*
+        /// gave them — what the capture actually recorded, before the
+        /// rename above made it readable. Beside the readable ids rather
+        /// than instead of them, because the two answer different
+        /// questions: a test that names a tile reads better with `src-0`,
+        /// and a test that has to match an outpost declaration has no
+        /// choice at all. An outpost is declared in the engine's ids
+        /// (`Outpost`), because that is what a live projection keys every
+        /// target by, so these are the ids a Snapshot built to meet one
+        /// has to carry (ADR 0041, ADR 0042).
+        RealSources: (string * Pos) list
+        /// The controller under the engine's own id, as `RealSources` is.
+        RealController: (string * Pos) option
     }
 
 /// A captured room projected as a `SpatialInfo`, beside the ids the
@@ -133,7 +146,9 @@ let load (roomName: string) : RoomCapture =
     | _ -> failwithf "%s: the objects section has no id/type/x/y column header" path
 
     // The capture keeps the API's real ids, which is what makes it
-    // traceable; the projection's keys are the test's own vocabulary.
+    // traceable; the projection's keys are the test's own vocabulary — and
+    // since an outpost is declared in the engine's ids, both are carried
+    // out rather than one being thrown away here.
     // A mineral row is read and ignored: a mineral has no TargetKind to
     // enter the projection through.
     let objects =
@@ -141,11 +156,14 @@ let load (roomName: string) : RoomCapture =
         |> Array.skip 1
         |> Array.map (fun line ->
             match line.Split '\t' with
-            | [| _; kind; x; y |] -> kind, { X = int x; Y = int y }
+            | [| objectId; kind; x; y |] -> kind, (objectId, { X = int x; Y = int y })
             | _ -> failwithf "%s: object row %s is not id/type/x/y" path line)
 
     let ofKind kind =
         objects |> Array.filter (fst >> (=) kind) |> Array.map snd |> List.ofArray
+
+    let sources = ofKind "source"
+    let controller = ofKind "controller" |> List.tryHead
 
     {
         RoomName = field "room"
@@ -153,8 +171,10 @@ let load (roomName: string) : RoomCapture =
         Tick = int (field "tick")
         Terrain = terrain
         Border = border
-        Sources = ofKind "source" |> List.mapi (fun index pos -> $"src-{index}", pos)
-        Controller = ofKind "controller" |> List.tryHead |> Option.map (fun pos -> "ctrl", pos)
+        Sources = sources |> List.mapi (fun index (_, pos) -> $"src-{index}", pos)
+        Controller = controller |> Option.map (fun (_, pos) -> "ctrl", pos)
+        RealSources = sources
+        RealController = controller
     }
 
 /// The captured room with a spawn standing on it. The spawn is always the

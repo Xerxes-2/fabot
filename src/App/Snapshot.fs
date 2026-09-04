@@ -105,9 +105,31 @@ let private terrainOf (roomName: string) : RoomTerrain =
         terrainMemo.[roomName] <- tiles
         tiles
 
-let private buildSpatial (spawn: ISpawn) : SpatialInfo =
-    let room = spawn.room
+/// What one scanned room puts into the projection: its geometry and its
+/// border ring, both filed under its own name, beside its share of the
+/// three id-keyed tables, which stay unlayered because an object id is
+/// already unique across the world (ADR 0041). A record rather than a
+/// whole `SpatialInfo` per room, because merging projections would have to
+/// decide which of them names the home room and there is only one answer:
+/// the spawn's.
+type private RoomProjection =
+    {
+        Layer: RoomLayer
+        Border: Map<Pos, Terrain>
+        TargetKinds: Map<string, TargetKind>
+        Hits: Map<string, HitsInfo>
+        Stores: Map<string, int>
+    }
 
+/// One room we can see, projected: the half of a room's projection that
+/// vision pays for. Most of it comes off the `room.find` families, and
+/// what does not — the controller, a structure's store, our own creeps
+/// out of the world-wide `Game.creeps` — is scoped to this room by hand
+/// where the engine does not scope it, which is what the creep filter
+/// below is for and why it is not redundant. Its terrain is handed in
+/// rather than read here, because the half that needs no vision is the
+/// same read either way.
+let private projectVisible (terrain: RoomTerrain) (room: IRoom) : RoomProjection =
     // Each structure and site is classified once, here, and carried beside
     // its kind: every filter below reads that kind, and the engine string
     // is interpreted in one place (#75).
@@ -148,8 +170,6 @@ let private buildSpatial (spawn: ISpawn) : SpatialInfo =
             [||]
         else
             [| room.controller |]
-
-    let terrain = terrainOf room.name
 
     // This room's geometry, under this room's name: the one shape the
     // projection has since ADR 0041's contract step, so what the shell
@@ -218,14 +238,14 @@ let private buildSpatial (spawn: ISpawn) : SpatialInfo =
         }
 
     {
-        RoomName = Some room.name
-        Rooms = Map.ofList [ room.name, layer ]
-        // The border ring of every room the projection covers, under its
-        // own name: the Atlas answers a Seam from these and from nothing
-        // else (ADR 0041). One room today, so every Seam query answers
-        // empty — the neighbour is not projected — which is ADR 0004's
-        // per-entry absence and not a special case.
-        Borders = Map.ofList [ room.name, terrain.Border ]
+        Layer = layer
+        // The border ring of the room, under its own name once the caller
+        // files it: the Atlas answers a Seam from these and from nothing
+        // else (ADR 0041). With the outposts declared empty the projection
+        // covers one room, so every Seam query answers empty — the
+        // neighbour is not projected — which is ADR 0004's per-entry
+        // absence and not a special case.
+        Border = terrain.Border
         // Same array order as the layer's TargetPositions, so a controller
         // that also travels through FIND_STRUCTURES resolves to Controller
         // both times.
@@ -266,11 +286,106 @@ let private buildSpatial (spawn: ISpawn) : SpatialInfo =
             |> Map.ofArray
     }
 
+/// One scanned room as the engine hands it back this tick, or None where
+/// the colony has no vision in it. `Game.rooms` holds only the rooms we
+/// can see, so a missing key is exactly "no vision" — and this is the one
+/// place that says so, because both halves of the scan read it: the
+/// geometry the projection files, and the entity lists the Task pool is
+/// built from.
+let private roomSeen (roomName: string) : IRoom option =
+    let room = objectItem<IRoom> Game.rooms roomName
+
+    if isNull (box room) then None else Some room
+
+/// One room of the scan set, projected. Terrain comes off the memo whether
+/// or not we can see the room: `Game.map.getRoomTerrain` answers for any
+/// room in the world, needs no vision and never goes stale (ADR 0031, ADR
+/// 0041), which is why the terrain layer's marginal cost across rooms is
+/// zero. Everything else comes off `Game.rooms`, which holds only the
+/// rooms we have vision in this tick.
+///
+/// So a declared outpost we cannot see is terrain and nothing else — no
+/// target, no obstacle, no store, no hits — and that is ADR 0004's absence
+/// entry by entry rather than a "blind" state anything has to model:
+/// unplaced geometry is unpriceable, enters no Task and blocks no action.
+/// The room contributes nothing until vision returns and then contributes
+/// what it sees, with no shape change either way and nothing to
+/// invalidate.
+let private projectRoom (roomName: string) : RoomProjection =
+    let terrain = terrainOf roomName
+
+    match roomSeen roomName with
+    | None ->
+        {
+            Layer =
+                { RoomLayer.empty with
+                    Terrain = terrain.Ground
+                }
+            Border = terrain.Border
+            TargetKinds = Map.empty
+            Hits = Map.empty
+            Stores = Map.empty
+        }
+    | Some room -> projectVisible terrain room
+
+/// The tick's projection: the rooms the colony works, each under its own
+/// name, in one projection and never two (ADR 0005, layered by ADR 0041).
+/// The scan set is handed in rather than derived here: it is Core's rule
+/// (`Outpost.roomsProjected`) and the projection is not its only reader,
+/// so `build` takes the union once for the whole tick — the shell decides
+/// nothing about which rooms the colony works, it only reads them.
+///
+/// The three id-keyed tables are merged flat across the scanned rooms,
+/// because an object id is already unique across the world and layering it
+/// would key a unique thing twice (ADR 0041). Deterministic under a
+/// collision that cannot happen: the fold walks the scan set in order, so
+/// the last room to name an id would win — and one object id stands in one
+/// room, so no id is ever merged twice.
+let private buildSpatial (home: string) (scanned: string list) : SpatialInfo =
+    let projected = scanned |> List.map (fun roomName -> roomName, projectRoom roomName)
+
+    let mergedBy (select: RoomProjection -> Map<string, 'v>) =
+        (Map.empty, projected)
+        ||> List.fold (fun acc (_, room) ->
+            (acc, select room) ||> Map.fold (fun acc id value -> Map.add id value acc))
+
+    {
+        RoomName = Some home
+        Rooms = projected |> List.map (fun (name, room) -> name, room.Layer) |> Map.ofList
+        Borders = projected |> List.map (fun (name, room) -> name, room.Border) |> Map.ofList
+        TargetKinds = mergedBy (fun room -> room.TargetKinds)
+        Hits = mergedBy (fun room -> room.Hits)
+        Stores = mergedBy (fun room -> room.Stores)
+    }
+
 let build () : Snapshot =
     let spawns = objectValues<ISpawn> Game.spawns
 
     let spawnRooms =
         spawns |> Array.map (fun s -> s.room) |> Array.distinctBy (fun r -> r.name)
+
+    // The home room: the first spawn's, the single-colony assumption this
+    // shell has always made and ADR 0041 does not touch.
+    let home = spawns |> Array.tryHead |> Option.map (fun spawn -> spawn.room.name)
+
+    // The rooms the colony works this tick — the home room and every
+    // declared outpost beside it (ADR 0041). Core owns the union
+    // (`Outpost.roomsProjected`) and the shell reads it once here, because
+    // the projection is not the only thing built off a room scan: an
+    // outpost's Tasks join the *same* pool as the home room's, so the
+    // entity lists the Planner pools from are scanned over the same set.
+    // The declaration is empty, so this is the one room it has always
+    // been.
+    let scanned =
+        home
+        |> Option.map (Outpost.roomsProjected Outpost.declared)
+        |> Option.defaultValue []
+
+    // The scanned rooms we can actually see. A declared outpost with no
+    // vision contributes no entity at all rather than an empty something —
+    // ADR 0004's absence entry by entry, exactly as `projectRoom` gives
+    // its geometry half.
+    let seen = scanned |> List.choose roomSeen
 
     {
         Time = Game.time
@@ -309,10 +424,23 @@ let build () : Snapshot =
                 }
                 : RefillableInfo)
             |> Array.toList
+        // Every scanned room's sources, not the spawn room's: the Harvest
+        // pool is built from this list, and ADR 0041 puts an outpost's
+        // Harvest in the *same* pool ranked by the *same* order. What an
+        // unposted outpost source is worth to the quotas is ADR 0042's
+        // question and not this list's — the declaration is empty, so this
+        // is today's two rocks either way.
+        //
+        // The lists beside it stay home-only on purpose. `Refillables`,
+        // `Controller` and `RoomEnergy` are about rooms we own, and an
+        // outpost is by definition one we do not; `Hostiles` says so in
+        // its own comment below; and `ConstructionSites` would make a
+        // cross-room Build, which #115 puts outside this work with the
+        // rest of paving an outpost (ADR 0042).
         Sources =
-            spawns
-            |> Array.collect (fun s -> s.room.find findSources)
-            |> Array.map (fun o ->
+            seen
+            |> List.collect (fun room -> room.find findSources |> Array.toList)
+            |> List.map (fun o ->
                 let s = o :?> ISource
 
                 // A source holding energy restocks in zero ticks (ADR
@@ -329,8 +457,7 @@ let build () : Snapshot =
                             s.ticksToRegeneration
                 }
                 : SourceInfo))
-            |> Array.distinctBy (fun s -> s.Id)
-            |> Array.toList
+            |> List.distinctBy (fun s -> s.Id)
         Controller =
             spawns
             |> Array.tryPick (fun s ->
@@ -392,10 +519,13 @@ let build () : Snapshot =
                     }
                     : HostileInfo))
             |> Array.toList
-        // Single-colony assumption: only the first spawn's room is projected.
+        // Single-colony assumption, unchanged by ADR 0041: the first
+        // spawn's room is the home room, the one `RoomName` names and the
+        // Layout and the census signature read. What layering adds is the
+        // rooms beside it — the declared outposts — over the same scan set
+        // the Sources above are collected from.
         Spatial =
-            spawns
-            |> Array.tryHead
-            |> Option.map buildSpatial
+            home
+            |> Option.map (fun name -> buildSpatial name scanned)
             |> Option.defaultValue SpatialInfo.empty
     }

@@ -10943,3 +10943,222 @@ let neighbouringRoomTests =
                     "and a creep paying off fatigue in another room changes nothing here"
             }
         ]
+
+/// A plain border ring. The Seam query reads the border layer and nothing
+/// else (ADR 0041), so a projection without one answers an empty band and
+/// prices no crossing at all — which is what the two fixtures above rest
+/// on and what the ones below must not. Plain the whole way round, so no
+/// crossing is picked out by its terrain.
+let private plainRing =
+    Map.ofList
+        [
+            for x in 0..49 do
+                for y in 0..49 do
+                    if x = 0 || x = 49 || y = 0 || y = 49 then
+                        { X = x; Y = y }, Plain
+        ]
+
+/// The home half of the fixtures below: the corridor running down from the
+/// north border, one worker at (10,2) a step inside it, and one source
+/// wherever the test puts it. No controller, no refillable with room and
+/// no store, so the whole Task pool is the sources — which is what lets a
+/// Matched Verdict's factor name the one comparison that separated them
+/// rather than report on some third candidate.
+let private northBorderColony (homeSource: Pos) =
+    { bareRespawn with
+        Spawns = []
+        Controller = None
+        Refillables = []
+        Sources = [ source "src-home" ]
+        Creeps = [ worker "w" 0 50 ]
+        Spatial =
+            { SpatialInfo.empty with
+                RoomName = Some "W1N1"
+                Borders = Map.ofList [ "W1N1", plainRing ]
+                TargetKinds = Map.ofList [ "src-home", Source ]
+            }
+            |> withHome (fun layer ->
+                { layer with
+                    Terrain = Map.ofList (corridor 10 1 40)
+                    TargetPositions = Map.ofList [ "src-home", homeSource ]
+                    CreepPositions = Map.ofList [ "w", { X = 10; Y = 2 } ]
+                })
+    }
+
+/// The same colony with its outpost beside it, one room north: W1N2's
+/// y = 49 row lands on W1N1's y = 0 row, and `Atlas.seams` reads that join
+/// out of the two room names alone (ADR 0041) — no fixture here declares
+/// an edge, because a declared edge is a second fact that can disagree
+/// with the first. The outpost's corridor runs to its own y = 48, so the
+/// tile a crossing lands a creep on opens onto ground.
+///
+/// `None` is the room the colony has declared and cannot see this tick,
+/// shaped as the shell shapes it (`Snapshot.projectRoom`): its terrain and
+/// its border ring, because `Game.map.getRoomTerrain` needs no vision, and
+/// not one entry more, because everything else does.
+let private withNorthOutpost (outpostSource: Pos option) (colony: Snapshot) =
+    { colony with
+        Sources = colony.Sources @ [ for _ in Option.toList outpostSource -> source "src-out" ]
+        Spatial =
+            { colony.Spatial with
+                Borders = Map.add "W1N2" plainRing colony.Spatial.Borders
+                TargetKinds =
+                    match outpostSource with
+                    | Some _ -> Map.add "src-out" Source colony.Spatial.TargetKinds
+                    | None -> colony.Spatial.TargetKinds
+            }
+            |> withNeighbour
+                "W1N2"
+                { RoomLayer.empty with
+                    Terrain = Map.ofList (corridor 10 40 48)
+                    TargetPositions =
+                        outpostSource
+                        |> Option.map (fun pos -> Map.ofList [ "src-out", pos ])
+                        |> Option.defaultValue Map.empty
+                }
+    }
+
+/// What the tick decided, less the plan memo: the memo carries a mutable
+/// walk table whose identity is not a decision, and these three are the
+/// whole of what leaves the colony.
+let private outcomeOf (colony: Snapshot) =
+    let decision = decide colony Map.empty Set.empty None
+    decision.Intents, decision.Assignments, decision.Verdicts
+
+/// Which Task won the one worker, and what separated it from its closest
+/// rival (ADR 0009's Matched Verdict).
+let private matchOf (colony: Snapshot) =
+    let { Verdicts = verdicts } = decide colony Map.empty Set.empty None
+
+    verdicts
+    |> List.tryPick (function
+        | Verdict.Matched("w", task, factor) -> Some(task, factor)
+        | _ -> None)
+
+[<Tests>]
+let outpostTests =
+    testList
+        "outposts"
+        [
+            // ADR 0041's central claim, at the seam it is claimed on: an
+            // outpost's Task is not steered to the front of the pool or to
+            // the back of it, it is ranked. Both Harvests sit on the
+            // feeding tier, so what separates them is travel cost — and
+            // travel cost crosses the Seam since #123, which is what makes
+            // the outpost's Task comparable at all rather than a special
+            // case somewhere ahead of the ranking.
+            //
+            // Pairwise, one rival at a time: this pool holds these two
+            // Tasks and nothing else, so the factor a Matched Verdict
+            // reports is about this pair and no third candidate stands in
+            // for either of them.
+            //
+            // The ranking and deliberately not the tick that follows it:
+            // run whole, the first fixture answers `Matched ("w",
+            // "harvest:src-out", TravelCost)` and then `SayCreep` alone —
+            // no move and no dig, because the winner is priced across the
+            // Seam and #142 has not yet given the mover a step toward one.
+            // That is why the declaration lands empty here and #126 waits
+            // on #142; this test reads the Verdict, which is the half ADR
+            // 0041 delivers.
+            test "an outpost Harvest and a home Harvest are ranked in one pool" {
+                Expect.equal
+                    (matchOf (
+                        northBorderColony { X = 10; Y = 38 }
+                        |> withNorthOutpost (Some { X = 10; Y = 46 })
+                    ))
+                    (Some(taskId (Harvest "src-out"), MatchFactor.TravelCost))
+                    "the outpost source is the nearer of the two, across the Seam"
+
+                // The same fixture with the two sources swapped over: only
+                // how far each one is moves, and the ranking moves with it.
+                Expect.equal
+                    (matchOf (
+                        northBorderColony { X = 10; Y = 4 }
+                        |> withNorthOutpost (Some { X = 10; Y = 41 })
+                    ))
+                    (Some(taskId (Harvest "src-home"), MatchFactor.TravelCost))
+                    "the home source is the nearer of the two, and wins the same comparison"
+            }
+
+            test "a declared room the colony cannot see this tick changes nothing" {
+                // What the shell projects for a room in the constant it has
+                // no vision into: terrain and the border ring, and not one
+                // entry more (`Snapshot.projectRoom`). ADR 0004 carries the
+                // whole of it — the room is unpriceable, enters no Task and
+                // blocks no action — so "blind" is not a state anything has
+                // to model, and the proof of that is that the tick decides
+                // what it decided before the room was ever declared.
+                //
+                // Read at the top seam over all three outputs at once,
+                // because the ways this could go wrong are not local: a
+                // second room's weight grid consulted for a home price, a
+                // Seam band admitting a crossing to nowhere, a Task pooled
+                // off a layer with nothing in it.
+                let colony = northBorderColony { X = 10; Y = 38 }
+
+                Expect.contains
+                    (let _, _, verdicts = outcomeOf colony in verdicts)
+                    (Verdict.Matched("w", taskId (Harvest "src-home"), MatchFactor.OnlyCandidate))
+                    "the premise: this colony decides something, so an equal outcome says something"
+
+                Expect.equal
+                    (outcomeOf (colony |> withNorthOutpost None))
+                    (outcomeOf colony)
+                    "a room with no geometry decides exactly what no room at all decides"
+            }
+
+            test "the declared outposts land empty, so the shell scans the one room" {
+                // The landing's whole claim (ADR 0041): the capability to
+                // project a neighbour, and no behaviour. The set the shell
+                // scans is the spawn room alone until ADR 0042 fills the
+                // declaration, which is why every fixture in this suite and
+                // every byte `decide` answers is what it was.
+                Expect.equal Outpost.declared [] "no outpost is declared yet"
+
+                Expect.equal
+                    (Outpost.roomsProjected Outpost.declared "W12S28")
+                    [ "W12S28" ]
+                    "so the projection covers today's one room"
+            }
+
+            test "a declared outpost joins the spawn room in the set the shell scans" {
+                // Written in the engine's own ids, as a declaration has to
+                // be: the projection keys every target by the id the server
+                // hands back, so a constant written in the captures'
+                // readable short names would match nothing at all on a live
+                // server, and would do it in silence (ADR 0004).
+                let north =
+                    {
+                        RoomName = "W12S27"
+                        Sources = [ "6a8caabadd4872bccd3194a6", { X = 16; Y = 45 } ]
+                        Controller = "6a8caabadd4872bccd3194a5", { X = 37; Y = 43 }
+                    }
+
+                let west =
+                    {
+                        RoomName = "W13S28"
+                        Sources =
+                            [
+                                "6a8caaaddd4872bccd319362", { X = 16; Y = 7 }
+                                "6a8caaaddd4872bccd319361", { X = 18; Y = 4 }
+                            ]
+                        Controller = "6a8caaaddd4872bccd319363", { X = 24; Y = 17 }
+                    }
+
+                Expect.equal
+                    (Outpost.roomsProjected [ north; west ] "W12S28")
+                    [ "W12S28"; "W12S27"; "W13S28" ]
+                    "the spawn room, then the declarations in their own order"
+
+                // A declaration naming the spawn room is a human's slip in
+                // a constant a human moves (ADR 0039's precedent), and the
+                // projection keys rooms by name: scanning that room twice
+                // would file one room's geometry under one name twice over
+                // rather than say anything about it.
+                Expect.equal
+                    (Outpost.roomsProjected [ { north with RoomName = "W12S28" } ] "W12S28")
+                    [ "W12S28" ]
+                    "a room declared twice is scanned once"
+            }
+        ]

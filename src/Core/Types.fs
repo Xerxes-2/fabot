@@ -291,6 +291,85 @@ module SpatialInfo =
         |> Map.tryPick (fun room (layer: RoomLayer) ->
             Map.tryFind id layer.TargetPositions |> Option.map (fun pos -> room, pos))
 
+/// One outpost: a neighbouring room this colony mines and does not own.
+/// Declared, never discovered (ADR 0041) — a constant a human moves in a
+/// commit, exactly as the Layout's horizon is (ADR 0039) — because every
+/// "the first creep to walk in writes it down" scheme has to answer what
+/// sent the first creep, and answering it means inventing scouting,
+/// persistent room intel and staleness discounting for a colony with two
+/// candidate neighbours already committed as fixtures.
+///
+/// What is declared is exactly what vision cannot be waited for: the
+/// room's name, and the id and tile of each source and of the controller.
+/// Everything that actually changes — the reservation remaining, container
+/// and road hits, stores, hostiles — is read off the projection where
+/// there is vision and is absent entry by entry where there is none (ADR
+/// 0004). That is the whole of what "we cannot see it this tick" means
+/// here: no second state, and nothing to discount.
+///
+/// The ids are the engine's own, and this is the decision the rest of the
+/// outpost work is built on. Every id in the projection is the server's —
+/// `TargetKinds`, `Hits` and `Stores` are keyed by it and `Snapshot.Sources`
+/// carries it — so a declaration written in the room captures' readable
+/// short names (`RoomFixtures` renames `6a8c…4a6` to `src-0` for a person
+/// to read) would match nothing on a live server, and would do it in
+/// silence: an id the projection does not place is unpriceable geometry,
+/// so the outpost would simply never enter a Task rather than fail (ADR
+/// 0004). The captures keep the server's ids beside the readable ones
+/// (`RoomCapture.RealSources`) so a test can build the Snapshot a
+/// declaration matches.
+///
+/// No adjacency field, deliberately: which border an outpost shares with
+/// home is already a fact about the two room names, and the Seam query
+/// reads it out of them (`Atlas.seams`). A room name and an edge are two
+/// facts that can disagree, and the disagreement would build a band out of
+/// two rooms' opposite walls.
+type Outpost =
+    {
+        RoomName: string
+        /// The room's sources, each under the id the engine knows it by.
+        Sources: (string * Pos) list
+        /// The room's controller, whose reservation is what doubles those
+        /// sources (ADR 0042). Not optional: an unreserved source is worth
+        /// half, so a room with no controller to reserve — a sector centre
+        /// or a Source Keeper room — is not a candidate outpost at all.
+        Controller: string * Pos
+    }
+
+[<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
+module Outpost =
+    /// The colony's outposts. Empty, and the emptiness is this landing's
+    /// whole claim: ADR 0041 delivers the capability to project a
+    /// neighbour and deliberately no behaviour, so the room set below is
+    /// the one room the shell has always projected and `decide` answers
+    /// byte for byte what it answered before the layering. ADR 0042 fills
+    /// it — W12S27 north and W13S28 west — together with the rules that
+    /// make an outpost pay. Filling it first would walk straight into the
+    /// trap that ADR names: an outpost source with no container joins
+    /// `snapshot.Sources`, and `workforceTarget`'s unposted-seat rule
+    /// hires generalists to commute fifty tiles to a swamp.
+    let declared: Outpost list = []
+
+    /// The rooms the shell projects this tick: the spawn room, and every
+    /// declared outpost beside it (ADR 0041). One projection covering
+    /// several rooms, never a second one (ADR 0005) — the union is taken
+    /// here so the rule has one statement rather than a copy in the shell.
+    ///
+    /// The outposts are handed in rather than read from `declared`
+    /// straight, for two reasons that outlive this landing: the union rule
+    /// is then checkable while the declaration itself stays empty, and the
+    /// stand-down gate (ADR 0043) has exactly one place to narrow the set
+    /// — a room withdrawn from does not enter the projection at all, which
+    /// is the whole of "retreat" in an architecture that keeps no state.
+    ///
+    /// Home first, then the declarations in their own order, each room
+    /// once: a declaration naming the spawn room is a human's slip, and
+    /// projecting that room twice would file one room's geometry under one
+    /// name twice over rather than say so.
+    let roomsProjected (outposts: Outpost list) (home: string) : string list =
+        home :: (outposts |> List.map (fun outpost -> outpost.RoomName))
+        |> List.distinct
+
 /// What the decision layer knows about one construction site this tick.
 type ConstructionSiteInfo = { Id: string }
 
