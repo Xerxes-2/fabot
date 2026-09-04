@@ -8,13 +8,16 @@ open Fabot.Core.Types
 /// engine-native weights (ADR 0010).
 type private FatigueFactor = { FatigueParts: int; MoveParts: int }
 
-/// Which of the tick's two floods a memo entry holds (ADR 0029). One
-/// dimension separates them because the pair differs in both of the ways
-/// their readers differ: travel cost is a ranking price, so it wants
-/// sub-tick granularity and wants to see today's crowds; the walk is a
-/// clock, so it wants a whole tick a tile and wants to be blind to them. Widening the memo's key by this one
-/// dimension, rather than laying a second map beside it, is what keeps
-/// the two floods from drifting apart.
+/// Which of the tick's floods a memo entry holds (ADR 0029, widened by
+/// ADR 0030). One dimension separates them because they differ in the two
+/// ways their readers differ — granularity and traffic — and no reader
+/// wants a combination the dimension cannot name: travel cost is a
+/// ranking price, so it wants sub-tick granularity and wants to see
+/// today's crowds; the walk is a clock, so it wants a whole tick a tile
+/// and wants to be blind to them; the baseline is the ranking price over
+/// empty ground, which is what makes a detour attributable. Widening the
+/// memo's key by this one dimension, rather than laying a second map
+/// beside it, is what keeps the floods from drifting apart.
 type private Pricing =
     /// Travel cost's units — half-ticks, floored at one unit a step, with
     /// the occupancy surcharge on occupied tiles (ADR 0010, ADR 0008).
@@ -24,6 +27,12 @@ type private Pricing =
     /// (ADR 0029). The clock: the horizon every time-aware judgement is
     /// made at.
     | Walk
+    /// Travel cost's own units over empty ground (ADR 0030): the route the
+    /// body would take were no tile occupied. The baseline the occupancy
+    /// surcharge is judged against — it differs from TravelCost in traffic
+    /// alone, which is what lets the reroute attribution blame the
+    /// difference on traffic and nothing else (ADR 0008, ADR 0009).
+    | Baseline
 
 /// The per-tick, task-aware query interface over the spatial projection
 /// (ADR 0004). Total: geometry the projection cannot place gets one
@@ -50,11 +59,12 @@ type Atlas =
             /// factor and pricing, forced at most once per tick and shared
             /// by every query pricing from it (ADR 0002, extended to the
             /// whole tick). Bodies of the same factor at the same tile
-            /// share one flood. Two entries per creep since ADR 0029 — the
-            /// ranking price travel cost ranks on and the clock the walk
-            /// reads — laid lazily, so a tick that asks only one of them
-            /// pays for only one. Each flood is a distance and a
-            /// predecessor-index array over tile indices.
+            /// share one flood. One entry per pricing per creep since ADR
+            /// 0029 — the ranking price travel cost ranks on, the clock the
+            /// walk reads, and since ADR 0030 the baseline the reroute
+            /// attribution compares against — laid lazily, so a tick that
+            /// asks for one of them pays for one. Each flood is a distance
+            /// and a predecessor-index array over tile indices.
             Floods: Map<Pos * FatigueFactor * Pricing, Lazy<int[] * int[]>>
             /// Memoised traffic-blind flood out of a spawner's tile, per
             /// (spawner tile, fatigue factor), for bodies the Snapshot does
@@ -125,7 +135,9 @@ let private swampWeight = 10
 let private occupancyPenalty = swampWeight
 
 /// No tile occupied: the flood baseline the occupancy surcharge is judged
-/// against, and the ground the walk is priced over (ADR 0029).
+/// against — the ground the walk is priced over (ADR 0029), and the ground
+/// the `Baseline` pricing the attribution compares against is priced over
+/// (ADR 0030).
 let private noTraffic: bool[] = Array.create tileCount false
 
 let private neighbours pos =
@@ -216,9 +228,10 @@ let private stepTicks (factor: FatigueFactor) weight =
 
 /// Dijkstra flood over the weight grid from every tile in `starts`,
 /// priced by `stepPrice` — one body's price for a step onto a tile of a
-/// given terrain weight, and the only thing that differs between the
-/// tick's two floods (ADR 0029): cheapest cost to every reachable tile
-/// (`unreached` elsewhere), plus each tile's predecessor index on a
+/// given terrain weight, and, beside the occupancy the caller passes, the
+/// only thing that differs between the tick's floods (ADR 0029, ADR 0030):
+/// cheapest cost to every reachable tile (`unreached` elsewhere), plus
+/// each tile's predecessor index on a
 /// cheapest path (-1 elsewhere). This is the tick's hottest loop, so it
 /// runs on flat arrays with a binary min-heap of dist-then-index keys —
 /// the key ordering also keeps tie-breaking deterministic. Every start
@@ -230,8 +243,8 @@ let private stepTicks (factor: FatigueFactor) weight =
 /// standing traffic when a detour is cheaper. The penalty is a number of
 /// cost units, so a caller pricing steps in anything else must pass no
 /// occupancy at all: every traffic-blind caller here passes `noTraffic`,
-/// and for the tick's two memoised floods `floodPriced` pairs the two
-/// choices so neither can be made without the other.
+/// and for the tick's memoised floods `floodPriced` pairs the two choices
+/// per pricing, so neither can be made without the other.
 let private floodFromAll
     (weights: int[])
     (occupied: bool[])
@@ -344,12 +357,15 @@ let private walkFloodFrom weights factor (start: Pos) =
 
 /// The flood one pricing wants over one body: the ranking price sees
 /// today's traffic and counts half-ticks, the clock is blind to it and
-/// counts whole ticks (ADR 0029). The one place the pair is set side by
-/// side, so the memo cannot hold one where a reader expects the other.
+/// counts whole ticks (ADR 0029), and the baseline counts the ranking
+/// price's own half-ticks with the crowd taken out (ADR 0030). The one
+/// place the set is laid side by side, so the memo cannot hold one where
+/// a reader expects another.
 let private floodPriced weights occupied factor pricing (start: Pos) =
     match pricing with
     | TravelCost -> floodFrom weights occupied (stepUnits factor) start
     | Walk -> walkFloodFrom weights factor start
+    | Baseline -> floodFrom weights noTraffic (stepUnits factor) start
 
 let ofSnapshot (snapshot: Snapshot) : Atlas =
     let spatial = snapshot.Spatial
@@ -387,7 +403,7 @@ let ofSnapshot (snapshot: Snapshot) : Atlas =
             |> List.collect (fun (name, pos) ->
                 let factor = Map.find name factors
 
-                [ TravelCost; Walk ]
+                [ TravelCost; Walk; Baseline ]
                 |> List.map (fun pricing ->
                     (pos, factor, pricing), lazy (floodPriced weights occupied factor pricing pos)))
             |> Map.ofList
@@ -906,20 +922,16 @@ let firstStep (atlas: Atlas) (creep: string) (task: Task) : Pos option =
 /// traffic-blind route, otherwise priced exactly like firstStep. The
 /// Resolver compares the two: a difference attributes the detour to the
 /// occupancy surcharge, which is the only pricing the two floods do not
-/// share (ADR 0008, ADR 0009). Still the one flood ADR 0004's memo cannot
-/// serve, though no longer for ADR 0018's stated reason: since ADR 0029
-/// the memo is keyed on exactly this creep's tile and factor, but its
-/// traffic-blind entry is the walk's, priced in whole ticks, and a route
-/// read off whole ticks is not the route this attribution compares
-/// against. So the Resolver still runs it only for creeps on the verbose
-/// list (ADR 0018), whose decision is about log noise and stands either
-/// way.
+/// share (ADR 0008, ADR 0009). Off the shared memo since ADR 0030, under
+/// the Baseline pricing: ADR 0018 called this the one flood ADR 0004's
+/// memo could not serve, and neither half of that holds any more — the key
+/// carries this creep's own tile since ADR 0029, and the pricing dimension
+/// now names the units this route wants rather than only the walk's whole
+/// ticks. ADR 0018's decision stands regardless, being about log noise:
+/// the Resolver still asks only for creeps on the verbose list, and the
+/// entry is lazy, so a tick that watches nobody floods for nobody.
 let firstStepIgnoringTraffic (atlas: Atlas) (creep: string) (task: Task) : Pos option =
-    firstStepVia
-        atlas
-        (floodFrom atlas.Weights noTraffic (stepUnits (factorOf atlas creep)))
-        creep
-        task
+    firstStepVia atlas (flood atlas Baseline creep) creep task
 
 /// Round-trip haul cost in whole ticks for a body between a container's
 /// tile and a sink structure's tile (ADR 0012): the leg out prices every

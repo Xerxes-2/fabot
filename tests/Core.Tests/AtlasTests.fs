@@ -983,6 +983,101 @@ let firstStepTests =
         ]
 
 [<Tests>]
+let firstStepIgnoringTrafficTests =
+    testList
+        "atlas firstStepIgnoringTraffic"
+        [
+            test "the traffic-blind step keeps the lane the surcharge steers the priced step out of" {
+                // The reroute attribution's whole comparison (ADR 0008, ADR
+                // 0009): the same body over the same ground, once with
+                // today's crowd priced in and once without. A creep parked
+                // mid-lane bends the priced step into the parallel lane;
+                // the blind step walks straight at it.
+                let atlas =
+                    { spatial
+                          [ "src-a", { X = 10; Y = 10 } ]
+                          [
+                              { X = 10; Y = 10 }, Wall
+                              { X = 10; Y = 11 }, Plain
+                              { X = 10; Y = 12 }, Plain
+                              { X = 10; Y = 13 }, Plain
+                              { X = 10; Y = 14 }, Plain
+                              { X = 11; Y = 11 }, Plain
+                              { X = 11; Y = 12 }, Plain
+                              { X = 11; Y = 13 }, Plain
+                          ] with
+                        CreepPositions =
+                            Map.ofList [ "w", { X = 10; Y = 14 }; "b", { X = 10; Y = 13 } ]
+                    }
+                    |> snapshotWith [ worker "w"; worker "b" ]
+                    |> ofSnapshot
+
+                Expect.equal
+                    (firstStep atlas "w" (Harvest "src-a"))
+                    (Some { X = 11; Y = 13 })
+                    "the priced step leaves the parked creep's lane"
+
+                Expect.equal
+                    (firstStepIgnoringTraffic atlas "w" (Harvest "src-a"))
+                    (Some { X = 10; Y = 13 })
+                    "the blind step holds the lane: the detour is the surcharge's doing"
+            }
+
+            test "the blind route is priced in travel cost's units, never the walk's ticks" {
+                // Two lanes to two Seats, and the two prices choose
+                // differently. The paved lane is three road steps (3 units,
+                // 3 ticks); the bare lane is two plain steps (4 units, 2
+                // ticks). Travel cost's units buy the trunk — which is what
+                // the trunk is for — and the walk's whole ticks flatten
+                // road and plain for this body and take the short lane
+                // instead. The attribution compares against firstStep's
+                // route, so it must read the units: the shared memo's
+                // traffic-blind entries are two, and this is the other one.
+                let atlas =
+                    { spatial
+                          [ "src-a", { X = 10; Y = 10 } ]
+                          [
+                              { X = 10; Y = 10 }, Wall
+                              { X = 11; Y = 9 }, Plain
+                              { X = 11; Y = 10 }, Wall
+                              { X = 11; Y = 11 }, Plain
+                              { X = 12; Y = 8 }, Plain
+                              { X = 12; Y = 9 }, Wall
+                              { X = 12; Y = 10 }, Wall
+                              { X = 12; Y = 11 }, Plain
+                              { X = 13; Y = 9 }, Plain
+                              { X = 13; Y = 10 }, Plain
+                          ] with
+                        Roads =
+                            Set.ofList [ { X = 13; Y = 9 }; { X = 12; Y = 8 }; { X = 11; Y = 9 } ]
+                        CreepPositions = Map.ofList [ "w", { X = 13; Y = 10 } ]
+                    }
+                    |> snapshotWith [ worker "w" ]
+                    |> ofSnapshot
+
+                Expect.equal
+                    (travelCost atlas "w" (Harvest "src-a"))
+                    (Some 3)
+                    "three road steps beat two plain ones in units"
+
+                Expect.equal
+                    (walkTicks atlas "w" (Harvest "src-a"))
+                    (Some 2)
+                    "two plain steps beat three road ones in whole ticks"
+
+                Expect.equal
+                    (firstStepIgnoringTraffic atlas "w" (Harvest "src-a"))
+                    (firstStep atlas "w" (Harvest "src-a"))
+                    "empty ground: the blind route is the priced one, down the paved lane"
+
+                Expect.equal
+                    (firstStepIgnoringTraffic atlas "w" (Harvest "src-a"))
+                    (Some { X = 13; Y = 9 })
+                    "the road lane, not the whole-tick lane at (12,11)"
+            }
+        ]
+
+[<Tests>]
 let workAreaForTests =
     testList
         "atlas workAreaFor"

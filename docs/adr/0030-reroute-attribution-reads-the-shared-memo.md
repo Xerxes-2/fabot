@@ -1,0 +1,27 @@
+# Reroute attribution reads the shared flood memo, under a baseline pricing of its own
+
+ADR 0018 made reroute attribution verbose-only on two grounds, and they are not the same kind of ground. One is about **cost**: attributing a detour takes a second, traffic-blind flood per creep, and *"it is the only unmemoisable flood — each creep's tile is a unique key, so ADR 0004's memo cannot help"*. The other is about **audience**: the label serves observability alone, no decision reads it, and a Verdict whose evidence must be manufactured is pay-per-use (ADR 0009). ADR 0029 falsified the first: the flood memo's key became `(tile, fatigue factor, pricing)`, and a placed creep's own tile is exactly what it is keyed on.
+
+Falsified, but not thereby served. ADR 0029's traffic-blind entry is the **[[walk]]'s**, priced in whole ticks, and `firstStepIgnoringTraffic` compares its route against `firstStep`'s, which is priced in [[travel cost]]'s units. A route read off whole ticks is a different route: the walk's per-step floor collapses the road/plain distinction for any body whose plain step already prices at or under two units — precisely the fast bodies the [[trunk]] exists for. Three paved steps price at 3 units and 3 ticks, two bare steps at 4 units and 2 ticks; the ranking price takes the trunk and the clock takes the short lane. Reading the walk's entry would have changed the answer rather than where it comes from, and would have attributed to traffic a difference that was really the granularity.
+
+We decided **the pricing dimension gains a third case and the attribution floods through the memo under it**. `Baseline` is travel cost's own units over empty ground: it differs from `TravelCost` in traffic and in nothing else, which is exactly what lets the comparison blame the difference on traffic and nothing else (ADR 0008, ADR 0009). The flood it names is the flood `firstStepIgnoringTraffic` was already running by hand, so the route is unchanged by construction; what changes is that the last per-creep flood priced outside `floodPriced` comes inside it, where the pricing pair ADR 0029 refused to let drift apart now sits as a trio.
+
+**ADR 0018's decision is untouched.** A pricing change must not silently overturn an accepted decision about log noise, and this one does not: the Resolver still asks only for creeps on the [[verbose list]], and the memo's entries are lazy, so a tick that watches nobody floods for nobody. Only ADR 0018's stated reason retires, and it retires in a successor rather than by an edit to the accepted document.
+
+## Considered Options
+
+- **Read the walk's traffic-blind entry as it stands** — rejected: it changes the answer, for the reason above. The two traffic-blind prices are not interchangeable, and a comparison between a units route and a ticks route attributes the granularity to the crowd.
+- **Close the ticket as obsolete and keep the uncached flood**, correcting ADR 0018's prose alone — rejected: the flood is a memo entry's flood exactly, and leaving it outside keeps a second place where a step is priced for a creep standing on a tile. That is the drift ADR 0029 designed out when it widened the key rather than laying a second map beside it; the argument applies unchanged to a third price.
+- **Make the dimension a product of its two axes** — granularity × traffic, four cases — rejected: a whole-tick, traffic-aware price has no reader, and a clock that saw crowds is the defect ADR 0029 removed. The dimension enumerates the prices that have readers, and a case with no reader is a case nobody keeps honest.
+- **Drop the verbose-only restriction now that the flood is memoised** — rejected, and not this ticket's to weigh: ADR 0018's Considered Options turned on log noise and on a Verdict investigations rarely start from, neither of which the memo touches. The cost argument getting cheaper is not the argument that carried it.
+
+## Restatements
+
+- **ADR 0018's premise** — *"it is the only unmemoisable flood — each creep's tile is a unique key, so ADR 0004's memo cannot help"* — no longer holds. The memo is keyed on a creep's tile, its fatigue factor and its pricing (ADR 0029), and the attribution's route is one of the pricings. ADR 0018's **decision** stands on its second ground, which is the one its Considered Options actually weighed: the reroute comparison runs only for creeps on the verbose list, and its consequence that `firstStepIgnoringTraffic` is verbose-only machinery stands with it.
+
+## Consequences
+
+- One more lazy entry per placed creep in the Floods memo. A tick that watches nobody pays three Map inserts and no flood; a watched creep pays the same one flood it paid before, and pays it once however many times the attribution is asked for that creep.
+- Every flood a placed creep prices from now runs through `floodPriced`, so a step has one price per pricing and no query prices one of its own. The floods still outside the memo are the ones keyed by something other than a placed creep's tile: the [[lead]]'s cast walk out of a spawner, the [[hauler unit]] quota's round trip out of a container, and the [[trunk]]'s raw-terrain path.
+- `AtlasTests` gain the attribution's own list: the crowd comparison ADR 0008 describes, and the fixture where the units route and the walk route deliberately part ways — the pin that fails if the attribution is ever pointed at the walk's entry.
+- The Resolver, the Verdict vocabulary and `DecideTests`' reroute list are untouched. This changed where the answer comes from, never the answer.

@@ -1530,10 +1530,11 @@ let private directionTo (from: Pos) (dest: Pos) : Direction option =
 /// swap settle on the tile they asked for.
 ///
 /// Rerouted alone is evidence that must be manufactured — a second,
-/// traffic-blind flood per traveller, unmemoisable because each creep's
-/// tile is its own key — so it is computed only for creeps on the verbose
-/// list (ADR 0018). Grounded and yielded fall out of work the arbitration
-/// already did and stay always-on.
+/// traffic-blind flood per traveller — so it is computed only for creeps
+/// on the verbose list (ADR 0018), whose decision is about log noise and
+/// stands now that the flood comes off the Atlas's shared memo (ADR 0030).
+/// Grounded and yielded fall out of work the arbitration already did and
+/// stay always-on.
 let resolve
     (snapshot: Snapshot)
     atlas
