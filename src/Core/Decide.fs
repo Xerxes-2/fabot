@@ -454,6 +454,14 @@ let planTasks (snapshot: Snapshot) (threats: Threats) : Task list =
 /// Screeps CARRY_CAPACITY: energy one Carry part holds.
 let private carryPartCapacity = 50
 
+/// Ceiling division over the quota rows' arithmetic: a quota that came
+/// out a fraction of a body hires the whole body (ADR 0012 for the hauler
+/// row, ADR 0037 for the worker row), because the fraction a floor drops
+/// is demand nobody is hired for. A numerator at or below zero lands at
+/// or below zero — F# divides toward zero — and each row's own floor
+/// answers for it.
+let private ceilDiv numerator divisor = (numerator + divisor - 1) / divisor
+
 /// The hauler row's quota rule (ADR 0012) — the row's colony fact, per
 /// ADR 0006's law that a row arrives with its quota or not at all: per
 /// source container, ceil(round-trip travel ticks to the spawn × source
@@ -492,7 +500,7 @@ let private haulerQuota (snapshot: Snapshot) atlas : int =
             let capacity = (body |> List.filter ((=) Carry) |> List.length) * carryPartCapacity
 
             Atlas.haulRoundTripTicks atlas body tile spawnPos
-            |> Option.map (fun ticks -> (ticks * sourceOutputPerTick + capacity - 1) / capacity))
+            |> Option.map (fun ticks -> ceilDiv (ticks * sourceOutputPerTick) capacity))
         |> function
             | [] -> 0
             | quotas -> List.min quotas)
@@ -520,10 +528,11 @@ let private upgradeDrainPerWork = 1
 /// seat crews that walk it, so only the posted sources' output is income.
 /// From that income the anchor and hauler rows' replacement amortization
 /// (body cost spread over a creep's lifetime) is deducted; every energy
-/// per tick left feeds upgrade mouths at one worker body's Work drain —
-/// exactly as many workers as the surplus feeds, bodies priced as the
-/// richest bank would cast them. The arithmetic runs scaled by the
-/// lifetime so the amortization never rounds away.
+/// per tick left feeds upgrade mouths at one worker body's Work drain,
+/// rounded up so the mouths cover the surplus rather than fall a body
+/// short of it (ADR 0037), bodies priced as the richest bank would cast
+/// them. The arithmetic runs scaled by the lifetime so the amortization
+/// never rounds away.
 let private workforceTarget (snapshot: Snapshot) atlas anchorQuota haulerQuota =
     let posts = Atlas.posts atlas
 
@@ -554,10 +563,17 @@ let private workforceTarget (snapshot: Snapshot) atlas anchorQuota haulerQuota =
             | Work -> upgradeDrainPerWork
             | _ -> 0)
 
+    // Rounded up through the same ceilDiv as the hauler row (ADR 0037):
+    // the granularity a floor would drop is a whole worker body's Work,
+    // which grows with RCL, and the income it drops leaks every tick
+    // while the body it oversells is paid for out of stock. An
+    // amortization above income leaves the surplus negative, and max 0 is
+    // the row's floor for it.
     let incomeWorkers =
-        (List.length posted * sourceOutputPerTick * creepLifetime - amortization)
-        / (workerDrain * creepLifetime)
-        |> max 0
+        let surplusOverLifetime =
+            List.length posted * sourceOutputPerTick * creepLifetime - amortization
+
+        ceilDiv surplusOverLifetime (workerDrain * creepLifetime) |> max 0
 
     anchorQuota + haulerQuota + unpostedSeats + incomeWorkers |> max minWorkforce
 

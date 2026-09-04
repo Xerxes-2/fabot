@@ -6418,14 +6418,17 @@ let anchorTests =
             }
 
             test "planned creeps never exceed the workforce target" {
-                // One Post and nine income workers make a target of ten
-                // (ADR 0012); nine living leave one gap — the second idle
-                // spawn must stay quiet even with energy banked for it.
+                // One Post and ten income workers make a target of eleven
+                // (ADR 0012, the worker row rounded up by ADR 0037: the
+                // Post's 15,000 of lifetime income less the Anchor's 300
+                // of amortization over 1 × 1500 is 9.8); ten living leave
+                // one gap — the second idle spawn must stay quiet even
+                // with energy banked for it.
                 let snapshot =
                     { dualSeatColony with
                         Spawns = [ spawn; secondSpawn ]
                         RoomEnergy = bank 600 300
-                        Creeps = anchor "a1" 0 50 :: [ for i in 1..8 -> worker $"w{i}" 0 50 ]
+                        Creeps = anchor "a1" 0 50 :: [ for i in 1..9 -> worker $"w{i}" 0 50 ]
                         Spatial = threeSeatRoom
                     }
 
@@ -8699,7 +8702,7 @@ let incomeColony =
 /// and the income workers — 2 posted sources × 10 e/tick × the 1500-tick
 /// lifetime = 30,000, minus the anchor and hauler rows' replacement
 /// amortization (2 × 300 + 4 × 300 = 1,800), over one worker body's Work
-/// drain × lifetime (1 × 1500) → floor(18.8) = 18.
+/// drain × lifetime (1 × 1500) → ceil(18.8) = 19 (ADR 0037).
 let incomeFleet =
     [
         anchor "a1" 0 50
@@ -8709,14 +8712,35 @@ let incomeFleet =
         hauler "h3" 0 100
         hauler "h4" 0 100
     ]
-    @ [ for i in 1..18 -> worker $"w{i}" 0 50 ]
+    @ [ for i in 1..19 -> worker $"w{i}" 0 50 ]
+
+/// The same colony at a bank the real W12S28 banks: the geometry is
+/// untouched — same sources, same containers, same four idle spawns — and
+/// only the bank moves, to 1300 against 1300, so every row's body grows
+/// with it. Anchor 6W/1C/1M = 700, hauler 16C/8M = 1200 (16 Carry is 800
+/// capacity, so the 24-tick round trip's 240 energy is one hauler a
+/// container, halving the row to 2), worker 6W/7C/7M — a Work drain of 6.
+/// That drain is the granularity the worker row's rounding is paid in,
+/// and it grows with RCL: the fixture the row was pinned at banks 300,
+/// where the drain is 1 and a lost fraction is worth 0.8 e/tick.
+let richIncomeColony =
+    { incomeColony with
+        RoomEnergy = bank 1300 1300
+    }
+
+/// The rich bank's fleet at a given worker count: the rows its quotas
+/// pin — one Anchor per Post (2) beside one hauler per container (2) —
+/// and as many workers as the case under it is pinning.
+let richIncomeFleet workers =
+    [ anchor "a1" 0 50; anchor "a2" 0 50; hauler "h1" 0 100; hauler "h2" 0 100 ]
+    @ [ for i in 1..workers -> worker $"w{i}" 0 50 ]
 
 [<Tests>]
 let incomeWorkforceTests =
     testList
         "income-based workforce"
         [
-            test "the W12S28 fleet is the whole target: 2 Anchors + 4 haulers + 18 workers" {
+            test "the W12S28 fleet is the whole target: 2 Anchors + 4 haulers + 19 workers" {
                 // Each posted source retires its 8 Seats: a seat base would
                 // add 16 on top and the idle spawns would cast into it.
                 let snapshot =
@@ -8730,7 +8754,7 @@ let incomeWorkforceTests =
 
             test "amortization is deducted: one worker short casts exactly one worker" {
                 // Without the anchor/hauler replacement deduction income
-                // would feed 20 workers and this gap would draw three casts.
+                // would feed 20 workers and this gap would draw two casts.
                 let snapshot =
                     { incomeColony with
                         Creeps = List.truncate (List.length incomeFleet - 1) incomeFleet
@@ -8741,6 +8765,41 @@ let incomeWorkforceTests =
                 match spawnIntents intents with
                 | [ (_, _, creepName) ] ->
                     Expect.stringStarts creepName "worker-" "the gap is a worker gap"
+                | other -> failtest $"expected exactly one SpawnCreep intent, got %A{other}"
+            }
+
+            test "at a 1300 bank the whole fleet is 2 Anchors + 2 haulers + 3 workers" {
+                // One Anchor per Post (2), one hauler per container (2 at
+                // this bank's 800 carry capacity), and the income workers
+                // — 30,000 of lifetime income less 2 × 700 + 2 × 1200 of
+                // amortization over the row's 6 × 1500 → ceil(2.911) = 3.
+                let snapshot =
+                    { richIncomeColony with
+                        Creeps = richIncomeFleet 3
+                    }
+
+                let { Intents = intents } = decide snapshot Map.empty Set.empty None
+                Expect.isEmpty (spawnIntents intents) "the fleet already matches the target"
+            }
+
+            test "the worker row rounds up at a Work drain of 6, not down to a body short" {
+                // The whole defect at one RCL: 30,000 of lifetime income
+                // less 3,800 of anchor and hauler amortization over the
+                // worker row's 6 × 1500 is 2.911 bodies. Truncating gives
+                // 2 and pins upgrade throughput at 12 e/tick whatever the
+                // surplus is; rounding up gives the third body (ADR 0037).
+                // The fleet below is two workers, so only the rounded-up
+                // target has a gap to cast into.
+                let snapshot =
+                    { richIncomeColony with
+                        Creeps = richIncomeFleet 2
+                    }
+
+                let { Intents = intents } = decide snapshot Map.empty Set.empty None
+
+                match spawnIntents intents with
+                | [ (_, _, creepName) ] ->
+                    Expect.stringStarts creepName "worker-" "the third body is the gap"
                 | other -> failtest $"expected exactly one SpawnCreep intent, got %A{other}"
             }
         ]

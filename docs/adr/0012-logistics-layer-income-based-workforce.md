@@ -1,5 +1,7 @@
 # The logistics layer: containers, Posts, the hauler row, and an income-based workforce
 
+> **Revised by ADR 0037**: the worker row's quota is rounded up, as this ADR's hauler quota always was — a floor drops a whole worker body's Work, and that granularity grows with RCL.
+
 > **Revised by ADR 0022**: Seats are working ground and no longer reservable by the clustered ordering, so the source-container pick never has to dodge a reservation. **Revised by ADR 0023**: the Storage joins Withdraw's sources one tier below the source containers, pooled only while some other sink is hungry.
 
 > **Revised by ADR 0020**: a Post is not merely the tile an Anchor is worth casting for — for a Work-heavy body it is the only tile Harvest's Work Area offers at a source that has one, and a creep acts only from inside its Work Area. Travel-cost pinning is now backed by geometry: nothing else on the source is a place such a body may stand or dig.
