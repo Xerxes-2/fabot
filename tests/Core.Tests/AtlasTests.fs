@@ -643,6 +643,255 @@ let travelUnitTests =
             }
         ]
 
+/// A paved lane running east from the source's only Seat: source at
+/// (10,10) in wall, Seat at (11,10), road tiles from there out to
+/// (19,10). A creep at (19,10) is eight road steps from the Seat —
+/// #79's corridor.
+let roadCorridor creeps =
+    { spatial
+          [ "src-a", { X = 10; Y = 10 } ]
+          [ for x in 10..19 -> { X = x; Y = 10 }, (if x = 10 then Wall else Plain) ] with
+        Roads = Set.ofList [ for x in 11..19 -> { X = x; Y = 10 } ]
+        CreepPositions = Map.ofList creeps
+    }
+
+/// The same lane unpaved: six plain steps from (17,10) to the Seat.
+let plainCorridor creeps =
+    { spatial
+          [ "src-a", { X = 10; Y = 10 } ]
+          [ for x in 10..17 -> { X = x; Y = 10 }, (if x = 10 then Wall else Plain) ] with
+        CreepPositions = Map.ofList creeps
+    }
+
+/// A varied room for the walk's floor property: 15 × 15 of mixed terrain
+/// with scattered single walls — spaced four apart, so no two touch and
+/// the passable tiles stay one connected component, which makes every
+/// Work Area tile reachable from every creep. Sources sit at four corners
+/// of the interior.
+let mixedRoom creeps =
+    let tiles =
+        [
+            for x in 0..14 do
+                for y in 0..14 do
+                    if x % 4 = 1 && y % 4 = 1 then { X = x; Y = y }, Wall
+                    elif (x + y) % 3 = 0 then { X = x; Y = y }, Swamp
+                    else { X = x; Y = y }, Plain
+        ]
+
+    { spatial
+          [
+              for i, tile in List.indexed [ { X = 3; Y = 3 }; { X = 11; Y = 4 }; { X = 6; Y = 12 } ] ->
+                  $"src-%d{i}", tile
+          ]
+          tiles with
+        Roads =
+            Set.ofList
+                [
+                    for x in 0..14 do
+                        for y in 0..14 do
+                            if (2 * x + y) % 5 = 0 then
+                                { X = x; Y = y }
+                ]
+        CreepPositions = Map.ofList creeps
+    }
+
+[<Tests>]
+let walkTests =
+    testList
+        "atlas walk"
+        [
+            test "the walk is at least the Chebyshev distance to the tile it reaches" {
+                // ADR 0029's floor, checked over a fixture rather than an
+                // example: every body against every source in a room of
+                // mixed terrain, roads and scattered walls. No body crosses
+                // a tile in less than a tick, so no walk may price below
+                // the tiles it must cross — the defect #79 reported, stated
+                // as a property the pricing cannot break.
+                let bodies =
+                    [
+                        "worker", 0, [ Work; Carry; Move ]
+                        "loaded", 50, [ Work; Carry; Move ]
+                        "hauler", 0, [ Carry; Carry; Move ]
+                        "anchor", 0, [ Work; Work; Work; Work; Work; Work; Carry; Move ]
+                        "surplus", 0, [ Work; Move; Move; Move ]
+                    ]
+
+                let starts =
+                    [ { X = 0; Y = 0 }; { X = 14; Y = 0 }; { X = 7; Y = 8 }; { X = 12; Y = 13 } ]
+
+                let sources = [ "src-0"; "src-1"; "src-2" ]
+
+                let violations =
+                    [
+                        for name, energy, body in bodies do
+                            for start in starts do
+                                let atlas =
+                                    mixedRoom [ name, start ]
+                                    |> snapshotWith [ creepWith name energy body ]
+                                    |> ofSnapshot
+
+                                for source in sources do
+                                    let task = Harvest source
+
+                                    let floor =
+                                        workArea atlas task
+                                        |> Set.toList
+                                        |> List.map (range start)
+                                        |> function
+                                            | [] -> 0
+                                            | tiles -> List.min tiles
+
+                                    match walkTicks atlas name task with
+                                    | Some walk when walk < floor ->
+                                        yield
+                                            $"%s{name} from %A{start} to %s{source}: walk %d{walk} under floor %d{floor}"
+                                    | _ -> ()
+                    ]
+
+                Expect.isEmpty violations "no walk prices below the tiles it must cross"
+            }
+
+            test "eight road tiles are eight ticks for an empty road-parity body, not four" {
+                // #79's worked example. The empty hauler unit generates no
+                // fatigue at all, so travel cost floors its road step at
+                // one unit — half a tick — and eight steps read as four
+                // ticks once halved. The walk floors the same step at a
+                // whole tick: eight tiles, eight ticks.
+                let atlas =
+                    roadCorridor [ "h", { X = 19; Y = 10 } ]
+                    |> snapshotWith [ creepWith "h" 0 [ Carry; Carry; Move ] ]
+                    |> ofSnapshot
+
+                Expect.equal
+                    (walkTicks atlas "h" (Harvest "src-a"))
+                    (Some 8)
+                    "eight tiles cannot be crossed in fewer than eight ticks"
+
+                Expect.equal
+                    (travelCost atlas "h" (Harvest "src-a"))
+                    (Some 8)
+                    "travel cost is untouched: eight units, the ranking price the old rule halved"
+            }
+
+            test "the floor lifts a cheap step without capping a dear one" {
+                // The floor is a floor, not a rounding: a worker unit's
+                // road step is one tick where travel cost priced it half a
+                // one, and its swamp step stays the five ticks the engine
+                // charges — ceil(10 / 2) — rather than flattening to the
+                // floor beside it.
+                let walkOn terrain roads =
+                    let atlas =
+                        seatPriced terrain roads |> snapshotWith [ worker "w" ] |> ofSnapshot
+
+                    walkTicks atlas "w" (Harvest "src-a")
+
+                let road = Set.singleton { X = 10; Y = 11 }
+
+                Expect.equal (walkOn Plain road) (Some 1) "a road step is one tick"
+                Expect.equal (walkOn Plain Set.empty) (Some 1) "so is a plain step"
+                Expect.equal (walkOn Swamp Set.empty) (Some 5) "a swamp step is five, not one"
+            }
+
+            test "a Move surplus buys travel cost half a tick a tile and the walk nothing" {
+                // The two numbers deliberately disagree. Three Moves under
+                // one Work price a plain step at ceil(2 / 3) = 1 unit — the
+                // per-unit floor, which is half of what a plain step costs
+                // the worker unit beside it — so six tiles cost six units,
+                // and the old rule read those as three ticks. The walk
+                // floors each step at a whole tick: six tiles, six ticks.
+                // Travel cost keeps ranking the fast body ahead; the clock
+                // refuses to believe it.
+                let atlas =
+                    plainCorridor [ "s", { X = 17; Y = 10 } ]
+                    |> snapshotWith [ creepWith "s" 0 [ Work; Move; Move; Move ] ]
+                    |> ofSnapshot
+
+                Expect.equal
+                    (travelCost atlas "s" (Harvest "src-a"))
+                    (Some 6)
+                    "one unit a tile, half what the worker unit pays for the same ground"
+
+                Expect.equal
+                    (walkTicks atlas "s" (Harvest "src-a"))
+                    (Some 6)
+                    "one tick a tile: no body crosses a tile faster than that"
+            }
+
+            test "the walk is blind to standing traffic" {
+                // #78 inverted at the Atlas seam: the occupancy surcharge
+                // re-prices travel cost around a bystander and the walk does
+                // not move, because a creep standing in the lane this tick
+                // is not part of the path's physical length.
+                let clear =
+                    corridor [ "w", { X = 10; Y = 15 } ]
+                    |> snapshotWith [ worker "w" ]
+                    |> ofSnapshot
+
+                let crowded =
+                    corridor [ "w", { X = 10; Y = 15 }; "b", { X = 11; Y = 13 } ]
+                    |> snapshotWith [ worker "w"; worker "b" ]
+                    |> ofSnapshot
+
+                Expect.equal
+                    (travelCost clear "w" (Harvest "src-a"),
+                     travelCost crowded "w" (Harvest "src-a"))
+                    (Some 4, Some 12)
+                    "travel cost sees the crowd and detours into the swamp Seat"
+
+                Expect.equal
+                    (walkTicks clear "w" (Harvest "src-a"), walkTicks crowded "w" (Harvest "src-a"))
+                    (Some 2, Some 2)
+                    "the walk prices the same two tiles either way"
+            }
+
+            test "totality follows travel cost's contract" {
+                // ADR 0004, verbatim from travel cost (ADR 0029 changes the
+                // pricing, never the contract): unplaceable geometry prices
+                // 0, an unreachable Work Area has no walk at all, and a
+                // creep already inside has none left to walk.
+                let unplaced = corridor [] |> snapshotWith [ worker "w" ] |> ofSnapshot
+
+                Expect.equal
+                    (walkTicks unplaced "w" (Harvest "src-a"))
+                    (Some 0)
+                    "an unplaced creep prices at 0"
+
+                let placed =
+                    corridor [ "w", { X = 10; Y = 15 } ]
+                    |> snapshotWith [ worker "w" ]
+                    |> ofSnapshot
+
+                Expect.equal
+                    (walkTicks placed "w" (Harvest "ghost"))
+                    (Some 0)
+                    "an unplaced target prices at 0, not None"
+
+                let inside =
+                    corridor [ "w", { X = 11; Y = 13 } ]
+                    |> snapshotWith [ worker "w" ]
+                    |> ofSnapshot
+
+                Expect.equal
+                    (walkTicks inside "w" (Harvest "src-a"))
+                    (Some 0)
+                    "already there: no walk left to cover anything"
+
+                let island = corridor [ "w", { X = 20; Y = 20 } ]
+
+                let stranded =
+                    { island with
+                        Terrain = Map.add { X = 20; Y = 20 } Plain island.Terrain
+                    }
+                    |> snapshotWith [ worker "w" ]
+                    |> ofSnapshot
+
+                Expect.equal
+                    (walkTicks stranded "w" (Harvest "src-a"))
+                    None
+                    "an unreachable Work Area has no walk: readers count from now"
+            }
+        ]
+
 [<Tests>]
 let firstStepTests =
     testList

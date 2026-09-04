@@ -1016,11 +1016,6 @@ let private ticksToRestock (snapshot: Snapshot) sourceId =
     |> Option.map (fun s -> s.TicksToRestock)
     |> Option.defaultValue 0
 
-/// A travel cost as the creep's arrival in whole ticks: the cost is priced
-/// in half-ticks (ADR 0010) and a half step still costs a whole tick, so
-/// it rounds up — the same halving the hauler quota's round trip uses.
-let private arrivalTicks cost = (cost + 1) / 2
-
 /// Whether a creep garrisons a source's container Post: ADR 0024's
 /// condition — a Work-heavy body standing on that source's built
 /// container. The full-store reprieve and the empty-window reprieve are
@@ -1031,28 +1026,43 @@ let private garrisons atlas (creep: CreepInfo) sourceId =
     Atlas.workHeavy atlas creep.Name
     && Atlas.catchesOverflow atlas creep.Name sourceId
 
-/// Whether a Task's time has not come for this creep (ADR 0025): a drained
-/// source's Harvest is applicable only when the creep's walk covers the
-/// restock wait — arrival ≥ ticks to restock, with no slack, because the
-/// wait shrinks by one each tick while the walk stays put, so a creep one
-/// tick short departs one tick later and arrives as the energy does. A
-/// creep already beside a dry rock has no walk to cover anything and is
-/// released, exactly as ADR 0013 released it. One exemption, on ADR 0024's
-/// condition and no other: the garrison keeps its Post through the empty
-/// window. A Dual Seat Anchor gets none: Upgrade is in place there, so it
-/// upgrades through the window and rematches Harvest once its Carry is
-/// spent. Every other Task is judged at the current tick.
-/// One consequence worth naming: travel cost answers 0 for an unplaced
-/// creep or target (ADR 0004), and this gate reads that as an arrival of
-/// now — the one place unpriceable geometry holds a Task up, waiting out a
-/// drained source exactly as a creep on its Seat does. Exempting it would
-/// assign a creep to waiting instead, the stranding ADR 0013 fixed, and
-/// the outcome is 0013's own: no Task at all for a drained source.
-let private tooEarly (snapshot: Snapshot) atlas (creep: CreepInfo) task cost =
+/// Whether a Task's time has not come for this creep (ADR 0025, repriced
+/// by ADR 0029): a drained source's Harvest is applicable only when the
+/// creep's walk covers the restock wait — walk ≥ ticks to restock, with no
+/// slack, because the wait shrinks by one each tick while the walk stays
+/// put, so a creep one tick short departs one tick later and arrives as
+/// the energy does. The walk is the Atlas's own query and nothing here
+/// converts anything: it is already whole ticks, floored at one a tile and
+/// blind to today's traffic, so a bystander in the lane cannot dispatch a
+/// creep this tick and recall it the next. A creep already beside a dry
+/// rock has no walk to cover anything and is released, exactly as ADR 0013
+/// released it. One exemption, on ADR 0024's condition and no other: the
+/// garrison keeps its Post through the empty window. A Dual Seat Anchor
+/// gets none: Upgrade is in place there, so it upgrades through the window
+/// and rematches Harvest once its Carry is spent. Every other Task is
+/// judged at the current tick.
+/// Two consequences worth naming, both ADR 0004's totality. The walk
+/// answers 0 for an unplaced creep or target, and this gate reads that as
+/// an arrival of now — the one place unpriceable geometry holds a Task up,
+/// waiting out a drained source exactly as a creep on its Seat does.
+/// Exempting it would assign a creep to waiting instead, the stranding ADR
+/// 0013 fixed, and the outcome is 0013's own: no Task at all for a drained
+/// source. And an unreachable Work Area has no walk at all, which is not
+/// earliness: the reachability gate stands ahead of this one and names
+/// that rejection itself.
+/// The walk arrives deferred because only this arm and the capacity gate
+/// spend it, and pricing one for every Task in the pool measured at a
+/// third of the tick (ADR 0029).
+let private tooEarly (snapshot: Snapshot) atlas (creep: CreepInfo) task (walk: Lazy<int option>) =
     match task with
     | Harvest sourceId ->
-        arrivalTicks cost < ticksToRestock snapshot sourceId
-        && not (garrisons atlas creep sourceId)
+        match walk.Value with
+        // No walk at all is unreachable geometry, which is not earliness:
+        // the reachability gate stands ahead of this one in both cascades
+        // and names that rejection itself (ADR 0002, ADR 0029).
+        | None -> false
+        | Some ticks ->
+            ticks < ticksToRestock snapshot sourceId && not (garrisons atlas creep sourceId)
     | Withdraw _
     | Refill _
     | Build _
@@ -1651,9 +1661,9 @@ let matchCreeps
                 | Some ticks -> Map.tryFind name lives |> Option.forall (fun life -> life >= ticks)
 
             let arrived =
-                match Atlas.travelCost atlas name task with
+                match Atlas.walkTicks atlas name task with
                 | None -> true
-                | Some cost -> arrivalTicks cost <= candidate.TicksToLive
+                | Some ticks -> ticks <= candidate.TicksToLive
 
             alive && arrived
 
@@ -1667,7 +1677,7 @@ let matchCreeps
     // kind competes for. Only Harvest is capped at all, so the holders are
     // gathered inside the capped arms — the Refills, Withdraws and surplus
     // work the pool is mostly made of never walk the assignment map.
-    let hasCapacity (creep: CreepInfo) acc task arrival =
+    let hasCapacity (creep: CreepInfo) acc task (arrival: Lazy<int option>) =
         let tid = taskId task
         let seatCap = Map.tryFind tid capacities
 
@@ -1678,9 +1688,12 @@ let matchCreeps
                 None
 
         match seatCap, postCap with
+        // Only a capped Task forces the walk: the Refills, Withdraws and
+        // surplus work the pool is mostly made of neither walk the
+        // assignment map nor pay for an arrival (ADR 0029).
         | None, None -> true
         | _ ->
-            let holders = holdersAt acc creep task arrival
+            let holders = holdersAt acc creep task arrival.Value
 
             let withinSeats =
                 match seatCap with
@@ -1723,29 +1736,39 @@ let matchCreeps
                 | Some task when not (applicable atlas creep task) ->
                     release ReleaseReason.Inapplicable
                 | Some task ->
-                    // The cost is read one gate before it is spent, exactly
-                    // as the fresh cascade below reads it: capacity counts
-                    // holders at this holder's own arrival (ADR 0026).
+                    // The walk is bound one gate before it is spent, exactly
+                    // as the fresh cascade below binds it: capacity counts
+                    // holders at this holder's own arrival (ADR 0026), and
+                    // the arrival gate spends the very same number — priced
+                    // at most once, and only if one of the two asks.
+                    // Reachability is still travel cost's answer — the two
+                    // floods reach the same tiles, and ADR 0002's release
+                    // has no other price.
                     let cost = Atlas.travelCost atlas creep.Name task
+                    let arrival = lazy (Atlas.walkTicks atlas creep.Name task)
 
                     if
-                        not (hasCapacity creep acc task (Option.map arrivalTicks cost))
+                        not (hasCapacity creep acc task arrival)
                         && not (expiring snapshot atlas creep)
                     then
                         release ReleaseReason.OverCapacity
                     else
                         match cost with
                         | None -> release ReleaseReason.Unreachable
-                        | Some cost when tooEarly snapshot atlas creep task cost ->
+                        | Some _ when tooEarly snapshot atlas creep task arrival ->
                             release ReleaseReason.TooEarly
                         | Some _ -> Map.add name tid acc, released)
 
     // One gate cascade judges every (creep, Task) pair — rejected at the
     // first matching gate it fails (applicable, capacity, reachable, in
-    // time) or scored on the full key when none does. The travel cost is
-    // priced once, above the capacity gate, because capacity counts
-    // holders at the candidate's arrival (ADR 0026) and the arrival gate
-    // below spends the very same number. The order of the gates is
+    // time) or scored on the full key when none does. Two numbers are bound
+    // above the capacity gate: the travel cost, which the reachability gate
+    // and the scored key both read, and the walk, which capacity counts
+    // holders at (ADR 0026) and the arrival gate spends after it — one
+    // number for both, priced at most once. The walk is bound rather than
+    // priced because most of the pool asks for neither gate, and pricing
+    // one per pair regardless measured at a third of the tick (ADR 0029
+    // split the pair; the cascade did not move). The order of the gates is
     // unchanged by that: a candidate the Atlas cannot price has no arrival
     // to count holders at, every holder counts against it, and it reports
     // the rejection it always did. The Matcher's candidates and a verbose
@@ -1758,13 +1781,14 @@ let matchCreeps
             Candidate.Rejected(tid, RejectReason.Inapplicable)
         else
             let cost = Atlas.travelCost atlas creep.Name task
+            let arrival = lazy (Atlas.walkTicks atlas creep.Name task)
 
-            if not (hasCapacity creep acc task (Option.map arrivalTicks cost)) then
+            if not (hasCapacity creep acc task arrival) then
                 Candidate.Rejected(tid, RejectReason.CapacityFull)
             else
                 match cost with
                 | None -> Candidate.Rejected(tid, RejectReason.Unreachable)
-                | Some cost when tooEarly snapshot atlas creep task cost ->
+                | Some _ when tooEarly snapshot atlas creep task arrival ->
                     Candidate.Rejected(tid, RejectReason.TooEarly)
                 | Some cost -> Candidate.Scored(tid, rank snapshot task, cost, load acc tid)
 

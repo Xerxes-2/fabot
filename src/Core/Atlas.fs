@@ -8,6 +8,23 @@ open Fabot.Core.Types
 /// engine-native weights (ADR 0010).
 type private FatigueFactor = { FatigueParts: int; MoveParts: int }
 
+/// Which of the tick's two floods a memo entry holds (ADR 0029). One
+/// dimension separates them because the pair differs in both of the ways
+/// their readers differ: travel cost is a ranking price, so it wants
+/// sub-tick granularity and wants to see today's crowds; the walk is a
+/// clock, so it wants a whole tick a tile and wants to be blind to them. Widening the memo's key by this one
+/// dimension, rather than laying a second map beside it, is what keeps
+/// the two floods from drifting apart.
+type private Pricing =
+    /// Travel cost's units — half-ticks, floored at one unit a step, with
+    /// the occupancy surcharge on occupied tiles (ADR 0010, ADR 0008).
+    /// The ranking price: it breaks rank ties in the Matcher.
+    | TravelCost
+    /// The walk's whole ticks — floored at one tick a step, traffic-blind
+    /// (ADR 0029). The clock: the horizon every time-aware judgement is
+    /// made at.
+    | Walk
+
 /// The per-tick, task-aware query interface over the spatial projection
 /// (ADR 0004). Total: geometry the projection cannot place gets one
 /// documented answer per query — it never counts against a Task and never
@@ -29,13 +46,16 @@ type Atlas =
             /// flood prices these tiles dearer so paths detour around
             /// standing traffic.
             Occupied: bool[]
-            /// Memoised Dijkstra flood per placed creep's tile and fatigue
-            /// factor, forced at most once per tick and shared by every
-            /// query pricing from it (ADR 0002, extended to the whole
-            /// tick). Bodies of the same factor at the same tile share one
-            /// flood. Each flood is a distance and a predecessor-index
-            /// array over tile indices.
-            Floods: Map<Pos * FatigueFactor, Lazy<int[] * int[]>>
+            /// Memoised Dijkstra flood per placed creep's tile, fatigue
+            /// factor and pricing, forced at most once per tick and shared
+            /// by every query pricing from it (ADR 0002, extended to the
+            /// whole tick). Bodies of the same factor at the same tile
+            /// share one flood. Two entries per creep since ADR 0029 — the
+            /// ranking price travel cost ranks on and the clock the walk
+            /// reads — laid lazily, so a tick that asks only one of them
+            /// pays for only one. Each flood is a distance and a
+            /// predecessor-index array over tile indices.
+            Floods: Map<Pos * FatigueFactor * Pricing, Lazy<int[] * int[]>>
             /// Memoised traffic-blind flood out of a spawner's tile, per
             /// (spawner tile, fatigue factor), for bodies the Snapshot does
             /// not carry: a lead prices a replacement that has not been
@@ -48,7 +68,10 @@ type Atlas =
             /// shares no key, and it is itself memoised on the census
             /// signature (ADR 0017) — it runs only when the room changes.
             /// A mutable table for the same reason WorkAreas is one, and
-            /// per-tick by the same construction.
+            /// per-tick by the same construction. Priced in cost units,
+            /// not in the walk's whole ticks (ADR 0029): the lead's
+            /// conversion is the one the walk has yet to replace, so this
+            /// memo shares no key with the Floods table either.
             Walks: System.Collections.Generic.Dictionary<Pos * FatigueFactor, int[]>
             /// Work Area per Task, built at most once per tick and shared
             /// by every query that stands a creep in one — the Floods memo
@@ -100,6 +123,10 @@ let private swampWeight = 10
 /// passable, unlike an obstacle, so traffic never makes a Task
 /// inapplicable.
 let private occupancyPenalty = swampWeight
+
+/// No tile occupied: the flood baseline the occupancy surcharge is judged
+/// against, and the ground the walk is priced over (ADR 0029).
+let private noTraffic: bool[] = Array.create tileCount false
 
 let private neighbours pos =
     [
@@ -171,23 +198,44 @@ let private stepUnits (factor: FatigueFactor) weight =
     else
         Some(max 1 ((weight * factor.FatigueParts + factor.MoveParts - 1) / factor.MoveParts))
 
+/// Whole ticks the body needs to step onto a tile of the given terrain
+/// weight — the walk's price (ADR 0029). Two cost units make a tick and a
+/// part of one still costs a whole tick, so the unit price rounds up; and
+/// no step costs less than a tick, because no body crosses a tile faster
+/// than that however much Move it carries. The nested rounding is exact
+/// rather than an approximation — ceil(ceil(w·F / M) / 2) = ceil(w·F /
+/// 2M), the fatigue the step generates over what the body pays off in a
+/// tick — so this is the physical time of the step, which is why the
+/// per-step floor belongs here and not on the total (#79). The outer floor
+/// is written as ADR 0029 states the rule; `stepUnits`' own floor of one
+/// unit already implies it, and spelling it out is what keeps the two
+/// floors from having to be read together. A body without Move parts steps
+/// nowhere, exactly as travel cost has it.
+let private stepTicks (factor: FatigueFactor) weight =
+    stepUnits factor weight |> Option.map (fun units -> max 1 ((units + 1) / 2))
+
 /// Dijkstra flood over the weight grid from every tile in `starts`,
-/// priced in cost units for one fatigue factor: cheapest travel cost to
-/// every reachable tile (`unreached` elsewhere), plus each tile's
-/// predecessor index on a cheapest path (-1 elsewhere). This is the tick's
-/// hottest loop, so it runs on flat arrays with a binary min-heap of
-/// dist-then-index keys — the key ordering also keeps tie-breaking
-/// deterministic. Every start tile costs 0 even when it cannot be stepped
-/// onto — a creep already stands there, or is about to be placed there.
-/// Several starts price a body that may begin anywhere in a set at no
-/// step's cost, which is how a spawner places a finished creep beside
-/// itself (ADR 0026). A tile some creep occupies costs occupancyPenalty
-/// extra, so paths detour around standing traffic when a detour is
-/// cheaper.
+/// priced by `stepPrice` — one body's price for a step onto a tile of a
+/// given terrain weight, and the only thing that differs between the
+/// tick's two floods (ADR 0029): cheapest cost to every reachable tile
+/// (`unreached` elsewhere), plus each tile's predecessor index on a
+/// cheapest path (-1 elsewhere). This is the tick's hottest loop, so it
+/// runs on flat arrays with a binary min-heap of dist-then-index keys —
+/// the key ordering also keeps tie-breaking deterministic. Every start
+/// tile costs 0 even when it cannot be stepped onto — a creep already
+/// stands there, or is about to be placed there. Several starts price a
+/// body that may begin anywhere in a set at no step's cost, which is how
+/// a spawner places a finished creep beside itself (ADR 0026). A tile
+/// marked occupied costs occupancyPenalty extra, so paths detour around
+/// standing traffic when a detour is cheaper. The penalty is a number of
+/// cost units, so a caller pricing steps in anything else must pass no
+/// occupancy at all: every traffic-blind caller here passes `noTraffic`,
+/// and for the tick's two memoised floods `floodPriced` pairs the two
+/// choices so neither can be made without the other.
 let private floodFromAll
     (weights: int[])
     (occupied: bool[])
-    (factor: FatigueFactor)
+    (stepPrice: int -> int option)
     (starts: Pos list)
     : int[] * int[] =
     let dist = Array.create tileCount unreached
@@ -263,11 +311,11 @@ let private floodFromAll
                         let next = nx * roomSide + ny
 
                         if weights.[next] >= 0 then
-                            match stepUnits factor weights.[next] with
+                            match stepPrice weights.[next] with
                             | None -> ()
-                            | Some units ->
+                            | Some step ->
                                 let candidate =
-                                    d + units + (if occupied.[next] then occupancyPenalty else 0)
+                                    d + step + (if occupied.[next] then occupancyPenalty else 0)
 
                                 if candidate < dist.[next] then
                                     dist.[next] <- candidate
@@ -278,8 +326,18 @@ let private floodFromAll
 
 /// The one-origin flood every query but the lead's walk wants: a creep
 /// prices from the tile it stands on.
-let private floodFrom weights occupied factor (start: Pos) =
-    floodFromAll weights occupied factor [ start ]
+let private floodFrom weights occupied stepPrice (start: Pos) =
+    floodFromAll weights occupied stepPrice [ start ]
+
+/// The flood one pricing wants over one body: the ranking price sees
+/// today's traffic and counts half-ticks, the clock is blind to it and
+/// counts whole ticks (ADR 0029). The one place the pair's two
+/// differences are spelled out, so neither can be applied without the
+/// other.
+let private floodPriced weights occupied factor pricing (start: Pos) =
+    match pricing with
+    | TravelCost -> floodFrom weights occupied (stepUnits factor) start
+    | Walk -> floodFrom weights noTraffic (stepTicks factor) start
 
 let ofSnapshot (snapshot: Snapshot) : Atlas =
     let spatial = snapshot.Spatial
@@ -314,9 +372,12 @@ let ofSnapshot (snapshot: Snapshot) : Atlas =
         Occupied = occupied
         Floods =
             placed
-            |> List.map (fun (name, pos) ->
+            |> List.collect (fun (name, pos) ->
                 let factor = Map.find name factors
-                (pos, factor), lazy (floodFrom weights occupied factor pos))
+
+                [ TravelCost; Walk ]
+                |> List.map (fun pricing ->
+                    (pos, factor, pricing), lazy (floodPriced weights occupied factor pricing pos)))
             |> Map.ofList
         Walks = System.Collections.Generic.Dictionary()
         WorkAreas = System.Collections.Generic.Dictionary()
@@ -349,14 +410,14 @@ let private factorOf (atlas: Atlas) (creep: string) : FatigueFactor =
     Map.tryFind creep atlas.Factors
     |> Option.defaultValue { FatigueParts = 1; MoveParts = 1 }
 
-/// The memoised flood for a creep from a tile; placed creeps' own tiles
-/// hit the memo.
-let private flood (atlas: Atlas) (creep: string) (pos: Pos) =
+/// The memoised flood for a creep from a tile, under one pricing; placed
+/// creeps' own tiles hit the memo.
+let private flood (atlas: Atlas) (pricing: Pricing) (creep: string) (pos: Pos) =
     let factor = factorOf atlas creep
 
-    match Map.tryFind (pos, factor) atlas.Floods with
+    match Map.tryFind (pos, factor, pricing) atlas.Floods with
     | Some memo -> memo.Value
-    | None -> floodFrom atlas.Weights atlas.Occupied factor pos
+    | None -> floodPriced atlas.Weights atlas.Occupied factor pricing pos
 
 /// The creeps the projection places, in Snapshot creep order.
 let placedCreeps (atlas: Atlas) : (string * Pos) list = atlas.Placed
@@ -704,17 +765,11 @@ let catchesOverflow (atlas: Atlas) (creep: string) (sourceId: string) : bool =
         Set.contains pos (containerTiles atlas)
         && Set.contains pos (seatTilesOf atlas sourceId)
 
-/// Travel cost of a Task for a creep (ADR 0002, revised by ADRs 0006 and
-/// 0010): the cost units — half-ticks — the creep's body needs along a
-/// cheapest path to any Work Area
-/// tile — terrain weights scaled by the body's fatigue factor, tiles
-/// under standing creeps priced occupancyPenalty dearer — 0 for a creep
-/// already inside. None — a placed Work Area the creep cannot reach
-/// (a body without Move parts reaches nothing), or an empty one — makes
-/// the Task inapplicable to that creep. An unplaced creep or target
-/// prices at 0: unpriceable geometry never counts against a Task (ADR
-/// 0004).
-let travelCost (atlas: Atlas) (creep: string) (task: Task) : int option =
+/// The cheapest path from a creep to its Task's Work Area under one
+/// pricing — the shape travel cost and the walk share, so the two can
+/// disagree on what a step costs and on nothing else (ADR 0029). Its
+/// totality contract is ADR 0004's and is documented on both wrappers.
+let private pricedPath (atlas: Atlas) (pricing: Pricing) (creep: string) (task: Task) : int option =
     match
         Map.tryFind creep atlas.Spatial.CreepPositions,
         Map.tryFind (targetOf task) atlas.Spatial.TargetPositions
@@ -727,7 +782,7 @@ let travelCost (atlas: Atlas) (creep: string) (task: Task) : int option =
         if Set.contains pos area then
             Some 0
         else
-            let dist, _ = flood atlas creep pos
+            let dist, _ = flood atlas pricing creep pos
 
             area
             |> Set.toList
@@ -737,6 +792,34 @@ let travelCost (atlas: Atlas) (creep: string) (task: Task) : int option =
             |> function
                 | [] -> None
                 | costs -> Some(List.min costs)
+
+/// Travel cost of a Task for a creep (ADR 0002, revised by ADRs 0006 and
+/// 0010): the cost units — half-ticks — the creep's body needs along a
+/// cheapest path to any Work Area
+/// tile — terrain weights scaled by the body's fatigue factor, tiles
+/// under standing creeps priced occupancyPenalty dearer — 0 for a creep
+/// already inside. None — a placed Work Area the creep cannot reach
+/// (a body without Move parts reaches nothing), or an empty one — makes
+/// the Task inapplicable to that creep. An unplaced creep or target
+/// prices at 0: unpriceable geometry never counts against a Task (ADR
+/// 0004). A ranking price and nothing else since ADR 0029: it breaks rank
+/// ties in the Matcher, and no time-aware judgement is made on it — that
+/// is the walk's job, and halving this number is not the walk.
+let travelCost (atlas: Atlas) (creep: string) (task: Task) : int option =
+    pricedPath atlas TravelCost creep task
+
+/// The creep's walk to a Task's Work Area (ADR 0029): the whole ticks its
+/// body needs along a cheapest path, every step floored at one tick and
+/// today's standing creeps priced at nothing — the horizon every
+/// time-aware judgement is made at. Beside travel cost, not derived from
+/// it: a clock must not read a crowd that will have moved on, and must
+/// never price a tile below the tick it takes to cross. 0 for a creep
+/// already inside the area — there is no walk left to cover anything
+/// with. Totality is travel cost's own contract (ADR 0004): an unplaced
+/// creep or target prices 0, and an unreachable or empty Work Area has no
+/// walk at all, which readers take as "no arrival" and count from now.
+let walkTicks (atlas: Atlas) (creep: string) (task: Task) : int option =
+    pricedPath atlas Walk creep task
 
 /// Whether a creep may perform its Task's action this tick: standing
 /// inside the Task's Work Area for its body at tick start (ADR 0020) — a
@@ -805,21 +888,26 @@ let private firstStepVia
 /// is empty or unreachable. Of equally cheap goals the lowest (cost, tile)
 /// wins, matching the flood's tie-breaking.
 let firstStep (atlas: Atlas) (creep: string) (task: Task) : Pos option =
-    firstStepVia atlas (flood atlas creep) creep task
-
-/// No tile occupied: the flood baseline the occupancy surcharge is judged
-/// against.
-let private noTraffic: bool[] = Array.create tileCount false
+    firstStepVia atlas (flood atlas TravelCost creep) creep task
 
 /// The first step the same body would take were no tile occupied — the
 /// traffic-blind route, otherwise priced exactly like firstStep. The
 /// Resolver compares the two: a difference attributes the detour to the
 /// occupancy surcharge, which is the only pricing the two floods do not
-/// share (ADR 0008, ADR 0009). This is the one flood ADR 0004's memo
-/// cannot serve — each creep's tile is its own key — so the Resolver runs
-/// it only for creeps on the verbose list (ADR 0018).
+/// share (ADR 0008, ADR 0009). Still the one flood ADR 0004's memo cannot
+/// serve, though no longer for ADR 0018's stated reason: since ADR 0029
+/// the memo is keyed on exactly this creep's tile and factor, but its
+/// traffic-blind entry is the walk's, priced in whole ticks, and a route
+/// read off whole ticks is not the route this attribution compares
+/// against. So the Resolver still runs it only for creeps on the verbose
+/// list (ADR 0018), whose decision is about log noise and stands either
+/// way.
 let firstStepIgnoringTraffic (atlas: Atlas) (creep: string) (task: Task) : Pos option =
-    firstStepVia atlas (floodFrom atlas.Weights noTraffic (factorOf atlas creep)) creep task
+    firstStepVia
+        atlas
+        (floodFrom atlas.Weights noTraffic (stepUnits (factorOf atlas creep)))
+        creep
+        task
 
 /// Round-trip haul cost in whole ticks for a body between a container's
 /// tile and a sink structure's tile (ADR 0012): the leg out prices every
@@ -839,7 +927,7 @@ let haulRoundTripTicks (atlas: Atlas) (body: BodyPart list) (from: Pos) (sink: P
     let goals = adjacentWalkable atlas sink
 
     let legUnits factor =
-        let dist, _ = floodFrom atlas.Weights noTraffic factor from
+        let dist, _ = floodFrom atlas.Weights noTraffic (stepUnits factor) from
 
         goals
         |> List.choose (fun goal ->
@@ -889,7 +977,11 @@ let castWalkTicks (atlas: Atlas) (body: BodyPart list) (spawn: Pos) (goal: Pos) 
     let dist =
         memoised atlas.Walks (spawn, factor) (fun () ->
             let dist, _ =
-                floodFromAll atlas.Weights noTraffic factor (adjacentWalkable atlas spawn)
+                floodFromAll
+                    atlas.Weights
+                    noTraffic
+                    (stepUnits factor)
+                    (adjacentWalkable atlas spawn)
 
             dist)
 
@@ -919,7 +1011,7 @@ let trunkPath (atlas: Atlas) (avoid: Set<Pos>) (origin: Pos) (goals: Set<Pos>) :
             | Wall -> ())
 
     let dist, parents =
-        floodFrom weights noTraffic { FatigueParts = 1; MoveParts = 1 } origin
+        floodFrom weights noTraffic (stepUnits { FatigueParts = 1; MoveParts = 1 }) origin
 
     goals
     |> Set.toList

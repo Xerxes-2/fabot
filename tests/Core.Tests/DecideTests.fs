@@ -6988,9 +6988,9 @@ let postCapacityTests =
 /// The restock dispatch corridor: a one-tile lane y = 10 from x = 9 to
 /// x = 21 with the source embedded in wall at (10,10), so its Seats are
 /// (9,10) and (11,10) and the lane east of the source is the only approach
-/// to either. An empty worker-unit body pays two half-ticks per plain
-/// step, so a creep at (15,10) is four steps and a travel cost of 8 —
-/// four ticks of walking — from the Seat it can reach.
+/// to either. An empty worker-unit body pays a whole tick per plain step,
+/// so a creep at (15,10) is four steps and a walk of four ticks from the
+/// Seat it can reach (ADR 0029).
 let restockRoom =
     spatial [] [ for x in 9..21 -> { X = x; Y = 10 }, (if x = 10 then Wall else Plain) ]
     |> withTargets [ "src-a", { X = 10; Y = 10 }, Source ]
@@ -7056,12 +7056,14 @@ let restockTests =
                     "nothing to walk toward yet: it holds its ground for a tick"
             }
 
-            test "an odd travel cost rounds up: half a tick of walking still costs a tick" {
-                // Travel cost is priced in half-ticks (ADR 0010); a road on
-                // (14,10) makes the four-step approach cost 7, not 8. Rounded
-                // up that is the same four-tick arrival, and the boundary
-                // holds — rounded down it would be three and the creep would
-                // sit out a tick it could have spent walking.
+            test "paving one tile of the approach does not shorten the walk" {
+                // The floor is per step, not on the total (ADR 0029): a road
+                // on (14,10) drops the four-step approach from 8 cost units
+                // to 7 — travel cost still ranks a paved route ahead — while
+                // the walk stays four ticks, because four tiles are four
+                // tiles however they are surfaced. Halving the total would
+                // have made it three and sat the creep out of a tick it
+                // could have spent walking.
                 let snapshot = restockAt "w1" { X = 15; Y = 10 } 4
 
                 let snapshot =
@@ -7077,13 +7079,15 @@ let restockTests =
                 Expect.equal
                     (harvesters assignments "src-a")
                     [ "w1" ]
-                    "seven half-ticks is four ticks of walking, not three"
+                    "four tiles are four ticks, paved or not"
             }
 
             test "an unreachable drained source rejects as Unreachable, not as too early" {
-                // The arrival gate is priced from the travel cost, so it
-                // stands behind the reachability gate: geometry the creep
-                // cannot cross is reported as such, whatever the source holds.
+                // The arrival gate stands behind the reachability gate:
+                // geometry the creep cannot cross is reported as such,
+                // whatever the source holds. The walk and the travel cost
+                // reach the same tiles, so neither gate can shadow the
+                // other's answer (ADR 0029).
                 let snapshot = restockAt "w1" { X = 17; Y = 10 } 60
 
                 let snapshot =
@@ -7328,6 +7332,90 @@ let restockTests =
                 Expect.isEmpty
                     (moveIntentsFor "a1" intents)
                     "it upgrades in place, it does not walk"
+            }
+
+            test "eight road tiles are eight ticks of waiting, not four" {
+                // #79's report, at the gate that made it visible. The lane
+                // is paved, so an empty worker unit pays one cost unit a
+                // step: eight steps price at 8, which halved read as a
+                // four-tick arrival and sent this creep out to cover a wait
+                // it could not reach in time. The walk floors each tile at
+                // a whole tick — eight tiles, eight ticks — so the gate
+                // now covers an eight-tick wait and no more.
+                let pavedAt pos ticks =
+                    let snapshot = restockAt "w1" pos ticks
+
+                    { snapshot with
+                        Spatial =
+                            { snapshot.Spatial with
+                                Roads = Set.ofList [ for x in 11..21 -> { X = x; Y = 10 } ]
+                            }
+                    }
+
+                let { Assignments = assignments } =
+                    decide (pavedAt { X = 19; Y = 10 } 8) Map.empty Set.empty None
+
+                Expect.equal
+                    (harvesters assignments "src-a")
+                    [ "w1" ]
+                    "the walk equals the wait: it leaves now and arrives as the energy does"
+
+                let { Assignments = assignments } =
+                    decide (pavedAt { X = 19; Y = 10 } 9) Map.empty Set.empty None
+
+                Expect.equal
+                    (Map.tryFind "w1" assignments)
+                    None
+                    "one tick short, and eight ticks of road do not cover nine of waiting"
+            }
+
+            test "a bystander in the lane does not change the dispatch" {
+                // #78 inverted. The lane is one tile wide, so a creep
+                // standing in it has nowhere to be walked around: the
+                // occupancy surcharge added 10 cost units to this walk,
+                // five ticks of phantom arrival, and the gate dispatched a
+                // creep on a crowd that had moved on by the next tick —
+                // then released it TooEarly. The walk is blind to today's
+                // traffic, so the same Snapshot decides the same way with
+                // the bystander and without it, at every wait either side
+                // of the boundary.
+                let decides crowded ticks =
+                    let snapshot = restockAt "w1" { X = 15; Y = 10 } ticks
+
+                    let snapshot =
+                        if crowded then
+                            { snapshot with
+                                Creeps =
+                                    snapshot.Creeps
+                                    @ [ creepWith "b1" 0 100 [ Carry; Carry; Move ] ]
+                                Spatial =
+                                    { snapshot.Spatial with
+                                        CreepPositions =
+                                            snapshot.Spatial.CreepPositions
+                                            |> Map.add "b1" { X = 14; Y = 10 }
+                                    }
+                            }
+                        else
+                            snapshot
+
+                    let { Assignments = assignments } = decide snapshot Map.empty Set.empty None
+                    Map.tryFind "w1" assignments
+
+                for ticks in [ 3; 4; 5; 6; 9; 12 ] do
+                    Expect.equal
+                        (decides true ticks)
+                        (decides false ticks)
+                        $"a bystander cannot decide a %d{ticks}-tick wait either way"
+
+                Expect.equal
+                    (decides true 4)
+                    (Some(taskId (Harvest "src-a")))
+                    "four ticks of walking still cover four of waiting, crowd or no crowd"
+
+                Expect.equal
+                    (decides true 9)
+                    None
+                    "and the crowd no longer buys the phantom five that dispatched it"
             }
         ]
 
@@ -8021,18 +8109,20 @@ let arrivalCapacityTests =
                     "the second Anchor is idle for want of standing room, not for want of time"
             }
 
-            test "the succession's whole margin is the surcharge on the incumbent's own tile" {
-                // ADR 0026's failure signal is NoneFree on a freshly cast
-                // Anchor, and this is the arithmetic that keeps it off. The
-                // lead over the lane is 66 for the 600-bank Anchor row, of
-                // which 21 is the spawner, so the incumbent has 45 ticks
-                // left the tick its successor stands on the birth tile. The
-                // successor's arrival is the same nine steps priced *with*
-                // traffic: 45 ticks of walking plus the occupancy surcharge
-                // on the Post its predecessor is standing on — five ticks,
-                // 50. 45 < 50 admits it. Five ticks is the whole margin, so
-                // a lead five ticks longer meets the arrival exactly and
-                // the successor idles through the walk it was cast to make.
+            test "the succession's margin is spent: the walk and the lead price the same ground" {
+                // ADR 0026 read this margin as the occupancy surcharge on
+                // the incumbent's own tile — the lead was traffic-blind and
+                // the arrival was not, which bought the successor five
+                // ticks. ADR 0029 makes the arrival traffic-blind too, and
+                // the five ticks are gone: nine steps at five ticks a step
+                // is a walk of 45, and the lead over the same lane is 66 —
+                // 21 in the spawner and the same 45 of walking. So the
+                // incumbent has exactly 45 ticks left the tick its
+                // successor stands on the birth tile, and the window is
+                // read at equality: 44 admits it, 45 does not. The margin
+                // ADR 0026 named is no longer there to spend, and a
+                // successor born on the boundary idles the tick before the
+                // window opens.
                 let admits life =
                     let remembered = Map.ofList [ "a1", taskId (Harvest "src-a") ]
 
@@ -8044,24 +8134,28 @@ let arrivalCapacityTests =
 
                     harvesters assignments "src-a", releases verdicts, verdicts
 
-                let harvesting, released, _ = admits 45
+                let harvesting, released, _ = admits 44
 
                 Expect.equal
                     harvesting
                     [ "a1"; "a2" ]
-                    "the successor walks while its predecessor digs"
+                    "a predecessor gone before the walk ends holds none of the Post"
 
                 Expect.isEmpty released "and the predecessor keeps digging"
 
-                let harvesting, released, verdicts = admits 50
+                let harvesting, released, verdicts = admits 45
 
-                Expect.equal harvesting [ "a1" ] "with the margin spent, the Post reads full"
+                Expect.equal
+                    harvesting
+                    [ "a1" ]
+                    "still standing there when the successor arrives, the Post reads full"
+
                 Expect.isEmpty released "the incumbent is still never released for it"
 
                 Expect.contains
                     verdicts
                     (Verdict.Unassigned("a2", IdleReason.NoneFree))
-                    "and the successor idles — what a mispriced lead buys"
+                    "and the successor idles until the window opens a tick later"
             }
 
             test "a holder still walking when the candidate dies holds none of it either" {
