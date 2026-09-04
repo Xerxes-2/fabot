@@ -32,20 +32,38 @@ let private builtKindOf =
     let byName = allBuiltKinds |> List.map (fun k -> builtKindName k, k) |> Map.ofList
     fun structureType -> byName |> Map.tryFind structureType |> Option.defaultValue BuiltKind.Other
 
+/// The projection's terrain, memoised per room name (ADR 0031). Room
+/// terrain is fixed for the life of the server, so the key can never go
+/// stale: the first tick that projects a room reads the engine's terrain
+/// once and every later tick recalls the same map. Heap state only, like
+/// the plan memo (ADR 0017) — nothing here reaches Memory, and a global
+/// reset empties the table so the next tick rebuilds it.
+let private terrainMemo =
+    System.Collections.Generic.Dictionary<string, Map<Pos, Terrain>>()
+
+let private terrainOf (roomName: string) : Map<Pos, Terrain> =
+    match terrainMemo.TryGetValue roomName with
+    | true, tiles -> tiles
+    | _ ->
+        let terrain = Game.map.getRoomTerrain roomName
+
+        // Rows and columns 0/49 are exit tiles — stepping on one teleports
+        // the creep into the next room. They stay out of the projection: an
+        // absent tile is impassable, so no path or Work Area ever uses an
+        // exit.
+        let tiles =
+            Map.ofList
+                [
+                    for x in 1..48 do
+                        for y in 1..48 do
+                            { X = x; Y = y }, terrainAt terrain x y
+                ]
+
+        terrainMemo.[roomName] <- tiles
+        tiles
+
 let private buildSpatial (spawn: ISpawn) : SpatialInfo =
     let room = spawn.room
-    let terrain = Game.map.getRoomTerrain room.name
-
-    // Rows and columns 0/49 are exit tiles — stepping on one teleports the
-    // creep into the next room. They stay out of the projection: an absent
-    // tile is impassable, so no path or Work Area ever uses an exit.
-    let tiles =
-        Map.ofList
-            [
-                for x in 1..48 do
-                    for y in 1..48 do
-                        { X = x; Y = y }, terrainAt terrain x y
-            ]
 
     // Each structure and site is classified once, here, and carried beside
     // its kind: every filter below reads that kind, and the engine string
@@ -81,7 +99,7 @@ let private buildSpatial (spawn: ISpawn) : SpatialInfo =
 
     {
         RoomName = Some room.name
-        Terrain = tiles
+        Terrain = terrainOf room.name
         TargetPositions =
             Map.ofArray (
                 Array.concat

@@ -257,17 +257,26 @@ function buildWorld() {
 
   Object.assign(spawn, { name: "Spawn1", spawning: null, room, spawnCreep: ok });
 
+  // One terrain object per room, handed back unchanged on every call, as
+  // the engine does — and counted, so the per-room terrain memo (ADR
+  // 0031) is checkable: the bot should read it once per heap lifetime.
   const terrain = buildTerrain();
+  let terrainReads = 0;
   const game = {
     time: 1000,
     cpu: { getUsed: () => performance.now() },
-    map: { getRoomTerrain: () => terrain },
+    map: {
+      getRoomTerrain: () => {
+        terrainReads++;
+        return terrain;
+      },
+    },
     rooms: { [ROOM]: room },
     spawns: { Spawn1: spawn },
     creeps: Object.fromEntries(creeps.map((c) => [c.name, c])),
     getObjectById: (id) => byId.get(id) ?? null,
   };
-  return { game, roadCount: roads.length };
+  return { game, roadCount: roads.length, terrainReads: () => terrainReads };
 }
 
 // ---------------------------------------------------------------------------
@@ -379,7 +388,7 @@ if (!existsSync(bundle)) {
   process.exit(1);
 }
 
-const { game, roadCount } = buildWorld();
+const { game, roadCount, terrainReads } = buildWorld();
 globalThis.Game = game;
 globalThis.Memory = {};
 
@@ -412,4 +421,5 @@ const profilePath = path.join(here, "..", "build", "fabot.cpuprofile");
 writeFileSync(profilePath, JSON.stringify(profile));
 
 printReport(tickMs, summarize(profile), roadCount);
+console.log(`engine terrain reads: ${terrainReads()} over ${WARMUP + TICKS} ticks (Game.map.getRoomTerrain)`);
 console.log(`\nraw profile: ${path.relative(process.cwd(), profilePath)} (open in Chrome DevTools / speedscope)`);
