@@ -130,13 +130,84 @@ type TargetKind =
     /// Task target; projected as position and kind alone, no amount.
     | Dropped
 
-/// The Snapshot's spatial projection: the spawn room's terrain plus
-/// positions of the entities decisions need to place on it.
+/// One room's geometry, filed under that room's name (ADR 0041): every
+/// container the projection keys by `Pos` or fills with `Pos`es, gathered
+/// into one record rather than five maps side by side, so reading a
+/// room's geometry is one lookup and not five. The id-keyed containers
+/// (target kinds, hits, stores) stay outside it, because an object id is
+/// already unique across the world and layering it would key a unique
+/// thing twice.
+///
+/// Absence stays per entry (ADR 0004) and now says one more thing: a room
+/// missing entry by entry inside its layer and a room with no layer at all
+/// are the same answer, so a room's geometry is read as
+/// `Map.tryFind name spatial.Rooms |> Option.defaultValue RoomLayer.empty`
+/// and never as `.[name]`, which throws on a room the projection names but
+/// has no geometry for. Neither absence is a state of its own — an outpost
+/// the colony cannot currently see is unpriceable geometry and nothing
+/// more.
+type RoomLayer =
+    {
+        /// Terrain per tile over this room's ground (x,y in 1..48); a tile
+        /// absent from the map is impassable. The border ring is not here
+        /// and is not ground: it rides in `SpatialInfo.Borders`, whose one
+        /// reader is the Seam query (ADR 0036, ADR 0041).
+        Terrain: Map<Pos, Terrain>
+        /// Target id -> that target's tile in this room: the Task targets
+        /// (source, refillable structure, construction site, controller)
+        /// and the dropped piles the pickup reflex reads, which are never
+        /// Task targets and are filtered out by kind where that matters
+        /// (`Atlas.buildableTiles`).
+        TargetPositions: Map<string, Pos>
+        /// Creep name -> the tile the creep stands on in this room.
+        CreepPositions: Map<string, Pos>
+        /// Tiles blocked by obstacle structures (spawn, extension,
+        /// controller, ...) and by their construction sites — the engine
+        /// refuses to move a creep onto its own obstacle-type site;
+        /// impassable regardless of terrain.
+        Obstacles: Set<Pos>
+        /// Tiles holding a built road — built structures only, a road
+        /// construction site is not yet a road (ADR 0010).
+        Roads: Set<Pos>
+    }
+
+[<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
+module RoomLayer =
+    /// A room with nothing in it — every entry absent. What a `tryFind` on
+    /// `SpatialInfo.Rooms` defaults to, so a room the projection holds no
+    /// geometry for reads the same as one whose every container is empty
+    /// (ADR 0004).
+    let empty: RoomLayer =
+        {
+            Terrain = Map.empty
+            TargetPositions = Map.empty
+            CreepPositions = Map.empty
+            Obstacles = Set.empty
+            Roads = Set.empty
+        }
+
+/// The Snapshot's spatial projection: the terrain of the rooms the colony
+/// works plus positions of the entities decisions need to place on them.
 type SpatialInfo =
     {
-        /// Name of the room the projection covers. None when the
-        /// projection is empty — absence is per-entry (ADR 0004).
+        /// Which entry of `Rooms` is home — the spawn room (ADR 0041) —
+        /// and still the room name the census signature and the Layout
+        /// read (ADR 0017). None for a projection that does not say which
+        /// room it is, whose geometry the bridge files under the empty
+        /// name, exactly as `Decide.censusSignature` spells that room.
         RoomName: string option
+        /// Room name -> that room's geometry. The layer ADR 0041 adds, and
+        /// where the tile-shaped containers end up: the flat fields below
+        /// still carry the home room's copy of the same five while the
+        /// readers migrate onto this one, and it is those that go away at
+        /// the end of the migration, not this. `RoomName` says which entry
+        /// is home; every other entry is an outpost — so a projection
+        /// carrying a `Borders` entry has to name its home room too, or
+        /// that one room lands here under the empty name and in `Borders`
+        /// under its real one. Read an entry with `Map.tryFind`, defaulting
+        /// to `RoomLayer.empty`: a room with no geometry has no entry here
+        /// at all, and that is the same answer (ADR 0004).
+        Rooms: Map<string, RoomLayer>
         /// Terrain per tile over the projection's ground (x,y in 1..48); a
         /// tile absent from the map is impassable. Absent is not the same
         /// as outside the projection since ADR 0041: the border ring is
@@ -189,6 +260,7 @@ module SpatialInfo =
     let empty =
         {
             RoomName = None
+            Rooms = Map.empty
             Terrain = Map.empty
             Borders = Map.empty
             TargetPositions = Map.empty
@@ -199,6 +271,69 @@ module SpatialInfo =
             Hits = Map.empty
             Stores = Map.empty
         }
+
+    /// The home room's layer, built from the flat fields when the layer
+    /// does not already carry one. The bridge ADR 0041's migration rests
+    /// on: while both shapes exist, a projection written either way reads
+    /// the same through this, so a reader can move onto the layer without
+    /// the same commit rewriting every projection ever written flat.
+    ///
+    /// Three rules, and each one is a decision:
+    ///
+    /// A projection that already carries the home room's entry is returned
+    /// untouched, layer and all. The layer is the truth and the flat
+    /// fields are the copy, so nothing here ever writes one over the
+    /// other — a projection carrying both a home layer and flat fields
+    /// that disagree means the layer, which is what makes the migration
+    /// one-way.
+    ///
+    /// Flat fields holding nothing bridge nothing. The empty projection is
+    /// every entry absent (ADR 0004), and that now includes the layer: a
+    /// projection with no ground, no targets, no creeps, no obstacles and
+    /// no roads projects no room, whether or not it names one. A room
+    /// named but empty answers absent from either shape, so the two agree
+    /// without an entry standing for it.
+    ///
+    /// The home room is `RoomName`, and the empty name when it names none.
+    /// A projection with tiles but no room name is a colony's own room
+    /// written without saying so — the shape most hand-built projections
+    /// take — and the census signature already spells that room's name the
+    /// empty string (`Decide.censusSignature`). Filing its tiles under the
+    /// same name is what lets those projections reach a migrated reader at
+    /// all; the alternative is a room's geometry the layer cannot hold.
+    ///
+    /// Apply it once, and after `RoomName` is final: a projection
+    /// normalised, then named, then normalised again carries its home room
+    /// twice, under the empty name and under its real one. Under a fixed
+    /// name it is idempotent.
+    ///
+    /// Temporary by construction: it goes when the flat fields go, at the
+    /// end of the migration, so nothing new should be written to need it.
+    let normalise (spatial: SpatialInfo) : SpatialInfo =
+        let home = spatial.RoomName |> Option.defaultValue ""
+
+        let flat: RoomLayer =
+            {
+                Terrain = spatial.Terrain
+                TargetPositions = spatial.TargetPositions
+                CreepPositions = spatial.CreepPositions
+                Obstacles = spatial.Obstacles
+                Roads = spatial.Roads
+            }
+
+        let carriesNothing =
+            Map.isEmpty flat.Terrain
+            && Map.isEmpty flat.TargetPositions
+            && Map.isEmpty flat.CreepPositions
+            && Set.isEmpty flat.Obstacles
+            && Set.isEmpty flat.Roads
+
+        if carriesNothing || Map.containsKey home spatial.Rooms then
+            spatial
+        else
+            { spatial with
+                Rooms = Map.add home flat spatial.Rooms
+            }
 
 /// What the decision layer knows about one construction site this tick.
 type ConstructionSiteInfo = { Id: string }

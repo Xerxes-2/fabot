@@ -153,6 +153,13 @@ let private buildSpatial (spawn: ISpawn) : SpatialInfo =
 
     {
         RoomName = Some room.name
+        // Filled from the five fields below by the `normalise` this
+        // assembly ends with, rather than written out a second time here:
+        // the layer is derived from the flat fields in exactly one place
+        // (ADR 0041), so what the shell projects and what a hand-written
+        // projection bridges to cannot drift apart. The maps themselves
+        // are shared, not copied — the layer costs one record.
+        Rooms = Map.empty
         Terrain = terrain.Ground
         // The border ring of every room the projection covers, under its
         // own name: the Atlas answers a Seam from these and from nothing
@@ -239,6 +246,11 @@ let private buildSpatial (spawn: ISpawn) : SpatialInfo =
             |> Array.map (fun (st, _) -> st.id, st.store.getUsedCapacity "energy")
             |> Map.ofArray
     }
+    // The spawn room's layer, beside the flat fields it was built from
+    // (ADR 0041). Both shapes carry this room until the readers have
+    // moved; the layer is what an outpost's geometry will arrive as, and
+    // the flat fields have no room to put a second room in.
+    |> SpatialInfo.normalise
 
 let build () : Snapshot =
     let spawns = objectValues<ISpawn> Game.spawns

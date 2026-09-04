@@ -943,3 +943,185 @@ let seamTests =
                         $"{name} -> W15S25: and none the other way"
             }
         ]
+
+// ---- the room layer the projection grew ---------------------------------
+
+/// A captured room projected as a lived-in tick would leave it: the
+/// loader's own flat projection, plus the two containers a capture has no
+/// furniture for — creeps standing somewhere, roads built somewhere —
+/// filled off the room's own plain ground. All five of the layered
+/// containers hold something, so a comparison between the two shapes can
+/// come out wrong on any of them.
+let private peopled (capture: RoomCapture) (loaded: LoadedRoom) : SpatialInfo =
+    let plains =
+        capture.Terrain
+        |> Map.toList
+        |> List.choose (fun (tile, terrain) -> if terrain = Plain then Some tile else None)
+
+    { loaded.Spatial with
+        CreepPositions =
+            plains
+            |> List.truncate 3
+            |> List.mapi (fun index tile -> $"creep-{index}", tile)
+            |> Map.ofList
+        Roads = plains |> List.skip 3 |> List.truncate 5 |> Set.ofList
+    }
+
+/// The layer ADR 0041 files the projection's geometry under, checked over
+/// the captures rather than over three tiles chosen to make a point. The
+/// layer has no reader yet — that is the next commit's work, and this
+/// commit's whole claim is that when a reader arrives it will find what
+/// the shell projected.
+[<Tests>]
+let layerTests =
+    testList
+        "the projection's room layer"
+        [
+            test "a room written flat reads back the same five containers under its own name" {
+                for room in rooms do
+                    let capture = load room.Name
+                    let spawn = spawnTiles room capture |> List.head
+                    let flat = peopled capture (project capture spawn room.FallbackController)
+                    let layered = SpatialInfo.normalise flat
+
+                    Expect.equal
+                        (layered.Rooms |> Map.toList |> List.map fst)
+                        [ room.Name ]
+                        $"{room.Name}: one room projected, one layer, under the room's own name"
+
+                    let layer = layered.Rooms.[room.Name]
+
+                    Expect.equal layer.Terrain flat.Terrain $"{room.Name}: the ground it stands on"
+
+                    Expect.equal
+                        layer.TargetPositions
+                        flat.TargetPositions
+                        $"{room.Name}: where its targets stand"
+
+                    Expect.equal
+                        layer.CreepPositions
+                        flat.CreepPositions
+                        $"{room.Name}: where its creeps stand"
+
+                    Expect.equal
+                        layer.Obstacles
+                        flat.Obstacles
+                        $"{room.Name}: the tiles nothing crosses"
+
+                    Expect.equal layer.Roads flat.Roads $"{room.Name}: the roads built on it"
+
+                    Expect.equal
+                        { layered with Rooms = Map.empty }
+                        flat
+                        $"{room.Name}: and the layer is all that was added"
+            }
+
+            test "a room already in the layer is left as the projection wrote it" {
+                // Which way the copy runs is the shape of the whole
+                // migration: the layer is the truth and the flat fields are
+                // the copy, so a projection carrying both keeps the layer it
+                // was written with. A bridge that refilled the layer from
+                // the flat fields would undo every reader the migration
+                // moves, one tick at a time and silently.
+                let capture = load "W12S28"
+                let flat = peopled capture (project capture { X = 25; Y = 25 } None)
+
+                let sparse: RoomLayer =
+                    {
+                        Terrain = Map.ofList [ { X = 1; Y = 1 }, Plain ]
+                        TargetPositions = Map.empty
+                        CreepPositions = Map.empty
+                        Obstacles = Set.empty
+                        Roads = Set.empty
+                    }
+
+                let layered =
+                    { flat with
+                        Rooms = Map.ofList [ capture.RoomName, sparse ]
+                    }
+
+                Expect.equal
+                    (SpatialInfo.normalise layered)
+                    layered
+                    "the projection it was handed, layer and all"
+            }
+
+            test "a projection that names no room files its geometry under the name it has" {
+                // Tiles and no room name is this colony's own room written
+                // without saying so, which is what a hand-built projection
+                // usually is. Its geometry goes under the empty name — the
+                // one the census signature already gives that room — so a
+                // reader on the layer still finds it.
+                let unnamed =
+                    { SpatialInfo.empty with
+                        Terrain = Map.ofList [ { X = 5; Y = 5 }, Plain ]
+                    }
+
+                let layered = SpatialInfo.normalise unnamed
+
+                Expect.equal
+                    (layered.Rooms |> Map.toList |> List.map fst)
+                    [ "" ]
+                    "the unnamed room's own name"
+
+                Expect.equal
+                    layered.Rooms.[""].Terrain
+                    unnamed.Terrain
+                    "carrying the ground it was written with"
+            }
+
+            test "an empty projection projects no room at all" {
+                // Every entry absent (ADR 0004) covers the layer too: a
+                // projection with nothing in it has no room to file, named
+                // or not, and both shapes answer absent already without an
+                // entry standing for it.
+                Expect.equal
+                    (SpatialInfo.normalise SpatialInfo.empty)
+                    SpatialInfo.empty
+                    "nothing in it, nothing layered"
+
+                let named =
+                    { SpatialInfo.empty with
+                        RoomName = Some "W12S28"
+                    }
+
+                Expect.equal
+                    (SpatialInfo.normalise named)
+                    named
+                    "a room named and empty is still no geometry"
+            }
+
+            test "a room named and empty still reads back the five containers it has" {
+                // No entry and an entry with every container empty are the
+                // same answer (ADR 0004), so the layer agrees with the flat
+                // fields on a projection carrying nothing too — read the way
+                // a reader reads, with `tryFind` and `RoomLayer.empty`.
+                // `Rooms.[name]` would throw on exactly this projection,
+                // which is why the reading rule is the contract and the
+                // indexer is not.
+                let named =
+                    { SpatialInfo.empty with
+                        RoomName = Some "W12S28"
+                    }
+
+                let layered = SpatialInfo.normalise named
+
+                let layer =
+                    layered.Rooms |> Map.tryFind "W12S28" |> Option.defaultValue RoomLayer.empty
+
+                Expect.equal layer.Terrain named.Terrain "W12S28: the ground it stands on"
+
+                Expect.equal
+                    layer.TargetPositions
+                    named.TargetPositions
+                    "W12S28: where its targets stand"
+
+                Expect.equal
+                    layer.CreepPositions
+                    named.CreepPositions
+                    "W12S28: where its creeps stand"
+
+                Expect.equal layer.Obstacles named.Obstacles "W12S28: the tiles nothing crosses"
+                Expect.equal layer.Roads named.Roads "W12S28: the roads built on it"
+            }
+        ]
