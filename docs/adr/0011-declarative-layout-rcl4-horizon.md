@@ -1,5 +1,7 @@
 # One declarative Layout, computed whole, truncated at RCL4
 
+> **Revised by ADR 0039**: the horizon moves to RCL5, and the title's "truncated at RCL4" is now history. ADR 0022's refusal to move it was weighed against the ordering *before* the working ground left it; re-derived after, the ten further extensions and the second tower cost the trunks nothing — both horizons pave the same 25 tiles.
+
 > **Revised by ADR 0022**: the ordering rule now excludes the working ground (every source's Seats and the controller's Upgrade Work Area), and the RCL4 revisit this ADR asked for concluded that the clustered horizon *stays* at RCL4 — only the Storage tile and four Link footings are reserved beyond it, because those are the tiles that never come back once an extension takes them.
 
 Construction planning was a single hard-coded rule (the extension
