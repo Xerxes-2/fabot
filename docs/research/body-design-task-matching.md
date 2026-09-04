@@ -5,7 +5,7 @@ Date: 2026-09-03. 所有论断均对照一手来源核验（官方文档源码�
 ## Summary
 
 - **身体生成的社区标准形态是"每岗位一个 pattern + 按能量重复"**：`numRepeats = min(能量上限, 50件上限, 岗位 sizeLimit)`。Overmind `CreepSetup`、Quorum `buildFromTemplate`、Winsley `buildFromSegment`、bonzAI `bodyRatio` 是同一个算法的四次独立实现；The International 用 `defaultParts + extraParts × partsMultiplier` 再叠一层按 `spawnEnergyCapacity` 的手写阶梯。**没有任何被调查 bot 用单一通用体**——矿工、hauler、upgrader、worker 的 pattern 全部不同。
-- **静态矿体惯例高度一致：5–6 WORK + 1 CARRY + ceil(WORK/2) 个 MOVE**（MOVE:WORK ≈ 1:2，即走路半速；只为出生时走到岗位一次）。1 个 CARRY 用于修 container / 喂 link。远程矿工因为要跨房跑路，MOVE 提到 1:1（bonzAI remote 6W1C6M）。
+- **静态矿体惯例高度一致：5–6 WORK + 1 CARRY + ceil(WORK/2) 个 MOVE**（MOVE:WORK ≈ 1:2，即走路半速；只为出生时走到岗位一次）。1 个 CARRY 用于修 container / 喂 link。远程矿工的 MOVE 要不要提到 1:1，**本条已于 2026-09-05 更正**：原文引的 bonzAI `workerBody(6,1,6)` 那个分支在 remote mining 路径上不可达（`remoteSpawning` 对 `MiningOperation` 从不为真）。TI 与 Quorum 确实为 remote 加 MOVE，但本服实测分布偏向 1:2（110 只 `6W1C3M` 对 9 只 `6W6M`）。见 `remote-mining.md`。
 - **Hauler 惯例：有路 [CARRY,CARRY,MOVE]，无路 [CARRY,MOVE]**，且 CARRY 总数由需求账本（带宽 = 距离×流量）倒推，不是"能量能买多大买多大"。**Upgrader 惯例：WORK-heavy 静态体**，RCL8 封顶 15 WORK（引擎上限 15 energy/tick）。
 - **①的答案：有先例但只有一个成熟谱系** —— Jon Winsley 的 role-free 任务系统（2020）里任意 minion 接任意任务、匹配时看 "distance + the minion's active parts"（身体感知匹配）；2021 简化后仍保留"身体档案（SALESMAN/ACCOUNTANT/RESEARCH…）按岗位铸造、行为由 mission/任务层决定"的解耦。其余成熟 bot（Overmind、TI、Quorum、bonzAI）全部是出生带角色。
 - **③的答案：未找到任何"同点挖矿+升级"复合点位的实现或专门讨论**（标 unverified 的否定）。但引擎层面它是可行的：官方 simultaneous-actions 流水线图中 `harvest` 与 `upgradeController` 不在同一条依赖链上，能量足够时可同 tick 执行。2016 年论坛有过"多职责 creep 不划算"的反对（MyrddinE），其论据（移动模式不同）恰好不适用于静态同点情形。
@@ -56,7 +56,7 @@ hauler（`haulerForCommune()`）：`hasSufficientRoads` 时 `[CARRY,CARRY,MOVE]`
 
 ### 1.4 bonzAI（bonzaiferroni/bonzAI）— 比例式 + 需求倒推
 
-`src/ai/missions/Mission.ts`：`workerBody(w,c,m)` 直排三段；`bodyRatio(workRatio, carryRatio, moveRatio, spawnFraction, limit)` 按比例买到能量/50件上限。`MiningMission.getMinerBody()`：**`work = ceil((SOURCE_ENERGY_CAPACITY / ENERGY_REGEN_TIME) / HARVEST_POWER) + 1` = 6，体 = `workerBody(6, 1, ceil(6/2)=3)`**——WORK 数从 source 产能推导而非拍死；remote 则 `workerBody(6,1,6)`（1:1，要跨房走）。`Mission.analyzeTransport(distance, load, maxSpawnEnergy)`：注释 "cargo units are just 2 CARRY, 1 MOVE"，`bandwidthNeeded = distance × load × 2.1`，由此得 cart 数与每 cart 的 CARRY 数——**hauler 规模 = 距离×流量的带宽计算**。`UpgradeMission.linkUpgraderBody()`：满配 `workerBody(30, 4, 15)`（30W:4C:15M，MOVE 1:2），`potencyPerCreep` 封顶 30、`findMaxUpgraders` 最多 5 只。
+`src/ai/missions/Mission.ts`：`workerBody(w,c,m)` 直排三段；`bodyRatio(workRatio, carryRatio, moveRatio, spawnFraction, limit)` 按比例买到能量/50件上限。`MiningMission.getMinerBody()`：**`work = ceil((SOURCE_ENERGY_CAPACITY / ENERGY_REGEN_TIME) / HARVEST_POWER) + 1` = 6，体 = `workerBody(6, 1, ceil(6/2)=3)`**——WORK 数从 source 产能推导而非拍死；remote 则 `workerBody(6,1,6)`（1:1，要跨房走）——**更正（2026-09-05）：这个分支在 remote mining 上不可达**，`remoteSpawning` 对 `MiningOperation` 从不为真，所以它不能用来论证 remote 矿工的 MOVE 比例；见 `remote-mining.md`。`Mission.analyzeTransport(distance, load, maxSpawnEnergy)`：注释 "cargo units are just 2 CARRY, 1 MOVE"，`bandwidthNeeded = distance × load × 2.1`，由此得 cart 数与每 cart 的 CARRY 数——**hauler 规模 = 距离×流量的带宽计算**。`UpgradeMission.linkUpgraderBody()`：满配 `workerBody(30, 4, 15)`（30W:4C:15M，MOVE 1:2），`potencyPerCreep` 封顶 30、`findMaxUpgraders` 最多 5 只。
 
 ### 1.5 Quorum（ScreepsQuorum/screeps-quorum）— 模板循环填充
 
