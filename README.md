@@ -49,14 +49,26 @@ trunk-road tiles (spawn → source container, spawn → controller container,
 a couple below half hits so Repair pools tasks), a source container and a
 controller container, 3 extension sites, and 8 creeps (2 Anchors, 3 hauler
 units, 3 worker units). It implements only the API surface declared in
-`src/App/Bindings.fs` and never touches the Screeps network API.
+`src/App/Bindings.fs` and never touches the Screeps network API. The live
+colony has since moved on (RCL4 with a Storage, 7 creeps as of 2026-09-04);
+the stub deliberately keeps the #50 shape so ms/tick stays comparable
+across commits.
 
-The instrument recognizes the known hotspots from #50 — a run on the
-machine that recorded that baseline shows ~15 ms/tick with `floodFrom` at
-~11% self / ~39% inclusive, `planLayout` ~32% inclusive (`trunkPath` ~25%),
-`resolve` ~20%, `matchCreeps` ~15%, and the Fable structural-comparison
-family (`compare` / `recordCompareTo` / `sameConstructor` / `item`) around
-a third of self time.
+Where the time goes (2026-09-04, the machine that recorded the #50
+baseline, 500 ticks): ~4.3 ms/tick (~4.5 over the default 100), down from
+~15 at the #50 baseline and ~6 after the #51 optimisations. The profile is
+now the Atlas floods: `floodFromAll` ~29% self / ~42% inclusive, reached
+through `matchCreeps` → `travelCost` (~30% inclusive) and `planSpawns`
+(~24% inclusive, ~19% of it in `expiring` → `castWalkTicks`). `planLayout` no longer shows
+up at all — the census-signature memo (#53) means the frozen stub never
+recomputes it after the first tick, so the live cost of a census change is
+one thing this harness does not measure — and `resolve` is ~2% now that
+reroute attribution is verbose-only (#54). The Fable structural-comparison
+family (`compare` / `recordCompareTo` / `sameConstructor` and the `Map` /
+`Set` tree ops behind them) is still ~40% of self time, most of it from
+`stepCost`'s `Set<Pos>` obstacle lookup inside the flood. Live (same day,
+W12S28 at RCL4, 7 creeps): ~13.6 CPU/tick against a limit of 100, bucket
+full; the history is in #50.
 
 Limits to keep in mind when reading the numbers:
 
