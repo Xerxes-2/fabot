@@ -137,9 +137,26 @@ type SpatialInfo =
         /// Name of the room the projection covers. None when the
         /// projection is empty — absence is per-entry (ADR 0004).
         RoomName: string option
-        /// Terrain per tile; a tile absent from the map lies outside the
-        /// projected room and is impassable.
+        /// Terrain per tile over the projection's ground (x,y in 1..48); a
+        /// tile absent from the map is impassable. Absent is not the same
+        /// as outside the projection since ADR 0041: the border ring is
+        /// projected too, in `Borders` beside this, and is impassable here
+        /// because it is not ground.
         Terrain: Map<Pos, Terrain>
+        /// Room name -> the terrain of that room's border ring: the exit
+        /// rows and columns (x or y of 0 or 49) `Terrain` deliberately
+        /// leaves out. A layer of its own and never ground (ADR 0041): a
+        /// creep that ends its tick on an exit tile is moved into the
+        /// neighbouring room by the engine, so admitting one as walkable
+        /// would let a Seat, a Work Area or a standing candidate teleport
+        /// the creep out from under its Task — which is exactly what ADR
+        /// 0036's 1..48 trim prevents and this layer must not undo. It
+        /// enters no weight grid, no walkable or buildable set and no Work
+        /// Area; the Atlas's Seam query is its one reader. Keyed by room
+        /// name because a Seam joins two rooms: a room the projection does
+        /// not cover is simply absent here, and answers no Seam at all
+        /// (ADR 0004).
+        Borders: Map<string, Map<Pos, Terrain>>
         /// Task-target id (source, refillable structure, construction site,
         /// controller) -> that target's tile.
         TargetPositions: Map<string, Pos>
@@ -173,6 +190,7 @@ module SpatialInfo =
         {
             RoomName = None
             Terrain = Map.empty
+            Borders = Map.empty
             TargetPositions = Map.empty
             TargetKinds = Map.empty
             CreepPositions = Map.empty

@@ -32,32 +32,75 @@ let private builtKindOf =
     let byName = allBuiltKinds |> List.map (fun k -> builtKindName k, k) |> Map.ofList
     fun structureType -> byName |> Map.tryFind structureType |> Option.defaultValue BuiltKind.Other
 
+/// One room's terrain as the engine spells it — the whole fifty-by-fifty
+/// grid, in the two views the projection assembles from it. One engine
+/// read behind both, so there is one terrain truth per room and not two
+/// (ADR 0041): what differs is which window a reader is entitled to, and
+/// that is the projection's rule rather than the engine's.
+///
+/// The split happens here, at memo fill, rather than where `SpatialInfo`
+/// is assembled. Assembly runs every tick, and cutting a fifty-by-fifty
+/// map into these two there would rebuild 2304 `Pos`-keyed entries per
+/// room per tick — precisely the structural comparison ADR 0031 measured
+/// at about a quarter of an 8 ms tick and exists to delete, which is why
+/// ADR 0041's own Consequences say the terrain memo needs no change at
+/// all. Both windows come off one `getRoomTerrain` read and are disjoint,
+/// so this is one terrain truth cut once, not two kept in step.
+type private RoomTerrain =
+    {
+        /// x,y in 1..48: the ground the projection stands on.
+        Ground: Map<Pos, Terrain>
+        /// The border ring, x or y of 0 or 49: the Seam's terrain, never
+        /// ground.
+        Border: Map<Pos, Terrain>
+    }
+
 /// The projection's terrain, memoised per room name (ADR 0031). Room
 /// terrain is fixed for the life of the server, so the key can never go
 /// stale: the first tick that projects a room reads the engine's terrain
-/// once and every later tick recalls the same map. Heap state only, like
+/// once and every later tick recalls the same maps. Heap state only, like
 /// the plan memo (ADR 0017) — nothing here reaches Memory, and a global
 /// reset empties the table so the next tick rebuilds it.
 let private terrainMemo =
-    System.Collections.Generic.Dictionary<string, Map<Pos, Terrain>>()
+    System.Collections.Generic.Dictionary<string, RoomTerrain>()
 
-let private terrainOf (roomName: string) : Map<Pos, Terrain> =
+let private terrainOf (roomName: string) : RoomTerrain =
     match terrainMemo.TryGetValue roomName with
     | true, tiles -> tiles
     | _ ->
         let terrain = Game.map.getRoomTerrain roomName
 
-        // Rows and columns 0/49 are exit tiles — stepping on one teleports
-        // the creep into the next room. They stay out of the projection: an
-        // absent tile is impassable, so no path or Work Area ever uses an
-        // exit.
         let tiles =
-            Map.ofList
-                [
-                    for x in 1..48 do
-                        for y in 1..48 do
-                            { X = x; Y = y }, terrainAt terrain x y
-                ]
+            {
+                // Rows and columns 0/49 are exit tiles — stepping on one
+                // teleports the creep into the next room. They stay out of
+                // the projection's ground: an absent tile is impassable, so
+                // no path or Work Area ever uses an exit. Across rooms the
+                // trim is more right than it was single-room, not less
+                // (ADR 0041): the Matcher now ranks Tasks in a neighbouring
+                // room, and an exit admitted as ordinary ground would be a
+                // Seat or standing candidate the engine empties the tick a
+                // creep reaches it. Do not "fix" this trim.
+                Ground =
+                    Map.ofList
+                        [
+                            for x in 1..48 do
+                                for y in 1..48 do
+                                    { X = x; Y = y }, terrainAt terrain x y
+                        ]
+                // The same read's other window: the ring the trim drops,
+                // kept beside the ground rather than inside it, because a
+                // Seam is a pair of rooms joined at a tile and never a tile
+                // to stand on (ADR 0036, ADR 0041).
+                Border =
+                    Map.ofList
+                        [
+                            for x in 0..49 do
+                                for y in 0..49 do
+                                    if x = 0 || x = 49 || y = 0 || y = 49 then
+                                        { X = x; Y = y }, terrainAt terrain x y
+                        ]
+            }
 
         terrainMemo.[roomName] <- tiles
         tiles
@@ -106,9 +149,17 @@ let private buildSpatial (spawn: ISpawn) : SpatialInfo =
         else
             [| room.controller |]
 
+    let terrain = terrainOf room.name
+
     {
         RoomName = Some room.name
-        Terrain = terrainOf room.name
+        Terrain = terrain.Ground
+        // The border ring of every room the projection covers, under its
+        // own name: the Atlas answers a Seam from these and from nothing
+        // else (ADR 0041). One room today, so every Seam query answers
+        // empty — the neighbour is not projected — which is ADR 0004's
+        // per-entry absence and not a special case.
+        Borders = Map.ofList [ room.name, terrain.Border ]
         TargetPositions =
             Map.ofArray (
                 Array.concat

@@ -92,7 +92,11 @@ function buildTerrain() {
   const data = new Uint8Array(50 * 50);
   const rand = lcg(0xfab07);
 
-  // Border walls (rows/cols 0 and 49 are outside the projection anyway).
+  // Border walls. Rows/cols 0 and 49 are projected — they are the Seam's
+  // layer (ADR 0041), not nothing — and they are walled here because this
+  // scenario is one room with no neighbour to cross to, so every Seam band
+  // is empty by construction. A scenario with an outpost has to carve its
+  // exits, or the cross-room walk it profiles costs nothing.
   for (let i = 0; i < 50; i++) {
     data[i] = data[49 * 50 + i] = data[i * 50] = data[i * 50 + 49] = WALL;
   }

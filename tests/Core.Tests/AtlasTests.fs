@@ -2339,3 +2339,266 @@ let controllerContainerTests =
                     "no controller, no buffer — the empty answer opens the gate (ADR 0004)"
             }
         ]
+
+/// A projection carrying border rings under room names — the Seam query's
+/// whole input, and nothing else, so a test that names three exit tiles
+/// documents the rule the way `spatial`'s three ground tiles do. A tile a
+/// ring leaves out is impassable, exactly as a tile missing from the
+/// ground is.
+let bordered rings =
+    { SpatialInfo.empty with
+        Borders = rings |> List.map (fun (room, tiles) -> room, Map.ofList tiles) |> Map.ofList
+    }
+
+[<Tests>]
+let seamTests =
+    testList
+        "atlas seams"
+        [
+            test "a north neighbour's band joins this room's y=0 to the neighbour's y=49" {
+                // W12S28 sits at world (-13,28) and W12S27 at (-13,27), so
+                // W12S27 is the room across the top border: the pairing the
+                // engine makes is x for x, y=0 onto y=49. A swamp exit is in
+                // the band, dearly, exactly as swamp ground is; the wall is
+                // not.
+                let atlas =
+                    bordered
+                        [
+                            "W12S28",
+                            [
+                                { X = 10; Y = 0 }, Plain
+                                { X = 11; Y = 0 }, Swamp
+                                { X = 12; Y = 0 }, Wall
+                            ]
+                            "W12S27",
+                            [
+                                { X = 10; Y = 49 }, Plain
+                                { X = 11; Y = 49 }, Plain
+                                { X = 12; Y = 49 }, Plain
+                            ]
+                        ]
+                    |> snapshotWith []
+                    |> ofSnapshot
+
+                Expect.equal
+                    (seams atlas "W12S28" "W12S27")
+                    [ { X = 10; Y = 0 }, { X = 10; Y = 49 }; { X = 11; Y = 0 }, { X = 11; Y = 49 } ]
+                    "the passable exits, each beside the tile it lands on, in (X, Y) order"
+            }
+
+            test "a wall on the far side takes the pair out, as one on this side does" {
+                // The band is what a creep can cross, so both halves have to
+                // be ground: an exit onto a wall lands nowhere.
+                let atlas =
+                    bordered
+                        [
+                            "W12S28", [ { X = 10; Y = 0 }, Plain; { X = 11; Y = 0 }, Plain ]
+                            "W12S27", [ { X = 10; Y = 49 }, Wall; { X = 11; Y = 49 }, Plain ]
+                        ]
+                    |> snapshotWith []
+                    |> ofSnapshot
+
+                Expect.equal
+                    (seams atlas "W12S28" "W12S27")
+                    [ { X = 11; Y = 0 }, { X = 11; Y = 49 } ]
+                    "only the pair that is ground on both sides"
+            }
+
+            test "a west neighbour's band joins x=0 to x=49" {
+                // W13S28 is world (-14,28): one room further west, so the
+                // shared border is a column, and the pairing runs y for y.
+                let atlas =
+                    bordered
+                        [
+                            "W12S28", [ { X = 0; Y = 30 }, Plain; { X = 0; Y = 31 }, Plain ]
+                            "W13S28", [ { X = 49; Y = 30 }, Plain; { X = 49; Y = 31 }, Swamp ]
+                        ]
+                    |> snapshotWith []
+                    |> ofSnapshot
+
+                Expect.equal
+                    (seams atlas "W12S28" "W13S28")
+                    [ { X = 0; Y = 30 }, { X = 49; Y = 30 }; { X = 0; Y = 31 }, { X = 49; Y = 31 } ]
+                    "the west column, in (X, Y) order"
+            }
+
+            test "the band reads the same from the far side, every pair swapped" {
+                // The south and east borders are the north's and the west's
+                // read the other way round, which is the whole of what
+                // "adjacent" means here: one band, asked from either end.
+                let atlas =
+                    bordered
+                        [
+                            "W12S28", [ { X = 10; Y = 0 }, Plain; { X = 0; Y = 30 }, Plain ]
+                            "W12S27", [ { X = 10; Y = 49 }, Plain ]
+                            "W13S28", [ { X = 49; Y = 30 }, Plain ]
+                        ]
+                    |> snapshotWith []
+                    |> ofSnapshot
+
+                Expect.equal
+                    (seams atlas "W12S27" "W12S28")
+                    [ { X = 10; Y = 49 }, { X = 10; Y = 0 } ]
+                    "the south border is the north border swapped"
+
+                Expect.equal
+                    (seams atlas "W13S28" "W12S28")
+                    [ { X = 49; Y = 30 }, { X = 0; Y = 30 } ]
+                    "the east border is the west border swapped"
+            }
+
+            test "rooms that share no border share no band" {
+                // Diagonal neighbours touch at a corner the engine joins
+                // nothing across, and two rooms apart touch not at all. Both
+                // answer empty rather than failing: an unpriceable Seam is
+                // no Seam, never a blocked one (ADR 0004).
+                let ring room y =
+                    room, [ { X = 10; Y = y }, Plain; { X = 0; Y = 30 }, Plain ]
+
+                let atlas =
+                    bordered [ ring "W12S28" 0; ring "W13S27" 49; ring "W12S26" 49 ]
+                    |> snapshotWith []
+                    |> ofSnapshot
+
+                Expect.isEmpty (seams atlas "W12S28" "W13S27") "a diagonal pair joins nowhere"
+                Expect.isEmpty (seams atlas "W12S28" "W12S26") "two rooms apart share no border"
+                Expect.isEmpty (seams atlas "W12S28" "W12S28") "and a room borders no self"
+            }
+
+            test "a corner tile is on two borders at once, so it is a Seam on neither" {
+                // (0,0) is the north row and the west column both. Offered
+                // as a crossing it would hand the same tile two different
+                // landings — (0,49) north and (49,0) west — and the engine
+                // makes at most one of them, so pricing a route through it
+                // would put the creep in the wrong room. Every room the
+                // engine generates walls its four corners (all four
+                // captures do), so no band on real terrain loses a tile:
+                // what is pinned is that a passable corner invents none.
+                let atlas =
+                    bordered
+                        [
+                            "W12S28",
+                            [
+                                { X = 0; Y = 0 }, Plain
+                                { X = 1; Y = 0 }, Plain
+                                { X = 0; Y = 1 }, Plain
+                            ]
+                            "W12S27", [ { X = 0; Y = 49 }, Plain; { X = 1; Y = 49 }, Plain ]
+                            "W13S28", [ { X = 49; Y = 0 }, Plain; { X = 49; Y = 1 }, Plain ]
+                        ]
+                    |> snapshotWith []
+                    |> ofSnapshot
+
+                Expect.equal
+                    (seams atlas "W12S28" "W12S27")
+                    [ { X = 1; Y = 0 }, { X = 1; Y = 49 } ]
+                    "the north band keeps the row and drops the corner"
+
+                Expect.equal
+                    (seams atlas "W12S28" "W13S28")
+                    [ { X = 0; Y = 1 }, { X = 49; Y = 1 } ]
+                    "and the west band, which would otherwise claim the same tile"
+            }
+
+            test "a room the projection has no border for answers the empty band" {
+                // The outpost the colony cannot see, entry by entry (ADR
+                // 0004) — and a name the engine's grammar does not spell is
+                // the same absence, not an error. The ungrammatical name
+                // carries a ring of its own here, so the band it answers is
+                // empty for the one reason under test: the name places no
+                // room. Without the ring the missing layer would empty it
+                // first and the assertion would hold however the grammar
+                // was read.
+                let atlas =
+                    bordered
+                        [
+                            "W12S28", [ { X = 10; Y = 0 }, Plain ]
+                            "the outpost", [ { X = 10; Y = 49 }, Plain ]
+                        ]
+                    |> snapshotWith []
+                    |> ofSnapshot
+
+                Expect.isEmpty
+                    (seams atlas "W12S28" "W12S27")
+                    "the neighbour is unprojected, so there is nothing to join to"
+
+                Expect.isEmpty
+                    (seams atlas "W12S28" "the outpost")
+                    "and a name outside the grammar places no room at all"
+            }
+
+            test "an exit tile is in nothing the projection offers to stand or build on" {
+                // The prohibition ADR 0041 keeps by not admitting the border
+                // rows as ground: a source in the room's corner has its
+                // exits passable and in the Seam band, and not one of them
+                // is a Seat, a Work Area tile, a buildable tile, a walkable
+                // tile or a passable entry in the flood's weight table. The
+                // engine moves a creep that ends its tick on an exit into
+                // the next room, so a Matcher that could pick one would lose
+                // the creep out from under its Task.
+                let corner =
+                    { spatial
+                          [ "src-a", { X = 1; Y = 1 } ]
+                          [
+                              { X = 1; Y = 2 }, Plain
+                              { X = 2; Y = 1 }, Plain
+                              { X = 2; Y = 2 }, Plain
+                          ] with
+                        Borders =
+                            Map.ofList
+                                [
+                                    "W12S28",
+                                    Map.ofList
+                                        [
+                                            for x in 0..2 do
+                                                { X = x; Y = 0 }, Plain
+
+                                            for y in 0..2 do
+                                                { X = 0; Y = y }, Plain
+                                        ]
+                                    "W12S27",
+                                    Map.ofList [ for x in 0..2 -> { X = x; Y = 49 }, Plain ]
+                                ]
+                    }
+                    |> snapshotWith []
+                    |> ofSnapshot
+
+                Expect.hasLength
+                    (seams corner "W12S28" "W12S27")
+                    2
+                    "the exits are real Seam tiles, not merely absent ones — x 1 and 2, the corner never"
+
+                let onTheBorder (tile: Pos) =
+                    tile.X = 0 || tile.X = 49 || tile.Y = 0 || tile.Y = 49
+
+                Expect.equal
+                    (seatTilesOf corner "src-a")
+                    (Set.ofList [ { X = 1; Y = 2 }; { X = 2; Y = 1 }; { X = 2; Y = 2 } ])
+                    "the corner source seats three interior tiles and no exit"
+
+                Expect.isEmpty
+                    (workArea corner (Harvest "src-a") |> Set.filter onTheBorder)
+                    "no exit in a Work Area"
+
+                Expect.isEmpty
+                    (buildableTiles corner |> List.filter onTheBorder)
+                    "no exit is buildable"
+
+                Expect.isEmpty
+                    (walkableTiles corner |> Set.filter onTheBorder)
+                    "no exit is walkable"
+
+                let weights = stepWeights corner
+
+                Expect.isTrue
+                    (List.forall
+                        (fun (tile: Pos) -> weights.[tile.X * 50 + tile.Y] < 0)
+                        [
+                            for x in 0..49 do
+                                for y in 0..49 do
+                                    if onTheBorder { X = x; Y = y } then
+                                        { X = x; Y = y }
+                        ])
+                    "and the flood's weight table marks every exit impassable"
+            }
+        ]

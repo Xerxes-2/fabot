@@ -962,6 +962,117 @@ let catchesOverflow (atlas: Atlas) (creep: string) (sourceId: string) : bool =
         Set.contains pos (containerTiles atlas)
         && Set.contains pos (seatTilesOf atlas sourceId)
 
+/// A room's place on the world grid, read off its name — `W12S28` is
+/// (-13, 28). West and North count outward from the origin, so they run
+/// negative (`W n` is x = -n-1, `N n` is y = -n-1) and East and South run
+/// straight up, which turns "are these two rooms neighbours, and across
+/// which border" into subtraction. None for a name outside the engine's
+/// grammar, which is unplaceable geometry like any other (ADR 0004).
+///
+/// The Seam reads adjacency out of the two names rather than taking a
+/// border direction from its caller, and that is the decision this query
+/// makes: which edge two rooms share is already a fact about their names,
+/// so a caller that declared it separately could declare it wrong — an
+/// outpost constant carrying a room name *and* an edge is two facts that
+/// can disagree, and the disagreement would silently build a band out of
+/// two rooms' opposite walls. The arithmetic is the engine's own and
+/// costs these few lines once; a second field on every outpost, and a
+/// rule for what to do when it contradicts the name, costs forever.
+let private worldCoordsOf (roomName: string) : (int * int) option =
+    let isDigit index =
+        index < roomName.Length && roomName.[index] >= '0' && roomName.[index] <= '9'
+
+    let rec endOfDigits index =
+        if isDigit index then endOfDigits (index + 1) else index
+
+    let number start stop =
+        if stop <= start then
+            None
+        else
+            let mutable value = 0
+
+            for index in start .. stop - 1 do
+                value <- value * 10 + (int roomName.[index] - int '0')
+
+            Some value
+
+    // Outward from the origin is negative, towards it positive.
+    let axis letter outward inward value =
+        if letter = outward then Some(-value - 1)
+        elif letter = inward then Some value
+        else None
+
+    let xEnd = endOfDigits 1
+    let yEnd = endOfDigits (xEnd + 1)
+
+    if yEnd <> roomName.Length then
+        None
+    else
+        match number 1 xEnd, number (xEnd + 1) yEnd with
+        | Some x, Some y ->
+            match axis roomName.[0] 'W' 'E' x, axis roomName.[xEnd] 'N' 'S' y with
+            | Some worldX, Some worldY -> Some(worldX, worldY)
+            | _ -> None
+        | _ -> None
+
+/// The far exit row and column of a room — index 49, the outer of the two
+/// the projection's ground stops short of (ADR 0036).
+let private exitEdge = roomSide - 1
+
+/// The tile pairs the engine joins across the border two rooms share,
+/// before terrain has a say: this room's exit tile beside the tile a
+/// creep stepping onto it lands on, which is the same coordinate on the
+/// opposite row or column. `offset` is the neighbour's world position
+/// minus this room's, so only the four unit steps name a shared border —
+/// a diagonal pair touches at a corner the engine joins nothing across,
+/// and anything further apart shares no border at all. The four corner
+/// tiles are left out of every row and column: a corner lies on two
+/// borders at once, so offering it would hand the same tile two different
+/// landings, and the engine makes at most one of them. Every room the
+/// engine generates walls its corners, so this drops no crossing that
+/// exists — it declines to invent one where the terrain cannot say (ADR
+/// 0004). Listed in (X, Y) order, which is the order the band answers in.
+let private borderPairs offset : (Pos * Pos) list =
+    let alongEdge = [ 1 .. exitEdge - 1 ]
+
+    match offset with
+    | 0, -1 -> [ for x in alongEdge -> { X = x; Y = 0 }, { X = x; Y = exitEdge } ]
+    | 0, 1 -> [ for x in alongEdge -> { X = x; Y = exitEdge }, { X = x; Y = 0 } ]
+    | -1, 0 -> [ for y in alongEdge -> { X = 0; Y = y }, { X = exitEdge; Y = y } ]
+    | 1, 0 -> [ for y in alongEdge -> { X = exitEdge; Y = y }, { X = 0; Y = y } ]
+    | _ -> []
+
+/// The Seam band joining two rooms: the passable exit-tile pairs, each
+/// this room's border tile beside the tile it lands a creep on in the
+/// neighbour (ADR 0041). The third kind of geometry beside the Seat and
+/// the Post — those are tiles a creep works from, a Seam is one it can
+/// only pass through — and never a tile anything offers to stand on: it
+/// is answered from the projection's border layer, which enters no weight
+/// grid, no walkable or buildable set and no Work Area, so the Matcher
+/// cannot pick one and have the engine empty it the tick a creep arrives.
+/// A pair is in the band when neither side is wall; a swamp exit is in
+/// it, dearly, exactly as swamp ground is. Deterministic (X, Y) order.
+/// Total (ADR 0004): two rooms that are not orthogonal neighbours, and a
+/// room the projection carries no border for, answer with the empty
+/// band — an unpriceable Seam is no Seam, never a blocked one, so it
+/// costs nothing and blocks nothing.
+let seams (atlas: Atlas) (fromRoom: string) (toRoom: string) : (Pos * Pos) list =
+    let passable (ring: Map<Pos, Terrain>) tile =
+        match Map.tryFind tile ring with
+        | Some terrain -> terrainWeight terrain > 0
+        | None -> false
+
+    match
+        Map.tryFind fromRoom atlas.Spatial.Borders,
+        Map.tryFind toRoom atlas.Spatial.Borders,
+        worldCoordsOf fromRoom,
+        worldCoordsOf toRoom
+    with
+    | Some near, Some far, Some(hereX, hereY), Some(thereX, thereY) ->
+        borderPairs (thereX - hereX, thereY - hereY)
+        |> List.filter (fun (here, there) -> passable near here && passable far there)
+    | _ -> []
+
 /// The cheapest path from a creep to a set of tiles under one pricing —
 /// the shape travel cost and the walk share, so the two can disagree on
 /// what a step costs and on nothing else (ADR 0029). The tiles are the

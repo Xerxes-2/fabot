@@ -20,8 +20,14 @@ type RoomCapture =
         Shard: string
         Tick: int
         /// Terrain per tile over x,y in 1..48 — the same window
-        /// `Snapshot.terrainOf` projects, with the exit rows dropped.
+        /// `Snapshot.terrainOf` projects as ground, with the exit rows
+        /// dropped.
         Terrain: Map<Pos, Terrain>
+        /// Terrain on the border ring, x or y of 0 or 49 — the rows the
+        /// window above drops, delivered beside it and never inside it,
+        /// exactly as the shell delivers them (ADR 0041): the Seam's own
+        /// terrain, the engine's verbatim, and never a tile to stand on.
+        Border: Map<Pos, Terrain>
         /// The room's sources in the capture's order, each under the
         /// readable id the projection knows it by.
         Sources: (string * Pos) list
@@ -95,16 +101,28 @@ let load (roomName: string) : RoomCapture =
     then
         failwithf "%s: terrain is not %d rows of %d characters" path roomSide roomSide
 
-    // The border is read and then dropped rather than never captured: the
-    // file holds the room verbatim so a re-capture diffs cleanly, and this
-    // is the one line that narrows it to the window the shell projects.
-    // Rows are the capture's own row-major order — `rows.[y].[x]`.
+    // The file holds the room verbatim so a re-capture diffs cleanly, and
+    // these are the lines that split it the way the shell splits it: the
+    // window the projection stands on, and the border ring beside it that
+    // only the Seam reads (ADR 0036, ADR 0041). Rows are the capture's own
+    // row-major order — `rows.[y].[x]`.
+    let terrainAt x y =
+        terrainOfMask (int rows.[y].[x] - int '0')
+
     let terrain =
         Map.ofList
             [
                 for y in 1 .. roomSide - 2 do
-                    for x in 1 .. roomSide - 2 ->
-                        { X = x; Y = y }, terrainOfMask (int rows.[y].[x] - int '0')
+                    for x in 1 .. roomSide - 2 -> { X = x; Y = y }, terrainAt x y
+            ]
+
+    let border =
+        Map.ofList
+            [
+                for y in 0 .. roomSide - 1 do
+                    for x in 0 .. roomSide - 1 do
+                        if x = 0 || x = roomSide - 1 || y = 0 || y = roomSide - 1 then
+                            { X = x; Y = y }, terrainAt x y
             ]
 
     let objectRows =
@@ -134,6 +152,7 @@ let load (roomName: string) : RoomCapture =
         Shard = field "shard"
         Tick = int (field "tick")
         Terrain = terrain
+        Border = border
         Sources = ofKind "source" |> List.mapi (fun index pos -> $"src-{index}", pos)
         Controller = ofKind "controller" |> List.tryHead |> Option.map (fun pos -> "ctrl", pos)
     }
@@ -166,6 +185,14 @@ let project (capture: RoomCapture) (spawn: Pos) (fallbackController: Pos option)
             { SpatialInfo.empty with
                 RoomName = Some capture.RoomName
                 Terrain = capture.Terrain
+                // Beside the ground, never inside it, exactly as the shell
+                // delivers it (ADR 0041): one room's ring under its own
+                // name, which is the shape `buildSpatial` produces. One
+                // capture is one room, so this projection answers no band
+                // by itself — a Seam joins two rooms, and a projection that
+                // can answer one is composed by merging two captures'
+                // rings, as `RoomInvariantTests.acrossFrom` does.
+                Borders = Map.ofList [ capture.RoomName, capture.Border ]
                 TargetPositions = targets |> List.map (fun (id, pos, _) -> id, pos) |> Map.ofList
                 TargetKinds = targets |> List.map (fun (id, _, kind) -> id, kind) |> Map.ofList
                 // The obstacle rule is the shell's, read off the Core's own

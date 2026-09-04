@@ -47,6 +47,41 @@ let loaderTests =
                     "no tile outside the projected window"
             }
 
+            test "the border ring is loaded beside that window, holding the room's exits" {
+                // The trim above and this are one split, not two truths: the
+                // ring is delivered beside the ground and never inside it
+                // (ADR 0041), so the Seam has the engine's own exit terrain
+                // while nothing that stands a creep can reach it. The exits
+                // are named here, with the furniture, because they are what
+                // the server said this room's edges are — the invariants
+                // below name no tile.
+                let home = load "W12S28"
+
+                Expect.hasLength home.Border (50 * 50 - 48 * 48) "the ring, and only the ring"
+
+                Expect.isTrue
+                    (home.Border
+                     |> Map.forall (fun tile _ ->
+                         tile.X = 0 || tile.X = 49 || tile.Y = 0 || tile.Y = 49))
+                    "no tile off the border"
+
+                let exitsAlong on across =
+                    home.Border
+                    |> Map.toList
+                    |> List.filter (fun (tile, terrain) -> on tile && terrain <> Wall)
+                    |> List.map (fst >> across)
+
+                Expect.equal
+                    (exitsAlong (fun tile -> tile.Y = 0) (fun tile -> tile.X))
+                    [ 4..39 ]
+                    "the north edge W12S27 is reached across: 36 exits, x 4..39"
+
+                Expect.equal
+                    (exitsAlong (fun tile -> tile.X = 0) (fun tile -> tile.Y))
+                    [ 22..40 ]
+                    "the west edge W13S28 is reached across: 19 exits, y 22..40"
+            }
+
             test "the terrain reads row-major, as the live room's own record shows" {
                 // Orientation is not a matter of taste: the encoded string
                 // is not symmetric, so reading it transposed would give a
@@ -703,5 +738,208 @@ let knownLossTests =
                         case.Unrouted
                         |> List.forall (fun trunk -> trunk.Goal = TrunkGoal.Spawn case.SpawnId))
                     "and names the spawn alone: the controller's trunk is routed and paved"
+            }
+        ]
+
+// ---- the Seam bands the captured rooms hold -----------------------------
+
+/// One border two captured rooms share, spelled the way a person reads a
+/// map. The pairing is stated here rather than derived, because deriving
+/// it is precisely what `seams` does: a test that recomputed the room-name
+/// arithmetic would agree with the query however wrong both were.
+type private Border =
+    {
+        /// The room the band is asked from, and the neighbour across it.
+        From: string
+        To: string
+        /// Where each half of a pair has to sit: this room's exit row or
+        /// column, and the neighbour's opposite one.
+        Near: Pos -> bool
+        Far: Pos -> bool
+        /// The coordinate the border leaves free — the one an exit and its
+        /// landing tile share.
+        Along: Pos -> int
+        /// How wide the band is. The server's own answer, read off the two
+        /// committed captures, and the number ADR 0041 sizes the cross-room
+        /// walk on — "a minimum over 36 additions, not 36 floods". Named
+        /// here, with the furniture the loader tests name, because the
+        /// derivation the test below runs is symmetric: recompute the band
+        /// from the same two rings and a neighbour recaptured with a
+        /// narrower exit row shrinks both sides at once, silently.
+        Exits: int
+    }
+
+/// W12S27 is the room across W12S28's north edge and W13S28 the room
+/// across its west edge (#83's two remote targets). W15S25 is a sector
+/// centre four rooms off and borders neither, which is what makes it the
+/// negative case below.
+let private borders =
+    [
+        {
+            From = "W12S28"
+            To = "W12S27"
+            Near = fun tile -> tile.Y = 0
+            Far = fun tile -> tile.Y = 49
+            Along = fun tile -> tile.X
+            Exits = 36
+        }
+        {
+            From = "W12S28"
+            To = "W13S28"
+            Near = fun tile -> tile.X = 0
+            Far = fun tile -> tile.X = 49
+            Along = fun tile -> tile.Y
+            Exits = 19
+        }
+    ]
+
+/// The Atlas over two captures' border rings and nothing else: the Seam is
+/// answered from the border layer alone, so this is its whole input, and
+/// every tile in it is the server's own. `Terrain` stays empty — a room
+/// with no ground at all still has its exits, which is the separation
+/// under test.
+let private acrossFrom (near: RoomCapture) (far: RoomCapture) =
+    { SpatialInfo.empty with
+        Borders = Map.ofList [ near.RoomName, near.Border; far.RoomName, far.Border ]
+    }
+    |> AtlasTests.snapshotWith []
+    |> ofSnapshot
+
+[<Tests>]
+let seamTests =
+    testList
+        "seams on real terrain"
+        [
+            test "every captured pair of neighbours has a band, on their shared border" {
+                for border in borders do
+                    let near = load border.From
+                    let far = load border.To
+                    let band = seams (acrossFrom near far) near.RoomName far.RoomName
+                    let edge = $"{border.From} -> {border.To}"
+
+                    let ground (ring: Map<Pos, Terrain>) tile =
+                        match Map.tryFind tile ring with
+                        | Some Plain
+                        | Some Swamp -> true
+                        | Some Wall
+                        | None -> false
+
+                    Expect.isNonEmpty band $"{edge}: rooms the engine joins have exits"
+
+                    Expect.all
+                        band
+                        (fun (here, _) -> border.Near here)
+                        $"{edge}: every near tile on this room's own exit row"
+
+                    Expect.all
+                        band
+                        (fun (_, there) -> border.Far there)
+                        $"{edge}: every far tile on the neighbour's opposite row"
+
+                    Expect.all
+                        band
+                        (fun (here, there) -> border.Along here = border.Along there)
+                        $"{edge}: each pair joins one coordinate to itself"
+
+                    Expect.all
+                        band
+                        (fun (here, there) -> ground near.Border here && ground far.Border there)
+                        $"{edge}: no wall on either side of a crossing"
+
+                    Expect.equal
+                        band
+                        (band |> List.distinct |> List.sortBy (fun (here, _) -> here.X, here.Y))
+                        $"{edge}: each pair once, in (X, Y) order"
+            }
+
+            test "the bands are as wide as ADR 0041 sizes the cross-room walk on" {
+                // 36 north and 19 west are the numbers the cross-room walk
+                // is costed against — "a minimum over 36 additions, not 36
+                // floods" — so they are asserted of the query, not only of
+                // one room's ring. The test below recomputes the band from
+                // the same two rings and would follow a narrower recapture
+                // of either room down without a word; this is the line that
+                // would go red instead.
+                for border in borders do
+                    let atlas = acrossFrom (load border.From) (load border.To)
+
+                    Expect.hasLength
+                        (seams atlas border.From border.To)
+                        border.Exits
+                        $"{border.From} -> {border.To}: the band the two captures hold"
+            }
+
+            test "the band is every exit the two captures agree on, and no other" {
+                // The width is pinned above; what is pinned here is which
+                // tiles, recomputed off the committed captures rather than
+                // written down — the query drops nothing a creep could
+                // cross and admits nothing it could not.
+                for border in borders do
+                    let near = load border.From
+                    let far = load border.To
+                    let edge = $"{border.From} -> {border.To}"
+
+                    // A corner is on two borders at once and is a crossing
+                    // on neither, so it is not one of the exits the two
+                    // rooms agree on. Every capture walls its corners, so
+                    // this line changes nothing today; it is here so a
+                    // capture that did not would fail the width test above
+                    // rather than this one.
+                    let corner tile =
+                        border.Along tile = 0 || border.Along tile = 49
+
+                    let crossable =
+                        near.Border
+                        |> Map.toList
+                        |> List.filter (fun (tile, terrain) ->
+                            border.Near tile
+                            && not (corner tile)
+                            && terrain <> Wall
+                            && far.Border
+                               |> Map.exists (fun landing landingTerrain ->
+                                   border.Far landing
+                                   && border.Along landing = border.Along tile
+                                   && landingTerrain <> Wall))
+                        |> List.map (fst >> border.Along)
+
+                    Expect.equal
+                        (seams (acrossFrom near far) near.RoomName far.RoomName
+                         |> List.map (fst >> border.Along))
+                        crossable
+                        $"{edge}: the band is the exits both rooms hold"
+            }
+
+            test "the band reads the same from the neighbour's side, every pair swapped" {
+                // Adjacency has no preferred end: the same crossing, asked
+                // from the other room, is the same tiles the other way round.
+                for border in borders do
+                    let near = load border.From
+                    let far = load border.To
+                    let atlas = acrossFrom near far
+
+                    Expect.equal
+                        (seams atlas far.RoomName near.RoomName)
+                        (seams atlas near.RoomName far.RoomName
+                         |> List.map (fun (here, there) -> there, here)
+                         |> List.sortBy (fun (here, _) -> here.X, here.Y))
+                        $"{border.To} -> {border.From}: the same band, swapped"
+            }
+
+            test "a room that borders none of them has no band with any of them" {
+                // W15S25 is four rooms away, so nothing joins it — and that
+                // is an empty answer, never a failure or a block (ADR 0004).
+                let stranger = load "W15S25"
+
+                for name in [ "W12S28"; "W12S27"; "W13S28" ] do
+                    let other = load name
+                    let atlas = acrossFrom stranger other
+
+                    Expect.isEmpty
+                        (seams atlas stranger.RoomName other.RoomName)
+                        $"W15S25 -> {name}: no shared border, no band"
+
+                    Expect.isEmpty
+                        (seams atlas other.RoomName stranger.RoomName)
+                        $"{name} -> W15S25: and none the other way"
             }
         ]
