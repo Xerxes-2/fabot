@@ -1645,9 +1645,12 @@ let matchCreeps
     // The crowding component of the matching key (ADR 0002): every holder,
     // counted at this tick. Arrival discounts what a Task's cap counts
     // (ADR 0026), never what the key does — spreading creeps over Tasks is
-    // a judgement about now, and nothing in 0026 revises the key.
+    // a judgement about now, and nothing in 0026 revises the key. The
+    // count is a fold: the question is how many, and a Map built only to
+    // be measured and dropped costs an allocation and a structural insert
+    // per holder, once per scored pair.
     let load (acc: Assignments) tid =
-        acc |> Map.filter (fun _ assigned -> assigned = tid) |> Map.count
+        acc |> Map.fold (fun n _ assigned -> if assigned = tid then n + 1 else n) 0
 
     // The holders a candidate actually competes with, counted at arrival
     // (ADR 0026): two creeps hold the same standing room against each
