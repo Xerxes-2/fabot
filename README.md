@@ -65,8 +65,10 @@ recomputes it after the first tick, so the live cost of a census change is
 one thing this harness does not measure — and `resolve` is ~2% now that
 reroute attribution is verbose-only (#54). The Fable structural-comparison
 family (`compare` / `recordCompareTo` / `sameConstructor` and the `Map` /
-`Set` tree ops behind them) is still ~40% of self time, most of it from
-`stepCost`'s `Set<Pos>` obstacle lookup inside the flood. Live (same day,
+`Set` tree ops behind them) is still ~40% of self time — almost all of it
+in `Atlas.ofSnapshot` (~32% inclusive), which rebuilds the flat weight grid
+every tick by calling `stepCost` on each of the 2500 tiles, three tree
+lookups apiece; the flood itself reads only arrays. Live (same day,
 W12S28 at RCL4, 7 creeps): ~13.6 CPU/tick against a limit of 100, bucket
 full; the history is in #50.
 
