@@ -7471,6 +7471,38 @@ let haulerCasts intents =
     |> List.filter (fun (_, _, name: string) -> name.StartsWith "hauler-")
     |> List.length
 
+/// A room whose source containers are a two- and a three-step paved haul
+/// from the spawn — the live W12S28 geometry the round trip's repricing
+/// was measured against (ADR 0029), flattened onto one paved lane. Sources embedded in
+/// wall at (8,10) and (17,10), their built containers on the Seats (9,10)
+/// and (16,10) — two Posts — and the spawn structure standing at (12,10),
+/// whose free neighbours are (11,10) and (13,10): two steps from the first
+/// container, three from the second.
+let shortHaulRoom =
+    { spatial
+          [
+              "src-a", { X = 8; Y = 10 }
+              "src-b", { X = 17; Y = 10 }
+              "can-a", { X = 9; Y = 10 }
+              "can-b", { X = 16; Y = 10 }
+              "spawn-1", { X = 12; Y = 10 }
+          ]
+          [
+              for x in 8..17 -> { X = x; Y = 10 }, (if x = 8 || x = 17 then Wall else Plain)
+          ] with
+        TargetKinds =
+            Map.ofList
+                [
+                    "src-a", Source
+                    "src-b", Source
+                    "can-a", Structure BuiltKind.Container
+                    "can-b", Structure BuiltKind.Container
+                    "spawn-1", Structure BuiltKind.Spawn
+                ]
+        Roads = Set.ofList [ for x in 9..16 -> { X = x; Y = 10 } ]
+        Obstacles = Set.singleton { X = 12; Y = 10 }
+    }
+
 [<Tests>]
 let haulerTests =
     testList
@@ -7478,13 +7510,15 @@ let haulerTests =
         [
             test "a farther source container hires a larger hauler quota" {
                 // Near spawn: 8 steps from the container, [4 Carry; 2 Move]
-                // at the 300-capacity bank — 20 round-trip ticks, quota
-                // ceil(20 x 10 / 200) = 1. Far spawn: 27 steps — 68 ticks,
-                // quota 4. The living Anchor fills the Post, so every
-                // remaining specialist gap is a hauler cast.
+                // at the 300-capacity bank — each leg a walk (ADR 0029),
+                // 2 ticks a loaded step and 1 empty, so 24 round-trip ticks
+                // and quota ceil(24 x 10 / 200) = 2. Far spawn: 27 steps —
+                // 81 ticks, quota 5. The living Anchor fills the Post, so
+                // every remaining specialist gap is a hauler cast, and five
+                // idle spawns on a 1500 bank can pay for the larger quota.
                 let decideAt spawnX =
                     decide
-                        { quotaColony spawnX 4 1200 with
+                        { quotaColony spawnX 5 1500 with
                             Creeps = [ anchor "a1" 0 50 ]
                         }
                         Map.empty
@@ -7494,8 +7528,59 @@ let haulerTests =
                 let near = decideAt 20
                 let far = decideAt 39
 
-                Expect.equal (haulerCasts near.Intents) 1 "8 steps ship in one body"
-                Expect.equal (haulerCasts far.Intents) 4 "27 steps hire four"
+                Expect.equal (haulerCasts near.Intents) 2 "8 steps ship in two bodies"
+                Expect.equal (haulerCasts far.Intents) 5 "27 steps hire five"
+            }
+
+            test "the measured room's quota does not move: the fix was not a resizing" {
+                // ADR 0029 repriced each leg of the round trip as a walk,
+                // and both legs got dearer — the live room's two containers
+                // move from 3 and 5 round-trip ticks to 4 and 6. Neither
+                // crosses the 20 ticks that would buy a second body against
+                // the 200-carry hauler a 300 bank casts — the live room's
+                // 16-Carry body wants one only past 80 — so the quota stays
+                // one apiece and the fleet is the size it was. The error this corrects bites
+                // at remote-mining distances, not at home; a future reader
+                // finding the fleet unchanged is looking at the right
+                // outcome, not at a fix that failed to land.
+                let snapshot =
+                    { bareRespawn with
+                        Spawns =
+                            [
+                                for i in 1..4 ->
+                                    { spawn with
+                                        Name = $"Spawn{i}"
+                                        Id = (if i = 1 then "spawn-1" else $"spawn-{i}")
+                                    }
+                            ]
+                        RoomEnergy = bank 1200 300
+                        Sources = [ source "src-a"; source "src-b" ]
+                        Spatial = shortHaulRoom
+                        Creeps = [ anchor "a1" 0 50; anchor "a2" 0 50 ]
+                    }
+
+                let atlas = Atlas.ofSnapshot snapshot
+                let haulerBody = [ Carry; Carry; Carry; Carry; Move; Move ]
+
+                let roundTrip from =
+                    Atlas.haulRoundTripTicks atlas haulerBody from { X = 12; Y = 10 }
+
+                Expect.equal
+                    (roundTrip { X = 9; Y = 10 })
+                    (Some 4)
+                    "two paved steps out and back, a tick a tile: 3 ticks became 4"
+
+                Expect.equal
+                    (roundTrip { X = 16; Y = 10 })
+                    (Some 6)
+                    "three paved steps out and back: 5 ticks became 6"
+
+                let { Intents = intents } = decide snapshot Map.empty Set.empty None
+
+                Expect.equal
+                    (haulerCasts intents)
+                    2
+                    "one hauler per container, exactly as the halved round trip hired"
             }
 
             test "no source containers hires no haulers" {
@@ -7522,8 +7607,11 @@ let haulerTests =
             }
 
             test "casting order runs Anchor, then hauler, then worker from the one debited bank" {
+                // The 8-step round trip hires two haulers, so the order
+                // runs Anchor, both haulers, then the generalist — four
+                // casts, one per idle spawn, off the one debited bank.
                 let snapshot =
-                    { quotaColony 20 3 900 with
+                    { quotaColony 20 4 1200 with
                         Creeps = [ worker "w1" 0 50 ]
                     }
 
@@ -7532,7 +7620,8 @@ let haulerTests =
                 match spawnIntents intents with
                 | [ (_, firstBody, firstName)
                     (_, secondBody, secondName)
-                    (_, thirdBody, thirdName) ] ->
+                    (_, thirdBody, thirdName)
+                    (_, fourthBody, fourthName) ] ->
                     Expect.stringStarts firstName "anchor-" "the Post's gap is filled first"
                     Expect.equal firstBody [ Work; Work; Carry; Move ] "the Anchor row's body"
                     Expect.stringStarts secondName "hauler-" "the hauler quota comes second"
@@ -7542,9 +7631,15 @@ let haulerTests =
                         [ Carry; Carry; Carry; Carry; Move; Move ]
                         "two whole blocks at the 300 bank"
 
-                    Expect.stringStarts thirdName "worker-" "the generalist fills the remainder"
-                    Expect.equal thirdBody (workerBodyFor 300) "the worker row sized to the bank"
-                | other -> failtest $"expected exactly three SpawnCreep intents, got %A{other}"
+                    Expect.stringStarts
+                        thirdName
+                        "hauler-"
+                        "the quota is filled before the remainder"
+
+                    Expect.equal thirdBody secondBody "the row casts one body"
+                    Expect.stringStarts fourthName "worker-" "the generalist fills the remainder"
+                    Expect.equal fourthBody (workerBodyFor 300) "the worker row sized to the bank"
+                | other -> failtest $"expected exactly four SpawnCreep intents, got %A{other}"
             }
 
             test "the disaster fallback still casts a bare worker unit" {
@@ -7767,21 +7862,30 @@ let incomeColony =
     }
 
 /// The income-based fleet the W12S28 shape pins (ADR 0012): one Anchor
-/// per Post (2), the throughput quota (1 hauler per container at 8 steps),
+/// per Post (2), the throughput quota (2 haulers per container at 8
+/// steps — the round trip is 16 ticks out loaded and 8 back empty, and
+/// ceil(24 × 10 / 200) is 2 since ADR 0029 priced each leg as a walk),
 /// and the income workers — 2 posted sources × 10 e/tick × the 1500-tick
 /// lifetime = 30,000, minus the anchor and hauler rows' replacement
-/// amortization (2 × 300 + 2 × 300 = 1,200), over one worker body's Work
-/// drain × lifetime (1 × 1500) → floor(19.2) = 19.
+/// amortization (2 × 300 + 4 × 300 = 1,800), over one worker body's Work
+/// drain × lifetime (1 × 1500) → floor(18.8) = 18.
 let incomeFleet =
-    [ anchor "a1" 0 50; anchor "a2" 0 50; hauler "h1" 0 100; hauler "h2" 0 100 ]
-    @ [ for i in 1..19 -> worker $"w{i}" 0 50 ]
+    [
+        anchor "a1" 0 50
+        anchor "a2" 0 50
+        hauler "h1" 0 100
+        hauler "h2" 0 100
+        hauler "h3" 0 100
+        hauler "h4" 0 100
+    ]
+    @ [ for i in 1..18 -> worker $"w{i}" 0 50 ]
 
 [<Tests>]
 let incomeWorkforceTests =
     testList
         "income-based workforce"
         [
-            test "the W12S28 fleet is the whole target: 2 Anchors + 2 haulers + 19 workers" {
+            test "the W12S28 fleet is the whole target: 2 Anchors + 4 haulers + 18 workers" {
                 // Each posted source retires its 8 Seats: a seat base would
                 // add 16 on top and the idle spawns would cast into it.
                 let snapshot =
@@ -7795,7 +7899,7 @@ let incomeWorkforceTests =
 
             test "amortization is deducted: one worker short casts exactly one worker" {
                 // Without the anchor/hauler replacement deduction income
-                // would feed 20 workers and this gap would draw two casts.
+                // would feed 20 workers and this gap would draw three casts.
                 let snapshot =
                     { incomeColony with
                         Creeps = List.truncate (List.length incomeFleet - 1) incomeFleet
@@ -7887,10 +7991,10 @@ let expiringTests =
                 // worker stands eight steps from the spawn at (20,10) —
                 // seven from the tile a replacement is born on. That body
                 // is five parts, so 15 ticks in the spawner, and its two
-                // Move parts ride the one-unit floor empty: 7 half-ticks,
-                // rounded up to 4. A lead of 19, so at 19 ticks left the
-                // worker is out of the count and its successor is cast
-                // while it still works.
+                // Move parts carry it over a plain tile in the walk's
+                // one-tick floor: 7 ticks, one a tile (ADR 0029). A lead of
+                // 22, so at 22 ticks left the worker is out of the count
+                // and its successor is cast while it still works.
                 let fleetWithLastWorker life =
                     { incomeColony with
                         Creeps =
@@ -7908,9 +8012,9 @@ let expiringTests =
 
                     spawnIntents intents
 
-                Expect.isEmpty (casts 20) "one tick outside its lead, the worker still counts"
+                Expect.isEmpty (casts 23) "one tick outside its lead, the worker still counts"
 
-                match casts 19 with
+                match casts 22 with
                 | [ (_, _, creepName) ] ->
                     Expect.stringStarts creepName "worker-" "at its lead it is counted out"
                 | other -> failtest $"expected exactly one SpawnCreep intent, got %A{other}"
@@ -7949,11 +8053,12 @@ let expiringTests =
                 // Nine plain steps from the spawn at (20,10) — eight from
                 // the tile a replacement is born on — for two rows of the
                 // same colony (ADR 0026). A fresh Anchor is empty and slow
-                // — 4 cost units a step, so 32 half-ticks, 16 ticks of
-                // walking against 12 in the spawner: a lead of 28. A
-                // hauler unit rides the one-unit floor empty: 4 ticks of
-                // walking against 18 in the spawner, a lead of 22. With 25
-                // ticks left each, only the Anchor is inside its own lead.
+                // — 4 cost units a step, 2 ticks of walk apiece, so 16
+                // ticks of walking against 12 in the spawner: a lead of 28.
+                // A hauler unit rides the walk's one-tick floor empty: 8
+                // ticks of walking against 18 in the spawner, a lead of 26.
+                // With 27 ticks left each, only the Anchor is inside its
+                // own lead.
                 let fleetAtPosts life =
                     { incomeColony with
                         Creeps =
@@ -7976,12 +8081,12 @@ let expiringTests =
 
                     spawnIntents intents |> List.map (fun (_, _, creepName) -> creepName)
 
-                match casts 25 with
+                match casts 27 with
                 | [ anchorCast ] ->
-                    Expect.stringStarts anchorCast "anchor-" "the Anchor's lead outlasts 25 ticks"
+                    Expect.stringStarts anchorCast "anchor-" "the Anchor's lead outlasts 27 ticks"
                 | other -> failtest $"expected exactly one SpawnCreep intent, got %A{other}"
 
-                match casts 20 with
+                match casts 26 with
                 | [ anchorCast; haulerCast ] ->
                     Expect.stringStarts anchorCast "anchor-" "under both leads both rows are short"
                     Expect.stringStarts haulerCast "hauler-" "the hauler's lead is the shorter one"

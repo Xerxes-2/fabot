@@ -1691,31 +1691,33 @@ let haulRoundTripTests =
                 |> ofSnapshot
 
             test "the loaded leg out and the empty leg back sum to whole ticks" {
-                // [Carry;Carry;Move] loaded on plain: two full Carry x
-                // weight 2 over one Move is 4 units a step; empty Carry
-                // rides free, so the leg back costs the 1-unit floor. Nine
-                // steps x 5 units = 45 half-ticks, rounded up to 23.
+                // Each leg is a walk (ADR 0029). [Carry;Carry;Move]
+                // loaded on plain: two full Carry x weight 2 over one Move
+                // is 4 units a step, ceil(4 / 2) = 2 ticks. Empty Carry
+                // rides free, so the leg back sits on the one-tick floor.
+                // Nine steps out at 2 and nine back at 1 = 27 ticks, with
+                // nothing halved on the total.
                 Expect.equal
                     (haulRoundTripTicks
                         (corridorWith Set.empty [])
                         [ Carry; Carry; Move ]
                         { X = 10; Y = 10 }
                         { X = 20; Y = 10 })
-                    (Some 23)
+                    (Some 27)
                     "both legs are priced by the body's own fatigue factor"
             }
 
             test "a road under the trunk discounts the loaded leg" {
-                // Road weight 1 halves the loaded step to 2 units; the
-                // empty leg already rides the floor. Nine steps x 3 units
-                // = 27 half-ticks, rounded up to 14.
+                // Road weight 1 halves the loaded step to 2 units, one
+                // tick; the empty leg already rides the floor. Nine steps
+                // out and nine back at a tick apiece = 18.
                 Expect.equal
                     (haulRoundTripTicks
                         (corridorWith (Set.ofList [ for x in 11..19 -> { X = x; Y = 10 } ]) [])
                         [ Carry; Carry; Move ]
                         { X = 10; Y = 10 }
                         { X = 20; Y = 10 })
-                    (Some 14)
+                    (Some 18)
                     "road parity is worth hiring for"
             }
 
@@ -1729,8 +1731,38 @@ let haulRoundTripTests =
                         [ Carry; Carry; Move ]
                         { X = 10; Y = 10 }
                         { X = 20; Y = 10 })
-                    (Some 23)
+                    (Some 27)
                     "today's traffic is not tomorrow's throughput"
+            }
+
+            test "neither leg prices below the tiles it crosses" {
+                // ADR 0029's floor, on this reader too: the round trip is
+                // two walks, so it can never price below twice the
+                // Chebyshev distance to the sink's nearest goal. The guard
+                // that makes reintroducing the trailing halve-and-round-up
+                // go red — under it the Move-surplus body below crossed
+                // eighteen tiles in nine ticks.
+                let floor = 2 * range { X = 10; Y = 10 } { X = 19; Y = 10 }
+
+                for body in
+                    [
+                        [ Carry; Carry; Move ]
+                        [ Carry; Carry; Carry; Carry; Move; Move ]
+                        [ Carry; Move; Move; Move ]
+                    ] do
+                    match
+                        haulRoundTripTicks
+                            (corridorWith Set.empty [])
+                            body
+                            { X = 10; Y = 10 }
+                            { X = 20; Y = 10 }
+                    with
+                    | Some ticks ->
+                        Expect.isGreaterThanOrEqual
+                            ticks
+                            floor
+                            $"%A{body} rounds a nine-tile leg below nine ticks"
+                    | None -> failtest $"%A{body} should reach the sink"
             }
 
             test "an unreachable sink prices no round trip" {
@@ -1784,10 +1816,10 @@ let castWalkTicksTests =
 
             test "the walk is priced for the body given, not for any creep standing there" {
                 // The lead's whole point (ADR 0026): an empty Anchor body
-                // pays 8 units a plain step, so the nine steps out of the
-                // spawner cost 72 half-ticks, 36 ticks. A hauler unit over
+                // pays 8 units a plain step, ceil(8 / 2) = 4 ticks, so the
+                // nine steps out of the spawner cost 36. A hauler unit over
                 // the same ground carries no fatigue empty and rides the
-                // one-unit floor: 9 half-ticks, rounded up to 5.
+                // walk's one-tick floor: 9.
                 Expect.equal
                     (castWalkTicks
                         (corridorWith Set.empty [])
@@ -1803,7 +1835,7 @@ let castWalkTicksTests =
                         [ Carry; Carry; Move ]
                         { X = 20; Y = 10 }
                         { X = 10; Y = 10 })
-                    (Some 5)
+                    (Some 9)
                     "a hauler on the same ground earns a short one"
             }
 
@@ -1825,9 +1857,10 @@ let castWalkTicksTests =
             }
 
             test "a road under the walk discounts it, as it discounts travel cost" {
-                // Road weight 1 quarters the Anchor's step to 4 units over
-                // the eight paved tiles it steps onto; the last step onto
-                // the unpaved (10,10) still costs 8. 40 half-ticks, 20.
+                // Road weight 1 quarters the Anchor's step to 4 units —
+                // 2 ticks — over the eight paved tiles it steps onto; the
+                // last step onto the unpaved (10,10) still costs 8 units,
+                // 4 ticks. 16 + 4 = 20.
                 Expect.equal
                     (castWalkTicks
                         (corridorWith (Set.ofList [ for x in 11..19 -> { X = x; Y = 10 } ]) [])
@@ -1850,6 +1883,31 @@ let castWalkTicksTests =
                         { X = 10; Y = 10 })
                     (Some 36)
                     "a standing creep is not a detour a replacement will still face"
+            }
+
+            test "the cast walk prices no tile below a tick" {
+                // ADR 0029's floor, on the lead's reader too: the walk out
+                // of the spawner starts beside it, so it can never price
+                // below the Chebyshev distance from the birth tile (19,10)
+                // to the goal. The guard that makes reintroducing the
+                // trailing halving go red — under it a Move-surplus body
+                // walked nine tiles in five ticks.
+                let floor = range { X = 19; Y = 10 } { X = 10; Y = 10 }
+
+                for body in [ anchorBody; [ Carry; Carry; Move ]; [ Work; Move; Move; Move ] ] do
+                    match
+                        castWalkTicks
+                            (corridorWith Set.empty [])
+                            body
+                            { X = 20; Y = 10 }
+                            { X = 10; Y = 10 }
+                    with
+                    | Some ticks ->
+                        Expect.isGreaterThanOrEqual
+                            ticks
+                            floor
+                            $"%A{body} leads on a walk shorter than its tiles"
+                    | None -> failtest $"%A{body} should reach the goal"
             }
 
             test "an unreachable tile prices no walk" {

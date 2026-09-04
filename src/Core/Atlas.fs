@@ -68,10 +68,10 @@ type Atlas =
             /// shares no key, and it is itself memoised on the census
             /// signature (ADR 0017) — it runs only when the room changes.
             /// A mutable table for the same reason WorkAreas is one, and
-            /// per-tick by the same construction. Priced in cost units,
-            /// not in the walk's whole ticks (ADR 0029): the lead's
-            /// conversion is the one the walk has yet to replace, so this
-            /// memo shares no key with the Floods table either.
+            /// per-tick by the same construction. Priced in the walk's
+            /// whole ticks (ADR 0029), like every clock in the colony; it
+            /// is the origin set, never the pricing, that keeps this memo
+            /// beside the Floods table rather than inside it.
             Walks: System.Collections.Generic.Dictionary<Pos * FatigueFactor, int[]>
             /// Work Area per Task, built at most once per tick and shared
             /// by every query that stands a creep in one — the Floods memo
@@ -329,15 +329,27 @@ let private floodFromAll
 let private floodFrom weights occupied stepPrice (start: Pos) =
     floodFromAll weights occupied stepPrice [ start ]
 
+/// The walk's flood over one body, from anywhere in `starts` (ADR 0029):
+/// whole ticks a step and blind to today's traffic. The one place the
+/// walk's two differences from travel cost are spelled out, so no reader
+/// can take one without the other — every clock in the colony floods
+/// through here, however its origins are chosen.
+let private walkFloodFromAll weights factor (starts: Pos list) =
+    floodFromAll weights noTraffic (stepTicks factor) starts
+
+/// The one-origin walk: a creep, or a container, prices from the tile it
+/// sits on.
+let private walkFloodFrom weights factor (start: Pos) =
+    walkFloodFromAll weights factor [ start ]
+
 /// The flood one pricing wants over one body: the ranking price sees
 /// today's traffic and counts half-ticks, the clock is blind to it and
-/// counts whole ticks (ADR 0029). The one place the pair's two
-/// differences are spelled out, so neither can be applied without the
-/// other.
+/// counts whole ticks (ADR 0029). The one place the pair is set side by
+/// side, so the memo cannot hold one where a reader expects the other.
 let private floodPriced weights occupied factor pricing (start: Pos) =
     match pricing with
     | TravelCost -> floodFrom weights occupied (stepUnits factor) start
-    | Walk -> floodFrom weights noTraffic (stepTicks factor) start
+    | Walk -> walkFloodFrom weights factor start
 
 let ofSnapshot (snapshot: Snapshot) : Atlas =
     let spatial = snapshot.Spatial
@@ -917,17 +929,19 @@ let firstStepIgnoringTraffic (atlas: Atlas) (creep: string) (task: Task) : Pos o
 /// this feeds is capacity planning, not routing, and today's standing
 /// creeps must never resize the fleet. Goals are the sink's adjacent
 /// walkable tiles (transfer acts at range 1); the origin prices 0 as every
-/// flood origin does. Cost units are half-ticks; the two legs sum and
-/// round up. None when no goal is reachable — unpriceable geometry hires
-/// nobody (ADR 0004).
+/// flood origin does. Each leg is priced as a walk (ADR 0029) — whole
+/// ticks, no tile below one — so the two simply sum: there is no trailing
+/// conversion, and one rule turns units into ticks for the whole colony.
+/// None when no goal is reachable — unpriceable geometry hires nobody
+/// (ADR 0004).
 let haulRoundTripTicks (atlas: Atlas) (body: BodyPart list) (from: Pos) (sink: Pos) : int option =
     let count part =
         body |> List.filter ((=) part) |> List.length
 
     let goals = adjacentWalkable atlas sink
 
-    let legUnits factor =
-        let dist, _ = floodFrom atlas.Weights noTraffic (stepUnits factor) from
+    let legTicks factor =
+        let dist, _ = walkFloodFrom atlas.Weights factor from
 
         goals
         |> List.choose (fun goal ->
@@ -938,16 +952,16 @@ let haulRoundTripTicks (atlas: Atlas) (body: BodyPart list) (from: Pos) (sink: P
             | costs -> Some(List.min costs)
 
     let loaded =
-        legUnits
+        legTicks
             {
                 FatigueParts = List.length body - count Move
                 MoveParts = count Move
             }
 
-    let empty = legUnits (emptyFactorOf body)
+    let empty = legTicks (emptyFactorOf body)
 
     match loaded, empty with
-    | Some out, Some back -> Some((out + back + 1) / 2)
+    | Some out, Some back -> Some(out + back)
     | _ -> None
 
 /// The walk in whole ticks a freshly cast body needs to stand on a tile
@@ -967,8 +981,10 @@ let haulRoundTripTicks (atlas: Atlas) (body: BodyPart list) (from: Pos) (sink: P
 /// not routing, the walk it prices does not start until the body is cast,
 /// and the goal tile is the very tile the creep being replaced stands on —
 /// so the occupancy surcharge would add its own step to every lead, every
-/// tick, for a crowd of one that will be dead. Cost units are half-ticks
-/// and round up, the same halving arrival uses. None when the goal is
+/// tick, for a crowd of one that will be dead. Priced as a walk (ADR
+/// 0029): whole ticks, no tile below one, the same rule every other
+/// time-aware judgement in the colony is made on — a lead is a clock, and
+/// nothing here converts units to ticks of its own. None when the goal is
 /// unreachable, and none when the spawner has no free neighbour to be born
 /// on — unpriceable geometry leads nobody (ADR 0004).
 let castWalkTicks (atlas: Atlas) (body: BodyPart list) (spawn: Pos) (goal: Pos) : int option =
@@ -976,18 +992,13 @@ let castWalkTicks (atlas: Atlas) (body: BodyPart list) (spawn: Pos) (goal: Pos) 
 
     let dist =
         memoised atlas.Walks (spawn, factor) (fun () ->
-            let dist, _ =
-                floodFromAll
-                    atlas.Weights
-                    noTraffic
-                    (stepUnits factor)
-                    (adjacentWalkable atlas spawn)
+            let dist, _ = walkFloodFromAll atlas.Weights factor (adjacentWalkable atlas spawn)
 
             dist)
 
     match dist.[indexOf goal] with
     | d when d = unreached -> None
-    | d -> Some((d + 1) / 2)
+    | d -> Some d
 
 /// Cheapest raw-terrain path for a trunk road (ADR 0011): plain 2, swamp
 /// 10 — no road discount and no occupancy surcharge, so the line neither
