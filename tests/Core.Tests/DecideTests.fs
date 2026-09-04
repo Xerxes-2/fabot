@@ -5375,6 +5375,26 @@ let hostileAt id pos body : HostileInfo =
 /// A hostile creep of the given body, position immaterial.
 let hostile body = hostileAt "h-1" { X = 25; Y = 25 } body
 
+/// The same colony with the given hostiles standing in its room.
+let facing hostiles (snapshot: Snapshot) = { snapshot with Hostiles = hostiles }
+
+/// The same colony reading its safe-mode gates off the given controller.
+let governedBy controller (snapshot: Snapshot) =
+    { snapshot with
+        Controller = Some controller
+    }
+
+/// A colony whose whole Keep stands at full hits (ADR 0034).
+let wholeKeep =
+    bareRespawn
+    |> withHits "spawn-1" BuiltKind.Spawn 5000 5000
+    |> withHits "tower-1" BuiltKind.Tower 5000 5000
+    |> withHits "sto-1" BuiltKind.Storage 5000 5000
+
+/// The same Keep one hit off max on the spawn — all the second arm reads:
+/// the Keep does not decay, so below max means it was damaged.
+let dentedSpawn = wholeKeep |> withHits "spawn-1" BuiltKind.Spawn 4999 5000
+
 [<Tests>]
 let safeModeTests =
     testList
@@ -5460,6 +5480,103 @@ let safeModeTests =
 
                 let { Intents = intents } = decide snapshot Map.empty Set.empty None
                 Expect.isEmpty (activations intents) "the room is already protected"
+            }
+
+            test "a dented Keep with a hostile in the room fires" {
+                // The second arm (ADR 0034), and it stands on its own: this
+                // hostile carries no CLAIM, so the first arm holds its peace
+                // and only the damage speaks. Each of the three in turn —
+                // the tower is the dismantler test below.
+                let fires snapshot =
+                    let { Intents = intents } =
+                        decide
+                            (snapshot |> facing [ hostile [ Tough; Attack; Move ] ])
+                            Map.empty
+                            Set.empty
+                            None
+
+                    activations intents
+
+                Expect.equal
+                    (fires dentedSpawn)
+                    [ "ctrl-1" ]
+                    "the spawn is losing hits with someone here"
+
+                Expect.equal
+                    (fires (wholeKeep |> withHits "sto-1" BuiltKind.Storage 4999 5000))
+                    [ "ctrl-1" ]
+                    "the Storage is the room's largest store, and it is of the Keep"
+            }
+
+            test "a dented Keep in an empty room holds the stock" {
+                // Damage alone is not a raid: the window between a raid
+                // leaving and a worker patching the Keep spends nothing.
+                let { Intents = intents } = decide dentedSpawn Map.empty Set.empty None
+                Expect.isEmpty (activations intents) "nobody is here to be held off"
+            }
+
+            test "a full Keep with a hostile in the room fires nothing" {
+                let snapshot = wholeKeep |> facing [ hostile [ Attack; Attack; Move ] ]
+
+                let { Intents = intents } = decide snapshot Map.empty Set.empty None
+                Expect.isEmpty (activations intents) "an intact Keep is not yet certain harm"
+            }
+
+            test "a WORK-only hostile in a room with a dented tower fires" {
+                // A dismantler hurts a structure without ever qualifying as a
+                // Threat — the arm reads any hostile for exactly this case.
+                let snapshot =
+                    wholeKeep
+                    |> withHits "tower-1" BuiltKind.Tower 4999 5000
+                    |> facing [ hostile [ Work; Work; Move ] ]
+
+                let { Intents = intents } = decide snapshot Map.empty Set.empty None
+                Expect.equal (activations intents) [ "ctrl-1" ] "a dismantler is doing the harm"
+            }
+
+            test "a hungry Post container and a hungry rampart are not the Keep" {
+                // Invaders chew containers as a matter of routine, and the
+                // stock is not for that (ADR 0034). The rampart matters more:
+                // one sits below its floor for most of its life — it decays
+                // there — so a Keep arm that read every hungry structure
+                // would spend the stock on the first hostile to wander past.
+                let snapshot =
+                    wholeKeep
+                    |> withHits "cont-1" BuiltKind.Container 1 125_000
+                    |> withHits "ram-1" BuiltKind.Rampart 50_000 3_000_000
+                    |> facing [ hostile [ Work; Move ] ]
+
+                let { Intents = intents } = decide snapshot Map.empty Set.empty None
+
+                Expect.isEmpty
+                    (activations intents)
+                    "hits off the Keep's list never spend the stock"
+            }
+
+            test "the gates hold over a dented Keep under attack" {
+                // The second arm is gated exactly as the first is: there is
+                // one pair, not a pair each.
+                let dismantled = dentedSpawn |> facing [ hostile [ Work; Move ] ]
+
+                let empty =
+                    dismantled
+                    |> governedBy
+                        { controllerAt 1 with
+                            SafeModeAvailable = 0
+                        }
+
+                let running =
+                    dismantled
+                    |> governedBy
+                        { controllerAt 1 with
+                            SafeModeActive = true
+                        }
+
+                let { Intents = onEmpty } = decide empty Map.empty Set.empty None
+                let { Intents = onRunning } = decide running Map.empty Set.empty None
+
+                Expect.isEmpty (activations onEmpty) "an empty stock has nothing to spend"
+                Expect.isEmpty (activations onRunning) "already protected, whichever arm asks"
             }
 
             test "a quiet room fires nothing" {

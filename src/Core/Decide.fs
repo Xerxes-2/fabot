@@ -202,6 +202,22 @@ let private isHungry kind (hits: HitsInfo) =
     | Some WholeLine.Full -> hits.Hits < hits.HitsMax
     | None -> false
 
+/// Every structure the projection carries hits for that stands below its
+/// kind's whole line, with its kind, in id order. The one walk over the
+/// hits and the kinds that judges them, and the two readers that ask it
+/// share it: the Repair pool takes all of them, the safe-mode reflex's
+/// Keep arm asks only whether one of them is of the Keep (ADR 0034). The
+/// projection carries hits on repairable kinds only, but the kind gate is
+/// judged here — the decision layer owns what it reads, off the same table
+/// the projection filtered by.
+let private hungryStructures (snapshot: Snapshot) : (string * BuiltKind) list =
+    snapshot.Spatial.Hits
+    |> Map.toList
+    |> List.choose (fun (id, hits) ->
+        match Map.tryFind id snapshot.Spatial.TargetKinds with
+        | Some(Structure kind) when isHungry kind hits -> Some(id, kind)
+        | _ -> None)
+
 /// Screeps CONTAINER_CAPACITY: what a container's store can hold — the
 /// line past which the buffer needs no Refill.
 let private containerCapacity = 2000
@@ -241,17 +257,8 @@ let planTasks (snapshot: Snapshot) : Task list =
     let builds = snapshot.ConstructionSites |> List.map (fun site -> Build site.Id)
 
     // A Repair per repairable structure below its kind's whole line, in id
-    // order. The projection carries hits on repairable kinds only, but the
-    // kind gate is judged here — the Planner owns what enters the pool,
-    // off the same table the projection filtered by (ADR 0010, ADR 0034).
-    let repairs =
-        snapshot.Spatial.Hits
-        |> Map.toList
-        |> List.filter (fun (id, hits) ->
-            match Map.tryFind id snapshot.Spatial.TargetKinds with
-            | Some(Structure kind) -> isHungry kind hits
-            | _ -> false)
-        |> List.map (fst >> Repair)
+    // order (ADR 0010, ADR 0034).
+    let repairs = hungryStructures snapshot |> List.map (fst >> Repair)
 
     let upgrades =
         snapshot.Controller |> Option.toList |> List.map (fun c -> Upgrade c.Id)
@@ -632,17 +639,31 @@ let private planSpawns (snapshot: Snapshot) atlas (haulerQuota: int) : Intent li
 /// margin for a skipped tick.
 let private safeModeDeadline = 3
 
-/// Colony reflex beside the pipeline: a CLAIM-part hostile is the one
-/// threat that can disarm safe mode itself — attackController blocks
-/// activation for 1,000 ticks. But the tap is a range-1 act, so the
-/// activation holds until a claimer stands within reach of landing it
-/// (ADR 0015) — the hold is free (activation still wins the race) and
-/// buys the towers their window to kill the claimer en route. A
-/// controller the projection cannot place has no deadline to measure
-/// and falls back to firing on sight. Fighters without CLAIM cannot
-/// touch the controller and never spend the stock: at RCL2 safe mode
-/// outlasts any invader raid 13×, so it keeps for when the room is
-/// actually being taken (ADR 0007).
+/// Colony reflex beside the pipeline, two arms and one pair of gates —
+/// stock remaining, safe mode not already running.
+///
+/// The CLAIM arm: a CLAIM-part hostile is the one threat that can disarm
+/// safe mode itself — attackController blocks activation for 1,000 ticks.
+/// But the tap is a range-1 act, so the activation holds until a claimer
+/// stands within reach of landing it (ADR 0015) — the hold is free
+/// (activation still wins the race) and buys the towers their window to
+/// kill the claimer en route. A controller the projection cannot place has
+/// no deadline to measure and falls back to firing on sight.
+///
+/// The Keep arm (ADR 0034): any Keep structure below full hits while any
+/// hostile stands in the spawn room. The same shape — hold until the harm
+/// is certain — over the other half of the exposure. Any hostile, not only
+/// a Threat: a WORK-only dismantler hurts a structure without ever
+/// qualifying as one, and "the Keep is losing hits with someone here" is
+/// the honest reading whoever is doing it. Stateless on purpose: one
+/// tick's hits, never a comparison against the last tick's (ADR 0012,
+/// 0017), which is what makes Repair's full-hits line on the Keep part of
+/// this reflex — a Keep left dented would keep the arm armed for every
+/// hostile that wandered through afterwards.
+///
+/// A hostile that neither claims nor damages spends nothing: at RCL2 safe
+/// mode outlasts any invader raid 13×, so the stock keeps for when the
+/// room is actually being taken (ADR 0007).
 let private planSafeMode (snapshot: Snapshot) atlas : Intent list =
     match snapshot.Controller with
     | Some controller when controller.SafeModeAvailable > 0 && not controller.SafeModeActive ->
@@ -652,7 +673,19 @@ let private planSafeMode (snapshot: Snapshot) atlas : Intent list =
                | Some pos -> range h.Pos pos <= safeModeDeadline
                | None -> true
 
-        if snapshot.Hostiles |> List.exists withinReach then
+        let claimerInReach = snapshot.Hostiles |> List.exists withinReach
+
+        // Below full hits, off the walk the Repair pool reads: the Keep's
+        // whole line is Full, so "hungry" and "damaged" are one fact and
+        // the two readers cannot drift apart. The Posts and the ramparts
+        // are hungry on their own lines and are not of the Keep — neither
+        // a container's hits nor a rampart's ever spend the stock. The
+        // hostiles are asked first, so a quiet room walks nothing.
+        let keepDamaged =
+            not (List.isEmpty snapshot.Hostiles)
+            && hungryStructures snapshot |> List.exists (snd >> isKeep)
+
+        if claimerInReach || keepDamaged then
             [ ActivateSafeMode controller.Id ]
         else
             []
