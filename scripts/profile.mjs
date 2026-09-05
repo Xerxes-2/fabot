@@ -192,6 +192,15 @@ function store({ used = 0, capacity = 0 } = {}) {
 
 const ok = () => 0;
 
+// The username this colony holds its rooms under. One name for the whole
+// harness, because `Snapshot` reads it once off the spawn room's
+// controller and then decides whose every reservation is by comparing
+// against it (ADR 0042): a scenario that spelled the owner and the
+// reserver's username differently would hand the bundle two outposts held
+// by a rival, and a rival's hold is a room the colony withdraws from
+// rather than mines.
+const COLONY_OWNER = "fabot";
+
 // Screeps CARRY_CAPACITY: what one Carry part holds.
 const CARRY_CAPACITY = 50;
 
@@ -278,6 +287,47 @@ function stubRoom({ name, controller, findTables, energy = { available: 0, capac
 // ---------------------------------------------------------------------------
 
 const keyOf = (p) => `${p.x},${p.y}`;
+
+// A row's stations: where a hired creep of that row is stood, each tile
+// paired with the room it lies in and that room's grid. A station is a
+// room and a tile and not a bare coordinate, because two of ADR 0042's
+// rows are cast by the home spawn and work a room away — the reserver
+// walks to an outpost's controller and holds the reservation there, and
+// an outpost Post's Anchor stands on its container — so "where this row
+// stands" stopped being answerable inside one room the tick #131 landed.
+// Every other row still hands its own room over, and reads the same.
+const stationsIn = (room, grid, positions) => positions.map((pos) => ({ room, grid, pos }));
+
+// The tiles already claimed in one room, by name. One set per room and
+// never one flat set over the world: every room has the same 2,500
+// coordinates, so a reserver beside W12S27's controller at 36,44 and a
+// worker on W12S28's 36,44 are two creeps on one key, and the second
+// would be pushed off a tile nothing stands on. The scenario builds the
+// sets — it is the half that knows what its rooms already hold — and a
+// room with none is the harness stationing a creep in a room it never
+// furnished, which throws rather than guesses (ADR 0027).
+function claimsIn(world, roomName) {
+  const claimed = world.claimed.get(roomName);
+  if (!claimed) {
+    throw new Error(
+      `the ${scenario} scenario holds no claimed tiles for ${roomName} ` +
+        `(it knows: ${[...world.claimed.keys()].join(", ")}), so a creep stationed there ` +
+        "would be stood on a tile the world may already be using"
+    );
+  }
+  return claimed;
+}
+
+// The reserver row read off the hired fleet, as `room x,y` per body. Both
+// scenarios print it (see their `describe`), because the fleet line above
+// counts a row's bodies and never says which tile they hold: a reserver
+// parked on the spawn's doorstep and one holding an outpost's controller
+// are the same number in every other count the report prints, and the
+// difference between them is this ticket's whole subject.
+const reserverStations = (creeps) =>
+  creeps
+    .filter((creep) => creep.name.split("-")[0] === "reserver")
+    .map((creep) => `${creep.room.name} ${keyOf(creep.pos)}`);
 
 function* neighbours(p) {
   for (let dx = -1; dx <= 1; dx++) {
@@ -594,6 +644,14 @@ function buildStubWorld() {
   const controller = register({
     id: "ctrl",
     my: true,
+    // The name the engine spells this colony, which `Snapshot` reads off
+    // the spawn room's controller and off nothing else: it is the name
+    // every reservation is compared against (ADR 0042), so a home
+    // controller with no owner leaves the colony nameless and a
+    // reservation of our own reading as a rival's. Nothing in this
+    // one-room world is reserved, but the two rooms of the `outpost`
+    // scenario are, and both rooms answer the same shape.
+    owner: { username: COLONY_OWNER },
     level: LEVEL,
     ticksToDowngrade: 9000,
     safeModeAvailable: 1,
@@ -729,13 +787,27 @@ function buildStubWorld() {
     // the spawn's doorstep would spend the run walking and the profile
     // would time a colony in transit rather than one at work.
     stations: {
-      anchor: [SOURCE_A, SOURCE_B],
-      hauler: [SPAWN_POS],
-      worker: [CONTROLLER, ...cluster.sites.map((site) => site.pos)],
+      // The reserver row stands at the spawn — beside it, in fact, since
+      // `nearestFree` resolves a station to a walkable tile the world is
+      // not already using — and this scenario cannot do better: the rooms
+      // it was cast to reserve are the declared outposts, which this world
+      // does not model and answers as solid rock (above), so its Reserve
+      // target is across a border with no exits. Standing it here is the
+      // honest version of that limit — a creep that cannot reach its work,
+      // priced every tick as one — and
+      // the `outpost` scenario is where the walk and the hold are
+      // measured. Building the two rooms for it here would make this the
+      // outpost scenario twice.
+      reserver: stationsIn(room, grid, [SPAWN_POS]),
+      anchor: stationsIn(room, grid, [SOURCE_A, SOURCE_B]),
+      hauler: stationsIn(room, grid, [SPAWN_POS]),
+      worker: stationsIn(room, grid, [CONTROLLER, ...cluster.sites.map((site) => site.pos)]),
     },
+    // One room, so one claimed-tile set: everything the colony already
+    // stands on, which `taken` has collected as the room was furnished.
+    claimed: new Map([[ROOM, taken]]),
     grid,
     homeRoom: room,
-    taken,
     // The home room's geometry and its clustered tiles, for the ADR 0022
     // self-check below.
     sourcePositions: [SOURCE_A, SOURCE_B],
@@ -746,6 +818,11 @@ function buildStubWorld() {
         `${furnitureLine()}, ${plural(roads.length, "road")}, ` +
         `${plural(containers.length, "container")}, ${plural(cluster.sites.length, "site")}, ` +
         `${plural(creeps.length, "creep")})`,
+      `  ${plural(reserverStations(creeps).length, "reserver")} at ` +
+        `${reserverStations(creeps).join(", ") || "no station"} — this world models no declared ` +
+        "outpost and answers every one of them as solid rock, so their Reserve target is " +
+        "unreachable and they stand where they were cast; the walk is the outpost scenario's " +
+        "to measure",
     ],
     spareTiles: spare.length,
   };
@@ -773,6 +850,12 @@ function stubCreep({ name, pos, parts, used, ticksToLive = 1500 }) {
     build: ok,
     repair: ok,
     upgradeController: ok,
+    // The reserver row's own verb (ADR 0042, #130). Here for the same
+    // reason every other one is: the stub implements exactly the surface
+    // `Bindings.fs` declares, and a creep missing a method the Executor
+    // reaches for takes the whole run down on the tick that row is first
+    // matched — which is how a stub answers "this row does not exist" (#163).
+    reserveController: ok,
     pickup: ok,
     move: ok,
     say: ok,
@@ -803,6 +886,15 @@ function pavingPerturbation({ spare, structures, byId, structure }) {
 }
 
 // ---------------------------------------------------------------------------
+// The rows whose stations are places rather than a pool: one Anchor per
+// Post (ADR 0020, ADR 0042), so the row's station count is the world's
+// Post count and a body past it has nowhere of its own to stand. The
+// reserver row is *not* one of these, though its quota is one per declared
+// outpost: the stub scenario deliberately stands both of its reservers at
+// the one station it can offer, because it models neither outpost, and
+// says so in its report.
+const ONE_PER_STATION = new Set(["anchor"]);
+
 // The fleet, hired by the bundle rather than written down.
 // ---------------------------------------------------------------------------
 
@@ -815,7 +907,20 @@ const FILLS = [0, 0.5, 1];
 // is an arithmetic of quotas and income (ADR 0012), so it converges; a run
 // that walks past this is one where it did not, and a fleet still growing
 // is not a colony to profile.
-const HIRE_CAP = 60;
+//
+// Raised from 60 by #163, and by the outposts entering the economy rather
+// than by the two reservers: a standing container makes an outpost source
+// a Post (ADR 0042), so the `outpost` scenario now hires against five
+// held sources instead of two, and the count is largest where the bank is
+// smallest — a 300-energy body is a single Work part, so the income buys
+// a great many of them. Measured across every level the flag accepts,
+// `outpost` converges at 74 hires at RCL1, 52 at RCL2, 35 at RCL3, 25 at
+// RCL4, **20 at the RCL5 default** (the live colony held 22 creeps at
+// t140,810: 15 at home, 3 in W12S27, 4 in W13S28), 18 at RCL6 and 15 at
+// RCL7 and RCL8; `stub` never passes 21. So the ceiling clears the worst
+// of them with room to spare and still catches a fleet that is genuinely
+// running away.
+const HIRE_CAP = 120;
 
 // Fill the home room's fleet the way the colony would: run the bundle,
 // honour every SpawnCreep intent it emits, and stop the tick it stops
@@ -843,8 +948,7 @@ function hireFleet(world, game, loop) {
     return 0;
   };
 
-  const standing = new Set(world.taken);
-  for (const creep of world.creeps) standing.add(keyOf(creep.pos));
+  for (const creep of world.creeps) claimsIn(world, creep.room.name).add(keyOf(creep.pos));
   const cursors = new Map();
   const bodies = new Map();
   let hired = 0;
@@ -866,13 +970,15 @@ function hireFleet(world, game, loop) {
     for (const request of requests) {
       const row = request.name.split("-")[0];
       if (!bodies.has(row)) bodies.set(row, request.parts);
-      // A row this scenario stations nowhere is not a row to guess at: the
-      // next one on ADR 0006's table is already decided — ADR 0042's
-      // reserver, cast before every other row — and standing it among the
-      // workers would have the report say "hired N creeps by the bundle's
-      // own intents" over a fleet in the wrong places. Falling back would
-      // be the shape ADR 0027 names and refuses: code that hides a broken
-      // invariant instead of failing on it.
+      // A row this scenario stations nowhere is not a row to guess at:
+      // standing it among the workers would have the report say "hired N
+      // creeps by the bundle's own intents" over a fleet in the wrong
+      // places. Falling back would be the shape ADR 0027 names and
+      // refuses: code that hides a broken invariant instead of failing on
+      // it. This is the throw ADR 0042's reserver row tripped the tick
+      // #131 cast one (#163) — a real row arriving, correctly refused a
+      // seat it had not been given, and given one here rather than a
+      // fallback.
       if (!Object.hasOwn(world.stations, row)) {
         throw new Error(
           `the bundle cast a "${row}" body and the ${scenario} scenario stations no such row ` +
@@ -883,8 +989,32 @@ function hireFleet(world, game, loop) {
       const stations = world.stations[row];
       const cursor = cursors.get(row) ?? 0;
       cursors.set(row, cursor + 1);
-      const pos = nearestFree(world.grid, stations[cursor % stations.length], standing);
-      standing.add(keyOf(pos));
+      // A row whose quota is one body per place must not run out of
+      // places. The hauler and worker rows pool over theirs and the cursor
+      // is meant to wrap, but the Anchor row's quota is one per Post (ADR
+      // 0020, ADR 0042), so an Anchor wrapping onto a station another
+      // Anchor already holds is two on one Post — and, when the Posts it
+      // ran out of are an outpost's, a wrap that quietly stands the whole
+      // outpost's Anchors in the spawn room. That is what a scenario
+      // standing an outpost container without stationing its Anchor does,
+      // and nothing else in the report would show it: the fleet line
+      // counts bodies, not tiles. Refused for the same reason the missing
+      // row above is (ADR 0027).
+      if (ONE_PER_STATION.has(row) && cursor >= stations.length) {
+        throw new Error(
+          `the bundle cast ${cursor + 1} "${row}" bodies and the ${scenario} scenario stations ` +
+            `${stations.length} — that row's quota is one body per place, so the world it hired ` +
+            "against holds places this scenario has not stationed"
+        );
+      }
+      // The row's next station, which carries the room as well as the
+      // tile: a reserver is cast by the home spawn and stationed beside a
+      // declared outpost's controller (ADR 0042), so the room a hired
+      // creep ends up in is the station's and no longer the spawn's.
+      const station = stations[cursor % stations.length];
+      const claimed = claimsIn(world, station.room.name);
+      const pos = nearestFree(station.grid, station.pos, claimed);
+      claimed.add(keyOf(pos));
       const capacity = request.parts.filter((part) => part === "carry").length * CARRY_CAPACITY;
       const creep = stubCreep({
         name: request.name,
@@ -892,7 +1022,7 @@ function hireFleet(world, game, loop) {
         parts: request.parts,
         used: Math.round(capacity * FILLS[hired % FILLS.length]),
       });
-      creep.room = world.homeRoom;
+      creep.room = station.room;
       world.byId.set(creep.id, creep);
       world.creeps.push(creep);
       game.creeps[creep.name] = creep;
@@ -922,6 +1052,40 @@ const OUTPOST_ROOMS = ["W12S27", "W13S28"];
 // RoomInvariantTests sweeps W12S28 over, so the plan this scenario profiles
 // is the plan the suite already reasons about.
 const HOME_SPAWN = { x: 12, y: 40 };
+
+// The containers standing in the outposts, as the live server holds them
+// (read off the read-only API at t140,810): one beside each outpost
+// source, on the Seat #128 placed the site on. ADR 0042 makes a standing
+// container the switch that admits an outpost into the economy — until one
+// stands, the room is invisible to every quota but the reserver's — so a
+// scenario without them profiles two rooms whose sources the bundle prices
+// at nothing, which is not the colony that exists.
+//
+// Written down as tiles rather than derived, for the reason the spawn tile
+// above is: which Seat the container landed on is a decision the colony
+// has already made and the server has already built, and re-deriving it
+// here would have the harness profile the room it thinks the colony should
+// have rather than the one it has. Each is range 1 of its own source
+// (`16,45`; `18,4`; `16,7`) and walkable — 18,3 plain, the other two swamp.
+const OUTPOST_CONTAINERS = {
+  W12S27: [{ x: 15, y: 44 }],
+  W13S28: [
+    { x: 18, y: 3 },
+    { x: 15, y: 8 },
+  ],
+};
+
+// How long the colony's reservation on each outpost controller has left.
+// A hold rather than none, because the live colony holds both (ADR 0042's
+// reserver row, #131): an unreserved source is worth five a tick instead
+// of ten, so a scenario with no reservation prices three sources at half
+// and sizes every quota that reads them off the wrong number. Long rather
+// than nearly spent, because the row's body is
+// `ceil((5000 − ticks held) / 600)` CLAIM parts and the world is frozen:
+// a hold about to lapse would have every tick of the run cast the largest
+// body the bank affords, which is a colony in an emergency and not one at
+// work.
+const OUTPOST_RESERVATION_TICKS = 4000;
 
 const capturesDirectory = () =>
   path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "tests", "Core.Tests", "rooms");
@@ -1013,6 +1177,9 @@ function buildOutpostWorld() {
   const homeController = register({
     id: home.controller.id,
     my: true,
+    // The colony's own name, which every reservation below is judged
+    // against — see the stub scenario's controller for why it is here.
+    owner: { username: COLONY_OWNER },
     level: LEVEL,
     ticksToDowngrade: 9000,
     safeModeAvailable: 1,
@@ -1089,9 +1256,16 @@ function buildOutpostWorld() {
   // Vision in both, which is the expensive half: a room we can see is
   // projected entry by entry, and a room we cannot contributes terrain and
   // nothing else (ADR 0004). The worst case is the one worth measuring.
-  // Nothing of ours stands in them — an outpost is a room we do not own —
-  // beyond the creeps working it, and their containers and roads arrive
-  // with ADR 0042 rather than here.
+  // Nothing *owned* stands in them — an outpost is a room we do not own,
+  // so no spawn, no extension and no tower — but the three source
+  // containers do, on the tiles the live server holds them
+  // (`OUTPOST_CONTAINERS`), because a container is nobody's and is the one
+  // structure ADR 0042 puts in an outpost. Roads are still out: ADR 0042
+  // declines to pave an outpost, so the colony has none to model.
+  //
+  // Their controllers carry the colony's own reservation
+  // (`OUTPOST_RESERVATION_TICKS`), which is what doubles those sources and
+  // is the reserver row's whole reason to exist.
   const outpostRooms = outposts.map((capture) => {
     const sources = capture.sources.map((source) =>
       register({
@@ -1108,43 +1282,65 @@ function buildOutpostWorld() {
       ticksToDowngrade: undefined,
       safeModeAvailable: 0,
       safeMode: undefined,
+      reservation: { username: COLONY_OWNER, ticksToEnd: OUTPOST_RESERVATION_TICKS },
       pos: capture.controller.pos,
       activateSafeMode: ok,
     });
+    const containers = (OUTPOST_CONTAINERS[capture.name] ?? []).map((pos, i) =>
+      structure(`${capture.name.toLowerCase()}-cont-${i}`, "container", pos, {
+        store: store({ used: 1500, capacity: CONTAINER_CAPACITY }),
+      })
+    );
     return {
       capture,
       sources,
+      containers,
+      // What a creep may not be stood on here: a source and a controller
+      // are obstacles the engine will not let one share, and nothing else
+      // in the room is — a container is walkable, and standing an Anchor
+      // on one is exactly what a Post is (ADR 0020). Handed to `hireFleet`
+      // and to the crew below as one set per room, so the reserver and the
+      // Anchor the bundle stations here and the hauler crew stood beside
+      // them cannot land on one tile.
+      occupied: new Set([
+        ...sources.map((source) => keyOf(source.pos)),
+        keyOf(capture.controller.pos),
+      ]),
       room: stubRoom({
         name: capture.name,
         controller,
-        findTables: { 105: sources, 108: [], 107: [], 114: [], 103: [], 106: [] },
+        findTables: { 105: sources, 108: [], 107: containers, 114: [], 103: [], 106: [] },
       }),
     };
   });
 
   // --- the fleet ---------------------------------------------------------
-  // The home room's is hired by the bundle itself (`hireFleet`), so its
-  // size is this level's Workforce target and not a number written here.
-  // Beside it the outpost crews: an Anchor on every outpost source and a
-  // hauler per outpost room — a rule over the rooms rather than a count,
-  // so a third outpost would bring its own crew. How many haulers a round
-  // trip fifty tiles long really wants is ADR 0042's arithmetic and not a
-  // number to guess here, so the scenario crews the work it can justify
-  // and the run says how many that came to: twelve at the RCL5 default,
-  // four short of the roughly sixteen ADR 0041 sizes the layered
-  // projection against — and the gap widens as the level climbs, because a
-  // bigger bank buys bigger bodies and the derived home fleet shrinks
-  // (sixteen in this world at RCL3, twelve at RCL5, ten at RCL8).
+  // Hired by the bundle itself (`hireFleet`), so its size is this level's
+  // Workforce target and not a number written here — and since
+  // `Outpost.declared` was filled (#126) that target is the three-room
+  // colony's. Three of its rows leave the spawn room: the reserver stands
+  // beside each outpost's controller and, because the containers below
+  // make those sources Posts, an Anchor stands on each of their containers
+  // (ADR 0042 — one Anchor per Post, wherever the Post lies). `hireFleet`
+  // stations them there rather than at home, so the run times creeps at
+  // work instead of creeps that would spend a frozen world in transit.
   //
-  // They are crewed *after* the home fleet is hired, and cast from the
-  // bodies the bundle itself cast at home — an outpost Anchor is the home
-  // Anchor's body a room over. After, because they would otherwise count
-  // into the Workforce target through the world-wide `Game.creeps` and
-  // shrink the home fleet, and the reason they can is the very defect this
-  // run reports below: with `Outpost.declared` empty the projection cannot
-  // place them, so they are creeps the colony would not have hired
-  // against. Sizing the home fleet off that would bake the defect into the
-  // ms rather than measure beside it.
+  // Beside them one crew the bundle does not hire: a hauler per outpost
+  // *container*. The hauler row itself is hired and stood at the home
+  // spawn, which is the storage end of every round trip; these three are
+  // the far end, which nothing else in a frozen world stands at. It is a
+  // floor and not a quota — ADR 0042 sizes two haulers per container for
+  // an unpaved outpost, and the row's own quota already prices these three
+  // round trips into the home hires — so the count is deliberately under
+  // what the colony runs, and what the bundle would hire *instead of* it
+  // is ADR 0012's arithmetic and not this harness's to guess.
+  //
+  // They are crewed *after* the fleet is hired, and cast from the bodies
+  // the bundle itself cast at home — an outpost hauler is the home
+  // hauler's body a room over. After, because the world-wide `Game.creeps`
+  // is what the Workforce target counts against, so crewing first would
+  // have the bundle hire that much less and the run would measure a fleet
+  // nobody chose the size of.
   const creeps = [];
   const crewOutposts = (bodies, game) => {
     // The home cast is the only source of these bodies, and standing in
@@ -1152,7 +1348,7 @@ function buildOutpostWorld() {
     // unreachable: `hireFleet` records the *first* body per row, and the
     // first cast of any run is ADR 0006's disaster-fallback minimal
     // worker, so the crew would silently become three-part workers while
-    // the report still called them Anchors (ADR 0027).
+    // the report still called them haulers (ADR 0027).
     const partsFor = (row) => {
       const parts = bodies.get(row);
       if (!parts) {
@@ -1163,17 +1359,21 @@ function buildOutpostWorld() {
       }
       return parts;
     };
-    const anchorParts = partsFor("anchor");
     const haulerParts = partsFor("hauler");
     for (const outpost of outpostRooms) {
-      const occupied = new Set([
-        ...outpost.sources.map((s) => keyOf(s.pos)),
-        keyOf(outpost.room.controller.pos),
-      ]);
-      const defs = [
-        ...outpost.sources.map((source) => ({ at: source.pos, parts: anchorParts })),
-        { at: outpost.sources[0].pos, parts: haulerParts },
-      ];
+      // The room's own claimed tiles, the same set `hireFleet` stood the
+      // reserver and the outpost Anchors out of, so the crew cannot be put
+      // on top of one.
+      const occupied = outpost.occupied;
+      // One hauler per standing container and not per room: the haul is a
+      // round trip per source container, and W13S28 holds two of the
+      // three. One is ADR 0042's *paved* number — the unpaved outpost this
+      // world models sizes two — and the floor is deliberate, because the
+      // hired hauler row above already prices these same round trips.
+      const defs = outpost.containers.map((container) => ({
+        at: container.pos,
+        parts: haulerParts,
+      }));
       for (const [i, def] of defs.entries()) {
         const pos = nearestFree(outpost.capture, def.at, occupied);
         occupied.add(keyOf(pos));
@@ -1228,16 +1428,62 @@ function buildOutpostWorld() {
     creeps,
     byId,
     perturb: pavingPerturbation({ spare, structures: homeFinds[107], byId, structure }),
-    // Same rule as the stub scenario's: an Anchor at a source, a hauler at
-    // the spawn, a worker at the controller or a site.
+    // Same rule as the stub scenario's for the two rows that never leave
+    // the home room: a hauler at the spawn — the storage end of every
+    // round trip, wherever the far end lies — and a worker at the
+    // controller or a site.
+    //
+    // The other two rows are cast at home and work a room away, so their
+    // stations carry the room as well as the tile. The reserver's is one
+    // per declared outpost, at that outpost's controller — `nearestFree`
+    // resolves it to a walkable tile at range 1, which on W12S27 is one of
+    // exactly two, both swamp — and taken in `Outpost.declared`'s own
+    // order, which `OUTPOST_ROOMS` above spells, so the first body cast
+    // holds W12S27 and the second W13S28. The Anchor row's is one station
+    // per source, in every room the projection carries and not the spawn
+    // room's alone (ADR 0042): the tick an outpost's container stands, its
+    // source becomes a Post and gains an Anchor of its own, and the row's
+    // quota is one per Post wherever the Post lies. Written as the source
+    // and left to `nearestFree` like the home room's, which on all three
+    // outpost sources resolves to the container's own tile — the Seat the
+    // colony built on, and what standing on a Post means (ADR 0020).
+    //
+    // Standing either row at home instead would put it on a fifty-tile
+    // walk it never finishes in a frozen world, and the run would time
+    // creeps in transit as if they were creeps at work — which is the
+    // world `hireFleet`'s own throw refuses to profile.
     stations: {
-      anchor: home.sources.map((source) => source.pos),
-      hauler: [HOME_SPAWN],
-      worker: [home.controller.pos, ...cluster.sites.map((site) => site.pos)],
+      reserver: outpostRooms.flatMap((outpost) =>
+        stationsIn(outpost.room, outpost.capture, [outpost.room.controller.pos])
+      ),
+      anchor: [
+        ...stationsIn(
+          homeRoom,
+          home,
+          home.sources.map((source) => source.pos)
+        ),
+        ...outpostRooms.flatMap((outpost) =>
+          stationsIn(
+            outpost.room,
+            outpost.capture,
+            outpost.sources.map((source) => source.pos)
+          )
+        ),
+      ],
+      hauler: stationsIn(homeRoom, home, [HOME_SPAWN]),
+      worker: stationsIn(homeRoom, home, [
+        home.controller.pos,
+        ...cluster.sites.map((site) => site.pos),
+      ]),
     },
+    // One claimed-tile set per room of the world: the home room's is what
+    // furnishing it collected, each outpost's is the obstacles it holds.
+    claimed: new Map([
+      [home.name, taken],
+      ...outpostRooms.map((outpost) => [outpost.room.name, outpost.occupied]),
+    ]),
     grid: home,
     homeRoom,
-    taken,
     sourcePositions: home.sources.map((source) => source.pos),
     controllerPos: home.controller.pos,
     clustered: cluster.built.concat(cluster.sites).map((s) => s.pos),
@@ -1252,8 +1498,13 @@ function buildOutpostWorld() {
       ...outpostRooms.map(
         (outpost) =>
           `  ${outpost.capture.name} outpost  ${outpost.sources.length} source` +
-          `${outpost.sources.length === 1 ? "" : "s"}, controller, vision`
+          `${outpost.sources.length === 1 ? "" : "s"}, controller reserved ` +
+          `${OUTPOST_RESERVATION_TICKS} ticks, ` +
+          `${plural(outpost.containers.length, "container")}, vision`
       ),
+      `  ${plural(reserverStations(creeps).length, "reserver")} beside the outpost ` +
+        `controllers at ${reserverStations(creeps).join(", ") || "no station"}, one per ` +
+        "declared outpost in Outpost.declared's own order",
     ],
     spareTiles: spare.length,
   };
@@ -1565,10 +1816,21 @@ const { loop } = createRequire(import.meta.url)(bundle);
 // count is written down anywhere in this file (#144).
 const { hired, hireTicks, bodies } = hireFleet(world, game, loop);
 if (world.crew) world.crew(bodies, game);
+// Where the hired fleet stands, which since #163 is no longer the home
+// room for every body: the reserver row and the outposts' own Anchors are
+// cast by the home spawn and stationed a room away (ADR 0042), so a line
+// that read every hire as the home room's would over-count it by exactly
+// the rows that left. The crew stands outside the count entirely — it is
+// not hired — and is named after it.
+const homeHires = world.creeps.filter((creep) => creep.room.name === world.homeRoom.name).length;
+const outpostHires = hired - homeHires;
 console.log(
-  `hired ${hired} creep${hired === 1 ? "" : "s"} into ${world.homeRoom.name} at RCL${LEVEL} ` +
+  `hired ${hired} creep${hired === 1 ? "" : "s"} for ${world.homeRoom.name} at RCL${LEVEL} ` +
     `off a ${FURNITURE.bank} bank over ${hireTicks} ticks, by the bundle's own SpawnCreep ` +
     "intents" +
+    (outpostHires
+      ? ` (${homeHires} standing at home, ${outpostHires} stationed in the outposts)`
+      : "") +
     (world.creeps.length > hired ? `, plus ${world.creeps.length - hired} outpost crew` : "")
 );
 
@@ -1707,20 +1969,22 @@ if (!Array.isArray(cpuLine) || cpuLine.length === 0) {
   );
 }
 
-// What the bundle actually projected, against what the world holds. With
-// `Outpost.declared` empty (#124 landed it so, ADR 0042/#126 fills it) the
-// scan set is the spawn room alone, so an outpost run measures the world's
-// rooms and the home room's projection — the harness is ready for the
-// declaration, and the numbers are not two rooms' yet. Said out loud rather
-// than left to be inferred from a read count nobody compares.
+// What the bundle actually projected, against what the world holds. The
+// scan set is the spawn room plus every declared outpost the stand-down
+// gate leaves standing (ADR 0041, ADR 0043), so with the constant filled
+// (#126) an outpost run reads all three of its rooms and this says
+// nothing. It speaks when a room the world holds is left out of the scan
+// — a declaration removed, or a stand-down shutting one — because those
+// ms are then fewer rooms' projection than the world in front of it, and
+// nothing else in the report would say so.
 const projected = wallCounts.filter(([name]) => terrainReads.get(name) > 0).map(([name]) => name);
 const unprojected = worldRooms.filter((name) => !projected.includes(name));
 if (unprojected.length) {
   console.log(
     `projection: the bundle read terrain for ${projected.join(", ") || "no room"} and never for ` +
-      `${unprojected.join(", ")} — those rooms are in the world but outside the scan set, ` +
-      "which is `Outpost.declared` standing empty (ADR 0041 ships the capability, ADR 0042 " +
-      "fills the constant). These ms are one room's projection, not the layered one's."
+      `${unprojected.join(", ")} — those rooms are in the world but outside the scan set, which ` +
+      "is `Outpost.declared` less whatever ADR 0043's stand-down is withholding. These ms are " +
+      "the projected rooms' and not the whole world's."
   );
 
   // And the creeps standing in those rooms are worse than unmeasured, so
