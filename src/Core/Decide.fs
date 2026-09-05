@@ -630,62 +630,75 @@ let private sourceOutputOf (snapshot: Snapshot) atlas (sourceId: string) : int o
 /// price hires nobody at all, the same answer unreachable geometry gets
 /// (ADR 0004).
 ///
-/// The colony's own room and no other (ADR 0041). The kind census spans
-/// every room the projection carries, so the containers are read out of
-/// the home layer to pick the room, and the source judgement is then made
-/// inside it. Both halves have to be home: the round trip is priced by
-/// `Atlas.haulRoundTripTicks`, which floods the home room's grid, so an
-/// outpost container handed to it would be walked over home terrain and
-/// hire a fleet for a haul nobody makes. The honest cross-room price is a
-/// minimum over the Seam band, which #123 landed inside the Atlas and did
-/// *not* widen `Atlas.haulRoundTripTicks` to use — that flood is still one
-/// room's, by its own stated decision. Until it is widened, and until the
-/// outpost's own quota (the economics ADR 0042 owns) lands, a container
-/// the home room does not place hires nobody, which is ADR 0004's answer
-/// for geometry this query cannot price. That is also why this rule can
-/// only ever read the *home* room's control entry, which is what makes
-/// signing that one entry (`censusSignature`) the whole of what the memo
-/// owes.
+/// Every room the projection carries, and not the colony's own alone
+/// (ADR 0042): an outpost's container ships its source's energy home
+/// across a border, so it hires haul capacity exactly as a home
+/// container does, and the round trip it hires against is
+/// `Atlas.haulRoundTripTicks` joined on the Seam band — the same
+/// arithmetic #123 landed for the walk and the ranking price, run once
+/// per leg because the loaded body and the empty one are two journeys
+/// (ADR 0029, ADR 0030). ADR 0042 costs that trip at 138–168 ticks
+/// unpaved, so an outpost container hires two haulers where a home one
+/// hires one: the number is large because the haul is long.
+///
+/// The room is the container's own throughout, carried beside its tile
+/// rather than assumed, because a `Pos` names none (ADR 0041): the source
+/// judgement is made inside the container's room, so a home container
+/// beside an outpost source's *coordinates* serves nothing, and the round
+/// trip is flooded from that room's grid, so nothing is ever walked over
+/// terrain it does not stand on. A container the projection places in no
+/// room at all is priced by nothing and hires nobody, which is ADR 0004's
+/// answer for geometry this query cannot see — as is a Seam band the body
+/// cannot pay a crossing on.
+///
+/// Reading a second room's `RoomControl` entry is what the census
+/// signature had to widen for, and did (`censusSignature`): every
+/// projected room's held rate is signed, because any of them can hold the
+/// container this fold prices next tick.
 let private haulerQuota (snapshot: Snapshot) atlas : int =
-    let home = SpatialInfo.homeName snapshot.Spatial
-    let placed = (SpatialInfo.layerOf snapshot.Spatial home).TargetPositions
-
-    // Each source container beside the output of the rock it serves: the
-    // tile alone cannot be priced, so a tile the fold cannot resolve to a
-    // source, or to a source whose room it cannot price, leaves the list
+    // Each source container beside the room it stands in and the output of
+    // the rock it serves: the tile alone cannot be priced, so a container
+    // the projection places in no room, or one the fold cannot resolve to
+    // a source, or to a source whose room it cannot price, leaves the list
     // here rather than entering the sum at some default rate.
     let sourceContainers =
         snapshot.Spatial.TargetKinds
         |> Map.toList
         |> List.choose (fun (id, kind) ->
             if kind = Structure BuiltKind.Container then
-                Map.tryFind id placed
+                SpatialInfo.placementOf snapshot.Spatial id
             else
                 None)
-        |> List.choose (fun tile ->
-            sourceContainerServes snapshot home tile
+        |> List.choose (fun (room, tile) ->
+            sourceContainerServes snapshot room tile
             |> Option.bind (sourceOutputOf snapshot atlas)
-            |> Option.map (fun output -> tile, output))
+            |> Option.map (fun output -> room, tile, output))
 
+    // The sink's room is the projection's and never `SpawnInfo.RoomName`:
+    // the two agree on the live colony and a fixture that names one and
+    // files the other would flood an empty grid (ADR 0041). The bank is
+    // still the spawn's own room's, which is the name the engine's
+    // energyCapacityAvailable is keyed by.
     let spawns =
         snapshot.Spawns
         |> List.choose (fun s ->
-            Atlas.positionOf atlas s.Id |> Option.map (fun pos -> s.RoomName, pos))
+            SpatialInfo.placementOf snapshot.Spatial s.Id
+            |> Option.map (fun (room, pos) -> s.RoomName, room, pos))
 
     sourceContainers
-    |> List.sumBy (fun (tile, output) ->
+    |> List.sumBy (fun (room, tile, output) ->
         spawns
-        |> List.choose (fun (roomName, spawnPos) ->
+        |> List.choose (fun (bankRoom, spawnRoom, spawnPos) ->
             let bank =
                 snapshot.RoomEnergy
-                |> Map.tryFind roomName
+                |> Map.tryFind bankRoom
                 |> Option.defaultValue { Available = 0; Capacity = 0 }
 
             let body = bodyFor haulerPattern bank.Capacity
 
             let capacity = (body |> List.filter ((=) Carry) |> List.length) * carryPartCapacity
 
-            Atlas.haulRoundTripTicks atlas body tile spawnPos
+            Atlas.haulRoundTripTicks atlas body room tile spawnRoom spawnPos
             |> Option.map (fun ticks -> ceilDiv (ticks * output) capacity))
         |> function
             | [] -> 0
@@ -925,9 +938,17 @@ let private planSpawns
 
         // The specialist rows' quota rules (ADR 0006, ADR 0012): one Anchor
         // per Post, haulers per the throughput arithmetic — the hauler quota
-        // arrives memoised on the census signature (ADR 0017), its input set
-        // a subset of the Layout's. Both are addends of the target itself —
-        // inside it by construction, never on top of it.
+        // arrives memoised on the census signature (ADR 0017). That
+        // signature signs the *union* of what the Layout and the quota read,
+        // and since #149 neither input set contains the other: the quota
+        // folds every projected room's containers and reads every projected
+        // room's held rate (ADR 0042), where the Layout reads the home
+        // room's census, level and name. ADR 0017's stated basis — the
+        // quota's inputs "a subset of the Layout's" — is what stopped
+        // holding, and the memo never rested on it: unchanged, the signature
+        // still proves both identical; moved, it may have moved for only one
+        // of them. Both quotas are addends of the target itself — inside it
+        // by construction, never on top of it.
         let anchorQuota = Atlas.posts atlas |> Set.count
         let target = workforceTarget snapshot atlas anchorQuota haulerQuota
 
@@ -1673,26 +1694,29 @@ let private planLayout
 /// could have been created at all.
 ///
 /// **Recomputed every tick, and deliberately not ridden on the plan
-/// memo.** The memo's signature is one room's by construction (ADR 0017 as
-/// ADR 0041 narrowed it, `censusSignature`) and every input this rule
-/// reads is a second room's — the outpost's terrain, its declared source
-/// tiles, its Seam band and its container census. Riding the memo would
-/// mean naming the room in every census entry and covering the outpost
-/// layers, which throws the whole Layout and the whole spawn-walk table
-/// (ADR 0032) away whenever an outpost structure moves, for geometry no
-/// other memo entry reads. What that would buy is one flood a room a tick:
-/// the walk out to the Seam is memoised inside the Atlas on the room pair,
-/// so every Seat of every source in one room shares one flood
-/// (`Atlas.seamWalkTicks`), and this is not the cost class that made the
-/// Layout worth memoising — the Layout routes trunks and orders 2,500
-/// tiles. Measured on `npm run profile -- --scenario outpost --level 5`
+/// memo.** Since #149 the signature does name the room in every standing
+/// entry and does span the outpost layers — the hauler quota's price, and
+/// it has been paid (`censusSignature`). What it still does not sign is
+/// the rest of what this rule reads: the outpost's terrain, its declared
+/// source tiles, its Seam band, and the *pending* census this rule's own
+/// site lands in, which stays the home layer's alone. Riding the memo
+/// would mean signing all four, and the pending half is the one that
+/// costs — the whole Layout and the whole spawn-walk table (ADR 0032)
+/// thrown away the tick an outpost site appears, for geometry nothing
+/// reads while it is still a site. One throw-away and not two: the tick
+/// it *completes* is paid either way now, because the container it
+/// becomes is a standing structure the census spans (`censusSignature`)
+/// and the hauler quota is the memo entry that prices it. What signing
+/// the site would buy is one flood a room a tick: the walk out to the
+/// Seam is memoised inside the Atlas on the room pair, so every Seat of
+/// every source in one room shares one flood (`Atlas.seamWalkTicks`),
+/// and this is not the cost class that made the Layout worth memoising
+/// — the Layout routes trunks and orders 2,500 tiles. Measured on `npm run profile -- --scenario outpost --level 5`
 /// (two outposts, three rooms, RCL5, the level named so the figure does
 /// not silently re-baseline when the default moves with the colony):
 /// **4.84 ms a tick without this rule and 5.35 with it**, against ADR
 /// 0041's condition to revisit any of this — a mean tick above 50 ms or a
-/// single tick above 80. The tick the *quota* reads an outpost container
-/// is the tick the signature has to widen anyway, and it is that ticket's
-/// price to pay.
+/// single tick above 80.
 ///
 /// Recomputing also keeps the deferral honest with no signature at all:
 /// the tick a container becomes *visible* in an outpost, this stops
@@ -2948,8 +2972,9 @@ let private assignedTasks (tasks: Task list) (assignments: Assignments) : Map<st
 /// The census signature (ADR 0017): a string over exactly the inputs the
 /// census-derived plans read — the (kind, position) census of standing
 /// structures, the (kind, position) census of pending sites, the
-/// controller level, the room name, and who holds that room. Any one input
-/// moving moves the signature; everything else a Snapshot carries —
+/// controller level, the home room's name, and who holds each room the
+/// projection carries. Any one input moving moves the signature;
+/// everything else a Snapshot carries —
 /// creeps, stores, hits, dropped piles, hostiles, banked energy, the
 /// tick — is invisible to it.
 ///
@@ -2967,53 +2992,87 @@ let private assignedTasks (tasks: Task list) (assignments: Assignments) : Map<st
 /// reservation's `TicksToEnd`, which decays every tick and would throw
 /// the Layout and the walk table away on every one of them.
 ///
-/// One entry is enough because the quota can reach exactly one room: it
-/// folds the home layer's containers and resolves each to a source
-/// standing in that same room, so home's is the only control entry any
-/// memoised value reads. The tick a memo entry prices a second room's
-/// container is the tick this has to widen with it, on the same terms as
-/// the position join below.
+/// **It signs every projected room, and this is the tick it widened to.**
+/// ADR 0041 narrowed it to the home layer while everything the memo
+/// carried was that one room's; ADR 0042's hauler quota is the entry that
+/// reads a second one, folding the containers of *every* room the
+/// projection carries and pricing each at the rate its own room is held
+/// at. Both halves of that reading are signed here, and the widening is a
+/// deliberate change to `PlanMemo.Signature` (#116's forward note), not a
+/// break of any byte-for-byte promise:
 ///
-/// It signs **one room**, and since ADR 0041 it says which: the home
-/// entry of the layer, the room `RoomName` names and `SpatialInfo.homeName`
-/// spells the empty string when it names none. The single `RoomName` no
-/// longer has a colony to outgrow, because everything the memo carries is
-/// that one room's — the Layout is anchored in it and stamps it onto every
-/// site, the spawn walks flood its grid alone (ADR 0032), and the hauler
-/// quota prices its containers alone. A second room's structures entering
-/// the kind census must therefore leave this string alone: they move
-/// nothing the memo holds, and a signature that flinched at them would
-/// throw the whole Layout and the whole walk table away for geometry no
-/// entry of the memo reads. What makes them *not* enter is the position
-/// join — the census is (kind, position), and the position is read out of
-/// the home room's layer, so an id the home room does not place carries no
-/// entry. The tick that a memo entry does read a second room — the outpost
-/// container plan and its quota (ADR 0042) — is the tick this has to
-/// widen, and widening it means naming the room in the entry, because two
-/// rooms hold the same coordinates and `Container@16,44` in either would
-/// otherwise be the same census.
+/// - **The standing census spans every room, and names the room in the
+///   entry.** Two rooms hold the same coordinates, so `Container@16,44`
+///   in either would otherwise be the same census entry, and an outpost
+///   container standing up would leave the string untouched while the
+///   quota it hires moved. Every *kind* and not the containers alone,
+///   because the quota reads more of an outpost than its containers: the
+///   round trip it prices them by floods that room's step-weight grid,
+///   and `Snapshot.projectVisible` lays `Roads` and `Obstacles` out of
+///   the same every-owner `findStructures` array the kind census comes
+///   from. A road paved along the haul lane makes the trip cheaper and
+///   an invader core standing on it makes it dearer or impossible, so a
+///   census narrowed to `Container` outside home would hand back a quota
+///   priced on a grid that has moved — ADR 0017's signature gap, in the
+///   one room it can still happen in. The price of signing them whole is
+///   a Layout and walk-table recompute on a hostile structure appearing
+///   or decaying in an outpost, which is rare and is bounded by the
+///   profile figures the outpost container plan records.
+/// - **The pending census is still the home layer's alone**, because
+///   nothing the memo carries reads a site outside it: the Layout is
+///   anchored at home and stamps that room onto every site it plans, and
+///   the outpost's own container plan is derived fresh every tick and
+///   rides no memo entry at all (ADR 0042) — which is the reason it may
+///   go unsigned. It is written as a join of its own rather than as a
+///   filter, so which room each half of the census reaches is a thing a
+///   reader can see rather than infer. Both halves name the room, so the
+///   entries stay one format.
+/// - **The held rate is signed per projected room**, not for home alone.
+///   Which rooms the quota reaches is itself derived from the census —
+///   whichever ones place a source container this tick — so a signature
+///   that tried to sign only those would have to run the fold it exists
+///   to guard. The projected rooms are the rooms a container can be
+///   folded out of at all, which makes them the honest key set, and a
+///   room whose rate moves while it holds no container costs one Layout
+///   recompute: a reservation is won or lost rarely, and a wrong quota
+///   handed back is wrong every tick until one does.
+///
+/// The room name stays out front as well as inside the entries, because
+/// it is `SpatialInfo.homeName` that decides which layer the Layout is
+/// anchored in and which grid the spawn walks flood (ADR 0032) — a
+/// projection that renamed its home room while carrying the same geometry
+/// moves both, and the entries alone would not say so.
 let censusSignature (snapshot: Snapshot) : string =
     let spatial = snapshot.Spatial
     let home = SpatialInfo.homeName spatial
-    let placed = (SpatialInfo.layerOf spatial home).TargetPositions
 
-    let census select =
+    let census placement select =
         spatial.TargetKinds
         |> Map.toList
         |> List.choose (fun (id, kind) ->
             select kind
             |> Option.bind (fun (built: BuiltKind) ->
-                Map.tryFind id placed |> Option.map (fun pos -> $"{built}@{pos.X},{pos.Y}")))
+                placement id
+                |> Option.map (fun (room, pos) -> $"{built}@{room}:{pos.X},{pos.Y}")))
         |> List.sort
         |> String.concat ";"
 
+    // The two joins, and which room each reaches. A standing structure is
+    // read wherever the projection places it; a pending site is read in
+    // the home layer alone.
+    let anywhere id = SpatialInfo.placementOf spatial id
+
+    let atHome id =
+        Map.tryFind id (SpatialInfo.layerOf spatial home).TargetPositions
+        |> Option.map (fun pos -> home, pos)
+
     let standing =
-        census (function
+        census anywhere (function
             | Structure kind -> Some kind
             | _ -> None)
 
     let pending =
-        census (function
+        census atHome (function
             | Site kind -> Some kind
             | _ -> None)
 
@@ -3022,13 +3081,23 @@ let censusSignature (snapshot: Snapshot) : string =
         |> Option.map (fun c -> string c.Level)
         |> Option.defaultValue ""
 
-    // The rate the home room's sources are priced at this tick, the empty
-    // string where vision answered for no room at all — the third answer
-    // the quota gives, and a different one from either rate (ADR 0004).
+    // The rate each projected room's sources are priced at this tick, in
+    // room-name order, and the empty rate for a room vision answered for
+    // not at all — the third answer the quota gives, and a different one
+    // from either rate (ADR 0004). The room is named beside its rate so a
+    // room joining or leaving the projection moves the string even when
+    // the rates it carries happen to line up.
     let held =
-        Map.tryFind home snapshot.RoomControl
-        |> Option.map (heldRateOf >> string)
-        |> Option.defaultValue ""
+        spatial.Rooms
+        |> Map.toList
+        |> List.map (fun (room, _) ->
+            let rate =
+                Map.tryFind room snapshot.RoomControl
+                |> Option.map (heldRateOf >> string)
+                |> Option.defaultValue ""
+
+            $"{room}:{rate}")
+        |> String.concat ","
 
     $"{home}|{level}|{held}|{standing}|{pending}"
 

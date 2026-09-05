@@ -1772,10 +1772,20 @@ let private farFlood (atlas: Atlas) (pricing: Pricing) (creep: string) (room: st
 /// A cross-room price, joined on the Seam: the smallest, over the whole
 /// band between the two rooms, of *walk to the exit tile* + *the exit
 /// tile's own price* + *walk in from the tile it lands on* (ADR 0041,
-/// narrowed by #123). Each leg is a single-room flood on the tables
-/// already laid — the near one out of the creep, the far one into the
-/// Task — so no flood ever leaves its room and the join is a minimum over
-/// thirty-odd additions rather than over thirty-odd floods.
+/// narrowed by #123). Each leg is a single-room flood the caller has
+/// already run — so no flood ever leaves its room and the join is a
+/// minimum over thirty-odd additions rather than over thirty-odd floods.
+///
+/// The join itself and not a second one (ADR 0030). Two callers reach it,
+/// and they differ in nothing but which two floods they hand it: a creep
+/// priced toward a Task (`pricedAcross`) floods out of the creep and into
+/// that Task's Work Area, and the hauler quota's round trip
+/// (`haulRoundTripTicks`) floods out of a container and into the sink's
+/// approach. What the two floods owe this rule is fixed: the near one is
+/// `fromRoom`'s and charges every tile it enters, the far one is the
+/// other room's and is run *into* its goals with each goal seeded at its
+/// own entry cost (`floodPricedInto`). Hand it a far leg flooded the
+/// ordinary way round and the sum below is short by a tile, every time.
 ///
 /// **The convention, spelled out**, because the two legs are read from
 /// opposite ends and a reader has to know which tiles each charges. A step
@@ -1803,9 +1813,8 @@ let private farFlood (atlas: Atlas) (pricing: Pricing) (creep: string) (room: st
 ///
 /// Total (ADR 0004): a band with no crossing the body can pay for, a near
 /// side no ground of this room reaches, and a far side whose landing tile
-/// opens onto nothing all answer with no price at all — the same answer an
-/// unreachable Work Area in the creep's own room gets, which is the Task
-/// being inapplicable to this creep.
+/// opens onto nothing all answer with no price at all — the same answer
+/// unreachable geometry gets inside one room.
 ///
 /// The winning exit tile comes back beside the price, and that is #142's
 /// whole decision: the mover aims a cross-room creep at the near side of
@@ -1816,6 +1825,45 @@ let private farFlood (atlas: Atlas) (pricing: Pricing) (creep: string) (room: st
 /// while priced at another. The minimum is over `(sum, exit)` pairs, so the
 /// price is the same number it always was and the tie falls to the lowest
 /// (X, Y) exit, exactly as every other tie in the Atlas falls.
+let private joinedAcross
+    (atlas: Atlas)
+    (pricing: Pricing)
+    (factor: FatigueFactor)
+    (fromRoom: string)
+    (band: (Pos * Pos) list)
+    (near: int[])
+    (far: int[])
+    : (int * Pos) option =
+    let reached (dist: int[]) tiles =
+        tiles
+        |> List.choose (fun tile ->
+            let d = dist.[indexOf tile]
+            if d = unreached then None else Some d)
+        |> function
+            | [] -> None
+            | costs -> Some(List.min costs)
+
+    band
+    |> List.choose (fun (exitTile, landing) ->
+        match
+            reached near (besideExit exitTile),
+            exitPrice atlas pricing factor fromRoom exitTile,
+            reached far (besideExit landing)
+        with
+        | Some approach, Some crossing, Some departure ->
+            Some(approach + crossing + departure, exitTile)
+        | _ -> None)
+    |> function
+        | [] -> None
+        | crossings -> Some(List.min crossings)
+
+/// A creep's cross-room price toward a Task: the join above over this
+/// creep's own memoised flood and the Task's far leg, the one flooded out
+/// of the target and shared colony-wide, so a second creep pricing the
+/// same Task across the same border pays for no second flood (ADR 0041).
+/// The band is read before either flood is forced, because a pair of
+/// rooms with no Seam between them has no price to pay for and no flood
+/// to run for it (ADR 0004).
 let private pricedAcross
     (atlas: Atlas)
     (pricing: Pricing)
@@ -1828,32 +1876,10 @@ let private pricedAcross
     match seams atlas creepRoom targetRoom with
     | [] -> None
     | band ->
-        let factor = factorOf atlas creep
         let near, _ = flood atlas pricing creepRoom creep from
         let far = farFlood atlas pricing creep targetRoom task
 
-        let reached (dist: int[]) tiles =
-            tiles
-            |> List.choose (fun tile ->
-                let d = dist.[indexOf tile]
-                if d = unreached then None else Some d)
-            |> function
-                | [] -> None
-                | costs -> Some(List.min costs)
-
-        band
-        |> List.choose (fun (exitTile, landing) ->
-            match
-                reached near (besideExit exitTile),
-                exitPrice atlas pricing factor creepRoom exitTile,
-                reached far (besideExit landing)
-            with
-            | Some approach, Some crossing, Some departure ->
-                Some(approach + crossing + departure, exitTile)
-            | _ -> None)
-        |> function
-            | [] -> None
-            | crossings -> Some(List.min crossings)
+        joinedAcross atlas pricing (factorOf atlas creep) creepRoom band near far
 
 /// The cheapest path from a creep to a set of tiles under one pricing —
 /// the shape travel cost and the walk share, so the two can disagree on
@@ -2184,27 +2210,72 @@ let firstStepIgnoringTraffic
 /// ticks, no tile below one — so the two simply sum: there is no trailing
 /// conversion, and one rule turns units into ticks for the whole colony.
 /// None when no goal is reachable — unpriceable geometry hires nobody
-/// (ADR 0004). Both tiles are read in the colony's own room: they are bare
-/// `Pos`es with no room on them (ADR 0041), and a round trip that left the
-/// room would be two legs joined at a Seam, which is #123's arithmetic and
-/// not a flood.
-let haulRoundTripTicks (atlas: Atlas) (body: BodyPart list) (from: Pos) (sink: Pos) : int option =
+/// (ADR 0004).
+///
+/// A `Pos` carries no room (ADR 0041), so both rooms ride on the API, and
+/// an outpost's container is priced across the border rather than walked
+/// over home terrain (ADR 0042): each leg is then `joinedAcross`, the same
+/// minimum over the same Seam band the Matcher's ranking price and the
+/// mover's walk are read off, and never a second cross-room arithmetic of
+/// this rule's own (ADR 0030). Same room, the flood and the tiles are the
+/// ones this rule always ran, byte for byte.
+///
+/// **Two crossings and not one**, because the two legs are two journeys
+/// (ADR 0029): the loaded factor and the empty one price a swamp exit
+/// differently, and a body heavy enough to pay five ticks a swamp tile
+/// loaded and one empty can be right to cross at one Seam full and
+/// another empty. Each leg therefore runs both of its own floods under its
+/// own factor and takes its own minimum over the whole band; the two share
+/// nothing but the band itself.
+///
+/// Both legs are flooded out of the container and in to the sink, and the
+/// leg *back* is the same direction priced on the empty body — the rule
+/// ADR 0012 has always had, kept verbatim here. Reversing the return leg
+/// would price one round trip by two joins: the exit charged would be the
+/// sink room's rather than the container room's, so the same haul over the
+/// same tiles would answer two numbers depending on which way it was read.
+///
+/// It runs its own floods rather than the tick's memoised ones, exactly as
+/// it always has — its origins are containers and its goals a sink's
+/// approach, so it shares a key with nothing here — and it is itself
+/// memoised where it counts, on the census signature that gates the hauler
+/// quota (ADR 0017). A container in a second room costs this rule two more
+/// floods on the ticks the census moves and none on any other.
+let haulRoundTripTicks
+    (atlas: Atlas)
+    (body: BodyPart list)
+    (fromRoom: string)
+    (from: Pos)
+    (sinkRoom: string)
+    (sink: Pos)
+    : int option =
     let count part =
         body |> List.filter ((=) part) |> List.length
 
-    let goals = adjacentWalkable atlas sink
-    let weights = weightsOf atlas atlas.Home
+    let goals = adjacentWalkableIn atlas sinkRoom sink
+    let weights = weightsOf atlas fromRoom
 
-    let legTicks factor =
-        let dist, _ = walkFloodFrom weights factor from
-
-        goals
-        |> List.choose (fun goal ->
-            let d = dist.[indexOf goal]
+    let nearest (dist: int[]) tiles =
+        tiles
+        |> List.choose (fun tile ->
+            let d = dist.[indexOf tile]
             if d = unreached then None else Some d)
         |> function
             | [] -> None
             | costs -> Some(List.min costs)
+
+    let legTicks factor =
+        if fromRoom = sinkRoom then
+            let dist, _ = walkFloodFrom weights factor from
+            nearest dist goals
+        else
+            match seams atlas fromRoom sinkRoom with
+            | [] -> None
+            | band ->
+                let near, _ = walkFloodFrom weights factor from
+                let far = floodPricedInto (weightsOf atlas sinkRoom) noTraffic factor Walk goals
+
+                joinedAcross atlas Walk factor fromRoom band near far |> Option.map fst
 
     let loaded =
         legTicks

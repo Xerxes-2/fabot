@@ -350,12 +350,19 @@ module SpatialInfo =
 
     /// The room the projection files a target id under, with its tile
     /// there. The id-to-room join on the projection itself, beside the one
-    /// the Atlas precomputes (`TargetAt`) for the readers that hold an
-    /// Atlas: a target id is unique across the world, so the layer holding
-    /// it *is* the room it stands in, and a reader that has only a
-    /// Snapshot — the Planner, which is handed no Atlas — resolves it
-    /// here. None for a target the projection does not place, which
-    /// classifies nothing and blocks nothing (ADR 0004).
+    /// the Atlas precomputes (`TargetAt`): a target id is unique across
+    /// the world, so the layer holding it *is* the room it stands in, and
+    /// the two answer alike because the Atlas fills `TargetAt` by walking
+    /// these same layers. Which one a reader spells is therefore about
+    /// what it is answerable to, not about what it holds. A reader handed
+    /// no Atlas — the Planner, and `censusSignature` — has only this one.
+    /// A reader *guarded* by that signature spells it this way too, even
+    /// holding an Atlas: the hauler quota resolves its containers here so
+    /// that the join the memo signs and the join the memo's value reads
+    /// are the same line, rather than two spellings kept in step by hand.
+    /// Everything else — a Task priced against the Atlas's own tables —
+    /// takes the precomputed join. None for a target the projection does
+    /// not place, which classifies nothing and blocks nothing (ADR 0004).
     ///
     /// Deterministic under a collision that cannot happen: `Map.tryPick`
     /// walks the rooms in name order, and one id stands in one room.

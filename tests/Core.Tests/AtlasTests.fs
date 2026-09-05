@@ -2046,6 +2046,14 @@ let haulRoundTripTests =
                 |> snapshotWith []
                 |> ofSnapshot
 
+            // Both tiles are the colony's own room's, and these fixtures
+            // file it under the empty name (`SpatialInfo.homeName`): since
+            // #149 the two rooms ride on the API, because a `Pos` names
+            // none (ADR 0041). Same room in and out, this is the flood the
+            // rule always ran.
+            let atHome atlas body from sink =
+                haulRoundTripTicks atlas body "" from "" sink
+
             test "the loaded leg out and the empty leg back sum to whole ticks" {
                 // Each leg is a walk (ADR 0029). [Carry;Carry;Move]
                 // loaded on plain: two full Carry x weight 2 over one Move
@@ -2054,7 +2062,7 @@ let haulRoundTripTests =
                 // Nine steps out at 2 and nine back at 1 = 27 ticks, with
                 // nothing halved on the total.
                 Expect.equal
-                    (haulRoundTripTicks
+                    (atHome
                         (corridorWith Set.empty [])
                         [ Carry; Carry; Move ]
                         { X = 10; Y = 10 }
@@ -2068,7 +2076,7 @@ let haulRoundTripTests =
                 // tick; the empty leg already rides the floor. Nine steps
                 // out and nine back at a tick apiece = 18.
                 Expect.equal
-                    (haulRoundTripTicks
+                    (atHome
                         (corridorWith (Set.ofList [ for x in 11..19 -> { X = x; Y = 10 } ]) [])
                         [ Carry; Carry; Move ]
                         { X = 10; Y = 10 }
@@ -2082,7 +2090,7 @@ let haulRoundTripTests =
                 // corridor with a creep parked mid-lane prices identically
                 // — no occupancy surcharge.
                 Expect.equal
-                    (haulRoundTripTicks
+                    (atHome
                         (corridorWith Set.empty [ "w", { X = 15; Y = 10 } ])
                         [ Carry; Carry; Move ]
                         { X = 10; Y = 10 }
@@ -2107,7 +2115,7 @@ let haulRoundTripTests =
                         [ Carry; Move; Move; Move ]
                     ] do
                     match
-                        haulRoundTripTicks
+                        atHome
                             (corridorWith Set.empty [])
                             body
                             { X = 10; Y = 10 }
@@ -2138,11 +2146,7 @@ let haulRoundTripTests =
                     |> ofSnapshot
 
                 Expect.equal
-                    (haulRoundTripTicks
-                        gapped
-                        [ Carry; Carry; Move ]
-                        { X = 10; Y = 10 }
-                        { X = 20; Y = 10 })
+                    (atHome gapped [ Carry; Carry; Move ] { X = 10; Y = 10 } { X = 20; Y = 10 })
                     None
                     "unpriceable geometry hires nobody"
             }
@@ -3673,6 +3677,126 @@ let crossRoomTests =
                     (walkTicks posted "w" (Harvest "src-out"))
                     (Some 18)
                     "and the light body ignores the Post, over the same border on the same tick"
+            }
+        ]
+
+/// The hauler the haul below is priced for, and the body the two creeps
+/// standing on its container are cast from: `fatigueFactorOf` reads a
+/// living creep's load, so a full one carries the round trip's loaded
+/// factor and an empty one its empty factor, exactly — which is what lets
+/// the quota's legs be pinned against the Matcher's own walk.
+let private haulerBody = [ Carry; Carry; Move ]
+
+/// The haul the outpost's container makes: the container standing at
+/// (25,41) of the outpost's corridor, the spawn structure eleven tiles
+/// down the home room's at (25,10). The spawn is an obstacle, so the only
+/// tile a transfer reaches it from on the side the haul arrives on is
+/// (25,9); the tile behind it is ground the corridor never opens onto from
+/// the north. The two haulers stand on the container, one full and one
+/// empty; standing creeps price nothing here, the round trip and the walk
+/// alike being traffic-blind (ADR 0029). The rings are the caller's, so a
+/// case can wall a crossing off or lay swamp on it.
+let private haulAcross homeRing outpostRing =
+    northOf
+        { RoomLayer.empty with
+            Terrain = Map.ofList (plainLine [ for y in 1..48 -> { X = 25; Y = y } ])
+            TargetPositions = Map.ofList [ "spawn-1", { X = 25; Y = 10 } ]
+            Obstacles = Set.singleton { X = 25; Y = 10 }
+        }
+        homeRing
+        { RoomLayer.empty with
+            Terrain = Map.ofList (plainLine [ for y in 41..48 -> { X = 25; Y = y } ])
+            TargetPositions = Map.ofList [ "can-out", { X = 25; Y = 41 } ]
+            CreepPositions =
+                Map.ofList [ "loaded", { X = 25; Y = 41 }; "empty", { X = 25; Y = 41 } ]
+        }
+        outpostRing
+        [
+            "spawn-1", Structure BuiltKind.Spawn
+            "can-out", Structure BuiltKind.Container
+        ]
+        [ creepWith "loaded" 100 haulerBody; creepWith "empty" 0 haulerBody ]
+
+/// The one haul every case below prices: the outpost's container to the
+/// home room's spawn, rooms named on the way in because a `Pos` names none
+/// (ADR 0041).
+let private roundTripOf atlas =
+    haulRoundTripTicks atlas haulerBody "W1N2" { X = 25; Y = 41 } "W1N1" { X = 25; Y = 10 }
+
+[<Tests>]
+let crossRoomHaulTests =
+    testList
+        "atlas cross-room haulRoundTripTicks"
+        [
+            test "the round trip across a border is two Seam joins, one per leg" {
+                // ADR 0042's outpost haul, countable a tile at a time.
+                // Loaded, a plain step costs two ticks for this body and
+                // the exit tile costs the same: seven steps up the
+                // outpost's corridor to (25,48) is 14, the crossing at
+                // (25,49) is 2, and the far leg — the step onto (25,1)
+                // plus eight more down to (25,9) — is 18. Thirty-four out.
+                // Empty, every one of those tiles sits on ADR 0029's
+                // one-tick floor: 7 + 1 + 9 = 17 back. Fifty-one for the
+                // round trip, which is the order ADR 0042 costs an unpaved
+                // outpost haul at and not a bug.
+                let atlas = haulAcross [ { X = 25; Y = 0 }, Plain ] [ { X = 25; Y = 49 }, Plain ]
+
+                Expect.equal
+                    (roundTripOf atlas)
+                    (Some 51)
+                    "fourteen, two and eighteen out; seven, one and nine back"
+            }
+
+            test "each leg is the walk's own join, read off the same Seam band" {
+                // ADR 0030's law, at the reader that used to be exempt from
+                // it: the quota's round trip must be the same arithmetic
+                // the Matcher ranks on and the mover walks, and not a
+                // second cross-room pricing of its own. So the two legs are
+                // pinned against `walkTicks` — one creep carrying the load
+                // the leg out is priced for, one empty as the leg back is —
+                // walking to the very tiles a transfer reaches the spawn
+                // from.
+                let atlas = haulAcross [ { X = 25; Y = 0 }, Plain ] [ { X = 25; Y = 49 }, Plain ]
+
+                let out = walkTicks atlas "loaded" (Refill "spawn-1")
+                let back = walkTicks atlas "empty" (Refill "spawn-1")
+
+                Expect.equal out (Some 34) "the premise: the loaded leg the Matcher would price"
+                Expect.equal back (Some 17) "and the empty one"
+
+                Expect.equal
+                    (roundTripOf atlas)
+                    (Option.map2 (+) out back)
+                    "the round trip is those two walks and nothing else"
+            }
+
+            test "a swamp crossing is charged to each leg at its own factor" {
+                // The trap the two legs exist for. Swamp weighs five
+                // times plain, so this body pays ten ticks to step onto
+                // the crossing loaded and one empty — the empty leg's step
+                // was already on ADR 0029's floor and cannot get dearer.
+                // Against the plain-exit case above the round trip gains
+                // exactly the loaded leg's eight, which a single crossing
+                // priced once for both legs could not produce at any
+                // factor.
+                let atlas = haulAcross [ { X = 25; Y = 0 }, Plain ] [ { X = 25; Y = 49 }, Swamp ]
+
+                Expect.equal
+                    (roundTripOf atlas)
+                    (Some 59)
+                    "the loaded leg pays the swamp its ten, the empty leg its one"
+            }
+
+            test "a border with no crossing prices no round trip" {
+                // ADR 0004, and the shape the hauler quota reads it in: an
+                // unpriceable Seam is no Seam, so the haul has no price and
+                // the container hires nobody — never a zero, which would
+                // hire a fleet for free.
+                let atlas = haulAcross [ { X = 25; Y = 0 }, Wall ] [ { X = 25; Y = 49 }, Plain ]
+
+                Expect.isEmpty (seams atlas "W1N2" "W1N1") "the premise: the exit is walled"
+
+                Expect.equal (roundTripOf atlas) None "unpriceable geometry hires nobody"
             }
         ]
 

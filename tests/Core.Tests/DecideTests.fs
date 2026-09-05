@@ -2443,16 +2443,22 @@ let censusSignatureTests =
                     "the level gates allowances, so it is a signature input"
             }
 
-            test "a second room joining the projection leaves the signature alone" {
-                // The signature signs one room (ADR 0041), and every entry
-                // of the memo it gates is that room's: the Layout is
-                // anchored in it, the spawn walks flood its grid, and the
-                // hauler quota prices its containers. So an outpost
-                // arriving with terrain, a source and a standing container
-                // must not throw all three away — a census that flinched
-                // at geometry no memo entry reads would recompute the
-                // Layout for a room it never plans in.
+            test "a second room's standing container joins the signature under its own name" {
+                // The widening #116's forward note booked and #149 spent
+                // (ADR 0042): the hauler quota folds the containers of
+                // every projected room and prices each at the rate that
+                // room is held at, so both of those are memo inputs now
+                // and the signature that gates the memo has to carry them.
+                // #121's narrowing to the home layer was right while the
+                // memo held nothing but home's; this is the tick it stops
+                // being.
                 let colony = trunkColony 2
+
+                let ground =
+                    [
+                        for x in 23..26 do
+                            for y in 23..26 -> { X = x; Y = y }, Plain
+                    ]
 
                 let joined =
                     colony
@@ -2462,19 +2468,76 @@ let censusSignatureTests =
                             "src-out", { X = 24; Y = 24 }, Source
                             "can-out", { X = 24; Y = 25 }, Structure BuiltKind.Container
                         ]
-                        [
-                            for x in 23..26 do
-                                for y in 23..26 -> { X = x; Y = y }, Plain
-                        ]
+                        ground
 
-                Expect.equal
+                Expect.notEqual
                     (censusSignature joined)
                     (censusSignature colony)
-                    "the census is the home room's, and a second room's structures are not in it"
+                    "an outpost's standing container is a census entry: it hires haulers"
 
-                // The pair the equality above would also pass by signing
-                // nothing at all: the same container standing at the same
-                // coordinates *at home* is a census change.
+                // The room is *in* the entry and not merely implied by the
+                // room list, because two rooms hold the same coordinates.
+                // Pairwise, one rival at a time: both sides below project
+                // W1N2 with the same ground, the same source and the same
+                // control, and carry the same container id at the same
+                // (24,25) — the only thing that moves is which room's
+                // layer places it.
+                let bare =
+                    colony |> withOutpost "W1N2" [ "src-out", { X = 24; Y = 24 }, Source ] ground
+
+                // The widening itself, with nothing else moving: the same
+                // room list, the same held rates, the same home layer —
+                // the container standing in W1N2 is the only difference.
+                // Joined against the home layer alone (#121's rule) these
+                // two sign the same string, and the memo hands back the
+                // quota from before the container stood.
+                Expect.notEqual
+                    (censusSignature joined)
+                    (censusSignature bare)
+                    "a standing structure in a second room is a census entry of its own"
+
+                Expect.notEqual
+                    (censusSignature joined)
+                    (censusSignature (
+                        bare
+                        |> withTarget "can-out" { X = 24; Y = 25 } (Structure BuiltKind.Container)
+                    ))
+                    "the same container at the same coordinates in the other room is another census"
+
+                // And not the container kind alone. The quota prices that
+                // container by a round trip flooded over the outpost's
+                // step-weight grid, and `Snapshot.projectVisible` lays a
+                // room's `Roads` and `Obstacles` out of the same
+                // every-owner structure array the kind census comes from —
+                // so a road paved along the haul lane, or a hostile core
+                // standing on it, moves a number the memo holds. A
+                // standing census filtered down to `Container` outside
+                // home would be ADR 0017's signature gap.
+                let paved =
+                    colony
+                    |> withOutpost
+                        "W1N2"
+                        [
+                            "src-out", { X = 24; Y = 24 }, Source
+                            "road-out", { X = 24; Y = 26 }, Structure BuiltKind.Road
+                        ]
+                        ground
+
+                Expect.notEqual
+                    (censusSignature paved)
+                    (censusSignature bare)
+                    "a second room's road prices its haul, so it is a signature input too"
+
+                // And the room list itself, because the rate is signed per
+                // projected room: a room that joins carrying nothing is a
+                // room the quota can fold a container out of the tick one
+                // stands there, and its held rate is what that container
+                // would be priced at.
+                Expect.notEqual
+                    (censusSignature (colony |> withOutpost "W1N2" [] ground))
+                    (censusSignature colony)
+                    "a room joining the projection brings its own held rate into the signature"
+
                 Expect.notEqual
                     (censusSignature (
                         colony
@@ -9218,8 +9281,13 @@ let haulerTests =
                 let atlas = Atlas.ofSnapshot snapshot
                 let haulerBody = [ Carry; Carry; Carry; Carry; Move; Move ]
 
+                // Container and spawn alike stand in the colony's own
+                // room, which the rooms now ride on the API for (#149): a
+                // home round trip is the one-room flood it always was.
+                let home = SpatialInfo.homeName snapshot.Spatial
+
                 let roundTrip from =
-                    Atlas.haulRoundTripTicks atlas haulerBody from { X = 12; Y = 10 }
+                    Atlas.haulRoundTripTicks atlas haulerBody home from home { X = 12; Y = 10 }
 
                 Expect.equal
                     (roundTrip { X = 9; Y = 10 })
@@ -9599,16 +9667,17 @@ let roomLayerTests =
                     "the same source at home does, and hires for the haul"
 
                 // And the mirror, because the quota picks a room twice
-                // over: the containers it folds come out of the home
-                // layer, so an outpost container beside a home source's
-                // coordinates is not the home room's to price. Its round
-                // trip would be flooded over home terrain, hiring a fleet
-                // for a haul nobody makes — the honest cross-room price is
-                // a minimum over the Seam band (#123).
+                // over: since #149 it folds the containers of every
+                // projected room, but each is judged against the sources
+                // of *its own* room — so an outpost container beside a
+                // home source's coordinates serves no rock and is priced
+                // by nothing. The failure this guards is the container
+                // being paired with the home rock and then flooded over
+                // home terrain, hiring a fleet for a haul nobody makes.
                 Expect.equal
                     (quotaOf outpostContainerColony)
                     0
-                    "a container the home room does not place hires nobody"
+                    "a container whose own room places no rock it serves hires nobody"
             }
 
             test "the home room keeps its own targets after a second one has joined" {
@@ -10029,11 +10098,13 @@ let private incomeFleetOf workers = incomeFleetRows 4 workers
 /// nothing else.
 ///
 /// Its Anchor and hauler quotas are the home room's either way. One Anchor
-/// per Post counts `Atlas.posts`, the colony's own room, and the hauler
-/// quota folds the containers the home layer places — so the outpost's
-/// Post and its container are in neither, and the income base is the one
-/// addend this fixture moves. That is what makes a worker count the whole
-/// reading of it.
+/// per Post counts `Atlas.posts`, the colony's own room; and the hauler
+/// quota does fold this container since #149, but W1N2 arrives here with
+/// no border ring, so the two rooms share no Seam band, the haul has no
+/// price and the container hires nobody (ADR 0004). The income base is
+/// therefore still the one addend this fixture moves, which is what makes
+/// a worker count the whole reading of it — the quota's own outpost case
+/// is `outpostHaulTests`, on a fixture that lays the rings.
 let private postedOutpostColony workers (control: (string * RoomControlInfo) list) =
     let rock = { X = 40; Y = 40 }
 
@@ -10210,14 +10281,14 @@ let sourceOutputTests =
             }
 
             test "the hauler quota prices each container at its own source's output" {
-                // The quota's other reader (ADR 0042). It folds the home
-                // layer's containers and prices each at *that*
-                // container's source. The home room is the only room it
-                // can ask about — `Atlas.haulRoundTripTicks` floods one
-                // room, and #123 landed the Seam-band price without
-                // widening it — so the rate is moved under the home room
-                // rather than under an outpost. ceil(24 × 10 / 200) is
-                // two haulers a container and ceil(24 × 5 / 200) is one.
+                // The quota's other reader (ADR 0042), read here on the
+                // colony's own room: it folds every projected room's
+                // containers and prices each at *that* container's
+                // source, so moving the rate under the home room moves
+                // the home containers' half of it and nothing else. The
+                // outpost half is `outpostHaulTests`, on a fixture with a
+                // Seam to cross. ceil(24 × 10 / 200) is two haulers a
+                // container and ceil(24 × 5 / 200) is one.
                 Expect.equal (quotaOf incomeColony) 4 "the premise: the reserved rate hires four"
 
                 Expect.equal
@@ -11862,21 +11933,26 @@ let outpostTests =
                     None
                     "and a site the Snapshot does not carry is no Task, however well the projection places it"
 
-                // The memo does not flinch at it either. #121's own test
-                // pins that with a *standing* container in the outpost and
-                // so walks `censusSignature`'s `standing` branch; the site
-                // this fixture stands there walks the `pending` one, and
-                // both are joined against the home layer's positions
-                // alone, so neither carries an entry. Without this the
-                // Layout and the whole spawn walk table would be thrown
-                // away every tick an outpost site stands (ADR 0017, ADR
-                // 0032).
+                // The memo does not flinch at it either, and since #149
+                // that is a statement about the `pending` branch alone:
+                // the `standing` half of `censusSignature` spans every
+                // projected room now, because the hauler quota folds their
+                // containers, but the `pending` half is still joined
+                // against the home layer's positions — nothing the memo
+                // carries reads a site outside home, this rule's own site
+                // least of all, since it is recomputed every tick (ADR
+                // 0042). Were it signed, the Layout and the whole spawn
+                // walk table would be thrown away the tick this site
+                // appears, for geometry nothing reads while it is still a
+                // site (ADR 0017, ADR 0032) — one throw-away and not two,
+                // the tick it completes being paid either way now that the
+                // container it becomes is a standing entry of the census.
                 Expect.equal
                     (censusSignature sited)
                     (censusSignature (
                         northBorderColony { X = 10; Y = 38 } |> withNorthOutpost None |> loaded
                     ))
-                    "an outpost's site is no entry of the home room's census (#121)"
+                    "an outpost's pending site is no entry of the census (#121)"
 
                 let { Intents = opening } = decide sited Map.empty Set.empty None
 
@@ -12970,6 +13046,213 @@ let outpostContainerTests =
                 Expect.isEmpty
                     (containerSites colony)
                     "no band to price a Seat against, so no Seat is picked"
+            }
+        ]
+
+/// The colony's own room for the haul below: its spawn standing eleven
+/// tiles down a one-wide corridor from the north border, an obstacle as a
+/// spawn is, so the only tile a transfer reaches it from on the side the
+/// haul arrives on is (25,9). No controller, no refillable with room and
+/// no home source — what the hauler quota folds here is the outpost's one
+/// container and nothing beside it, so the number this fixture answers is
+/// that container's own.
+let private haulHome =
+    { bareRespawn with
+        Controller = None
+        Refillables = []
+        Sources = [ source "src-out" ]
+        RoomEnergy = bank 300 300
+        Spatial =
+            { SpatialInfo.empty with
+                RoomName = Some "W1N1"
+                Borders = Map.ofList [ "W1N1", plainRing; "W1N2", plainRing ]
+                TargetKinds = Map.ofList [ "spawn-1", Structure BuiltKind.Spawn ]
+            }
+            |> withHome (fun layer ->
+                { layer with
+                    Terrain = Map.ofList (corridor 25 1 48)
+                    TargetPositions = Map.ofList [ "spawn-1", { X = 25; Y = 10 } ]
+                    Obstacles = Set.singleton { X = 25; Y = 10 }
+                })
+    }
+
+/// The same colony with its outpost one room north: the rock at (25,40) on
+/// ground the projection carries none of, and the container standing on
+/// the Seat below it — the switch that admits an outpost into the economy
+/// (ADR 0042). Who holds W1N2 is the caller's and is the only thing that
+/// moves between two calls; `None` is the room the colony sees nobody in,
+/// which is a third answer and not the neutral one (ADR 0004).
+let private withHaulOutpost (control: RoomControlInfo option) (colony: Snapshot) =
+    { colony with
+        RoomControl =
+            match control with
+            | Some held -> Map.add "W1N2" held colony.RoomControl
+            | None -> colony.RoomControl
+        Spatial =
+            { colony.Spatial with
+                TargetKinds =
+                    colony.Spatial.TargetKinds
+                    |> Map.add "src-out" Source
+                    |> Map.add "can-out" (Structure BuiltKind.Container)
+            }
+            |> withNeighbour
+                "W1N2"
+                { RoomLayer.empty with
+                    Terrain = Map.ofList (corridor 25 41 48)
+                    TargetPositions =
+                        Map.ofList [ "src-out", { X = 25; Y = 40 }; "can-out", { X = 25; Y = 41 } ]
+                }
+    }
+
+/// The same outpost the tick before its container stands: the rock
+/// projected and the room held exactly as above, and `can-out` simply
+/// absent, which is what a Seat with nothing built on it is. The standing
+/// census is then the only census input that moves between the two.
+let private beforeHaulContainer (colony: Snapshot) =
+    let outpost = SpatialInfo.layerOf colony.Spatial "W1N2"
+
+    { colony with
+        Spatial =
+            { colony.Spatial with
+                TargetKinds = colony.Spatial.TargetKinds |> Map.remove "can-out"
+            }
+            |> withNeighbour
+                "W1N2"
+                { outpost with
+                    TargetPositions = outpost.TargetPositions |> Map.remove "can-out"
+                }
+    }
+
+[<Tests>]
+let outpostHaulTests =
+    testList
+        "the outpost's container in the hauler quota"
+        [
+            test "an outpost container hires haul capacity, priced at its own room's rate" {
+                // ADR 0042's hauler half, which #127 could not reach: the
+                // quota folds every projected room's containers, and the
+                // round trip it prices this one at is the Seam join
+                // (`Atlas.haulRoundTripTicks`), 51 ticks over this
+                // corridor. At the 300 bank the hauler row carries 200, so
+                // held the rock ships ten a tick and hires ceil(51 x 10 /
+                // 200) = 3, and unheld it ships five and hires 2.
+                //
+                // Pairwise, one rival at a time: the two colonies differ in
+                // who holds W1N2 and in nothing else.
+                let held control =
+                    quotaOf (haulHome |> withHaulOutpost (Some control))
+
+                Expect.equal
+                    (quotaOf haulHome)
+                    0
+                    "the premise: without the outpost there is no haul"
+
+                Expect.equal (held (reservedRoom true 4000)) 3 "reserved, the rock ships ten a tick"
+                Expect.equal (held neutralRoom) 2 "held by nobody, it ships five and hires less"
+
+                Expect.equal
+                    (held ownedRoom)
+                    (held (reservedRoom true 4000))
+                    "owned or reserved by us is one rate, as the engine pays it"
+
+                Expect.equal
+                    (quotaOf (haulHome |> withHaulOutpost None))
+                    0
+                    "and a room the colony cannot see prices no rock at all (ADR 0004)"
+            }
+
+            test "a container in a room the projection does not carry hires nobody" {
+                // ADR 0004 at the fold's own edge: the container is in the
+                // kind census, the colony holds the room, and the
+                // projection places neither the container nor its rock —
+                // so there is no tile to flood from and no room to flood
+                // over. Nothing, and never the home room's arithmetic run
+                // over an outpost's coordinates.
+                let seen = haulHome |> withHaulOutpost (Some(reservedRoom true 4000))
+
+                let unprojected =
+                    { seen with
+                        Spatial =
+                            { seen.Spatial with
+                                Rooms = Map.remove "W1N2" seen.Spatial.Rooms
+                            }
+                    }
+
+                Expect.equal (quotaOf seen) 3 "the premise: projected, the container hires three"
+                Expect.equal (quotaOf unprojected) 0 "unprojected, the same census hires none"
+            }
+
+            test "a quota memoised while the outpost was held is not handed back when it lapses" {
+                // #127's memo case, in the room it was written for. The
+                // hauler quota rides the census memo (ADR 0017) and now
+                // reads a *second* room's held rate, so the census
+                // signature had to widen to sign every projected room's —
+                // and this is what the widening buys. Every census input
+                // below is byte-identical between the two Snapshots: the
+                // reservation is the only thing that moved.
+                let lapsed = haulHome |> withHaulOutpost (Some neutralRoom)
+
+                let previous =
+                    (decide
+                        (haulHome |> withHaulOutpost (Some(reservedRoom true 4000)))
+                        Map.empty
+                        Set.empty
+                        None)
+                        .Memo
+
+                Expect.equal previous.HaulerQuota 3 "the premise: held, the container hires three"
+
+                let recalled = decide lapsed Map.empty Set.empty (Some previous)
+                let fresh = decide lapsed Map.empty Set.empty None
+
+                Expect.equal fresh.Memo.HaulerQuota 2 "the premise: lapsed, it hires two"
+
+                Expect.equal
+                    recalled.Memo.HaulerQuota
+                    fresh.Memo.HaulerQuota
+                    "the stale memo recomputes rather than handing back the held rate's fleet"
+
+                Expect.equal
+                    (spawnIntents recalled.Intents)
+                    (spawnIntents fresh.Intents)
+                    "so the fleet the colony casts is the one the halved haul asked for"
+            }
+
+            test
+                "the quota memoised before an outpost container stood is not handed back once it does" {
+                // The other half of the widening, and the one the rate
+                // above cannot reach: the census entry itself. The
+                // reservation case moves `held`, which is signed per room;
+                // this one moves nothing but whether `can-out` stands in
+                // W1N2, which only the *standing* census spanning every
+                // projected room can see. Joined against the home layer
+                // alone the two Snapshots sign one string, so the colony
+                // would recall the container-less nothing for ever and ADR
+                // 0042's switch would never fire.
+                let standing = haulHome |> withHaulOutpost (Some(reservedRoom true 4000))
+                let before = standing |> beforeHaulContainer
+
+                let previous = (decide before Map.empty Set.empty None).Memo
+
+                Expect.equal
+                    previous.HaulerQuota
+                    0
+                    "the premise: with no container on the Seat there is no haul to hire for"
+
+                let recalled = decide standing Map.empty Set.empty (Some previous)
+                let fresh = decide standing Map.empty Set.empty None
+
+                Expect.equal fresh.Memo.HaulerQuota 3 "the premise: standing, it hires three"
+
+                Expect.equal
+                    recalled.Memo.HaulerQuota
+                    fresh.Memo.HaulerQuota
+                    "the container standing up moves the signature, so the quota is recomputed"
+
+                Expect.equal
+                    (spawnIntents recalled.Intents)
+                    (spawnIntents fresh.Intents)
+                    "and the fleet the colony casts is the one the new haul asked for"
             }
         ]
 
