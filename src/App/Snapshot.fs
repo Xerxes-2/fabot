@@ -312,13 +312,18 @@ let private roomSeen (roomName: string) : IRoom option =
 /// zero. Everything else comes off `Game.rooms`, which holds only the
 /// rooms we have vision in this tick.
 ///
-/// So a declared outpost we cannot see is terrain and nothing else — no
-/// target, no obstacle, no store, no hits — and that is ADR 0004's absence
-/// entry by entry rather than a "blind" state anything has to model:
-/// unplaced geometry is unpriceable, enters no Task and blocks no action.
-/// The room contributes nothing until vision returns and then contributes
-/// what it sees, with no shape change either way and nothing to
-/// invalidate.
+/// So the half a room we cannot see contributes is its terrain, and the
+/// half vision pays for — stores, hits, sites, creeps, hostiles, and every
+/// structure standing — is absent entry by entry until vision returns (ADR
+/// 0004), rather than a "blind" state anything has to model: unplaced
+/// geometry is unpriceable, enters no Task and blocks no action.
+///
+/// It is not the whole of what a declared outpost puts in the projection.
+/// The other half is declared rather than seen — the sources' and the
+/// controller's ids and tiles — and `Outpost.place` lays it in over the
+/// whole assembled projection, once, after this runs (ADR 0041, #148). It
+/// is not laid here because the rule is Core's: this function knows only
+/// what the engine answered for one room name.
 let private projectRoom (roomName: string) : RoomProjection =
     let terrain = terrainOf roomName
 
@@ -376,6 +381,15 @@ let build () : Snapshot =
     // shell has always made and ADR 0041 does not touch.
     let home = spawns |> Array.tryHead |> Option.map (fun spawn -> spawn.room.name)
 
+    // The declarations this tick works from, read once: the scan set, the
+    // furniture laid into the projection and the rocks pooled for Harvest
+    // are three readings of one constant, and a second read is a second
+    // constant that can disagree — which is exactly what the stand-down
+    // gate (ADR 0043) would narrow one of and not the others. The scan
+    // set below is taken from this list and then gates the other two, so
+    // the three narrow together or not at all.
+    let outposts = Outpost.declared
+
     // The rooms the colony works this tick — the home room and every
     // declared outpost beside it (ADR 0041). Core owns the union
     // (`Outpost.roomsProjected`) and the shell reads it once here, because
@@ -385,14 +399,12 @@ let build () : Snapshot =
     // Three rooms since #126 filled the declaration: the spawn room,
     // W12S27 and W13S28.
     let scanned =
-        home
-        |> Option.map (Outpost.roomsProjected Outpost.declared)
-        |> Option.defaultValue []
+        home |> Option.map (Outpost.roomsProjected outposts) |> Option.defaultValue []
 
-    // The scanned rooms we can actually see. A declared outpost with no
-    // vision contributes no entity at all rather than an empty something —
-    // ADR 0004's absence entry by entry, exactly as `projectRoom` gives
-    // its geometry half.
+    // The scanned rooms we can actually see. What vision pays for is read
+    // off these and is absent entry by entry where there is none (ADR
+    // 0004); what a declaration carries is read off `outposts` instead and
+    // needs no vision at all (ADR 0041).
     let seen = scanned |> List.choose roomSeen
 
     {
@@ -434,16 +446,22 @@ let build () : Snapshot =
             |> Array.toList
         // Every scanned room's sources, not the spawn room's: the Harvest
         // pool is built from this list, and ADR 0041 puts an outpost's
-        // Harvest in the *same* pool ranked by the *same* order. Read off
-        // `seen` and not off `scanned`: a source is an entity, so a
-        // declared outpost we have no vision in this tick contributes
-        // none of its rocks, by the same per-entry absence `projectRoom`
-        // gives its geometry (ADR 0004, #124's fourth criterion). So the
-        // list is the three declared rocks *plus* today's two only on a
-        // tick the colony can see those rooms. What an unposted outpost
-        // source is worth to the quotas is not this list's question: it is
-        // answered once, in `Decide.workforceTarget`, and the answer is
-        // nothing (ADR 0042).
+        // Harvest in the *same* pool ranked by the *same* order. Vision
+        // answers for the rooms it covers and the declaration answers for
+        // the rest, joined by `Outpost.pooledSources`, which keeps the
+        // engine's own answer where both speak. Until #148 this read off
+        // `seen` alone — #124's fourth acceptance criterion, and wrong: a
+        // declared source's id and tile are exactly the facts ADR 0041
+        // refuses to make vision wait for, and pooling them only where
+        // there is vision is the deadlock that ADR's third paragraph
+        // exists to break — no Harvest names the outpost, so nothing walks
+        // there, so vision never comes. Gated on `scanned`, the same set
+        // the projection is built over: a rock pooled for a room the scan
+        // left out would be a Task over geometry nothing places — and an
+        // unplaced target is not inert, it prices at 0 and wins. What an
+        // unposted outpost source is worth to the quotas is not this
+        // list's question: it is answered once, in
+        // `Decide.workforceTarget`, and the answer is nothing (ADR 0042).
         //
         // The lists beside it stay home-only on purpose. `Refillables`,
         // `Controller` and `RoomEnergy` are about rooms we own, and an
@@ -471,7 +489,7 @@ let build () : Snapshot =
                             s.ticksToRegeneration
                 }
                 : SourceInfo))
-            |> List.distinctBy (fun s -> s.Id)
+            |> Outpost.pooledSources scanned outposts
         Controller =
             spawns
             |> Array.tryPick (fun s ->
@@ -538,8 +556,16 @@ let build () : Snapshot =
         // Layout and the census signature read. What layering adds is the
         // rooms beside it — the declared outposts — over the same scan set
         // the Sources above are collected from.
+        //
+        // The declared furniture goes in last, over the whole assembled
+        // projection rather than room by room inside it (`Outpost.place`,
+        // ADR 0041): the rule that a source's and a controller's id and
+        // tile do not wait for vision is Core's, and the shell's share of
+        // it is this one splice. It lays nothing into a room the scan set
+        // left out, and neither does the pool above, so the union stays
+        // the single gate on which rooms the colony works.
         Spatial =
             home
-            |> Option.map (fun name -> buildSpatial name scanned)
+            |> Option.map (fun name -> buildSpatial name scanned |> Outpost.place outposts)
             |> Option.defaultValue SpatialInfo.empty
     }

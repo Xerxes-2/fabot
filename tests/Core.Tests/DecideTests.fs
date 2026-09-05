@@ -11166,10 +11166,18 @@ let private northBorderColony (homeSource: Pos) =
 /// with the first. The outpost's corridor runs to its own y = 48, so the
 /// tile a crossing lands a creep on opens onto ground.
 ///
-/// `None` is the room the colony has declared and cannot see this tick,
-/// shaped as the shell shapes it (`Snapshot.projectRoom`): its terrain and
-/// its border ring, because `Game.map.getRoomTerrain` needs no vision, and
-/// not one entry more, because everything else does.
+/// `None` is the room before anything is laid into it: the whole of what
+/// `Snapshot.projectRoom` builds for a room with no vision — its terrain
+/// and its border ring, because `Game.map.getRoomTerrain` needs neither —
+/// and not one entry more, because everything vision pays for is absent
+/// entry by entry until vision returns (ADR 0004).
+///
+/// That is not the whole of what the shell hands Core for a *declared*
+/// room it cannot see: `Outpost.place` lays the declared sources and
+/// controller in afterwards, with no vision at all (ADR 0041, #148). So
+/// this is the baseline the declaration is added to and never a blind
+/// outpost as the colony really projects one — the tests below that want
+/// one build it by calling `place`, as the shell does.
 let private withNorthOutpost (outpostSource: Pos option) (colony: Snapshot) =
     { colony with
         Sources = colony.Sources @ [ for _ in Option.toList outpostSource -> source "src-out" ]
@@ -11684,14 +11692,20 @@ let outpostTests =
                     "the traveller takes (10,5) and the parked creep swaps past it up the outpost's corridor"
             }
 
-            test "a declared room the colony cannot see this tick changes nothing" {
-                // What the shell projects for a room in the constant it has
-                // no vision into: terrain and the border ring, and not one
-                // entry more (`Snapshot.projectRoom`). ADR 0004 carries the
-                // whole of it — the room is unpriceable, enters no Task and
-                // blocks no action — so "blind" is not a state anything has
-                // to model, and the proof of that is that the tick decides
-                // what it decided before the room was ever declared.
+            test "a neighbour room of bare ground changes nothing" {
+                // ADR 0004's totality over a room layer carrying terrain
+                // and a border ring and nothing else: every query of it
+                // answers empty, so it is unpriceable, enters no Task and
+                // blocks no action — "empty" is not a state anything has to
+                // model, and the proof is that the tick decides exactly
+                // what it decided with no such room at all.
+                //
+                // Not a blind outpost, which this test claimed to be until
+                // #148: a declared room the colony cannot see carries its
+                // sources and its controller all the same (`Outpost.place`,
+                // ADR 0041), and the tests further down pin what *that*
+                // decides. What is left here is the totality property the
+                // furniture is laid on top of.
                 //
                 // Read at the top seam over all three outputs at once,
                 // because the ways this could go wrong are not local: a
@@ -11773,6 +11787,265 @@ let outpostTests =
                     (Outpost.roomsProjected [ { north with RoomName = "W12S28" } ] "W12S28")
                     [ "W12S28" ]
                     "a room declared twice is scanned once"
+            }
+
+            test "a declaration nobody can see this tick still pools its rock, and wins on it" {
+                // ADR 0041's deadlock, read at the top seam (#148): *"A
+                // source's position needs vision; vision needs a creep
+                // there; a creep goes there because a Task exists; the Task
+                // exists because the source is in the projection."* #124
+                // read ADR 0004's per-entry absence onto the declaration
+                // as well, so the outpost's rock entered the pool only on a
+                // tick the colony could see the room — and nothing was ever
+                // sent to make that tick happen.
+                //
+                // The room here is shaped exactly as the shell shapes one
+                // it cannot see (`Snapshot.projectRoom`): terrain and a
+                // border ring, because `Game.map.getRoomTerrain` needs no
+                // vision, and not one entry more. Everything the outpost
+                // contributes below is the declaration's.
+                let declaration =
+                    {
+                        RoomName = "W1N2"
+                        Sources = [ "src-out", { X = 10; Y = 46 } ]
+                        // Off the corridor on purpose: what the controller
+                        // is doing to this fixture is standing in
+                        // `Obstacles`, and a controller on the corridor
+                        // would seal it and make the comparison below about
+                        // reachability instead of about distance.
+                        Controller = "ctrl-out", { X = 11; Y = 44 }
+                    }
+
+                let blind = northBorderColony { X = 10; Y = 38 } |> withNorthOutpost None
+
+                let declared =
+                    { blind with
+                        Sources = Outpost.pooledSources [ "W1N2" ] [ declaration ] blind.Sources
+                        Spatial = Outpost.place [ declaration ] blind.Spatial
+                    }
+
+                Expect.equal
+                    (matchOf blind)
+                    (Some(taskId (Harvest "src-home"), MatchFactor.OnlyCandidate))
+                    "the premise: undeclared, the blind room offers nothing and the home rock stands alone"
+
+                // The win has to be on the *placed* rock's price, and that
+                // needs saying because an unplaced target is not inactive:
+                // ADR 0004's escape prices it at 0, which beats every real
+                // walk on the same factor. So a `place` that did nothing at
+                // all would hand the Verdict below the same task and the
+                // same `TravelCost` for the opposite reason. These two
+                // lines are what tell the reasons apart: the rock is filed
+                // under its own room, and the price that won is a real
+                // crossing rather than the escape — the step down to the
+                // border, the crossing itself, and two down the outpost's
+                // corridor to the Seat at (10,47), four plain tiles at
+                // travel cost's 2 apiece (ADR 0010's half-ticks).
+                let atlas = Atlas.ofSnapshot declared
+
+                Expect.equal
+                    (Atlas.targetRoom atlas "src-out")
+                    (Some "W1N2")
+                    "the declaration reached the projection: the rock is filed under its own room"
+
+                Expect.equal
+                    (Atlas.travelCost atlas "w" (Harvest "src-out"))
+                    (Some 8)
+                    "and its price is a real crossing, never the escape: four plain steps at 2 apiece"
+
+                // The same pair the ranking test above compares, at the
+                // same two tiles — so what moved is only that the outpost's
+                // rock is now declared rather than seen, and it is still
+                // travel cost that separates the two.
+                Expect.equal
+                    (matchOf declared)
+                    (Some(taskId (Harvest "src-out"), MatchFactor.TravelCost))
+                    "declared, the unseen rock is a Task ranked in the one pool — and the nearer of the two"
+            }
+
+            test "where vision answers, laying the declaration in changes nothing" {
+                // The other half of the rule: a declaration carries only
+                // what cannot wait for vision — the ids and the tiles — and
+                // is laid *under* what the room's `find` families answered,
+                // never over it (ADR 0041). The reservation remaining, the
+                // hits, the stores, the creeps and every structure standing
+                // are vision's alone and stay vision's.
+                //
+                // Asserted as an equality on the whole projection rather
+                // than field by field: what has to hold is that not one
+                // entry moves, and a per-field check would pass while some
+                // field nobody thought of was overwritten.
+                //
+                // The declaration below names the rock one tile off where
+                // vision put it, and that disagreement is the whole test.
+                // Live the two agree by construction — the ids are the
+                // engine's own and a rock does not move — so a declaration
+                // that matched vision tile for tile would leave this
+                // equality true whichever of the two won, and the rule
+                // would be pinned by nothing. Only a conflict can say which
+                // truth is authoritative. The one that can really arise is
+                // a human's: the constant is moved by hand (ADR 0041), and
+                // a mistyped tile must not move a rock the engine is
+                // answering for out from under its Seats.
+                let declaration =
+                    {
+                        RoomName = "W1N2"
+                        Sources = [ "src-out", { X = 10; Y = 47 } ]
+                        Controller = "ctrl-out", { X = 11; Y = 44 }
+                    }
+
+                let colony = northBorderColony { X = 10; Y = 38 }
+
+                let seen =
+                    { colony with
+                        Sources = colony.Sources @ [ drained "src-out" 120 ]
+                        Creeps = colony.Creeps @ [ worker "w-out" 0 50 ]
+                        Spatial =
+                            { colony.Spatial with
+                                Borders = Map.add "W1N2" plainRing colony.Spatial.Borders
+                                TargetKinds =
+                                    colony.Spatial.TargetKinds
+                                    |> Map.add "src-out" Source
+                                    |> Map.add "ctrl-out" Controller
+                                    |> Map.add "cont-out" (Structure BuiltKind.Container)
+                                Hits = Map.ofList [ "cont-out", { Hits = 100; HitsMax = 250000 } ]
+                                Stores = Map.ofList [ "cont-out", 300 ]
+                            }
+                            |> withNeighbour
+                                "W1N2"
+                                { RoomLayer.empty with
+                                    Terrain = Map.ofList (corridor 10 40 48)
+                                    TargetPositions =
+                                        Map.ofList
+                                            [
+                                                "src-out", { X = 10; Y = 46 }
+                                                "ctrl-out", { X = 11; Y = 44 }
+                                                "cont-out", { X = 10; Y = 45 }
+                                            ]
+                                    CreepPositions = Map.ofList [ "w-out", { X = 10; Y = 44 } ]
+                                    Obstacles = Set.singleton { X = 11; Y = 44 }
+                                }
+                    }
+
+                Expect.equal
+                    (Outpost.place [ declaration ] seen.Spatial)
+                    seen.Spatial
+                    "a projection vision already filled gains nothing from the declaration"
+
+                Expect.equal
+                    (Outpost.pooledSources [ "W1N2" ] [ declaration ] seen.Sources)
+                    seen.Sources
+                    "and the seen rock is pooled once, at the engine's restock and not the default"
+            }
+
+            test "an unseen rock is pooled at the held-energy default, not at never" {
+                // ADR 0025: a restock is a time, and 0 is what a source
+                // holding energy reads. The unknown restock takes the same
+                // 0 rather than something large, because a drained source's
+                // Harvest is judged at the creep's arrival — a walk has to
+                // cover the wait — so any other number would be a source no
+                // walk could ever cover, which is the vision deadlock again
+                // in a second place. What withholds the dig from a rock
+                // that turns out to be empty when the creep gets there is
+                // the Emitter's own gate, on the tick there is vision to
+                // read it from.
+                let declaration =
+                    {
+                        RoomName = "W1N2"
+                        Sources = [ "src-out", { X = 10; Y = 46 } ]
+                        Controller = "ctrl-out", { X = 11; Y = 44 }
+                    }
+
+                Expect.equal
+                    (Outpost.pooledSources [ "W1N2" ] [ declaration ] [ source "src-home" ])
+                    [ source "src-home"; source "src-out" ]
+                    "the seen rocks first, in their order, then the declared one at restock 0"
+            }
+
+            test "a declaration for a room the scan set left out places nothing and pools nothing" {
+                // The scan set is the one gate on which rooms the colony
+                // works (`roomsProjected`), and the stand-down of ADR 0043
+                // narrows exactly it: a room withdrawn from does not enter
+                // the projection at all. A declaration able to furnish a
+                // room the scan left out would be a second gate free to
+                // disagree with the first — furniture standing on terrain
+                // nobody read.
+                let declaration =
+                    {
+                        RoomName = "W9N9"
+                        Sources = [ "src-gone", { X = 10; Y = 46 } ]
+                        Controller = "ctrl-gone", { X = 11; Y = 44 }
+                    }
+
+                let blind = northBorderColony { X = 10; Y = 38 } |> withNorthOutpost None
+
+                Expect.equal
+                    (Outpost.place [ declaration ] blind.Spatial)
+                    blind.Spatial
+                    "no layer for that room, so no tile of it is placed"
+
+                // The pool passes the same gate, and has to: an unplaced
+                // target is not inert. `Atlas.travelCost` answers 0 for
+                // geometry the projection cannot place (ADR 0004's escape),
+                // so a rock pooled for a room nothing was projected for
+                // *wins* its tier on price, and the Emitter aims a Harvest
+                // at an object `Game.getObjectById` cannot answer for while
+                // anti-thrash holds the creep on it (#142's stuck creep, in
+                // a second place). Reachable the tick the colony's last
+                // spawn dies — the shell's scan set is empty with no home
+                // room — and the shape ADR 0043's stand-down withdraws a
+                // room in.
+                Expect.equal
+                    (Outpost.pooledSources [ "W1N1"; "W1N2" ] [ declaration ] blind.Sources)
+                    blind.Sources
+                    "and no rock of it is pooled, so the two readings of the constant agree"
+
+                Expect.isEmpty
+                    (Outpost.pooledSources [] Outpost.declared [])
+                    "an empty scan set — no spawn, so no home room — pools nothing at all"
+            }
+
+            test "a declared controller stands in Obstacles, so no Work Area offers its tile" {
+                // The third thing a declaration puts in the projection
+                // beside the tiles and the kinds: the controller's own tile
+                // joins `Obstacles`, exactly as the seen half files it. A
+                // controller is an obstacle structure — a reserver stands
+                // beside it and never on it — so a Work Area built over
+                // ground that ignored it would offer a tile the engine
+                // refuses to move onto, and #131's reserver would be
+                // assigned there and held there.
+                //
+                // On plain ground on purpose, and that is the whole reason
+                // this fixture exists rather than an assertion over the
+                // committed captures: both declared controllers stand on
+                // terrain the capture reads as wall, so `stepCost` refuses
+                // their tiles before `Obstacles` is ever consulted and the
+                // rule would be pinned by the terrain rather than by the
+                // code (ADR 0036 supplies counterexamples, not cover).
+                let declaration =
+                    {
+                        RoomName = "W1N2"
+                        Sources = [ "src-out", { X = 10; Y = 46 } ]
+                        Controller = "ctrl-out", { X = 10; Y = 42 }
+                    }
+
+                let blind = northBorderColony { X = 10; Y = 38 } |> withNorthOutpost None
+
+                let atlas =
+                    Atlas.ofSnapshot
+                        { blind with
+                            Spatial = Outpost.place [ declaration ] blind.Spatial
+                        }
+
+                let area = Atlas.workArea atlas (Upgrade "ctrl-out")
+
+                Expect.isNonEmpty
+                    area
+                    "the premise: the corridor gives the controller ground to be reserved from"
+
+                Expect.isFalse
+                    (Set.contains { X = 10; Y = 42 } area)
+                    "and the controller's own tile is not part of it, standing in Obstacles"
             }
         ]
 

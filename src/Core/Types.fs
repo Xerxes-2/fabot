@@ -399,6 +399,123 @@ module Outpost =
         home :: (outposts |> List.map (fun outpost -> outpost.RoomName))
         |> List.distinct
 
+    /// One declaration as projection entries: the controller and then the
+    /// sources in their declared order, each id paired with the tile the
+    /// declaration names and the kind it is. Position and kind are read off
+    /// one list rather than two, so the two folds below cannot place an id
+    /// the kind census then misses or classify one nothing places.
+    let private furnitureOf (outpost: Outpost) : (string * Pos * TargetKind) list =
+        (fst outpost.Controller, snd outpost.Controller, Controller)
+        :: (outpost.Sources |> List.map (fun (id, pos) -> id, pos, Source))
+
+    /// The declared furniture, laid into the projection: for every scanned
+    /// outpost, its sources and its controller at the tiles and under the
+    /// ids the declaration names — whether or not the colony has vision in
+    /// that room this tick.
+    ///
+    /// This is the half of ADR 0041 that vision may not gate, and the
+    /// deadlock the ADR spends a paragraph breaking: *"A source's position
+    /// needs vision; vision needs a creep there; a creep goes there because
+    /// a Task exists; the Task exists because the source is in the
+    /// projection."* A declared fact — a source's id and tile, the
+    /// controller's — is in the projection because a human wrote it down;
+    /// only what actually changes (reservation remaining, container and
+    /// road hits, stores, creeps, hostiles) waits for vision, and that is
+    /// what is absent entry by entry where there is none (ADR 0004). #124
+    /// read that absence onto the declaration as well, which left the whole
+    /// ADR 0042 chain without its first step: no Harvest could name an
+    /// outpost, so nothing walked there, so vision never came (#148).
+    ///
+    /// Vision wins every entry it holds: the declaration is laid *under*
+    /// what the room's `find` families answered and never over it. The two
+    /// agree by construction — the ids are the engine's own and a rock does
+    /// not move — so this decides which truth is authoritative rather than
+    /// resolving a conflict that can arise.
+    ///
+    /// The controller's tile joins `Obstacles`, exactly as the seen half
+    /// files it (`Snapshot.projectVisible`): a controller is an obstacle
+    /// structure, so a reserver stands beside it and never on it, and a
+    /// Work Area built over ground that ignored it would offer a tile the
+    /// engine refuses to move onto.
+    ///
+    /// Only rooms the projection already carries a layer for. The scan set
+    /// is the one gate on which rooms the colony works (`roomsProjected`,
+    /// narrowed by the stand-down of ADR 0043), and a declaration able to
+    /// conjure a room the scan left out would be a second gate free to
+    /// disagree with the first — furniture standing on terrain nobody read.
+    let place (outposts: Outpost list) (spatial: SpatialInfo) : SpatialInfo =
+        (spatial, outposts)
+        ||> List.fold (fun spatial outpost ->
+            match Map.tryFind outpost.RoomName spatial.Rooms with
+            | None -> spatial
+            | Some layer ->
+                let furniture = furnitureOf outpost
+
+                { spatial with
+                    Rooms =
+                        Map.add
+                            outpost.RoomName
+                            { layer with
+                                TargetPositions =
+                                    (layer.TargetPositions, furniture)
+                                    ||> List.fold (fun placed (id, pos, _) ->
+                                        if Map.containsKey id placed then
+                                            placed
+                                        else
+                                            Map.add id pos placed)
+                                Obstacles = Set.add (snd outpost.Controller) layer.Obstacles
+                            }
+                            spatial.Rooms
+                    TargetKinds =
+                        (spatial.TargetKinds, furniture)
+                        ||> List.fold (fun kinds (id, _, kind) ->
+                            if Map.containsKey id kinds then
+                                kinds
+                            else
+                                Map.add id kind kinds)
+                })
+
+    /// The sources the Harvest pool is built from: the ones vision answered
+    /// with, and every declared outpost rock beside them. One pool ranked
+    /// in one order (ADR 0041), so a rock the colony cannot see this tick
+    /// is a Task all the same — the declaration is what breaks the vision
+    /// deadlock, and a pool that waited for vision would never see one.
+    /// Deduplicated by id with the seen list first, because a declared rock
+    /// in a room we *can* see arrives twice under one engine id and the
+    /// engine's answer is the one carrying this tick's restock.
+    ///
+    /// An unseen rock restocks in 0 ticks: ADR 0025's "holds energy"
+    /// default, the same one the shell gives a source whose regeneration
+    /// timer the engine has not started. A restock is a *time* fact, and
+    /// the unknown one is not "for ever" — priced at 0 the source is judged
+    /// at arrival like any other (ADR 0025), and the Emitter's own gate is
+    /// what withholds the dig from a rock that turns out to be empty when
+    /// the creep gets there. Priced at anything else it would be a source
+    /// no walk could cover, which is the same deadlock in a second place.
+    ///
+    /// Scanned rooms only, which is the gate `place` reads off the
+    /// projection it is handed: the scan set is the one gate on which rooms
+    /// the colony works (`roomsProjected`, narrowed by the stand-down of
+    /// ADR 0043), and the pool has to pass through it too. A pool that took
+    /// the declaration straight would name rocks nothing places — and an
+    /// unplaced target is not inert to the Matcher: it prices at 0 (ADR
+    /// 0004's escape), so it *wins* its tier, and the Emitter then aims a
+    /// Harvest at an object `Game.getObjectById` cannot answer for while
+    /// anti-thrash holds the creep on it. So the rocks are pooled exactly
+    /// where the furniture is laid, and a stand-down narrows both at once.
+    let pooledSources
+        (rooms: string list)
+        (outposts: Outpost list)
+        (seen: SourceInfo list)
+        : SourceInfo list =
+        seen
+        @ [
+            for outpost in outposts do
+                if List.contains outpost.RoomName rooms then
+                    for id, _ in outpost.Sources -> { Id = id; TicksToRestock = 0 }
+        ]
+        |> List.distinctBy (fun source -> source.Id)
+
 /// What the decision layer knows about one construction site this tick.
 type ConstructionSiteInfo = { Id: string }
 

@@ -1228,15 +1228,23 @@ let crossRoomWalkTests =
             }
         ]
 
-/// The Atlas over the projection of one declared outpost, built out of
-/// the declaration itself over that room's committed terrain: the room's
-/// ground, and its declared sources and controller placed at the declared
-/// tiles under the declared ids. That is the shape the shell hands Core
-/// for a room it can see (`Snapshot.buildSpatial`), and the Atlas is what
-/// prices it (CONTEXT.md keeps the two apart: the projection is the data,
-/// the Atlas the query interface over it) — so a declaration that named a
-/// tile the room walls, or an id nothing places, is priced here the way
-/// the live colony would price it.
+/// The Atlas over the projection of one declared outpost on the tick the
+/// colony cannot see it: that room's committed terrain and border ring —
+/// the whole of what `Game.map.getRoomTerrain` answers without vision —
+/// with the declaration laid in by the production rule that lays it in
+/// (`Outpost.place`, ADR 0041). That is the shape the shell hands Core for
+/// a room it has never had a creep in (`Snapshot.projectRoom`, then the
+/// one splice in `Snapshot.build`), and the Atlas is what prices it
+/// (CONTEXT.md keeps the two apart: the projection is the data, the Atlas
+/// the query interface over it) — so a declaration that named a tile the
+/// room walls, or an id nothing places, is priced here the way the live
+/// colony would price it.
+///
+/// Built through `place` and never by hand (#148): a helper that typed the
+/// placement out itself would prove that a source *placed* in the
+/// projection can be priced, which nothing ever doubted, and would stay
+/// green through the whole of the defect this ticket fixes — that the
+/// blind room's furniture never reached the projection at all.
 ///
 /// The home room's name is the one the declaration is written relative to
 /// — W12S28 — and it carries no geometry, because what is under test is
@@ -1246,10 +1254,6 @@ let crossRoomWalkTests =
 let private declaredAtlas (outpost: Outpost) =
     let capture = load outpost.RoomName
 
-    let targets =
-        [ for id, pos in outpost.Sources -> id, pos, Source ]
-        @ [ fst outpost.Controller, snd outpost.Controller, Controller ]
-
     { SpatialInfo.empty with
         RoomName = Some "W12S28"
         Rooms =
@@ -1258,14 +1262,11 @@ let private declaredAtlas (outpost: Outpost) =
                     outpost.RoomName,
                     { RoomLayer.empty with
                         Terrain = capture.Terrain
-                        TargetPositions =
-                            targets |> List.map (fun (id, pos, _) -> id, pos) |> Map.ofList
-                        Obstacles = Set.singleton (snd outpost.Controller)
                     }
                 ]
         Borders = Map.ofList [ outpost.RoomName, capture.Border ]
-        TargetKinds = targets |> List.map (fun (id, _, kind) -> id, kind) |> Map.ofList
     }
+    |> Outpost.place [ outpost ]
     |> AtlasTests.snapshotWith []
     |> ofSnapshot
 
