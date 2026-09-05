@@ -616,6 +616,19 @@ let private sourceContainerServes (snapshot: Snapshot) (room: string) (pos: Pos)
 let private isSourceContainerTile (snapshot: Snapshot) (room: string) (pos: Pos) =
     sourceContainerServes snapshot room pos |> Option.isSome
 
+/// Whether this colony owns the named room — one spelling for the two
+/// rules of the reserver's that read it (#181). `reserveController`
+/// answers ERR_INVALID_TARGET on a controller with an owner, so a room we
+/// own has no reservation to offer: the Reserve pool must not carry its
+/// controller and the reserver row must not hire against it, and those are
+/// one sentence rather than two gates free to disagree. A room with no
+/// control entry is one the colony cannot see this tick, and an unseen
+/// room is not one it owns — absence classifies nothing (ADR 0004).
+let private colonyOwns (snapshot: Snapshot) room =
+    snapshot.RoomControl
+    |> Map.tryFind room
+    |> Option.exists (fun control -> control.Owner = Ownership.Ours)
+
 /// Planner: rebuild this tick's full Task pool from the Snapshot. Pure and
 /// from scratch every tick — Tasks are never persisted.
 let planTasks (snapshot: Snapshot) (threats: Threats) : Task list =
@@ -670,15 +683,33 @@ let planTasks (snapshot: Snapshot) (threats: Threats) : Task list =
     // controller it is turns on the id and never on a tile, so no
     // coordinate two rooms share can answer it.
     //
-    // The colony's own controller is excluded by id. The engine refuses
+    // The colony's own controller is excluded by id, and every controller
+    // standing in a room the colony owns with it. The engine refuses
     // reserveController on a room we own, and the home controller is what
     // Upgrade acts on: pooling both for one target would put a Task in the
-    // pool no body can ever execute.
+    // pool no body can ever execute. The id alone said that while home was
+    // the only room the colony owned; the tick a declared outpost is
+    // claimed it stops saying it (#181), and the Task left standing there
+    // is one the Matcher will happily fill — travel cost knows nothing
+    // about ownership — so the rule is spelled by room, off the same
+    // `colonyOwns` the reserver row's quota drops the room with, and the
+    // pool and the row cannot disagree about which controllers are
+    // reservable.
+    //
+    // The room comes off the projection's own placement and not off an
+    // Atlas the Planner is never handed (ADR 0041). A controller the
+    // projection does not place names no room and stays pooled, which
+    // classifies nothing and blocks nothing (ADR 0004).
     let reserves =
         let home = snapshot.Controller |> Option.map (fun c -> c.Id)
 
+        let inRoomWeOwn id =
+            SpatialInfo.placementOf snapshot.Spatial id
+            |> Option.map fst
+            |> Option.exists (colonyOwns snapshot)
+
         idsOfKind Controller
-        |> List.filter (fun id -> Some id <> home)
+        |> List.filter (fun id -> Some id <> home && not (inRoomWeOwn id))
         |> List.map Reserve
 
     // The haul cycle's intake (ADR 0012), shaped over the projection's
@@ -1163,8 +1194,11 @@ let private reserverBodyWithin claims capacity =
 /// projected controller that is not the colony's own, so a room with no
 /// such controller offers a CLAIM body nothing to do — it would stand
 /// where it was born for its whole 600-tick life, applicable to Flee and
-/// to nothing else. The colony's own controller is excluded by id, as it
-/// is there: the engine refuses reserveController on a room we own.
+/// to nothing else. The colony's own controller is excluded by id there,
+/// and every controller in a room this colony owns by `colonyOwns` — the
+/// same read this row's own clause below drops the room with, because the
+/// engine refuses reserveController on a room we own and a Task no body
+/// can execute must not be pooled for one to be matched to.
 ///
 /// The *rooms* drop out, and every cast this tick is sized at the largest
 /// demand in the list rather than at the demand standing beside it. The
@@ -1194,6 +1228,31 @@ let private reserverBodyWithin claims capacity =
 /// entry and reads the same zero, which is the right answer and not an
 /// accident of blindness — a room we have no vision in is a room nothing
 /// of ours is standing in to reserve.
+///
+/// **A room this colony owns is dropped**, and that is the engine's
+/// refusal rather than a preference: `reserveController` answers
+/// ERR_INVALID_TARGET on a controller with an owner. The Reserve pool
+/// drops that room's controller by the same read (`colonyOwns`), so the
+/// row hires against exactly the controllers the pool offers; the pool's
+/// older exclusion by the home controller's *id* said the same thing only
+/// while home was the only room this colony owned, and the tick a declared
+/// outpost is claimed it stops saying it (#181). An owned room carries no
+/// reservation, again because the engine refuses one, so `heldTicks` reads
+/// zero and the deficit reads the whole 5,000: without this clause the row
+/// would cast the bank's whole reserver body at it every 600 ticks forever
+/// — `[2Claim;2Move]` at today's 1,800, and the deficit's own nine blocks
+/// at a bank that affords them — each one walking over to fail at the
+/// controller for its whole life. `heldRateOf` above already prices an
+/// owned room at the held rate, so the economy's half of the same fact was
+/// never wrong; only the hiring was.
+///
+/// Only `Ownership.Ours` needs the clause. A room another player owns is
+/// one the colony is withdrawing from, and ADR 0043's stand-down takes it
+/// out of the scan set — from the tick *after* the colony last saw it
+/// held, since the gate reads the previous tick's raid log, so the one
+/// tick between first sight and the withdrawal is priced here as a room
+/// nobody holds. That window is bounded, pre-dates this clause, and is
+/// left where the ticket left it.
 let private reserverClaimsOf (snapshot: Snapshot) atlas : int list =
     let home = snapshot.Controller |> Option.map (fun c -> c.Id)
 
@@ -1216,6 +1275,7 @@ let private reserverClaimsOf (snapshot: Snapshot) atlas : int list =
             else
                 None)
         |> List.distinct
+        |> List.filter (colonyOwns snapshot >> not)
         |> List.map (fun room -> ceilDiv (reservationCap - heldTicks room) claimLifetime |> max 1)
 
 /// Workforce target (ADR 0012): four addends, each a pattern row's own

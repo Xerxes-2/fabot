@@ -16520,6 +16520,73 @@ let reserveTests =
                     [ taskId (Reserve "ctrl-out"); taskId (Reserve "ctrl-west") ]
                     "the two reservers hold the two declared controllers, one each"
             }
+
+            test "a controller in a room this colony owns is not pooled at all" {
+                // The other half of #181's fact, at the seam it is decided
+                // on: the engine refuses reserveController on a room we
+                // own, so that room's controller is not a Task. The pool
+                // excluded the colony's own controller by *id*, which said
+                // the same thing only while home was the only room the
+                // colony owned — the tick a declared outpost is claimed it
+                // stops saying it, and a Task no body can execute is one
+                // the Matcher fills all the same.
+                //
+                // Pairwise on the one fact: the same declaration, the same
+                // controller, the same projection, ownership the only
+                // input that moves.
+                let pooledUnder control =
+                    let colony = reserveColony []
+
+                    { colony with
+                        RoomControl = colony.RoomControl |> Map.add "W1N2" control
+                    }
+                    |> fun colony -> planTasks colony noThreats
+                    |> reserveTasks
+
+                Expect.equal
+                    (pooledUnder neutralRoom)
+                    [ "ctrl-out" ]
+                    "a neutral outpost's controller is the Reserve it always was"
+
+                Expect.isEmpty
+                    (pooledUnder ownedRoom)
+                    "the same controller, in a room this colony owns, offers a CLAIM body nothing"
+            }
+
+            test "the row's one reserver walks past the outpost we own to the one we do not" {
+                // #181's live shape, at the seam the bug actually bites:
+                // home, a near declared outpost the user has just claimed,
+                // and a farther one still neutral. The row hires one body
+                // — a room we own is not a room to reserve — and travel
+                // cost alone would spend it on the near controller, which
+                // is exactly the controller the engine refuses. Nothing
+                // between the pool and the Matcher reads ownership, so the
+                // pool is where that has to be settled, and this is the
+                // test that says so: with the near room owned the body
+                // must cross to the far one.
+                //
+                // Pairwise on ownership, one creep, so the cap cannot be
+                // what spreads them: the same colony with the west room
+                // neutral keeps the body on the west controller.
+                let assignedUnder control =
+                    let colony = twoOutpostColony [ reserver "r1", { X = 5; Y = 26 } ]
+
+                    { colony with
+                        RoomControl = colony.RoomControl |> Map.add "W2N1" control
+                    }
+                    |> fun colony -> decide colony Map.empty Set.empty None
+                    |> fun result -> Map.tryFind "r1" result.Assignments
+
+                Expect.equal
+                    (assignedUnder neutralRoom)
+                    (Some(taskId (Reserve "ctrl-west")))
+                    "neutral, the near controller is the cheapest walk and the body takes it"
+
+                Expect.equal
+                    (assignedUnder ownedRoom)
+                    (Some(taskId (Reserve "ctrl-out")))
+                    "owned, the near controller is no Task and the body crosses to the neutral one"
+            }
         ]
 
 /// A colony standing exactly at its Workforce target with one reserver in
@@ -17034,6 +17101,42 @@ let reserverRowTests =
                         "worker-"
                         "one body short, the generalist row fills the remainder"
                 | other -> failtest $"expected exactly one SpawnCreep intent, got %A{other}"
+            }
+
+            test "a declared outpost this colony owns hires no reserver at all" {
+                // The tick a declared outpost is claimed, its controller
+                // stops being reservable: the engine answers
+                // ERR_INVALID_TARGET to `reserveController` on a room
+                // anybody owns (#181). An owned room carries no reservation
+                // for the same reason, so the deficit read off one is the
+                // whole 5,000 and this row would cast a 650-energy body at
+                // it every 600 ticks forever, each one walking over to fail
+                // for its whole life.
+                //
+                // Pairwise on the one fact — same room, same rock, same
+                // absent reservation, same fleet, same bank — because
+                // ownership is the only input that moves. Read at a bank
+                // that affords the whole nine-block deficit, so the
+                // neutral half is a body the truncation could not have
+                // produced by accident.
+                let castsUnder control =
+                    let colony =
+                        reserverColony [ northOutpost false ] (surplusFleet 2) [ "W1N2", control ]
+
+                    { colony with
+                        RoomEnergy = bank 8000 8000
+                    }
+                    |> fun colony -> decide colony Map.empty Set.empty None
+                    |> fun result -> reserverCasts result.Intents
+
+                Expect.equal
+                    (castsUnder neutralRoom)
+                    [ List.replicate 9 Claim @ List.replicate 9 Move ]
+                    "a room nobody holds is the whole 5,000 of deficit: nine parts"
+
+                Expect.isEmpty
+                    (castsUnder ownedRoom)
+                    "the same room, owned by this colony, is no longer a room to reserve"
             }
         ]
 
