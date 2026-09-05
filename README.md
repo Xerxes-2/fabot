@@ -35,9 +35,10 @@ Or separately: `npm run build` / `npm run upload`.
 
 ```sh
 npm run build
-npm run profile            # 100 ticks; or: npm run profile -- 500 [top-N]
+npm run profile            # 100 ticks at RCL5; or: npm run profile -- 500 [top-N]
 npm run profile -- 100 30 --census-every 10   # move the census every 10 ticks
 npm run profile -- --scenario outpost         # the colony and its neighbours
+npm run profile -- --level 4                  # build both scenarios at another RCL
 ```
 
 `npm run profile` drives the compiled `loop()` in Node against a stub colony
@@ -60,20 +61,46 @@ cleared it.
 
 Two scenarios:
 
-- **`stub`** (the default) keeps the #50 baseline shape — one synthetic
-  room (`W1N1`) shaped like the live colony at RCL3, 8 creeps — so ms/tick
-  stays comparable across commits even as the live colony moves on. A room
-  it does not model, such as a declared outpost, answers as solid rock: a
-  neighbour with no exits, which is the fiction its walled border ring
-  already tells.
+- **`stub`** (the default) is one synthetic room (`W1N1`) shaped like the
+  live colony. A room it does not model, such as a declared outpost,
+  answers as solid rock: a neighbour with no exits, which is the fiction
+  its walled border ring already tells.
 - **`outpost`** builds the colony's own room and its two declared
   neighbours from the committed room captures (`W12S28`, `W12S27`,
-  `W13S28`), on real terrain rather than synthetic (ADR 0036), with 13
-  creeps across the three. It is the world ADR 0041's layered projection is
-  sized against, and the run says how much of it the bundle actually
-  projected: while `Outpost.declared` stands empty the scan set is the
-  spawn room alone, so today its ms are one room's and the harness is
-  waiting on the constant (ADR 0042).
+  `W13S28`), on real terrain rather than synthetic (ADR 0036), and crews
+  each neighbour with an Anchor per source and a hauler. It is the world
+  ADR 0041's layered projection is sized against, and the run says how much
+  of it the bundle actually projected: while `Outpost.declared` stands
+  empty the scan set is the spawn room alone, so today its ms are one
+  room's and the harness is waiting on the constant (ADR 0042).
+
+Both are built at a **controller level** — `--level N`, RCL5 by default,
+which is where the live colony stands — and the first line of every report
+says which one it ran at. Everything the level implies is derived from it
+rather than written down: the extension, tower and Storage counts come off
+the engine's `CONTROLLER_STRUCTURES` table (RCL5: 30 extensions, of which 3
+stay construction sites so the Build family is measured, 2 towers, 1
+Storage), the energy bank off the extensions that stand, and the **fleet
+off the bundle itself** — the harness runs `loop()` with no creep standing
+anywhere and honours every `SpawnCreep` intent until the bot stops asking
+(the first is ADR 0006's disaster-fallback worker), so the creep
+count is the Workforce target at that bank (ADR 0012) and not a number in
+the script. Moving the colony a level is one flag, and no count in
+`scripts/profile.mjs` has to be re-checked by hand.
+
+Two things about that furnishing are worth having in front of you when you
+read a number against #144's own table. The three construction sites are
+held back **out of** the level's allowance, not added on top of it — the
+engine counts a site against `CONTROLLER_STRUCTURES` too, so 30 built plus
+3 pending is a room RCL5 cannot hold — which means an RCL5 run stands 27
+extensions and `energyCapacityAvailable` reports **1650**, not the 1800 the
+ticket's table names for a finished level. Every body ADR 0006 casts is
+sized against that 1650, a deliberate 8% under the level's ceiling, and the
+price of keeping the Build family in the measurement. And the cluster steps
+over the room's **working ground** — every source's Seats and the
+controller's Upgrade Work Area — because ADR 0022 keeps the Layout off it,
+so the harness furnishes the room the colony would actually build rather
+than one with an extension on the tile an Anchor stands on.
 
 Both implement only the API surface declared in `src/App/Bindings.fs`, the
 world is frozen between ticks, and engine-side costs are not simulated:
@@ -104,8 +131,43 @@ things about that split are worth knowing:
 
 Samples the profiler parks at the root — the garbage collector, and its own
 start and stop — belong to no tick, so they are in neither class and each
-table's percentages are on its own class's base. Only unflagged `stub` runs
-are comparable with the #50 baseline.
+table's percentages are on its own class's base.
+
+**The #50 baseline is superseded (#144).** Runs before that ticket measured
+both scenarios at RCL3 with a hand-written 8- and 13-creep fleet, while the
+colony had reached RCL5 — so ADR 0041's trigger was being judged two levels
+under the room it is about. `--level 3` does *not* bring that baseline
+back: the old world under-furnished its own level (no extensions and no
+tower where RCL3 allows ten and one) and hard-coded its fleet, and both are
+now derived, so an RCL3 run today is an RCL3 colony rather than the old
+fixture. The new generation's anchor, on this hardware: unflagged `stub`
+means **4.0 ms/tick** (was 2.4), `--scenario outpost` **2.3** (was 2.1),
+and a perturbed tick under `--census-every 10` **12.5** against 11.7. Only
+runs at the same `--scenario` and `--level` are comparable with each other.
+
+Worth knowing before reading a level change: **a higher level is a cheaper
+tick, not a dearer one**, and both halves of that are worth having straight
+before a number surprises you.
+
+- Raising the level does not enlarge the Layout. The plan is computed to
+  ADR 0039's horizon whatever the current level is, so `planLayout` on a
+  perturbed tick does not grow with the level — it costs 6.9 ms at RCL5
+  against 7.6 at RCL3, if anything shrinking, because the further the room
+  is built out the fewer placements are left to make.
+- A derived fleet gets **smaller** as the level climbs: a bigger bank buys
+  bigger bodies, and a Workforce target is an arithmetic of quotas and
+  income (ADR 0012), so the count falls. `stub` hires 14 creeps at RCL3 and
+  12 at RCL5; the `outpost` world stands 16 creeps at RCL3, 12 at RCL5 and
+  10 at RCL8. Measured means follow it: `stub` is 4.5 ms at RCL3 against
+  4.0 at RCL5, `outpost` 3.1 against 2.3.
+
+So the 2.4 → 4.0 step above is **furnishing the room and deriving the fleet
+at all**, not the two extra levels — an RCL3 run on today's harness is
+dearer than the RCL5 default, not cheaper. One more number to keep beside
+the `outpost` run: ADR 0041 sizes the layered projection against *roughly
+sixteen creeps over three rooms*, and at the RCL5 default the scenario
+stands 12 — the shortfall is the outpost haulers a fifty-tile round trip
+will want, which is ADR 0042's arithmetic and not a count to guess here.
 
 Current numbers, the live CPU history, and the per-hotspot attribution are
 tracked in #50 — read that, not this file, for where the time goes.
