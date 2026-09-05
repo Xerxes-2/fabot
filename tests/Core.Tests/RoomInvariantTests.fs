@@ -1812,3 +1812,418 @@ let outpostContainerTests =
                                     $"{where}: no Seat of this rock walks out to the Seam in fewer ticks"
             }
         ]
+
+// ---- the flood settled on demand (#174) ---------------------------------
+
+/// The captured room with one creep standing in it: the shape the tick's
+/// per-creep flood memo is laid for (ADR 0029), over terrain no hand-built
+/// fixture poses — walls, swamp lanes, and pockets nothing reaches. Every
+/// case below builds one of these per read order rather than sharing one,
+/// because the memo is the thing under test: what a resumable flood
+/// answers must not depend on what was asked of it before.
+let private standingIn (capture: RoomCapture) (spawn: Pos) (creep: CreepInfo) (stand: Pos) =
+    (project capture spawn None).Spatial
+    |> AtlasTests.withHome (fun layer ->
+        { layer with
+            CreepPositions = Map.ofList [ creep.Name, stand ]
+        })
+    |> AtlasTests.snapshotWith [ creep ]
+    |> ofSnapshot
+
+/// The room's own ground, nearest the creep first. This is the order a
+/// tick actually reads a flood in — a Task is usually a dozen tiles off —
+/// so it is the order that leaves the most of the room unsettled between
+/// reads, and the one a resumed flood has the most chance to get wrong.
+/// Its reverse settles almost the whole room on the first read, which is
+/// the other end of the same promise.
+let private nearestFirst (stand: Pos) (capture: RoomCapture) =
+    capture.Terrain
+    |> Map.toList
+    |> List.map fst
+    |> List.sortBy (fun tile -> range stand tile, tile.X, tile.Y)
+
+/// A tile no flood can reach, wherever the creep stands: the border ring
+/// is not the projection's ground (ADR 0041), so nothing settles it and
+/// the read has to answer absent rather than "not yet".
+let private offTheGround = { X = 0; Y = 0 }
+
+/// The bodies the cases sweep: one at ADR 0003's fatigue parity, which
+/// walks plain ground at a tick a tile, and one below it, which pays two
+/// units a plain step and prices swamp far dearer — different step
+/// tables, so different heaps, different tie-breaks and a different
+/// settle order over the same terrain (ADR 0029).
+let private floodBodies =
+    [
+        "parity", AtlasTests.creepWith "w" 0 [ Carry; Carry; Move; Move ]
+        "slow", AtlasTests.worker "w"
+    ]
+
+/// The rooms the cases sweep, each with the spawn tile the projection
+/// stands its furniture on and the tile the creep stands on: the colony's
+/// own room and one of #83's remote targets.
+let private floodRooms =
+    [
+        "W12S28", { X = 12; Y = 40 }, { X = 24; Y = 24 }
+        "W13S28", { X = 24; Y = 24 }, { X = 12; Y = 30 }
+    ]
+
+/// One tile in thirteen gets a flood of its very own — a read no earlier
+/// read can have contaminated. A stride rather than every tile because
+/// this is the case that pays for an Atlas per tile, and the passes it
+/// sits beside already compare all 2,304 against each other.
+let private coldStride = 13
+
+[<Tests>]
+let onDemandFloodTests =
+    testList
+        "atlas flood settled on demand"
+        [
+            test "a walk read off the resumable memo is the whole flood's, tile for tile" {
+                // The oracle, and the only case here that does not compare
+                // the memo against itself. `haulRoundTripTicks` runs its own
+                // floods and settles them whole (ADR 0012, and #174 left it
+                // that way deliberately), while `walkTicks` reads the tick's
+                // per-creep memo, which #174 made resumable. Point them at
+                // one room, one origin and one goal set and they must
+                // answer the same number: same weights, same Walk pricing
+                // (ADR 0029), both traffic-blind.
+                //
+                // The two are made to line up by the fixture and not by a
+                // special case: a Carry-less body is priced identically
+                // loaded and empty, so the round trip is exactly twice the
+                // one-way walk; and a spawn structure is an obstacle, so
+                // the Refill Work Area at range 1 is exactly the sink's
+                // adjacent walkable tiles. Real terrain is what makes it
+                // worth asserting — the walk detours around walls and pays
+                // swamp, and a flood stopped a pop too early would answer a
+                // route it had not finished finding (ADR 0036).
+                let body = [ Work; Move ]
+
+                for roomName, spawn, _ in floodRooms do
+                    let capture = load roomName
+                    let task = Refill "spawn-1"
+
+                    let stands =
+                        capture.Terrain
+                        |> Map.toList
+                        |> List.choose (fun (tile, terrain) ->
+                            if terrain <> Wall && (tile.X + tile.Y) % 7 = 0 then
+                                Some tile
+                            else
+                                None)
+
+                    Expect.isGreaterThan
+                        (List.length stands)
+                        100
+                        $"{roomName}: tiles worth sweeping"
+
+                    let mutable walked = 0
+
+                    for stand in stands do
+                        let creep = AtlasTests.creepWith "w" 0 body
+                        let atlas = standingIn capture spawn creep stand
+
+                        let onDemand = walkTicks atlas creep.Name task
+                        let whole = haulRoundTripTicks atlas body roomName stand roomName spawn
+
+                        match onDemand, whole with
+                        | Some one, Some round ->
+                            walked <- walked + 1
+
+                            Expect.equal
+                                (one * 2)
+                                round
+                                $"{roomName} from {stand}: the memo's walk is the whole flood's"
+                        | None, None -> () // no route: absent from both, as ADR 0004 has it
+                        | one, round ->
+                            failtest
+                                $"{roomName} from {stand}: memo {one} and whole flood {round} disagree on whether there is a walk"
+
+                    Expect.isGreaterThan walked 50 $"{roomName}: walks actually compared"
+            }
+
+            test "a tile prices the same whichever order the room is read in" {
+                // The memo is shared: every query pricing a creep this tick
+                // reads one flood, so what it answers must not depend on
+                // what was asked of it before (`Floods`). `travelCostWithin`
+                // takes the tiles the caller names, so one call is one
+                // tile's distance out of that flood, and a flood pushed out
+                // tile by tile, a flood asked from the far end in, and a
+                // flood asked for one tile and nothing else must agree
+                // everywhere. Dijkstra settles a tile for good when it
+                // leaves the heap, so this is a property and not a
+                // coincidence.
+                for roomName, spawn, stand in floodRooms do
+                    let capture = load roomName
+
+                    for bodyName, creep in floodBodies do
+                        let where = $"{roomName}/{bodyName}"
+                        let tiles = nearestFirst stand capture
+                        let atlasOf () = standingIn capture spawn creep stand
+
+                        let priced atlas tile =
+                            travelCostWithin atlas creep.Name (Set.singleton tile)
+
+                        Expect.isGreaterThan
+                            (List.length tiles)
+                            2000
+                            $"{where}: a room worth sweeping"
+
+                        let onDemand =
+                            let atlas = atlasOf ()
+                            tiles |> List.map (priced atlas)
+
+                        let farEndFirst =
+                            let atlas = atlasOf ()
+                            tiles |> List.rev |> List.map (priced atlas) |> List.rev
+
+                        let cold =
+                            tiles
+                            |> List.indexed
+                            |> List.filter (fun (index, _) -> index % coldStride = 0)
+                            |> List.map (fun (_, tile) -> priced (atlasOf ()) tile)
+
+                        // The fourth order, and the one that makes this a
+                        // comparison against the whole flood rather than
+                        // against another resumable one: a tile nothing
+                        // reaches settles the heap to exhaustion, so every
+                        // read after it comes off exactly the flood the
+                        // pre-#174 code laid in one go. Asking it first is
+                        // the ticket's "whole flood, then on demand".
+                        let wholeFirst =
+                            let atlas = atlasOf ()
+
+                            Expect.isNone
+                                (priced atlas offTheGround)
+                                $"{where}: the border ring is reached by nothing, so asking drains the flood"
+
+                            tiles |> List.map (priced atlas)
+
+                        Expect.isGreaterThan
+                            (onDemand |> List.choose id |> List.length)
+                            1500
+                            $"{where}: a room the creep can price at all"
+
+                        Expect.equal
+                            onDemand
+                            wholeFirst
+                            $"{where}: a flood pushed out tile by tile prices what one settled whole does"
+
+                        Expect.equal
+                            onDemand
+                            farEndFirst
+                            $"{where}: the read order does not move a single tile's price"
+
+                        Expect.equal
+                            cold
+                            (onDemand
+                             |> List.indexed
+                             |> List.filter (fun (index, _) -> index % coldStride = 0)
+                             |> List.map snd)
+                            $"{where}: a flood asked one tile answers what a flood asked every tile does"
+            }
+
+            test "the step toward a tile is the one the whole flood leaves, read early or late" {
+                // The other half of a flood is its predecessor chain, and it
+                // is read *after* the goal settles: every tile of a cheapest
+                // path is strictly cheaper than the goal, so all of them
+                // left the heap first. `firstStep` is the reader, and a
+                // stale parent would move its answer without moving a single
+                // price — a creep walking one way while ranked another
+                // (ADR 0008, #142). Both routing pricings are swept: the
+                // Resolver compares them and blames the difference on
+                // traffic (ADR 0018, ADR 0030).
+                for roomName, spawn, stand in floodRooms do
+                    let capture = load roomName
+                    let loaded = project capture spawn None
+                    let task = Harvest(List.head loaded.SourceIds)
+                    let creep = AtlasTests.worker "w"
+
+                    let goals =
+                        nearestFirst stand capture
+                        |> List.indexed
+                        |> List.filter (fun (index, _) -> index % 5 = 0)
+                        |> List.map snd
+
+                    let atlasOf () = standingIn capture spawn creep stand
+
+                    let steps step =
+                        let onDemand =
+                            let atlas = atlasOf ()
+                            goals |> List.map (step atlas)
+
+                        let farEndFirst =
+                            let atlas = atlasOf ()
+                            goals |> List.rev |> List.map (step atlas) |> List.rev
+
+                        let cold = goals |> List.map (fun goal -> step (atlasOf ()) goal)
+
+                        // The chain against a flood settled whole, which is
+                        // the only order here that is not the memo compared
+                        // with itself: a goal nothing reaches drains the
+                        // heap through this very reader, so the steps that
+                        // follow are walked back down the predecessor grid
+                        // the pre-#174 flood left. The drain has to answer
+                        // absent, or it has not drained.
+                        let wholeFirst =
+                            let atlas = atlasOf ()
+
+                            Expect.isNone
+                                (step atlas offTheGround)
+                                $"{roomName}: no step toward a tile the flood never reaches"
+
+                            goals |> List.map (step atlas)
+
+                        onDemand, farEndFirst, cold, wholeFirst
+
+                    let routes =
+                        [
+                            "priced",
+                            steps (fun atlas goal ->
+                                firstStep atlas creep.Name task (Set.singleton goal))
+                            "traffic-blind",
+                            steps (fun atlas goal ->
+                                firstStepIgnoringTraffic atlas creep.Name task (Set.singleton goal))
+                        ]
+
+                    for pricing, (onDemand, farEndFirst, cold, wholeFirst) in routes do
+                        let where = $"{roomName}/{pricing}"
+
+                        Expect.isGreaterThan
+                            (onDemand |> List.choose id |> List.length)
+                            100
+                            $"{where}: a room the creep can step into at all"
+
+                        Expect.equal
+                            onDemand
+                            wholeFirst
+                            $"{where}: a chain read off a resumable flood is the chain a whole one leaves"
+
+                        Expect.equal
+                            onDemand
+                            farEndFirst
+                            $"{where}: the read order does not move a single step"
+
+                        Expect.equal
+                            onDemand
+                            cold
+                            $"{where}: a chain read off a resumed flood is the chain a fresh one leaves"
+            }
+
+            test "the walk resumes across the Tasks that share one flood" {
+                // The third pricing (ADR 0029): the clock, whose reader takes
+                // a Task rather than a tile, so it is the Tasks of a room
+                // that ask one flood for one creep in one tick. Asked in
+                // either order, or each on a flood of its own, every Task
+                // must answer the same walk — the memo's own promise
+                // (`Floods`), which #174 made depend on where the flood
+                // stopped.
+                for roomName, spawn, stand in floodRooms do
+                    let capture = load roomName
+                    let loaded = project capture spawn None
+                    let creep = AtlasTests.worker "w"
+
+                    let tasks =
+                        [
+                            for id in loaded.SourceIds -> Harvest id
+                            for id in Option.toList loaded.ControllerId -> Upgrade id
+                            yield Refill "spawn-1"
+                        ]
+
+                    let atlasOf () = standingIn capture spawn creep stand
+                    let walked atlas task = walkTicks atlas creep.Name task
+
+                    Expect.isGreaterThan (List.length tasks) 2 $"{roomName}: Tasks worth sweeping"
+
+                    let apiece = tasks |> List.map (fun task -> walked (atlasOf ()) task)
+
+                    // Three lists of absences would agree with each other
+                    // too, so the walks have to be walks: a flood that
+                    // answered nothing at all would satisfy every equality
+                    // below and pin nothing.
+                    Expect.isGreaterThan
+                        (apiece |> List.choose id |> List.length)
+                        2
+                        $"{roomName}: Tasks the creep can actually walk to"
+
+                    let inOrder =
+                        let atlas = atlasOf ()
+                        tasks |> List.map (walked atlas)
+
+                    let reversed =
+                        let atlas = atlasOf ()
+                        tasks |> List.rev |> List.map (walked atlas) |> List.rev
+
+                    Expect.equal
+                        inOrder
+                        apiece
+                        $"{roomName}: a Task asked second walks what it walks asked alone"
+
+                    Expect.equal
+                        reversed
+                        apiece
+                        $"{roomName}: nor does asking them the other way round"
+            }
+
+            test "a tile nothing reaches is unreachable and not merely unsettled" {
+                // The trap #174 introduces and no type can catch: `unreached`
+                // means "nothing gets here" in a whole flood and "nobody has
+                // asked yet" in a resumed one, so a reader that answered off
+                // the grid before settling would call a reachable tile
+                // unreachable — and an unpriceable Task is a creep that never
+                // works (ADR 0004). Every wall of a real room is a case, and
+                // so is the ring around it.
+                let capture = load "W12S28"
+                let creep = AtlasTests.worker "w"
+                let stand = { X = 24; Y = 24 }
+                let atlas = standingIn capture { X = 12; Y = 40 } creep stand
+
+                let walls =
+                    capture.Terrain
+                    |> Map.toList
+                    |> List.choose (fun (tile, terrain) ->
+                        if terrain = Wall then Some tile else None)
+
+                Expect.isNonEmpty walls "a captured room has walls"
+
+                Expect.isNone
+                    (travelCostWithin atlas creep.Name (Set.singleton offTheGround))
+                    "the border ring is no tile of the projection's ground"
+
+                Expect.isNone
+                    (travelCostWithin atlas creep.Name (Set.singleton { X = 60; Y = 3 }))
+                    "a tile off the fifty-by-fifty grid is unpriceable, not an exception (ADR 0004)"
+
+                for wall in walls do
+                    Expect.isNone
+                        (travelCostWithin atlas creep.Name (Set.singleton wall))
+                        $"a wall at {wall} is reachable by nothing"
+
+                // After all of that: an absent answer drains the flood, and
+                // the reads that follow one must still answer — the failure
+                // a shortcut that gave up on absence would hide. The tile
+                // the creep stands on is left out of both, because
+                // `pricedPathTo` answers that one before it asks the flood
+                // anything (`Set.contains pos area`), so a set holding it
+                // would be green with no flood at all.
+                let elsewhere =
+                    nearestFirst stand capture |> List.filter (fun tile -> tile <> stand)
+
+                Expect.equal
+                    (travelCostWithin atlas creep.Name (Set.singleton stand))
+                    (Some 0)
+                    "the creep's own tile prices at nothing, asked before any flood is"
+
+                Expect.isSome
+                    (travelCostWithin atlas creep.Name (Set.ofList elsewhere))
+                    "and the room around it is still reachable"
+
+                Expect.isGreaterThan
+                    (elsewhere
+                     |> List.filter (fun tile ->
+                         travelCostWithin atlas creep.Name (Set.singleton tile) |> Option.isSome)
+                     |> List.length)
+                    1500
+                    "and so is each of its tiles, asked one at a time after the drain"
+            }
+        ]
