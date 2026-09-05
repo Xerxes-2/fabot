@@ -827,16 +827,15 @@ let placedCreepsByRoom (atlas: Atlas) : (string * (string * Pos) list) list =
 
 /// The creeps the projection places in the colony's own room, in Snapshot
 /// creep order: the home group of `placedCreepsByRoom`, handed out as a
-/// bare `Pos` list for the two readers whose other side is home geometry
-/// and no other room's — the pickup reflex measures range against home
-/// piles, and the lead prices the tile off the home room's flood (ADR
-/// 0041). A second room's creep unioned in would pair an outpost creep
-/// with a home pile at the same coordinate and price an outpost tile on
-/// home terrain. The Resolver reads the grouped query instead (#145). A
-/// creep the colony's own room does not place is simply not picked up
-/// for and not led — the answer ADR 0004 gives for geometry a query
-/// cannot place, here reached by picking the room rather than by failing
-/// to find the tile.
+/// bare `Pos` list for the reader whose other side is home geometry and no
+/// other room's — the pickup reflex measures range against home piles (ADR
+/// 0041). A second room's creep unioned in would pair an outpost creep with
+/// a home pile at the same coordinate. The Resolver reads the grouped query
+/// instead (#145), and the lead reads `creepRoom` beside `creepTile`, since
+/// #153 prices a succession wherever the creep stands. A creep the colony's
+/// own room does not place is simply not picked up for — the answer ADR
+/// 0004 gives for geometry a query cannot place, here reached by picking
+/// the room rather than by failing to find the tile.
 let placedCreeps (atlas: Atlas) : (string * Pos) list =
     atlas.Placed
     |> List.choose (fun (name, room, pos) -> if room = atlas.Home then Some(name, pos) else None)
@@ -1828,12 +1827,16 @@ let private farFlood (atlas: Atlas) (pricing: Pricing) (creep: string) (room: st
 /// already run — so no flood ever leaves its room and the join is a
 /// minimum over thirty-odd additions rather than over thirty-odd floods.
 ///
-/// The join itself and not a second one (ADR 0030). Two callers reach it,
-/// and they differ in nothing but which two floods they hand it: a creep
-/// priced toward a Task (`pricedAcross`) floods out of the creep and into
-/// that Task's Work Area, and the hauler quota's round trip
+/// The join itself and not a second one (ADR 0030). Three callers reach
+/// it, and they differ in nothing but which two floods they hand it: a
+/// creep priced toward a Task (`pricedAcross`) floods out of the creep and
+/// into that Task's Work Area, the hauler quota's round trip
 /// (`haulRoundTripTicks`) floods out of a container and into the sink's
-/// approach. What the two floods owe this rule is fixed: the near one is
+/// approach, and a lead's cast walk (`castWalkTicks`) floods out of *all*
+/// the tiles beside a spawner — the one many-origin near leg here, since a
+/// finished body is born on whichever of them is free — and into the tile
+/// the creep being replaced stands on. What the two floods owe this rule
+/// is fixed: the near one is
 /// `fromRoom`'s and charges every tile it enters, the far one is the
 /// other room's and is run *into* its goals with each goal seeded at its
 /// own entry cost (`floodPricedInto`). Hand it a far leg flooded the
@@ -2364,24 +2367,69 @@ let haulRoundTripTicks
 /// time-aware judgement in the colony is made on — a lead is a clock, and
 /// nothing here converts units to ticks of its own. None when the goal is
 /// unreachable, and none when the spawner has no free neighbour to be born
-/// on — unpriceable geometry leads nobody (ADR 0004). Floods the colony's
-/// own room: a spawner stands at home, and the memo this rides is keyed by
-/// tile and factor with no room on it (ADR 0032) — which is safe exactly
-/// because every origin it holds is a home-room spawner's tile, and stays
-/// safe only while nothing else is memoised here.
-let castWalkTicks (atlas: Atlas) (body: BodyPart list) (spawn: Pos) (goal: Pos) : int option =
+/// on — unpriceable geometry leads nobody (ADR 0004).
+///
+/// The spawner floods its own room and the *goal's* room is the caller's
+/// (#153), because a row's creeps do not all live at home: an outpost's
+/// Post hires its Anchor off the home row (ADR 0042) and a reserver's
+/// whole life is the far side of a Seam, so a lead that could only price
+/// home tiles left ADR 0026's succession switched off for exactly those
+/// creeps — never expiring, replaced only once dead. A goal in the
+/// colony's own room prices as it always did, byte for byte: the same
+/// flood, the same memo entry, the same lookup. A goal across a border is
+/// the minimum over the Seam band (`joinedAcross`) — the one join the
+/// Matcher's ranking price, the mover's step and the hauler quota's round
+/// trip are all read off, never a second cross-room arithmetic of this
+/// rule's own (ADR 0030). Two rooms with no band between them lead nobody,
+/// which is the answer an unreachable tile inside one room already gets.
+///
+/// **Only the near leg enters the memo**, and that is ADR 0032's own
+/// condition rather than an omission here. That table lives *across* ticks
+/// under the census signature and its key carries no room — safe exactly
+/// because every origin it holds is a home-room spawner's tile. The far
+/// leg is the other room's, and its origin is a bare `Pos` the home room
+/// holds too, so an entry for it would collide with a home walk on a key
+/// that cannot tell the two coordinates apart (#120's forward warning).
+/// That collision is the whole of the reason and staleness is no part of
+/// it: an outpost's ground needs no vision at all (`Snapshot.projectRoom`
+/// reads the engine's terrain for any room in the world, ADR 0031, ADR
+/// 0041), and the roads and obstacles vision does pay for are signed per
+/// projected room exactly as the home room's are (`censusSignature`). It
+/// is therefore flooded fresh — once for every ask, so a creep the home
+/// room does not place costs one flood per spawn per reader of `expiring`
+/// — and the band is read before it is run, because a pair of rooms with
+/// no crossing has no flood to pay for (`pricedAcross`'s rule, for
+/// `pricedAcross`'s reason).
+let castWalkTicks
+    (atlas: Atlas)
+    (body: BodyPart list)
+    (spawn: Pos)
+    (goalRoom: string)
+    (goal: Pos)
+    : int option =
     let factor = emptyFactorOf body
 
-    let dist =
+    // The near leg, and the whole of a home-room lead: the flood out of the
+    // tiles beside the spawner, over the colony's own room's weights,
+    // recalled from the plan memo while the census holds (ADR 0032).
+    let near () =
         memoised atlas.Walks (spawn, factor) (fun () ->
             let dist, _ =
                 walkFloodFromAll (weightsOf atlas atlas.Home) factor (adjacentWalkable atlas spawn)
 
             dist)
 
-    match dist.[indexOf goal] with
-    | d when d = unreached -> None
-    | d -> Some d
+    if goalRoom = atlas.Home then
+        match (near ()).[indexOf goal] with
+        | d when d = unreached -> None
+        | d -> Some d
+    else
+        match seams atlas atlas.Home goalRoom with
+        | [] -> None
+        | band ->
+            let far = floodPricedInto (weightsOf atlas goalRoom) noTraffic factor Walk [ goal ]
+
+            joinedAcross atlas Walk factor atlas.Home band (near ()) far |> Option.map fst
 
 /// Cheapest raw-terrain path for a trunk road (ADR 0011): plain 2, swamp
 /// 10 — no road discount and no occupancy surcharge, so the line neither

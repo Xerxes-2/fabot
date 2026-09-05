@@ -13299,6 +13299,126 @@ let outpostHaulTests =
             }
         ]
 
+/// The same haul fixture with an Anchor garrisoning the outpost's
+/// container — the succession ADR 0026 owes an outpost's Post as much as a
+/// home one (#153). Its ticks to live are the caller's, because that is the
+/// whole of what moves between two calls below.
+let private withOutpostGarrison life (colony: Snapshot) =
+    let outpost = SpatialInfo.layerOf colony.Spatial "W1N2"
+
+    { colony with
+        Creeps = colony.Creeps @ [ anchor "a-out" 0 50 |> withLife life ]
+        Spatial =
+            colony.Spatial
+            |> withNeighbour
+                "W1N2"
+                { outpost with
+                    CreepPositions = Map.add "a-out" { X = 25; Y = 41 } outpost.CreepPositions
+                }
+    }
+
+/// The colony the cases below read: the haul fixture's two rooms, the
+/// outpost held and its container standing, and one Anchor on that
+/// container with the given life left.
+let private outpostSuccession life =
+    haulHome
+    |> withHaulOutpost (Some(reservedRoom true 4000))
+    |> withOutpostGarrison life
+
+/// The names of the bodies a tick casts, in the order the colony emits
+/// them — the row a spawn Intent came from, which is the whole of what the
+/// cases below read.
+let private castNames (colony: Snapshot) =
+    spawnIntents (decide colony Map.empty Set.empty None).Intents
+    |> List.map (fun (_, _, name) -> name)
+
+[<Tests>]
+let outpostSuccessionTests =
+    testList
+        "an outpost's Anchor and its lead"
+        [
+            test "an Anchor a room away is expiring, and its replacement is cast before it dies" {
+                // The reproduction #153 opens on. Until it, a lead was
+                // priced off the home room's flood alone, so a creep the
+                // home room did not place answered 0 and was never expiring
+                // — an outpost's garrison held its Post to the last tick,
+                // its successor was cast only once it was dead, and the Post
+                // stood empty for the cast plus the crossing in every
+                // 1,500-tick life while the workforce target went on hiring
+                // against the source's nominal output (ADR 0042).
+                //
+                // Priced over the border the lead is countable a tile at a
+                // time. The Anchor row at this 300 bank is two Work over a
+                // Carry and a Move (`anchorBodyFor`), so twelve ticks in the
+                // spawner and four cost units — two ticks — a plain step.
+                // The replacement is born on (25,9), walks eight tiles up to
+                // (25,1), steps onto the exit at (25,0), is moved to (25,49)
+                // for nothing, steps off onto (25,48) and walks seven more
+                // down to the container at (25,41): sixteen tiles of ground
+                // at two ticks each, plus the plain exit's own two — 34 of
+                // walking and a lead of 46.
+                Expect.equal
+                    (castNames (outpostSuccession 1500))
+                    (castNames (outpostSuccession 47))
+                    "one tick outside its lead the garrison still counts, exactly as a fresh one does"
+
+                match castNames (outpostSuccession 47) with
+                | [ name ] ->
+                    Expect.stringStarts name "hauler-" "the premise: the Anchor row is filled"
+                | other -> failtest $"expected exactly one SpawnCreep intent, got %A{other}"
+
+                match castNames (outpostSuccession 46) with
+                | [ name ] ->
+                    Expect.stringStarts
+                        name
+                        "anchor-"
+                        "at its lead the outpost's row is short and the successor is cast"
+                | other -> failtest $"expected exactly one SpawnCreep intent, got %A{other}"
+
+                match castNames (outpostSuccession 1) with
+                | [ name ] ->
+                    Expect.stringStarts
+                        name
+                        "anchor-"
+                        "and a tick from death it is being replaced, not mourned"
+                | other -> failtest $"expected exactly one SpawnCreep intent, got %A{other}"
+            }
+
+            test "an outpost no crossing reaches leads nobody, however little life is left" {
+                // Total (ADR 0004) at the seam the border is joined on: with
+                // no ring in the projection the two rooms share no Seam
+                // band, so there is no walk to price and no lead — and a
+                // lead of 0 leaves the garrison counted living to its last
+                // tick, which is the answer unpriceable geometry has always
+                // had. Never an arbitrary number, and never the home room's
+                // arithmetic run over an outpost's coordinates.
+                let unbordered life =
+                    let colony = outpostSuccession life
+
+                    { colony with
+                        Spatial =
+                            { colony.Spatial with
+                                Borders = Map.empty
+                            }
+                    }
+
+                Expect.equal
+                    (castNames (unbordered 1))
+                    (castNames (unbordered 1500))
+                    "the same colony casts the same body whether the garrison is dying or fresh"
+
+                // A worker and not a hauler, because the same missing band
+                // leaves the container's round trip unpriceable and its
+                // haul unhired (ADR 0004, `outpostHaulTests`). What this
+                // case reads is the row it is *not*: the Anchor row is
+                // filled, so the garrison is still counted living.
+                match castNames (unbordered 1) with
+                | [ name ] ->
+                    Expect.stringStarts name "worker-" "and the Anchor row reads as filled"
+                | other -> failtest $"expected exactly one SpawnCreep intent, got %A{other}"
+            }
+        ]
+
 /// The switch's home half: the same corridor down column 25 of W1N1 with
 /// the spawn at (25,10), and one home source in the rock beside it at
 /// (24,20) with its container standing on the Seat (25,20). A home Post,

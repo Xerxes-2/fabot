@@ -2178,6 +2178,13 @@ let castWalkTicksTests =
             /// Move, so a plain step costs 8 units.
             let anchorBody = [ Work; Work; Work; Work; Carry; Move ]
 
+            /// The room every goal below stands in. The goal's room is the
+            /// caller's since #153 — a creep is led wherever it stands, and
+            /// these cases lead one at home — and `spatial` builds from
+            /// `SpatialInfo.empty`, which names no room, so the corridor is
+            /// filed under the empty name (`SpatialInfo.homeName`).
+            let home = SpatialInfo.homeName SpatialInfo.empty
+
             test "the walk is priced for the body given, not for any creep standing there" {
                 // The lead's whole point (ADR 0026): an empty Anchor body
                 // pays 8 units a plain step, ceil(8 / 2) = 4 ticks, so the
@@ -2189,6 +2196,7 @@ let castWalkTicksTests =
                         (corridorWith Set.empty [])
                         anchorBody
                         { X = 20; Y = 10 }
+                        home
                         { X = 10; Y = 10 })
                     (Some 36)
                     "a slow body earns a long lead"
@@ -2198,6 +2206,7 @@ let castWalkTicksTests =
                         (corridorWith Set.empty [])
                         [ Carry; Carry; Move ]
                         { X = 20; Y = 10 }
+                        home
                         { X = 10; Y = 10 })
                     (Some 9)
                     "a hauler on the same ground earns a short one"
@@ -2215,6 +2224,7 @@ let castWalkTicksTests =
                         (corridorWith Set.empty [])
                         anchorBody
                         { X = 20; Y = 10 }
+                        home
                         { X = 19; Y = 10 })
                     (Some 0)
                     "a replacement is born beside the spawner, not moved there"
@@ -2230,6 +2240,7 @@ let castWalkTicksTests =
                         (corridorWith (Set.ofList [ for x in 11..19 -> { X = x; Y = 10 } ]) [])
                         anchorBody
                         { X = 20; Y = 10 }
+                        home
                         { X = 10; Y = 10 })
                     (Some 20)
                     "the trunk shortens a succession"
@@ -2244,6 +2255,7 @@ let castWalkTicksTests =
                         (corridorWith Set.empty [ "w", { X = 15; Y = 10 } ])
                         anchorBody
                         { X = 20; Y = 10 }
+                        home
                         { X = 10; Y = 10 })
                     (Some 36)
                     "a standing creep is not a detour a replacement will still face"
@@ -2264,6 +2276,7 @@ let castWalkTicksTests =
                             (corridorWith Set.empty [])
                             body
                             { X = 20; Y = 10 }
+                            home
                             { X = 10; Y = 10 }
                     with
                     | Some ticks ->
@@ -2295,6 +2308,7 @@ let castWalkTicksTests =
                         gapped
                         [ Work; Carry; Move ]
                         { X = 20; Y = 10 }
+                        home
                         { X = 10; Y = 10 })
                     None
                     "unpriceable geometry leads nobody"
@@ -2320,6 +2334,7 @@ let castWalkTicksTests =
                         walled
                         [ Work; Carry; Move ]
                         { X = 20; Y = 10 }
+                        home
                         { X = 10; Y = 10 })
                     None
                     "a spawner that can place nothing leads nobody"
@@ -2346,6 +2361,12 @@ let walkRecallTests =
 
             let hauler = [ Carry; Carry; Move ]
             let spawnTile = { X = 20; Y = 10 }
+
+            /// The corridor's own room, which is where this goal stands: the
+            /// name `spatial` files an unnamed projection's layer under
+            /// (`SpatialInfo.homeName`). The cross-border half of the same
+            /// table is `crossRoomLeadTests`.
+            let home = SpatialInfo.homeName SpatialInfo.empty
             let goal = { X = 10; Y = 10 }
 
             /// The one flood a corridor's lead pricing lays, read off the
@@ -2363,7 +2384,7 @@ let walkRecallTests =
                 let first = corridorSnapshot () |> ofSnapshotRecalling walks
 
                 Expect.equal
-                    (castWalkTicks first hauler spawnTile goal)
+                    (castWalkTicks first hauler spawnTile home goal)
                     (Some 9)
                     "the first Atlas floods to price the lead"
 
@@ -2373,7 +2394,7 @@ let walkRecallTests =
                 let second = corridorSnapshot () |> ofSnapshotRecalling walks
 
                 Expect.equal
-                    (castWalkTicks second hauler spawnTile goal)
+                    (castWalkTicks second hauler spawnTile home goal)
                     (Some 9)
                     "the recalled walk prices the same lead"
 
@@ -2392,14 +2413,14 @@ let walkRecallTests =
                 let atlas = corridorSnapshot () |> ofSnapshotRecalling fresh
 
                 Expect.equal
-                    (castWalkTicks atlas hauler spawnTile goal)
+                    (castWalkTicks atlas hauler spawnTile home goal)
                     (Some 9)
                     "an empty table is flooded into, and prices the lead identically"
 
                 Expect.equal fresh.Count 1 "the flood it ran is left in it"
 
                 Expect.equal
-                    (castWalkTicks (corridorSnapshot () |> ofSnapshot) hauler spawnTile goal)
+                    (castWalkTicks (corridorSnapshot () |> ofSnapshot) hauler spawnTile home goal)
                     (Some 9)
                     "and the plain entry point, which lays its own table, agrees"
             }
@@ -3296,11 +3317,12 @@ let roomTests =
                 // ADR 0041's Consequences: arbitrated movement (ADR 0001,
                 // ADR 0008) and the occupancy surcharge stay single-room,
                 // unchanged. The pickup reflex measures range against home
-                // piles, and the lead prices the tile off the home room's
-                // flood — both of which read a second room's creep as a
-                // creep of this one when the coordinates agree. The floods
-                // still get every room's creep, and the Resolver reads the
-                // grouped query beside this one (#145); this bare list is
+                // piles, which would read a second room's creep as a creep
+                // of this one when the coordinates agree. The floods still
+                // get every room's creep; the Resolver reads the grouped
+                // query beside this one (#145) and the lead reads
+                // `creepRoom` and `creepTile` (#153), because a succession
+                // is priced wherever the creep stands. This bare list is
                 // home's.
                 let home =
                     { SpatialInfo.empty with
@@ -3398,7 +3420,19 @@ let roomTests =
 /// `seams` answers and the join `pricedAcross` sums over. The rings ride
 /// beside the ground and never inside it (ADR 0041), which is what makes a
 /// crossing priceable without any exit tile becoming a tile to stand on.
-let private northOf (home: RoomLayer) homeRing (outpost: RoomLayer) outpostRing kinds creeps =
+///
+/// The Snapshot is handed out beside the Atlas because one case below
+/// prices a lead over a walk table it supplies itself
+/// (`ofSnapshotRecalling`, ADR 0032); every other case wants the Atlas and
+/// takes the shorthand.
+let private northOfSnapshot
+    (home: RoomLayer)
+    homeRing
+    (outpost: RoomLayer)
+    outpostRing
+    kinds
+    creeps
+    =
     { SpatialInfo.empty with
         RoomName = Some "W1N1"
         Borders = Map.ofList [ "W1N1", Map.ofList homeRing; "W1N2", Map.ofList outpostRing ]
@@ -3407,7 +3441,9 @@ let private northOf (home: RoomLayer) homeRing (outpost: RoomLayer) outpostRing 
     |> withHome (fun _ -> home)
     |> withOutpost "W1N2" outpost
     |> snapshotWith creeps
-    |> ofSnapshot
+
+let private northOf (home: RoomLayer) homeRing (outpost: RoomLayer) outpostRing kinds creeps =
+    northOfSnapshot home homeRing outpost outpostRing kinds creeps |> ofSnapshot
 
 /// The colony's own room as every cross-room case below shapes it: one
 /// plain corridor down column 25 to the exit row, with the creeps standing
@@ -3776,6 +3812,228 @@ let crossRoomTests =
                     (walkTicks posted "w" (Harvest "src-out"))
                     (Some 18)
                     "and the light body ignores the Post, over the same border on the same tick"
+            }
+        ]
+
+/// The spawn structure of every lead below, standing at (25,10) of the home
+/// corridor. An obstacle, as a spawn is, so a finished body is born on
+/// (25,9) or (25,11) and the walk it is led by starts there.
+let private leadSpawn = { X = 25; Y = 10 }
+
+/// The tile in the outpost a lead below is priced to: the Seat under that
+/// room's rock, which is where an outpost's Anchor garrisons (ADR 0042).
+let private outpostSeat = { X = 25; Y = 41 }
+
+/// The two rooms every lead below is priced over: the cross-room fixture's
+/// own corridors, with the spawn structure standing in the home one and the
+/// rings the caller shapes. The Snapshot, because one case hands its own
+/// walk table in (ADR 0032).
+let private leadAcrossSnapshot homeRing outpostRing placed creeps =
+    northOfSnapshot
+        { corridorHome placed with
+            TargetPositions = Map.ofList [ "spawn-1", leadSpawn ]
+            Obstacles = Set.singleton leadSpawn
+        }
+        homeRing
+        corridorOutpost
+        outpostRing
+        [ "spawn-1", Structure BuiltKind.Spawn; "src-out", Source ]
+        creeps
+
+let private leadAcross homeRing outpostRing placed creeps =
+    leadAcrossSnapshot homeRing outpostRing placed creeps |> ofSnapshot
+
+[<Tests>]
+let crossRoomLeadTests =
+    testList
+        "atlas cross-room castWalkTicks"
+        [
+            /// The hauler unit empty: no fatigue-generating part at all, so
+            /// it rides the walk's one-tick floor over every tile.
+            let hauler = [ Carry; Carry; Move ]
+
+            /// The Anchor row's minimal cast, empty: two Work over one Move,
+            /// so 4 units and 2 ticks a plain step and 20 units and 10 ticks
+            /// a swamp one. The body an outpost's garrison is actually
+            /// replaced by at a 300 bank (`anchorBodyFor`).
+            let anchorUnit = [ Work; Work; Carry; Move ]
+
+            let openRings = [ { X = 25; Y = 0 }, Plain ], [ { X = 25; Y = 49 }, Plain ]
+
+            test "a creep in the outpost is led across the Seam, on the join everything else uses" {
+                // ADR 0026's succession over ADR 0041's border (#153). The
+                // replacement is born on (25,9), walks eight tiles up to
+                // (25,1), steps onto the exit at (25,0), is moved to (25,49)
+                // for nothing at the end of that tick, steps off onto
+                // (25,48) and walks seven more down to the Seat at (25,41):
+                // seventeen tiles stepped onto, one tick each for a body
+                // that generates no fatigue.
+                let homeRing, outpostRing = openRings
+
+                let atlas =
+                    leadAcross
+                        homeRing
+                        outpostRing
+                        [ "w", { X = 25; Y = 9 } ]
+                        [ creepWith "w" 0 hauler ]
+
+                Expect.equal
+                    (castWalkTicks atlas hauler leadSpawn "W1N2" outpostSeat)
+                    (Some 17)
+                    "eight near, the exit, and eight in the outpost"
+
+                // The same ground, the same body and the same border, read
+                // by the other clock in the colony: a creep standing on the
+                // birth tile is walked to that Seat in exactly the ticks the
+                // lead charges for reaching it. One join, two readers (ADR
+                // 0030) — a second cross-room arithmetic of the lead's own
+                // would agree here and drift everywhere else.
+                Expect.equal
+                    (walkTicks atlas "w" (Harvest "src-out"))
+                    (castWalkTicks atlas hauler leadSpawn "W1N2" outpostSeat)
+                    "the Matcher's walk and the lead's walk price one crossing"
+            }
+
+            test "the exit tile is charged what the body pays to step onto it" {
+                // #123's narrowing of ADR 0041's literal `+1`, on the lead's
+                // reader too: the Anchor unit pays 2 ticks a plain tile, so
+                // sixteen near, the exit, and sixteen in the outpost. A
+                // swamp crossing costs it ten rather than two, and the whole
+                // lead is eight ticks longer — the eight ticks a colony
+                // whose Seam is swamp has to cast its replacement earlier.
+                let homeRing, outpostRing = openRings
+
+                let over ring =
+                    leadAcross [ { X = 25; Y = 0 }, ring ] outpostRing [] []
+
+                Expect.equal
+                    (castWalkTicks
+                        (leadAcross homeRing outpostRing [] [])
+                        anchorUnit
+                        leadSpawn
+                        "W1N2"
+                        outpostSeat)
+                    (Some 34)
+                    "sixteen near, two onto a plain exit, sixteen in the outpost"
+
+                Expect.equal
+                    (castWalkTicks (over Swamp) anchorUnit leadSpawn "W1N2" outpostSeat)
+                    (Some 42)
+                    "and a swamp exit is charged its own ten"
+            }
+
+            test "a goal in the colony's own room is led off the home flood, unchanged" {
+                // The regression ADR 0026's existing cases are the rest of:
+                // the room the goal stands in is the caller's since #153,
+                // and naming home is the walk this rule always ran — the
+                // same flood out of the birth tiles, the same lookup, no
+                // band consulted. Nine tiles down the corridor from (25,11).
+                let homeRing, outpostRing = openRings
+                let atlas = leadAcross homeRing outpostRing [] []
+
+                Expect.equal
+                    (castWalkTicks atlas hauler leadSpawn "W1N1" { X = 25; Y = 20 })
+                    (Some 9)
+                    "the home leg alone, priced as it was before the border was crossable"
+            }
+
+            test "no crossing and no ring each lead nobody" {
+                // Total (ADR 0004), one absence at a time: an unpriceable
+                // Seam is no Seam, so the lead is absent exactly as an
+                // unreachable tile inside one room makes it absent — never a
+                // zero, which would leave the creep counted as living for
+                // ever. The open ring at the bottom is what makes the None
+                // above the wall's answer rather than the fixture's.
+                //
+                // Two of `seams`'s absences, and the third is not here: the
+                // walled ring reaches the band and finds nothing passable in
+                // it, the last room reaches no band at all because the
+                // projection carries no ring under its name — while a room
+                // that *is* projected and simply is not an orthogonal
+                // neighbour is `RoomInvariantTests.seamTests`' case, on the
+                // real captures. One answer, three reasons.
+                let homeRing, outpostRing = openRings
+                let open' = leadAcross homeRing outpostRing [] []
+                let walled = leadAcross [ { X = 25; Y = 0 }, Wall ] outpostRing [] []
+
+                Expect.isEmpty (seams walled "W1N1" "W1N2") "the premise: the exit is walled"
+
+                Expect.equal
+                    (castWalkTicks walled hauler leadSpawn "W1N2" outpostSeat)
+                    None
+                    "no crossing, no lead"
+
+                Expect.equal
+                    (castWalkTicks open' hauler leadSpawn "W1N2" outpostSeat)
+                    (Some 17)
+                    "open that one tile and the same two rooms lead again"
+
+                Expect.equal
+                    (castWalkTicks open' hauler leadSpawn "W5N5" outpostSeat)
+                    None
+                    "and a room the projection carries no ring for has no band to be led over"
+            }
+
+            test "a creep on the border ring itself leads nobody, on either side of it" {
+                // The tick a crossing lands: the engine parks the creep on
+                // the far room's ring tile and `Snapshot` files it there, so
+                // a lead asked for that tick is asked about a tile that is
+                // in no room's ground (ADR 0041 keeps the rings beside the
+                // projection, never inside it). Unpriceable, therefore, and
+                // absent rather than zero-with-a-guess — for one tick the
+                // creep is simply counted living, and the next tick it
+                // stands on ground and is led again.
+                let homeRing, outpostRing = openRings
+                let atlas = leadAcross homeRing outpostRing [] []
+
+                Expect.equal
+                    (castWalkTicks atlas hauler leadSpawn "W1N2" { X = 25; Y = 49 })
+                    None
+                    "the landing tile is the outpost's ring, and no ground of it"
+
+                Expect.equal
+                    (castWalkTicks atlas hauler leadSpawn "W1N1" { X = 25; Y = 0 })
+                    None
+                    "and the exit tile is the home room's ring, which the flood never enters"
+            }
+
+            test "the far leg stays out of the walk table, which keeps its two-field key" {
+                // ADR 0032's table lives across ticks under the census
+                // signature and its key carries no room, which is safe only
+                // while every origin in it is a home-room spawner's tile.
+                // So the crossing adds nothing to it: one entry after a
+                // cross-room lead, the same entry the home lead reads back,
+                // and it is the very array the first flood allocated.
+                let homeRing, outpostRing = openRings
+                let walks = WalkTable()
+
+                let atlas =
+                    leadAcrossSnapshot homeRing outpostRing [] [] |> ofSnapshotRecalling walks
+
+                Expect.equal
+                    (castWalkTicks atlas hauler leadSpawn "W1N2" outpostSeat)
+                    (Some 17)
+                    "the premise: the lead is priced across the border"
+
+                Expect.equal walks.Count 1 "the near leg is memoised and the far leg is not"
+                let flooded = walks |> Seq.map (fun entry -> entry.Value) |> Seq.exactlyOne
+
+                Expect.equal
+                    (castWalkTicks atlas hauler leadSpawn "W1N1" { X = 25; Y = 20 })
+                    (Some 9)
+                    "and the home lead reads the same key"
+
+                Expect.equal
+                    walks.Count
+                    1
+                    "no second entry: the room is not one of the key's fields"
+
+                Expect.isTrue
+                    (obj.ReferenceEquals(
+                        walks |> Seq.map (fun entry -> entry.Value) |> Seq.exactlyOne,
+                        flooded
+                    ))
+                    "and it is the flood the crossing already ran, not a second one"
             }
         ]
 

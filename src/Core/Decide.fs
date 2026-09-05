@@ -976,41 +976,30 @@ let private patternOf atlas (creep: CreepInfo) =
 /// place, and a tile no spawn can reach each answer 0, and a lead of 0
 /// leaves every living creep counted.
 ///
-/// Priced in the colony's own room (ADR 0041): the tile comes from
-/// `Atlas.placedCreeps`, which answers home, and the walk from
-/// `Atlas.castWalkTicks`, which floods the home grid and rides a memo ADR
-/// 0032 keys on the census signature — a key with no room on it, because
-/// no flood leaves the room it started in. So a creep the home room does
-/// not place answers 0 and is never expiring: its successor is cast only
-/// after it has died, never while it still works.
+/// Read wherever the creep stands, home or an outpost (#153). The tile and
+/// its room come off the same lookup — `Atlas.creepRoom` beside
+/// `Atlas.creepTile`, never `Atlas.placedCreeps`, which answers the home
+/// room by construction — and the walk from `Atlas.castWalkTicks`, which
+/// floods home for the near leg and joins over the Seam band for a goal
+/// beyond it. One row, one rule, both sides of a border: an outpost's Post
+/// hires its Anchor off this row (ADR 0042) and a reserver's whole working
+/// life is the far side of a Seam, so a lead that could price only home
+/// tiles left ADR 0026's succession switched off for exactly the creeps
+/// whose replacement has the furthest to walk — the outpost Anchor read as
+/// never expiring, its successor cast the tick *after* it died, and its
+/// Post unmanned for the cast plus the crossing every 1,500 ticks while
+/// the workforce target went on hiring against its nominal output.
 ///
-/// That is a **gap, not a rule**, and since #129 it has a row standing in
-/// it: an outpost's Post hires an Anchor off this same row, and that
-/// Anchor lives its whole life on the far side of a Seam, so ADR 0026's
-/// succession is off for it while it is on for the home half of the row.
-/// The clause that used to excuse it — that a spawn could not walk there
-/// at all — stopped holding when #123 landed the cross-room walk; the
-/// honest cross-room lead is the minimum over the Seam band, the same
-/// join `Atlas.haulRoundTripTicks` already prices this leg with, and it
-/// is unpriced here pending its own ticket (#153) rather than by design.
-///
-/// The reserver row (ADR 0042) is the second row standing in that gap, and
-/// it stands in it for the whole of a reserver's life rather than for part
-/// of one: a reserver's work *is* the far side of a Seam. So `patternOf`'s
-/// CLAIM arm below prices the row correctly and reaches a living reserver
-/// only while it is still walking out through the home room — which is why
-/// #153 names this row too, and why nothing here should be read as ADR
-/// 0026's succession working for a reserver at its controller.
+/// The totality above gains one more absence and no new rule: a creep
+/// whose room shares no priceable crossing with home answers 0 too, exactly
+/// as a tile no spawn can reach does (ADR 0004).
 let private leadOf (snapshot: Snapshot) atlas (creep: CreepInfo) : int =
     let pattern = patternOf atlas creep
 
-    let tile =
-        Atlas.placedCreeps atlas
-        |> List.tryPick (fun (name, pos) -> if name = creep.Name then Some pos else None)
-
-    match tile with
-    | None -> 0
-    | Some tile ->
+    match Atlas.creepRoom atlas creep.Name, Atlas.creepTile atlas creep.Name with
+    | None, _
+    | _, None -> 0
+    | Some room, Some tile ->
         snapshot.Spawns
         |> List.choose (fun s ->
             match Atlas.positionOf atlas s.Id with
@@ -1023,7 +1012,7 @@ let private leadOf (snapshot: Snapshot) atlas (creep: CreepInfo) : int =
 
                 let body = bodyFor pattern bank.Capacity
 
-                Atlas.castWalkTicks atlas body spawnPos tile
+                Atlas.castWalkTicks atlas body spawnPos room tile
                 |> Option.map (fun walk -> spawnTicksPerPart * List.length body + walk))
         |> function
             | [] -> 0
