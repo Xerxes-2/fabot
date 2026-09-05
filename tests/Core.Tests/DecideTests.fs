@@ -10412,6 +10412,233 @@ let sourceOutputTests =
             }
         ]
 
+/// The W12S28 colony with its own two source containers taken away: the
+/// same two rocks, the same eight Seats apiece, and no Post on either. The
+/// only Post left in a projection is whatever an outpost carries — which
+/// is the one arrangement where a neutral rate is the *richest* rate the
+/// Anchor row hires for, and so the only one where the row's ceiling can
+/// be read off a cast body at all.
+let private withoutHomePosts (colony: Snapshot) =
+    { colony with
+        Spatial =
+            { colony.Spatial with
+                TargetKinds = colony.Spatial.TargetKinds |> Map.remove "can-a" |> Map.remove "can-b"
+            }
+            |> withHome (fun layer ->
+                { layer with
+                    TargetPositions =
+                        layer.TargetPositions |> Map.remove "can-a" |> Map.remove "can-b"
+                })
+    }
+
+/// The W12S28 colony at a 1,300 bank with the posted outpost source of
+/// `postedOutpostColony` standing beside it: the same rock in the same
+/// three-Seat field, its container built, and a fleet of one worker so
+/// every Post in the projection is an unfilled Anchor gap. The bank alone
+/// would buy twelve Work, so the body the row casts is decided by its
+/// ceiling and by nothing else, and 700 of the 1,300 goes on that body —
+/// leaving too little for a second, so the tick casts exactly one Anchor
+/// whatever the gap.
+///
+/// Two dials and no others: whether the colony's own room keeps its Posts,
+/// and who holds W1N2. Everything the target is built from moves with
+/// them, but the *body* reads only the ceiling.
+let private anchorCapColony homePosts (control: (string * RoomControlInfo) list) =
+    let rock = { X = 40; Y = 40 }
+
+    let colony =
+        { incomeColony with
+            RoomEnergy = bank 1300 1300
+            Sources = incomeColony.Sources @ [ source "src-out" ]
+            Creeps = [ worker "w1" 0 50 ]
+        }
+        |> (if homePosts then id else withoutHomePosts)
+        |> withOutpost
+            "W1N2"
+            [
+                "src-out", rock, Source
+                "can-out", { rock with X = rock.X - 1 }, Structure BuiltKind.Container
+            ]
+            (threeSeatField rock)
+
+    { colony with
+        RoomControl =
+            (colony.RoomControl, control)
+            ||> List.fold (fun acc (room, holder) -> Map.add room holder acc)
+    }
+
+/// The one Anchor body the tick casts, off `decide`'s own Intents. The row
+/// is read off the creep name the casting step stamps, so a tick that cast
+/// some other row fails here rather than quietly asserting about a worker.
+let private anchorCastBy colony =
+    match
+        spawnIntents (decide colony Map.empty Set.empty None).Intents
+        |> List.filter (fun (_, _, name) -> name.StartsWith "anchor-")
+    with
+    | [ (_, body, _) ] -> body
+    | other -> failtest $"expected exactly one Anchor SpawnCreep intent, got %A{other}"
+
+/// The colony the anchor row's **charge** is legible in, which the cast's
+/// own fixture is not: the same W12S28 without its two Posts, at a 1,400
+/// bank, with three neutral rocks a room away, each with its container
+/// standing — three Posts, three Anchors hired, and every one of them
+/// under the neutral ceiling. Its fleet is whole but for the workers, so
+/// the one thing a spawn Intent can be here is the income base's own
+/// answer.
+///
+/// Why those two numbers and not the 1,300 of the cast's fixture. The
+/// amortization is deducted from income before the surplus is divided into
+/// worker places, and the division rounds up over a whole body's Work
+/// drain across a lifetime (ADR 0037) — 10,500 energy at this bank — so a
+/// charge that moves by 350 an Anchor is invisible unless the surplus
+/// straddles a boundary. Three Posts move it by 1,050, and 15 energy a
+/// tick over the lifetime leaves 21,450 charged at the cast body against
+/// 20,400 charged at the held one: three worker places and two. One
+/// Post at 1,300 moves it by 350 against a 9,000-energy place and could
+/// not move the target at all.
+let private anchorChargeColony workers =
+    let rocks = [ { X = 10; Y = 40 }; { X = 20; Y = 40 }; { X = 30; Y = 40 } ]
+
+    let outpost =
+        rocks
+        |> List.mapi (fun i rock ->
+            [
+                $"src-out{i}", rock, Source
+                $"can-out{i}", { rock with X = rock.X - 1 }, Structure BuiltKind.Container
+            ])
+        |> List.concat
+
+    let colony =
+        { incomeColony with
+            RoomEnergy = bank 1400 1400
+            Sources = incomeColony.Sources @ [ for i in 0..2 -> source $"src-out{i}" ]
+            Creeps =
+                [ for i in 1..3 -> anchor $"a{i}" 0 50 ]
+                @ [ for i in 1..workers -> worker $"w{i}" 0 50 ]
+        }
+        |> withoutHomePosts
+        |> withOutpost "W1N2" outpost (rocks |> List.collect threeSeatField)
+
+    { colony with
+        RoomControl = Map.add "W1N2" neutralRoom colony.RoomControl
+    }
+
+[<Tests>]
+let anchorWorkCapTests =
+    testList
+        "the Anchor row's Work ceiling"
+        [
+            let sixWork = [ Work; Work; Work; Work; Work; Work; Carry; Move ]
+
+            let threeWork = [ Work; Work; Work; Carry; Move ]
+
+            test "the same rock caps the Anchor row at six Work reserved and three unreserved" {
+                // ADR 0021's rule, ADR 0042's number: the ceiling is a
+                // source's saturation plus one spare, and a source under no
+                // reservation regenerates 1,500 over 300 ticks instead of
+                // 3,000. Five Work saturate the held rock and two the
+                // neutral one, so the ceilings are six and three — and the
+                // 1,300 bank standing behind both would buy twelve.
+                //
+                // One rock, one field, one fleet: only who holds W1N2 moves
+                // between the two calls.
+                Expect.equal
+                    (anchorCastBy (anchorCapColony false [ "W1N2", reservedRoom true 4000 ]))
+                    sixWork
+                    "reserved, the rock gives ten a tick and the row buys the six Work that dig it"
+
+                Expect.equal
+                    (anchorCastBy (anchorCapColony false [ "W1N2", neutralRoom ]))
+                    threeWork
+                    "unreserved it gives five, and three Work drain it as fast as it fills"
+            }
+
+            test "a neutral outpost Post does not shrink the ceiling the home room asks for" {
+                // The direction the fold is wrong in, pinned pairwise
+                // against the case above: the same neutral W1N2, the same
+                // rock, the same field — the colony's own two Posts are the
+                // only thing added. A cast is a body and not a posting, and
+                // travel cost pins it on whichever Post is nearest once it
+                // is alive (ADR 0021's own rejection of sizing by the Post),
+                // so the row takes the richest saturation it hires for
+                // rather than the poorest. Under-sizing an Anchor for a held
+                // rock loses four energy a tick for the body's whole life;
+                // over-sizing one for a neutral rock wastes 300 energy once
+                // in 1,500 ticks and still digs everything the rock has.
+                Expect.equal
+                    (anchorCastBy (anchorCapColony true [ "W1N2", neutralRoom ]))
+                    sixWork
+                    "the home room's held rocks keep the row at six Work whatever stands beside them"
+            }
+
+            test "the colony's own room is capped exactly where it always was" {
+                // The regression ADR 0042 promises: "unchanged as a rule and
+                // changed as a number", and the colony's own number does not
+                // move. Owned, with no outpost in the projection at all —
+                // the case every existing Anchor test is written on, read
+                // here for the ceiling alone.
+                Expect.equal
+                    (anchorCastBy
+                        { incomeColony with
+                            RoomEnergy = bank 1300 1300
+                            Creeps = [ worker "w1" 0 50 ]
+                        })
+                    sixWork
+                    "two held Posts and a 1,300 bank: the six-Work Anchor of ADR 0021"
+            }
+
+            test "a Post the colony cannot price this tick leaves the ceiling where it was" {
+                // ADR 0004, entry by entry, and the same separation the
+                // source rate keeps: unpriceable is not half. W1N2 carries
+                // no control entry here, so nobody knows who holds it —
+                // the rock contributes no saturation to the fold rather
+                // than the neutral one, and a fold with nothing priceable
+                // in it answers the held ceiling, which is the largest the
+                // rule gives and the safe direction to be wrong in.
+                //
+                // Pinned strictly against the neutral case above: seen and
+                // held by nobody the same rock casts three Work.
+                Expect.equal
+                    (anchorCastBy (anchorCapColony false []))
+                    sixWork
+                    "a rock nobody can price caps nothing, and the row keeps the held ceiling"
+            }
+
+            test "the row is charged the body it would cast, not the held one" {
+                // The other half of #132's landing note — "the price the row
+                // is charged must be the body the row is cast at" — and the
+                // half no cast body can show: `workforceTarget` deducts the
+                // Anchor row's replacement cost from the income before the
+                // surplus is divided into worker places (ADR 0012, ADR
+                // 0042), so charging six Work for a row that casts three
+                // hires an upgrade mouth fewer than the income really feeds.
+                //
+                // Read as the income base's cases are read, pairwise across
+                // one fleet: three Anchors and nineteen workers is the whole
+                // of what this colony's 15 energy a tick pays for, so the
+                // tick casts nothing; one worker short of it, the row that
+                // is short is the worker row and the tick says so. Charged
+                // at the held ceiling the target is 21 instead of 22, and
+                // the fleet of 21 below has no gap at all.
+                let casts workers =
+                    spawnIntents
+                        (decide (anchorChargeColony workers) Map.empty Set.empty None).Intents
+                    |> List.map (fun (_, _, name) -> name)
+
+                Expect.isEmpty
+                    (casts 19)
+                    "three Anchors and nineteen workers: the income base is spent and the tick casts nothing"
+
+                match casts 18 with
+                | [ creepName ] ->
+                    Expect.stringStarts
+                        creepName
+                        "worker-"
+                        "one short of it the worker row is short, which the held charge would not have hired"
+                | other -> failtest $"expected exactly one SpawnCreep intent, got %A{other}"
+            }
+        ]
+
 /// A lane with one Post at one end and the spawn at the other: the source
 /// in wall at (10,10), its built container on the Seat (11,10) — the only
 /// tile a Work-heavy body may dig that source from (ADR 0020) — and the

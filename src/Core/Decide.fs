@@ -107,17 +107,20 @@ let private harvestPerWork = 2
 /// early, and those ticks absorb an unmanned Post's gap (death, recast,
 /// the walk back) at no cost in output.
 ///
-/// Read at the held rate and still a constant. ADR 0042 narrows this rule
-/// to a *source's* saturation — "unchanged as a rule and changed as a
-/// number" — and #132 is where the narrowing lands, because the number is
-/// consumed inside `anchorBodyFor`, reached through `bodyFor` from a
-/// `planSpawns` that does not know which Post the Anchor it casts will
-/// fill. Pairing an unmanned Post to its source is a wider change than
-/// pricing a container, so the two are separate tickets; until then the
-/// cap is a held room's, which is what every outpost this colony declares
-/// is (ADR 0042 reserves all of them from the first version), and the
-/// wrong number shows only while a reservation has lapsed.
-let private anchorWorkCap = heldOutputPerTick / harvestPerWork + 1
+/// A rule about one source's regeneration and never about heavy bodies in
+/// general, so ADR 0042 narrows it by changing its input and nothing else:
+/// "unchanged as a rule and changed as a number". The number a *cast*
+/// reads is `anchorWorkCapOf` below, folded off the projection; this is
+/// the arithmetic both readings share.
+let private workCapOf output = output / harvestPerWork + 1
+
+/// The ceiling in a room the colony holds: six Work, the number ADR 0021
+/// derived and the only one the colony's own room ever asks for. Two
+/// readers want the largest ceiling the rule can give rather than the one
+/// standing beside them — `bodyFor` below, which holds a capacity and no
+/// projection, and `anchorWorkCapOf`'s answer where nothing priceable is
+/// posted at all.
+let private heldWorkCap = workCapOf heldOutputPerTick
 
 /// The worker row's sizing rule: the largest affordable repetition of the
 /// block (never below one repeat), with the remainder spent on Carry/Move
@@ -163,11 +166,22 @@ let private parityBodyFor block capacity =
 /// energy buys output rather than mobility the Post never uses, and
 /// stops where the source has no more to give (ADR 0021). Exempt from
 /// fatigue parity (ADR 0006); never below the row's two-Work block.
-let private anchorBodyFor capacity =
+///
+/// The ceiling arrives as an argument rather than being read from a
+/// constant (ADR 0042): it is a fact about the **set of posted sources**
+/// the row hires for, not about the row — which holds a capacity and no
+/// projection — and emphatically not about the one source the finished
+/// body will dig, which no caster knows (`anchorWorkCapOf` is where the
+/// set is folded, and why its richest member wins). The same shape the
+/// reserver row's sizing takes for a neighbouring reason
+/// (`reserverBodyWithin`, whose second fact is one room's reservation
+/// deficit): the casting step supplying a rule its caller has already
+/// decided.
+let private anchorBodyFor workCap capacity =
     let work =
         (capacity - bodyCost [ Carry; Move ]) / bodyCost [ Work ]
         |> max 2
-        |> min anchorWorkCap
+        |> min workCap
 
     List.replicate work Work @ [ Carry; Move ]
 
@@ -228,9 +242,32 @@ let private reserverBodyFor capacity =
 /// parity, the reserver row buys whole blocks of the one part that holds a
 /// reservation, and every other block-replicating row pads its remainder
 /// at plain fatigue parity.
+///
+/// A capacity is the whole of what this entry point holds, so the two rows
+/// whose real rule reads a second fact — the anchor's source output (ADR
+/// 0042) and the reserver's reservation deficit — are answered here at
+/// their **largest** body: the held ceiling and the bank's own block
+/// count. What holds that reading is this signature and not a preference
+/// for long leads: the remaining caller for either row is `leadOf`, which
+/// prices a succession here (ADR 0026), and a lead has no row-specific
+/// rule to read a second fact through (ADR 0026 under ADR 0006) while a
+/// capacity is all this one carries. It is *not* what ADR 0026 asks for —
+/// it defines the lead as **the replacement body's** cast time and travel
+/// and names the over-long one as a defect: "`IdleReason.NoneFree` on a
+/// freshly cast Anchor should no longer appear during a succession; if it
+/// does, the lead is mispriced". So both rows' leads run long exactly
+/// while their second fact sits below its largest — the anchor's while no
+/// posted source is held, the reserver's while no reservation has
+/// slipped — and the reserver's has since #131. Making either exact is
+/// one decision over both rows and this signature rather than a branch
+/// here, and it is deferred, not decided here. The casting step reads the
+/// narrower rule — `anchorBodyFor` under `anchorWorkCapOf`,
+/// `reserverBodyWithin` under the deficit — so a body bought from either
+/// of *those two* rows is never sized from here; the hauler and worker
+/// rows are sized and cast from this entry point (`planSpawns`).
 let bodyFor pattern capacity =
     if pattern.Name = anchorPattern.Name then
-        anchorBodyFor capacity
+        anchorBodyFor heldWorkCap capacity
     elif pattern.Name = haulerPattern.Name then
         haulerBodyFor capacity
     elif pattern.Name = reserverPattern.Name then
@@ -704,6 +741,80 @@ let private sourceOutputOf (snapshot: Snapshot) atlas (sourceId: string) : int o
     |> Option.bind (fun room -> Map.tryFind room snapshot.RoomControl)
     |> Option.map heldRateOf
 
+/// Whether a source is posted: whether a container stands on one of its
+/// Seats, or a Dual Seat makes one of them a Post without a structure —
+/// the switch that admits a source into the quotas at all (ADR 0042). One
+/// spelling, read by the anchor row's ceiling below and by the income
+/// base's own split (`workforceTarget`), so a rule that narrows what
+/// counts as posted cannot narrow it for one of the two alone.
+///
+/// Judged in the source's own room, by `Atlas.postsOf` and not by testing
+/// its Seats against the home room's Posts: a `Pos` carries no room, so a
+/// home Post standing on an outpost Seat's coordinates would read that
+/// outpost source as posted with no container under it — a phantom ten
+/// energy a tick in the income base, and a phantom Anchor place beside it.
+let private isPosted atlas (s: SourceInfo) =
+    Atlas.postsOf atlas s.Id |> Set.isEmpty |> not
+
+/// The anchor row's Work ceiling this tick (ADR 0021 as ADR 0042 narrows
+/// it): the saturation of the richest source the row is hiring for, plus
+/// the one spare Work. The row's ceiling stops being the held rate written
+/// as a constant and becomes a fact read off the projection — a source
+/// under no reservation regenerates half as much, and six Work on it drain
+/// it in 125 ticks and then idle for 175, buying spawn energy nothing digs.
+///
+/// **The input is the set of posted sources and not one Post**, and that
+/// is ADR 0021's own answer rather than a convenience. It already
+/// considered sizing an Anchor by the Post it will man and rejected it:
+/// *"a spawn does not know which Post an Anchor will man — the creep
+/// chooses by matching after birth (the no-role axiom, ADR 0006)"*. A cast
+/// is a body, not a posting; travel cost pins it on the Post nearest it
+/// once it is alive, and that Matcher knows nothing of any source's
+/// output. So the ceiling has to be one colony-wide number over a *set* of
+/// the sources the row hires for and never one of them, and the two
+/// questions left are which sources are in the set and which way to be
+/// wrong when they disagree with each other.
+///
+/// **The largest, for the same reason the reserver row casts at its
+/// largest outstanding demand** (`reserverClaimsOf`): the two errors are
+/// not each other's mirror. An Anchor over-sized for a neutral source
+/// wastes 300 energy of body once in 1,500 ticks — a fifth of an energy a
+/// tick — and still digs everything the rock has. An Anchor under-sized
+/// for a held source digs 6 a tick where the rock gives 10, and loses four
+/// energy a tick for its whole life. Over-buying is the safe direction by
+/// a factor of twenty, and it is the direction `bodyFor` above is already
+/// wrong in for the lead.
+///
+/// Posted sources and not projected rooms: a room with no Post hires no
+/// Anchor, so its rate is not this row's business. A posted source the
+/// colony cannot price this tick contributes nothing rather than a rate it
+/// has no evidence for (ADR 0004), and a set with nothing priceable in it
+/// answers the held ceiling: the largest the rule gives, which is the safe
+/// direction above and today's number besides.
+///
+/// **What this does not yet buy is a number the live colony can move.**
+/// The colony's own room's Posts are in the set folded here and an owned
+/// room prices at the held rate, so `List.max` is `heldOutputPerTick` in
+/// every state a colony with one posted home source can reach: while a
+/// reservation is lapsed the outpost's Anchor is still cast at six Work
+/// against a rock giving five. ADR 0042's "a lapsed reservation is now a
+/// visible economic event" is delivered by the hauler quota and the income
+/// base, which do shrink on their own (#127), and not yet by this row's
+/// body. Narrowing the fold to the Posts a cast is actually filling —
+/// #132's other option — is deferred rather than refused, and it is a
+/// wider change than it looks: the unmanned Posts have to be paired to
+/// their sources *at arrival* (ADR 0026), or an ordinary succession sizes
+/// the home room's replacement off an outpost's neutral rock and loses the
+/// four energy a tick this fold exists to protect, and the amortization
+/// below has to charge per Post rather than one ceiling times the quota.
+let private anchorWorkCapOf (snapshot: Snapshot) atlas : int =
+    snapshot.Sources
+    |> List.filter (isPosted atlas)
+    |> List.choose (fun s -> sourceOutputOf snapshot atlas s.Id)
+    |> function
+        | [] -> heldWorkCap
+        | outputs -> List.max outputs |> workCapOf
+
 /// The hauler row's quota rule (ADR 0012) — the row's colony fact, per
 /// ADR 0006's law that a row arrives with its quota or not at all: per
 /// source container, ceil(round-trip travel ticks to the spawn × that
@@ -988,11 +1099,9 @@ let private reserverClaimsOf (snapshot: Snapshot) atlas : int list =
 /// from, and a source the projection does not place is unpriceable and
 /// counts nothing wherever it was declared (ADR 0004).
 ///
-/// Being posted is judged in the source's own room, by `Atlas.postsOf` and
-/// not by testing its Seats against the home room's Posts: a `Pos` carries
-/// no room, so a home Post standing on an outpost Seat's coordinates would
-/// read that outpost source as posted with no container under it, and put
-/// a phantom ten energy a tick into the income base below.
+/// Being posted is `isPosted`'s one spelling above, room-joined for the
+/// reason recorded there: a phantom Post read off a bare coordinate
+/// collision would put ten energy a tick into the income base below.
 ///
 /// Income is counted per source at that source's own output and never at
 /// a colony-wide ten (ADR 0042): an unreserved source is worth half a held
@@ -1011,12 +1120,17 @@ let private reserverClaimsOf (snapshot: Snapshot) atlas : int list =
 /// amortization never rounds away. The **worker** row's own replacement
 /// cost is still not deducted — a pre-existing home-room defect ADR 0042
 /// names and deliberately does not pay off here.
-let private workforceTarget (snapshot: Snapshot) atlas reserverClaims anchorQuota haulerQuota =
+let private workforceTarget
+    (snapshot: Snapshot)
+    atlas
+    reserverClaims
+    anchorWorkCap
+    anchorQuota
+    haulerQuota
+    =
     let home = SpatialInfo.homeName snapshot.Spatial
 
-    let posted, unposted =
-        snapshot.Sources
-        |> List.partition (fun s -> Atlas.postsOf atlas s.Id |> Set.isEmpty |> not)
+    let posted, unposted = snapshot.Sources |> List.partition (isPosted atlas)
 
     let unpostedSeats =
         unposted
@@ -1042,8 +1156,14 @@ let private workforceTarget (snapshot: Snapshot) atlas reserverClaims anchorQuot
             List.length reserverClaims
             * bodyCost (reserverBodyWithin (List.max reserverClaims) capacity)
 
+    // The anchor row charged at the body the casting step below would
+    // actually cast, under this tick's ceiling and not the held one (ADR
+    // 0042): a row whose bodies shrank with a lapsed reservation while its
+    // amortization went on deducting the six-Work price would hire an
+    // upgrade mouth fewer than the income really feeds. The same rule the
+    // reserver term beside it is written under.
     let amortization =
-        anchorQuota * bodyCost (bodyFor anchorPattern capacity)
+        anchorQuota * bodyCost (anchorBodyFor anchorWorkCap capacity)
         + haulerQuota * bodyCost (bodyFor haulerPattern capacity)
         + reserverCost * creepLifetime / claimLifetime
 
@@ -1263,7 +1383,15 @@ let private planSpawns
         // bodies are creeps, and a fleet counting them as generalists would
         // hire an upgrade mouth fewer for every reserver in the room.
         let reserverClaims = reserverClaimsOf snapshot atlas
-        let target = workforceTarget snapshot atlas reserverClaims anchorQuota haulerQuota
+
+        // The anchor row's ceiling this tick, read once beside the quotas
+        // and for the same reason the reserver's demand list is (ADR
+        // 0042): the row's body is what the amortization is charged and
+        // what the cast below buys, and the two must be the same body.
+        let anchorWorkCap = anchorWorkCapOf snapshot atlas
+
+        let target =
+            workforceTarget snapshot atlas reserverClaims anchorWorkCap anchorQuota haulerQuota
 
         // The deficit and every row gap count the creeps that will still be
         // alive when a replacement could arrive: an expiring creep is already
@@ -1287,12 +1415,14 @@ let private planSpawns
         //
         // The row's sizing rule arrives as a function of the capacity
         // rather than being looked up from the pattern, which is the
-        // choice ADR 0042's reserver row forces: three rows are the bank's
+        // choice ADR 0042's reserver row forces: two rows are the bank's
         // answer alone and `bodyFor` is exactly that, but the reserver's
-        // body is `min(reservation deficit, bank)` and the deficit is a
-        // fact about the **room being reserved**, not about the row. A
-        // sizing member on `BodyPattern` — ADR 0006's other shape — would
-        // have had nowhere to read that room from, so the casting step
+        // body is `min(reservation deficit, bank)` and the anchor's is
+        // capped by `anchorWorkCapOf`'s reading of the posted set — a fact
+        // about the **room being reserved** and a fact about a **set of
+        // sources**, neither of them about the row. A sizing member on
+        // `BodyPattern` — ADR 0006's other shape — would
+        // have had nowhere to read either from, so the casting step
         // takes an already-decided sizing instead and each caller supplies
         // the rule its row is written in.
         let castFromBank pattern (sizing: int -> BodyPart list) (bank: RoomEnergy) =
@@ -1409,7 +1539,12 @@ let private planSpawns
                                 (reserverBodyWithin (List.max reserverClaims))
                                 bank
                         elif planned < reserverGap + anchorGap then
-                            castFromBank anchorPattern (bodyFor anchorPattern) bank
+                            // Sized under this tick's ceiling and never the
+                            // held constant (ADR 0042): which Post the
+                            // finished body lands on is the Matcher's, so
+                            // the cast carries the richest posted source's
+                            // saturation (`anchorWorkCapOf`).
+                            castFromBank anchorPattern (anchorBodyFor anchorWorkCap) bank
                         elif planned < reserverGap + anchorGap + haulerGap then
                             castFromBank haulerPattern (bodyFor haulerPattern) bank
                         elif planned < deficit then
