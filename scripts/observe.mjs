@@ -1,9 +1,13 @@
 // One-shot CLI over the observe channels — the Transition log (ADR 0009),
 // the Raid log (ADR 0028), the Layout record (ADR 0035) and the CPU line
 // (ADR 0041): pull the observe subtree from `Memory.fabot.observe`, flip
-// the verbose list
-// remotely, or watch the console for a bounded window. Config via .env (loaded by
-// `node --env-file-if-exists=.env`), same as upload.mjs:
+// the verbose list remotely, or watch the console for a bounded window.
+// `outposts` is the one read that needs a second endpoint — it also reads
+// the server's clock, because shut-or-open has no answer without it, and
+// it fails on that read alone where the others cannot.
+//
+// Config via .env (loaded by `node --env-file-if-exists=.env`), same as
+// upload.mjs:
 //   SCREEPS_TOKEN   - auth token (required)
 //   SCREEPS_API_URL - API base, default https://screeps.com/season (seasonal server)
 //   SCREEPS_SHARD   - shard for Memory reads; when unset and the server
@@ -13,6 +17,9 @@
 //   observe.mjs tasks              every creep's current Task with its Verdict reason
 //   observe.mjs timeline <creep>   one creep's Transition log, oldest first
 //   observe.mjs raids              the Raid log's episodes, newest first
+//   observe.mjs outposts           every outpost the Raid log knows: shut or
+//                                  open right now, the tick a stand-down runs
+//                                  to, and the deadline that tick was read off
 //   observe.mjs layout             what the Layout could not deliver this plan
 //   observe.mjs cpu                the per-tick CPU line, with ADR 0041's
 //                                  revisit trigger read off it
@@ -35,7 +42,7 @@ const fail = (msg) => {
 
 const usage =
   "usage: observe.mjs tasks [--json] | timeline <creep> [--json] | raids [--json] | " +
-  "layout [--json] | cpu [--json] | " +
+  "outposts [--json] | layout [--json] | cpu [--json] | " +
   "verbose [add <creep> | remove <creep> | clear] [--json] | " +
   "console --seconds N";
 
@@ -58,7 +65,11 @@ const [command, ...rest] = args;
 const creepArg = rest[0];
 const [action, actionName] = rest;
 
-if (!["tasks", "timeline", "raids", "layout", "cpu", "verbose", "console"].includes(command))
+if (
+  !["tasks", "timeline", "raids", "outposts", "layout", "cpu", "verbose", "console"].includes(
+    command,
+  )
+)
   fail(usage);
 if (command === "timeline" && !creepArg) fail(usage);
 if (command === "verbose" && action !== undefined) {
@@ -95,6 +106,22 @@ const memoryGet = async (path) => {
   });
   if (res.ok !== 1) fail(`memory read failed: ${JSON.stringify(res)}`);
   return res.data;
+};
+
+// The Raid log's leaf, read the same way for both of its families: the
+// spawn-room raids and the outpost stand-downs (ADR 0043) share one leaf,
+// so they share this read and the one sentence that explains its absence.
+// Each family's own guard — `episodes` for the raids, `outposts` for the
+// stand-downs — stays in its command, because those differ deliberately.
+const raidLeaf = async () => {
+  const stored = await memoryGet("fabot.observe.raids");
+  if (stored == null || typeof stored !== "object") {
+    fail(
+      "no Raid log at Memory.fabot.observe.raids — " +
+        "an old bundle is still running, or the colony respawned and hasn't written one yet.",
+    );
+  }
+  return stored;
 };
 
 // ---- console: a bounded subscription, the one non-Memory command --------
@@ -176,15 +203,10 @@ if (command === "console") {
   // the episodes alone. `damage` is absent on an episode written before
   // ADR 0034 and reads as zero. `outposts` is the Raid log's second family
   // (ADR 0043) — one row per [[stand-down]], the room it shuts, the tick it
-  // runs to and which deadline that tick was read off; this command does
-  // not print it yet, and reading it out from the terminal is #135's.
-  const stored = await memoryGet("fabot.observe.raids");
-  if (stored == null || typeof stored !== "object") {
-    fail(
-      "no Raid log at Memory.fabot.observe.raids — " +
-        "an old bundle is still running, or the colony respawned and hasn't written one yet.",
-    );
-  }
+  // runs to and which deadline that tick was read off; it is a family of
+  // its own and `observe.mjs outposts` reads it whole, so this command
+  // prints the spawn-room raids alone rather than filtering a mixed list.
+  const stored = await raidLeaf();
   const episodes = Array.isArray(stored.episodes) ? [...stored.episodes].reverse() : [];
 
   if (json) {
@@ -215,6 +237,196 @@ if (command === "console") {
       console.log(`  damage: ${e.damage ?? 0} hits off the Keep and the ramparts`);
       console.log("");
     }
+  }
+} else if (command === "outposts") {
+  // ---- outposts: the Raid log's second family, read as the gate reads it --
+
+  // The wire shape written by ObserveMemory.fs, a key of its own beside
+  // `episodes` in the same leaf:
+  //   { outposts: [{ room, opened, last, expiry, basis }] }
+  // One row per [[stand-down]] (ADR 0043): the room it shuts, the window
+  // (opened, and the last tick a core was actually seen there), the
+  // absolute tick the stand-down runs to, and which of the three deadlines
+  // that tick was read off. Stored oldest first like the raids beside it.
+  //
+  // Shut or open is `now < expiry` and nothing else — Observe.standingDown,
+  // the one place the family's openness is decided — so this command is a
+  // read of the same rule the gate applies, never a second one. `last` is
+  // deliberately not part of that test: the stand-down withdraws the very
+  // creeps whose vision would see the core, so silence there says nobody is
+  // looking and never that the room is clear.
+  const stored = await raidLeaf();
+  // The list is guarded in its own right, the way each of the Layout
+  // record's three is: a leaf carrying `episodes` and no `outposts` is a
+  // bundle predating ADR 0043's family or a wire shape that has moved, and
+  // the half that is there must not vouch for the half that is not.
+  // Reading it as an empty ring would answer "no outpost is shut" off a
+  // deploy that cannot shut one — the confident false negative this
+  // channel exists to prevent, and the one an operator back from a week
+  // away is least able to catch.
+  if (!Array.isArray(stored.outposts)) {
+    fail(
+      "the Raid log at Memory.fabot.observe.raids carries no `outposts` list — " +
+        "the deployed bundle predates ADR 0043's outpost family, the leaf was hand-edited, " +
+        'or its wire shape has moved. Not read as "no outpost is shut".',
+    );
+  }
+
+  // The clock the rows are read against. Off the server rather than off the
+  // CPU line's last row: that row is as old as the last tick the bundle
+  // finished, and a bundle that stopped writing leaves it behind while the
+  // game clock runs on — every stand-down would read as still running.
+  // Unreadable is fatal, because "shut or open" has no answer without it
+  // and the answer it would default to is "open".
+  const clock = await api.gameTime(shard).catch((err) => {
+    fail(`game time read failed: ${err.message ?? err}`);
+  });
+  if (clock.ok !== 1 || typeof clock.time !== "number") {
+    fail(`game time read failed: ${JSON.stringify(clock)}`);
+  }
+  const now = clock.time;
+
+  // The basis vocabulary exactly as `standDownBasisName` spells it on the
+  // wire (Core's Types.fs), one clause each: "shut until 172,783" and "shut
+  // until 172,783 because nothing could be read" are different answers to
+  // an operator, which is why the basis is carried at all.
+  const BASIS = {
+    "collapse-timer": "the core's own collapse timer",
+    reservation: "the end of the reservation the Invader core took",
+    fallback: "no deadline was readable — ADR 0043's 2,500-tick expansion period",
+  };
+
+  // A row off the wire shape is fatal and quoted, never dropped. The
+  // asymmetry is ADR 0043's: a row this reader hid would show its room as
+  // open, and Core's decoder drops a row whose `expiry` or `basis` will not
+  // decode — so the room a dropped row was holding really is open to the
+  // bot, and saying so out loud is the whole point of the command.
+  const rows = stored.outposts.map((row) => {
+    const readable =
+      row !== null &&
+      typeof row === "object" &&
+      typeof row.room === "string" &&
+      typeof row.opened === "number" &&
+      typeof row.last === "number" &&
+      typeof row.expiry === "number" &&
+      // An own-key test and never `BASIS[row.basis] !== undefined`: the
+      // key comes off the wire, and every object literal answers a
+      // prototype name — `toString`, `constructor`, `valueOf`,
+      // `__proto__` — with a function rather than `undefined`. A row
+      // spelling one of those would read as a known basis here and print
+      // JavaScript internals as its reason, while Core's decoder answers
+      // `None` for it (`standDownBasisOf`, Types.fs) and drops the row:
+      // the room would stand wide open with this command calling it shut.
+      // The vocabulary is exactly the three names `standDownBasisName`
+      // spells, and nothing the language put on the table beside them.
+      Object.hasOwn(BASIS, row.basis);
+    if (!readable) {
+      fail(
+        "a stand-down row at Memory.fabot.observe.raids.outposts is off the wire shape: " +
+          `${JSON.stringify(row)} — the leaf was hand-edited, or its wire shape has moved. ` +
+          'Not read as "that room is open": the bot drops a row it cannot decode, so a room ' +
+          "this one names may be standing wide open right now.",
+      );
+    }
+    return row;
+  });
+
+  const tickOf = (t) => `t${t.toLocaleString("en-US")}`;
+  const ticks = (n) => `${n.toLocaleString("en-US")} tick${n === 1 ? "" : "s"}`;
+
+  // ADR 0043's dated observation, and the one number here the colony can
+  // never read for itself: W15S24 is four rooms out, the bot has no
+  // scouting (ADR 0041) and never has vision there, so this cannot arrive
+  // on a Snapshot the way an outpost's expiry does. It is printed beside
+  // the rows because it changes how every one of them reads — when it
+  // passes, this sector's invasion switch is off until another stronghold
+  // spawns, so a stand-down opened after it is a core that was already
+  // standing rather than a fresh expansion, and the 2,500-tick fallback
+  // stops being a cadence anything is still running on.
+  //
+  // `collapse` is the read-only HTTP API's raw `endTime` — an absolute
+  // tick, which is the only reason it may be compared against `now` as it
+  // stands. Refreshing it the obvious way, off the runtime, would write a
+  // *relative* count here: `RoomObject.effects[].ticksRemaining`, the
+  // number `InvaderCoreInfo.CollapseTick` is built from, is "how many
+  // ticks the effect still lasts" and Snapshot.fs adds `Game.time` to it
+  // for exactly this reason. Substituted here it would date the sector
+  // clock a hundred thousand ticks wrong and print the switch as already
+  // off — the one date ADR 0043 says changes every other conclusion.
+  const SECTOR = {
+    stronghold: "W15S24",
+    collapse: 170283,
+    read: "t105,945-106,529",
+  };
+
+  const roomsOf = (list) => [...new Set(list.map((row) => row.room))].sort();
+
+  if (json) {
+    // The stored rows verbatim beside the two facts a reader cannot
+    // recover from them — the tick they were judged against, and the
+    // sector's date. A row is never hidden from --json; an unreadable one
+    // has already failed the whole command above.
+    console.log(JSON.stringify({ now, sector: SECTOR, outposts: stored.outposts }, null, 2));
+  } else {
+    console.log(`now ${tickOf(now)}`);
+    console.log("");
+
+    if (rows.length === 0) {
+      console.log("the Raid log records no stand-down: no outpost is shut by a clock");
+      console.log("");
+    } else {
+      for (const room of roomsOf(rows)) {
+        const mine = rows.filter((row) => row.room === room);
+        // At most one of a room's rows can be running — a sighting extends
+        // the standing episode and opens a new one only when none holds —
+        // but the latest expiry is taken rather than assumed, so a
+        // hand-edited leaf reads out the row that is actually holding.
+        const running = mine.filter((row) => now < row.expiry).sort((a, b) => b.expiry - a.expiry);
+        const spent = mine.filter((row) => now >= row.expiry).sort((a, b) => b.expiry - a.expiry);
+
+        if (running.length > 0) {
+          const row = running[0];
+          console.log(
+            `${room}  shut until ${tickOf(row.expiry)} — ${ticks(row.expiry - now)} to go`,
+          );
+          console.log(`  because ${BASIS[row.basis]}`);
+          console.log(`  opened ${tickOf(row.opened)}, a core last seen there ${tickOf(row.last)}`);
+        } else {
+          const row = spent[0];
+          console.log(`${room}  open — no stand-down is running`);
+          console.log(
+            `  last one ran to ${tickOf(row.expiry)}, spent ${ticks(now - row.expiry)} ago ` +
+              `(${BASIS[row.basis]})`,
+          );
+        }
+        console.log("");
+      }
+    }
+
+    // The rooms this command cannot name. The declared outposts are a
+    // constant in Core a human moves (ADR 0041) and no Memory leaf carries
+    // them, so a room that has never stood down has no row here and cannot
+    // be listed as open — said out loud rather than left to be read as
+    // "these are all of them".
+    console.log(
+      "rows are the stand-downs the log holds; a declared outpost that has never been shut " +
+        "has no row and is not named above.",
+    );
+    console.log("");
+
+    console.log(
+      now < SECTOR.collapse
+        ? `sector clock: ${SECTOR.stronghold}'s collapse timer ends ${tickOf(SECTOR.collapse)} — ` +
+            `${ticks(SECTOR.collapse - now)} away; after it this sector's invasion switch is off ` +
+            "until another stronghold spawns"
+        : `sector clock: ${SECTOR.stronghold}'s collapse timer ended ${tickOf(SECTOR.collapse)}, ` +
+            `${ticks(now - SECTOR.collapse)} ago — this sector's invasion switch is off unless ` +
+            "another stronghold has spawned since",
+    );
+    console.log(
+      `  read off the read-only API at ${SECTOR.read} and recorded in ADR 0043. A dated ` +
+        "observation, never a live read: the colony has no vision there and never will.",
+    );
   }
 } else if (command === "layout") {
   // ---- layout: what the Layout could not deliver ------------------------
