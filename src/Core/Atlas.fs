@@ -795,6 +795,40 @@ let private reachedBy (flood: Flood) (tile: Pos) : int =
         settleTo flood index
         at index flood.Dist
 
+/// What a resumable flood has *already* reached one tile at, advancing it
+/// not one pop (#176): the grid read `reachedBy` guards, handed out raw
+/// and therefore never an answer — `unreached` here still means "nobody
+/// has asked yet" and the number it holds may still fall. Only the bound
+/// below reads it, and only ever as an upper one; nothing outside this
+/// file can see it, which is the whole of what keeps #174's distinction
+/// safe.
+let private glimpsedBy (flood: Flood) (tile: Pos) : int =
+    if not (inGrid tile) then
+        unreached
+    else
+        at (indexOf tile) flood.Dist
+
+/// The cheapest distance any tile the flood has *not* settled can still
+/// turn out to have: the dist at the top of its heap, and `unreached` when
+/// the heap has run dry — a flood with nothing left to pop has settled
+/// everything it ever will, so there is no unsettled tile left for this to
+/// bound and every grid read is already final. Read-only, and that is the
+/// point (#176): a reader asks this to decide whether a tile is worth
+/// settling at all.
+///
+/// It is Dijkstra's own invariant read from the other side of `settleTo`'s
+/// stopping rule. A tile the flood has not popped is reached, if at all,
+/// through some tile still in the heap, and no step costs less than one
+/// (ADR 0029, ADR 0010) — so no unsettled tile ends up cheaper than the
+/// cheapest key left. A stale duplicate sitting at the top does not weaken
+/// it: the tile that will really be popped next is at or below that key,
+/// and this is a lower bound either way.
+let private frontierOf (flood: Flood) : int =
+    if flood.Size = 0 then
+        unreached
+    else
+        heapAt 0 flood.Heap / tileCount
+
 /// The same read on a flood already settled whole. Spelled beside
 /// `reachedBy` so the two answer off one arithmetic, and a reader handed
 /// one instead of the other changes nothing but when the work was done.
@@ -2108,11 +2142,14 @@ let standsOnSeam (atlas: Atlas) (creep: string) : bool =
 /// neighbourhood is more ring, so a near leg read tile by tile over a
 /// thirty-odd crossing band drained 2,500 tiles at its first crossing and
 /// handed an outpost creep none of #174's saving. What the read still pays
-/// after this is the band's own width and not the ring's: it asks after
-/// every crossing in the band, so the flood is pushed out as far as the
-/// dearest of them and a creep far from its border settles most of its
-/// room either way. The grid does the clipping, `inGrid` and all
-/// (`weightAt`), so there is one rule here and not two.
+/// after this is the band's own width and not the ring's — and since #176
+/// not the whole of that width either: the join walks the band cheapest
+/// half first and never settles for a crossing whose lower bound already
+/// loses (`boundOn`). What is left is the price of the answer rather than
+/// of the read — a creep whose winning crossing is genuinely far from it
+/// still settles most of its room, and one whose is near no longer pays
+/// for the dearest crossing in the band. The grid does the clipping,
+/// `inGrid` and all (`weightAt`), so there is one rule here and not two.
 let private besideExit (grid: int[]) (tile: Pos) : Pos list =
     neighbours tile |> List.filter (walkableAt grid)
 
@@ -2298,6 +2335,70 @@ let private farFlood (atlas: Atlas) (pricing: Pricing) (creep: string) (room: st
             pricing
             (narrowedArea atlas creep task |> Set.toList))
 
+/// The near leg of a cross-room join, in the two shapes its two callers
+/// hand it (#174): the tick's own per-creep flood, which the join may
+/// push further, and a flood some caller already settled whole, which it
+/// may only read. Both answer the same two questions — what a tile is
+/// finally reached at, and what it cannot possibly beat — so the join
+/// below is written once and neither caller gets an arithmetic of its own
+/// (ADR 0030).
+type private NearLeg =
+    /// The resumable memo of one creep under one pricing: a read may cost
+    /// relaxation, and the whole of #176 is asking for as few of them as
+    /// the answer allows.
+    | Resuming of Flood
+    /// A flood already drained — the hauler quota's own legs. Every read
+    /// is final and free, so the bound below is exact and prunes nothing
+    /// that could have won.
+    | Drained of int[]
+
+/// What a near leg finally reaches a tile at — `unreached` for a tile
+/// nothing reaches, and never for one merely unsettled (#174).
+let private reachedOn (leg: NearLeg) : Pos -> int =
+    match leg with
+    | Resuming flood -> reachedBy flood
+    | Drained dist -> reachedIn dist
+
+/// A lower bound on what the near leg will finally reach the cheapest
+/// tile of a set at, taken without advancing it a single pop — the
+/// licence for #176's early stop, and the argument that it moves no
+/// answer.
+///
+/// Per tile: the flood's own frontier bounds every tile it has not
+/// settled (`frontierOf`), while a tile it *has* settled already holds
+/// its final number, and the grid read is an upper bound on that number
+/// for every tile whatever its state. So `min(frontier, glimpse)` is at or
+/// below the tile's final distance in both cases, and the smallest of
+/// those over the set is at or below the set's own minimum. Both halves
+/// matter: the frontier alone is not a bound, because a tile settled
+/// cheaply while the flood ran past it toward another crossing sits
+/// *below* the frontier, and adjacent crossings in a band share their
+/// approach tiles, so that is the ordinary case here and not the exotic
+/// one.
+///
+/// What the join does with it: the three terms are non-negative — an exit
+/// costs at least one step (`exitPrice`), a far leg at least nothing — so
+/// `bound + crossing + departure` is at or below the sum any crossing can
+/// still produce. A crossing whose bound already exceeds the best sum in
+/// hand can therefore never win it and is never settled for; every other
+/// crossing is settled and compared exactly as it was before. The answer
+/// is `List.min` over the whole band either way, because the crossings
+/// skipped are only ever crossings that lose (#176).
+///
+/// An empty set — an exit with no ground of this room beside it — bounds
+/// at `unreached`, which is the same absence `nearestReached` would answer
+/// it with, and keeps the addition above out of overflow.
+let private boundOn (leg: NearLeg) (tiles: Pos list) : int =
+    match leg, tiles with
+    | _, [] -> unreached
+    | Drained dist, _ ->
+        tiles |> List.fold (fun bound tile -> min bound (reachedIn dist tile)) unreached
+    | Resuming flood, _ ->
+        min
+            (frontierOf flood)
+            (tiles
+             |> List.fold (fun bound tile -> min bound (glimpsedBy flood tile)) unreached)
+
 /// A cross-room price, joined on the Seam: the smallest, over the whole
 /// band between the two rooms, of *walk to the exit tile* + *the exit
 /// tile's own price* + *walk in from the tile it lands on* (ADR 0041,
@@ -2362,16 +2463,26 @@ let private farFlood (atlas: Atlas) (pricing: Pricing) (creep: string) (room: st
 /// price is the same number it always was and the tie falls to the lowest
 /// (X, Y) exit, exactly as every other tie in the Atlas falls.
 ///
-/// Both legs arrive as tile reads rather than as grids (#174): the near
-/// leg of a creep's price is the tick's resumable memo and pushes out
-/// over the band as the band is walked, while the far leg and both legs
-/// of the hauler quota's round trip are floods already settled whole.
-/// Each side is read at its own room's ground alone and never at the ring
-/// between them (`besideExit`, #175) — which is the same minimum, taken
-/// without settling a resumable near leg over a room to learn that a ring
-/// tile is unreachable. The near leg's origin rides in for the one tile
+/// Neither leg arrives as a grid (#174): the far leg is a tile read, and
+/// the near one a `NearLeg` (#176), which carries the flood itself so the
+/// join can bound it without advancing it. The near leg of a creep's
+/// price is the tick's resumable memo and pushes out over the band as the
+/// band is walked, while the far leg and both legs of the hauler quota's
+/// round trip are floods already settled whole. Each side is read at its
+/// own room's ground alone and never at the ring between them
+/// (`besideExit`, #175) — which is the same minimum, taken without
+/// settling a resumable near leg over a room to learn that a ring tile is
+/// unreachable. The near leg's origin rides in for the one tile
 /// that rule has to spare: the flood is seeded there whatever it weighs,
 /// so a creep standing on the ring prices from where it stands.
+///
+/// And the near leg is no longer pushed out as far as the dearest
+/// crossing in the band (#176). What it is pushed out to is the first
+/// crossing the band's `crossing + departure` order admits — which is not
+/// in general the one that wins — and after that only the crossings whose
+/// bound leaves them able to tie the best sum in hand; every other
+/// crossing is skipped without a single pop. See `NearLeg` above for the
+/// bound and why it moves no answer.
 let private joinedAcross
     (atlas: Atlas)
     (pricing: Pricing)
@@ -2380,7 +2491,7 @@ let private joinedAcross
     (from: Pos)
     (toRoom: string)
     (band: (Pos * Pos) list)
-    (near: Pos -> int)
+    (near: NearLeg)
     (far: Pos -> int)
     : (int * Pos) option =
     // One price table for the whole band: every crossing in it is priced
@@ -2389,19 +2500,65 @@ let private joinedAcross
     let nearGround = weightsOf atlas fromRoom
     let farGround = weightsOf atlas toRoom
 
-    band
-    |> List.choose (fun (exitTile, landing) ->
-        match
-            nearestReached near (besideExitFrom nearGround from exitTile),
-            exitPrice atlas stepPrices fromRoom exitTile,
-            nearestReached far (besideExit farGround landing)
-        with
-        | Some approach, Some crossing, Some departure ->
-            Some(approach + crossing + departure, exitTile)
-        | _ -> None)
-    |> function
-        | [] -> None
-        | crossings -> Some(List.min crossings)
+    // Everything but the near leg, priced first, and the band ordered by
+    // it. The far leg is a flood settled whole and the exit's own price a
+    // table read, so this costs the band a read apiece and no relaxation
+    // at all — and it is what makes the bound below bite early: a crossing
+    // whose own two terms already beat every other's is the one most
+    // likely to set a best sum the rest cannot reach. A crossing the body
+    // cannot pay for, or whose landing tile opens onto nothing, drops out
+    // here exactly as it always did.
+    let crossings =
+        band
+        |> List.choose (fun (exitTile, landing) ->
+            match
+                exitPrice atlas stepPrices fromRoom exitTile,
+                nearestReached far (besideExit farGround landing)
+            with
+            | Some crossing, Some departure ->
+                Some(crossing + departure, exitTile, besideExitFrom nearGround from exitTile)
+            | _ -> None)
+        // On the sum of the two terms alone, which is a primitive key over
+        // a list the band already ordered (#96): the answer below does not
+        // depend on this order — every crossing left unsettled is one the
+        // bound proved cannot win — so ordering is a matter of how much
+        // work is saved and never of what is answered.
+        |> List.sortBy (fun (rest, _, _) -> rest)
+
+    // One closure for the whole band, not one per crossing: the read is
+    // the same read every time and the band is walked a crossing at a
+    // time (#168).
+    let reached = reachedOn near
+    let mutable best = None
+
+    for rest, exitTile, approach in crossings do
+        let bound = boundOn near approach
+
+        let worthSettling =
+            bound < unreached
+            && match best with
+               // At or under the best sum and not merely under: the answer
+               // is the smallest `(sum, exit)` pair and not the smallest
+               // sum, so a crossing that can only *tie* still has to be
+               // looked at — the tie falls to the lowest exit, exactly as
+               // `List.min` over the whole band fell.
+               | Some(bestSum, _) -> bound + rest <= bestSum
+               | None -> true
+
+        if worthSettling then
+            match nearestReached reached approach with
+            | None -> ()
+            | Some arrival ->
+                let sum = arrival + rest
+
+                match best with
+                | Some(bestSum, bestExit) when
+                    bestSum < sum || (bestSum = sum && bestExit <= exitTile)
+                    ->
+                    ()
+                | _ -> best <- Some(sum, exitTile)
+
+    best
 
 /// A creep's cross-room price toward a Task: the join above over this
 /// creep's own memoised flood and the Task's far leg, the one flooded out
@@ -2433,7 +2590,7 @@ let private pricedAcross
             from
             targetRoom
             band
-            (reachedBy near)
+            (Resuming near)
             (reachedIn far)
 
 /// The cheapest path from a creep to a set of tiles under one pricing —
@@ -2816,7 +2973,7 @@ let haulRoundTripTicks
                     from
                     sinkRoom
                     band
-                    (reachedIn near)
+                    (Drained near)
                     (reachedIn far)
                 |> Option.map fst
 

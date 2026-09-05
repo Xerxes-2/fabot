@@ -2227,3 +2227,205 @@ let onDemandFloodTests =
                     "and so is each of its tiles, asked one at a time after the drain"
             }
         ]
+
+// ---- the band read bounded by the best sum (#176) -----------------------
+
+/// Where a cross-room sweep stands its creep: the near room's own ground,
+/// strided as every other cross-room case strides it, plus the crossings
+/// themselves. A creep parked on a crossing is where the engine leaves one
+/// the tick it steps over (#142, #145), and it is the stand the bound has
+/// least room on — the flood is seeded on the ring tile whatever it
+/// weighs, so the first approach it settles costs nothing and the frontier
+/// it prunes by stays at the bottom of the band.
+let private standsAcross (near: RoomCapture) (far: RoomCapture) (from: string) (into: string) =
+    let onTheRing =
+        seams (acrossFrom near far) from into
+        |> List.map fst
+        |> List.indexed
+        |> List.filter (fun (index, _) -> index % 7 = 0)
+        |> List.map snd
+
+    standingSample near @ onTheRing
+
+/// A tile of a capture nothing ever reaches — its first wall, in the
+/// loader's own order, chosen for nothing but being a wall. Asking a
+/// resumable flood about it drains the flood to exhaustion (#174), which
+/// is how the cases below get the *whole* band's reading to compare the
+/// bounded one against: a drained flood has an empty heap, so its frontier
+/// bounds nothing, every grid read is already final, and the bound admits
+/// every crossing in the band exactly as the pre-#176 minimum over all of
+/// them did.
+let private drainTile (capture: RoomCapture) =
+    capture.Terrain
+    |> Map.toList
+    |> List.find (fun (_, terrain) -> terrain = Wall)
+    |> fst
+
+/// The body both readings of the walk are taken over: one
+/// fatigue-generating part to one Move (ADR 0003) and no Carry at all.
+/// Carry-less is what makes the round trip twice the one-way walk — an
+/// empty Carry generates no fatigue, so a body holding one prices its two
+/// legs under two factors — and one Work against one Move is under the
+/// Work-heavy line, so a Harvest keeps the Work Area a source's own
+/// surroundings rather than a Post it has no container for (ADR 0020).
+let private haulBody = [ Work; Move ]
+
+/// The two captures again, with the far room's sources standing as
+/// obstacles and the creep carrying nothing: the one fixture on which the
+/// hauler quota's round trip and the Matcher's walk are the same journey.
+/// A source tile nothing may stand on makes the Harvest Work Area exactly
+/// the sink's adjacent walkable tiles, and a Carry-less body prices its
+/// loaded and its empty leg under one fatigue factor (ADR 0003), so the
+/// round trip is twice the one-way walk and nothing else. Everything
+/// geometric is still the server's.
+let private haulingAcross (near: RoomCapture) (far: RoomCapture) (stand: Pos) =
+    { SpatialInfo.empty with
+        RoomName = Some near.RoomName
+        Rooms =
+            Map.ofList
+                [
+                    near.RoomName,
+                    { RoomLayer.empty with
+                        Terrain = near.Terrain
+                        CreepPositions = Map.ofList [ "w", stand ]
+                    }
+                    far.RoomName,
+                    { RoomLayer.empty with
+                        Terrain = far.Terrain
+                        TargetPositions = Map.ofList far.Sources
+                        Obstacles = far.Sources |> List.map snd |> Set.ofList
+                    }
+                ]
+        Borders = Map.ofList [ near.RoomName, near.Border; far.RoomName, far.Border ]
+        TargetKinds = far.Sources |> List.map (fun (id, _) -> id, Source) |> Map.ofList
+    }
+    |> AtlasTests.snapshotWith [ AtlasTests.creepWith "w" 0 haulBody ]
+    |> ofSnapshot
+
+[<Tests>]
+let boundedBandTests =
+    testList
+        "atlas band read bounded by the best sum"
+        [
+            test "a cross-room price is the one the whole band answers, crossing for crossing" {
+                // #176's whole promise. The near leg is now pushed out only
+                // as far as the crossing that wins, so the crossings behind
+                // the bound are never settled for at all — and the answer
+                // has to be the one the band gave when every crossing was.
+                //
+                // The comparison is against the same memo read after it has
+                // been drained, which is the pre-#176 reading exactly: with
+                // the heap empty the frontier bounds nothing, every tile
+                // holds its final distance, and no crossing is skipped. So
+                // one side prunes and the other cannot, over one band, one
+                // creep, one body and one room's terrain (ADR 0036).
+                //
+                // Both routes ride along, because a price and a step that
+                // disagree are a creep walked to one crossing and ranked at
+                // another (#142): the winning exit comes out of this very
+                // minimum, so a wrongly pruned crossing moves the step
+                // whether or not it moves the number.
+                let mutable priced = 0
+                let mutable stepped = 0
+
+                for border in borders do
+                    for from, into in [ border.From, border.To; border.To, border.From ] do
+                        let near = load from
+                        let far = load into
+                        let drain = Set.singleton (drainTile near)
+
+                        for stand in standsAcross near far from into do
+                            let bounded = walkingAcross near far stand
+                            let whole = walkingAcross near far stand
+
+                            Expect.isNone
+                                (travelCostWithin whole "w" drain)
+                                $"{from}: a wall is reached by nothing, so asking drains the flood"
+
+                            for sourceId, _ in far.Sources do
+                                let task = Harvest sourceId
+                                let cost = travelCost bounded "w" task
+
+                                Expect.equal
+                                    cost
+                                    (travelCost whole "w" task)
+                                    $"{from} -> {into} from {stand.X},{stand.Y}: {sourceId} prices what the whole band prices"
+
+                                if Option.isSome cost then
+                                    priced <- priced + 1
+
+                                // The drained side's goals are the drain
+                                // itself: the tiles a cross-room Task hands
+                                // its mover are empty either way (`workAreaFor`
+                                // answers a creep a room away with nothing),
+                                // so both sides fall through to the Seam, and
+                                // passing the unreachable tile is what settles
+                                // the traffic-blind flood before it does.
+                                let step = firstStep bounded "w" task (workAreaFor bounded "w" task)
+
+                                Expect.equal
+                                    step
+                                    (firstStep whole "w" task drain)
+                                    $"{from} -> {into} from {stand.X},{stand.Y}: {sourceId} steps where the whole band steps"
+
+                                if Option.isSome step then
+                                    stepped <- stepped + 1
+
+                                Expect.equal
+                                    (firstStepIgnoringTraffic
+                                        bounded
+                                        "w"
+                                        task
+                                        (workAreaFor bounded "w" task))
+                                    (firstStepIgnoringTraffic whole "w" task drain)
+                                    $"{from} -> {into} from {stand.X},{stand.Y}: and so does the traffic-blind route"
+
+                Expect.isGreaterThan priced 20 "the sweep really did price across"
+                Expect.isGreaterThan stepped 20 "and really did step across"
+            }
+
+            test "the walk across is the one a flood settled whole answers" {
+                // The oracle from outside the memo, and the only case here
+                // that does not compare a flood against itself. The hauler
+                // quota's round trip runs its own floods and settles them
+                // whole (ADR 0012), joins the same band by the same rule
+                // (`joinedAcross`), and prices in the same whole ticks
+                // (ADR 0029) — so over a Carry-less body its two legs are
+                // one journey twice and it must answer exactly twice the
+                // Matcher's walk, which reads the tick's resumable memo and
+                // prunes the band against its best sum.
+                //
+                // Real terrain is what makes it worth asserting: the walk
+                // detours around walls and pays swamp on both sides of the
+                // border, and the two rooms' cheapest crossings are not the
+                // same tile from every stand (ADR 0036).
+                let mutable walked = 0
+
+                for border in borders do
+                    for from, into in [ border.From, border.To; border.To, border.From ] do
+                        let near = load from
+                        let far = load into
+
+                        for stand in standsAcross near far from into do
+                            let atlas = haulingAcross near far stand
+
+                            for sourceId, source in far.Sources do
+                                let one = walkTicks atlas "w" (Harvest sourceId)
+                                let round = haulRoundTripTicks atlas haulBody from stand into source
+
+                                match one, round with
+                                | Some out, Some trip ->
+                                    walked <- walked + 1
+
+                                    Expect.equal
+                                        (out * 2)
+                                        trip
+                                        $"{from} -> {into} from {stand.X},{stand.Y}: {sourceId}'s bounded walk is the whole flood's"
+                                | None, None -> () // unreachable from both, as ADR 0004 has it
+                                | out, trip ->
+                                    failtest
+                                        $"{from} -> {into} from {stand.X},{stand.Y}: {sourceId} walks {out} on the memo and {trip} on the whole flood"
+
+                Expect.isGreaterThan walked 20 "the sweep really did walk across"
+            }
+        ]

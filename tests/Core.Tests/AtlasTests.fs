@@ -4808,6 +4808,103 @@ let crossRoomStepTests =
                     "so the step is the crossing the price was paid at, taken off the ring"
             }
 
+            test "two crossings tied on the sum fall to the lowest exit, not to the cheaper half" {
+                // The tie the bounded band read must not turn over (#176).
+                // The near leg now stops at the crossing that wins, and the
+                // rule that decides whether a crossing is worth settling for
+                // is "its lower bound is at or under the best sum" — *at*,
+                // and not merely under, because the answer is the smallest
+                // `(sum, exit)` pair and never the smallest sum alone. A
+                // crossing that can only tie still moves the exit, and the
+                // exit is where the mover walks (#142).
+                //
+                // Countable. The creep stands at (23,1) on a plain row from
+                // x=20 to x=30, and the band holds two crossings:
+                //
+                //   west (20,0), a *swamp* exit: two steps to (21,1), the
+                //     ground beside it, five ticks onto the swamp exit, and
+                //     eleven in the outpost — eighteen.
+                //   east (30,0), a plain exit: six steps to (29,1), one tick
+                //     onto the exit, and the same eleven — eighteen.
+                //
+                // The outpost's eleven is the same both sides by
+                // construction: from the tile beside either landing, seven
+                // down its column, a diagonal onto the row at y=41, and three
+                // along it to the nearest tile of the source's Work Area.
+                //
+                // So the sums tie, and the east crossing is the one the band
+                // reads first — its exit price and far leg are the cheaper
+                // half, which is the order the bound is taken in. A read that
+                // stopped at "strictly better" would never look at the west
+                // crossing at all and would walk the creep east, to a
+                // crossing the pre-#176 minimum over the whole band never
+                // picked: `List.min` over `(sum, exit)` pairs falls to the
+                // lowest exit, and (20,0) is lower than (30,0).
+                let home stand =
+                    { RoomLayer.empty with
+                        Terrain = Map.ofList (plainLine [ for x in 20..30 -> { X = x; Y = 1 } ])
+                        CreepPositions = Map.ofList [ "w", stand ]
+                    }
+
+                let outpost =
+                    { RoomLayer.empty with
+                        Terrain =
+                            Map.ofList (
+                                plainLine
+                                    [
+                                        for y in 41..48 -> { X = 20; Y = y }
+                                        for y in 41..48 -> { X = 30; Y = y }
+                                        for x in 21..29 -> { X = x; Y = 41 }
+                                    ]
+                            )
+                        TargetPositions = Map.ofList [ "src-out", { X = 25; Y = 40 } ]
+                    }
+
+                let across stand =
+                    northOf
+                        (home stand)
+                        [ { X = 20; Y = 0 }, Swamp; { X = 30; Y = 0 }, Plain ]
+                        outpost
+                        [ { X = 20; Y = 49 }, Plain; { X = 30; Y = 49 }, Plain ]
+                        [ "src-out", Source ]
+                        [ worker "w" ]
+
+                let tied = across { X = 23; Y = 1 }
+
+                Expect.hasLength (seams tied "W1N1" "W1N2") 2 "the premise: two crossings"
+
+                Expect.equal
+                    (walkTicks tied "w" (Harvest "src-out"))
+                    (Some 18)
+                    "two down the swamp exit and six down the plain one come to the same walk"
+
+                Expect.equal
+                    (travelCost tied "w" (Harvest "src-out"))
+                    (Some 36)
+                    "and they tie in the ranking price's units too, which double every step here"
+
+                Expect.equal
+                    (firstStepFor tied "w" (Harvest "src-out"))
+                    (Some { X = 22; Y = 1 })
+                    "so the creep is sent west, to the lower exit the tie falls to"
+
+                // The pairwise control, one tile east: nothing about the
+                // rooms changes, the sums stop tying, and the cheaper
+                // crossing wins outright — so the west answer above is the
+                // tie-break and not a westward bias.
+                let untied = across { X = 24; Y = 1 }
+
+                Expect.equal
+                    (walkTicks untied "w" (Harvest "src-out"))
+                    (Some 17)
+                    "three, five and eleven the west way is nineteen; five, one and eleven the east way is seventeen"
+
+                Expect.equal
+                    (firstStepFor untied "w" (Harvest "src-out"))
+                    (Some { X = 25; Y = 1 })
+                    "and the step follows the winner east"
+            }
+
             test "the last step onto an exit tile is a step nothing offers to stand on" {
                 // ADR 0036 and ADR 0041 keep the exit out of the projection's
                 // ground, and #142 does not put it back: the mover may push a
