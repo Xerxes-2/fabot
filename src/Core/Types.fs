@@ -130,14 +130,15 @@ type ReservationInfo =
         Ours: bool
         /// Ticks left on the reservation — what the reserver row's one
         /// rule sizes and quotas from, `ceil((5000 - this) / 600)` CLAIM
-        /// parts (ADR 0042, #131).
+        /// parts (ADR 0042, `Decide.reserverClaimsOf`). Read only where
+        /// `Ours` is true: a reservation another player holds leaves this
+        /// colony's own hold at zero, exactly as it leaves the room's
+        /// sources at the neutral rate.
         ///
-        /// The one field here no rule reads yet, and the exception the
-        /// sentence under `Reservation` below does not cover: the holder
-        /// and the ticks left are a single engine fact off a single
-        /// binding — the reservation object arrives whole or not at all —
-        /// so projecting the pair costs nothing over projecting `Ours`
-        /// alone, and #131 splits neither of them.
+        /// The holder and the ticks left are a single engine fact off a
+        /// single binding — the reservation object arrives whole or not at
+        /// all — so the pair is projected together and the exception the
+        /// sentence under `Reservation` below does not cover.
         TicksToEnd: int
     }
 
@@ -169,9 +170,10 @@ type RoomControlInfo =
         /// clockless stand-down that will (ADR 0043) is the tick to widen
         /// this rather than a reason to project a field early (ADR 0007's
         /// rule). That is a rule about a field the projection would have
-        /// to go and fetch; the unread `TicksToEnd` above arrives inside
-        /// the reservation this one already carries, which is why it is
-        /// not the same question.
+        /// to go and fetch; the `TicksToEnd` above — read every tick by
+        /// `Decide.reserverClaimsOf` since #131 — arrives inside the
+        /// reservation this one already carries, which is why it is not
+        /// the same question.
         Reservation: ReservationInfo option
     }
 

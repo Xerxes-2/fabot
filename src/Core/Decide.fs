@@ -47,15 +47,11 @@ let haulerPattern =
 /// energy amortised over a CLAIM part's 600-tick life — 2.17 a tick — so
 /// it pays for itself twice over on a single source.
 ///
-/// Declared here and deliberately **not a row of the table below**. ADR
-/// 0006's law is that a row arrives with its quota or does not arrive, and
-/// this row's quota — one reserver per posted outpost, sized off the
-/// reservation deficit — is #131's. Nothing casts a reserver until it
-/// lands. What this value is for meanwhile is reading a *living* CLAIM
-/// body back to the row it came from (`patternOf`), which is how ADR
-/// 0026 prices a succession: in the table it would be cast with no colony
-/// fact saying when; outside it, it still prices the bodies a later
-/// ticket puts in the room.
+/// A row of the table below since its quota arrived with it (ADR 0006's
+/// law, #131): one reserver per declared outpost, sized off the reservation
+/// deficit (`reserverClaimsOf`), cast in front of every other row
+/// (`planSpawns`). It is also the row a *living* CLAIM body is read back
+/// to (`patternOf`), which is how ADR 0026 prices its succession.
 let reserverPattern =
     {
         Name = "reserver"
@@ -66,7 +62,13 @@ let reserverPattern =
 /// energy under the row's own sizing rule. A future pattern is one more
 /// data row plus its own quota rule — a colony fact deciding when it is
 /// cast — never a new code path (ADR 0006).
-let patternTable = [ workerPattern; anchorPattern; haulerPattern ]
+///
+/// Declaration order and not casting order: the rows cast reserver,
+/// Anchor, hauler, worker (`planSpawns`), and no rule in this module reads
+/// this list for a sequence. What it is is the enumeration — every body the colony
+/// casts is here, so a row cast from outside it would be a body no reader
+/// of the table could account for.
+let patternTable = [ workerPattern; anchorPattern; haulerPattern; reserverPattern ]
 
 let bodyCost body =
     body
@@ -199,17 +201,22 @@ let private haulerBodyFor capacity =
     wholeBlockBodyFor haulerPattern.Block capacity
 
 /// The reserver row's sizing rule: as many whole [Claim; Move] blocks as
-/// capacity buys, never below one. The bank's truncation and nothing else
-/// — ADR 0042 sizes this row off the reservation deficit,
-/// `ceil((5000 - ticksToEnd) / 600)` CLAIM parts *capped by the bank*,
-/// and #131 lands the deficit half beside the cap this is.
+/// capacity buys, never below one. The bank's truncation alone, which is
+/// half the row's rule — ADR 0042 sizes the body off the reservation
+/// deficit, `ceil((5000 - ticksToEnd) / 600)` CLAIM parts *capped by the
+/// bank*, and `reserverBodyWithin` below is where the two halves meet.
+/// This entry point is the one `bodyFor` exposes, so a reader holding
+/// only a capacity — the lead's succession pricing (ADR 0026) — gets the
+/// largest body the row could cast and therefore the longest lead, which
+/// is the safe direction to be wrong in: a successor is cast early rather
+/// than after its incumbent died.
 ///
-/// It is here ahead of that ticket because a lead is priced off the row's
-/// own body (ADR 0026), and `parityBodyFor` cannot price this one: it
-/// counts Work, Carry and Move out of a block and emits only those, so a
-/// [Claim; Move] row read through it sizes to a body with no CLAIM part in
-/// it at all — eight Carry and four Move at an 1,800 bank — and prices the
-/// reserver's succession off a body that could not reserve anything.
+/// The row is sized here rather than through the generalist rule because
+/// `parityBodyFor` cannot price it: it counts Work, Carry and Move out of
+/// a block and emits only those, so a [Claim; Move] row read through it
+/// sizes to a body with no CLAIM part in it at all — eight Carry and four
+/// Move at an 1,800 bank — and prices the reserver's succession off a body
+/// that could not reserve anything.
 /// Parts are grouped Claim then Move so damage strips the reservation
 /// before the legs, as every other row strips its output first.
 let private reserverBodyFor capacity =
@@ -811,14 +818,149 @@ let private spawnTicksPerPart = 3
 /// drains per upgrade tick — the rate an upgrade mouth eats income at.
 let private upgradeDrainPerWork = 1
 
-/// Workforce target (ADR 0012): three addends, each a pattern row's own
-/// colony fact — Anchors one per Post, haulers the throughput quota,
-/// workers the income arithmetic — floored at minWorkforce and derived
-/// fresh each tick. A source whose Post is provided for retires its other
-/// Seats: one heavy body drains it alone, so counting seats after that is
-/// hiring for jobs that no longer exist. An unposted source of the spawn
-/// room still contributes its Seat count — its output is spoken for by the
-/// seat crews that walk it — so only the posted sources' output is income.
+/// Screeps CONTROLLER_RESERVE_MAX: the ticks a reservation caps at. The
+/// deficit the reserver row sizes off is measured from here down (ADR
+/// 0042), so a reservation standing at the cap asks for the smallest body
+/// the row can cast and nothing bigger.
+let private reservationCap = 5000
+
+/// Screeps CREEP_CLAIM_LIFE_TIME: the ticks a body carrying a CLAIM part
+/// lives — well short of the 1,500 every other row gets. Two things read
+/// it: the deficit's divisor (one CLAIM part holds the reservation up
+/// through a whole such life, which is TooAngel's rule and ADR 0042's),
+/// and the reserver row's amortization, which must spread its body cost
+/// over *this* life rather than over `creepLifetime` — 1,300 over 600 is
+/// the 2.17 energy a tick ADR 0042 prices the row at, and over 1,500 it
+/// would read as 0.87 and undercharge the row by a factor of two and a
+/// half.
+let private claimLifetime = 600
+
+/// The richest bank the colony could fill this tick: every projected
+/// room's capacity, and the largest of them. Two readers who must not
+/// disagree — `workforceTarget` prices every row's replacement as the
+/// richest bank would cast it, and the reserver row's quota refuses to
+/// hire at all where that bank cannot buy the row's floor body — so the
+/// fold is written once here rather than twice.
+let private richestCapacity (snapshot: Snapshot) =
+    snapshot.RoomEnergy
+    |> Map.toList
+    |> List.map (fun (_, bank) -> bank.Capacity)
+    |> function
+        | [] -> 0
+        | caps -> List.max caps
+
+/// The reserver row's body for one outpost (ADR 0042): the deficit sizing
+/// and the bank truncation, whichever asks for less, never below one
+/// block. The deficit arrives as a second capacity ceiling — `claims`
+/// blocks' worth of energy — because "as many whole blocks as capacity
+/// buys" is already `reserverBodyFor`'s rule and the smaller of two
+/// ceilings is the smaller of two block counts.
+///
+/// This row is the only one whose body is *not* the bank's answer alone,
+/// and ADR 0042 refuses the bank on its own terms: at RCL6 a 2,300 bank
+/// buys a third CLAIM for a reservation that caps at 5,000 anyway. Today's
+/// RCL5 bank of 1,800 agrees with the deficit at `[2Claim;2Move]`, so the
+/// two rules are told apart only at a richer bank.
+let private reserverBodyWithin claims capacity =
+    reserverBodyFor (min capacity (claims * bodyCost reserverPattern.Block))
+
+/// The reserver row's quota and its sizing, which are one rule with two
+/// faces (ADR 0042, ADR 0006's law that a row arrives with its quota):
+/// one reserver per **declared** outpost, each wanting
+/// `ceil((5000 − ticks this colony holds) / 600)` CLAIM parts. The list's
+/// length is the quota; each entry is what that outpost's body asks for.
+/// No state is kept between ticks — the deficit recomputes from the
+/// reservation itself, shrinks to one block in steady state, and comes
+/// back bigger on its own the tick a reservation has slipped, which is
+/// also the whole of what "a dead reserver's room hires a bigger
+/// replacement" needs.
+///
+/// **Declared and not posted**, which is where #131's own correction
+/// comment overrides its ticket text and ADR 0042's "one reserver per
+/// posted outpost" clause. Gating this row on a standing container
+/// deadlocks the outpost chain: a container site needs vision (#128),
+/// vision needs a creep in the room, and the only creep with a reason to
+/// go is this one — a worker picks the cheapest feeding tier and Storage
+/// is a few tiles away where an outpost rock is fifty. ADR 0042's own
+/// Considered Options settle it against its Consequences clause, having
+/// already rejected "mine first, reserve later" because *"reserving from
+/// the start also doubles the outpost's output before the first hauler is
+/// sized"*. So the row hires for a room that has produced nothing yet:
+/// it **is** the bootstrap — it walks there, supplies the vision the
+/// container needs, and turns five a tick into ten from the first day.
+/// The scan set is the gate that remains, and it is the one ADR 0043's
+/// stand-down narrows: a room withdrawn from is not projected, carries no
+/// controller here, and hires nobody.
+///
+/// **Carrying a controller of its own in the projection**, which is
+/// the row meeting its Task (ADR 0006): `planTasks` pools one Reserve per
+/// projected controller that is not the colony's own, so a room with no
+/// such controller offers a CLAIM body nothing to do — it would stand
+/// where it was born for its whole 600-tick life, applicable to Flee and
+/// to nothing else. The colony's own controller is excluded by id, as it
+/// is there: the engine refuses reserveController on a room we own.
+///
+/// The *rooms* drop out, and every cast this tick is sized at the largest
+/// demand in the list rather than at the demand standing beside it. The
+/// row cannot do better: the quota counts bodies, and which controller
+/// each finished body ends up holding is the Matcher's, through the
+/// Reserve Task's one-holder-per-controller capacity (#130), which prices
+/// the nearer controller cheapest and knows nothing about a deficit. So a
+/// list read positionally would hand the nearer room the body the further
+/// one asked for, and a room reserved by one CLAIM against the engine's
+/// one tick of decay is a room frozen where it stands for the whole
+/// 600-tick life of that body. Over-buying is the safe direction and the
+/// same one `reserverBodyFor` is wrong in for the lead (ADR 0026); the
+/// bank truncates it anyway, and the demands differ only while a
+/// reservation is slipping.
+///
+/// **The bank must afford one block**, or the row hires nobody at all.
+/// Its floor body is 650 — larger than every other row's, and larger than
+/// the whole bank below RCL3 — and a gap this row can never fill would
+/// stop the cascade under it forever, the home room's Anchors and haulers
+/// included, since `planSpawns` gives each idle spawn the first unfilled
+/// row and this one would always be it. A colony that cannot buy a
+/// reservation does not hold one.
+///
+/// A reservation another player holds counts as no hold at all, exactly as
+/// it does for the source rate: the ticks left on it are theirs, and ours
+/// starts from zero. A room the colony cannot see this tick has no control
+/// entry and reads the same zero, which is the right answer and not an
+/// accident of blindness — a room we have no vision in is a room nothing
+/// of ours is standing in to reserve.
+let private reserverClaimsOf (snapshot: Snapshot) atlas : int list =
+    let home = snapshot.Controller |> Option.map (fun c -> c.Id)
+
+    let heldTicks room =
+        snapshot.RoomControl
+        |> Map.tryFind room
+        |> Option.bind (fun control -> control.Reservation)
+        |> Option.filter (fun held -> held.Ours)
+        |> Option.map (fun held -> held.TicksToEnd)
+        |> Option.defaultValue 0
+
+    if richestCapacity snapshot < bodyCost reserverPattern.Block then
+        []
+    else
+        snapshot.Spatial.TargetKinds
+        |> Map.toList
+        |> List.choose (fun (id, kind) ->
+            if kind = Controller && Some id <> home then
+                Atlas.targetRoom atlas id
+            else
+                None)
+        |> List.distinct
+        |> List.map (fun room -> ceilDiv (reservationCap - heldTicks room) claimLifetime |> max 1)
+
+/// Workforce target (ADR 0012): four addends, each a pattern row's own
+/// colony fact — reservers one per declared outpost, Anchors one per Post,
+/// haulers the throughput quota, workers the income arithmetic — floored
+/// at minWorkforce and derived fresh each tick. A source whose Post is
+/// provided for retires its other Seats: one heavy body drains it alone,
+/// so counting seats after that is hiring for jobs that no longer exist.
+/// An unposted source of the spawn room still contributes its Seat count
+/// — its output is spoken for by the seat crews that walk it — so only the
+/// posted sources' output is income.
 ///
 /// An unposted source of an outpost contributes nothing at all (ADR 0042).
 /// The seat-crew justification presumes the walk is cheap, and across a
@@ -827,15 +969,19 @@ let private upgradeDrainPerWork = 1
 /// generalists to commute forty-seven to fifty-six tiles to dig them. The
 /// useful half of that exclusion is that a standing container is the
 /// switch admitting an outpost into the economy — until one stands the
-/// room is invisible to every quota, and the tick it stands the source
-/// becomes a Post: an Anchor place on the one row every Post hires from
-/// (`Atlas.postCount`, in `planSpawns`), a hauler term at its own round
-/// trip across the Seam, and a share of the income base at its own
-/// output. Three existing rows widened, and among these three no rule an
-/// outpost has of its own — which is not to say it has none: the reserver
-/// is a fourth pattern row whose quota *is* an outpost rule, one per
-/// posted outpost, gated on this same switch (ADR 0042, #131), and it
-/// arrives with that quota or does not arrive (ADR 0006). Which room a
+/// room is invisible to every quota *but one*, and the tick it stands the
+/// source becomes a Post: an Anchor place on the one row every Post hires
+/// from (`Atlas.postCount`, in `planSpawns`), a hauler term at its own
+/// round trip across the Seam, and a share of the income base at its own
+/// output. Three existing rows widened, and beside them the one rule an
+/// outpost has of its own — and the one quota this switch does *not* gate:
+/// the reserver row's, one per declared outpost, arriving here as
+/// `reserverClaims`, the CLAIM demand of each. Its length is the addend
+/// and its largest entry prices the amortization (ADR 0042). That row
+/// hires before the container exists because it is what makes the
+/// container possible: it is the only creep with a reason to walk to a
+/// room that produces nothing yet, and the vision it brings is what lets
+/// the site be placed at all (#128, #131's correction). Which room a
 /// source stands in is the Atlas's own id-to-room join — the layer that
 /// places its id, precomputed for every reader holding an Atlas (ADR
 /// 0041) — never the constant: the projection is what the quota is derived
@@ -856,14 +1002,16 @@ let private upgradeDrainPerWork = 1
 /// their own prose is what puts it in, "posted ones enter the income base
 /// at the source's output".
 ///
-/// From that income the anchor and hauler rows' replacement amortization
-/// (body cost spread over a creep's lifetime) is deducted; every energy
-/// per tick left feeds upgrade mouths at one worker body's Work drain,
-/// rounded up so the mouths cover the surplus rather than fall a body
-/// short of it (ADR 0037), bodies priced as the richest bank would cast
-/// them. The arithmetic runs scaled by the lifetime so the amortization
-/// never rounds away.
-let private workforceTarget (snapshot: Snapshot) atlas anchorQuota haulerQuota =
+/// From that income the reserver, anchor and hauler rows' replacement
+/// amortization (body cost spread over a creep's lifetime) is deducted;
+/// every energy per tick left feeds upgrade mouths at one worker body's
+/// Work drain, rounded up so the mouths cover the surplus rather than fall
+/// a body short of it (ADR 0037), bodies priced as the richest bank would
+/// cast them. The arithmetic runs scaled by the lifetime so the
+/// amortization never rounds away. The **worker** row's own replacement
+/// cost is still not deducted — a pre-existing home-room defect ADR 0042
+/// names and deliberately does not pay off here.
+let private workforceTarget (snapshot: Snapshot) atlas reserverClaims anchorQuota haulerQuota =
     let home = SpatialInfo.homeName snapshot.Spatial
 
     let posted, unposted =
@@ -875,17 +1023,29 @@ let private workforceTarget (snapshot: Snapshot) atlas anchorQuota haulerQuota =
         |> List.filter (fun s -> Atlas.targetRoom atlas s.Id = Some home)
         |> List.sumBy (fun s -> Atlas.seats atlas s.Id |> Option.defaultValue 0)
 
-    let capacity =
-        snapshot.RoomEnergy
-        |> Map.toList
-        |> List.map (fun (_, bank) -> bank.Capacity)
-        |> function
-            | [] -> 0
-            | caps -> List.max caps
+    let capacity = richestCapacity snapshot
+
+    // The row's own body, once, times the places it hires: every reserver
+    // cast this tick carries the largest outstanding demand, so the charge
+    // is priced off that same body and never off a per-room one the
+    // casting step would not have cast.
+    //
+    // Scaled from a CLAIM body's own 600-tick life onto the 1,500 the rest
+    // of this sum is written in (ADR 0042's 2.17 energy a tick): a reserver
+    // is replaced two and a half times over one worker's life, and charging
+    // it once would leave the income base hiring an upgrade mouth the
+    // reservation is really paying for.
+    let reserverCost =
+        if List.isEmpty reserverClaims then
+            0
+        else
+            List.length reserverClaims
+            * bodyCost (reserverBodyWithin (List.max reserverClaims) capacity)
 
     let amortization =
         anchorQuota * bodyCost (bodyFor anchorPattern capacity)
         + haulerQuota * bodyCost (bodyFor haulerPattern capacity)
+        + reserverCost * creepLifetime / claimLifetime
 
     let workerDrain =
         bodyFor workerPattern capacity
@@ -912,7 +1072,12 @@ let private workforceTarget (snapshot: Snapshot) atlas anchorQuota haulerQuota =
 
         ceilDiv surplusOverLifetime (workerDrain * creepLifetime) |> max 0
 
-    anchorQuota + haulerQuota + unpostedSeats + incomeWorkers |> max minWorkforce
+    List.length reserverClaims
+    + anchorQuota
+    + haulerQuota
+    + unpostedSeats
+    + incomeWorkers
+    |> max minWorkforce
 
 /// Whether a living body was cast from the hauler row: Carry parts but no
 /// Work. The worker and anchor rows both keep at least one Work, and only
@@ -948,9 +1113,9 @@ let private isReserverBody (creep: CreepInfo) =
 /// wrong body on both counts, and wrong in the expensive direction, since
 /// the worker row sized to the live RCL5 bank of 1,800 is nine whole
 /// units — twenty-seven parts, no remainder to pad — against the
-/// reserver's four. The row is not in `patternTable` and nothing casts one
-/// yet (#131); the rule is written where the body is read, not where it is
-/// cast, so it is right the tick the first reserver exists.
+/// reserver's four. The rule is written where the body is read and not
+/// where it is cast, which is what lets the same arm price a reserver the
+/// colony cast under an older rule as readily as one it cast this tick.
 let private patternOf atlas (creep: CreepInfo) =
     if isReserverBody creep then reserverPattern
     elif Atlas.workHeavy atlas creep.Name then anchorPattern
@@ -1089,9 +1254,18 @@ let private planSpawns
         // nothing built in it adds nothing here, and the tick a container
         // stands the row grows by one (`Atlas.postCount`).
         let anchorQuota = Atlas.postCount atlas
-        let target = workforceTarget snapshot atlas anchorQuota haulerQuota
 
-        // The deficit and both row gaps count the creeps that will still be
+        // The reserver row's quota and its body in one value (ADR 0042):
+        // one entry per declared outpost, each entry that outpost's CLAIM
+        // demand, and the largest of them is what every cast this tick
+        // carries. Read here beside the other two rows'
+        // quotas because it is an addend of the same target — the row's
+        // bodies are creeps, and a fleet counting them as generalists would
+        // hire an upgrade mouth fewer for every reserver in the room.
+        let reserverClaims = reserverClaimsOf snapshot atlas
+        let target = workforceTarget snapshot atlas reserverClaims anchorQuota haulerQuota
+
+        // The deficit and every row gap count the creeps that will still be
         // alive when a replacement could arrive: an expiring creep is already
         // outside the count (ADR 0026), so its successor is cast while it
         // still works rather than after it dies. The disaster fallback below
@@ -1110,23 +1284,49 @@ let private planSpawns
         // would wait forever — spawn a minimal worker unit from whatever is
         // banked right now; time-to-first-creep outranks specialisation, so
         // the anchor gap waits (ADR 0006).
-        let castFromBank pattern (bank: RoomEnergy) =
+        //
+        // The row's sizing rule arrives as a function of the capacity
+        // rather than being looked up from the pattern, which is the
+        // choice ADR 0042's reserver row forces: three rows are the bank's
+        // answer alone and `bodyFor` is exactly that, but the reserver's
+        // body is `min(reservation deficit, bank)` and the deficit is a
+        // fact about the **room being reserved**, not about the row. A
+        // sizing member on `BodyPattern` — ADR 0006's other shape — would
+        // have had nowhere to read that room from, so the casting step
+        // takes an already-decided sizing instead and each caller supplies
+        // the rule its row is written in.
+        let castFromBank pattern (sizing: int -> BodyPart list) (bank: RoomEnergy) =
             if List.isEmpty snapshot.Creeps then
                 if bank.Available >= bodyCost workerPattern.Block then
                     Some(workerPattern, workerPattern.Block)
                 else
                     None
             else
-                let body = bodyFor pattern bank.Capacity
+                let body = sizing bank.Capacity
 
                 if bank.Available >= bodyCost body then
                     Some(pattern, body)
                 else
                     None
 
-        // Anchor gaps are filled before hauler gaps, hauler gaps before
-        // generalist gaps — the casting order runs Anchor, hauler, worker
-        // — and the worker row's quota is whatever the target has left.
+        // Reserver gaps are filled before Anchor gaps, Anchor gaps before
+        // hauler gaps, hauler gaps before generalist gaps — the casting
+        // order runs reserver, Anchor, hauler, worker — and the worker
+        // row's quota is whatever the target has left.
+        //
+        // The reserver goes in front of all three (ADR 0042): the other
+        // rows spend income, and this one decides whether the income is
+        // five a tick or ten across every source of an outpost at once.
+        // Being first, it holds the cascade the tick the bank cannot pay
+        // for it, exactly as the Anchor row did while that row was first:
+        // `planned` counts intents, so an uncast head row leaves every
+        // idle spawn asking for the head row again. That is the priority
+        // this ordering *is*, and it is bounded — the row's body never
+        // costs more than the bank's own capacity, so the wait ends the
+        // tick the extensions fill. What is not bounded is a bank whose
+        // capacity cannot buy the row's 650-energy floor at all, and
+        // `reserverClaimsOf` refuses the quota outright there rather than
+        // stalling the colony forever.
         //
         // Each specialist gap is that row's own unfilled quota, and it is
         // answered on its own terms rather than out of the deficit (#154):
@@ -1142,6 +1342,18 @@ let private planSpawns
         // overshoot. The gaps below are each floored at zero, so a row
         // standing over its quota still hires nobody; only a row genuinely
         // short of its own quota gets a body.
+        //
+        // Bodies and not rooms (#130): the row's quota counts CLAIM bodies
+        // against the number of declared outposts, and which controller each
+        // ends up holding is the Reserve Task's one-holder-per-controller
+        // capacity. Counting living reservers per room instead would recast
+        // for a room every tick of the fifty its first reserver spends
+        // walking there.
+        let reserverGap =
+            List.length reserverClaims
+            - (living |> List.filter isReserverBody |> List.length)
+            |> max 0
+
         let anchorGap =
             anchorQuota
             - (living
@@ -1172,9 +1384,9 @@ let private planSpawns
                     // stands in for that row's own gap rather than being
                     // it: ADR 0012 hires the row against whatever the
                     // target has left over once the specialist rows are
-                    // counted, and the whole-fleet gap less the two gaps
-                    // above is exactly that remainder while both
-                    // specialist rows are at or under quota. A row
+                    // counted, and the whole-fleet gap less the three gaps
+                    // above is exactly that remainder while every
+                    // specialist row is at or under quota. A row
                     // standing over its quota holds the worker row down by
                     // the surplus instead — the half of the old gate #154
                     // keeps, pinned by `rowGapTests`. The disaster
@@ -1182,12 +1394,26 @@ let private planSpawns
                     // empty colony's first body is a worker unit whichever
                     // row asked for it.
                     let cast =
-                        if planned < anchorGap then
-                            castFromBank anchorPattern bank
-                        elif planned < anchorGap + haulerGap then
-                            castFromBank haulerPattern bank
+                        if planned < reserverGap then
+                            // Every cast at the largest outstanding demand
+                            // and never at the one standing beside it in
+                            // the list: the Matcher pairs a finished body
+                            // to a controller by travel cost, so a body
+                            // sized for the room that has slipped furthest
+                            // can land on the room that has not
+                            // (`reserverClaimsOf`).
+                            // A positive gap is a non-empty demand list, so
+                            // the `List.max` is total here and nowhere else.
+                            castFromBank
+                                reserverPattern
+                                (reserverBodyWithin (List.max reserverClaims))
+                                bank
+                        elif planned < reserverGap + anchorGap then
+                            castFromBank anchorPattern (bodyFor anchorPattern) bank
+                        elif planned < reserverGap + anchorGap + haulerGap then
+                            castFromBank haulerPattern (bodyFor haulerPattern) bank
                         elif planned < deficit then
-                            castFromBank workerPattern bank
+                            castFromBank workerPattern (bodyFor workerPattern) bank
                         else
                             None
 

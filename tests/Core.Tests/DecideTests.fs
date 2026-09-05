@@ -388,7 +388,13 @@ let patternTableTests =
     testList
         "pattern table"
         [
-            test "the worker unit, the Anchor and the hauler are the table's rows" {
+            test "the worker unit, the Anchor, the hauler and the reserver are the table's rows" {
+                // The reserver joined the table the tick its quota did (ADR
+                // 0006, ADR 0042): a row arrives with the colony fact that
+                // says when it is cast, and `reserverClaimsOf` is that
+                // fact. The order here is the declaration's and not the
+                // casting order — which runs reserver, Anchor, hauler,
+                // worker — because nothing reads this list for a sequence.
                 Expect.equal
                     patternTable
                     [
@@ -403,6 +409,10 @@ let patternTableTests =
                         {
                             Name = "hauler"
                             Block = [ Carry; Carry; Move ]
+                        }
+                        {
+                            Name = "reserver"
+                            Block = [ Claim; Move ]
                         }
                     ]
                     "every body the colony casts comes from these rows"
@@ -473,9 +483,11 @@ let patternTableTests =
                 // note) and 650 a `[Claim; Move]` block, so the bank buys
                 // two and strands 500: ADR 0042's own `[2Claim;2Move]`,
                 // the body every arithmetic in that ADR is written for.
-                // The row is not in `patternTable` and nothing casts it
-                // yet (#131) — `bodyFor` reaches it because a lead is
-                // priced off the row's own body (ADR 0026).
+                // This is the bank's half of the row's rule and the body
+                // `bodyFor` answers with, which is what a lead prices its
+                // succession off (ADR 0026). What the row actually casts
+                // is `min(reservation deficit, this)`, pinned in "the
+                // reserver row" below.
                 Expect.equal
                     (bodyFor reserverPattern 1800)
                     [ Claim; Claim; Move; Move ]
@@ -510,7 +522,11 @@ let patternTableTests =
                     }
 
                 let { Intents = intents } = decide snapshot Map.empty Set.empty None
-                let row = List.head patternTable
+
+                // The row by its name and not by its place in the table:
+                // the declaration order is nobody's rule (see the pattern
+                // table's own note), so a reordering must not fail here.
+                let row = patternTable |> List.find (fun row -> row.Name = workerPattern.Name)
 
                 match spawnIntents intents with
                 | [ (_, body, creepName) ] ->
@@ -9364,10 +9380,16 @@ let haulerTests =
                     "every cast is the generalist row"
             }
 
-            test "casting order runs Anchor, then hauler, then worker from the one debited bank" {
+            test "the reserver row leads and is empty here: Anchor, hauler, worker follow" {
                 // The 8-step round trip hires two haulers, so the order
                 // runs Anchor, both haulers, then the generalist — four
                 // casts, one per idle spawn, off the one debited bank.
+                //
+                // The reserver row runs in front of all three (ADR 0042)
+                // and casts nothing at all here: a colony projecting one
+                // room has no outpost to declare, so that row's quota is
+                // zero and its gap with it. A reserver appearing in this list
+                // would mean the gap had been computed unconditionally.
                 let snapshot =
                     { quotaColony 20 4 1200 with
                         Creeps = [ worker "w1" 0 50 ]
@@ -14398,11 +14420,460 @@ let reserverLeadTests =
                     Expect.stringStarts
                         creepName
                         "worker-"
-                        "at its lead the colony is one short — and casts a generalist, the reserver row having no quota yet (#131)"
+                        "at its lead the colony is one short — and casts a generalist, this room declaring no outpost for the reserver row to hire against"
 
                     Expect.isFalse
                         (List.contains Claim body)
-                        "nothing this ticket added casts a CLAIM part"
+                        "the row that replaces a reserver is the reserver row's quota, and here it is zero"
+                | other -> failtest $"expected exactly one SpawnCreep intent, got %A{other}"
+            }
+        ]
+
+/// One outpost's furniture in a layer of its own: the rock in a
+/// three-Seat field, a controller — what a CLAIM body walks to, and what
+/// pools the Reserve Task (#130) — and, when `posted`, a built container
+/// on one of those Seats: the switch that makes the rock a Post and
+/// admits the room to the economy (#129). Ids carry the room's name, so
+/// two outposts stand in one projection without colliding.
+let private withOutpostRoom room (rock: Pos) posted (colony: Snapshot) =
+    let container =
+        if posted then
+            [ $"can-{room}", { rock with X = rock.X - 1 }, Structure BuiltKind.Container ]
+        else
+            []
+
+    { colony with
+        Sources = colony.Sources @ [ source $"src-{room}" ]
+    }
+    |> withOutpost
+        room
+        ([
+            $"src-{room}", rock, Source
+            $"ctrl-{room}", { rock with Y = rock.Y + 2 }, Controller
+         ]
+         @ container)
+        (threeSeatField rock)
+
+/// The reserver row's colony: the W12S28 shape at the live RCL5 bank of
+/// 1,800 — the level ADR 0042's `[2Claim;2Move]` is priced against — with
+/// the named outposts standing beside it and the named holder on each
+/// room. Everything else is `incomeColony`, unmoved, so a difference
+/// between two calls is the outposts, the fleet or the reservation and
+/// nothing else. The bank holds 8,000 against that capacity: restraint in
+/// these cases must come from the rows, never from the bank running dry.
+let private reserverColony outposts creeps control =
+    let colony =
+        ({ incomeColony with
+            RoomEnergy = bank 8000 1800
+            Creeps = creeps
+         },
+         outposts)
+        ||> List.fold (fun acc (room, rock, posted) -> withOutpostRoom room rock posted acc)
+
+    { colony with
+        RoomControl =
+            (colony.RoomControl, control)
+            ||> List.fold (fun acc (room, holder) -> Map.add room holder acc)
+    }
+
+/// The north outpost and the west one, diagonal to each other as W12S27
+/// and W13S28 are (ADR 0042) — two rooms, so "one reserver per declared
+/// outpost" can be told apart from "one reserver".
+let private northOutpost posted = "W1N2", { X = 40; Y = 40 }, posted
+let private westOutpost posted = "W2N2", { X = 20; Y = 40 }, posted
+
+/// A fleet standing over every row's quota but the reserver's: one Anchor
+/// per Post — the home room's two plus one for each posted outpost — four
+/// haulers where the row wants two, and forty workers where the income
+/// base hires a handful. Every other gap is therefore zero and the
+/// whole-fleet deficit is negative, so a `SpawnCreep` in these cases is a
+/// reserver or it is a defect.
+let private surplusFleet posts =
+    [ for i in 1..posts -> anchor $"a{i}" 0 50 ]
+    @ [ for i in 1..4 -> hauler $"h{i}" 0 100 ]
+    @ [ for i in 1..40 -> worker $"w{i}" 0 50 ]
+
+/// The bodies of this tick's reserver casts, in casting order.
+let private reserverCasts intents =
+    spawnIntents intents
+    |> List.filter (fun (_, _, name: string) -> name.StartsWith "reserver-")
+    |> List.map (fun (_, body, _) -> body)
+
+/// The one block the row never casts below, and the body a reservation
+/// standing at its 5,000 cap asks for: the deficit is zero and the floor
+/// is one.
+let private oneBlock = [ Claim; Move ]
+
+/// ADR 0042's own reserver body, which a deficit of one to 1,200 ticks
+/// buys: 1,300 energy, 2.17 a tick over a CLAIM part's 600-tick life.
+let private twoBlocks = [ Claim; Claim; Move; Move ]
+
+[<Tests>]
+let reserverRowTests =
+    testList
+        "the reserver row"
+        [
+            test "a declared outpost hires one reserver, posted or not" {
+                // The one quota the container switch does *not* gate
+                // (#131's correction comment): gating it deadlocks the
+                // chain, because a container site needs vision, vision
+                // needs a creep in the room, and this is the only creep
+                // with a reason to go. ADR 0042's Considered Options is the
+                // authority its Consequences clause contradicts — it
+                // rejected "mine first, reserve later" precisely so the
+                // reservation is standing before the first hauler is sized.
+                //
+                // Pairwise on the one structure — same room, same rock,
+                // same controller, same reservation — because that is the
+                // only input that moves.
+                let castsWith posted =
+                    let fleet = surplusFleet (if posted then 3 else 2)
+
+                    reserverColony [ northOutpost posted ] fleet [ "W1N2", reservedRoom true 5000 ]
+                    |> fun colony -> decide colony Map.empty Set.empty None
+                    |> fun result -> spawnIntents result.Intents
+
+                for posted in [ true; false ] do
+                    match castsWith posted with
+                    | [ (_, body, creepName) ] ->
+                        Expect.stringStarts
+                            creepName
+                            "reserver-"
+                            $"the one cast is the reserver row's (posted: %b{posted})"
+
+                        Expect.equal body oneBlock "and its body holds a CLAIM part"
+                    | other -> failtest $"expected exactly one SpawnCreep intent, got %A{other}"
+            }
+
+            test "two declared outposts hire two reservers, one apiece" {
+                // Never one rover: `[4Claim;4Move]` is 2,600 energy and so
+                // an RCL7 body, and two outposts diagonal to each other
+                // share no exit — a rover would spend its 600-tick life
+                // crossing the home room (ADR 0042).
+                let colony =
+                    reserverColony
+                        [ northOutpost true; westOutpost true ]
+                        (surplusFleet 4)
+                        [ "W1N2", reservedRoom true 5000; "W2N2", reservedRoom true 5000 ]
+
+                Expect.equal
+                    (reserverCasts (decide colony Map.empty Set.empty None).Intents)
+                    [ oneBlock; oneBlock ]
+                    "one body per declared outpost, and the four idle spawns cast no third"
+
+                let half =
+                    reserverColony
+                        [ northOutpost true; westOutpost false ]
+                        (surplusFleet 3)
+                        [ "W1N2", reservedRoom true 5000; "W2N2", reservedRoom true 5000 ]
+
+                Expect.equal
+                    (reserverCasts (decide half Map.empty Set.empty None).Intents)
+                    [ oneBlock; oneBlock ]
+                    "and the one still waiting for its container is hired for just the same"
+            }
+
+            test "a bank that cannot buy one block hires no reserver and still casts" {
+                // The row's floor body is 650 — larger than every other
+                // row's, and larger than the whole bank below RCL3. Being
+                // first in the cascade, a gap it can never fill would stop
+                // every row under it forever: `planned` counts intents, so
+                // an uncast head row leaves every idle spawn asking for the
+                // head row again, in the home room included. So a bank that
+                // cannot afford the floor hires the row not at all.
+                let intentsAt capacity =
+                    let colony =
+                        reserverColony
+                            [ northOutpost false ]
+                            [ worker "w1" 0 50 ]
+                            [ "W1N2", neutralRoom ]
+
+                    { colony with
+                        RoomEnergy = bank capacity capacity
+                    }
+                    |> fun colony -> decide colony Map.empty Set.empty None
+                    |> fun result -> result.Intents
+
+                Expect.isEmpty
+                    (reserverCasts (intentsAt 550))
+                    "at an RCL2 bank of 550 the row has no quota at all"
+
+                match spawnIntents (intentsAt 550) with
+                | (_, _, creepName) :: _ ->
+                    Expect.stringStarts
+                        creepName
+                        "anchor-"
+                        "and the row under it casts rather than the colony freezing"
+                | [] -> failtest "expected the rows under the reserver to cast"
+
+                Expect.equal
+                    (reserverCasts (intentsAt 650))
+                    [ oneBlock ]
+                    "one block's worth of capacity is where the row starts hiring"
+            }
+
+            test "a living reserver fills the quota; one inside its lead does not" {
+                // The quota counts bodies and not rooms (#130): which
+                // controller each body ends up holding is the Reserve
+                // Task's one-holder-per-controller capacity, so a reserver
+                // still walking to its outpost already fills the row's
+                // place. Its succession is ADR 0026's existing path and
+                // nothing new: inside its lead it leaves the count, and the
+                // replacement is cast while it still holds the reservation.
+                let colonyWith reservers =
+                    reserverColony
+                        [ northOutpost true ]
+                        (surplusFleet 3 @ reservers)
+                        [ "W1N2", reservedRoom true 5000 ]
+
+                let placed life =
+                    let colony = colonyWith [ reserver "r1" |> withLife life ]
+
+                    { colony with
+                        Spatial =
+                            colony.Spatial
+                            |> withHome (fun layer ->
+                                { layer with
+                                    CreepPositions = Map.ofList [ "r1", { X = 22; Y = 10 } ]
+                                })
+                    }
+
+                Expect.isEmpty
+                    (reserverCasts (decide (placed 1500) Map.empty Set.empty None).Intents)
+                    "a reserver with a life ahead of it is the row's one body"
+
+                Expect.equal
+                    (reserverCasts (decide (placed 5) Map.empty Set.empty None).Intents)
+                    [ oneBlock ]
+                    "inside its lead it is already outside the count, so the successor is cast"
+            }
+
+            test "the reserver row casts in front of the Anchor, hauler and worker rows" {
+                // ADR 0042's ordering: the other three rows spend income
+                // and this one decides whether the income is five a tick or
+                // ten across every source of an outpost at once — and it is
+                // the cheapest body on the table, so the row it displaces
+                // for a tick waits on 650 energy.
+                //
+                // The fleet is short in every row at once: two Anchors
+                // against three Posts, one hauler against the two-body
+                // quota, and a whole-fleet deficit under all of it. Four
+                // idle spawns cast one body each, so the whole order is
+                // readable in one tick.
+                let colony =
+                    reserverColony
+                        [ northOutpost true ]
+                        ([ anchor "a1" 0 50; anchor "a2" 0 50; hauler "h1" 0 100 ])
+                        [ "W1N2", reservedRoom true 5000 ]
+
+                match spawnIntents (decide colony Map.empty Set.empty None).Intents with
+                | [ (_, firstBody, firstName)
+                    (_, _, secondName)
+                    (_, _, thirdName)
+                    (_, _, fourthName) ] ->
+                    Expect.stringStarts firstName "reserver-" "the reservation is cast for first"
+                    Expect.equal firstBody oneBlock "at the deficit's own body, not the bank's"
+                    Expect.stringStarts secondName "anchor-" "then the empty Post"
+                    Expect.stringStarts thirdName "hauler-" "then the throughput quota"
+                    Expect.stringStarts fourthName "worker-" "and the generalist last"
+                | other -> failtest $"expected exactly four SpawnCreep intents, got %A{other}"
+            }
+
+            test "the body grows by a CLAIM part for every 600 ticks the reservation has lost" {
+                // ADR 0042's one rule, quota and sizing in the same
+                // expression: `ceil((5000 − ticks held) / 600)` CLAIM
+                // parts. No state between ticks — the deficit is read off
+                // the reservation itself, so the row shrinks to its floor
+                // in steady state and comes back bigger on its own the
+                // tick a reservation has slipped.
+                let castFor held =
+                    reserverColony
+                        [ northOutpost true ]
+                        (surplusFleet 3)
+                        [ "W1N2", reservedRoom true held ]
+                    |> fun colony -> decide colony Map.empty Set.empty None
+                    |> fun result -> reserverCasts result.Intents
+
+                Expect.equal (castFor 5000) [ oneBlock ] "at the cap the deficit is zero: the floor"
+
+                Expect.equal
+                    (castFor 4400)
+                    [ oneBlock ]
+                    "600 ticks lost is one part: one CLAIM holds a reservation up through a whole CLAIM life"
+
+                Expect.equal (castFor 4399) [ twoBlocks ] "the 601st lost tick is the second part"
+                Expect.equal (castFor 3800) [ twoBlocks ] "and 1,200 lost is still the second"
+            }
+
+            test "the bank truncates the deficit, and the deficit truncates the bank" {
+                // The two halves of the sizing rule, each shown cutting the
+                // other off. ADR 0042 refuses the bank *as the rule*: at
+                // RCL6 a 2,300 bank would buy a third CLAIM for a
+                // reservation that caps at 5,000 anyway — which is why the
+                // pair below is read at 2,300 and not at today's 1,800,
+                // where the two rules agree.
+                let castAt capacity held =
+                    let colony =
+                        reserverColony
+                            [ northOutpost true ]
+                            (surplusFleet 3)
+                            [ "W1N2", reservedRoom true held ]
+
+                    { colony with
+                        RoomEnergy = bank 8000 capacity
+                    }
+                    |> fun colony -> decide colony Map.empty Set.empty None
+                    |> fun result -> reserverCasts result.Intents
+
+                Expect.equal
+                    (castAt 2300 5000)
+                    [ oneBlock ]
+                    "a full reservation asks for one block, and the RCL6 bank's three do not overrule it"
+
+                Expect.equal
+                    (castAt 2300 0)
+                    [ List.replicate 3 Claim @ List.replicate 3 Move ]
+                    "a reservation on the floor asks for nine parts and gets the three the bank buys"
+
+                Expect.equal
+                    (castAt 8000 0)
+                    [ List.replicate 9 Claim @ List.replicate 9 Move ]
+                    "at a bank that affords them, the deficit's own nine"
+            }
+
+            test "a reservation another player holds leaves this colony holding nothing" {
+                // Pairwise, one holder at a time: the same room, the same
+                // ticks on the same controller, and only whose it is moves.
+                // The colony's hold starts at zero under a rival's
+                // reservation, exactly as that room's sources stay at the
+                // neutral rate — a hold somebody else owns is not one this
+                // row can measure its deficit from.
+                //
+                // Read at a bank that affords the whole deficit and not at
+                // the live 1,800, where two parts and nine both truncate to
+                // two and the pair could not tell the `Ours` filter from
+                // its absence.
+                let castWith control =
+                    let colony = reserverColony [ northOutpost true ] (surplusFleet 3) control
+
+                    { colony with
+                        RoomEnergy = bank 8000 8000
+                    }
+                    |> fun colony -> decide colony Map.empty Set.empty None
+                    |> fun result -> reserverCasts result.Intents
+
+                let nineBlocks = List.replicate 9 Claim @ List.replicate 9 Move
+
+                Expect.equal
+                    (castWith [ "W1N2", reservedRoom true 4000 ])
+                    [ twoBlocks ]
+                    "1,000 ticks lost of ours is two parts"
+
+                Expect.equal
+                    (castWith [ "W1N2", reservedRoom false 4000 ])
+                    [ nineBlocks ]
+                    "the same 4,000 in a rival's name is a deficit of the whole 5,000: nine parts"
+
+                Expect.equal
+                    (castWith [])
+                    [ nineBlocks ]
+                    "and no reservation at all is that same whole deficit"
+            }
+
+            test "every cast this tick carries the largest outstanding demand" {
+                // The row casts bodies and the Matcher pairs them to
+                // controllers, by travel cost alone and knowing nothing
+                // about a deficit (#130). So a demand read room by room
+                // would land the *nearer* room's small body on the room
+                // that has slipped, and a controller held by one CLAIM
+                // against the engine's one tick of decay is frozen where it
+                // stands for that body's whole 600-tick life. The row
+                // over-buys instead — at most one block per cast, and only
+                // while two demands differ.
+                let colony =
+                    reserverColony
+                        [ northOutpost false; westOutpost false ]
+                        (surplusFleet 2)
+                        [ "W1N2", reservedRoom true 5000; "W2N2", reservedRoom true 2000 ]
+
+                let fiveBlocks = List.replicate 5 Claim @ List.replicate 5 Move
+
+                Expect.equal
+                    (reserverCasts
+                        (decide
+                            { colony with
+                                RoomEnergy = bank 8000 8000
+                            }
+                            Map.empty
+                            Set.empty
+                            None)
+                            .Intents)
+                    [ fiveBlocks; fiveBlocks ]
+                    "the room standing at its cap is cast the five blocks the slipped room asked for"
+            }
+
+            test "the reserver row is an addend of the target, amortized over a CLAIM life" {
+                // The row's two effects on the Workforce target (ADR 0042),
+                // both read off one boundary: it adds a place of its own —
+                // a CLAIM body is a creep, and a fleet counting it as a
+                // generalist would hire an upgrade mouth fewer — and its
+                // replacement cost is deducted from the income base like
+                // the Anchor and hauler rows'. Unlike theirs it is spread
+                // over a **CLAIM body's own 600 ticks** rather than the
+                // 1,500 the rest of the sum is written in: ADR 0042 prices
+                // this row at 2.17 energy a tick, and over 1,500 it would
+                // read as 0.87.
+                //
+                // The bank is 8,000 so the deficit's whole nine blocks are
+                // affordable and the difference is a worker place wide.
+                // W1N2 is seen and held by nobody: its rock is worth five,
+                // and its reservation is on the floor, so the row asks for
+                // its largest body against its smallest income.
+                //
+                // Income 10 + 10 + 5 = 25 a tick over 1,500 = 37,500.
+                // Amortization: 3 Anchors × 700 = 2,100, 2 haulers × 2,400
+                // = 4,800, and one 9-block reserver at 5,850 spread over
+                // 600 and re-scaled onto 1,500 = 14,625 — 21,525 in all.
+                // The surplus 15,975 over a 16-Work body's drain × 1,500 =
+                // 24,000 rounds up to one worker (ADR 0037). Charged over
+                // 1,500 instead, the same row would leave 24,750 and hire
+                // two.
+                let fleetOf workers =
+                    [ for i in 1..3 -> anchor $"a{i}" 0 50 ]
+                    @ [ for i in 1..2 -> hauler $"h{i}" 0 100 ]
+                    @ [ reserver "r1" ]
+                    @ [ for i in 1..workers -> worker $"w{i}" 0 50 ]
+
+                let atFleet workers =
+                    let colony =
+                        reserverColony
+                            [ northOutpost true ]
+                            (fleetOf workers)
+                            [ "W1N2", neutralRoom ]
+
+                    decide
+                        { colony with
+                            RoomEnergy = bank 40000 8000
+                        }
+                        Map.empty
+                        Set.empty
+                        None
+
+                Expect.equal
+                    (atFleet 1).Memo.HaulerQuota
+                    2
+                    "the premise: the two home containers hire one body each at this bank"
+
+                Expect.isEmpty
+                    (spawnIntents (atFleet 1).Intents)
+                    "3 Anchors + 2 haulers + 1 reserver + 1 worker is the whole target: seven"
+
+                match spawnIntents (atFleet 0).Intents with
+                | [ (_, _, creepName) ] ->
+                    Expect.stringStarts
+                        creepName
+                        "worker-"
+                        "one body short, the generalist row fills the remainder"
                 | other -> failtest $"expected exactly one SpawnCreep intent, got %A{other}"
             }
         ]
