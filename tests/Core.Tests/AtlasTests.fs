@@ -2741,6 +2741,126 @@ let seamTests =
             }
         ]
 
+/// A projection carrying one room's ground and any number of rooms' border
+/// rings — the whole input a walk out to a Seam reads. The ground is
+/// W12S28's, because the walk runs inside one room and stops at its
+/// border; the far room needs a ring and nothing else, exactly as `seams`
+/// needs of it.
+let private seamGround ground rings =
+    { SpatialInfo.empty with
+        RoomName = Some "W12S28"
+        Rooms =
+            Map.ofList
+                [
+                    "W12S28",
+                    { RoomLayer.empty with
+                        Terrain = Map.ofList ground
+                    }
+                ]
+        Borders = rings |> List.map (fun (room, tiles) -> room, Map.ofList tiles) |> Map.ofList
+    }
+    |> snapshotWith []
+    |> ofSnapshot
+
+/// A plain three-tile column running up to the room's north exit, and the
+/// exit's plain landing across it — the smallest room that has a walk out
+/// to a Seam at all.
+let private toNorthExit =
+    [ { X = 10; Y = 1 }, Plain; { X = 10; Y = 2 }, Plain; { X = 10; Y = 3 }, Plain ]
+
+let private northExit terrain =
+    [
+        "W12S28", [ { X = 10; Y = 0 }, terrain ]
+        "W12S27", [ { X = 10; Y = 49 }, Plain ]
+    ]
+
+[<Tests>]
+let seamWalkTests =
+    testList
+        "atlas seam walk"
+        [
+            test "the walk is the ground to a tile beside the exit, plus the step onto it" {
+                // The near half of a cross-room price with the far leg left
+                // off (ADR 0041, #123), which is what a plan anchored on the
+                // Seam is measured with (ADR 0042). Charged the way every
+                // walk in the colony is: one tick a plain step, the tile the
+                // creep steps onto and never the one it starts on.
+                let atlas = seamGround toNorthExit (northExit Plain)
+
+                Expect.equal
+                    (seamWalkTicks atlas "W12S28" "W12S27" { X = 10; Y = 1 })
+                    (Some 1)
+                    "from the tile beside the exit, the crossing itself is the whole walk"
+
+                Expect.equal
+                    (seamWalkTicks atlas "W12S28" "W12S27" { X = 10; Y = 3 })
+                    (Some 3)
+                    "two tiles further back, two more plain steps and the same crossing"
+            }
+
+            test "a swamp exit is not free, which is #123's narrowing of the ADR's +1" {
+                // ADR 0041 writes the crossing as `+1`; that is the price of
+                // stepping onto a *plain* exit under a body at fatigue
+                // parity, and a swamp exit costs five like any other swamp.
+                let atlas = seamGround toNorthExit (northExit Swamp)
+
+                Expect.equal
+                    (seamWalkTicks atlas "W12S28" "W12S27" { X = 10; Y = 1 })
+                    (Some 5)
+                    "the swamp crossing, and nothing else, from the tile beside it"
+            }
+
+            test "the tile asked at is charged nothing, whatever it costs to stand on" {
+                // The convention spelled out where it bites: a swamp tile
+                // beside a plain exit is one tick from the Seam, not six.
+                // Whoever walks *in* to that tile pays for it; the walk out
+                // of it does not, and two Seats of one source are therefore
+                // compared on the ground between them (ADR 0042's pick).
+                let atlas =
+                    seamGround
+                        [ { X = 10; Y = 1 }, Swamp; { X = 10; Y = 2 }, Plain ]
+                        (northExit Plain)
+
+                Expect.equal
+                    (seamWalkTicks atlas "W12S28" "W12S27" { X = 10; Y = 1 })
+                    (Some 1)
+                    "the swamp tile's own step belongs to the walk that arrives on it"
+
+                Expect.equal
+                    (seamWalkTicks atlas "W12S28" "W12S27" { X = 10; Y = 2 })
+                    (Some 6)
+                    "and the tile behind it does pay for it: five onto the swamp, one onto the exit"
+            }
+
+            test "no band, no ground and no path each answer with no walk at all" {
+                // Total (ADR 0004), one absence at a time. An unpriceable
+                // Seam is no Seam and never a blocked one, so each of these
+                // costs nothing and stops nothing.
+                let atlas =
+                    seamGround (({ X = 30; Y = 30 }, Plain) :: toNorthExit) (northExit Plain)
+
+                Expect.equal
+                    (seamWalkTicks atlas "W12S28" "W15S25" { X = 10; Y = 1 })
+                    None
+                    "a room four sectors away shares no border, so there is nothing to walk to"
+
+                Expect.equal
+                    (seamWalkTicks atlas "W12S27" "W12S28" { X = 10; Y = 48 })
+                    None
+                    "and a room the projection carries no ground for reaches no exit of its own"
+
+                Expect.equal
+                    (seamWalkTicks atlas "W12S28" "W12S27" { X = 30; Y = 30 })
+                    None
+                    "a tile walled off from every crossing is unpriceable, not far away"
+
+                Expect.equal
+                    (seamWalkTicks atlas "W12S28" "W12S27" { X = 10; Y = 40 })
+                    None
+                    "and so is a tile the projection carries no ground for"
+            }
+        ]
+
 /// A projection carrying two rooms: the colony's own, filed by `withHome`
 /// under the name the projection gives it, and the outpost added beside it
 /// under its own (ADR 0041). It adds an entry and never replaces the map,

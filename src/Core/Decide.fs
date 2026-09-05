@@ -1511,14 +1511,13 @@ let private planLayout
         let towerTiles, extensionTiles =
             clusterPicks |> List.splitAt (min towerSlots clusterPicks.Length)
 
-        // The container census the target clause is judged against: a
-        // container standing, or a site already going up. The asymmetry
-        // with `Atlas.posts`, which counts standing containers alone, is
-        // deliberate (ADR 0040) — the plan asks whether another one must
-        // be built, and a site answers that; a Post asks what is catching
-        // overflow on a Seat right now, and a site catches nothing.
-        let containerCensus =
-            Set.union (Atlas.containerTiles atlas) (Atlas.pendingContainerTiles atlas)
+        // The container census the target clause is judged against
+        // (ADR 0040): a container standing, or a site already going up.
+        // The home room's, because the Layout plans one room; the outpost
+        // rule asks the same census of its own room (`containerCensusIn`),
+        // and there is one spelling of it so that ADR 0040 cannot come to
+        // mean two things.
+        let containerCensus = Atlas.containerCensus atlas
 
         // The target clause (ADR 0040): a source is served when a
         // container stands or is pending within range 1 of it, the
@@ -1623,6 +1622,133 @@ let private planLayout
     // asked for, so every record is empty rather than any of them being a
     // shortfall (#77, #106, #107).
     | _ -> [], [], [], [], []
+
+/// The outpost's source containers (ADR 0042) — the colony's one placement
+/// rule that is not the Layout's, and a rule beside it rather than a
+/// branch inside it: one container per outpost source, on the Seat whose
+/// walk out to the Seam toward home is shortest.
+///
+/// **Why it is not the Layout's.** The Layout seats a source container on
+/// the Seat nearest that source's trunk, and a trunk is a paved line to a
+/// spawn. An outpost has no spawn, so the pick needs another anchor, and
+/// the Seam is the only fixed thing in that room home lies beyond — a
+/// container placed on it is a container the haul leaves by the shortest
+/// road there is. Nothing here orders a clustered pick, reserves a Link
+/// footing (ADR 0027), paves a trunk or enters any of the layout record's
+/// three lists: every one of those is a fact about the home room's plan,
+/// which ADR 0042 leaves untouched ("The outpost gets a container and
+/// nothing else. No roads, and no Layout").
+///
+/// **The room is the outpost's own.** The placement Intent has carried a
+/// room name since it was written, and the Layout stamps the single room
+/// it plans onto every site it emits. An outpost pick routed through that
+/// path would drop a container site on the *home* room's tile of the same
+/// coordinates — a real tile, in a real room, at a real 5,000 energy — so
+/// this rule stamps the room the source stands in, read off the
+/// projection's own id-to-room join (ADR 0041).
+///
+/// **ADR 0040 holds here, and by target rather than by tile.** A source
+/// with a container standing, or a site pending, within range 1 of it is
+/// served wherever the thing serving it sits, and is planned for no second
+/// one. The census is read in that source's own room: a `Pos` carries no
+/// room, so a home container on an outpost source's coordinates would
+/// otherwise defer the plan forever and leave the outpost with no switch
+/// to close (ADR 0041). There is no tile clause and there cannot be one —
+/// nothing paves an outpost, so no pick is ever owed a road.
+///
+/// **Only into a room the colony can see.** Both halves of this rule are
+/// paid for by vision: the census that defers it is empty in a room
+/// nothing looks into, and the Intent itself is answered by the
+/// Executor's `Game.rooms` lookup, which holds the seen rooms alone. A
+/// blind room's empty census is a missing entry and not a "no container"
+/// (ADR 0004), so planning off it would read an absence as an answer —
+/// and would hand the Executor an Intent it can only report as
+/// `ActorMissing`, the outcome it reserves for an upstream bug, once a
+/// tick per rock for ever. The gate is the room's `RoomControl` entry,
+/// which is exactly the Snapshot's per-room vision fact and what
+/// `sourceOutputOf` reads for the same reason. Nothing is lost by
+/// waiting: a Harvest names an outpost rock with no vision at all (ADR
+/// 0041), so a creep walks there on its own, and the tick it arrives is
+/// both the tick the census can be trusted and the first tick the site
+/// could have been created at all.
+///
+/// **Recomputed every tick, and deliberately not ridden on the plan
+/// memo.** The memo's signature is one room's by construction (ADR 0017 as
+/// ADR 0041 narrowed it, `censusSignature`) and every input this rule
+/// reads is a second room's — the outpost's terrain, its declared source
+/// tiles, its Seam band and its container census. Riding the memo would
+/// mean naming the room in every census entry and covering the outpost
+/// layers, which throws the whole Layout and the whole spawn-walk table
+/// (ADR 0032) away whenever an outpost structure moves, for geometry no
+/// other memo entry reads. What that would buy is one flood a room a tick:
+/// the walk out to the Seam is memoised inside the Atlas on the room pair,
+/// so every Seat of every source in one room shares one flood
+/// (`Atlas.seamWalkTicks`), and this is not the cost class that made the
+/// Layout worth memoising — the Layout routes trunks and orders 2,500
+/// tiles. Measured on `npm run profile -- --scenario outpost --level 5`
+/// (two outposts, three rooms, RCL5, the level named so the figure does
+/// not silently re-baseline when the default moves with the colony):
+/// **4.84 ms a tick without this rule and 5.35 with it**, against ADR
+/// 0041's condition to revisit any of this — a mean tick above 50 ms or a
+/// single tick above 80. The tick the *quota* reads an outpost container
+/// is the tick the signature has to widen anyway, and it is that ticket's
+/// price to pay.
+///
+/// Recomputing also keeps the deferral honest with no signature at all:
+/// the tick a container becomes *visible* in an outpost, this stops
+/// planning one — and on the blind ticks either side of that it plans
+/// nothing at all, so there is no tick on which a stale answer could be
+/// handed back.
+///
+/// Total (ADR 0004): a source the projection does not place, a source in a
+/// room the colony cannot see, a room with no Seam band to home, and a
+/// source no Seat of which can reach one all plan nothing — unpriceable
+/// geometry is never planned onto, and never blocks.
+///
+/// One gap this rule's output does not close on its own, named here so the
+/// next reader does not have to find it: a site standing in an outpost is
+/// named by no Build Task, because `Snapshot.ConstructionSites` is the
+/// spawn rooms' alone (#115 left a cross-room Build out with the rest of
+/// paving an outpost). Until that widens, the site is placed and nothing
+/// builds it, so ADR 0042's switch cannot close — recorded as #150
+/// rather than widened into here.
+let private planOutpostContainers (snapshot: Snapshot) atlas : Intent list =
+    let home = SpatialInfo.homeName snapshot.Spatial
+
+    // Every rock the projection places in a room that is not home and that
+    // the colony is looking into this tick — `RoomControl` carries one
+    // entry per seen room, and vision is what both the census below and
+    // the Executor's own `Game.rooms` lookup are paid for with.
+    snapshot.Sources
+    |> List.choose (fun s ->
+        match Atlas.targetRoom atlas s.Id, Atlas.positionOf atlas s.Id with
+        | Some room, Some pos when room <> home && Map.containsKey room snapshot.RoomControl ->
+            Some(s.Id, room, pos)
+        | _ -> None)
+    |> List.choose (fun (sourceId, room, sourcePos) ->
+        let served =
+            Atlas.containerCensusIn atlas room |> Set.exists (servesSource sourcePos)
+
+        if served then
+            None
+        else
+            // The pick, and with it the tie-break — the same trap the
+            // Layout's own pick has: three Seats all of swamp can price
+            // identically, so the lowest (X, Y) answers, exactly as
+            // `sourceContainerPicks` and every other tie in the colony
+            // answers. A source with one Seat is the same rule with one
+            // candidate, not a case of its own.
+            Atlas.seatTilesOf atlas sourceId
+            |> Set.toList
+            |> List.choose (fun seat ->
+                Atlas.seamWalkTicks atlas room home seat |> Option.map (fun walk -> walk, seat))
+            |> function
+                | [] -> None
+                | priced ->
+                    let _, seat =
+                        priced |> List.minBy (fun (walk, seat: Pos) -> walk, seat.X, seat.Y)
+
+                    Some(PlaceConstructionSite(room, seat, Container)))
 
 /// Colony reflex beside the pipeline, the second after safe mode: every
 /// creep with free carry capacity standing within pickup range of a
@@ -2944,6 +3070,11 @@ let decide
     // rampart census, and shared by every reader of them (ADR 0033).
     let threats = threatsOf snapshot atlas
 
+    // The colony's other placement step, beside the memoised Layout and
+    // never inside it (ADR 0042): the outpost's source containers, derived
+    // fresh every tick for the reason written on the rule itself.
+    let outpostSiteIntents = planOutpostContainers snapshot atlas
+
     let defenseIntents = planSafeMode snapshot atlas @ planFire snapshot atlas
     let spawnIntents = planSpawns snapshot atlas threats plan.HaulerQuota
     let pickupIntents = planPickups snapshot atlas
@@ -2957,6 +3088,7 @@ let decide
             defenseIntents
             @ spawnIntents
             @ plan.SiteIntents
+            @ outpostSiteIntents
             @ pickupIntents
             @ emit snapshot atlas threats assigned
             @ moveIntents

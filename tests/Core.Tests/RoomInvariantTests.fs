@@ -1391,3 +1391,140 @@ let outpostDeclarationTests =
                         $"{where}: every Work Area tile walkable within the Upgrade range"
             }
         ]
+
+/// The colony ADR 0042 declares, over the committed captures: W12S28
+/// projected as the colony's own room with a spawn on the tile the live
+/// colony stands on, every declared outpost's ground and border ring laid
+/// in beside it, and the declaration's own furniture laid over that the
+/// way the shell lays it (`Outpost.place`) — under the engine's ids,
+/// because that is the vocabulary the constant is written in. The outpost
+/// rocks are pooled the way the shell pools them (`Outpost.pooledSources`),
+/// so nothing here hand-writes a source list.
+///
+/// Both rings, because a Seam joins two rooms and a band is empty unless
+/// the projection carries both sides (ADR 0041). A `RoomControl` entry per
+/// outpost, held by nobody: that map is one entry per *seen* room, so this
+/// is the fixture saying the colony is looking into those rooms this tick
+/// — the state a creep sent to an outpost rock puts them in, and the only
+/// state the container can be planned in, since the census that defers the
+/// plan and the `Game.rooms` lookup that executes it are both paid for by
+/// vision (ADR 0004). Held by nobody rather than reserved because the
+/// container comes before the reserver: what admits the room to the
+/// economy is the container, so nothing here may depend on the room
+/// already being in it.
+let private declaredColony level =
+    let loaded = project (load "W12S28") { X = 12; Y = 40 } None
+
+    let spatial =
+        (loaded.Spatial, Outpost.declared)
+        ||> List.fold (fun spatial outpost ->
+            let capture = load outpost.RoomName
+
+            { spatial with
+                Rooms =
+                    Map.add
+                        outpost.RoomName
+                        { RoomLayer.empty with
+                            Terrain = capture.Terrain
+                        }
+                        spatial.Rooms
+                Borders = Map.add outpost.RoomName capture.Border spatial.Borders
+            })
+        |> Outpost.place Outpost.declared
+
+    let colony = colonyOf loaded level
+
+    { colony with
+        Spatial = spatial
+        RoomControl =
+            (colony.RoomControl, Outpost.declared)
+            ||> List.fold (fun control outpost ->
+                Map.add outpost.RoomName { Owned = false; Reservation = None } control)
+        Sources =
+            colony.Sources
+            |> Outpost.pooledSources
+                (Outpost.roomsProjected Outpost.declared (SpatialInfo.homeName spatial))
+                Outpost.declared
+    }
+
+[<Tests>]
+let outpostContainerTests =
+    testList
+        "the outpost container on real terrain"
+        [
+            test "each declared source is planned one container, on the Seat nearest the Seam" {
+                // ADR 0042's placement rule, stated as a property and never
+                // as a tile: the pick is on that rock's *own* Seats, and no
+                // other Seat of that rock walks out to the Seam in fewer
+                // ticks. Both halves matter and neither implies the other —
+                // the first would hold for a rule that read another room's
+                // geometry into this one, the second for a rule that picked
+                // any tile at all.
+                //
+                // Real terrain is the counterexample generator here (ADR
+                // 0036): the two captures hold a single-Seat rock (`16,7`),
+                // a two-Seat rock split between plain and swamp (`18,4`)
+                // and a three-Seat rock of nothing but swamp (`16,45`), and
+                // no expected value below comes from any of them.
+                let colony = declaredColony 5
+                let atlas = ofSnapshot colony
+                let home = SpatialInfo.homeName colony.Spatial
+                let { Intents = intents } = decide colony Map.empty Set.empty None
+
+                let sites =
+                    intents
+                    |> List.choose (function
+                        | PlaceConstructionSite(room, pos, Container) -> Some(room, pos)
+                        | _ -> None)
+
+                let declaredSources =
+                    [
+                        for outpost in Outpost.declared do
+                            for id, pos in outpost.Sources -> outpost.RoomName, id, pos
+                    ]
+
+                // Everything below is derived from the declaration, and an
+                // empty one would leave this case green having checked
+                // nothing — the guard the sweep above this file uses, for
+                // the same reason.
+                Expect.isNonEmpty declaredSources "a declaration nobody made is nothing to check"
+
+                Expect.hasLength
+                    (sites |> List.filter (fun (room, _) -> room <> home))
+                    (List.length declaredSources)
+                    "one container planned per declared outpost rock, and not one more"
+
+                for room, id, pos in declaredSources do
+                    let where = $"{room} source {id}"
+                    let seats = seatTilesOf atlas id
+
+                    // Attributed by the geometry a source container *is* —
+                    // range 1 of the rock (ADR 0012) — so that standing on
+                    // a Seat is something this asserts rather than
+                    // something it assumed to find the site.
+                    let mine =
+                        sites
+                        |> List.filter (fun (siteRoom, tile) ->
+                            siteRoom = room && range tile pos <= 1)
+
+                    Expect.hasLength mine 1 $"{where}: exactly one container planned for this rock"
+
+                    let _, pick = List.head mine
+
+                    Expect.isTrue
+                        (Set.contains pick seats)
+                        $"{where}: the pick is one of this rock's own Seats, in its own room"
+
+                    match seamWalkTicks atlas room home pick with
+                    | None -> failtest $"{where}: the pick is a tile no walk reaches the Seam from"
+                    | Some picked ->
+                        for seat in seats do
+                            match seamWalkTicks atlas room home seat with
+                            | None -> ()
+                            | Some other ->
+                                Expect.isLessThanOrEqual
+                                    picked
+                                    other
+                                    $"{where}: no Seat of this rock walks out to the Seam in fewer ticks"
+            }
+        ]

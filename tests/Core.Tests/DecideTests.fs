@@ -11735,6 +11735,13 @@ let outpostTests =
 
                 let assigned = Map.ofList [ "w", taskId (Harvest "src-out") ]
 
+                // Nothing else leaves the colony on these ticks, and one
+                // absence is worth naming: this outpost carries no
+                // `RoomControl` entry, so it is a room the colony is not
+                // looking into, and ADR 0042's container rule plans into
+                // no such room (`planOutpostContainers`). Give the fixture
+                // vision and a placement Intent joins the lines below.
+                //
                 // The tile the crossing above delivers to, two more ring and
                 // ground tiles at the top of the corridor, and one a step
                 // from the Work Area: each is walked toward the source.
@@ -12397,6 +12404,325 @@ let outpostTests =
                 Expect.isFalse
                     (Set.contains { X = 10; Y = 42 } area)
                     "and the controller's own tile is not part of it, standing in Obstacles"
+            }
+        ]
+
+/// A colony with an outpost beside it whose ground and furniture are the
+/// case's own: the room's whole floor, and everything placed in it, said
+/// here rather than inherited. The container pick is a choice *between*
+/// Seats (ADR 0042), so a corridor with one Seat at each end proves
+/// nothing about it; these cases lay a floor that makes the Seats differ.
+///
+/// Both rooms get a plain border ring, because the pick is measured to the
+/// Seam and a projection carrying no ring answers an empty band (ADR
+/// 0041). No case declares an edge: which border two rooms share is read
+/// out of their names.
+///
+/// The outpost room gets a `RoomControl` entry, held by nobody: that map
+/// is one entry per *seen* room, so an entry is how a fixture says the
+/// colony is looking into the room this tick — which is what the placement
+/// rule waits for, and what the Executor needs to create anything there.
+/// Neutral rather than reserved because nothing here reads the rate; the
+/// blind room is a case of its own below.
+let private withOutpostGround room terrain placed (colony: Snapshot) =
+    { colony with
+        Sources = colony.Sources @ [ source "src-out" ]
+        RoomControl = Map.add room neutralRoom colony.RoomControl
+        Spatial =
+            { colony.Spatial with
+                Borders =
+                    colony.Spatial.Borders
+                    |> Map.add (SpatialInfo.homeName colony.Spatial) plainRing
+                    |> Map.add room plainRing
+                TargetKinds =
+                    (colony.Spatial.TargetKinds, placed)
+                    ||> List.fold (fun kinds (id, _, kind) -> Map.add id kind kinds)
+            }
+            |> withNeighbour
+                room
+                { RoomLayer.empty with
+                    Terrain = Map.ofList terrain
+                    TargetPositions = placed |> List.map (fun (id, pos, _) -> id, pos) |> Map.ofList
+                }
+    }
+
+/// Every container site the tick asks for, room beside tile, in the order
+/// the colony emits them — the whole of what this rule adds to a Decision.
+let private containerSites (colony: Snapshot) =
+    let { Intents = intents } = decide colony Map.empty Set.empty None
+
+    intents
+    |> List.choose (function
+        | PlaceConstructionSite(room, pos, Container) -> Some(room, pos)
+        | _ -> None)
+
+/// `src-out` sits at (10,44), which no case lays ground on, so its Seats
+/// are whichever of its eight neighbours the case does.
+let private outpostSource = { X = 10; Y = 44 }
+
+/// Two Seats and two ways out. `(10,45)` is a row nearer the border and
+/// its only run to it is three tiles of swamp; `(11,43)` is a row farther
+/// and its run is five of plain. Walk and proximity therefore disagree,
+/// which is the whole point of the floor: 6 ticks against 16.
+let private detourGround =
+    [
+        { X = 10; Y = 45 }, Plain
+        { X = 10; Y = 46 }, Swamp
+        { X = 10; Y = 47 }, Swamp
+        { X = 10; Y = 48 }, Swamp
+        { X = 11; Y = 43 }, Plain
+        for y in 44..48 do
+            { X = 12; Y = y }, Plain
+    ]
+
+[<Tests>]
+let outpostContainerTests =
+    testList
+        "the outpost's source container"
+        [
+            test "the site lands on the Seat whose walk out to the Seam is shortest" {
+                // ADR 0042's own rule, at the seam it is decided on: an
+                // outpost has no spawn for a trunk to anchor on, so the
+                // pick is anchored on the Seam instead. Measured as a walk
+                // and never as a range — the two disagree on this floor by
+                // construction, and the Seat the range would pick is the
+                // one three swamp tiles from the border.
+                let colony =
+                    northBorderColony { X = 10; Y = 38 }
+                    |> withOutpostGround "W1N2" detourGround [ "src-out", outpostSource, Source ]
+
+                Expect.equal
+                    (Atlas.seatTilesOf (Atlas.ofSnapshot colony) "src-out")
+                    (Set.ofList [ { X = 10; Y = 45 }; { X = 11; Y = 43 } ])
+                    "the premise: the rock has two Seats, and the nearer one to the border is (10,45)"
+
+                Expect.equal
+                    (containerSites colony)
+                    [ "W1N2", { X = 11; Y = 43 } ]
+                    "the farther Seat wins, because the ground between it and the Seam is cheaper"
+            }
+
+            test "the Intent carries the outpost's own room, never the colony's" {
+                // The trap the Layout would have walked into: a placement
+                // Intent has always carried a room name, and `planLayout`
+                // stamps the one room it plans onto every site it emits, so
+                // an outpost pick routed through that path would drop a
+                // 5,000-energy container on the *home* room's tile of the
+                // same coordinates. (11,43) is a real coordinate in both
+                // rooms and this asserts which one is named.
+                let colony =
+                    northBorderColony { X = 10; Y = 38 }
+                    |> withOutpostGround "W1N2" detourGround [ "src-out", outpostSource, Source ]
+
+                // Asserted as the whole list and never with `Expect.all`,
+                // which is vacuously true of the empty one: a rule that
+                // planned nothing would pass the room-stamping case it
+                // exists to pin.
+                Expect.equal
+                    (containerSites colony)
+                    [ "W1N2", { X = 11; Y = 43 } ]
+                    "the one site this rule places names the room its source stands in"
+            }
+
+            test "a room the colony cannot see this tick is planned nothing" {
+                // ADR 0004 entry by entry, the same reading `sourceOutputOf`
+                // gives the same rock: with no vision the container census
+                // of that room is empty because nobody looked, not because
+                // nothing stands there, and an absence is not an answer.
+                // The Intent would also be one the Executor can only report
+                // as `ActorMissing` — `Game.rooms` holds the seen rooms
+                // alone — so a rule that fired here would file an upstream
+                // bug against itself once a tick per rock, for ever.
+                let seen =
+                    northBorderColony { X = 10; Y = 38 }
+                    |> withOutpostGround "W1N2" detourGround [ "src-out", outpostSource, Source ]
+
+                Expect.isNonEmpty
+                    (containerSites seen)
+                    "the premise: seen, this rock is planned a container"
+
+                Expect.isEmpty
+                    (containerSites
+                        { seen with
+                            RoomControl = Map.remove "W1N2" seen.RoomControl
+                        })
+                    "and the same tick with the room unseen plans nothing at all"
+            }
+
+            test "a source with one Seat is the same rule with one candidate" {
+                // W13S28's `16,7` is a single-Seat rock, and "the shortest"
+                // has to answer where there is nothing to be shorter than.
+                let ground =
+                    [
+                        { X = 10; Y = 45 }, Swamp
+                        for y in 46..48 do
+                            { X = 10; Y = y }, Plain
+                    ]
+
+                let colony =
+                    northBorderColony { X = 10; Y = 38 }
+                    |> withOutpostGround "W1N2" ground [ "src-out", outpostSource, Source ]
+
+                Expect.equal
+                    (containerSites colony)
+                    [ "W1N2", { X = 10; Y = 45 } ]
+                    "the one Seat there is, priced and picked like any other"
+            }
+
+            test "Seats that price alike fall to the lowest (X, Y), as every tie here does" {
+                // W12S27's `16,45` has three Seats and all three are swamp,
+                // so they can price identically — and a plan that answered
+                // a different one of them on different ticks would not be
+                // one (ADR 0011's determinism). Three swamp Seats over one
+                // plain apron, so the three walks are equal by construction
+                // and only the tie-break separates them.
+                //
+                // It also pins the subtraction the walk is measured with:
+                // the Seat's own swamp step is charged to whatever walks
+                // *in* to it, so three swamp Seats over identical ground
+                // tie rather than each carrying five ticks of their own.
+                let ground =
+                    [
+                        { X = 9; Y = 45 }, Swamp
+                        { X = 10; Y = 45 }, Swamp
+                        { X = 11; Y = 45 }, Swamp
+                        for x in 8..12 do
+                            for y in 46..48 do
+                                { X = x; Y = y }, Plain
+                    ]
+
+                let colony =
+                    northBorderColony { X = 10; Y = 38 }
+                    |> withOutpostGround "W1N2" ground [ "src-out", outpostSource, Source ]
+
+                Expect.equal
+                    (containerSites colony)
+                    [ "W1N2", { X = 9; Y = 45 } ]
+                    "the three Seats tie, and the lowest X answers"
+            }
+
+            test "a Seat's own terrain is not charged to it: the walk is the ground beyond it" {
+                // The convention every walk in this colony is measured by
+                // (ADR 0029): a walk charges the tiles a creep steps onto
+                // and never the tile it already stands on. Here it decides
+                // the pick. Two Seats over one symmetric plain apron, so
+                // the ground beyond them is identical and only their own
+                // terrain differs — the swamp one first in (X, Y) order. A
+                // rule that charged a Seat for standing on it would price
+                // the swamp Seat five ticks dearer and pick the plain one;
+                // this rule ties them and lets the tie-break answer, which
+                // is right because whoever hauls from that container starts
+                // on it and never pays to arrive.
+                let ground =
+                    [
+                        { X = 9; Y = 45 }, Swamp
+                        { X = 11; Y = 45 }, Plain
+                        for x in 8..12 do
+                            for y in 46..48 do
+                                { X = x; Y = y }, Plain
+                    ]
+
+                let colony =
+                    northBorderColony { X = 10; Y = 38 }
+                    |> withOutpostGround "W1N2" ground [ "src-out", outpostSource, Source ]
+
+                Expect.equal
+                    (Atlas.seatTilesOf (Atlas.ofSnapshot colony) "src-out")
+                    (Set.ofList [ { X = 9; Y = 45 }; { X = 11; Y = 45 } ])
+                    "the premise: two Seats, one swamp and one plain, over the same apron"
+
+                Expect.equal
+                    (containerSites colony)
+                    [ "W1N2", { X = 9; Y = 45 } ]
+                    "the swamp Seat is no dearer than the plain one, so the tie-break answers"
+            }
+
+            test "a container already serving the source is planned for no second one" {
+                // ADR 0040 holds here as it does at home, and by target
+                // rather than by tile: the thing serving the rock is on
+                // (10,45), which is not the tile the plan picked, and the
+                // rock is served all the same. Standing and pending both,
+                // because the plan asks whether another must be built and a
+                // site going up answers that.
+                let served kind =
+                    northBorderColony { X = 10; Y = 38 }
+                    |> withOutpostGround
+                        "W1N2"
+                        detourGround
+                        [ "src-out", outpostSource, Source; "con-out", { X = 10; Y = 45 }, kind ]
+
+                Expect.isEmpty
+                    (containerSites (served (Structure BuiltKind.Container)))
+                    "a container standing within range 1 of the rock, on a Seat the plan did not pick"
+
+                Expect.isEmpty
+                    (containerSites (served (Site BuiltKind.Container)))
+                    "and a site pending there, which is a container already being built"
+            }
+
+            test "a home container on the pick's coordinates defers nothing" {
+                // The room-blind census this rule would have inherited: a
+                // `Pos` carries no room (ADR 0041), so a census unioning
+                // both rooms' container tiles would read the home room's
+                // container as serving an outpost rock fifty tiles away —
+                // and would then defer the outpost's container forever,
+                // leaving the room with no switch to close (ADR 0042).
+                let colony =
+                    northBorderColony { X = 10; Y = 38 }
+                    |> withOutpostGround "W1N2" detourGround [ "src-out", outpostSource, Source ]
+                    |> withTarget "con-home" { X = 11; Y = 43 } (Structure BuiltKind.Container)
+
+                Expect.equal
+                    (containerSites colony)
+                    [ "W1N2", { X = 11; Y = 43 } ]
+                    "the outpost's rock is unserved: what stands on those coordinates stands at home"
+            }
+
+            test "the home room's Layout is not moved by an outpost joining the projection" {
+                // ADR 0042: "The outpost gets a container and nothing
+                // else. No roads, and no Layout." This rule runs beside the
+                // Layout and never inside it, so a colony that gains an
+                // outpost plans the same home room it planned without one —
+                // the same clustered picks, the same trunks, the same
+                // containers, the same footings — and gains exactly one
+                // site, in the other room.
+                let alone = trunkColony 4
+
+                let withOutpost =
+                    alone
+                    |> withOutpostGround "W1N2" detourGround [ "src-out", outpostSource, Source ]
+
+                let atHome colony =
+                    let { Intents = intents } = decide colony Map.empty Set.empty None
+
+                    placementIntents intents |> List.filter (fun (room, _, _) -> room = "W1N1")
+
+                Expect.isNonEmpty (atHome alone) "the premise: this room has a Layout to move"
+
+                Expect.equal
+                    (atHome withOutpost)
+                    (atHome alone)
+                    "every home site the Layout placed, unmoved and in its own order"
+
+                Expect.equal
+                    (containerSites withOutpost |> List.filter (fun (room, _) -> room <> "W1N1"))
+                    [ "W1N2", { X = 11; Y = 43 } ]
+                    "and the one site the outpost gained is the container, in the outpost"
+            }
+
+            test "a room home shares no border with is planned nothing" {
+                // Total (ADR 0004): the Seam is read out of the two room
+                // names, and two rooms four sectors apart have no band —
+                // so the walk that anchors the pick has no anchor, and an
+                // unpriceable rule plans nothing rather than planning
+                // arbitrarily. W5N5 is not W1N1's neighbour.
+                let colony =
+                    northBorderColony { X = 10; Y = 38 }
+                    |> withOutpostGround "W5N5" detourGround [ "src-out", outpostSource, Source ]
+
+                Expect.isEmpty
+                    (containerSites colony)
+                    "no band to price a Seat against, so no Seat is picked"
             }
         ]
 

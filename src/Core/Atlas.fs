@@ -144,6 +144,23 @@ type Atlas =
                     string * Task * bool * FatigueFactor * Pricing,
                     int[]
                  >
+            /// Memoised flood *into* a Seam band — the walk out of every
+            /// tile of one room onto the crossings joining it to a named
+            /// neighbour (ADR 0042's container pick, `seamWalkTicks`). One
+            /// flood per ordered room pair, however many tiles are read off
+            /// it: the Seats of every source in the room share the one
+            /// answer, which is the same arithmetic ADR 0041 rests the
+            /// cross-room walk on — a minimum over additions rather than
+            /// over floods.
+            ///
+            /// Two fields and no more. The **ordered pair**, because the
+            /// band is one room's exits toward one neighbour and a room
+            /// with two of them has two bands. No body and no pricing:
+            /// unlike every other flood here this one prices a *plan* and
+            /// not a creep, so it is run once for a body at fatigue parity
+            /// and traffic-blind, and there is nothing left for a key to
+            /// tell two of them apart by.
+            SeamWalks: System.Collections.Generic.Dictionary<string * string, int[]>
             /// Memoised traffic-blind flood out of a spawner's tile, per
             /// (spawner tile, fatigue factor), for bodies the Snapshot does
             /// not carry: a lead prices a replacement that has not been
@@ -694,6 +711,7 @@ let ofSnapshotRecalling (walks: WalkTable) (snapshot: Snapshot) : Atlas =
                     Map.add room laid table)
                 Map.empty
         FarFloods = System.Collections.Generic.Dictionary()
+        SeamWalks = System.Collections.Generic.Dictionary()
         Walks = walks
         WorkAreas = System.Collections.Generic.Dictionary()
         HeavyAreas = System.Collections.Generic.Dictionary()
@@ -974,16 +992,40 @@ let private tilesOfKind (atlas: Atlas) (kind: TargetKind) : Set<Pos> = tilesWher
 /// pending road is not yet a road (ADR 0010) but its tile needs no new site.
 let pendingRoadTiles (atlas: Atlas) : Set<Pos> = tilesOfKind atlas (Site BuiltKind.Road)
 
-/// Tiles holding a built container — the container census's standing half
-/// (ADR 0012): a built container keeps the Layout from re-dropping its site.
-let containerTiles (atlas: Atlas) : Set<Pos> =
-    tilesOfKind atlas (Structure BuiltKind.Container)
+/// Tiles of one room holding a built container — the container census's
+/// standing half (ADR 0012): a built container keeps a plan from
+/// re-dropping its site. The room is named because ADR 0040's target
+/// clause is asked in the room the target stands in, and since ADR 0042
+/// there are two such rooms: an outpost source's census is its own room's,
+/// and a home container on the same coordinates serves nothing of it
+/// (ADR 0041).
+let containerTilesIn (atlas: Atlas) (room: string) : Set<Pos> =
+    tilesOfKindIn atlas room (Structure BuiltKind.Container)
 
-/// Tiles holding a container construction site — the census's pending
-/// half: a pending container is not yet a container but its tile needs no
-/// new site.
-let pendingContainerTiles (atlas: Atlas) : Set<Pos> =
-    tilesOfKind atlas (Site BuiltKind.Container)
+/// The same census in the colony's own room — what the Layout reads.
+let containerTiles (atlas: Atlas) : Set<Pos> = containerTilesIn atlas atlas.Home
+
+/// Tiles of one room holding a container construction site — the census's
+/// pending half: a pending container is not yet a container but its tile
+/// needs no new site.
+let pendingContainerTilesIn (atlas: Atlas) (room: string) : Set<Pos> =
+    tilesOfKindIn atlas room (Site BuiltKind.Container)
+
+/// ADR 0040's container census in one room: the tiles a container stands
+/// on united with the tiles one is pending on — the set every "must
+/// another container be built?" question is asked against, at home and in
+/// an outpost alike. One name because it is one rule: a third member (a
+/// container being dismantled, say) joins it here, and ADR 0040 cannot
+/// then come to mean two different things in two rooms.
+///
+/// The asymmetry with `postsIn`, which counts standing containers alone,
+/// is the deliberate one ADR 0040 draws — a site already going up answers
+/// *another one is handled*, and catches no overflow at all.
+let containerCensusIn (atlas: Atlas) (room: string) : Set<Pos> =
+    Set.union (containerTilesIn atlas room) (pendingContainerTilesIn atlas room)
+
+/// The same census in the colony's own room — what the Layout reads.
+let containerCensus (atlas: Atlas) : Set<Pos> = containerCensusIn atlas atlas.Home
 
 /// Tiles holding a built Storage — the tile a Link footing is anchored on
 /// once the reservation has become a structure (ADR 0022).
@@ -1634,6 +1676,82 @@ let private exitPrice (atlas: Atlas) (pricing: Pricing) (factor: FatigueFactor) 
     |> Option.filter (fun weight -> weight > 0)
     |> Option.bind stepPrice
 
+/// The body a *plan* is priced for: fatigue parity, one fatigue-generating
+/// part to one Move (ADR 0003), which under the walk's rounding is a tick
+/// on plain and five on swamp. The trunk router prices its line on the
+/// same neutral body (`trunkPath`) and for the same reason — a placement
+/// that moved with whichever creep happened to be alive this tick would
+/// not be a plan — and the Layout's determinism (ADR 0011) is what that
+/// buys.
+let private planningFactor: FatigueFactor = { FatigueParts = 1; MoveParts = 1 }
+
+/// The walk out to a Seam, from every tile of one room's ground: the
+/// smallest, over the whole band joining that room to the named
+/// neighbour, of the walk to a tile beside a crossing plus the price of
+/// stepping onto the crossing itself. Flooded *into* the band rather than
+/// out of each tile, so one flood answers every Seat of every source in
+/// the room, and seeded at each origin's own entry cost for the reason
+/// `floodPricedInto` is — the engine charges a step on the tile it lands
+/// on, so a flood run backwards charges the wrong end by exactly one
+/// tile. What comes back at a tile `t` is therefore `cost(t) + walk(t ->
+/// the Seam)`, with the tile's own step still in it; the public query
+/// takes that back off.
+let private seamWalkFlood (atlas: Atlas) (fromRoom: string) (toRoom: string) : int[] =
+    memoised atlas.SeamWalks (fromRoom, toRoom) (fun () ->
+        let weights = weightsOf atlas fromRoom
+        let stepPrice, traffic = pricingOf noTraffic planningFactor Walk
+
+        seams atlas fromRoom toRoom
+        |> List.collect (fun (exitTile, _) ->
+            match exitPrice atlas Walk planningFactor fromRoom exitTile with
+            | None -> []
+            | Some crossing ->
+                besideExit exitTile
+                |> List.choose (fun tile ->
+                    entryCost weights traffic stepPrice tile
+                    |> Option.map (fun cost -> tile, cost + crossing)))
+        |> floodFromAllSeeded weights traffic stepPrice
+        |> fst)
+
+/// The walk in whole ticks from one tile of a room's own ground out to the
+/// Seam joining it to a neighbour — a walk *to* the border and not across
+/// it, which is the near half of `pricedAcross` with the far leg left off.
+/// No creep ever walks it: it is the anchor ADR 0042's outpost container
+/// pick is made against, an outpost having no spawn for a trunk to anchor
+/// on, and the Seam is the one fixed thing in that room home lies beyond.
+///
+/// Priced as a walk (ADR 0029) — whole ticks, nothing below one, blind to
+/// today's traffic — for a body at fatigue parity (`planningFactor`). The
+/// blindness is the hauler quota's round trip and the lead's cast walk
+/// again, and here it is load-bearing twice over: a creep standing on a
+/// Seat must not move a container plan, and the plan must answer the same
+/// tile on the tick the container it planned is finally stood on.
+///
+/// The tile it is asked at is charged nothing, exactly as every other walk
+/// in the colony charges the tile a creep already stands on nothing: what
+/// a Seat costs to step onto is paid by whatever walks *in* to it, never
+/// by the haul leaving it. That is the whole of the subtraction below, and
+/// it is what keeps two Seats of one source compared on the ground between
+/// them rather than on their own terrain.
+///
+/// Total (ADR 0004): two rooms with no band between them, a room the
+/// projection carries no ground for, a tile off the grid and a tile no
+/// crossing reaches all answer with no walk at all — an unpriceable Seam
+/// is no Seam, never a blocked one, so it costs nothing and blocks
+/// nothing.
+let seamWalkTicks (atlas: Atlas) (fromRoom: string) (toRoom: string) (from: Pos) : int option =
+    if from.X < 0 || from.X >= roomSide || from.Y < 0 || from.Y >= roomSide then
+        None
+    else
+        let stepPrice, traffic = pricingOf noTraffic planningFactor Walk
+        let reached = (seamWalkFlood atlas fromRoom toRoom).[indexOf from]
+
+        if reached = unreached then
+            None
+        else
+            entryCost (weightsOf atlas fromRoom) traffic stepPrice from
+            |> Option.map (fun own -> reached - own)
+
 /// The far leg's flood for one Task and one body, memoised colony-wide:
 /// the price, from every tile of the target's room, of stepping onto that
 /// tile and walking in to the Task's Work Area there (`floodPricedInto`).
@@ -2163,8 +2281,7 @@ let trunkPath (atlas: Atlas) (avoid: Set<Pos>) (origin: Pos) (goals: Set<Pos>) :
         if not (Set.contains tile home.Obstacles) && not (Set.contains tile avoid) then
             weights.[indexOf tile] <- terrainWeight terrain)
 
-    let dist, parents =
-        floodFrom weights noTraffic (stepUnits { FatigueParts = 1; MoveParts = 1 }) origin
+    let dist, parents = floodFrom weights noTraffic (stepUnits planningFactor) origin
 
     goals
     |> Set.toList
