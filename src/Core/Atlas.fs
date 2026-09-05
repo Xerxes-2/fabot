@@ -2094,13 +2094,53 @@ let standsOnSeam (atlas: Atlas) (creep: string) : bool =
 /// The tiles of a room's own ground next to one of its exit tiles — the
 /// only tiles a flood can price a Seam's near side from, or step off its
 /// far side onto, because the border ring is not ground and no flood ever
-/// enters it (ADR 0036, ADR 0041). Clipped to the grid rather than to the
-/// projection: a tile the projection does not carry is impassable, so the
-/// flood already answers `unreached` there, and an index off the grid is
-/// no index at all. Diagonals included — the engine lets a creep step onto
-/// an exit diagonally, and onto its first tile in the new room the same
-/// way.
-let private besideExit (tile: Pos) : Pos list = neighbours tile |> List.filter inGrid
+/// enters it (ADR 0036, ADR 0041). Diagonals included — the engine lets a
+/// creep step onto an exit diagonally, and onto its first tile in the new
+/// room the same way.
+///
+/// Clipped to the room's *ground* and not merely to the grid (#175). The
+/// answer is the same either way — a neighbour the grid marks impassable
+/// is a tile the flood's relaxation never enters (`settleTo`), so it holds
+/// `unreached` and adds nothing to a minimum, and a seeded far leg drops
+/// it at `entryCost` before it is ever a seed — but the cost is not: the
+/// per-creep flood is resumable since #174, so `reachedBy` on a tile
+/// nothing reaches settles the whole room. Half of every exit's
+/// neighbourhood is more ring, so a near leg read tile by tile over a
+/// thirty-odd crossing band drained 2,500 tiles at its first crossing and
+/// handed an outpost creep none of #174's saving. What the read still pays
+/// after this is the band's own width and not the ring's: it asks after
+/// every crossing in the band, so the flood is pushed out as far as the
+/// dearest of them and a creep far from its border settles most of its
+/// room either way. The grid does the clipping, `inGrid` and all
+/// (`weightAt`), so there is one rule here and not two.
+let private besideExit (grid: int[]) (tile: Pos) : Pos list =
+    neighbours tile |> List.filter (walkableAt grid)
+
+/// The same tiles for the leg a flood is *seeded* on, which is one tile
+/// wider: a flood seeds its origin whatever that tile weighs, so a creep
+/// the engine parked on the border ring the tick it crossed (#142, #145)
+/// reaches the crossings beside it at no cost — the one tile off a room's
+/// ground a near leg can honestly be read at. Dropping it with the rest of
+/// the ring would price such a creep as though it had to walk back inward
+/// before it could cross, which is a different answer and not a cheaper
+/// route to the same one. Every other tile of the ring stays out, so the
+/// drain #175 removed stays removed: the exception is one tile the flood
+/// has already settled, never a tile it would have to run to reach.
+///
+/// Where such a creep is then aimed is not ruled on here: that a creep on
+/// the ring is stepped sideways along it to an adjacent crossing is #146's
+/// open question, and #175 keeps the answer the tree already gave rather
+/// than settling it.
+///
+/// The origin is read once and not once per neighbour: a creep standing on
+/// its own room's ground has no exception to make, and the test is a `Pos`
+/// comparison inside the band loop this ticket exists to cheapen.
+let private besideExitFrom (grid: int[]) (origin: Pos) (tile: Pos) : Pos list =
+    if walkableAt grid origin then
+        besideExit grid tile
+    else
+        neighbours tile
+        |> List.filter (fun near -> near = origin || walkableAt grid near)
 
 /// The cheapest a flood reached any tile of a set at, and None when it
 /// reached none of them — the one read every arrival at a set of tiles is
@@ -2194,7 +2234,7 @@ let private seamWalkFlood (atlas: Atlas) (fromRoom: string) (toRoom: string) : i
             match exitPrice atlas stepPrices fromRoom exitTile with
             | None -> []
             | Some crossing ->
-                besideExit exitTile
+                besideExit weights exitTile
                 |> List.choose (fun tile ->
                     entryCost weights traffic stepPrices tile
                     |> Option.map (fun cost -> tile, cost + crossing)))
@@ -2326,11 +2366,19 @@ let private farFlood (atlas: Atlas) (pricing: Pricing) (creep: string) (room: st
 /// leg of a creep's price is the tick's resumable memo and pushes out
 /// over the band as the band is walked, while the far leg and both legs
 /// of the hauler quota's round trip are floods already settled whole.
+/// Each side is read at its own room's ground alone and never at the ring
+/// between them (`besideExit`, #175) — which is the same minimum, taken
+/// without settling a resumable near leg over a room to learn that a ring
+/// tile is unreachable. The near leg's origin rides in for the one tile
+/// that rule has to spare: the flood is seeded there whatever it weighs,
+/// so a creep standing on the ring prices from where it stands.
 let private joinedAcross
     (atlas: Atlas)
     (pricing: Pricing)
     (factor: FatigueFactor)
     (fromRoom: string)
+    (from: Pos)
+    (toRoom: string)
     (band: (Pos * Pos) list)
     (near: Pos -> int)
     (far: Pos -> int)
@@ -2338,13 +2386,15 @@ let private joinedAcross
     // One price table for the whole band: every crossing in it is priced
     // for the same body under the same pricing (#168).
     let stepPrices, _ = pricingOf noTraffic factor pricing
+    let nearGround = weightsOf atlas fromRoom
+    let farGround = weightsOf atlas toRoom
 
     band
     |> List.choose (fun (exitTile, landing) ->
         match
-            nearestReached near (besideExit exitTile),
+            nearestReached near (besideExitFrom nearGround from exitTile),
             exitPrice atlas stepPrices fromRoom exitTile,
-            nearestReached far (besideExit landing)
+            nearestReached far (besideExit farGround landing)
         with
         | Some approach, Some crossing, Some departure ->
             Some(approach + crossing + departure, exitTile)
@@ -2380,6 +2430,8 @@ let private pricedAcross
             pricing
             (factorOf atlas creep)
             creepRoom
+            from
+            targetRoom
             band
             (reachedBy near)
             (reachedIn far)
@@ -2619,7 +2671,11 @@ let private stepAcross (atlas: Atlas) (pricing: Pricing) (creep: string) (task: 
     | Some(creepRoom, from, targetRoom) ->
         pricedAcross atlas pricing creep task creepRoom from targetRoom
         |> Option.bind (fun (_, exitTile) ->
-            let approach = besideExit exitTile
+            // The near side the price was taken over, origin and all
+            // (`besideExitFrom`, #175): a creep the engine parked on the
+            // ring beside the winning crossing steps onto it from there,
+            // exactly as it was priced to.
+            let approach = besideExitFrom (weightsOf atlas creepRoom) from exitTile
 
             if List.contains from approach then
                 Some exitTile
@@ -2752,7 +2808,16 @@ let haulRoundTripTicks
                 let near, _ = walkFloodFrom weights factor from
                 let far = floodPricedInto (weightsOf atlas sinkRoom) noTraffic factor Walk goals
 
-                joinedAcross atlas Walk factor fromRoom band (reachedIn near) (reachedIn far)
+                joinedAcross
+                    atlas
+                    Walk
+                    factor
+                    fromRoom
+                    from
+                    sinkRoom
+                    band
+                    (reachedIn near)
+                    (reachedIn far)
                 |> Option.map fst
 
     let loaded =
@@ -2801,16 +2866,17 @@ let private castAcross
     (goalRoom: string)
     : int[] =
     let weights = weightsOf atlas goalRoom
+    let homeGround = weightsOf atlas atlas.Home
     let stepPrices, traffic = pricingOf noTraffic factor Walk
 
     band
     |> List.collect (fun (exitTile, landing) ->
         match
-            nearestReached (reachedIn near) (besideExit exitTile),
+            nearestReached (reachedIn near) (besideExit homeGround exitTile),
             exitPrice atlas stepPrices atlas.Home exitTile
         with
         | Some approach, Some crossing ->
-            besideExit landing
+            besideExit weights landing
             |> List.choose (fun tile ->
                 entryCost weights traffic stepPrices tile
                 |> Option.map (fun cost -> tile, approach + crossing + cost))

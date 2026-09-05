@@ -4751,6 +4751,63 @@ let crossRoomStepTests =
                     "and the same creep now walks straight up its own column instead"
             }
 
+            test "a creep parked on the ring prices and crosses from the tile it stands on" {
+                // The one tile off a room's ground a near leg is honestly
+                // read at (#175). The near side of a crossing is the room's
+                // own ground and nothing else — the ring is not ground (ADR
+                // 0036) and a flood never relaxes onto it — but a flood
+                // *seeds* its origin whatever that tile weighs, so a creep
+                // the engine parked on the ring the tick it crossed (#142,
+                // #145) is already standing beside every crossing next to
+                // it, at no cost at all.
+                //
+                // What is pinned here is the price and the step #175 found
+                // in the tree, not a ruling on #146: whether a creep on the
+                // ring should be aimed sideways along it at the crossing
+                // next door is that ticket's open question, and this one
+                // only had to leave the answer where it was.
+                //
+                // Countable: the creep stands on the home room's ring at
+                // (24,0), with two crossings open. Priced at (25,0) it pays
+                // nothing to approach — it is standing beside it — one tick
+                // onto the exit and eight in the outpost, which is nine.
+                // Priced at (24,0) it would first step to (25,1), the only
+                // ground beside that exit, and pay ten. So the band's
+                // minimum is (25,0), the crossing the creep can reach
+                // without leaving the ring, and the step is that exit
+                // itself. Read the ring off the near side instead and both
+                // crossings cost ten, the tie falls to (24,0), and the
+                // creep is walked inland to (25,1) to cross where it was
+                // never priced.
+                let atlas =
+                    northOf
+                        (corridorHome [ "w", { X = 24; Y = 0 } ])
+                        [ { X = 24; Y = 0 }, Plain; { X = 25; Y = 0 }, Plain ]
+                        corridorOutpost
+                        [ { X = 24; Y = 49 }, Plain; { X = 25; Y = 49 }, Plain ]
+                        [ "src-out", Source ]
+                        [ worker "w" ]
+
+                Expect.hasLength (seams atlas "W1N1" "W1N2") 2 "the premise: two crossings"
+
+                Expect.isTrue (standsOnSeam atlas "w") "and the creep stands on the ring"
+
+                Expect.equal
+                    (walkTicks atlas "w" (Harvest "src-out"))
+                    (Some 9)
+                    "no approach to pay, the exit's own tick, and eight in the outpost"
+
+                Expect.equal
+                    (travelCost atlas "w" (Harvest "src-out"))
+                    (Some 18)
+                    "and the same join in the ranking price's own units"
+
+                Expect.equal
+                    (firstStepFor atlas "w" (Harvest "src-out"))
+                    (Some { X = 25; Y = 0 })
+                    "so the step is the crossing the price was paid at, taken off the ring"
+            }
+
             test "the last step onto an exit tile is a step nothing offers to stand on" {
                 // ADR 0036 and ADR 0041 keep the exit out of the projection's
                 // ground, and #142 does not put it back: the mover may push a
