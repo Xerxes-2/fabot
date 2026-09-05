@@ -156,12 +156,32 @@ let private projectVisible (terrain: RoomTerrain) (room: IRoom) : RoomProjection
 
     let sources = room.find findSources |> Array.map (fun o -> o :?> ISource)
 
-    // Dropped energy piles, for the pickup reflex: position and kind only —
-    // no decision reads an amount, so none is projected.
+    // Dropped energy piles: position, kind, and — since #167 — the amount,
+    // which is what the Pickup Task's threshold and its capacity are read
+    // off. The reflex still reads none of it (ADR 0007's rule that the
+    // field list grows the tick a decision reads one: this is that tick).
     let dropped =
         room.find findDroppedResources
         |> Array.map (fun o -> o :?> IResource)
         |> Array.filter (fun r -> r.resourceType = "energy")
+
+    // The stores with a clock on them (#167): a dead creep's tombstone and
+    // a destroyed structure's ruin, projected as one kind because a
+    // Withdraw reads the same three facts off either.
+    //
+    // Energy only, as the piles above are — the colony holds no other
+    // resource and has no Task that would spend one — and only while there
+    // is some: an empty tombstone is a store that says nothing, and
+    // projecting one would put a target in the census that no rule can
+    // ever answer for. The Core pool gates on stock as well (`planTasks`
+    // pools only stocked stores), so this filter buys quiet rather than
+    // correctness: a hundred ticks of a spent tombstone in `TargetKinds`
+    // is churn in every id-keyed table for a target nothing will ever
+    // take.
+    let tombstones =
+        Array.append (room.find findTombstones) (room.find findRuins)
+        |> Array.map (fun o -> o :?> ITombstone)
+        |> Array.filter (fun r -> r.store.getUsedCapacity "energy" > 0)
 
     // The controller travels through FIND_STRUCTURES on live servers, but
     // is projected explicitly so nothing depends on that detail.
@@ -187,6 +207,7 @@ let private projectVisible (terrain: RoomTerrain) (room: IRoom) : RoomProjection
                             sites |> Array.map (fun (site, _) -> site.id, posOf site.pos)
                             controllers |> Array.map (fun c -> c.id, posOf c.pos)
                             dropped |> Array.map (fun r -> r.id, posOf r.pos)
+                            tombstones |> Array.map (fun r -> r.id, posOf r.pos)
                         ]
                 )
             // This room's creeps, not the world's: `Game.creeps` is every
@@ -268,6 +289,14 @@ let private projectVisible (terrain: RoomTerrain) (room: IRoom) : RoomProjection
                         sites |> Array.map (fun (site, kind) -> site.id, Site kind)
                         controllers |> Array.map (fun c -> c.id, Controller)
                         dropped |> Array.map (fun r -> r.id, Dropped)
+                        // A tombstone stands on the tile its creep died
+                        // on, which may well be a Seat or a Post, and a
+                        // ruin on the tile its structure stood on. Neither
+                        // joins `Obstacles`: the engine lets a creep walk
+                        // over both, and a transient tile-blocker would
+                        // move every price the room answers for a hundred
+                        // ticks (#167).
+                        tombstones |> Array.map (fun r -> r.id, Tombstone)
                     ]
             )
         // Hits on the repairable kinds only — the decaying roads and
@@ -289,10 +318,22 @@ let private projectVisible (terrain: RoomTerrain) (room: IRoom) : RoomProjection
         // with room and drops a full one, and its Withdraw tier drops an
         // empty one and pools a stocked one only while some sink other
         // than the stock still has room to take the load.
+        //
+        // The two transient stores ride the same table (#167): a
+        // tombstone's or a ruin's energy, which a Withdraw draws exactly
+        // as it draws a container's, and a pile's amount, which is what
+        // decides whether the pile is worth a Task at all. A pile carries
+        // a bare `amount` rather than a store, so it is the one entry read
+        // off a field instead of a `getUsedCapacity` call.
         Stores =
-            structures
-            |> Array.filter (fun (_, kind) -> isStored kind)
-            |> Array.map (fun (st, _) -> st.id, st.store.getUsedCapacity "energy")
+            Array.concat
+                [
+                    structures
+                    |> Array.filter (fun (_, kind) -> isStored kind)
+                    |> Array.map (fun (st, _) -> st.id, st.store.getUsedCapacity "energy")
+                    tombstones |> Array.map (fun r -> r.id, r.store.getUsedCapacity "energy")
+                    dropped |> Array.map (fun r -> r.id, r.amount)
+                ]
             |> Map.ofArray
     }
 

@@ -10267,6 +10267,427 @@ let withdrawCapacityTests =
             }
         ]
 
+/// The names assigned to one pile, in name order — `drawersOf`'s twin for
+/// the Pickup Task (#167).
+let pickersOf assignments pileId =
+    assignments
+    |> Map.toList
+    |> List.choose (fun (name, tid) -> if tid = taskId (Pickup pileId) then Some name else None)
+
+/// The pile fixture (#167): the crowding field again, one dropped pile on
+/// the middle row at (10,10) holding the given amount, and empty hauler
+/// bodies on the given tiles.
+///
+/// The bank is 150 — one whole hauler block, `[2 Carry; 1 Move]` — so a
+/// trip is exactly 100 energy and every capacity below is written against
+/// that load. No source, no placed controller and a full spawn, so a
+/// Carry-only body is applicable to the pile and to nothing else: what
+/// these tests read is the Pickup rule and never a tie against some other
+/// Task.
+let pileTaskColony amount (creeps: (string * Pos) list) =
+    { bareRespawn with
+        RoomEnergy = bank 150 150
+        Sources = []
+        Creeps = [ for name, _ in creeps -> hauler name 0 100 ]
+        Spatial =
+            { spatial [] crowdField with
+                Stores = Map.ofList [ "pile-a", amount ]
+            }
+            |> withTargets [ "pile-a", { X = 10; Y = 10 }, Dropped ]
+            |> withHome (fun layer ->
+                { layer with
+                    CreepPositions = Map.ofList creeps
+                })
+    }
+
+/// The same field with a tombstone at (10,10) holding the given energy and
+/// nothing else standing anywhere (#167). Deliberately not in `Obstacles`:
+/// a tombstone lies on the tile a creep died on and the engine lets
+/// another walk over it, so its Work Area includes its own tile.
+let tombColony energy (creeps: (string * Pos) list) =
+    { bareRespawn with
+        RoomEnergy = bank 150 150
+        Sources = []
+        Creeps = [ for name, _ in creeps -> hauler name 0 100 ]
+        Spatial =
+            { spatial [] crowdField with
+                Stores = Map.ofList [ "tomb-1", energy ]
+            }
+            |> withTargets [ "tomb-1", { X = 10; Y = 10 }, Tombstone ]
+            |> withHome (fun layer ->
+                { layer with
+                    CreepPositions = Map.ofList creeps
+                })
+    }
+
+[<Tests>]
+let pickupTaskTests =
+    testList
+        "the pile and the tombstone"
+        [
+            test "a pile past the threshold hires a hauler ten tiles off; one under it hires nobody" {
+                // The live gap's second half (#167): 193 energy of death
+                // drop at W13S28 36,21 with nobody near enough for the
+                // reflex ever to reach it. A pile at or over the threshold
+                // is a Task and gets walked to.
+                let walk =
+                    decide
+                        (pileTaskColony 150 [ "h1", { X = 20; Y = 10 } ])
+                        Map.empty
+                        Set.empty
+                        None
+
+                Expect.equal
+                    (Map.tryFind "h1" walk.Assignments)
+                    (Some(taskId (Pickup "pile-a")))
+                    "150 on the ground is worth ten tiles of walking"
+
+                Expect.isEmpty
+                    (pickups walk.Intents)
+                    "and out of reach it is walking, not picking: the act waits for arrival"
+
+                Expect.isNonEmpty
+                    (moveIntentsFor "h1" walk.Intents)
+                    "what a Task buys over the reflex is exactly this step"
+
+                // The pairwise control: the same creep on the same tile
+                // with the same everything, and 80 energy on the ground.
+                let small =
+                    decide (pileTaskColony 80 [ "h1", { X = 20; Y = 10 } ]) Map.empty Set.empty None
+
+                Expect.equal
+                    (Map.tryFind "h1" small.Assignments)
+                    None
+                    "under the threshold the pile is the reflex's business and nobody walks"
+            }
+
+            test "the threshold is inclusive: a hundred exactly is worth the trip" {
+                // Where the tunable turns, pinned on both sides of it: two
+                // CARRY parts' worth is the smallest load that pays for a
+                // walk made for the pile alone.
+                let assignmentAt amount =
+                    let { Assignments = assignments } =
+                        decide
+                            (pileTaskColony amount [ "h1", { X = 20; Y = 10 } ])
+                            Map.empty
+                            Set.empty
+                            None
+
+                    Map.tryFind "h1" assignments
+
+                Expect.equal
+                    (assignmentAt 100)
+                    (Some(taskId (Pickup "pile-a")))
+                    "at the line, pooled"
+
+                Expect.equal (assignmentAt 99) None "one energy short of it, not"
+            }
+
+            test "the pile that arrives is picked up once, and the bubble says so" {
+                // The Task's own action Intent, at range 1 where the Atlas
+                // permits it. The reflex asks for the same act on this
+                // tick — its rule is the same range and the same free
+                // capacity — so the count is the assertion and not the
+                // membership: an arriving picker satisfies both producers,
+                // and one creep's one pickup spelt twice would over-report
+                // the CPU line's accepted-intent column tick after tick
+                // (#167). Two *adjacent creeps* both reaching for one pile
+                // stay two asks; this is one creep asking twice.
+                let {
+                        Intents = intents
+                        Assignments = assignments
+                    } =
+                    decide
+                        (pileTaskColony 150 [ "h1", { X = 10; Y = 11 } ])
+                        Map.empty
+                        Set.empty
+                        None
+
+                Expect.equal
+                    (Map.tryFind "h1" assignments)
+                    (Some(taskId (Pickup "pile-a")))
+                    "standing on its doorstep it still holds the Task"
+
+                Expect.equal
+                    (pickups intents)
+                    [ "h1", "pile-a" ]
+                    "it asks the engine for it, exactly once between the Task and the reflex"
+
+                Expect.contains
+                    intents
+                    (SayCreep("h1", "🧲"))
+                    "one glyph per Task, and this Task has its own"
+            }
+
+            test
+                "the creep beside a hired picker still asks: the pair is deduplicated, not the pile" {
+                // The other side of the count above (#167): what the
+                // deduplication drops is one creep's own Intent spelt
+                // twice, and nothing else. Two haulers stand at one pile
+                // of exactly a hundred, so its capacity is one body: h1 is
+                // hired and h2 is not, and h2's reflex pickup is energy
+                // the colony recovers for free. A filter written over the
+                // pile rather than over the (creep, pile) pair would drop
+                // it — which is why the assertion is both names and not a
+                // count.
+                let { Intents = intents } =
+                    decide
+                        (pileTaskColony 100 [ "h1", { X = 10; Y = 11 }; "h2", { X = 11; Y = 10 } ])
+                        Map.empty
+                        Set.empty
+                        None
+
+                Expect.equal
+                    (pickups intents |> List.sort)
+                    [ "h1", "pile-a"; "h2", "pile-a" ]
+                    "one ask apiece: the hired picker's own, and the bystander's reflex"
+            }
+
+            test "a pile decaying under the threshold releases the hauler still walking to it" {
+                // The accepted loss, pinned so it stays a decision
+                // (`pickupThreshold`, #167). The threshold gates
+                // persistence as well as entry, because the pool is
+                // rebuilt creep-blind every tick: a pile at 100 holds its
+                // holder, and the same pile one energy lighter — a
+                // hundredth of the decay a pile spends on its own, or the
+                // first of two hired haulers arriving — is gone, and the
+                // walk already spent bought nothing.
+                let held = Map.ofList [ "h1", taskId (Pickup "pile-a") ]
+
+                let standing =
+                    decide (pileTaskColony 100 [ "h1", { X = 20; Y = 10 } ]) held Set.empty None
+
+                Expect.contains
+                    standing.Verdicts
+                    (Verdict.Kept("h1", taskId (Pickup "pile-a")))
+                    "at the line the walk stands"
+
+                let decayed =
+                    decide (pileTaskColony 99 [ "h1", { X = 20; Y = 10 } ]) held Set.empty None
+
+                Expect.contains
+                    decayed.Verdicts
+                    (Verdict.Released("h1", taskId (Pickup "pile-a"), ReleaseReason.TaskGone))
+                    "one energy under it, ten tiles from home, and the trip is over"
+            }
+
+            test "the pile's amount is its capacity: 150 admits two of the three haulers" {
+                // The Withdraw rule over a pile (#161 read by #167):
+                // `ceil(150 / 100)` is two bodies, and travel cost cannot
+                // thin the crowd because all three stand one step from the
+                // pile's Work Area.
+                let { Assignments = split } =
+                    decide (pileTaskColony 150 crowdOfThree) Map.empty Set.empty None
+
+                Expect.equal
+                    (pickersOf split "pile-a")
+                    [ "h1"; "h2" ]
+                    "one and a half loads on the ground hire two haulers"
+
+                // The pairwise control: the same three creeps on the same
+                // tiles, nothing changed but the amount.
+                let { Assignments = whole } =
+                    decide (pileTaskColony 300 crowdOfThree) Map.empty Set.empty None
+
+                Expect.equal
+                    (pickersOf whole "pile-a")
+                    [ "h1"; "h2"; "h3" ]
+                    "three loads take the whole crowd"
+            }
+
+            test "a Work-heavy body never picks a pile up (ADR 0016)" {
+                // The gate that keeps an Anchor at its rock, read over the
+                // ground as well as over a container: a heavy body's
+                // intake is digging, and a pile is not a dig. Pairwise on
+                // the body alone — the same parts, one Move more.
+                let bodied body =
+                    let colony = pileTaskColony 150 [ "a1", { X = 12; Y = 10 } ]
+
+                    { colony with
+                        Creeps = [ creepWith "a1" 0 50 body ]
+                    }
+
+                let { Assignments = heavy } =
+                    decide (bodied [ Work; Work; Carry; Move ]) Map.empty Set.empty None
+
+                Expect.equal (Map.tryFind "a1" heavy) None "more Work than Move: no Pickup"
+
+                let { Assignments = balanced } =
+                    decide (bodied [ Work; Work; Carry; Move; Move ]) Map.empty Set.empty None
+
+                Expect.equal
+                    (Map.tryFind "a1" balanced)
+                    (Some(taskId (Pickup "pile-a")))
+                    "the same body at Work <= Move picks it up"
+            }
+
+            test "a tombstone is a store: its 408 is withdrawn, and an empty one pools nothing" {
+                // The live gap's first half (#167): 408 energy standing in
+                // a tombstone in the home room while the colony dug. The
+                // Intent is the container's own — the engine's `withdraw`
+                // is one method over every store.
+                let {
+                        Intents = intents
+                        Assignments = assignments
+                    } =
+                    decide (tombColony 408 [ "h1", { X = 11; Y = 10 } ]) Map.empty Set.empty None
+
+                Expect.equal
+                    (Map.tryFind "h1" assignments)
+                    (Some(taskId (Withdraw "tomb-1")))
+                    "a store with a clock on it is drawn like any other"
+
+                Expect.contains
+                    intents
+                    (WithdrawEnergyFromStructure("h1", "tomb-1"))
+                    "and the act is withdraw, never pickup"
+
+                // The pairwise control: the same tombstone on the same
+                // tile, drawn dry.
+                let { Assignments = spent } =
+                    decide (tombColony 0 [ "h1", { X = 11; Y = 10 } ]) Map.empty Set.empty None
+
+                Expect.equal (Map.tryFind "h1" spent) None "an empty store is no Task"
+            }
+
+            test "a tombstone keeps no construction site off its tile" {
+                // Layout determinism (ADR 0011), the rule the piles already
+                // had (#167): a tombstone stands wherever a creep happened
+                // to die, and a plan that moved with it would be a function
+                // of that accident.
+                let bare = atLevel 2 (openRoom 3)
+
+                let littered =
+                    atLevel
+                        2
+                        (openRoom 3 |> withTargets [ "tomb-1", { X = 24; Y = 24 }, Tombstone ])
+
+                let placedWith = decide littered Map.empty Set.empty None
+                let placedWithout = decide bare Map.empty Set.empty None
+
+                Expect.equal
+                    (placedTiles placedWith.Intents)
+                    (placedTiles placedWithout.Intents)
+                    "the Layout does not see tombstones"
+            }
+
+            test "a pile ties a container: one tier, and only cost between them" {
+                // The tier (#167): a pile is the haul cycle's own energy
+                // lying where it fell, so it feeds on the containers' tier
+                // and the choice between the two is travel cost's. Equal
+                // cost is the way to read that off one match — a rank
+                // either way would have decided it before the price was
+                // asked, and the factor says which happened.
+                let colony =
+                    { bareRespawn with
+                        RoomEnergy = bank 150 150
+                        Sources = []
+                        Creeps = [ hauler "h1" 0 100 ]
+                        Spatial =
+                            { spatial [] crowdField with
+                                Stores = Map.ofList [ "pile-a", 150; "can-far", 400 ]
+                            }
+                            |> withTargets
+                                [
+                                    "pile-a", { X = 10; Y = 10 }, Dropped
+                                    "can-far", { X = 30; Y = 10 }, Structure BuiltKind.Container
+                                ]
+                            |> withHome (fun layer ->
+                                { layer with
+                                    CreepPositions = Map.ofList [ "h1", { X = 20; Y = 10 } ]
+                                })
+                    }
+
+                let { Verdicts = verdicts } = decide colony Map.empty Set.empty None
+
+                Expect.equal
+                    verdicts
+                    [ Verdict.Matched("h1", taskId (Withdraw "can-far"), MatchFactor.PoolOrder) ]
+                    "ten tiles either way: pool order broke the tie, not rank"
+            }
+
+            test "a pile outranks the stock underfoot" {
+                // The other half of the tier, and the one that has a rank
+                // in it (ADR 0023): the Storage is drawn a tier below the
+                // flow, so a pile sixteen tiles away beats a stock the
+                // creep is standing beside. A pile decays at a thousandth
+                // a tick and a stock does not, which is the reason the
+                // ordering is right as well as inherited.
+                let colony =
+                    { bareRespawn with
+                        RoomEnergy = bank 150 150
+                        Sources = []
+                        Refillables = [ refillable "spawn-1" 300 BuiltKind.Spawn ]
+                        Creeps = [ hauler "h1" 0 100 ]
+                        Spatial =
+                            { spatial [] crowdField with
+                                Stores = Map.ofList [ "pile-a", 300; "sto-c", 400 ]
+                            }
+                            |> withTargets
+                                [
+                                    "pile-a", { X = 30; Y = 10 }, Dropped
+                                    "sto-c", { X = 13; Y = 10 }, Structure BuiltKind.Storage
+                                ]
+                            |> withHome (fun layer ->
+                                { layer with
+                                    Obstacles = Set.singleton { X = 13; Y = 10 }
+                                    CreepPositions = Map.ofList [ "h1", { X = 14; Y = 10 } ]
+                                })
+                    }
+
+                let { Verdicts = verdicts } = decide colony Map.empty Set.empty None
+
+                Expect.equal
+                    verdicts
+                    [ Verdict.Matched("h1", taskId (Pickup "pile-a"), MatchFactor.Rank) ]
+                    "the feeding tier beats the stock draw whatever the distance"
+            }
+
+            test "an outpost's pile pools by the rule the home room's does" {
+                // The declared outpost is a room of the projection like any
+                // other (ADR 0041, ADR 0042): the pool is read off the kind
+                // census and the amount, neither of which knows a border.
+                // The home pile keeps its own coordinate and no amount, so
+                // it stays the reflex's and proves the pairing is not
+                // crossing (#166).
+                let colony =
+                    pileColony [ hauler "h-out" 0 100 ] []
+                    |> withPileRoom
+                        "W1N2"
+                        [ "pile-out", { X = 10; Y = 10 } ]
+                        [ "h-out", { X = 12; Y = 10 } ]
+
+                let snapshot =
+                    { colony with
+                        RoomEnergy = bank 150 150
+                        Spatial =
+                            { colony.Spatial with
+                                Stores = Map.ofList [ "pile-out", 150 ]
+                            }
+                    }
+
+                let {
+                        Intents = intents
+                        Assignments = assignments
+                    } =
+                    decide snapshot Map.empty Set.empty None
+
+                Expect.equal
+                    (pickersOf assignments "pile-out")
+                    [ "h-out" ]
+                    "the outpost's pile hires the hauler standing in the outpost"
+
+                Expect.contains
+                    intents
+                    (SayCreep("h-out", "🧲"))
+                    "and it walks under the Pickup glyph"
+
+                Expect.isEmpty
+                    (pickups intents)
+                    "two tiles out: no reflex, and no action Intent until it arrives"
+            }
+        ]
+
 /// The hauler quota this Snapshot decides, read off the plan memo `decide`
 /// returns — the quota's only seam, since the rule itself is private to
 /// that pipeline.
@@ -16005,8 +16426,13 @@ let reserveTests =
                         Creeps = [ reserver "r1" ]
                         Spatial =
                             { SpatialInfo.empty with
-                                TargetKinds = Map.ofList [ "cont-1", Structure BuiltKind.Container ]
-                                Stores = Map.ofList [ "cont-1", 500 ]
+                                TargetKinds =
+                                    Map.ofList
+                                        [
+                                            "cont-1", Structure BuiltKind.Container
+                                            "pile-1", Dropped
+                                        ]
+                                Stores = Map.ofList [ "cont-1", 500; "pile-1", 150 ]
                             }
                     }
                     |> withHits "road-1" BuiltKind.Road 100 5000
@@ -16019,6 +16445,7 @@ let reserveTests =
                         [
                             taskId (Harvest "src-a")
                             taskId (Withdraw "cont-1")
+                            taskId (Pickup "pile-1")
                             taskId (Refill "spawn-1")
                             taskId (Build "site-1")
                             taskId (Repair "road-1")

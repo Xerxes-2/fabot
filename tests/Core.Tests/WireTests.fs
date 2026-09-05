@@ -9,6 +9,7 @@ module Fabot.Core.Tests.WireTests
 open Expecto
 open FSharp.Reflection
 open Fabot.Core.Types
+open Fabot.Core
 
 /// The value a case's i-th field is sampled with: distinct numbers, so a
 /// vocabulary that drops a field — or rebuilds a case with two of them
@@ -204,5 +205,27 @@ let wireVocabularyTests =
                     (rejectReasonOf None "unreachable")
                     (Some RejectReason.Unreachable)
                     "a bare tag needs none, and is unaffected"
+            }
+
+            test "no two Tasks spell one task id" {
+                // The half of a Task's wire contract that exists (#167).
+                // `Task` is not one of the vocabularies above and cannot
+                // be: `taskId` is one-way — there is no `taskOf` anywhere
+                // in Core, App or the scripts — because an assignment
+                // crosses into Memory as an opaque `string -> string` map
+                // that nothing ever decodes back into a case. What *does*
+                // ride that map is the identity, and it is only an
+                // identity while it is unique: two cases spelling one id
+                // would make a creep's assignment name two different
+                // pieces of work, and anti-thrash would keep the wrong one
+                // alive. `casesOf` samples every field, so a case added
+                // without a `taskId` arm fails the compiler and one added
+                // with a copied prefix fails here.
+                let tasks = casesOf<Task> ()
+
+                Expect.equal
+                    (tasks |> Array.map Decide.taskId |> Array.distinct |> Array.length)
+                    (Array.length tasks)
+                    "Task: no two cases share a task id"
             }
         ]

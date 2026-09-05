@@ -269,9 +269,43 @@ type TargetKind =
     | Controller
     | Structure of BuiltKind
     | Site of BuiltKind
-    /// A dropped energy pile — read only by the pickup reflex, never a
-    /// Task target; projected as position and kind alone, no amount.
+    /// A dropped energy pile. Two readers now: the [[pickup reflex]],
+    /// which takes what is already at a creep's feet and reads no amount
+    /// at all, and the Pickup Task (#167), which walks a hauler to a pile
+    /// big enough to be worth the trip and reads the amount out of
+    /// `SpatialInfo.Stores` like any other store. The amount is the one
+    /// field this kind grew for the Task; the reflex is unchanged and
+    /// still asks only where a pile is.
     | Dropped
+    /// A tombstone or a ruin: a store with a clock on it. One kind for
+    /// both engine objects (#167), because the only thing any reader
+    /// decides on is that it holds energy and will be gone — a tombstone
+    /// in a hundred ticks, a ruin on its own decay — and `Withdraw` is
+    /// the verb for either. Its energy rides `SpatialInfo.Stores` beside
+    /// the containers', so the Withdraw pool, its stock cap (#161) and
+    /// its tier read it through the rules they already had.
+    ///
+    /// Never an obstacle: a tombstone stands on the tile a creep died on,
+    /// which may be a Seat or a Post, and the engine lets a creep walk
+    /// over both objects. Transient like a pile, and kept off the
+    /// Layout's ground for the same reason (`isTransient`).
+    | Tombstone
+
+/// Whether a projected target is one of the two transient kinds — a pile
+/// or a tombstone/ruin — that stand on a tile without holding it. Both
+/// vanish on their own within a few hundred ticks, so a census that let
+/// one keep a construction site off its tile would make the Layout's
+/// ordering depend on where a creep happened to die (ADR 0011's
+/// determinism). Read by `Atlas.buildableTiles`, which is the one census
+/// that walks every placed target rather than picking a kind.
+let isTransient =
+    function
+    | Dropped
+    | Tombstone -> true
+    | Source
+    | Controller
+    | Structure _
+    | Site _ -> false
 
 /// One room's geometry, filed under that room's name (ADR 0041): every
 /// container the projection keys by `Pos` or fills with `Pos`es, gathered
@@ -297,10 +331,12 @@ type RoomLayer =
         /// Seam query alone is priced off (ADR 0036, ADR 0041).
         Terrain: Map<Pos, Terrain>
         /// Target id -> that target's tile in this room: the Task targets
-        /// (source, refillable structure, construction site, controller)
-        /// and the dropped piles the pickup reflex reads, which are never
-        /// Task targets and are filtered out by kind where that matters
-        /// (`Atlas.buildableTiles`).
+        /// (source, refillable structure, construction site, controller,
+        /// and since #167 the piles and tombstones a hauler is sent to)
+        /// and the dropped piles the pickup reflex reads. The two
+        /// transient kinds are filtered out by kind where standing on a
+        /// tile is not the same as holding it (`isTransient`,
+        /// `Atlas.buildableTiles`).
         TargetPositions: Map<string, Pos>
         /// Creep name -> the tile the creep stands on in this room.
         CreepPositions: Map<string, Pos>
@@ -383,9 +419,15 @@ type SpatialInfo =
         /// (`wholeLine`), and three readers now share these hits: the
         /// Repair pool, the safe-mode reflex and the Raid log's damage.
         Hits: Map<string, HitsInfo>
-        /// Target id -> energy currently stored, on the containers (ADR
-        /// 0012) and the Storage (ADR 0023): the stock the logistics
-        /// Tasks judge a store by.
+        /// Target id -> energy currently stored: the stock the logistics
+        /// Tasks judge a store by. The containers (ADR 0012) and the
+        /// Storage (ADR 0023) are the standing stores; since #167 the two
+        /// transient ones are here on the same key — a tombstone's or a
+        /// ruin's energy, which `Withdraw` draws exactly as it draws a
+        /// container's, and a dropped pile's amount, which is what tells
+        /// the Pickup Task whether the pile is worth a walk. One table
+        /// and no second reading: a store is a store whatever will
+        /// become of the thing holding it.
         Stores: Map<string, int>
     }
 
@@ -904,7 +946,29 @@ type Task =
     /// Take stored energy out of a stocked container (ADR 0012), or out of
     /// the Storage a tier below them (ADR 0023) — the haul cycle's intake,
     /// judged over stores rather than energy's name.
+    ///
+    /// A tombstone and a ruin are stores too (#167), and this is the verb
+    /// for them: the engine's `withdraw` takes either, so the store's kind
+    /// changes nothing here — the pool reads the stock, the cap divides it
+    /// (#161) and the tier is the containers' own. What is different about
+    /// them is only that they end: a store that decays away mid-walk is
+    /// gone from the projection and releases its holder through the
+    /// task-gone path every vanished Task uses.
     | Withdraw of storeId: string
+    /// Walk to a dropped energy pile and take it (#167). The Task half of
+    /// what the [[pickup reflex]] does by hand: the reflex takes what is
+    /// already within range 1 of a creep standing somewhere for its own
+    /// reasons, and this is what sends a creep to a pile that no reflex
+    /// will ever reach — a death drop in the open, an [[anchor]]'s
+    /// overflow on a [[container]] no hauler is due at.
+    ///
+    /// Pooled on the pile's amount alone, and only from a threshold
+    /// (`pickupThreshold`), because a pile under one is not worth a
+    /// walk that the reflex would cover for free if anyone ever passed
+    /// it. Feeding tier and hauler-shaped applicability, the same as the
+    /// Withdraw beside it: which of a pile and a container an empty
+    /// carrier goes for is travel cost's call and never a rule's.
+    | Pickup of pileId: string
     | Refill of structureId: string
     | Build of siteId: string
     | Repair of structureId: string

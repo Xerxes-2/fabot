@@ -41,6 +41,16 @@ let findHostileStructures = 109
 /// Screeps `FIND_DROPPED_RESOURCES` constant.
 let findDroppedResources = 106
 
+/// Screeps `FIND_TOMBSTONES` constant: what a creep leaves behind when it
+/// dies, holding whatever it carried (#167).
+let findTombstones = 118
+
+/// Screeps `FIND_RUINS` constant: what a destroyed structure leaves
+/// behind, holding whatever stood in it. Projected as the same kind a
+/// tombstone is (`TargetKind.Tombstone`) — one store with a clock on it —
+/// because that is the whole of what a decision reads off either.
+let findRuins = 123
+
 /// Screeps `TERRAIN_MASK_WALL` constant.
 let terrainMaskWall = 1
 
@@ -133,6 +143,22 @@ type IResource =
     /// Screeps RESOURCE_* string, e.g. "energy".
     abstract resourceType: string
     abstract pos: IRoomPosition
+    /// How much of that resource the pile holds — the field the Pickup
+    /// Task's threshold and its capacity are both read off (#167). A pile
+    /// is a bare amount and not a store, which is why this is a number
+    /// here and a `getUsedCapacity` call on everything else.
+    abstract amount: int
+
+/// A tombstone or a ruin: the two engine objects that are a store with a
+/// clock on it — a dead creep's cargo, a destroyed structure's contents.
+/// One binding for both (#167), because the three fields the projection
+/// reads are the same three and Core models the pair as one kind. What
+/// draws from them is the ordinary `creep.withdraw`, which takes any store
+/// and so needs no binding of its own.
+type ITombstone =
+    abstract id: string
+    abstract pos: IRoomPosition
+    abstract store: IStore
 
 type IConstructionSite =
     abstract id: string

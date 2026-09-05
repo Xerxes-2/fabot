@@ -348,6 +348,7 @@ let taskId =
     | Repair structureId -> $"repair:{structureId}"
     | Upgrade controllerId -> $"upgrade:{controllerId}"
     | Reserve controllerId -> $"reserve:{controllerId}"
+    | Pickup pileId -> $"pickup:{pileId}"
     // One Flee for the whole colony: it has no target to be identified by,
     // and every creep inside a Reach is running from the same thing.
     | Flee -> "flee"
@@ -408,6 +409,35 @@ let private containerCapacity = 2000
 /// ever holds; the day it holds another, the Storage's free capacity has
 /// to be projected rather than inferred from one resource.
 let private storageCapacity = 1000000
+
+/// The pile a Pickup is worth walking for (#167): a dropped pile enters
+/// the pool at this many energy and never below it. A tunable beside
+/// `repairTrigger`, not part of any ADR.
+///
+/// A hundred, for what it costs against what it saves: the [[pickup
+/// reflex]] already takes every pile a creep happens to stand beside, so
+/// what this number prices is a walk made for the pile alone, and two
+/// CARRY parts' worth is the smallest load that pays for one. Under it the
+/// pile is left to decay at a thousandth a tick, or to the next creep that
+/// passes it. Not ADR 0013's rule wearing a number: that one pools a
+/// stocked source and says "no threshold cleverness" in as many words,
+/// because a drained rock cannot be worked at all. This is cleverness, and
+/// it is a tunable and not a decision for exactly that reason.
+///
+/// **A pile that falls back under the line loses its holder mid-walk**,
+/// and that is accepted rather than overlooked. The number is judged every
+/// tick against a pool rebuilt from scratch, so it is the persistence
+/// condition as well as the entry one: a pile decaying at one a tick
+/// crosses back under within `amount - 99` ticks, and the first of two
+/// hired haulers to arrive can take it under the line by itself. Either
+/// way the holders still walking are released through the ordinary
+/// task-gone path with the walk spent for nothing. The alternative is an
+/// entry condition — pool a pile some creep already holds while anything
+/// is left in it — and that costs the thing the pool is built on:
+/// `planTasks` is creep-blind, which is ADR 0013's own reason for pooling
+/// a rock whatever is standing at it. A walk is cheap and a rule that
+/// reads its own assignments back is not, so the walk is what is spent.
+let private pickupThreshold = 100
 
 /// The Reach margin (ADR 0033): the tiles a Threat's weapon range is
 /// widened by — one for the hostile's next step, one for our own tick of
@@ -661,8 +691,47 @@ let planTasks (snapshot: Snapshot) (threats: Threats) : Task list =
     let containers = idsOfKind (Structure BuiltKind.Container)
     let storages = idsOfKind (Structure BuiltKind.Storage)
 
+    // A tombstone and a ruin are stores the same way (#167), so they pool
+    // through the same line: a store with energy in it yields a Withdraw,
+    // and what will become of the thing holding it is not this pool's
+    // question. The engine's `withdraw` takes either object, and the cap
+    // (#161) and the tier are read off the stock and the kind exactly as a
+    // container's are.
+    //
+    // Where the two part is only in how they end. A container is emptied
+    // and stays; these are drawn down and then vanish — a tombstone in a
+    // hundred ticks or so whether anyone comes for it, a ruin on its own
+    // decay — so a holder halfway there loses its Task to the ordinary
+    // task-gone release the tick the projection stops carrying it (ADR
+    // 0013's shape: the Task exists exactly while its condition does).
+    // That churn is the price of the energy, and the energy is a whole
+    // Anchor's store: 408 stood in one tombstone at t140,810 while the
+    // colony dug.
+    let tombstones = idsOfKind Tombstone
+
     let withdraws =
-        containers |> List.filter (fun id -> stored id > 0) |> List.map Withdraw
+        containers @ tombstones
+        |> List.filter (fun id -> stored id > 0)
+        |> List.map Withdraw
+
+    // The piles worth walking to (#167): a dropped pile at or over
+    // `pickupThreshold` is a Feeding-tier Task, and every smaller one is
+    // left to the reflex that costs nothing.
+    //
+    // The amount and nothing else. Whether the pile is at somebody's feet
+    // already is a fact about a creep, and the Planner is creep-blind by
+    // construction (ADR 0013's own reason for pooling a drained rock): the
+    // pile a hauler is standing on is one the reflex takes this tick and
+    // the pool loses next tick, which is the same release every emptied
+    // store gets. Where both fire on one tick they spell the same creep's
+    // same act twice, and `decide` drops the second where the two lists
+    // meet rather than either producer narrowing its rule — what stays two
+    // asks is two *creeps* at one pile, which is the case the reflex
+    // deliberately lets the engine settle.
+    let pickups =
+        idsOfKind Dropped
+        |> List.filter (fun id -> stored id >= pickupThreshold)
+        |> List.map Pickup
 
     // The haul cycle's outflow: the controller container is one more
     // Refill target (ADR 0010's target layering, widened by ADR 0012).
@@ -732,6 +801,7 @@ let planTasks (snapshot: Snapshot) (threats: Threats) : Task list =
     flees
     @ harvests
     @ withdraws
+    @ pickups
     @ refills
     @ builds
     @ repairs
@@ -2526,6 +2596,14 @@ let private tooEarly (snapshot: Snapshot) atlas (creep: CreepInfo) task (walk: L
             else
                 None
     | Withdraw _
+    // A pile is workable the tick a creep reaches it and every tick
+    // before (#167). It moves — down by decay, up under an [[anchor]]
+    // spilling onto a full [[container]] — but neither direction is a
+    // restock, so there is no tick to be early *of* and nothing for this
+    // gate to compare a walk against. A pile that shrinks under the
+    // threshold before the walk ends is not earliness either: it leaves
+    // the pool, and the release is task-gone's (`pickupThreshold`).
+    | Pickup _
     | Refill _
     | Build _
     | Repair _
@@ -2545,6 +2623,7 @@ let private roomOfWork atlas task =
     match task with
     | Harvest id
     | Withdraw id
+    | Pickup id
     | Refill id
     | Build id
     | Repair id
@@ -2687,6 +2766,15 @@ let private applicable (snapshot: Snapshot) (threats: Threats) atlas (creep: Cre
         && creep.FreeCapacity > 0
         && not (Atlas.workHeavy atlas creep.Name)
         && (has Work || not (Set.contains storeId (Atlas.controllerContainers atlas)))
+    // The Withdraw gate without its one target-shaped clause (#167): a
+    // Carry part, room to put the energy, and ADR 0016's comparative gate
+    // — a Work-heavy body's intake is digging, and picking a pile up off
+    // the ground is no more its work than drawing a container is. The
+    // buffer clause has no counterpart here: ADR 0019 shuts a Work-less
+    // body out of the *controller's* container, and a pile is nobody's
+    // buffer — it is energy on the floor, and any carrier that can lift it
+    // is spending it somewhere the buffer's own drawers cannot.
+    | Pickup _ -> has Carry && creep.FreeCapacity > 0 && not (Atlas.workHeavy atlas creep.Name)
     | Refill _ -> has Carry && creep.Energy > 0
     // The one Build with a body gate on it (#157), and it is here for the
     // same reason ADR 0016's Withdraw gate is: `tierOf` below lifts this
@@ -2737,7 +2825,17 @@ let private applicable (snapshot: Snapshot) (threats: Threats) atlas (creep: Cre
 let private intentFor (creep: CreepInfo) task =
     match task with
     | Harvest sourceId -> Some(HarvestSource(creep.Name, sourceId))
+    // The same Intent for a tombstone or a ruin as for a container (#167):
+    // the engine's `withdraw` is one method over every store, so the
+    // Intent's name is the only thing that says "structure" and the
+    // Executor hands it whatever `getObjectById` answers with.
     | Withdraw storeId -> Some(WithdrawEnergyFromStructure(creep.Name, storeId))
+    // The reflex's own Intent, issued for a creep that walked (#167): one
+    // act, one vocabulary, whether the energy was underfoot already or was
+    // the reason the creep came. Which is why an arriving picker spells it
+    // twice and `decide` keeps one — this Task owns its own act, and the
+    // reflex is what gives way.
+    | Pickup pileId -> Some(PickupEnergy(creep.Name, pileId))
     | Refill structureId -> Some(TransferEnergyToStructure(creep.Name, structureId))
     | Build siteId -> Some(BuildSite(creep.Name, siteId))
     | Repair structureId -> Some(RepairStructure(creep.Name, structureId))
@@ -2751,6 +2849,7 @@ let private glyphFor =
     function
     | Harvest _ -> "⛏"
     | Withdraw _ -> "📥"
+    | Pickup _ -> "🧲"
     | Refill _ -> "🔋"
     | Build _ -> "🔨"
     | Repair _ -> "🔧"
@@ -2896,6 +2995,16 @@ let private tierOf (snapshot: Snapshot) atlas task =
             StockDraw
         else
             Feeding
+    // A pile is flow and not stock (#167): it is the haul cycle's energy
+    // lying where it fell — an Anchor's overflow, a death drop — so it
+    // feeds the colony on the tier the containers do, and which of the two
+    // an empty carrier goes for is travel cost's call. Deliberately not a
+    // tier of its own: a rank between a pile and a container would decide
+    // that before the price was ever asked, and there is no rule saying
+    // which of them should win. It is not the stock's tier either — a pile
+    // decays at a thousandth a tick, so the one store the colony must
+    // never leave standing is this one.
+    | Pickup _ -> Feeding
     | Refill structureId ->
         let isTower =
             snapshot.Refillables
@@ -3045,9 +3154,10 @@ let private outpostContainerBuilders = 2
 /// said once (`isOutpostContainerSite`), and counted at arrival like every
 /// other cap (ADR 0026).
 ///
-/// **A Withdraw is capped by its store's stock** (#161): `ceil(stored /
-/// one drawer's load)`, the number of bodies that store can actually
-/// fill. Nothing else in the pipeline says it. The matching key puts cost
+/// **A Withdraw is capped by its store's stock** (#161), **and a Pickup by
+/// its pile's** (#167): `ceil(stored / one drawer's load)`, the number of
+/// bodies that store can actually fill. Nothing else in the pipeline says
+/// it. The matching key puts cost
 /// ahead of `load` (ADR 0002), so every hauler with a free slot picks the
 /// *nearest* stocked container whatever is in it: a container holding 400
 /// draws five haulers, four come home empty, and a full one on the far
@@ -3109,7 +3219,7 @@ let private taskCapacities (snapshot: Snapshot) atlas (tasks: Task list) : Map<s
             | Reserve _ as task -> Some(taskId task, 1)
             | _ -> None)
 
-    let withdraws =
+    let draws =
         let capacity = richestCapacity snapshot
         let haulerLoad = carryCapacityOf (bodyFor haulerPattern capacity)
         let workerLoad = carryCapacityOf (workerBodyFor capacity)
@@ -3127,6 +3237,17 @@ let private taskCapacities (snapshot: Snapshot) atlas (tasks: Task list) : Map<s
                         haulerLoad
 
                 Some(taskId task, ceilDiv stock load)
+            // A pile is capped by the same arithmetic over the same table
+            // (#167): as many bodies as the energy on the ground can
+            // actually fill, and never the whole row onto one heap. The
+            // divisor is the hauler row's with no branch — ADR 0019's
+            // buffer is a container the Layout placed at the controller,
+            // and a pile is not one, so the reading that picks a row by
+            // store has one answer here.
+            | Pickup pileId as task ->
+                let amount = snapshot.Spatial.Stores |> Map.tryFind pileId |> Option.defaultValue 0
+
+                Some(taskId task, ceilDiv amount haulerLoad)
             | _ -> None)
 
     let outpostContainers =
@@ -3142,7 +3263,7 @@ let private taskCapacities (snapshot: Snapshot) atlas (tasks: Task list) : Map<s
             let each = outpostContainerBuilders / List.length sites |> max 1
             sites |> List.map (fun tid -> tid, each)
 
-    seats @ reserves @ withdraws @ outpostContainers |> Map.ofList
+    seats @ reserves @ draws @ outpostContainers |> Map.ofList
 
 /// Concurrent Work-heavy-harvester cap per Harvest task id (ADR 0024): the
 /// source's Post count, the standing room a heavy body actually has — its
@@ -3189,6 +3310,7 @@ let private actionIntents
         match task with
         | Harvest sourceId -> ticksToRestock snapshot sourceId > 0
         | Withdraw _
+        | Pickup _
         | Refill _
         | Build _
         | Repair _
@@ -4101,11 +4223,32 @@ let decide
 
     let defenseIntents = planSafeMode snapshot atlas @ planFire snapshot atlas
     let spawnIntents = planSpawns snapshot atlas threats plan.HaulerQuota
-    let pickupIntents = planPickups snapshot atlas
     let tasks = planTasks snapshot threats
     let next, verdicts = matchCreeps snapshot atlas threats tasks assignments verbose
     let assigned = assignedTasks tasks next
     let moveIntents, moveVerdicts = resolve snapshot atlas threats assigned verbose
+    let taskIntents = emit snapshot atlas threats assigned
+
+    // The reflex, less what a Task already asked for (#167). The Pickup
+    // Task's own act is a strict subset of the reflex's: both want a Carry
+    // body with room in it standing within range 1 of the pile in that
+    // pile's own room, so an arriving picker's `PickupEnergy` was going to
+    // be spelt twice — one Intent for the walk it made and one for the
+    // reflex it triggered by arriving. The engine executes a creep's
+    // second pickup over its first, so the duplicate cost nothing on the
+    // server; what it did cost is the accepted-[[intent]] count the CPU
+    // line is read off (#170), which over-reported by one per arrival.
+    //
+    // Deduplicated here rather than gated inside either producer, because
+    // neither is wrong: the reflex is deliberately creep-position-shaped
+    // and the Planner deliberately is not, and a gate in `applicable`
+    // would make Pickup the one Task whose applicability reads a position.
+    // The same reason the reflex lets two adjacent creeps both reach for
+    // one pile leaves that case alone: those are two Intents, not one
+    // spelt twice.
+    let pickupIntents =
+        planPickups snapshot atlas
+        |> List.filter (fun intent -> not (List.contains intent taskIntents))
 
     {
         Intents =
@@ -4114,7 +4257,7 @@ let decide
             @ plan.SiteIntents
             @ outpostSiteIntents
             @ pickupIntents
-            @ emit snapshot atlas threats assigned
+            @ taskIntents
             @ moveIntents
         Assignments = next
         Memo = plan

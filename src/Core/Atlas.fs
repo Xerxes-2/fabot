@@ -1271,9 +1271,12 @@ let positionOf (atlas: Atlas) (targetId: string) : Pos option =
 
 /// Tiles a construction site may occupy in the colony's own room: non-Wall
 /// terrain holding no projected target — anything standing (or being
-/// built) on a tile keeps a site off it; creeps do not, and neither does a
-/// dropped pile — a transient pile perturbing the ordering would break the
-/// Layout's determinism (ADR 0011). Deterministic (X, Y) order. The home
+/// built) on a tile keeps a site off it; creeps do not, and neither do the
+/// two transient kinds (`isTransient`) — a pile or a tombstone perturbing
+/// the ordering would break the Layout's determinism (ADR 0011), and a
+/// tombstone stands wherever a creep happened to die, which is exactly
+/// the kind of accident a plan must not be a function of (#167).
+/// Deterministic (X, Y) order. The home
 /// room and no other (ADR 0041): the Layout builds in the room it is
 /// anchored in, and a second room's tiles unioned in would offer the
 /// Layout a coordinate it does not own.
@@ -1297,7 +1300,7 @@ let buildableTiles (atlas: Atlas) : Pos list =
 
     (layerOf atlas atlas.Home).TargetPositions
     |> Map.iter (fun id tile ->
-        if Map.tryFind id atlas.Spatial.TargetKinds <> Some Dropped then
+        if not (Map.tryFind id atlas.Spatial.TargetKinds |> Option.exists isTransient) then
             taken.[indexOf tile] <- true)
 
     let mutable tiles = []
@@ -1628,11 +1631,18 @@ let targetRoom (atlas: Atlas) (targetId: string) : string option =
 /// walkable neighbours and the reserver stands beside the controller and
 /// never on it. At W12S27's `37,43` that area is two tiles, both swamp
 /// (ADR 0042) — a fact about that room's ground, not a special case here.
+///
+/// Pickup is a range-1 act like the other four, and its target is the one
+/// that is not an obstacle: a pile lies on ground a creep may stand on, so
+/// the Work Area below is that tile and its walkable neighbours — the
+/// pile's own tile included, which is where a hauler that walked the whole
+/// way for it ends up (#167).
 let private actionOn =
     function
     | Harvest id
     | Withdraw id
     | Reserve id
+    | Pickup id
     | Refill id -> Some(id, 1)
     | Build id
     | Repair id
