@@ -1013,15 +1013,18 @@ let rampartTiles (atlas: Atlas) : Set<Pos> =
 ///
 /// Ownership is a fact about the id, so it is asked of the flat hits
 /// census; the tile is a fact about the room, so it is read out of the
-/// home room's layer (ADR 0041).
-let ourRampartTiles (atlas: Atlas) : Set<Pos> =
-    let home = layerOf atlas atlas.Home
+/// named room's layer (ADR 0041) — the room a Reach is measured in, since
+/// #138 whichever room the hostile stands in, so the cover taken out of
+/// that Reach is that room's own. A room the projection does not carry
+/// holds no rampart of ours.
+let ourRampartTilesIn (atlas: Atlas) (room: string) : Set<Pos> =
+    let layer = layerOf atlas room
 
     atlas.Spatial.TargetKinds
     |> Map.toList
     |> List.choose (fun (id, kind) ->
         if kind = Structure BuiltKind.Rampart && Map.containsKey id atlas.Spatial.Hits then
-            Map.tryFind id home.TargetPositions
+            Map.tryFind id layer.TargetPositions
         else
             None)
     |> Set.ofList
@@ -1075,11 +1078,13 @@ let adjacentWalkable (atlas: Atlas) (pos: Pos) : Pos list = adjacentWalkableIn a
 /// a tile at a time: the same rules, held together the way the grid itself
 /// is (`stepCost`, and the road and obstacle precedence `ofSnapshot`
 /// spells out). The room-wide half nothing wanted until a Task's Work
-/// Area was the room itself (ADR 0033). The colony's own room: this is the
-/// Flee reflex's safe ground, and a hostile's Reach is measured in the
-/// room it stands in.
-let walkableTiles (atlas: Atlas) : Set<Pos> =
-    let weights = weightsOf atlas atlas.Home
+/// Area was the room itself (ADR 0033). The room rides on the API, as
+/// `adjacentWalkableIn`'s does: this is Flee's safe ground, and a creep
+/// runs over the ground of the room it stands in — which since #138 is
+/// whichever room a hostile's Reach is filed under, not the colony's own
+/// (ADR 0041). A room the projection does not carry has no ground.
+let walkableTilesIn (atlas: Atlas) (room: string) : Set<Pos> =
+    let weights = weightsOf atlas room
 
     Set.ofList
         [
@@ -1088,6 +1093,9 @@ let walkableTiles (atlas: Atlas) : Set<Pos> =
                     posAt index
         ]
 
+/// `walkableTilesIn` for the colony's own room.
+let walkableTiles (atlas: Atlas) : Set<Pos> = walkableTilesIn atlas atlas.Home
+
 /// The tile a creep stands on; None for a creep the projection does not
 /// place. What a judgement about where a creep *is* reads — as
 /// `positionOf` is the same question about a target — and, like it, the
@@ -1095,6 +1103,23 @@ let walkableTiles (atlas: Atlas) : Set<Pos> =
 /// the room itself (ADR 0041).
 let creepTile (atlas: Atlas) (creep: string) : Pos option =
     Map.tryFind creep atlas.CreepAt |> Option.map snd
+
+/// The room a creep stands in; None for a creep the projection does not
+/// place. The other half of `creepTile`, handed out on its own because a
+/// bare `Pos` cannot carry it (ADR 0041): what a reader holding a
+/// room-keyed fact of the colony's — a Reach, a safe set (#138) — picks
+/// its room's share with. An unplaced creep names no room, and so stands
+/// in no Reach and has no ground to run over, which is the answer ADR
+/// 0004 gives for geometry a query cannot place.
+let creepRoom (atlas: Atlas) (creep: string) : string option =
+    Map.tryFind creep atlas.CreepAt |> Option.map fst
+
+/// The room the projection files a target under; None for one it does not
+/// place. `positionOf`'s other half, as `creepRoom` is `creepTile`'s: the
+/// room a target's Work Area lies in, and so the room whose Reach is taken
+/// out of that area (#138), and the room a spawn's doorstep is read in.
+let targetRoom (atlas: Atlas) (targetId: string) : string option =
+    Map.tryFind targetId atlas.TargetAt |> Option.map fst
 
 /// What a Task acts on, and the Chebyshev range its action reaches from
 /// (Screeps: harvest, withdraw and transfer act at range 1; build, repair

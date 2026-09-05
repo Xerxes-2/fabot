@@ -265,64 +265,103 @@ let private weaponRange (hostile: HostileInfo) : int option =
 /// Reach out of every Work Area, Flee's own Work Area, and the spawn hold.
 /// Colony facts, never a change to the spatial projection: hostiles still
 /// block no tiles and price no paths, and nothing in the Atlas reads one.
+///
+/// Layered by room name, as the projection they are derived from is (ADR
+/// 0041, #138): a Reach is a set of one room's tiles, and a `Set<Pos>`
+/// cannot say which room's, so the room rides on the outer key — the
+/// room the hostile stands in, which `HostileInfo` carries for exactly
+/// this join. Without the layer a hostile in one room dug the same hole
+/// on the same coordinate of every projected room. Each reader picks its
+/// own room's share through `Threats.reachIn` and `Threats.safeIn`, and
+/// a room with no entry answers the empty set, which is ADR 0004's
+/// absence: it blocks no action and pools no Flee. So the single-room
+/// colony's answers are unchanged, and an outpost this tick projects no
+/// hostile in — `Snapshot.Hostiles` still sweeps the spawn rooms alone —
+/// is quiet by absence rather than by a second rule.
 type Threats =
     {
-        Reach: Set<Pos>
-        /// The walkable tiles no Threat reaches — Flee's Work Area. Empty
-        /// on a tick with no Reach, where it stands for "not derived"
-        /// rather than "nowhere is safe": nothing reads it there, because
-        /// the Reach that would pool a Flee is empty too.
-        Safe: Set<Pos>
+        /// Per room, the tiles a Threat standing in it can hurt. Never an
+        /// empty set under a room: a room whose whole Reach our ramparts
+        /// took back has no entry, so `Map.isEmpty` is "no Reach
+        /// anywhere" — the one question the pool asks of it.
+        Reach: Map<string, Set<Pos>>
+        /// Per room, the walkable tiles no Threat reaches — Flee's Work
+        /// Area for a creep standing there. Derived only for the rooms
+        /// with a Reach, where every other room's absence stands for "not
+        /// derived" rather than "nowhere is safe": nothing reads it there,
+        /// because a creep with no Reach around it is matched to no Flee.
+        Safe: Map<string, Set<Pos>>
     }
 
 /// The tick with nothing to run from: every Work Area stands whole and no
 /// creep flees. What the pipeline is handed for a quiet colony.
-let noThreats = { Reach = Set.empty; Safe = Set.empty }
+let noThreats = { Reach = Map.empty; Safe = Map.empty }
+
+[<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
+module Threats =
+    /// One room's Reach; empty for a room no Threat stands in (ADR 0004).
+    let reachIn (threats: Threats) (room: string) : Set<Pos> =
+        Map.tryFind room threats.Reach |> Option.defaultValue Set.empty
+
+    /// One room's safe set; empty for a room no Reach was derived in.
+    let safeIn (threats: Threats) (room: string) : Set<Pos> =
+        Map.tryFind room threats.Safe |> Option.defaultValue Set.empty
 
 /// This tick's Threats, off the Snapshot's hostiles and the rampart
-/// census. Each Threat reaches its weapon range plus the margin, in the
-/// Chebyshev tiles every range in the colony is measured in — less every
-/// tile under one of our standing ramparts, which is in no Reach at all: a
-/// creep on its own rampart cannot be attacked, and that exemption is what
-/// lets an Anchor keep digging on a ramparted Post (ADR 0034). The safe set
-/// is derived only when something is unsafe, so a quiet tick pays for no
-/// walk over the room.
+/// census, room by room. Each Threat reaches its weapon range plus the
+/// margin, in the Chebyshev tiles every range in the colony is measured
+/// in — less every tile under one of our standing ramparts in that same
+/// room, which is in no Reach at all: a creep on its own rampart cannot be
+/// attacked, and that exemption is what lets an Anchor keep digging on a
+/// ramparted Post (ADR 0034). A room's safe set is that room's walkable
+/// ground less that room's Reach, derived only where something is unsafe,
+/// so a quiet tick pays for no walk over any room, and a raid in one room
+/// walks that room alone. Derived once here and handed down; the layering
+/// does not make it once per creep.
 let threatsOf (snapshot: Snapshot) atlas : Threats =
-    // The hostiles are asked first, so a quiet room walks nothing: neither
-    // the rampart census nor the room's own tiles are read on a tick with
-    // nothing in it to run from.
+    // The hostiles are asked first, so a quiet colony walks nothing:
+    // neither the rampart census nor any room's own tiles are read on a
+    // tick with nothing in it to run from.
     match
         snapshot.Hostiles
-        |> List.choose (fun hostile -> weaponRange hostile |> Option.map (fun r -> hostile.Pos, r))
+        |> List.choose (fun hostile ->
+            weaponRange hostile |> Option.map (fun r -> hostile.RoomName, hostile.Pos, r))
     with
     | [] -> noThreats
     | threats ->
-        let ramparts = Atlas.ourRampartTiles atlas
-
         let reach =
             threats
-            |> List.collect (fun (pos, weapon) ->
-                let r = weapon + reachMargin
+            |> List.groupBy (fun (room, _, _) -> room)
+            |> List.choose (fun (room, inRoom) ->
+                let ramparts = Atlas.ourRampartTilesIn atlas room
 
-                [
-                    for x in pos.X - r .. pos.X + r do
-                        for y in pos.Y - r .. pos.Y + r do
-                            let tile = { X = x; Y = y }
+                let tiles =
+                    inRoom
+                    |> List.collect (fun (_, pos, weapon) ->
+                        let r = weapon + reachMargin
 
-                            if not (Set.contains tile ramparts) then
-                                tile
-                ])
-            |> Set.ofList
+                        [
+                            for x in pos.X - r .. pos.X + r do
+                                for y in pos.Y - r .. pos.Y + r do
+                                    let tile = { X = x; Y = y }
+
+                                    if not (Set.contains tile ramparts) then
+                                        tile
+                        ])
+                    |> Set.ofList
+
+                // Nothing left to run from once our own ramparts have taken
+                // the whole Reach back: no Reach, no entry, no safe set to
+                // derive.
+                if Set.isEmpty tiles then None else Some(room, tiles))
+            |> Map.ofList
 
         {
             Reach = reach
             Safe =
-                // Nothing left to run from once our own ramparts have taken
-                // the whole Reach back: no Reach, no safe set to derive.
-                if Set.isEmpty reach then
-                    Set.empty
-                else
-                    Set.difference (Atlas.walkableTiles atlas) reach
+                reach
+                |> Map.map (fun room tiles ->
+                    Set.difference (Atlas.walkableTilesIn atlas room) tiles)
         }
 
 /// The source container geometry (ADR 0012): a tile within range 1 of the
@@ -359,7 +398,7 @@ let planTasks (snapshot: Snapshot) (threats: Threats) : Task list =
     // colony, at the head of the pool as its Safety tier is at the head of
     // the ranking. No Reach, no Flee — a quiet tick's pool is the pool it
     // always was.
-    let flees = if Set.isEmpty threats.Reach then [] else [ Flee ]
+    let flees = if Map.isEmpty threats.Reach then [] else [ Flee ]
 
     // Harvest exists for every source, drained or not (ADR 0013, revised
     // by ADR 0025): the task no longer flickers with the source's stock,
@@ -721,16 +760,20 @@ let private planSpawns
     // into a Reach is a kill delivered, so no spawn casts anything while
     // any tile beside any spawn lies in one — the disaster fallback below
     // included, since an empty colony's first creep is the one that can
-    // least afford to be born under fire.
+    // least afford to be born under fire. The doorstep is read against the
+    // Reach of the spawn's own room (#138): a Threat on the neighbouring
+    // coordinate of another room is a room away from the birth tile.
     let doorstepInReach (s: SpawnInfo) =
-        match Atlas.positionOf atlas s.Id with
-        | Some pos ->
+        match Atlas.targetRoom atlas s.Id, Atlas.positionOf atlas s.Id with
+        | Some room, Some pos ->
+            let reach = Threats.reachIn threats room
+
             [
                 for x in pos.X - 1 .. pos.X + 1 do
                     for y in pos.Y - 1 .. pos.Y + 1 -> { X = x; Y = y }
             ]
-            |> List.exists (fun tile -> Set.contains tile threats.Reach)
-        | None -> false
+            |> List.exists (fun tile -> Set.contains tile reach)
+        | _ -> false
 
     // Asked before anything is priced, the way the reflexes ask their
     // hostiles first: a held tick derives no Workforce target and floods
@@ -1535,18 +1578,44 @@ let private tooEarly (snapshot: Snapshot) atlas (creep: CreepInfo) task (walk: L
     | Upgrade _
     | Flee -> None
 
+/// The room a Task's Work Area lies in: its target's, since the area is
+/// that target's surroundings and empty across a border (ADR 0020, ADR
+/// 0041) — so the Reach taken out of it is that room's share (#138). None
+/// for Flee, whose area is the creep's own room's, and for a target the
+/// projection does not place, whose area is empty and takes nothing.
+let private roomOfWork atlas task =
+    match task with
+    | Harvest id
+    | Withdraw id
+    | Refill id
+    | Build id
+    | Repair id
+    | Upgrade id -> Atlas.targetRoom atlas id
+    | Flee -> None
+
 /// The tiles a creep may work a Task from this tick (ADR 0033): its Work
-/// Area less the Reach — and for Flee, the safe set, an area of the
-/// colony's own rather than some target's surroundings. The Atlas's
-/// memoised Work Areas are never modified; this is a filter at the point of
-/// judgement, and a tick with no Reach hands the memo back verbatim.
+/// Area less its room's Reach — and for Flee, the safe set of the room the
+/// creep stands in, an area of the colony's own rather than some target's
+/// surroundings. Each is the share of one room (#138): a hostile a room
+/// away on the same coordinate takes no tile here. The Atlas's memoised
+/// Work Areas are never modified; this is a filter at the point of
+/// judgement, and a tick with no Reach anywhere hands the memo back
+/// verbatim.
 let private areaFor (threats: Threats) atlas creep task =
     match task with
-    | Flee -> threats.Safe
-    | _ when Set.isEmpty threats.Reach -> Atlas.workAreaFor atlas creep task
+    | Flee ->
+        Atlas.creepRoom atlas creep
+        |> Option.map (Threats.safeIn threats)
+        |> Option.defaultValue Set.empty
+    | _ when Map.isEmpty threats.Reach -> Atlas.workAreaFor atlas creep task
     | _ ->
+        let reach =
+            roomOfWork atlas task
+            |> Option.map (Threats.reachIn threats)
+            |> Option.defaultValue Set.empty
+
         Atlas.workAreaFor atlas creep task
-        |> Set.filter (fun tile -> not (Set.contains tile threats.Reach))
+        |> Set.filter (fun tile -> not (Set.contains tile reach))
 
 /// The travel cost of a Task for a creep, priced over the tiles it may
 /// actually work from this tick (ADR 0033): the safe set for Flee, which
@@ -1568,7 +1637,7 @@ let private areaFor (threats: Threats) atlas creep task =
 /// rather than through a case of its own.
 let private travelCostOf (threats: Threats) atlas (creep: string) task =
     match task with
-    | Flee -> Atlas.travelCostWithin atlas creep threats.Safe
+    | Flee -> Atlas.travelCostWithin atlas creep (areaFor threats atlas creep task)
     | _ ->
         match areaFor threats atlas creep task with
         | area when Set.isEmpty area -> Atlas.travelCost atlas creep task
@@ -1633,11 +1702,14 @@ let private applicable (threats: Threats) atlas (creep: CreepInfo) task =
     // being shot at and can run (ADR 0033). A Work-heavy body is exempt: at
     // four to seven ticks a step an Anchor leaving its Post neither escapes
     // nor digs, and the answer for the Post is a rampart (ADR 0034) — which
-    // is also why the tile under one is in no Reach.
+    // is also why the tile under one is in no Reach. The Reach it stands
+    // in is its own room's (#138): a Threat on its coordinate a room away
+    // is not shooting at it.
     | Flee ->
         not (Atlas.workHeavy atlas creep.Name)
-        && (Atlas.creepTile atlas creep.Name
-            |> Option.exists (fun tile -> Set.contains tile threats.Reach))
+        && (match Atlas.creepRoom atlas creep.Name, Atlas.creepTile atlas creep.Name with
+            | Some room, Some tile -> Set.contains tile (Threats.reachIn threats room)
+            | _ -> false)
 
 /// The action Intent a Task asks of a creep, or None for a Task with no
 /// action: Flee is movement and nothing else (ADR 0033), and the Emitter

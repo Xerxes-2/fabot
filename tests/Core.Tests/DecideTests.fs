@@ -10155,9 +10155,13 @@ let arrivalCapacityTests =
 
 /// The Reach of one tick, read at the seam its three readers share (ADR
 /// 0033) — the Threats are derived once from the Snapshot and the Atlas,
-/// and this is that derivation, not a second one.
+/// and this is that derivation, not a second one. The home room's share,
+/// since the Reach is filed by room (#138) and these colonies stand their
+/// hostiles at home.
 let reachIn snapshot =
-    (threatsOf snapshot (Atlas.ofSnapshot snapshot)).Reach
+    Threats.reachIn
+        (threatsOf snapshot (Atlas.ofSnapshot snapshot))
+        (SpatialInfo.homeName snapshot.Spatial)
 
 /// The open colony facing one hostile of the given body on the given tile.
 let facingBody pos body =
@@ -11589,5 +11593,162 @@ let outpostTests =
                     (Outpost.roomsProjected [ { north with RoomName = "W12S28" } ] "W12S28")
                     [ "W12S28" ]
                     "a room declared twice is scanned once"
+            }
+        ]
+
+/// The ticket's reproduction (#138): the home corridor with `src-home`
+/// midway down it and one worker above, and the outpost's corridor with
+/// `src-out` near its foot and one worker two tiles short of it. Two rooms
+/// whose corridors share a column, so every coordinate the outpost's
+/// worker stands on is a coordinate the home room could hold a hostile at
+/// — the shape a Reach filed without its room would collapse.
+let private twoRoomColony (hostiles: HostileInfo list) =
+    let colony =
+        northBorderColony { X = 10; Y = 20 }
+        |> withNorthOutpost (Some { X = 10; Y = 47 })
+
+    { colony with
+        Creeps = [ worker "wh" 0 50; worker "wo" 0 50 ]
+        Hostiles = hostiles
+        Spatial =
+            colony.Spatial
+            |> withHome (fun layer ->
+                { layer with
+                    CreepPositions = Map.ofList [ "wh", { X = 10; Y = 10 } ]
+                })
+            |> withNeighbour
+                "W1N2"
+                { RoomLayer.empty with
+                    Terrain = Map.ofList (corridor 10 40 48)
+                    TargetPositions = Map.ofList [ "src-out", { X = 10; Y = 47 } ]
+                    CreepPositions = Map.ofList [ "wo", { X = 10; Y = 45 } ]
+                }
+    }
+
+/// A hostile filed under the room it stands in — the field `facing`
+/// stamps with the home name, set by hand here because these fixtures
+/// put a hostile in either room (ADR 0041).
+let private hostileIn room pos body =
+    { hostileAt "h-1" pos body with
+        RoomName = room
+    }
+
+[<Tests>]
+let layeredThreatTests =
+    testList
+        "threats by room"
+        [
+            // The Reach follows the projection's layering (#138, ADR 0041):
+            // a hostile's `RoomName` is what its Reach is filed under, and
+            // each creep is judged against its own room's share. A room
+            // with no entry has an empty Reach, which blocks nothing (ADR
+            // 0004) — so the quiet tick is the yardstick every case below
+            // is measured against, byte for byte.
+            test "a home Threat digs no hole in the outpost: the coordinate is another room's" {
+                // The ticket's trace: one melee hostile at (10,45) in W1N1, a
+                // tile the home corridor does not even cover, shares its
+                // coordinate with the outpost's worker fifty tiles and a
+                // border away. Before #138 that worker dropped its source
+                // and fled.
+                let quiet = twoRoomColony []
+
+                Expect.equal
+                    (let _, assignments, _ = outcomeOf quiet in Map.toList assignments)
+                    [ "wh", taskId (Harvest "src-home"); "wo", taskId (Harvest "src-out") ]
+                    "each worker digs the source of its own room"
+
+                let raided = twoRoomColony [ hostileIn "W1N1" { X = 10; Y = 45 } [ Attack; Move ] ]
+
+                Expect.equal
+                    (outcomeOf raided)
+                    (outcomeOf quiet)
+                    "a Reach in the home room reaches no tile of the outpost"
+            }
+
+            test "and the mirror: an outpost Threat digs no hole at home" {
+                // The same hostile filed under W1N2, on the coordinate the
+                // home worker stands on — pairwise with the case above,
+                // because a Reach collapsed onto one set would fail both
+                // and a Reach keyed on the home room alone would pass one.
+                let quiet = twoRoomColony []
+
+                let raided = twoRoomColony [ hostileIn "W1N2" { X = 10; Y = 10 } [ Attack; Move ] ]
+
+                Expect.equal
+                    (outcomeOf raided)
+                    (outcomeOf quiet)
+                    "a Reach in the outpost reaches no tile of the home room"
+            }
+
+            test "an outpost creep flees over its own room's ground, and the home creep works on" {
+                // A ranged hostile at (10,42) in W1N2 reaches y 37..47 of
+                // that room: the outpost's worker at (10,45) is inside, and
+                // the only safe ground its room has left is (10,48), below
+                // it. Its Safe set is its own room's walkable ground less
+                // that Reach — were it the home room's, as it was before
+                // #138, every safe tile would lie in a room the creep's
+                // flood cannot enter, and Flee would be priced unreachable.
+                let intents, assignments, _ =
+                    outcomeOf (
+                        twoRoomColony [ hostileIn "W1N2" { X = 10; Y = 42 } [ RangedAttack; Move ] ]
+                    )
+
+                Expect.equal
+                    (Map.toList assignments)
+                    [ "wh", taskId (Harvest "src-home"); "wo", taskId Flee ]
+                    "the outpost worker flees; the home worker keeps its dig"
+
+                Expect.equal
+                    (moveIntentsFor "wo" intents)
+                    [ MoveCreep("wo", Bottom) ]
+                    "and runs down its own corridor to the one tile its room has outside the Reach"
+
+                Expect.equal
+                    (moveIntentsFor "wh" intents)
+                    [ MoveCreep("wh", Bottom) ]
+                    "while the home worker walks to its source as on a quiet tick"
+            }
+
+            test
+                "the spawn hold reads the spawn's own room: an outpost Threat beside its coordinate holds nothing" {
+                // ADR 0033's hold, pairwise: the same hostile on the same
+                // coordinate beside the spawn, first filed under the
+                // outpost, then under the home room.
+                let room =
+                    atLevel 2 (openRoom 6)
+                    |> withOutpost
+                        "W1N2"
+                        []
+                        [
+                            for x in 20..30 do
+                                for y in 20..30 -> { X = x; Y = y }, Plain
+                        ]
+
+                let colony =
+                    { room with
+                        Creeps = [ worker "w1" 0 100 ]
+                        Spatial =
+                            room.Spatial
+                            |> withHome (fun layer ->
+                                { layer with
+                                    CreepPositions = Map.ofList [ "w1", { X = 25; Y = 27 } ]
+                                })
+                    }
+
+                let castsWith hostiles =
+                    let { Intents = intents } =
+                        decide { colony with Hostiles = hostiles } Map.empty Set.empty None
+
+                    spawnIntents intents
+
+                Expect.isNonEmpty (castsWith []) "a quiet colony casts its deficit"
+
+                Expect.isNonEmpty
+                    (castsWith [ hostileIn "W1N2" { X = 25; Y = 29 } [ Attack; Move ] ])
+                    "a Threat in the outpost holds no spawn at home"
+
+                Expect.isEmpty
+                    (castsWith [ hostileIn "W1N1" { X = 25; Y = 29 } [ Attack; Move ] ])
+                    "the same Threat at home holds it"
             }
         ]
