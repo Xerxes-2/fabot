@@ -145,6 +145,17 @@ type Atlas =
             /// the Seat (ADR 0001), so the Seat query cannot read the
             /// walking grid and cannot afford to read the layer a `Pos` at
             /// a time either (#173).
+            ///
+            /// The Layout's three ground readers price off it too (#177):
+            /// a construction site's tile is terrain that holds nothing
+            /// (`buildableTiles`), a swamp under a road is still swamp
+            /// (`isSwamp`), and a trunk is priced over the ground before
+            /// any road discounts it (`trunkPath`, which lays the obstacle
+            /// pass back on for itself). Two of them sweep the whole room
+            /// on a census tick, which is what the grid is for; `isSwamp`
+            /// reads it a tile at a time through `weightAt`, for the
+            /// reason every single-tile query does since #173 — an index
+            /// rather than a `Pos` compared down a tree.
             Ground: Map<string, int[]>
             /// Terrain weight per tile index of each room's border ring —
             /// the exit rows and columns the layers' ground deliberately
@@ -1137,9 +1148,11 @@ let ofSnapshot (snapshot: Snapshot) : Atlas =
 /// The rule itself is `SpatialInfo.layerOf`'s, spelled once there and
 /// reached from here with the Atlas's own projection, so the tick that
 /// changes what a room with no entry answers there is the tick these
-/// eight call sites change with it — eight and not fourteen since #173,
-/// the tile-at-a-time readers having moved onto the grids, where the same
-/// absence is the same all-impassable answer (`noGround`).
+/// seven call sites change with it — seven and not fourteen since #173 and
+/// #177, the tile-at-a-time readers and the Layout's whole-room ground
+/// scans having moved onto the grids, where the same absence is the same
+/// all-impassable answer (`noGround`). What is left reads a layer's
+/// *placements* rather than its ground, which no grid holds.
 let private layerOf (atlas: Atlas) (room: string) : RoomLayer =
     SpatialInfo.layerOf atlas.Spatial room
 
@@ -1264,23 +1277,36 @@ let positionOf (atlas: Atlas) (targetId: string) : Pos option =
 /// room and no other (ADR 0041): the Layout builds in the room it is
 /// anchored in, and a second room's tiles unioned in would offer the
 /// Layout a coordinate it does not own.
+///
+/// Scanned off the raw ground grid rather than off the terrain layer a
+/// `Pos` at a time (#177): the Layout asks for this whole list on every
+/// census tick, and the layer form compared a `Pos` down a tree once to
+/// read each of two and a half thousand tiles and again to test it against
+/// the taken set. The scan runs the grid's flat index, which is
+/// `x * roomSide + y` — the very (X, Y) order the layer's key order gave,
+/// so the list comes out tile for tile as it did and ADR 0011's
+/// determinism is untouched. Built by consing down from the last index so
+/// the result is a list and never a Fable sequence.
 let buildableTiles (atlas: Atlas) : Pos list =
-    let home = layerOf atlas atlas.Home
+    let ground = groundOf atlas atlas.Home
 
-    let taken =
-        home.TargetPositions
-        |> Map.toList
-        |> List.filter (fun (id, _) -> Map.tryFind id atlas.Spatial.TargetKinds <> Some Dropped)
-        |> List.map snd
-        |> Set.ofList
+    // A grid rather than a `Set<Pos>` for the same reason the scan is one:
+    // it is asked about every tile of the room. Which targets stand on a
+    // tile and which do not is the rule above, unchanged.
+    let taken = Array.create tileCount false
 
-    home.Terrain
-    |> Map.toList
-    |> List.choose (fun (tile, terrain) ->
-        if terrain <> Wall && not (Set.contains tile taken) then
-            Some tile
-        else
-            None)
+    (layerOf atlas atlas.Home).TargetPositions
+    |> Map.iter (fun id tile ->
+        if Map.tryFind id atlas.Spatial.TargetKinds <> Some Dropped then
+            taken.[indexOf tile] <- true)
+
+    let mutable tiles = []
+
+    for index = tileCount - 1 downto 0 do
+        if at index ground >= 0 && not (flagAt index taken) then
+            tiles <- posAt index :: tiles
+
+    tiles
 
 /// Ids of the projected targets of one kind, in id order — across every
 /// room the projection carries. The kind census is not layered and does
@@ -1511,8 +1537,14 @@ let linkTiles (atlas: Atlas) : Set<Pos> =
 /// not. Of the colony's own room, because a bare `Pos` names no room
 /// (ADR 0041) and this query's readers — the Layout's road plan — work at
 /// home.
+///
+/// Read off the raw ground grid and not the walking one (#177): swamp is
+/// what the terrain is, so a road laid over it must not answer plain, and
+/// the ground grid is the terrain with neither overriding pass on it. The
+/// Layout asks this once per tile of the Upgrade Work Area on every census
+/// tick, which was that many `Pos` comparisons down a tree (#173).
 let isSwamp (atlas: Atlas) (tile: Pos) : bool =
-    Map.tryFind tile (layerOf atlas atlas.Home).Terrain = Some Swamp
+    weightAt (groundOf atlas atlas.Home) tile = swampWeight
 
 /// Walkable tiles adjacent to `pos` read as a tile of `room`, in
 /// deterministic (X, Y) order. Standing respects obstacles, unlike Seat
@@ -3165,13 +3197,34 @@ let castWalkTicks
 /// colony's own room's raw terrain: a trunk is a road the Layout plans,
 /// and the Layout plans at home (ADR 0041).
 let trunkPath (atlas: Atlas) (avoid: Set<Pos>) (origin: Pos) (goals: Set<Pos>) : Pos list =
-    let weights = Array.create tileCount -1
-    let home = layerOf atlas atlas.Home
+    // Raw terrain is the *price*, never what blocks: the trunk starts from
+    // the ground grid — plain 2, swamp 10, wall -1, and no road discount,
+    // which is the walking grid's one disqualifying difference — and then
+    // takes the obstacle pass back off the layer, because a rampart or a
+    // spawn standing in the line is as impassable to a planned road as a
+    // wall (ADR 0011). Marked from `Obstacles` rather than inferred from
+    // the walking grid's -1: the set is a few dozen tiles against the
+    // grid's two and a half thousand, and it is the rule itself rather
+    // than a reading of a grid that has already applied it.
+    //
+    // A copy off the grid and not a fresh pass over the terrain layer
+    // (#177): the layer form iterated every tile of the room and tested
+    // two `Set<Pos>` membership trees at each, three structural
+    // comparisons a tile per trunk, and the Layout plans one trunk per
+    // source per goal on every census tick.
+    let weights = Array.copy (groundOf atlas atlas.Home)
 
-    home.Terrain
-    |> Map.iter (fun tile terrain ->
-        if not (Set.contains tile home.Obstacles) && not (Set.contains tile avoid) then
-            weights.[indexOf tile] <- terrainWeight terrain)
+    (layerOf atlas atlas.Home).Obstacles
+    |> Set.iter (fun tile -> weights.[indexOf tile] <- -1)
+
+    // Through the grid's guard, unlike the pass above: `avoid` is the
+    // Layout's own reservation set rather than the projection's geometry,
+    // and `indexOf` checks nothing (#173) — so a tile off the
+    // fifty-by-fifty reserves nothing instead of indexing off the array.
+    avoid
+    |> Set.iter (fun tile ->
+        if inGrid tile then
+            weights.[indexOf tile] <- -1)
 
     let dist, parents =
         floodFrom weights noTraffic (stepTable (stepUnits planningFactor)) origin

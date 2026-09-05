@@ -446,6 +446,140 @@ let placementQueryTests =
                     "free plain and swamp tiles only, sorted by (X, Y)"
             }
 
+            test "buildableTiles orders by X before Y, not by Y before X" {
+                // The (X, Y) order is this query's own contract — the key
+                // order the terrain layer's `Map<Pos, _>` gave before #177,
+                // which the grid's `x * roomSide + y` index reproduces. No
+                // Layout consumer leans on it: `planLayout`'s ordering
+                // re-sorts on `(range, X, Y)` and the footing candidates go
+                // through a set, so ADR 0011's determinism downstream is
+                // carried by those and this pins the contract itself. Two
+                // tiles the two orders disagree about, which the
+                // neighbouring pairs above cannot tell apart.
+                let atlas =
+                    spatial [] [ { X = 11; Y = 9 }, Plain; { X = 10; Y = 12 }, Plain ]
+                    |> snapshotWith []
+                    |> ofSnapshot
+
+                Expect.equal
+                    (buildableTiles atlas)
+                    [ { X = 10; Y = 12 }; { X = 11; Y = 9 } ]
+                    "the lower X comes first though its Y is higher"
+            }
+
+            test "buildableTiles scans the home room's ground and nothing else's" {
+                // The Layout builds where it is anchored (ADR 0041), and a
+                // grid is chosen by room name before any tile is read, so
+                // the name has to be `Home` and not whichever room the
+                // projection files first. The outpost is named to sort
+                // before home and offers tiles home has not got.
+                let atlas =
+                    { SpatialInfo.empty with
+                        RoomName = Some "W2N2"
+                    }
+                    |> withHome (fun layer ->
+                        { layer with
+                            Terrain =
+                                Map.ofList [ { X = 10; Y = 10 }, Plain; { X = 10; Y = 11 }, Swamp ]
+                        })
+                    |> fun projection ->
+                        { projection with
+                            Rooms =
+                                Map.add
+                                    "W1N1"
+                                    { RoomLayer.empty with
+                                        Terrain = Map.ofList [ { X = 20; Y = 20 }, Plain ]
+                                    }
+                                    projection.Rooms
+                        }
+                    |> snapshotWith []
+                    |> ofSnapshot
+
+                Expect.equal
+                    (buildableTiles atlas)
+                    [ { X = 10; Y = 10 }; { X = 10; Y = 11 } ]
+                    "home's two tiles, and never the other room's coordinate"
+            }
+
+            test "isSwamp reads the home room's ground and nothing else's" {
+                // The Layout's road plan asks it per tile of the Upgrade
+                // Work Area; every answer that is not "swamp here" is one
+                // answer (ADR 0004). A bare `Pos` names no room (ADR 0041),
+                // so the room has to come from `Home` and not from whichever
+                // room the projection happens to file first: the outpost
+                // here is named to sort *before* home and contradicts it on
+                // both tiles the two share.
+                let atlas =
+                    { SpatialInfo.empty with
+                        RoomName = Some "W2N2"
+                    }
+                    |> withHome (fun layer ->
+                        { layer with
+                            Terrain =
+                                Map.ofList
+                                    [
+                                        { X = 10; Y = 10 }, Swamp
+                                        { X = 10; Y = 11 }, Plain
+                                        { X = 10; Y = 12 }, Wall
+                                    ]
+                        })
+                    |> fun projection ->
+                        { projection with
+                            Rooms =
+                                Map.add
+                                    "W1N1"
+                                    { RoomLayer.empty with
+                                        Terrain =
+                                            Map.ofList
+                                                [
+                                                    { X = 10; Y = 10 }, Plain
+                                                    { X = 10; Y = 11 }, Swamp
+                                                    { X = 30; Y = 30 }, Swamp
+                                                ]
+                                    }
+                                    projection.Rooms
+                        }
+                    |> snapshotWith []
+                    |> ofSnapshot
+
+                Expect.isTrue
+                    (isSwamp atlas { X = 10; Y = 10 })
+                    "swamp terrain is swamp, though the other room calls the coordinate plain"
+
+                Expect.isFalse
+                    (isSwamp atlas { X = 10; Y = 11 })
+                    "plain is not, though the other room calls the coordinate swamp"
+
+                Expect.isFalse (isSwamp atlas { X = 10; Y = 12 }) "wall is not"
+
+                Expect.isFalse
+                    (isSwamp atlas { X = 30; Y = 30 })
+                    "a tile home's layer does not carry is not swamp, whatever the outpost's is"
+
+                Expect.isFalse
+                    (isSwamp atlas { X = -1; Y = 10 })
+                    "nor is a tile off the fifty-by-fifty"
+            }
+
+            test "a swamp under a road is still swamp: isSwamp reads terrain, not the walking price" {
+                // The road pass discounts the walking grid to 1; the Layout
+                // plans its swamp roads off the ground under them, so a
+                // paved swamp must still read as swamp or the plan would
+                // stop maintaining the road it just built (ADR 0011).
+                let atlas =
+                    spatial [] [ { X = 10; Y = 10 }, Swamp ]
+                    |> withHome (fun layer ->
+                        { layer with
+                            Roads = Set.singleton { X = 10; Y = 10 }
+                        })
+                    |> snapshotWith []
+                    |> ofSnapshot
+
+                Expect.isTrue
+                    (isSwamp atlas { X = 10; Y = 10 })
+                    "the road does not pave the ground away"
+            }
+
             test
                 "droppedEnergyIn lists a room's placed piles in id order; buildableTiles ignores them" {
                 // A pile is a target the reflex reads, not a thing standing
@@ -2318,6 +2452,95 @@ let trunkPathTests =
                     "the swamp is dodged though its road would be cheap to walk"
 
                 Expect.equal (List.last path) { X = 14; Y = 10 } "the goal is still reached"
+            }
+
+            test "an obstacle structure is impassable, and no road on it makes it passable" {
+                // The trunk prices raw terrain, but "raw" is about the
+                // *price* and never about what blocks: a rampart or a spawn
+                // standing in the corridor is as impassable to a planned
+                // road as a wall (ADR 0011). On (12, 9) and not on the
+                // straight line through (12, 10): the flood's heap breaks
+                // its ties towards the lower index, so it walks the y = 9
+                // row of its own accord and an obstacle parked on (12, 10)
+                // proves nothing. Roaded too, against the other start the
+                // ticket floated — copying the *walking* grid and undoing
+                // the road discount, which would hand a roaded obstacle its
+                // terrain price back.
+                let atlas =
+                    corridor
+                    |> withHome (fun layer ->
+                        { layer with
+                            Obstacles = Set.singleton { X = 12; Y = 9 }
+                            Roads = Set.singleton { X = 12; Y = 9 }
+                        })
+                    |> snapshotWith []
+                    |> ofSnapshot
+
+                let path =
+                    trunkPath atlas Set.empty { X = 10; Y = 10 } (Set.singleton { X = 14; Y = 10 })
+
+                Expect.isFalse
+                    (List.contains { X = 12; Y = 9 } path)
+                    "the obstacle is never paved through"
+
+                Expect.equal (List.last path) { X = 14; Y = 10 } "the goal is still reached"
+                Expect.hasLength path 4 "the detour is a same-length diagonal"
+            }
+
+            test "the trunk is priced off the home room's ground and nothing else's" {
+                // A trunk is a road the Layout plans, and the Layout plans
+                // at home (ADR 0041) — so the grid the copy starts from is
+                // chosen by `Home` and not by whichever room the projection
+                // files first. The outpost sorts before home and walls off
+                // every tile of home's corridor, so a copy off the wrong
+                // room reaches nothing at all.
+                let atlas =
+                    { SpatialInfo.empty with
+                        RoomName = Some "W2N2"
+                    }
+                    |> withHome (fun layer ->
+                        { layer with
+                            Terrain =
+                                Map.ofList
+                                    [
+                                        yield { X = 10; Y = 10 }, Wall
+                                        for x in 11..14 do
+                                            yield { X = x; Y = 10 }, Plain
+                                    ]
+                        })
+                    |> fun projection ->
+                        { projection with
+                            Rooms = Map.add "W1N1" RoomLayer.empty projection.Rooms
+                        }
+                    |> snapshotWith []
+                    |> ofSnapshot
+
+                Expect.equal
+                    (trunkPath atlas Set.empty { X = 10; Y = 10 } (Set.singleton { X = 14; Y = 10 }))
+                    [
+                        { X = 11; Y = 10 }
+                        { X = 12; Y = 10 }
+                        { X = 13; Y = 10 }
+                        { X = 14; Y = 10 }
+                    ]
+                    "home's corridor is paved, though the room filed first has no ground at all"
+            }
+
+            test "an avoided tile off the fifty-by-fifty marks nothing" {
+                // The Layout hands its reservations in as bare tiles and the
+                // grid index does no checking of its own (#173), so a tile
+                // outside the room has to fall out before it is marked
+                // rather than index off the end of the grid.
+                let atlas = corridor |> snapshotWith [] |> ofSnapshot
+
+                Expect.equal
+                    (trunkPath
+                        atlas
+                        (Set.ofList [ { X = -1; Y = 10 }; { X = 50; Y = 10 }; { X = 12; Y = -1 } ])
+                        { X = 10; Y = 10 }
+                        (Set.singleton { X = 14; Y = 10 }))
+                    (trunkPath atlas Set.empty { X = 10; Y = 10 } (Set.singleton { X = 14; Y = 10 }))
+                    "an off-grid reservation reserves nothing and breaks nothing"
             }
 
             test "unreachable goals pave nothing" {
