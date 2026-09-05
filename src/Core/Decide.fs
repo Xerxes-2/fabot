@@ -1897,6 +1897,13 @@ let emit (snapshot: Snapshot) atlas (threats: Threats) (assigned: Map<string, Ta
 /// A creep's Move Intent: candidate standing tiles for next tick in
 /// preference order, plus a priority (the task rank). Input to the
 /// Resolver — not an Intent; the Resolver's output is what becomes one.
+///
+/// Standing tiles but one (#142): a creep walked at a Seam is given the
+/// exit tile itself as its last step, and that is a destination rather
+/// than a place to stand — the engine moves a creep off a border tile at
+/// the end of the tick, which is why no Seat, Work Area or standing
+/// candidate query will ever name one. It is a tile of this room, so the
+/// arbitration below settles it exactly as it settles ground.
 type private MoveIntent =
     {
         Creep: string
@@ -1919,6 +1926,16 @@ let private idleRank = System.Int32.MaxValue
 /// (`Atlas.adjacentWalkable`), which costs nothing to be sure of: every
 /// creep reaching this is one the Resolver placed, and the Resolver
 /// arbitrates the home room alone (ADR 0041).
+///
+/// The Task goes to `Atlas.firstStep` beside the area, and that is what
+/// gives a creep matched across a border somewhere to walk (#142): its
+/// Work Area is empty here by construction — the standing tiles are the
+/// neighbour's and a `Set<Pos>` cannot say so — so without the Task this
+/// creep would park on a Task it was priced for and never move, holding it
+/// against anti-thrash for the rest of its life. The step it gets back is
+/// the near side of the Seam the price won at, which is a tile of this
+/// creep's own room, so arbitration is handed nothing it could not already
+/// arbitrate.
 let private moveIntentFor
     (rankOf: Task -> int)
     (threats: Threats)
@@ -1954,7 +1971,7 @@ let private moveIntentFor
                         |> List.filter (fun tile -> Set.contains tile area))
             }
         else
-            match Atlas.firstStep atlas creep area with
+            match Atlas.firstStep atlas creep task area with
             | Some step ->
                 {
                     Creep = creep
@@ -2096,9 +2113,23 @@ let private directionTo (from: Pos) (dest: Pos) : Direction option =
 /// creeps unioned in would collapse two creeps standing on one coordinate
 /// of two rooms into one occupant and let a fatigued outpost creep
 /// pre-claim a home tile — deleting a home creep's `MoveCreep` outright.
-/// `Atlas.placedCreeps` answers home for exactly that reason, so an
-/// outpost creep is registered nowhere and moves nowhere; giving it a
-/// mover is the cross-room walk's business (#123), not the Resolver's.
+/// `Atlas.placedCreeps` answers home for exactly that reason.
+///
+/// What crosses the Seam is the *destination*, never the arbitration
+/// (#142): a creep standing at home and matched to an outpost's Task is
+/// arbitrated here like any other, over a step that is a tile of this room
+/// — the near side of the Seam it was priced at — and the engine puts it
+/// down in the neighbour at the end of that tick.
+///
+/// From that tick on it is registered here nowhere: no Move Intent, no
+/// `MoveCreep`, so it stands where it landed holding its Task, and the
+/// step the Atlas has for it is never asked for. The room filter is ADR
+/// 0041's boundary and #142 kept it deliberately. The *consequence* is a
+/// gap and is written down rather than assumed away: walking a creep on
+/// once it is over the border is a second arbitration, per room, which is
+/// its own issue — and filling the outpost constants puts it on the
+/// server, so that is what #126 must wait on. `DecideTests` asserts this
+/// state at the seam rather than leaving it to be discovered.
 let resolve
     (snapshot: Snapshot)
     atlas
@@ -2155,7 +2186,10 @@ let resolve
     let rerouted name task =
         let area = areaFor threats atlas name task
 
-        match Atlas.firstStep atlas name area, Atlas.firstStepIgnoringTraffic atlas name area with
+        match
+            Atlas.firstStep atlas name task area,
+            Atlas.firstStepIgnoringTraffic atlas name task area
+        with
         | Some priced, Some blind -> priced <> blind
         | _ -> false
 

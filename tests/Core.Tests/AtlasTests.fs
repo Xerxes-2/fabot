@@ -85,6 +85,18 @@ let spatial targets tiles =
 let mayActFor atlas creep task =
     mayAct atlas creep task (workAreaFor atlas creep task)
 
+/// `firstStep` over a Task's own Work Area, the same tick the mover sees:
+/// the Task rides beside the tiles since #142, because a target in the
+/// neighbouring room leaves the creep-aware area empty and the step is then
+/// the Seam's near side.
+let firstStepFor atlas creep task =
+    firstStep atlas creep task (workAreaFor atlas creep task)
+
+/// The traffic-blind route over the same area — the half the reroute
+/// attribution compares against (ADR 0008, ADR 0018).
+let firstStepBlindFor atlas creep task =
+    firstStepIgnoringTraffic atlas creep task (workAreaFor atlas creep task)
+
 [<Tests>]
 let workAreaTests =
     testList
@@ -1119,7 +1131,7 @@ let firstStepTests =
                     |> ofSnapshot
 
                 Expect.equal
-                    (firstStep atlas "w" (workAreaFor atlas "w" (Harvest "src-a")))
+                    (firstStepFor atlas "w" (Harvest "src-a"))
                     (Some { X = 11; Y = 13 })
                     "the step leaves the swamp lane for the plain one"
             }
@@ -1150,7 +1162,7 @@ let firstStepTests =
                     |> ofSnapshot
 
                 Expect.equal
-                    (firstStep atlas "w" (workAreaFor atlas "w" (Harvest "src-a")))
+                    (firstStepFor atlas "w" (Harvest "src-a"))
                     (Some { X = 11; Y = 13 })
                     "the step leaves the parked creep's lane for the free one"
             }
@@ -1161,10 +1173,7 @@ let firstStepTests =
                     |> snapshotWith [ worker "w" ]
                     |> ofSnapshot
 
-                Expect.equal
-                    (firstStep atlas "w" (workAreaFor atlas "w" (Harvest "src-a")))
-                    None
-                    "already there"
+                Expect.equal (firstStepFor atlas "w" (Harvest "src-a")) None "already there"
             }
 
             test "an unreachable Work Area yields no step: waiting beats marching at a wall" {
@@ -1179,19 +1188,13 @@ let firstStepTests =
                     |> snapshotWith [ worker "w" ]
                     |> ofSnapshot
 
-                Expect.equal
-                    (firstStep atlas "w" (workAreaFor atlas "w" (Harvest "src-a")))
-                    None
-                    "no path, no step"
+                Expect.equal (firstStepFor atlas "w" (Harvest "src-a")) None "no path, no step"
             }
 
             test "an unplaced creep has no step: no movement without geometry" {
                 let atlas = corridor [] |> snapshotWith [ worker "w" ] |> ofSnapshot
 
-                Expect.equal
-                    (firstStep atlas "w" (workAreaFor atlas "w" (Harvest "src-a")))
-                    None
-                    "nothing derivable"
+                Expect.equal (firstStepFor atlas "w" (Harvest "src-a")) None "nothing derivable"
             }
         ]
 
@@ -1228,12 +1231,12 @@ let firstStepIgnoringTrafficTests =
                     |> ofSnapshot
 
                 Expect.equal
-                    (firstStep atlas "w" (workAreaFor atlas "w" (Harvest "src-a")))
+                    (firstStepFor atlas "w" (Harvest "src-a"))
                     (Some { X = 11; Y = 13 })
                     "the priced step leaves the parked creep's lane"
 
                 Expect.equal
-                    (firstStepIgnoringTraffic atlas "w" (workAreaFor atlas "w" (Harvest "src-a")))
+                    (firstStepBlindFor atlas "w" (Harvest "src-a"))
                     (Some { X = 10; Y = 13 })
                     "the blind step holds the lane: the detour is the surcharge's doing"
             }
@@ -1284,12 +1287,12 @@ let firstStepIgnoringTrafficTests =
                     "two plain steps beat three road ones in whole ticks"
 
                 Expect.equal
-                    (firstStepIgnoringTraffic atlas "w" (workAreaFor atlas "w" (Harvest "src-a")))
-                    (firstStep atlas "w" (workAreaFor atlas "w" (Harvest "src-a")))
+                    (firstStepBlindFor atlas "w" (Harvest "src-a"))
+                    (firstStepFor atlas "w" (Harvest "src-a"))
                     "empty ground: the blind route is the priced one, down the paved lane"
 
                 Expect.equal
-                    (firstStepIgnoringTraffic atlas "w" (workAreaFor atlas "w" (Harvest "src-a")))
+                    (firstStepBlindFor atlas "w" (Harvest "src-a"))
                     (Some { X = 13; Y = 9 })
                     "the road lane, not the whole-tick lane at (12,11)"
             }
@@ -1450,7 +1453,7 @@ let workAreaForTests =
                     "standing on a plain Seat is no longer standing in the area"
 
                 Expect.equal
-                    (firstStep atlas "a" (workAreaFor atlas "a" (Harvest "src-a")))
+                    (firstStepFor atlas "a" (Harvest "src-a"))
                     (Some { X = 9; Y = 10 })
                     "the step goes to a Post — equally cheap, lowest tile wins"
             }
@@ -1858,7 +1861,7 @@ let consistencyTests =
 
                     let area = workArea atlas task
                     let cost = travelCost atlas "w" task
-                    let step = firstStep atlas "w" area
+                    let step = firstStep atlas "w" task area
 
                     if Set.contains pos area then
                         Expect.equal cost (Some 0) $"inside the Work Area costs 0 at {pos}"
@@ -2809,12 +2812,12 @@ let roomTests =
                     "five plain steps down the other room's, priced off the other room's ground"
 
                 Expect.equal
-                    (firstStep atlas "w-home" (workArea atlas (Harvest "src-home")))
+                    (firstStepFor atlas "w-home" (Harvest "src-home"))
                     (Some { X = 10; Y = 11 })
                     "and the route each one walks is its own room's, predecessors and all"
 
                 Expect.equal
-                    (firstStep atlas "w-out" (workArea atlas (Harvest "src-out")))
+                    (firstStepFor atlas "w-out" (Harvest "src-out"))
                     (Some { X = 9; Y = 10 })
                     "the other way entirely, out of the same coordinate"
             }
@@ -2896,12 +2899,12 @@ let roomTests =
                     "so the tile-shaped price refuses too, not only the Task-shaped one"
 
                 Expect.equal
-                    (firstStep atlas "w-home" area)
+                    (firstStep atlas "w-home" (Harvest "src-out") area)
                     None
                     "and the mover is given no step toward it"
 
                 Expect.equal
-                    (firstStepIgnoringTraffic atlas "w-home" area)
+                    (firstStepIgnoringTraffic atlas "w-home" (Harvest "src-out") area)
                     None
                     "nor the traffic-blind route the reroute attribution compares against"
             }
@@ -3375,6 +3378,15 @@ let crossRoomTests =
                 Expect.isTrue
                     (mayActFor atlas "w" (Harvest "src-far"))
                     "and it blocks nothing (ADR 0004)"
+
+                // Nor does it move anybody: there is no room to cross to,
+                // so there is no Seam to aim at and no near side of one
+                // (#142). An unplaced target is free, unblocking and
+                // unwalked, all three off the same absence.
+                Expect.equal
+                    (firstStepFor atlas "w" (Harvest "src-far"))
+                    None
+                    "and the mover is given no step toward a room nobody projected"
             }
 
             test "the price crosses the border and the standing tiles do not" {
@@ -3407,10 +3419,18 @@ let crossRoomTests =
                     (mayAct atlas "w" (Harvest "src-out") handed)
                     "it may not act on a target a room away"
 
+                // #142's correction, and the one line of this case that
+                // moved: a step is not a standing tile. The mover is given
+                // the near side of the crossing the price was paid at —
+                // a tile of the creep's *own* room — because a Task that is
+                // priced and unwalkable is a Task the Matcher gives away and
+                // anti-thrash never takes back. What stays refused is
+                // everything the creep would do on the far side: nowhere to
+                // stand, and no action reaching over.
                 Expect.equal
-                    (firstStep atlas "w" handed)
-                    None
-                    "and the mover is given no step toward one (ADR 0001, ADR 0008)"
+                    (firstStep atlas "w" (Harvest "src-out") handed)
+                    (Some { X = 25; Y = 9 })
+                    "but it is walked up its own corridor toward the Seam it was priced at"
             }
 
             test "a heavy body's far leg is its Post's, not the source's nearest Seat" {
@@ -3475,5 +3495,302 @@ let crossRoomTests =
                     (walkTicks posted "w" (Harvest "src-out"))
                     (Some 18)
                     "and the light body ignores the Post, over the same border on the same tick"
+            }
+        ]
+
+[<Tests>]
+let crossRoomStepTests =
+    testList
+        "atlas cross-room step"
+        [
+            test "the mover aims at the crossing the price was paid at, not the nearest one" {
+                // #142's trap, on the fixture the price is already pinned
+                // on: (25,0) is nine steps away and (27,0) ten, but the
+                // outpost's column under (25,49) is swamp and the one under
+                // (27,49) is plain, so the band's minimum is the *farther*
+                // exit. A mover that minimised the near leg again — its own
+                // second minimisation — would walk the creep up column 25
+                // to a crossing it was never priced at, and the two answers
+                // would agree on every number and split on this one.
+                let home =
+                    { RoomLayer.empty with
+                        Terrain =
+                            Map.ofList (
+                                plainLine
+                                    [
+                                        for y in 1..10 -> { X = 25; Y = y }
+                                        for x in 26..27 -> { X = x; Y = 10 }
+                                        for y in 1..9 -> { X = 27; Y = y }
+                                    ]
+                            )
+                        CreepPositions = Map.ofList [ "w", { X = 25; Y = 10 } ]
+                    }
+
+                let outpost =
+                    { RoomLayer.empty with
+                        Terrain =
+                            Map.ofList
+                                [
+                                    for x in 25..27 -> { X = x; Y = 41 }, Plain
+                                    for y in 42..48 -> { X = 25; Y = y }, Swamp
+                                    for y in 42..48 -> { X = 27; Y = y }, Plain
+                                ]
+                        TargetPositions = Map.ofList [ "src-out", { X = 26; Y = 40 } ]
+                    }
+
+                let across farRing =
+                    northOf
+                        home
+                        [
+                            { X = 25; Y = 0 }, Plain
+                            { X = 26; Y = 0 }, Wall
+                            { X = 27; Y = 0 }, Plain
+                        ]
+                        outpost
+                        farRing
+                        [ "src-out", Source ]
+                        [ worker "w" ]
+
+                let bothOpen =
+                    across
+                        [
+                            { X = 25; Y = 49 }, Plain
+                            { X = 26; Y = 49 }, Wall
+                            { X = 27; Y = 49 }, Plain
+                        ]
+
+                Expect.equal
+                    (walkTicks bothOpen "w" (Harvest "src-out"))
+                    (Some 19)
+                    "the premise: the price crosses at (27,0), the farther of the two"
+
+                Expect.equal
+                    (firstStepFor bothOpen "w" (Harvest "src-out"))
+                    (Some { X = 26; Y = 10 })
+                    "so the creep leaves its column sideways, toward that crossing"
+
+                // Wall the cheap crossing and the price falls back to the
+                // near one; the step falls back with it, which is the pair
+                // moving together rather than one of them being a constant.
+                let swampOnly =
+                    across
+                        [
+                            { X = 25; Y = 49 }, Plain
+                            { X = 26; Y = 49 }, Wall
+                            { X = 27; Y = 49 }, Wall
+                        ]
+
+                Expect.equal
+                    (walkTicks swampOnly "w" (Harvest "src-out"))
+                    (Some 46)
+                    "with only the dear crossing left, the price is paid at (25,0)"
+
+                Expect.equal
+                    (firstStepFor swampOnly "w" (Harvest "src-out"))
+                    (Some { X = 25; Y = 9 })
+                    "and the same creep now walks straight up its own column instead"
+            }
+
+            test "the last step onto an exit tile is a step nothing offers to stand on" {
+                // ADR 0036 and ADR 0041 keep the exit out of the projection's
+                // ground, and #142 does not put it back: the mover may push a
+                // creep *onto* one, and every query that offers somewhere to
+                // stand still refuses to name it. So the tile is reachable as
+                // a destination and unreachable as a Seat, a Work Area member
+                // or a walkable tile — which is what stops the Matcher ever
+                // seating a creep the engine will empty out from under it.
+                let atlas =
+                    northOf
+                        (corridorHome [ "w", { X = 25; Y = 1 } ])
+                        [ { X = 25; Y = 0 }, Plain ]
+                        corridorOutpost
+                        [ { X = 25; Y = 49 }, Plain ]
+                        [ "src-out", Source ]
+                        [ worker "w" ]
+
+                Expect.equal
+                    (firstStepFor atlas "w" (Harvest "src-out"))
+                    (Some { X = 25; Y = 0 })
+                    "standing beside the exit, the step is the exit itself"
+
+                Expect.isFalse
+                    (Set.contains { X = 25; Y = 0 } (walkableTiles atlas))
+                    "and that tile is no walkable ground of this room"
+
+                Expect.isFalse
+                    (List.contains { X = 25; Y = 0 } (adjacentWalkable atlas { X = 25; Y = 1 }))
+                    "no neighbour a parked creep may be displaced onto"
+
+                Expect.isFalse
+                    (Set.contains { X = 25; Y = 0 } (workArea atlas (Harvest "src-out")))
+                    "and no tile of any Work Area"
+            }
+
+            test "the action gate stays shut at the Seam and opens where the creep may stand" {
+                // The boundary #142 pushes a creep up to and never over.
+                // `mayAct` is `false` across a border because the engine's
+                // ranges are measured inside one room, and the mover asking
+                // for a step toward the Seam does not make it `true`: the
+                // Work Area a creep is handed is still empty, and the tile
+                // it is walked to is still no tile of one. The gate opens
+                // when the creep is standing in the target's own room and on
+                // a tile of the Work Area there, which is a fact about where
+                // the projection files it and needs no rule of its own —
+                // and the tile the engine lands it on is not yet one.
+                let across creepAt outpostCreeps =
+                    northOf
+                        (corridorHome creepAt)
+                        [ { X = 25; Y = 0 }, Plain ]
+                        { corridorOutpost with
+                            CreepPositions = Map.ofList outpostCreeps
+                        }
+                        [ { X = 25; Y = 49 }, Plain ]
+                        [ "src-out", Source ]
+                        [ worker "w" ]
+
+                let here = across [ "w", { X = 25; Y = 1 } ] []
+                let landed = across [] [ "w", { X = 25; Y = 49 } ]
+                let there = across [] [ "w", { X = 25; Y = 41 } ]
+
+                Expect.isFalse
+                    (mayActFor here "w" (Harvest "src-out"))
+                    "a step from the Seam is still a room away from digging"
+
+                Expect.equal
+                    (firstStepFor here "w" (Harvest "src-out"))
+                    (Some { X = 25; Y = 0 })
+                    "and it is walked onto the exit on the very tick it may not act"
+
+                // The tile the crossing above actually delivers to, and not
+                // an interior one hand-placed past it: stepping onto (25,0)
+                // lands the creep on the outpost's own ring at (25,49). The
+                // gate is still shut there — the landing tile is no Work
+                // Area tile, and the raw-range escape a ringed creep takes
+                // measures nine, not one — and the Atlas answers the step
+                // that opens it. What walks that step is the Resolver, and
+                // the Resolver arbitrates the home room alone (ADR 0041),
+                // so a creep the projection files in the outpost is handed
+                // no `MoveCreep` at all: the far-side mover is its own
+                // issue, deliberately outside #142, whose subject is the
+                // near side of the crossing.
+                Expect.isFalse
+                    (mayActFor landed "w" (Harvest "src-out"))
+                    "the tile the engine puts it down on is no tile of the Work Area"
+
+                Expect.equal
+                    (firstStepFor landed "w" (Harvest "src-out"))
+                    (Some { X = 25; Y = 48 })
+                    "and the geometry has the step off the ring that the ordinary rules ask for"
+
+                Expect.isTrue
+                    (mayActFor there "w" (Harvest "src-out"))
+                    "standing in the target's own room, the gate opens off `sharesRoom` alone"
+
+                Expect.equal
+                    (firstStepFor there "w" (Harvest "src-out"))
+                    None
+                    "standing in the Work Area it has arrived at, it has no step left to take"
+            }
+
+            test "a tied band is committed to, not shuttled between" {
+                // The tie is where two minimisations diverge, so the fixture
+                // holds the tie open for the whole approach: the creep walks
+                // a column that stays equidistant from both crossings, and
+                // the two are mirror images down to the far room's ground.
+                // Priced separately they cost the same to the tick, which is
+                // the premise; priced together the band's minimum picks one,
+                // and the mover has to pick that same one every tick or the
+                // creep walks a diagonal back and forth below the border and
+                // never crosses at all.
+                let home pos =
+                    { RoomLayer.empty with
+                        Terrain =
+                            Map.ofList (
+                                plainLine
+                                    [
+                                        for y in 1..10 -> { X = 25; Y = y }
+                                        for x in 23..27 -> { X = x; Y = 1 }
+                                    ]
+                            )
+                        CreepPositions = Map.ofList [ "w", pos ]
+                    }
+
+                let outpost =
+                    { RoomLayer.empty with
+                        Terrain =
+                            Map.ofList (
+                                plainLine
+                                    [
+                                        for y in 41..48 -> { X = 25; Y = y }
+                                        for x in 23..27 -> { X = x; Y = 48 }
+                                    ]
+                            )
+                        TargetPositions = Map.ofList [ "src-out", { X = 25; Y = 40 } ]
+                    }
+
+                let across ring pos =
+                    northOf
+                        (home pos)
+                        [ for x in ring -> { X = x; Y = 0 }, Plain ]
+                        outpost
+                        [ for x in ring -> { X = x; Y = 49 }, Plain ]
+                        [ "src-out", Source ]
+                        [ worker "w" ]
+
+                let start = { X = 25; Y = 10 }
+
+                Expect.equal
+                    (walkTicks (across [ 23 ] start) "w" (Harvest "src-out"))
+                    (walkTicks (across [ 27 ] start) "w" (Harvest "src-out"))
+                    "the premise: either crossing alone costs this creep the same walk"
+
+                Expect.hasLength
+                    (seams (across [ 23; 27 ] start) "W1N1" "W1N2")
+                    2
+                    "and with both open the band holds two of them"
+
+                // Driven a tick at a time, the way the Resolver drives it:
+                // the creep stands where the last step put it and is asked
+                // again. The drive stops the tick the step leaves this
+                // room's ground, which is the tick it crosses.
+                let ground = (home start).Terrain
+
+                let rec drive pos taken =
+                    if List.length taken > 20 then
+                        failtest "the creep never reached a crossing"
+                    else
+                        match firstStepFor (across [ 23; 27 ] pos) "w" (Harvest "src-out") with
+                        | Some step when Map.containsKey step ground -> drive step (step :: taken)
+                        | Some step -> List.rev (step :: taken)
+                        | None -> List.rev taken
+
+                Expect.equal
+                    (drive start [])
+                    [
+                        { X = 25; Y = 9 }
+                        { X = 25; Y = 8 }
+                        { X = 25; Y = 7 }
+                        { X = 25; Y = 6 }
+                        { X = 25; Y = 5 }
+                        { X = 25; Y = 4 }
+                        { X = 25; Y = 3 }
+                        { X = 25; Y = 2 }
+                        { X = 24; Y = 1 }
+                        { X = 23; Y = 0 }
+                    ]
+                    "one crossing, one route, and the exit tile is the last step of it"
+
+                // The price falls by one plain step's units every tick of
+                // that drive — which is the two answers being read off one
+                // minimisation and not two that happen to agree today.
+                let priced =
+                    start :: List.take 9 (drive start [])
+                    |> List.map (fun pos ->
+                        travelCost (across [ 23; 27 ] pos) "w" (Harvest "src-out"))
+
+                Expect.equal
+                    (priced |> List.pairwise |> List.map (fun (a, b) -> Option.map2 (-) a b))
+                    (List.replicate 9 (Some 2))
+                    "every step of the drive buys exactly the two units a plain step costs"
             }
         ]

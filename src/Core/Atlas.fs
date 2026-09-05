@@ -1329,13 +1329,22 @@ let private narrowedArea (atlas: Atlas) (creep: string) (task: Task) : Set<Pos> 
 /// last standing tile — it has nowhere to work this Task from, which is
 /// what makes the action gate refuse rather than mislead.
 ///
-/// #123 did not widen this, and that is the decision: the cross-room
-/// *price* is a minimum over the Seam band (`pricedAcross`), joined where
-/// the rooms are both in hand, while the *tiles* a creep is handed stay
-/// its own room's. Geometry crosses the border; standing, stepping and
+/// Neither #123 nor #142 widened this, and that is the decision: the
+/// cross-room *price* is a minimum over the Seam band (`pricedAcross`),
+/// joined where the rooms are both in hand, while the *tiles* a creep is
+/// handed stay its own room's. Geometry crosses the border; standing and
 /// acting do not (ADR 0041's Consequences). A caller that wants the far
 /// room's origins asks `narrowedArea` above, which is the same narrowing
 /// with no creep's room in it.
+///
+/// The mover crosses too, and it does so *around* this query rather than
+/// through it (#142): `firstStep` takes the Task beside these tiles and
+/// answers the near side of the winning Seam when they are empty, so the
+/// one thing that had to grow a border-crossing answer got one without the
+/// action gate and the reachability gate — which read this very set —
+/// growing one as a side effect. Widening the area to the Seam's near
+/// neighbours instead would have told a creep standing on one that it may
+/// dig a source a room away.
 ///
 /// Guarded outside the memo, which keys on the Task alone: the room is a
 /// fact about the creep, and two creeps of one Task must not share an
@@ -1535,11 +1544,16 @@ let private besideExit (tile: Pos) : Pos list =
 /// the ring carries no road, so there is no discount to apply, and the
 /// occupancy surcharge is deliberately not charged here even though
 /// the ring can hold a creep — the engine parks one on the far room's ring
-/// tile the tick it crosses, and `Snapshot` files it there. A surcharge
-/// re-ranks a step so a traveller detours around standing traffic, and
-/// there is no detour to buy at a Seam: which crossing is cheapest is a
-/// price the mover never spends, because arbitrated movement stays
-/// single-room (ADR 0041's Consequences). None for an exit the
+/// tile the tick it crosses, and `Snapshot` files it there. The choice of
+/// crossing is spent: since #142 the mover aims a cross-room creep at the
+/// near side of whichever exit this minimum won at, so the omission is not
+/// "nobody reads it". It is that the ring is not arbitrated ground — the
+/// Resolver settles one room's tiles (ADR 0041's Consequences) and an exit
+/// is in no room's — and that an occupant of one is gone by the next tick,
+/// the engine moving it off the border row it ended on. A surcharge buys a
+/// detour around traffic that stands; a transiently occupied exit costs at
+/// most a retry, and a permanent detour priced off it would be wrong the
+/// tick after. None for an exit the
 /// projection has no terrain for, or a wall, or a body that cannot step at
 /// all — an unpriceable crossing is no crossing (ADR 0004).
 let private exitPrice (atlas: Atlas) (pricing: Pricing) (factor: FatigueFactor) room tile =
@@ -1605,6 +1619,16 @@ let private farFlood (atlas: Atlas) (pricing: Pricing) (creep: string) (room: st
 /// opens onto nothing all answer with no price at all — the same answer an
 /// unreachable Work Area in the creep's own room gets, which is the Task
 /// being inapplicable to this creep.
+///
+/// The winning exit tile comes back beside the price, and that is #142's
+/// whole decision: the mover aims a cross-room creep at the near side of
+/// the crossing the price was paid at, so the Seam it walks and the Seam it
+/// is ranked on are the same one. Taking a second minimum somewhere else
+/// would agree on every number and diverge on every tie — two argmins over
+/// one tied band pick two exits — which is a creep sent to one crossing
+/// while priced at another. The minimum is over `(sum, exit)` pairs, so the
+/// price is the same number it always was and the tie falls to the lowest
+/// (X, Y) exit, exactly as every other tie in the Atlas falls.
 let private pricedAcross
     (atlas: Atlas)
     (pricing: Pricing)
@@ -1613,7 +1637,7 @@ let private pricedAcross
     (creepRoom: string)
     (from: Pos)
     (targetRoom: string)
-    : int option =
+    : (int * Pos) option =
     match seams atlas creepRoom targetRoom with
     | [] -> None
     | band ->
@@ -1637,11 +1661,12 @@ let private pricedAcross
                 exitPrice atlas pricing factor creepRoom exitTile,
                 reached far (besideExit landing)
             with
-            | Some approach, Some crossing, Some departure -> Some(approach + crossing + departure)
+            | Some approach, Some crossing, Some departure ->
+                Some(approach + crossing + departure, exitTile)
             | _ -> None)
         |> function
             | [] -> None
-            | sums -> Some(List.min sums)
+            | crossings -> Some(List.min crossings)
 
 /// The cheapest path from a creep to a set of tiles under one pricing —
 /// the shape travel cost and the walk share, so the two can disagree on
@@ -1682,6 +1707,29 @@ let private pricedPathTo
                 | [] -> None
                 | costs -> Some(List.min costs)
 
+/// The border a Task asks its creep to cross, or None when it asks for
+/// none: the creep's room, the tile it stands on, and the target's room,
+/// once the two names have been read and found different (ADR 0041).
+///
+/// One spelling, because two readers settle the rooms and they must settle
+/// them alike: the price (`pricedPath`) and the mover's step
+/// (`stepAcross`, #142). Absence is not a crossing — a Task acting on
+/// nothing, an unplaced creep and an unplaced target each keep the answer
+/// they had before the projection layered, which is the same permissive
+/// reading `sharesRoom` gives (ADR 0004).
+let private borderCrossing
+    (atlas: Atlas)
+    (creep: string)
+    (task: Task)
+    : (string * Pos * string) option =
+    match actionOn task with
+    | None -> None
+    | Some(targetId, _) ->
+        match Map.tryFind creep atlas.CreepAt, Map.tryFind targetId atlas.TargetAt with
+        | Some(creepRoom, from), Some(targetRoom, _) when creepRoom <> targetRoom ->
+            Some(creepRoom, from, targetRoom)
+        | _ -> None
+
 /// The same path priced for a Task: over the Task's own Work Area, and
 /// with the one escape a bare tile set cannot carry — a target the
 /// projection does not place prices at 0 rather than reading as
@@ -1703,12 +1751,12 @@ let private pricedPathTo
 let private pricedPath (atlas: Atlas) (pricing: Pricing) (creep: string) (task: Task) : int option =
     match actionOn task with
     | Some(targetId, _) when not (Map.containsKey targetId atlas.TargetAt) -> Some 0
-    | Some(targetId, _) ->
-        match Map.tryFind creep atlas.CreepAt, Map.tryFind targetId atlas.TargetAt with
-        | Some(creepRoom, from), Some(targetRoom, _) when creepRoom <> targetRoom ->
+    | _ ->
+        match borderCrossing atlas creep task with
+        | Some(creepRoom, from, targetRoom) ->
             pricedAcross atlas pricing creep task creepRoom from targetRoom
-        | _ -> pricedPathTo atlas pricing creep (workAreaFor atlas creep task)
-    | None -> pricedPathTo atlas pricing creep (workAreaFor atlas creep task)
+            |> Option.map fst
+        | None -> pricedPathTo atlas pricing creep (workAreaFor atlas creep task)
 
 /// Travel cost of a Task for a creep (ADR 0002, revised by ADRs 0006 and
 /// 0010): the cost units — half-ticks — the creep's body needs along a
@@ -1785,7 +1833,11 @@ let mayAct (atlas: Atlas) (creep: string) (task: Task) (area: Set<Pos>) : bool =
     // No action reaches across a border: the engine's ranges are measured
     // inside one room, and `range` over two bare tiles would read two
     // rooms' coordinates as one (ADR 0041). The area is the caller's, so
-    // this is asked here rather than inferred from an empty one.
+    // this is asked here rather than inferred from an empty one — which is
+    // also what keeps the gate shut while the mover walks a creep at the
+    // Seam (#142): a creep beside an exit tile, or on one, is still a room
+    // away from its target, and the gate opens by itself the tick the
+    // engine puts it down on the far side.
     | Some _ when not (sharesRoom atlas creep task) -> false
     | Some(targetId, actionRange) ->
         match Map.tryFind creep atlas.CreepAt, Map.tryFind targetId atlas.TargetAt with
@@ -1796,11 +1848,17 @@ let mayAct (atlas: Atlas) (creep: string) (task: Task) (area: Set<Pos>) : bool =
                 Set.contains creepPos area
         | _ -> true
 
-/// First step toward a Task's Work Area over the given flood, sharing
-/// firstStep's whole contract — that doc governs both public wrappers.
+/// First step toward a set of goal tiles under one pricing: the in-room
+/// half of `firstStep`'s contract, whose doc governs the floods, the
+/// tie-breaking and the totality here. Only that half — the border-
+/// crossing fallback is the public wrappers' own (`stepAcross`, #142), so
+/// a creep whose target is a room away answers `None` here while
+/// `firstStep` answers the near side of the winning Seam. Three callers,
+/// not two: both wrappers, and `stepAcross`, which reuses it for the
+/// approach leg over a set of exit-adjacent tiles that is no Work Area.
 let private firstStepVia
     (atlas: Atlas)
-    (floodOf: string -> Pos -> int[] * int[])
+    (pricing: Pricing)
     (creep: string)
     (goals: Set<Pos>)
     : Pos option =
@@ -1818,7 +1876,7 @@ let private firstStepVia
         if Set.isEmpty goals || Set.contains pos goals then
             None
         else
-            let dist, parents = floodOf room pos
+            let dist, parents = flood atlas pricing room creep pos
 
             goals
             |> Set.toList
@@ -1831,6 +1889,44 @@ let private firstStepVia
                     let _, goal = List.min reachable
                     Some(posAt (firstStepOf (indexOf goal) (indexOf pos) parents))
 
+/// The step a creep takes toward a Task whose target stands in another
+/// room: toward the near side of the Seam the price was paid at (#142).
+/// The exit tile is the creep's *own* room's border tile, so aiming at it
+/// asks nothing of the neighbour and arbitrates nothing across the Seam —
+/// ADR 0041's boundary stands exactly where it stood. The creep walks to a
+/// ground tile beside that exit, steps onto the exit, and the engine puts
+/// it down in the neighbour at the end of that tick; from there it shares
+/// the target's room and every rule already written takes the creep on.
+///
+/// The exit is the one `pricedAcross` won on, taken out of that same
+/// minimisation rather than looked for again: a second argmin agrees on
+/// every number and splits on every tie, which walks a creep to one
+/// crossing while ranking it at another. Under the caller's own pricing,
+/// as every route in the Atlas is — so the traffic-blind route may pick a
+/// different crossing than the priced one, and that difference is the
+/// occupancy surcharge's, which is precisely what the reroute attribution
+/// reports (ADR 0008, ADR 0018).
+///
+/// Two legs, because the exit tile is not ground and no flood enters it
+/// (ADR 0036): from anywhere else the goals are the ground tiles beside
+/// the exit, and from one of *those* the step is the exit tile itself. It
+/// is the one tile the mover ever aims at that nothing may stand on, and
+/// it never becomes a Seat, a Work Area member or a standing candidate —
+/// the projection carries no ground there, so no query can offer it.
+/// Total (ADR 0004): no crossing, no step.
+let private stepAcross (atlas: Atlas) (pricing: Pricing) (creep: string) (task: Task) : Pos option =
+    match borderCrossing atlas creep task with
+    | None -> None
+    | Some(creepRoom, from, targetRoom) ->
+        pricedAcross atlas pricing creep task creepRoom from targetRoom
+        |> Option.bind (fun (_, exitTile) ->
+            let approach = besideExit exitTile
+
+            if List.contains from approach then
+                Some exitTile
+            else
+                firstStepVia atlas pricing creep (Set.ofList approach))
+
 /// The first step of a cheapest path from a creep to a set of goal tiles,
 /// priced in the creep's own cost — a slow body may detour differently
 /// than a fast one over the same ground. The goals are the caller's: a
@@ -1841,10 +1937,22 @@ let private firstStepVia
 /// they are empty or unreachable. Of equally cheap goals the lowest
 /// (cost, tile) wins, matching the flood's tie-breaking. The goals are
 /// read as tiles of the creep's own room, the room its flood runs in
-/// (ADR 0041): a step is a step inside a room, and a goal on another
-/// room's ground is unreachable from here until #123 joins the two.
-let firstStep (atlas: Atlas) (creep: string) (goals: Set<Pos>) : Pos option =
-    firstStepVia atlas (fun room -> flood atlas TravelCost room creep) creep goals
+/// (ADR 0041): a step is a step inside a room.
+///
+/// The Task rides beside them for the one case a bare tile set cannot
+/// carry (#142): a target the projection files under another room name
+/// leaves the creep-aware Work Area empty — the tiles are the neighbour's
+/// and a `Set<Pos>` cannot say so — and the step is then toward the near
+/// side of the winning Seam instead. The same shape travel cost has had
+/// since #123, and for the same reason: the tiles a creep is handed stay
+/// its own room's while the *price* crosses, so the Task the Matcher
+/// ranked across a border is a Task the mover can also walk toward. The
+/// goals win whenever they yield a step, so a creep with somewhere to
+/// stand is never pulled toward a border instead.
+let firstStep (atlas: Atlas) (creep: string) (task: Task) (goals: Set<Pos>) : Pos option =
+    match firstStepVia atlas TravelCost creep goals with
+    | Some step -> Some step
+    | None -> stepAcross atlas TravelCost creep task
 
 /// The first step the same body would take were no tile occupied — the
 /// traffic-blind route, otherwise priced exactly like firstStep. The
@@ -1858,8 +1966,20 @@ let firstStep (atlas: Atlas) (creep: string) (goals: Set<Pos>) : Pos option =
 /// ticks. ADR 0018's decision stands regardless, being about log noise:
 /// the Resolver still asks only for creeps on the verbose list, and the
 /// entry is lazy, so a tick that watches nobody floods for nobody.
-let firstStepIgnoringTraffic (atlas: Atlas) (creep: string) (goals: Set<Pos>) : Pos option =
-    firstStepVia atlas (fun room -> flood atlas Baseline room creep) creep goals
+///
+/// Across a border it takes the same two-legged route firstStep takes and
+/// chooses its crossing under its own pricing (#142), so a traveller that
+/// detours to a different Seam because one exit's approach is crowded is
+/// attributed to the surcharge like any other detour.
+let firstStepIgnoringTraffic
+    (atlas: Atlas)
+    (creep: string)
+    (task: Task)
+    (goals: Set<Pos>)
+    : Pos option =
+    match firstStepVia atlas Baseline creep goals with
+    | Some step -> Some step
+    | None -> stepAcross atlas Baseline creep task
 
 /// Round-trip haul cost in whole ticks for a body between a container's
 /// tile and a sink structure's tile (ADR 0012): the leg out prices every

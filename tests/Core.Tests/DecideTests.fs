@@ -11054,13 +11054,9 @@ let outpostTests =
             // for either of them.
             //
             // The ranking and deliberately not the tick that follows it:
-            // run whole, the first fixture answers `Matched ("w",
-            // "harvest:src-out", TravelCost)` and then `SayCreep` alone —
-            // no move and no dig, because the winner is priced across the
-            // Seam and #142 has not yet given the mover a step toward one.
-            // That is why the declaration lands empty here and #126 waits
-            // on #142; this test reads the Verdict, which is the half ADR
-            // 0041 delivers.
+            // this test reads the Verdict, which is the half ADR 0041
+            // delivers. What the winner does with the tick is #142's, and
+            // the case below it drives that.
             test "an outpost Harvest and a home Harvest are ranked in one pool" {
                 Expect.equal
                     (matchOf (
@@ -11079,6 +11075,166 @@ let outpostTests =
                     ))
                     (Some(taskId (Harvest "src-home"), MatchFactor.TravelCost))
                     "the home source is the nearer of the two, and wins the same comparison"
+            }
+
+            test "the winner of that comparison is walked toward the Seam, tick after tick" {
+                // #142's reproduction, at the seam it was reproduced on.
+                // Before it, this fixture answered `Matched ("w",
+                // "harvest:src-out", TravelCost)` and then a lone
+                // `SayCreep`: the Task had a price and no step, so the
+                // creep stood still, said its glyph, and anti-thrash kept
+                // it there for the rest of its life — having given up the
+                // home source it would otherwise have dug.
+                //
+                // Now the mover aims at the near side of the crossing the
+                // price was paid at. That tile is in the creep's own room,
+                // so nothing here is arbitrated across the border: the
+                // Resolver settles a step of this room exactly as it always
+                // has. This band is plain the whole way round and the
+                // corridor meets it at x = 10, so three crossings — x = 9,
+                // 10 and 11 — cost this creep the same to the tick, and the
+                // band's minimum takes the lowest (X, Y) of them as every
+                // other tie in the Atlas is taken. The creep therefore
+                // leaves the corridor diagonally, which the engine allows
+                // onto an exit exactly as it allows anywhere else.
+                let colonyAt pos =
+                    let colony =
+                        northBorderColony { X = 10; Y = 38 }
+                        |> withNorthOutpost (Some { X = 10; Y = 46 })
+
+                    { colony with
+                        Spatial =
+                            colony.Spatial
+                            |> withHome (fun layer ->
+                                { layer with
+                                    CreepPositions = Map.ofList [ "w", pos ]
+                                })
+                    }
+
+                let assigned = Map.ofList [ "w", taskId (Harvest "src-out") ]
+
+                let {
+                        Intents = opening
+                        Assignments = assignments
+                    } =
+                    decide (colonyAt { X = 10; Y = 2 }) Map.empty Set.empty None
+
+                Expect.equal
+                    (Map.tryFind "w" assignments)
+                    (Some(taskId (Harvest "src-out")))
+                    "the premise: the outpost's Harvest wins the one worker"
+
+                Expect.equal
+                    (moveIntents opening)
+                    [ "w", Top ]
+                    "and it is walked up its own corridor toward the border, not parked on the Task"
+
+                Expect.isEmpty
+                    (actionIntents opening)
+                    "it may not dig a source a room away, however well priced (ADR 0041)"
+
+                // Driven the way the engine drives it: the creep stands
+                // where the last tick's Intent put it, its Assignment handed
+                // back, until the step it is given leaves this room's
+                // ground — the tick it crosses.
+                let ground = Map.ofList (corridor 10 1 40)
+
+                let rec drive pos walked =
+                    if List.length walked > 10 then
+                        failtest "the creep never reached a crossing"
+                    else
+                        let { Intents = intents } = decide (colonyAt pos) assigned Set.empty None
+
+                        match moveIntents intents with
+                        | [ _, direction ] ->
+                            let next = stepFrom pos direction
+
+                            if Map.containsKey next ground then
+                                drive next (next :: walked)
+                            else
+                                List.rev (next :: walked)
+                        | _ -> List.rev walked
+
+                Expect.equal
+                    (drive { X = 10; Y = 2 } [])
+                    [ { X = 10; Y = 1 }; { X = 9; Y = 0 } ]
+                    "one tile up the corridor, then onto the exit the price was paid at"
+            }
+
+            test "and the tick after the crossing is nobody's: the far side is deferred" {
+                // Where the drive above stops, and what stops it. The engine
+                // takes the creep off (9,0) and files it in W1N2 on that
+                // room's border row, and from that tick on the Resolver
+                // never asks the mover about it: `Atlas.placedCreeps`
+                // answers the home room alone, which is ADR 0041's boundary
+                // and #142's own decision to keep — arbitration is one
+                // room's, and a second room's creeps unioned into one
+                // `Map<Pos, string>` would collide with this room's tiles.
+                //
+                // So the creep stands where it landed, holding its Task
+                // against anti-thrash, saying its glyph — the very trace
+                // #142 quotes, one tile past the border. The geometry is not
+                // what is missing: the Atlas has the step and hands it over
+                // when asked. What is missing is a per-room arbitration,
+                // which is a ticket of its own and what #126 waits on.
+                //
+                // Asserted rather than left to be found: the day the
+                // far-side mover lands, this is the case that must move.
+                let landedAt pos =
+                    let colony =
+                        northBorderColony { X = 10; Y = 38 }
+                        |> withNorthOutpost (Some { X = 10; Y = 46 })
+
+                    { colony with
+                        Spatial =
+                            colony.Spatial
+                            |> withHome (fun layer ->
+                                { layer with
+                                    CreepPositions = Map.empty
+                                })
+                            |> withNeighbour
+                                "W1N2"
+                                { RoomLayer.empty with
+                                    Terrain = Map.ofList (corridor 10 40 48)
+                                    TargetPositions = Map.ofList [ "src-out", { X = 10; Y = 46 } ]
+                                    CreepPositions = Map.ofList [ "w", pos ]
+                                }
+                    }
+
+                let assigned = Map.ofList [ "w", taskId (Harvest "src-out") ]
+
+                // The tile the crossing above actually delivers to, and one
+                // of the outpost's own ground tiles a step from the Work
+                // Area: the ring is not what silences the mover, the room
+                // name is.
+                for pos in [ { X = 9; Y = 49 }; { X = 10; Y = 48 } ] do
+                    let landed = landedAt pos
+                    let atlas = Atlas.ofSnapshot landed
+                    let task = Harvest "src-out"
+
+                    Expect.isSome
+                        (Atlas.firstStep atlas "w" task (Atlas.workAreaFor atlas "w" task))
+                        $"the Atlas has a step out of {pos.X},{pos.Y} toward the Work Area"
+
+                    Expect.isEmpty
+                        (Atlas.placedCreeps atlas)
+                        "but the room the Resolver arbitrates holds nobody (ADR 0041)"
+
+                    let {
+                            Intents = intents
+                            Verdicts = verdicts
+                        } =
+                        decide landed assigned Set.empty None
+
+                    Expect.equal
+                        intents
+                        [ SayCreep("w", "⛏") ]
+                        $"so out of {pos.X},{pos.Y} there is no MoveCreep and no dig, only the glyph"
+
+                    Expect.equal
+                        verdicts
+                        [ Verdict.Kept("w", taskId (Harvest "src-out")) ]
+                        "and anti-thrash keeps the Task it cannot walk to"
             }
 
             test "a declared room the colony cannot see this tick changes nothing" {

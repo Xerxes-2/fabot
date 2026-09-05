@@ -1161,4 +1161,69 @@ let crossRoomWalkTests =
                     0
                     "and the rooms the engine joins really do price across: an empty sweep proves nothing"
             }
+
+            test "a crossing that has a price has a step, and the step stays in this room" {
+                // #142's invariant, on real terrain and naming no tile. A
+                // Task the Matcher can price is a Task the Matcher will
+                // hand out, so a price without a step is a creep parked on
+                // an assignment for life — which is the defect this test
+                // exists to keep out, stated as an equivalence rather than
+                // as a route anybody checked by hand.
+                //
+                // And the step is always one of this room's own tiles: its
+                // ground, or an exit of the band toward the target's room.
+                // Never the neighbour's, which a bare `Pos` could not tell
+                // apart, and never further than one tile away, because a
+                // step is a step (ADR 0001, ADR 0041).
+                let mutable stepped = 0
+
+                for border in borders do
+                    for from, into in [ border.From, border.To; border.To, border.From ] do
+                        let near = load from
+                        let far = load into
+
+                        // The band is read off the two rings and nothing
+                        // else (ADR 0041), so the tile this Atlas stands its
+                        // creep on is never looked at.
+                        let crossings =
+                            seams (walkingAcross near far { X = 0; Y = 0 }) from into
+                            |> List.map fst
+                            |> Set.ofList
+
+                        for stand in standingSample near do
+                            let atlas = walkingAcross near far stand
+
+                            for sourceId, _ in far.Sources do
+                                let task = Harvest sourceId
+                                let step = firstStep atlas "w" task (workAreaFor atlas "w" task)
+
+                                Expect.equal
+                                    (Option.isSome step)
+                                    (Option.isSome (travelCost atlas "w" task))
+                                    $"{from} -> {into} from {stand.X},{stand.Y}: priced and walkable answer alike for {sourceId}"
+
+                                match step with
+                                | None -> ()
+                                | Some tile ->
+                                    stepped <- stepped + 1
+
+                                    Expect.equal
+                                        (range stand tile)
+                                        1
+                                        $"{from} -> {into}: the step from {stand.X},{stand.Y} to {tile.X},{tile.Y} is one tile"
+
+                                    let onGround =
+                                        match Map.tryFind tile near.Terrain with
+                                        | Some terrain -> terrain <> Wall
+                                        | None -> false
+
+                                    Expect.isTrue
+                                        (onGround || Set.contains tile crossings)
+                                        $"{from} -> {into}: {tile.X},{tile.Y} is this room's ground or its exit, nothing else"
+
+                Expect.isGreaterThan
+                    stepped
+                    0
+                    "and the sweep really does walk somebody across: an empty one proves nothing"
+            }
         ]
