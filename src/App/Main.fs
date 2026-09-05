@@ -53,7 +53,22 @@ let mutable private planMemo: PlanMemo option = None
 
 // Exported as `loop` on the bundled `main` module; the engine calls it every tick.
 let loop () =
-    let snapshot = Snapshot.build ()
+    // The Raid log is read *before* the Snapshot is built, alone among the
+    // observe channels, because ADR 0043's gate is a condition on which
+    // rooms the shell scans at all: a stood-down outpost never enters the
+    // projection, so the log has to be in hand before there is one. The
+    // tick it is read at is this one and the conclusion is the previous
+    // tick's — the last one that had the vision to read a deadline with,
+    // which is the whole mechanism, since the gate's own effect is to
+    // withdraw the creeps that pay for that vision.
+    //
+    // The same value is folded and written back at the bottom of the loop.
+    // One read and not two: a second `loadRaids` after `decide` could
+    // answer differently — a hand-edit through the Memory HTTP API lands
+    // between them — and the tick would then be decided against one log
+    // and recorded against another.
+    let raids = ObserveMemory.loadRaids ()
+    let snapshot = Snapshot.build (Observe.standDown Game.time raids)
     // The verbose list is read fresh from Memory each tick, so a flip from
     // the terminal changes what the very next tick records.
     let decision =
@@ -78,7 +93,10 @@ let loop () =
     // itself the signal that this bundle is live — which is what lets
     // `observe.mjs raids` tell "no channel" from "no raids" instead of
     // reporting a confident false negative against a stale deploy.
-    ObserveMemory.loadRaids ()
+    //
+    // Folded here and read at the top of the loop: this tick's sightings
+    // are what the *next* tick's gate stands on (ADR 0043).
+    raids
     |> Observe.foldRaids Observe.capEpisodes Observe.quietGap snapshot
     |> ObserveMemory.saveRaids
 

@@ -397,7 +397,13 @@ let private buildSpatial (home: string) (scanned: string list) : SpatialInfo =
         Stores = mergedBy (fun room -> room.Stores)
     }
 
-let build () : Snapshot =
+/// The tick's Snapshot, and the one argument it takes: the rooms the
+/// [[stand-down]] gate is withholding (ADR 0043), derived by Core from the
+/// previous tick's [[raid log]] (`Observe.standDown`) and handed in the
+/// way the scan set is — the shell reads which rooms the colony works, it
+/// decides none of it. Empty is the ordinary case and the only one this
+/// colony has ever run in: no outpost has yet held a core.
+let build (shut: Set<string>) : Snapshot =
     let spawns = objectValues<ISpawn> Game.spawns
 
     let spawnRooms =
@@ -414,7 +420,13 @@ let build () : Snapshot =
     // gate (ADR 0043) would narrow one of and not the others. The scan
     // set below is taken from this list and then gates the other two, so
     // the three narrow together or not at all.
-    let outposts = Outpost.declared
+    //
+    // And this is where the gate lands, on the one read: a room being
+    // stood down leaves the declarations here, so it is not scanned, not
+    // furnished, and its rocks are not pooled — three consequences of one
+    // subtraction (`Outpost.worked`). Everything downstream sees a room
+    // nobody declared, which is the semantics ADR 0004 already paid for.
+    let outposts = Outpost.declared |> Outpost.worked shut
 
     // The rooms the colony works this tick — the home room and every
     // declared outpost beside it (ADR 0041). Core owns the union

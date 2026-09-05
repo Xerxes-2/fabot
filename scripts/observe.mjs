@@ -19,7 +19,8 @@
 //   observe.mjs raids              the Raid log's episodes, newest first
 //   observe.mjs outposts           every outpost the Raid log knows: shut or
 //                                  open right now, the tick a stand-down runs
-//                                  to, and the deadline that tick was read off
+//                                  to, the deadline that tick was read off, and
+//                                  the rooms another player took, shut by no clock
 //   observe.mjs layout             what the Layout could not deliver this plan
 //   observe.mjs cpu                the per-tick CPU line, with ADR 0041's
 //                                  revisit trigger read off it
@@ -191,6 +192,7 @@ if (command === "console") {
   //                  closest?: { range, x, y, t }, losses: [{ creep, t }],
   //                  damage }],
   //     outposts: [{ room, opened, last, expiry, basis }],
+  //     rivalHeld: { <room>: tick },
   //     living: [creep], hits: { <structure id>: hits } }
   // Stored oldest first like the Transition log's ring, printed newest
   // first. `closest` is simply absent when nothing of ours could be placed.
@@ -206,6 +208,9 @@ if (command === "console") {
   // runs to and which deadline that tick was read off; it is a family of
   // its own and `observe.mjs outposts` reads it whole, so this command
   // prints the spawn-room raids alone rather than filtering a mixed list.
+  // `rivalHeld` is that same command's other half — the rooms last seen in
+  // another player's hands, against the tick the gate shut on, ADR 0043's
+  // withdrawal with no clock — and is no more a raid than a stand-down is.
   const stored = await raidLeaf();
   const episodes = Array.isArray(stored.episodes) ? [...stored.episodes].reverse() : [];
 
@@ -243,11 +248,13 @@ if (command === "console") {
 
   // The wire shape written by ObserveMemory.fs, a key of its own beside
   // `episodes` in the same leaf:
-  //   { outposts: [{ room, opened, last, expiry, basis }] }
-  // One row per [[stand-down]] (ADR 0043): the room it shuts, the window
-  // (opened, and the last tick a core was actually seen there), the
-  // absolute tick the stand-down runs to, and which of the three deadlines
-  // that tick was read off. Stored oldest first like the raids beside it.
+  //   { outposts: [{ room, opened, last, expiry, basis }],
+  //     rivalHeld: { <room>: tick } }
+  // One `outposts` row per clocked [[stand-down]] (ADR 0043): the room it
+  // shuts, the window (opened, and the last tick a core was actually seen
+  // there), the absolute tick the stand-down runs to, and which of the
+  // three deadlines that tick was read off. Stored oldest first like the
+  // raids beside it.
   //
   // Shut or open is `now < expiry` and nothing else — Observe.standingDown,
   // the one place the family's openness is decided — so this command is a
@@ -255,6 +262,18 @@ if (command === "console") {
   // deliberately not part of that test: the stand-down withdraws the very
   // creeps whose vision would see the core, so silence there says nobody is
   // looking and never that the room is clear.
+  //
+  // `rivalHeld` is ADR 0043's other withdrawal, and it has no row shape
+  // because it has almost nothing to carry: a room another player owns or
+  // reserves is not a threat with a deadline, it is a room that stopped
+  // being ours to work, so the record is the room's name against the tick
+  // the last look concluded it, and the gate withholds it with no clock to
+  // compare against. The tick is not a deadline and nothing is measured
+  // from it; it is the date an income drop is lined up against (#117's
+  // US-20), the answer the clocked family gets from `opened`. It is a
+  // remembered conclusion — the fold writes it on the ticks with vision and
+  // holds it through the ticks without, because the gate's own effect is to
+  // take that vision away.
   const stored = await raidLeaf();
   // The list is guarded in its own right, the way each of the Layout
   // record's three is: a leaf carrying `episodes` and no `outposts` is a
@@ -271,6 +290,32 @@ if (command === "console") {
         'or its wire shape has moved. Not read as "no outpost is shut".',
     );
   }
+  // The clockless half, guarded in its own right for the same reason and
+  // never off the presence of the half above: a leaf carrying `outposts`
+  // and no `rivalHeld` is a bundle predating the gate, and a room that
+  // bundle's colony had already been pushed out of would print as worked.
+  if (
+    stored.rivalHeld === null ||
+    typeof stored.rivalHeld !== "object" ||
+    Array.isArray(stored.rivalHeld)
+  ) {
+    fail(
+      "the Raid log at Memory.fabot.observe.raids carries no `rivalHeld` map — " +
+        "the deployed bundle predates ADR 0043's clockless withdrawal, the leaf was " +
+        'hand-edited, or its wire shape has moved. Not read as "no room was taken".',
+    );
+  }
+  const rivalHeld = Object.entries(stored.rivalHeld).map(([room, since]) => {
+    if (typeof since !== "number") {
+      fail(
+        `the tick at Memory.fabot.observe.raids.rivalHeld.${room} is off the wire shape: ` +
+          `${JSON.stringify(since)} — the leaf was hand-edited, or its wire shape has moved. ` +
+          'Not read as "that room is open": the bot is withholding a room this command ' +
+          "cannot date.",
+      );
+    }
+    return { room, since };
+  });
 
   // The clock the rows are read against. Off the server rather than off the
   // CPU line's last row: that row is as old as the last tick the bundle
@@ -366,15 +411,52 @@ if (command === "console") {
     // recover from them — the tick they were judged against, and the
     // sector's date. A row is never hidden from --json; an unreadable one
     // has already failed the whole command above.
-    console.log(JSON.stringify({ now, sector: SECTOR, outposts: stored.outposts }, null, 2));
+    console.log(
+      JSON.stringify(
+        { now, sector: SECTOR, outposts: stored.outposts, rivalHeld: stored.rivalHeld },
+        null,
+        2,
+      ),
+    );
   } else {
     console.log(`now ${tickOf(now)}`);
     console.log("");
 
-    if (rows.length === 0) {
-      console.log("the Raid log records no stand-down: no outpost is shut by a clock");
+    if (rows.length === 0 && rivalHeld.length === 0) {
+      console.log("the Raid log records no stand-down: no outpost is shut");
       console.log("");
     } else {
+      // The clockless withdrawals first, and they answer for their room
+      // whatever the clocked rows say about it: a room another player holds
+      // is shut by a rule with no expiry, so a spent stand-down sitting in
+      // the ring beside it must not print that room as open.
+      //
+      // The clocked rows for the same room are printed under this line and
+      // not filtered away with it: a core and a rival's claimer can take one
+      // controller on one tick, and an operator told "no clock is running"
+      // while the log holds an expiry and a basis has lost exactly the trace
+      // ADR 0043 asks this channel to keep (#117's US-20).
+      const heldRooms = rivalHeld.map((held) => held.room);
+
+      for (const held of [...rivalHeld].sort((a, b) => a.room.localeCompare(b.room))) {
+        console.log(`${held.room}  shut since ${tickOf(held.since)}, and no clock is running`);
+        console.log("  because another player owns or reserves it — not a threat that passes,");
+        console.log("  a room that stopped being ours to work (ADR 0043)");
+        // The truth about getting back in, and it is not a thing the colony
+        // can do: the gate subtracts by room name after the declaration is
+        // read (`Outpost.worked`), so re-declaring this room changes
+        // nothing, and the room is never scanned again, so the tick with
+        // vision that would clear it can never arrive.
+        console.log("  nothing the colony does re-opens it: the room is not scanned, so the");
+        console.log("  look that would clear it never happens, and re-declaring it is a no-op.");
+        console.log(
+          `  clear "${held.room}" from Memory.fabot.observe.raids.rivalHeld once a look ` +
+            "confirms it is free,",
+        );
+        console.log("  or move the declaration in Core to a room somebody else is not working");
+        console.log("");
+      }
+
       for (const room of roomsOf(rows)) {
         const mine = rows.filter((row) => row.room === room);
         // At most one of a room's rows can be running — a sighting extends
@@ -384,16 +466,29 @@ if (command === "console") {
         const running = mine.filter((row) => now < row.expiry).sort((a, b) => b.expiry - a.expiry);
         const spent = mine.filter((row) => now >= row.expiry).sort((a, b) => b.expiry - a.expiry);
 
+        // A room the clockless half already answered for gets its clocked
+        // rows as a continuation of that answer rather than a second
+        // headline: the gate above it has no expiry to run out, so "open"
+        // here would contradict the line four rows up.
+        const alsoHeld = heldRooms.includes(room);
+
         if (running.length > 0) {
           const row = running[0];
           console.log(
-            `${room}  shut until ${tickOf(row.expiry)} — ${ticks(row.expiry - now)} to go`,
+            alsoHeld
+              ? `${room}  and a stand-down is recorded too, until ${tickOf(row.expiry)} — ` +
+                  `${ticks(row.expiry - now)} to go`
+              : `${room}  shut until ${tickOf(row.expiry)} — ${ticks(row.expiry - now)} to go`,
           );
           console.log(`  because ${BASIS[row.basis]}`);
           console.log(`  opened ${tickOf(row.opened)}, a core last seen there ${tickOf(row.last)}`);
         } else {
           const row = spent[0];
-          console.log(`${room}  open — no stand-down is running`);
+          console.log(
+            alsoHeld
+              ? `${room}  and the stand-down recorded beside that has run out`
+              : `${room}  open — no stand-down is running`,
+          );
           console.log(
             `  last one ran to ${tickOf(row.expiry)}, spent ${ticks(now - row.expiry)} ago ` +
               `(${BASIS[row.basis]})`,

@@ -463,6 +463,23 @@ let loadRaids () : RaidState =
                             with _ ->
                                 None)
                         |> Array.toList
+                // The clockless withdrawal's memory (ADR 0043): the rooms
+                // the colony last saw in another player's hands, each
+                // against the tick that look was taken on. Absent from a
+                // bundle written before it existed, and an empty map is
+                // what that honestly says — no room had been seen taken,
+                // because nothing was looking for it. Unlike an episode's
+                // expiry there is no direction this default can be wrong
+                // in that the next tick with vision does not correct: the
+                // room is still scanned, so the very next look re-decides
+                // it.
+                RivalHeld =
+                    if isNull raids?rivalHeld then
+                        Map.empty
+                    else
+                        objectEntries raids?rivalHeld
+                        |> Array.map (fun (room, tick) -> room, unbox<int> tick)
+                        |> Map.ofArray
                 Living = raids?living |> unbox<string[]> |> Set.ofArray
                 // The damage baseline, absent from a bundle written before
                 // it existed: an empty baseline charges the next tick
@@ -487,6 +504,16 @@ let saveRaids (state: RaidState) =
     let raids = createEmpty<obj>
     raids?episodes <- state.Episodes |> List.map encodeEpisode |> List.toArray
     raids?outposts <- state.Outposts |> List.map encodeOutpost |> List.toArray
+    // Room name to the tick the gate shut on, the way `hits` is keyed by
+    // structure id: the clockless withdrawal has no window, no expiry and
+    // no basis to carry, so a row shape would be a name with three empty
+    // fields beside the one date it does keep.
+    let rivals = createEmpty<obj>
+
+    for KeyValue(room, tick) in state.RivalHeld do
+        rivals?(room) <- tick
+
+    raids?rivalHeld <- rivals
     raids?living <- state.Living |> Set.toArray
 
     let hits = createEmpty<obj>

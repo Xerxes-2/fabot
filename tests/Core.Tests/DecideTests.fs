@@ -15988,3 +15988,374 @@ let reserverRowTests =
                 | other -> failtest $"expected exactly one SpawnCreep intent, got %A{other}"
             }
         ]
+
+/// One outpost as ADR 0041 declares it, read off the very tuple the
+/// reserver row's fixtures are written in — a room name, its rock and its
+/// controller, ids and tiles — spelling the same ids and the same tiles
+/// `withOutpostRoom` furnishes that room with. The declaration is what a
+/// stand-down subtracts and the furniture is what vision pays for, and
+/// the two have to name one room or the gate below would be subtracting
+/// something nothing else placed. Taking the room and the rock from
+/// `northOutpost`/`westOutpost` rather than retyping them is what keeps
+/// that true: one source for the colony both families describe, so a rock
+/// moved for one is moved for the other. The `posted` flag rides along
+/// unread — `gatedColony` posts every room it works, because an unposted
+/// outpost contributes nothing to three of the four rows to begin with
+/// and would make the gate's subtraction unreadable.
+let private gatedOutpost (room, rock: Pos, _posted) : Outpost =
+    {
+        RoomName = room
+        Sources = [ $"src-{room}", rock ]
+        Controller = $"ctrl-{room}", { rock with Y = rock.Y + 2 }
+    }
+
+/// The colony the shell assembles for a given declaration under a given
+/// shut set (ADR 0043), built the way `Snapshot.build` builds one: the
+/// declarations less what the gate withholds (`Outpost.worked`), and then
+/// every fact of a worked room — its layer, its rock in the pool, its
+/// standing container, who holds it — and *none* of a withheld one.
+///
+/// That second half is the shell's own rule and not this fixture's
+/// invention: the scan set is taken from the declarations that survive the
+/// gate, the furniture is laid only into rooms the scan set carries
+/// (`Outpost.place`), the rocks are pooled only for those rooms
+/// (`Outpost.pooledSources`) and every entry vision pays for is collected
+/// over `seen`, which is the scan set filtered by vision. A room the
+/// colony does not scan is one it never looks into, so it contributes
+/// nothing at all — which is exactly what ADR 0004 has always meant by a
+/// room that is not there.
+///
+/// The reservation stands at its 5,000 cap on every worked room, so the
+/// reserver row's deficit is zero and its casts are at the floor: the
+/// number of casts is then a count of rooms and never a reading of a
+/// deficit.
+///
+/// Assembled by `reserverColony` and not beside it: the rooms, the bank
+/// and the control entries are that fixture's already, so the gate reads
+/// over the same colony the reserver row is pinned on rather than a second
+/// one free to drift from it.
+let private gatedColony declarations shut creeps =
+    let worked = Outpost.worked shut declarations
+
+    reserverColony
+        (worked
+         |> List.map (fun (outpost: Outpost) ->
+             outpost.RoomName, outpost.Sources |> List.head |> snd, true))
+        creeps
+        (worked |> List.map (fun outpost -> outpost.RoomName, reservedRoom true 5000))
+
+/// The two outposts the gate is read over, diagonal to each other as
+/// W12S27 and W13S28 are (ADR 0042): one gate each, and one of them is not
+/// enough to tell "this room is withheld" from "outposts are withheld".
+/// The same two the reserver row hires for, declared instead of furnished.
+let private northGated = gatedOutpost (northOutpost true)
+let private westGated = gatedOutpost (westOutpost true)
+
+/// A creep standing in a room, placed the way the shell places one: in the
+/// layer of the room it stands in (ADR 0041), and nowhere at all when that
+/// room is not projected. A creep does give the engine vision of its own
+/// room, but the shell reads the rooms it scans and no others, so a
+/// stood-down room's tiles go unread and the creep on them is unplaced —
+/// unpriceable geometry, which is ADR 0004's own answer and not a state of
+/// its own.
+let private standingIn room (name, pos) (colony: Snapshot) =
+    match Map.tryFind room colony.Spatial.Rooms with
+    | None -> colony
+    | Some layer ->
+        { colony with
+            Spatial =
+                colony.Spatial
+                |> withNeighbour
+                    room
+                    { layer with
+                        CreepPositions = Map.add name pos layer.CreepPositions
+                    }
+        }
+
+/// Every Task in the pool that names a room's furniture — the rock, the
+/// controller and the container `withOutpostRoom` gives it, whose ids all
+/// carry the room's name.
+let private tasksNaming room colony =
+    planTasks colony noThreats
+    |> List.map taskId
+    |> List.filter (fun id -> (id: string).Contains(room: string))
+
+[<Tests>]
+let standDownGateTests =
+    testList
+        "a stood-down outpost in the pool"
+        [
+            test "a stood-down outpost pools no Task, counts in no quota and is cast for by nobody" {
+                // ADR 0043's whole claim, at the top seam: a room the gate
+                // withholds decides exactly what a room nobody declared
+                // decides. Nothing downstream was taught about stand-downs
+                // — the projection, the Task pool, the four quota rows and
+                // the Atlas each see a room that is not there, which is the
+                // semantics ADR 0004 paid for long ago.
+                //
+                // The fleet stands over every row's quota but the
+                // reserver's, so a `SpawnCreep` here is a reserver or it is
+                // a defect, and the reserver row is the one row a
+                // *declaration alone* hires for (#131): one body per
+                // declared outpost, container or no container. That makes
+                // it the row that can tell "the room left the projection"
+                // from "the room left the economy".
+                let fleet = surplusFleet 4
+                let both = gatedColony [ northGated; westGated ] Set.empty fleet
+                let shut = gatedColony [ northGated; westGated ] (Set.singleton "W1N2") fleet
+                let never = gatedColony [ westGated ] Set.empty fleet
+
+                Expect.isNonEmpty
+                    (tasksNaming "W1N2" both)
+                    "the premise: worked, the room's furniture is in the pool"
+
+                Expect.equal
+                    (reserverCasts (decide both Map.empty Set.empty None).Intents)
+                    [ oneBlock; oneBlock ]
+                    "and worked, it is one of two outposts each hiring its own reserver"
+
+                Expect.isEmpty
+                    (tasksNaming "W1N2" shut)
+                    "shut, no Task in the pool names the room — its rock, its controller and its container are gone with it"
+
+                Expect.equal
+                    (reserverCasts (decide shut Map.empty Set.empty None).Intents)
+                    [ oneBlock ]
+                    "and the one cast left is the other outpost's: nothing is built for a room nothing can enter"
+
+                // Everything else besides, and this one holds by
+                // construction rather than by observation: `gatedColony`
+                // subtracts the shut set before it assembles anything, so
+                // the two Snapshots below are the same value and the
+                // equality can only fail if `Outpost.worked` filters by
+                // something other than the room's name. That is worth one
+                // line and is not the criterion's quota half — a row still
+                // counting the shut room could not show up here, because
+                // there is no room here for it to count.
+                Expect.equal
+                    (outcomeOf shut)
+                    (outcomeOf never)
+                    "a room the gate withholds is subtracted by name, so it assembles the colony a room nobody declared assembles"
+            }
+
+            test "the quota rows stop counting the room the gate withholds" {
+                // Criterion 1's other half, and the one the equality above
+                // cannot reach: it is read on two colonies that really do
+                // differ — both declare both rooms, and only the shut set
+                // moves — so a row still folding the withheld room's
+                // furniture hires a body the colony it is actually working
+                // does not want.
+                //
+                // One row at a time, each against a fleet standing exactly
+                // at the shut colony's own quota for it while every other
+                // row is over its own, which is the pairwise reading the
+                // matcher's cheapest-rival rule asks for everywhere else.
+                let castRows anchors haulers workers shut =
+                    let fleet =
+                        [ for i in 1..anchors -> anchor $"a{i}" 0 50 ]
+                        @ [ for i in 1..haulers -> hauler $"h{i}" 0 100 ]
+                        @ [ for i in 1..workers -> worker $"w{i}" 0 50 ]
+
+                    gatedColony [ northGated; westGated ] shut fleet
+                    |> castNames
+                    |> List.map (fun (name: string) -> name.Split('-') |> Array.head)
+
+                let gated anchors haulers workers =
+                    castRows anchors haulers workers Set.empty,
+                    castRows anchors haulers workers (Set.singleton "W1N2")
+
+                // The Anchor row counts Posts and the withheld room's
+                // standing container was one: at three Anchors the colony
+                // working both rooms is a body short and the one working
+                // the west room alone is already at its target.
+                Expect.equal
+                    (gated 3 3 40)
+                    ([ "reserver"; "reserver"; "anchor" ], [ "reserver" ])
+                    "the fourth Post goes with the room, and the Anchor it would have hired goes with it"
+
+                // The workforce target counts each posted source's output
+                // and the withheld room's rock was one: at two workers the
+                // colony working both rooms hires a third.
+                Expect.equal
+                    (gated 4 3 2)
+                    ([ "reserver"; "reserver"; "worker" ], [ "reserver" ])
+                    "the withheld rock's ten a tick leaves the income the worker row is sized off"
+
+                // The fourth row is deliberately not pinned by a cast. At
+                // ADR 0042's 1,800 capacity one hauler covers a container's
+                // round trip, and this colony's two home containers set the
+                // row at two either way — the outposts move it by nothing
+                // there is a body's granularity to see. What the row reads
+                // is the projection's containers, and the withheld room's
+                // is gone with the room, which the Task pool above already
+                // shows: no Withdraw names it.
+                Expect.equal
+                    (gated 4 1 40)
+                    ([ "reserver"; "reserver"; "hauler" ], [ "reserver"; "hauler" ])
+                    "the hauler row wants its two home bodies on either side of the gate"
+            }
+
+            test "two outposts are two gates" {
+                // ADR 0043's independent gates: W12S27 standing down does
+                // not cost W13S28 its reserver. Pairwise, one room shut at
+                // a time, because a gate that withheld "the outposts"
+                // rather than a room would pass a test that shut only one.
+                let shutting room =
+                    let colony =
+                        gatedColony [ northGated; westGated ] (Set.singleton room) (surplusFleet 4)
+
+                    tasksNaming "W1N2" colony, tasksNaming "W2N2" colony
+
+                let northShut, westWithNorthShut = shutting "W1N2"
+                let northWithWestShut, westShut = shutting "W2N2"
+
+                Expect.isEmpty northShut "the north room is withheld"
+
+                Expect.isNonEmpty westWithNorthShut "while the west one is worked exactly as before"
+
+                Expect.isEmpty westShut "and the other way round"
+                Expect.isNonEmpty northWithWestShut "with the north one untouched"
+            }
+
+            test "the tick the clock runs out, the outpost is back in the pool" {
+                // Re-entry is the clock running out and nothing else (ADR
+                // 0043), so the gate is read straight off the log: the two
+                // colonies below differ only in the tick `Observe.standDown`
+                // was asked at, one either side of the recorded expiry.
+                let log =
+                    Observe.RaidState.empty
+                    |> Observe.foldRaids
+                        Observe.capEpisodes
+                        Observe.quietGap
+                        { incomeColony with
+                            Time = 100
+                            InvaderCores =
+                                [
+                                    {
+                                        RoomName = "W1N2"
+                                        CollapseTick = Some 900
+                                    }
+                                ]
+                        }
+
+                let fleet = surplusFleet 4
+
+                let atTick t =
+                    gatedColony [ northGated; westGated ] (Observe.standDown t log) fleet
+
+                Expect.isEmpty
+                    (tasksNaming "W1N2" (atTick 899))
+                    "one tick short of the expiry the room is still withheld"
+
+                Expect.isNonEmpty
+                    (tasksNaming "W1N2" (atTick 900))
+                    "on the expiry itself its rock, its controller and its container are in the pool again"
+
+                Expect.equal
+                    (reserverCasts (decide (atTick 900) Map.empty Set.empty None).Intents)
+                    [ oneBlock; oneBlock ]
+                    "and the row hires for it again, the tick it may be entered"
+            }
+
+            test "a room another player holds is withheld with no clock at all" {
+                // ADR 0043's other trigger, end to end: the fold remembers
+                // the room the tick it is seen taken (`RaidState.Foreign`),
+                // and the gate withholds it for ever after — there is no
+                // expiry, because a room somebody else works has not been
+                // made dangerous, it has stopped being ours.
+                //
+                // Pairwise against the same room seen held by *us*, which
+                // is the ordinary steady state of every outpost: one field
+                // of one control entry moves.
+                let logWith holder =
+                    Observe.RaidState.empty
+                    |> Observe.foldRaids
+                        Observe.capEpisodes
+                        Observe.quietGap
+                        { incomeColony with
+                            Time = 100
+                            RoomControl = Map.ofList [ "W1N2", reservedRoom holder 4000 ]
+                        }
+
+                let fleet = surplusFleet 4
+
+                let poolAt holder t =
+                    gatedColony
+                        [ northGated; westGated ]
+                        (Observe.standDown t (logWith holder))
+                        fleet
+                    |> tasksNaming "W1N2"
+
+                Expect.isNonEmpty
+                    (poolAt true 101)
+                    "held by us the room is worked, which is what every outpost's steady state looks like"
+
+                Expect.isEmpty
+                    (poolAt false 101)
+                    "held by another player it is withheld the tick after it was seen"
+
+                Expect.isEmpty
+                    (poolAt false 1_000_000)
+                    "and a million ticks later it is still withheld: this withdrawal carries no clock"
+            }
+
+            test "the creep standing in a stood-down outpost is released, on the existing path" {
+                // ADR 0043's re-entry rule has a mirror: nothing new
+                // withdraws the creeps either. The room's Tasks stop
+                // existing, and a creep holding one is released by the
+                // release the Matcher has always spoken for an assignment
+                // whose Task is gone — no retreat act, no new Verdict, no
+                // second rule about where a creep may stand.
+                // One creep and no fleet behind it: the release is the
+                // subject, and a colony standing at its quotas would have
+                // every home Task at capacity, so the creep would read as
+                // unassigned for a reason that has nothing to do with the
+                // gate.
+                let colonyWith shut =
+                    gatedColony [ northGated; westGated ] shut [ worker "w-out" 0 50 ]
+                    |> standingIn "W1N2" ("w-out", { X = 39; Y = 41 })
+
+                let held = taskId (Harvest "src-W1N2")
+                let assignments = Map.ofList [ "w-out", held ]
+
+                let verdictsWith shut =
+                    (decide (colonyWith shut) assignments Set.empty None).Verdicts
+
+                Expect.contains
+                    (verdictsWith Set.empty)
+                    (Verdict.Kept("w-out", held))
+                    "the premise: worked, the creep keeps the outpost Harvest it holds"
+
+                Expect.contains
+                    (verdictsWith (Set.singleton "W1N2"))
+                    (Verdict.Released("w-out", held, ReleaseReason.TaskGone))
+                    "shut, the Task is gone and the creep is released by the reason that has always meant that"
+
+                let rematched =
+                    verdictsWith (Set.singleton "W1N2")
+                    |> List.tryPick (function
+                        | Verdict.Matched("w-out", task, _) -> Some task
+                        | _ -> None)
+
+                Expect.isSome
+                    rematched
+                    "and it is matched again on the same tick, not left holding nothing"
+
+                Expect.isFalse
+                    ((Option.defaultValue "" rematched).Contains "W1N2")
+                    "to a Task of a room the colony is still working"
+
+            // What is *not* pinned here is the walk back, and it is not
+            // pinned because it does not happen. A withheld room is not
+            // projected (ADR 0043), so it places no creep, so the creep
+            // standing in it has no tile: the rematch above is priced on
+            // ADR 0004's escape — an unplaced creep prices every Task at 0
+            // — rather than on a crossing, `Decide.resolve` builds moves
+            // only over the creeps the Atlas places, and nothing aims this
+            // one home. The release path is this ticket's claim and it
+            // holds; the journey home is a fact about an unplaced creep
+            // that ADR 0043's own gate placement makes unreachable, and it
+            // is carried out of this ticket as a finding of its own rather
+            // than pinned here as if it were the behaviour.
+            }
+        ]

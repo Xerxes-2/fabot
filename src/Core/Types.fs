@@ -527,6 +527,31 @@ module Outpost =
             }
         ]
 
+    /// The declarations the colony works this tick: the declared list,
+    /// less every room a [[stand-down]] is withholding (ADR 0043). The
+    /// gate, and the one place the set is narrowed.
+    ///
+    /// It narrows the *declarations* and never the scan set directly,
+    /// because the three readings below — the rooms projected, the
+    /// furniture laid in and the rocks pooled — are three readings of one
+    /// list, and a gate applied to one of them would be a room whose
+    /// terrain nobody read carrying furniture, or a rock in the pool with
+    /// no layer to price it against (ADR 0004's escape prices an unplaced
+    /// target at 0, so it would *win* its tier). Narrowed here, the three
+    /// narrow together or not at all, and everything downstream — the
+    /// projection, the Task pool, the four quota rows, the Atlas — sees
+    /// exactly what it sees for a room nobody declared. That is the whole
+    /// of "withdraw" in an architecture that keeps no state and recomputes
+    /// every tick, and it is semantics ADR 0004 has already paid for.
+    ///
+    /// The shut set is the previous tick's conclusion (`Observe.standDown`
+    /// over the [[raid log]]), because the deadline it holds was read on
+    /// the last tick that had vision to read one with — and the creeps
+    /// that paid for that vision are the ones this gate withdraws.
+    let worked (shut: Set<string>) (outposts: Outpost list) : Outpost list =
+        outposts
+        |> List.filter (fun outpost -> not (Set.contains outpost.RoomName shut))
+
     /// The rooms the shell projects this tick: the spawn room, and every
     /// declared outpost beside it (ADR 0041). One projection covering
     /// several rooms, never a second one (ADR 0005) — the union is taken
@@ -760,9 +785,14 @@ type InvaderCoreInfo =
 ///
 /// The other withdrawal — a room another player owns or reserves — is
 /// deliberately not a fourth case. ADR 0043 makes it the clockless
-/// trigger, "not a threat episode": it opens no episode, carries no expiry
-/// for a basis to explain, and is judged straight off the Snapshot's
-/// `RoomControlInfo` where the gate stands.
+/// trigger, "not a threat episode": it opens no episode and carries no
+/// expiry for a basis to explain. It is read off the Snapshot's
+/// `RoomControlInfo` on every tick with vision and *remembered* between
+/// them (`RaidState.RivalHeld`, #136), because the gate's own effect is to
+/// take away the vision that judged it. What it remembers beside the room
+/// is a tick, and not one anything compares against: the trace the gate's
+/// closing leaves in the observe channel, where a basis would have nothing
+/// to explain.
 [<RequireQualifiedAccess>]
 type StandDownBasis =
     /// The core's own `EFFECT_COLLAPSE_TIMER`: the tick the engine put on
