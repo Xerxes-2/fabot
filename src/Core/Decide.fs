@@ -128,7 +128,64 @@ let private heldWorkCap = workCapOf heldOutputPerTick
 /// body, empty or loaded, and within that buys as much Carry as possible
 /// (ADR 0003, narrowed to the worker pattern by ADR 0006). Parts are
 /// grouped Work, Carry, Move so damage strips Work first and mobility last.
-let private parityBodyFor block capacity =
+///
+/// It is the rule every row without one of its own falls through to, and
+/// it can only place the three parts it counts: a block holding anything
+/// else — a guard's Attack, a healer's Heal — would be *silently* rebuilt
+/// out of Work, Carry and Move alone, which is how a `[Claim; Move]` row
+/// read through here priced eight Carry and four Move at an 1,800 bank
+/// (#155, and the reserver row's own note below). An empty block is the
+/// same mistake from the other side, and the two runtimes do not even
+/// agree on it: .NET divides by zero, while the emitted JS reads
+/// `~~(50 / 0)` as no repeats at all and pads a Carry/Move body out of a
+/// row that asked for neither. So a *shape* this rule cannot size is a
+/// hard stop rather than a quiet omission — the table's own promise above
+/// (ADR 0006) is that a row is one more data row plus its own quota rule
+/// and never a new code path, and the honest reading of that promise is
+/// that a row this rule cannot size is not a row yet.
+///
+/// Failing at the first cast says so where the mistake is, and it says it
+/// loudly: `Main.loop` calls `decide` under no handler, so the throw takes
+/// the whole tick with it — no intents, no observe channels, no CPU row,
+/// and the gap in the tick numbers is the only trace. That is the price of
+/// a row without a sizing rule, and it is meant to be paid in development
+/// rather than in the colony: `patternTableTests` sizes every row of the
+/// table, so a row declared without a rule is red in `dotnet test` before
+/// it is ever cast.
+///
+/// A stop and not the other shape ADR 0006 allows — a sizing rule carried
+/// on `BodyPattern` itself, which would make the table total and delete
+/// this fallback. That is the larger change and it is deferred, not
+/// rejected, for the reason `castFromBank` records beside the code that
+/// embodies it: the two rows that would need such a member read a fact the
+/// pattern cannot see. This stop costs one branch and changes no body the
+/// colony casts today.
+let private parityBodyFor (pattern: BodyPattern) capacity =
+    let block = pattern.Block
+
+    if List.isEmpty block then
+        failwith (
+            $"body pattern '{pattern.Name}' holds no parts at all, which the generalist sizing rule "
+            + "cannot size: it buys whole repeats of a block, and an empty block has no repeat to "
+            + "buy. Give this row a block, or its own sizing rule beside anchor/hauler/reserver "
+            + "(ADR 0006)."
+        )
+
+    let unplaceable =
+        block
+        |> List.filter (fun part -> part <> Work && part <> Carry && part <> Move)
+        |> List.distinct
+
+    if not (List.isEmpty unplaceable) then
+        let parts = unplaceable |> List.map string |> String.concat ", "
+
+        failwith (
+            $"body pattern '{pattern.Name}' holds {parts}, which the generalist sizing rule cannot "
+            + "place: it counts Work, Carry and Move out of a block and emits only those, so the "
+            + $"body it would return holds no {parts} at all. Give this row its own sizing rule "
+            + "beside anchor/hauler/reserver (ADR 0006)."
+        )
+
     let blockSize = List.length block
     let carryCost = bodyCost [ Carry ]
     let moveCost = bodyCost [ Move ]
@@ -228,9 +285,10 @@ let private haulerBodyFor capacity =
 /// The row is sized here rather than through the generalist rule because
 /// `parityBodyFor` cannot price it: it counts Work, Carry and Move out of
 /// a block and emits only those, so a [Claim; Move] row read through it
-/// sizes to a body with no CLAIM part in it at all — eight Carry and four
-/// Move at an 1,800 bank — and prices the reserver's succession off a body
-/// that could not reserve anything.
+/// is refused outright (#155). Until that refusal it sized instead — to a
+/// body with no CLAIM part in it at all, eight Carry and four Move at an
+/// 1,800 bank — and priced the reserver's succession off a body that could
+/// not reserve anything, which is the whole reason the refusal is there.
 /// Parts are grouped Claim then Move so damage strips the reservation
 /// before the legs, as every other row strips its output first.
 let private reserverBodyFor capacity =
@@ -241,7 +299,8 @@ let private reserverBodyFor capacity =
 /// Carry/Move pair, the hauler row buys whole blocks at its own road
 /// parity, the reserver row buys whole blocks of the one part that holds a
 /// reservation, and every other block-replicating row pads its remainder
-/// at plain fatigue parity.
+/// at plain fatigue parity — or, if its block holds a part that last rule
+/// cannot place, is refused rather than sized into some other body (#155).
 ///
 /// A capacity is the whole of what this entry point holds, so the two rows
 /// whose real rule reads a second fact — the anchor's source output (ADR
@@ -273,7 +332,7 @@ let bodyFor pattern capacity =
     elif pattern.Name = reserverPattern.Name then
         reserverBodyFor capacity
     else
-        parityBodyFor pattern.Block capacity
+        parityBodyFor pattern capacity
 
 /// The generalist body: the worker row of the pattern table, sized to
 /// capacity.

@@ -461,6 +461,21 @@ let patternTableTests =
                     "every body the colony casts comes from these rows"
             }
 
+            test "every row of the table has a sizing rule that can size it" {
+                // The generalist rule refuses a shape it cannot size
+                // (#155), and that refusal fires inside `decide`, which
+                // `Main.loop` calls under no handler — a row declared
+                // without a rule of its own would cost every intent of
+                // every tick, not one mis-shaped creep. So the table
+                // itself is walked here: a row arriving without a sizing
+                // rule is red at this gate the moment it is declared,
+                // rather than in the colony the moment it is first cast.
+                for row in patternTable do
+                    Expect.isNonEmpty
+                        (bodyFor row 1800)
+                        $"the {row.Name} row sizes at an 1,800 bank"
+            }
+
             test "the anchor row spends everything on Work beside one Carry and one Move" {
                 // 550 = the RCL2 full bank: 100 buys the Carry/Move pair,
                 // the rest is Work — no parity padding (ADR 0006 exempts
@@ -552,6 +567,80 @@ let patternTableTests =
                     (bodyFor reserverPattern 100000)
                     (List.replicate 25 Claim @ List.replicate 25 Move)
                     "twenty-five blocks fill the 50 parts exactly"
+            }
+
+            test "a row the generalist rule cannot size is refused, not quietly rebuilt" {
+                // The fallback counts Work, Carry and Move out of a block
+                // and emits only those, so the next table row that is not
+                // one of those three — a guard, a healer — used to get a
+                // body with none of its own parts in it and no complaint
+                // from the compiler (#155). The stop names the row and the
+                // part so the fix (its own sizing rule, ADR 0006) is
+                // legible from the message alone.
+                let guard =
+                    {
+                        Name = "guard"
+                        Block = [ Attack; Move ]
+                    }
+
+                let message =
+                    try
+                        bodyFor guard 1800 |> ignore
+                        "no exception"
+                    with ex ->
+                        ex.Message
+
+                Expect.stringContains
+                    message
+                    "guard"
+                    "the stop names the row that has no sizing rule"
+
+                Expect.stringContains
+                    message
+                    "Attack"
+                    "and the part the generalist rule would have dropped"
+            }
+
+            test "a Work/Carry/Move row the table does not name still sizes at parity" {
+                // The stop is for the parts the rule cannot place, not for
+                // rows the table has not grown yet: a block of Work, Carry
+                // and Move is exactly what the generalist rule is written
+                // for, whatever the row is called.
+                let scout =
+                    {
+                        Name = "scout"
+                        Block = [ Carry; Move ]
+                    }
+
+                Expect.equal
+                    (bodyFor scout 300)
+                    (List.replicate 3 Carry @ List.replicate 3 Move)
+                    "three whole blocks, nothing dropped and nothing padded"
+            }
+
+            test "a row with no block at all is refused too, on both runtimes" {
+                // The other shape the generalist rule cannot size, and the
+                // one the two runtimes disagree about: .NET divides by
+                // zero on the repeat count while the emitted JS reads
+                // `~~(50 / 0)` as no repeats and pads a Carry/Move body
+                // out of a row that asked for neither — the silent rebuild
+                // #155 exists to end, visible only in the colony. The stop
+                // names the row on both.
+                let ghost = { Name = "ghost"; Block = [] }
+
+                let message =
+                    try
+                        bodyFor ghost 1800 |> ignore
+                        "no exception"
+                    with ex ->
+                        ex.Message
+
+                Expect.stringContains message "ghost" "the stop names the row that has no block"
+
+                Expect.stringContains
+                    message
+                    "no parts at all"
+                    "and says which shape it is refusing to size"
             }
 
             test "spawn planning casts from the pattern table's row" {
