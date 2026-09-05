@@ -2263,25 +2263,29 @@ let private planLayout
 /// What finishes what this rule starts, named here because the two halves
 /// are read apart: the site placed here becomes a Build Task like any
 /// other, because `Snapshot.ConstructionSites` is every room the colony
-/// can see and no longer the spawn rooms' alone (#150). Nothing in the
-/// Build path is outpost-shaped — the Task names a site by id, its Work
-/// Area is that site's room's (ADR 0041) and its price crosses the Seam
-/// like every other cross-room price (#123).
+/// can see and no longer the spawn rooms' alone (#150). The Task, its Work
+/// Area and its price stay outpost-blind — it names a site by id, the area
+/// is that site's room's (ADR 0041) and the price crosses the Seam like
+/// every other cross-room price (#123). Its **tier**, its **cap** and its
+/// **applicability** are not, since #157, and `isOutpostContainerSite` is
+/// the one place all three ask which site this is.
 ///
 /// *Which* creep builds it is the ordinary ranking's answer and nothing
-/// this rule arranges, which is worth writing down because the obvious
-/// reading is wrong: Build and Upgrade share the surplus tier, so travel
-/// cost alone separates them, and a loaded worker standing at home is
-/// nearer its own controller than a site a Seam and fifty tiles away —
-/// it upgrades, every tick. The creep this site is cheapest for is the
-/// one already out there: a worker that walked into the outpost for the
-/// source's own Harvest (feeding tier, so it outranks the home Upgrade
-/// whatever the distance) and filled up on it, whose cheapest surplus
-/// Task is then the container three tiles from where it stands. That is
-/// the slow, right answer ADR 0042 asks for — no outpost builder row,
-/// and this rule invents none. Until the pool widened, the site was
-/// named by no Task at all and the switch could not close however near
-/// a creep stood.
+/// this rule arranges — but the ranking had to be corrected before that
+/// answer was anybody (#157). This site's Build is **feeding tier**, not
+/// surplus: it is the switch that admits a room into the economy, so it
+/// ranks with the flow, is capped at two concurrent builders, and a
+/// loaded home worker with no Refill left to do walks the Seam for it
+/// (`tierOf`, `taskCapacities`). Read on the surplus tier it lost to the
+/// home Upgrade every tick, and the answer #150 wrote down here — that
+/// the builder would be a creep which walked out for this source's own
+/// Harvest and filled up there — never happened on the deployed colony:
+/// the Storage's Withdraw is feeding tier and underfoot, so no
+/// cross-Seam Harvest ever won a creep, and the reserver (#131) carries
+/// CLAIM and no Work. The switch was laid down and nothing closed it.
+/// There is still no outpost builder row and this rule invents none.
+/// Until the pool widened, the site was named by no Task at all and the
+/// switch could not close however near a creep stood.
 let private planOutpostContainers (snapshot: Snapshot) atlas : Intent list =
     let home = SpatialInfo.homeName snapshot.Spatial
 
@@ -2514,6 +2518,35 @@ let private threatened (threats: Threats) atlas (creep: CreepInfo) task =
     not (Set.isEmpty (Atlas.workAreaFor atlas creep.Name task))
     && Set.isEmpty (areaFor threats atlas creep.Name task)
 
+/// Whether a construction site is an outpost's source container: the one
+/// site this colony ever places outside its own room
+/// (`planOutpostContainers`), and so the one Build that is a switch on a
+/// room's whole economy rather than a piece of surplus work (ADR 0042).
+/// Three readers, which is why it is a rule and not a line inlined three
+/// times — the applicability gate just below, the tier that gate exists
+/// because of, and the concurrency cap that keeps the tier from emptying
+/// the home room across the Seam.
+///
+/// Both halves come off the projection and neither off `Outpost.declared`
+/// (ADR 0041), exactly as the Reserve pool's does: the id-keyed kind
+/// census says a container is going up, and the layer that places the id
+/// says which room it stands in (`Atlas.targetRoom`). So a room a
+/// stand-down drops from the scan set (ADR 0043) leaves this reading with
+/// it rather than through a second gate free to disagree with the first.
+///
+/// The room half is load-bearing and not decoration: a `Pos` carries no
+/// room (ADR 0041), so the kind alone would read the home room's own
+/// container sites — one per source and one at the controller, all of them
+/// the Layout's (ADR 0012) — as outpost switches, and pull the worker row
+/// onto them off the feeding tier.
+///
+/// Total (ADR 0004): a site the projection does not place names no room,
+/// answers false, and is the ordinary surplus Build it has always been.
+let private isOutpostContainerSite (snapshot: Snapshot) atlas siteId =
+    Map.tryFind siteId snapshot.Spatial.TargetKinds = Some(Site BuiltKind.Container)
+    && Atlas.targetRoom atlas siteId
+       |> Option.exists (fun room -> room <> SpatialInfo.homeName snapshot.Spatial)
+
 /// Whether a creep can usefully work this Task right now. The body must
 /// physically be able to do it — Work-part tasks need a Work part, energy
 /// delivery needs a Carry part — and the energy state must call for it: a
@@ -2541,7 +2574,12 @@ let private threatened (threats: Threats) atlas (creep: CreepInfo) task =
 /// the Storage: the gate is scoped to the buffer by id, and the stock's own
 /// in-and-out cycle is closed in the Planner instead (ADR 0023), because
 /// the bodies that must feed the spawn from it are the ones with no Work.
-let private applicable (threats: Threats) atlas (creep: CreepInfo) task =
+/// A third gate reads the target beside the body in the same way (#157):
+/// an outpost container site's Build ranks on the feeding tier, where no
+/// travel cost separates it from the work a heavy body should be doing,
+/// so that one Build is inapplicable to a Work-heavy body — the arm
+/// carries why.
+let private applicable (snapshot: Snapshot) (threats: Threats) atlas (creep: CreepInfo) task =
     let has part =
         creep.Body |> Map.tryFind part |> Option.exists (fun n -> n > 0)
 
@@ -2553,7 +2591,24 @@ let private applicable (threats: Threats) atlas (creep: CreepInfo) task =
         && not (Atlas.workHeavy atlas creep.Name)
         && (has Work || not (Set.contains storeId (Atlas.controllerContainers atlas)))
     | Refill _ -> has Carry && creep.Energy > 0
-    | Build _
+    // The one Build with a body gate on it (#157), and it is here for the
+    // same reason ADR 0016's Withdraw gate is: `tierOf` below lifts this
+    // site onto the feeding tier, and a rank the whole colony shares is
+    // exactly what travel cost can no longer thin. What travel cost was
+    // holding up is written in the doc above — "Travel cost pins an Anchor
+    // that is at its Post" — and on this Task alone it stopped holding: a
+    // full Anchor whose Post has no standing container under it (a source
+    // whose container is still a site, or has decayed) loses Harvest, and
+    // was then outranked off its own controller and walked fifty tiles at
+    // four to seven ticks a step to spend one Carry into a 5,000-progress
+    // site. A heavy body's cross-room work is a Post and never a delivery
+    // (ADR 0020), so the switch is light bodies' work; it costs the colony
+    // nothing, because a Post — and so an Anchor — exists in an outpost
+    // only once that very container stands.
+    | Build siteId ->
+        has Work
+        && creep.Energy > 0
+        && not (isOutpostContainerSite snapshot atlas siteId && Atlas.workHeavy atlas creep.Name)
     | Repair _
     | Upgrade _ -> has Work && creep.Energy > 0
     // Part arithmetic and nothing else (ADR 0006): a reservation is pushed
@@ -2636,9 +2691,11 @@ type private Tier =
     /// too, because no other work matters while a creep is being killed.
     | Safety
     /// Feeding the economy: Harvest, a container's Withdraw, the Refill of
-    /// a spawn or an extension, and Reserve — the flow the colony's
-    /// reproduction runs on, and the one Task that decides how fast a
-    /// third of it flows (ADR 0042).
+    /// a spawn or an extension, Reserve, and an **outpost** container
+    /// site's Build (#157) — the flow the colony's reproduction runs on,
+    /// and beside it ADR 0042's two switches on a third of that flow: the
+    /// Reserve that decides how fast an outpost's rock gives, and the
+    /// Build that decides whether the room is in the economy at all.
     | Feeding
     /// The Storage's Withdraw (ADR 0023): the colony's stock as an
     /// intake, one tier below the source containers the flow fills. An
@@ -2654,6 +2711,10 @@ type private Tier =
     /// Surplus work: a tower Refill (ADR 0010), Build, Repair and
     /// Upgrade. The colony feeds its own reproduction before its guns,
     /// and everything it merely spends energy on waits behind the flow.
+    /// Build with one site excepted — the outpost container's, which is a
+    /// switch and not a spend (`isOutpostContainerSite`, #157); every
+    /// other site the colony ever has, its own container sites included,
+    /// is surplus here.
     | Surplus
     /// The controller container's Refill (ADR 0012): a full creep beside
     /// the buffer sinks its load into the controller rather than dumping
@@ -2689,10 +2750,11 @@ let private rankOfTier =
     | UpgradeBuffer -> 3
     | Stock -> 4
 
-/// The tier a Task sits in. Refill and Withdraw are the two Tasks whose
-/// tier layers by target (ADR 0010, ADR 0023), and both read the layer off
-/// the projection's kind — the stock is recognised for what it is, never
-/// for where it stands. On Refill: the Storage and the container are each
+/// The tier a Task sits in. Refill, Withdraw and Build are the three
+/// Tasks whose tier layers by target (ADR 0010, ADR 0023, ADR 0042). Two
+/// of the three read the layer off the projection's kind and nothing else
+/// — the stock is recognised for what it is, never for where it stands;
+/// the third, Build, is the one that asks where as well. On Refill: the Storage and the container are each
 /// one projected kind, and the projection holds one kind per id, so those
 /// two answers exclude each other by construction; a tower is read off the
 /// Refillables census instead, which can overlap either. So the kind is
@@ -2703,8 +2765,12 @@ let private rankOfTier =
 /// reaches here. Everything the three tests miss is a spawn or an
 /// extension: the flow. On Withdraw the layering is the one line: the
 /// stock is drawn on a tier below every container, source and controller
-/// alike.
-let private tierOf (snapshot: Snapshot) task =
+/// alike. On Build the layering is by target too, and by the site's room
+/// as well as its kind: `isOutpostContainerSite` above.
+///
+/// Reads the Atlas because that room is a question only the projection's
+/// id-to-room join answers.
+let private tierOf (snapshot: Snapshot) atlas task =
     match task with
     | Flee -> Safety
     | Harvest _ -> Feeding
@@ -2748,6 +2814,47 @@ let private tierOf (snapshot: Snapshot) task =
             Surplus
         else
             Feeding
+    // The switch ADR 0042 hangs a whole room on, ranked where a switch
+    // belongs (#157). A standing container is what admits an outpost into
+    // the economy; until one stands the room is in no quota, so building
+    // it is not surplus work the colony does with spare energy — it
+    // decides whether a third of the colony's income exists at all,
+    // exactly as the Reserve above decides whether that income is five a
+    // tick or ten. So it ranks with the flow and not with the spending.
+    //
+    // What the surplus reading actually cost, deployed: Build and Upgrade
+    // share the surplus tier, so only travel cost separated them, and the
+    // home controller is a few tiles from a loaded home worker while the
+    // site is a Seam and fifty tiles away. Every worker upgraded, every
+    // tick. The answer #150 wrote down — that the builder would be the
+    // creep which walked out for the outpost's own Harvest and filled up
+    // there — never happened either: the Storage's Withdraw is feeding
+    // tier and underfoot, so a cross-Seam Harvest never won a creep, and
+    // the reserver (#131) is a CLAIM body with no Work. The switch was
+    // laid down and nothing could ever close it.
+    //
+    // Home Build is untouched and stays Surplus: a home site is placed by
+    // the Layout out of a surplus the colony already has, and admits
+    // nothing.
+    //
+    // ADR 0010's Refill layering is untouched, but the tier it is untouched
+    // beside has grown, and the two consequences of that are written here
+    // rather than assumed away — the ticket's prose claimed neither
+    // happened, and both do. A spawn- or extension-feeding Refill shares
+    // this tier, so nothing but cost separates the two: the nearer target
+    // wins, which is the home one for a creep standing at home and the
+    // site for one the cap has already parked in the outpost. The home
+    // room feeds itself first through the creeps that are standing in it,
+    // and not by any rule. A **tower** Refill is surplus and not feeding
+    // (ADR 0010, the Refill arm above), and Repair is surplus too (ADR
+    // 0034), so both now rank strictly below this one site rather than
+    // race it on distance. That is ADR 0010's own sentence and not an
+    // exception to it — a colony feeds its own reproduction before its
+    // guns, and this Build is what a third of that reproduction's income
+    // is waiting on — but it is a real change of behaviour under a raid on
+    // the home room, and the answer for a raid is the stand-down (ADR
+    // 0043, #136) and not a rank.
+    | Build siteId when isOutpostContainerSite snapshot atlas siteId -> Feeding
     | Build _
     | Repair _
     | Upgrade _ -> Surplus
@@ -2766,10 +2873,18 @@ let private deadlineRank = -1
 /// Task's tier. One exception: a controller inside the downgrade deadline
 /// makes Upgrade the colony's most urgent work, outranking even the
 /// feeding tier (ADR 0007).
-let private rank (snapshot: Snapshot) task =
+let private rank (snapshot: Snapshot) atlas task =
     match task with
     | Upgrade _ when insideDowngradeDeadline snapshot -> deadlineRank
-    | _ -> tierOf snapshot task |> rankOfTier
+    | _ -> tierOf snapshot atlas task |> rankOfTier
+
+/// How many creeps the colony will have building outpost container sites
+/// at once (#157) — a budget over all of them together and never a
+/// per-site number, because the Planner places one site per unserved
+/// outpost source and places them all on the same tick. A tunable;
+/// `taskCapacities` below carries the argument for the number and for
+/// how it is spread.
+let private outpostContainerBuilders = 2
 
 /// Concurrent-worker cap per task id; tasks absent from the map are
 /// unbounded. Harvest is capped by its source's Seat count — a source the
@@ -2790,6 +2905,48 @@ let private rank (snapshot: Snapshot) task =
 /// in `planTasks`; and it counts holders at arrival like every other cap
 /// (ADR 0026), so a reserver's successor is cast and matched while the
 /// incumbent still holds the reservation.
+///
+/// The outpost container sites carry **`outpostContainerBuilders` between
+/// them** (#157), the same mechanism the Reserve cap uses and for the
+/// opposite reason: not that a second body buys nothing, but that a tenth
+/// does. Now that these sites sit on the feeding tier they outbid the home
+/// Upgrade for every loaded worker in the colony, and travel cost cannot
+/// thin the crowd — every worker in one room is about equally far from a
+/// site a Seam away, so without a cap the whole worker row walks out
+/// together and the home room's surplus work stops for the fifty ticks
+/// each of them spends crossing.
+///
+/// **A budget and not a per-site number**, which is the one place this cap
+/// is not the Reserve cap's shape: a reservation is one per controller and
+/// two of them are two separate jobs, but `planOutpostContainers` places a
+/// site for *every* unserved outpost source and places them on the same
+/// tick — the declaration carries three sources, so a per-site two is a
+/// colony-wide six, which is the whole worker row and exactly what the
+/// paragraph above says the cap exists to prevent. So the budget is spread
+/// over the sites the pool actually holds, floored at one apiece: one site
+/// takes two, and three sites take one each. Nothing waits on another's
+/// completion — every switch is being closed — and as each site completes
+/// the divisor falls and the survivors get the bodies back, so the last
+/// one standing is built by the full two.
+///
+/// **Two is a tunable, and this is the reason for that number**: one is
+/// the smallest crowd that builds, and two is the smallest that survives
+/// losing a body. A container is 5,000 progress and a generalist carries
+/// 50, so the site is many round trips deep whatever the crowd; a lone
+/// holder that dies, expires or is released by a Reach (ADR 0033) leaves
+/// the switch open for a whole cast-and-walk cycle, and the room stays
+/// outside every quota for all of it — which is the loss the floor of one
+/// accepts while several switches are open at once, and the reason the
+/// budget is spread rather than spent on one site at a time. Beyond two
+/// the marginal body buys the same fraction of a long build at the same
+/// fifty-tile price, which is why the number is small rather than the Work
+/// Area's own room. Raising it is a decision about how much of the home
+/// room's surplus the colony will spend to close the switches sooner, and
+/// nothing here breaks if it moves.
+///
+/// Read off the pool like the Reserve cap, so which site this is stays
+/// said once (`isOutpostContainerSite`), and counted at arrival like every
+/// other cap (ADR 0026).
 let private taskCapacities (snapshot: Snapshot) atlas (tasks: Task list) : Map<string, int> =
     let seats =
         snapshot.Sources
@@ -2802,7 +2959,20 @@ let private taskCapacities (snapshot: Snapshot) atlas (tasks: Task list) : Map<s
             | Reserve _ as task -> Some(taskId task, 1)
             | _ -> None)
 
-    seats @ reserves |> Map.ofList
+    let outpostContainers =
+        match
+            tasks
+            |> List.choose (function
+                | Build siteId as task when isOutpostContainerSite snapshot atlas siteId ->
+                    Some(taskId task)
+                | _ -> None)
+        with
+        | [] -> []
+        | sites ->
+            let each = outpostContainerBuilders / List.length sites |> max 1
+            sites |> List.map (fun tid -> tid, each)
+
+    seats @ reserves @ outpostContainers |> Map.ofList
 
 /// Concurrent Work-heavy-harvester cap per Harvest task id (ADR 0024): the
 /// source's Post count, the standing room a heavy body actually has — its
@@ -3181,7 +3351,7 @@ let resolve
             |> List.filter (fun (name, _) -> not (Set.contains name tired))
             |> List.map (fun (name, pos) ->
                 moveIntentFor
-                    (rank snapshot)
+                    (rank snapshot atlas)
                     threats
                     atlas
                     room
@@ -3408,7 +3578,7 @@ let matchCreeps
                 // creep however well its body fits (ADR 0033).
                 | Some task when threatened threats atlas creep task ->
                     release ReleaseReason.Threatened
-                | Some task when not (applicable threats atlas creep task) ->
+                | Some task when not (applicable snapshot threats atlas creep task) ->
                     release ReleaseReason.Inapplicable
                 | Some task ->
                     // The walk is bound one gate before it is spent, exactly
@@ -3455,7 +3625,7 @@ let matchCreeps
 
         if threatened threats atlas creep task then
             Candidate.Rejected(tid, RejectReason.Threatened)
-        elif not (applicable threats atlas creep task) then
+        elif not (applicable snapshot threats atlas creep task) then
             Candidate.Rejected(tid, RejectReason.Inapplicable)
         else
             let cost = travelCostOf threats atlas creep.Name task
@@ -3469,7 +3639,7 @@ let matchCreeps
                 | Some cost ->
                     match tooEarly snapshot atlas creep task arrival with
                     | Some(walk, wait) -> Candidate.Rejected(tid, RejectReason.TooEarly(walk, wait))
-                    | None -> Candidate.Scored(tid, rank snapshot task, cost, load acc tid)
+                    | None -> Candidate.Scored(tid, rank snapshot atlas task, cost, load acc tid)
 
     let assignOne (acc, verdicts) (creep: CreepInfo) =
         let verdicts =

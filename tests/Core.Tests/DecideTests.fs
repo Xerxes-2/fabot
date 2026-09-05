@@ -11966,6 +11966,24 @@ let private matchOf (colony: Snapshot) =
         | Verdict.Matched("w", task, factor) -> Some(task, factor)
         | _ -> None)
 
+/// The same colony with its own controller standing where the caller puts
+/// it: the rival every loaded worker in the real colony always has, and
+/// the one the fixtures above leave out so that their Matched factor can
+/// name a single comparison. Level 2 and far from its downgrade deadline,
+/// so nothing here is ADR 0007's deadline rank in disguise.
+let private withHomeController (pos: Pos) (colony: Snapshot) =
+    { colony with
+        Controller = Some(controllerAt 2)
+        Spatial =
+            { colony.Spatial with
+                TargetKinds = Map.add "ctrl-1" TargetKind.Controller colony.Spatial.TargetKinds
+            }
+            |> withHome (fun layer ->
+                { layer with
+                    TargetPositions = Map.add "ctrl-1" pos layer.TargetPositions
+                })
+    }
+
 [<Tests>]
 let outpostTests =
     testList
@@ -12331,60 +12349,73 @@ let outpostTests =
                     "off the ring onto the corridor, down to build range, and the container rises"
             }
 
-            test "which creep builds it is the ranking's answer, not the ticket's" {
-                // The two cases above hold one worker and no controller,
-                // which is what makes their factor name the Build's one
-                // rival. The colony that really exists has a controller,
-                // and it changes who wins: Build and Upgrade share the
-                // surplus tier (CONTEXT.md), so nothing but travel cost
-                // separates them, and a loaded worker standing at home is a
-                // corridor from its own controller and a Seam plus fifty
-                // tiles from the site. It upgrades — every tick, however
-                // long the container has stood as a site.
+            test "the site outranks the home Upgrade: a loaded worker crosses the Seam for it" {
+                // #157, and the reverse of what this very fixture asserted
+                // before it. The two cases above hold one worker and no
+                // controller, which is what let their factor name the
+                // Build's one rival; the colony that really exists has a
+                // controller, and while the site was surplus work that
+                // controller took every loaded worker every tick. Build and
+                // Upgrade shared the surplus tier, so nothing but travel
+                // cost separated them, and a loaded worker standing at home
+                // is a corridor from its own controller and a Seam plus
+                // fifty tiles from the site.
                 //
-                // That is not a hole in ADR 0042's switch, and this pins
-                // both halves of why: the creep the site *is* cheapest for
-                // is the one already out there. A worker walks into the
-                // outpost for the source's own Harvest, which is feeding
-                // tier and so outranks the home Upgrade whatever the
-                // distance (#123, ADR 0041); it fills up, Harvest goes
-                // inapplicable, and the cheapest surplus Task left to it is
-                // the container three tiles away. Pairwise both times: one
-                // Build, one Upgrade, no third candidate standing in.
-                let sited controller =
+                // Deployed, that was ADR 0042's switch laid down and never
+                // closed: the reserver went out (#131), the site went up
+                // (#128), and nobody ever built it. #150's answer here —
+                // that the builder would be a creep which had walked out
+                // for this room's own Harvest and filled up there — never
+                // happened either, because the Storage's Withdraw is
+                // feeding tier and a few tiles from home while the
+                // cross-Seam Harvest is fifty, so no worker made the trip
+                // to fill up out there in the first place.
+                //
+                // So this Build is feeding tier now (`tierOf`): it decides
+                // whether the room is in the economy at all, which is the
+                // same kind of question the Reserve beside it settles about
+                // the rate. The factor is `Rank` and deliberately not
+                // `TravelCost` — the site is still much the farther of the
+                // two targets and wins anyway. Pairwise, one rival at a
+                // time: one Build, one Upgrade, and the home Harvest
+                // inapplicable to a body with nothing free to fill.
+                let sited =
+                    northBorderColony { X = 10; Y = 38 }
+                    |> withNorthOutpost None
+                    |> withOutpostSite { X = 10; Y = 43 }
+                    |> loaded
+                    |> withHomeController { X = 10; Y = 5 }
+
+                Expect.equal
+                    (matchOf sited)
+                    (Some(taskId (Build "site-out"), MatchFactor.Rank))
+                    "the switch outranks the sink, however much nearer the sink stands"
+
+                let { Intents = opening } = decide sited Map.empty Set.empty None
+
+                Expect.equal
+                    (moveIntents opening)
+                    [ "w", Top ]
+                    "and the worker is walked up its own corridor toward the Seam it has to cross"
+
+                Expect.isEmpty
+                    (actionIntents opening)
+                    "having neither built a site a room away nor upgraded the controller beside it"
+            }
+
+            test "and the worker already in the outpost still builds it" {
+                // The other half of the same colony, unmoved by #157: a
+                // creep standing in the outpost is nearer the site than
+                // anything at home, so it held this Task on the surplus
+                // tier and holds it on the feeding one. What changed is
+                // that it is no longer the *only* creep that ever could.
+                let landed =
                     let colony =
                         northBorderColony { X = 10; Y = 38 }
                         |> withNorthOutpost None
                         |> withOutpostSite { X = 10; Y = 43 }
                         |> loaded
-
-                    { colony with
-                        Controller = Some(controllerAt 2)
-                        Spatial =
-                            { colony.Spatial with
-                                TargetKinds =
-                                    Map.add
-                                        "ctrl-1"
-                                        TargetKind.Controller
-                                        colony.Spatial.TargetKinds
-                            }
-                            |> withHome (fun layer ->
-                                { layer with
-                                    TargetPositions =
-                                        Map.add "ctrl-1" controller layer.TargetPositions
-                                })
-                    }
-
-                Expect.equal
-                    (matchOf (sited { X = 10; Y = 5 }))
-                    (Some(taskId (Upgrade "ctrl-1"), MatchFactor.TravelCost))
-                    "a worker at home upgrades: the site shares Upgrade's tier and loses on distance"
-
-                // The same colony, the same load, the same pool — the
-                // creep is standing in the outpost instead, where it would
-                // be the tick it filled up on the rock it walked there for.
-                let landed =
-                    let colony = sited { X = 10; Y = 5 }
+                        |> withHomeController { X = 10; Y = 5 }
 
                     { colony with
                         Spatial =
@@ -12402,8 +12433,397 @@ let outpostTests =
 
                 Expect.equal
                     (matchOf landed)
+                    (Some(taskId (Build "site-out"), MatchFactor.Rank))
+                    "the creep out there builds, as it did before the tier moved"
+            }
+
+            test "a hungry extension still comes first: same tier, and the nearer target wins" {
+                // ADR 0010's layering is untouched by #157, and this is
+                // what keeps a starving spawn from waiting on a container
+                // fifty tiles away with no special case written for it. The
+                // spawn and the extensions were always on the feeding tier
+                // and the outpost's site has joined them, so what separates
+                // the two is travel cost — and a hungry extension underfoot
+                // is nearer than a site across a Seam, every time.
+                //
+                // Pairwise, one rival at a time: no controller in this
+                // fixture, so the pool is the Build, the Refill and a home
+                // Harvest a full body cannot take.
+                let sited =
+                    northBorderColony { X = 10; Y = 38 }
+                    |> withNorthOutpost None
+                    |> withOutpostSite { X = 10; Y = 43 }
+                    |> loaded
+
+                Expect.equal
+                    (matchOf sited)
+                    (Some(taskId (Build "site-out"), MatchFactor.OnlyCandidate))
+                    "the premise: with nothing at home to fill, this worker crosses for the site"
+
+                let hungry =
+                    { sited with
+                        Refillables = [ refillable "ext-1" 50 BuiltKind.Extension ]
+                        Spatial =
+                            { sited.Spatial with
+                                TargetKinds =
+                                    Map.add
+                                        "ext-1"
+                                        (Structure BuiltKind.Extension)
+                                        sited.Spatial.TargetKinds
+                            }
+                            |> withHome (fun layer ->
+                                { layer with
+                                    TargetPositions =
+                                        Map.add "ext-1" { X = 10; Y = 3 } layer.TargetPositions
+                                })
+                    }
+
+                Expect.equal
+                    (matchOf hungry)
+                    (Some(taskId (Refill "ext-1"), MatchFactor.TravelCost))
+                    "and one extension with room in it takes the same worker back, on cost alone"
+            }
+
+            test "a home container site is surplus still: the room is what makes one a switch" {
+                // The half of #157 that must not move. What makes the
+                // outpost's site a switch is the room it stands in and not
+                // the kind it is, and a `Pos` carries no room (ADR 0041) —
+                // so a reading that went by the kind census alone would
+                // lift every container the Layout ever places (ADR 0040)
+                // onto the feeding tier and pull the whole worker row off
+                // the controller with it.
+                //
+                // Discriminating by construction: the home site is the
+                // farther of the two targets and the controller the nearer,
+                // so on the surplus tier they share the controller wins on
+                // cost — and read as a switch the site would have won on
+                // rank instead, which is exactly the failure this pins.
+                // Pairwise: one Build, one Upgrade.
+                let homeSite =
+                    let colony =
+                        northBorderColony { X = 10; Y = 38 }
+                        |> loaded
+                        |> withHomeController { X = 10; Y = 5 }
+
+                    { colony with
+                        ConstructionSites = [ { Id = "site-home" } ]
+                    }
+                    |> withTarget "site-home" { X = 10; Y = 30 } (Site BuiltKind.Container)
+
+                Expect.equal
+                    (matchOf homeSite)
+                    (Some(taskId (Upgrade "ctrl-1"), MatchFactor.TravelCost))
+                    "the colony's own container site shares Upgrade's tier and loses on distance"
+            }
+
+            test "two builders cross for the site, and the third stays home" {
+                // The cap `taskCapacities` puts on this Build (#157). On
+                // the feeding tier the site outbids the home Upgrade for
+                // every loaded worker at once, and travel cost cannot thin
+                // that crowd — a Seam away is a Seam away from every tile
+                // of one corridor. Uncapped, the whole worker row walks out
+                // together and the home room stops working for the fifty
+                // ticks each of them spends crossing.
+                //
+                // Two is a tunable and the third worker is what reads it:
+                // rejected as capacity-full, it falls to the Upgrade it
+                // would have taken anyway. Asserted as the whole tally, so
+                // a cap that admitted all three or only one both fail.
+                // Two is the whole colony's budget and not this site's
+                // alone — one site standing is what makes the two numbers
+                // agree here; the test below opens a second site and reads
+                // them apart.
+                let crowd =
+                    let colony =
+                        northBorderColony { X = 10; Y = 38 }
+                        |> withNorthOutpost None
+                        |> withOutpostSite { X = 10; Y = 43 }
+                        |> withHomeController { X = 10; Y = 5 }
+
+                    { colony with
+                        Creeps = [ for name in [ "w1"; "w2"; "w3" ] -> worker name 50 0 ]
+                        Spatial =
+                            colony.Spatial
+                            |> withHome (fun layer ->
+                                { layer with
+                                    CreepPositions =
+                                        Map.ofList
+                                            [
+                                                "w1", { X = 10; Y = 2 }
+                                                "w2", { X = 10; Y = 3 }
+                                                "w3", { X = 10; Y = 4 }
+                                            ]
+                                })
+                    }
+
+                let { Assignments = assignments } = decide crowd Map.empty Set.empty None
+
+                Expect.equal
+                    (assignments |> Map.toList |> List.map snd |> List.countBy id |> List.sort)
+                    [ taskId (Build "site-out"), 2; taskId (Upgrade "ctrl-1"), 1 ]
+                    "two of the three hold the site, and the one left over upgrades"
+            }
+
+            test "the whole ring closes at `decide`: cross, build it empty, dig it full, build on" {
+                // ADR 0042's switch closing under its own power, end to
+                // end and with no new concept in it (#157) — the loop the
+                // ticket asks for, driven one tick at a time over the one
+                // seam this repo decides at.
+                //
+                // The colony that really exists: a controller at home, a
+                // rock and a container site in the outpost, and one loaded
+                // worker standing at home. It crosses because the site now
+                // outranks the controller (`tierOf`); it builds until the
+                // build empties it; emptied, the Build goes inapplicable
+                // and the outpost's own rock — a step away, feeding tier —
+                // is the cheapest Task it has (`applicable`, ADR 0013);
+                // full again, the site outranks everything once more. No
+                // "go home" act and no outpost builder row: the ring is
+                // the ordinary ranking, turning.
+                //
+                // Driven the way the engine drives it: this tick's
+                // Assignments handed back as the next tick's, a Move
+                // Intent stepped, and a step onto the exit row handed over
+                // to the neighbour's own border row, which is exactly what
+                // the engine does with a creep that ends its tick there
+                // (ADR 0036, #145). What a build spends and a dig collects
+                // is the engine's arithmetic and not this seam's, so the
+                // two act on the store at their limits — emptied, filled —
+                // which is the state the ring turns on.
+                let colonyAt room pos carrying =
+                    let colony =
+                        northBorderColony { X = 10; Y = 38 }
+                        |> withNorthOutpost (Some { X = 10; Y = 46 })
+                        |> withOutpostSite { X = 10; Y = 44 }
+                        |> withHomeController { X = 10; Y = 5 }
+
+                    let standing (name: string) (layer: RoomLayer) =
+                        { layer with
+                            CreepPositions =
+                                if name = room then Map.ofList [ "w", pos ] else Map.empty
+                        }
+
+                    { colony with
+                        Creeps = [ (if carrying then worker "w" 50 0 else worker "w" 0 50) ]
+                        Spatial =
+                            colony.Spatial
+                            |> withHome (standing "W1N1")
+                            |> withNeighbour
+                                "W1N2"
+                                (SpatialInfo.layerOf colony.Spatial "W1N2" |> standing "W1N2")
+                    }
+
+                let rec drive (room, pos, carrying) assigned trail ticks =
+                    if ticks = 0 then
+                        List.rev trail
+                    else
+                        let {
+                                Intents = intents
+                                Assignments = next
+                            } =
+                            decide (colonyAt room pos carrying) assigned Set.empty None
+
+                        let step state acted =
+                            drive state next (acted :: trail) (ticks - 1)
+
+                        match actionIntents intents, moveIntents intents with
+                        | [ BuildSite("w", "site-out") ], [] -> step (room, pos, false) "build"
+                        | [ HarvestSource("w", "src-out") ], [] -> step (room, pos, true) "harvest"
+                        | [], [ _, direction ] ->
+                            let next = stepFrom pos direction
+
+                            // The engine's own handover: a creep ending its
+                            // tick on the exit row is lifted into the
+                            // neighbour and filed on that room's opposite
+                            // border row, same column.
+                            if room = "W1N1" && next.Y = 0 then
+                                step ("W1N2", { next with Y = 49 }, carrying) "cross"
+                            else
+                                step (room, next, carrying) "walk"
+                        | actions, moves ->
+                            failtest $"in {room} at {pos.X},{pos.Y}: {actions} and {moves}"
+
+                Expect.equal
+                    (drive ("W1N1", { X = 10; Y = 2 }, true) Map.empty [] 10)
+                    [
+                        "walk"
+                        "cross"
+                        "walk"
+                        "walk"
+                        "build"
+                        "harvest"
+                        "build"
+                        "harvest"
+                        "build"
+                        "harvest"
+                    ]
+                    "up the corridor, over the Seam, down to the site — and then the ring turns"
+            }
+
+            test "the switch is light bodies' work: a full Anchor stays on its Post" {
+                // What the feeding tier took away and `applicable` gives
+                // back (#157). Travel cost was the only thing keeping a
+                // heavy body off a distant site — `applicable`'s own doc
+                // says so, "Travel cost pins an Anchor that is at its
+                // Post" — and a rank the whole colony shares is exactly
+                // what travel cost cannot answer. A full Anchor whose Post
+                // carries no standing container yet loses Harvest
+                // (`garrisons`), and was then outranked off its own
+                // controller and walked fifty tiles at four to seven ticks
+                // a step to spend one Carry into a 5,000-progress site,
+                // burning a builder place while it went. A heavy body's
+                // cross-room work is a Post (ADR 0020), so the gate is
+                // ADR 0016's shape: this one Build is inapplicable to it.
+                //
+                // The two bodies stand on the same tile in the same
+                // colony, so what tells them apart is the body and
+                // nothing geometric.
+                let sited body =
+                    let colony =
+                        northBorderColony { X = 10; Y = 38 }
+                        |> withNorthOutpost None
+                        |> withOutpostSite { X = 10; Y = 43 }
+                        |> withHomeController { X = 10; Y = 5 }
+
+                    { colony with
+                        Creeps = [ body "w" 50 0 ]
+                    }
+
+                Expect.equal
+                    (matchOf (sited worker))
+                    (Some(taskId (Build "site-out"), MatchFactor.Rank))
+                    "the premise: a generalist is walked over the Seam for the site"
+
+                Expect.equal
+                    (matchOf (sited anchor))
+                    (Some(taskId (Upgrade "ctrl-1"), MatchFactor.OnlyCandidate))
+                    "and the Anchor beside it has no such Task at all: it spends its Carry where it stands"
+
+                Expect.isEmpty
+                    (moveIntents (decide (sited anchor) Map.empty Set.empty None).Intents)
+                    "and takes no step toward a border it would spend hundreds of ticks crossing"
+            }
+
+            test "what shares this tier and what only looks like it does" {
+                // The half of #157's Implementation decisions that is not
+                // true as the ticket wrote it, pinned as it really is. The
+                // ticket said "Refill still comes first — the home
+                // extension / tower is nearer, cost decides"; ADR 0010 is
+                // the authority and it puts a **tower** Refill in the
+                // surplus tier, not the feeding one, so cost never gets
+                // asked. Two pairwise cases, one rival each.
+                let sited =
+                    northBorderColony { X = 10; Y = 38 }
+                    |> withNorthOutpost None
+                    |> withOutpostSite { X = 10; Y = 43 }
+
+                // A tower with 500 free, three tiles from the worker,
+                // against a site a Seam and fifty tiles away. It loses on
+                // rank and distance is never reached — which is ADR 0010's
+                // own "a colony feeds its own reproduction before its
+                // guns" with this Build counted as reproduction, and a
+                // real change of behaviour under a raid at home. The
+                // answer for a raid is the stand-down (ADR 0043, #136).
+                let tower =
+                    { (sited |> loaded) with
+                        Refillables = [ refillable "tower-1" 500 BuiltKind.Tower ]
+                    }
+                    |> withTarget "tower-1" { X = 10; Y = 3 } (Structure BuiltKind.Tower)
+
+                Expect.equal
+                    (matchOf tower)
+                    (Some(taskId (Build "site-out"), MatchFactor.Rank))
+                    "a hungry tower is surplus work and is outranked outright, not beaten on distance"
+
+                // The spawn does share the tier, so cost decides — and
+                // cost is answered from where the creep stands. For the
+                // one the cap has already parked in the outpost the
+                // nearer target is the site, not the spawn: the home room
+                // feeds itself through the creeps standing in it and not
+                // by any rule.
+                let outThere =
+                    let colony =
+                        { (sited |> loaded) with
+                            Refillables = [ refillable "spawn-1" 300 BuiltKind.Spawn ]
+                        }
+                        |> withTarget "spawn-1" { X = 10; Y = 2 } (Structure BuiltKind.Spawn)
+
+                    { colony with
+                        Spatial =
+                            colony.Spatial
+                            |> withHome (fun layer ->
+                                { layer with
+                                    CreepPositions = Map.empty
+                                })
+                            |> withNeighbour
+                                "W1N2"
+                                { SpatialInfo.layerOf colony.Spatial "W1N2" with
+                                    CreepPositions = Map.ofList [ "w", { X = 10; Y = 44 } ]
+                                }
+                    }
+
+                Expect.equal
+                    (matchOf outThere)
                     (Some(taskId (Build "site-out"), MatchFactor.TravelCost))
-                    "and the worker already in the outpost builds it, which is how the switch closes"
+                    "and a hungry spawn does share it, so the creep already out there builds on rather than walking home"
+            }
+
+            test "the two builders are the colony's budget, not each site's" {
+                // `taskCapacities`' cap read at colony scale (#157).
+                // `planOutpostContainers` places one site per unserved
+                // outpost source and places them all on the same tick, so
+                // a per-site two over the declaration's three sources is a
+                // colony-wide six — the whole worker row, which is the one
+                // thing the cap exists to prevent. Spread instead: two
+                // sites take one apiece, and the case above, with one site
+                // standing, still takes two.
+                let crowd =
+                    let colony =
+                        northBorderColony { X = 10; Y = 38 }
+                        |> withNorthOutpost None
+                        |> withOutpostSite { X = 10; Y = 43 }
+                        |> withHomeController { X = 10; Y = 5 }
+
+                    let outpost = SpatialInfo.layerOf colony.Spatial "W1N2"
+
+                    { colony with
+                        ConstructionSites = colony.ConstructionSites @ [ { Id = "site-out2" } ]
+                        Creeps = [ for n in 1..5 -> worker $"w{n}" 50 0 ]
+                        Spatial =
+                            { colony.Spatial with
+                                TargetKinds =
+                                    Map.add
+                                        "site-out2"
+                                        (Site BuiltKind.Container)
+                                        colony.Spatial.TargetKinds
+                            }
+                            |> withHome (fun layer ->
+                                { layer with
+                                    CreepPositions =
+                                        Map.ofList
+                                            [ for n in 1..5 -> $"w{n}", { X = 10; Y = n + 1 } ]
+                                })
+                            |> withNeighbour
+                                "W1N2"
+                                { outpost with
+                                    TargetPositions =
+                                        Map.add
+                                            "site-out2"
+                                            { X = 10; Y = 45 }
+                                            outpost.TargetPositions
+                                }
+                    }
+
+                let { Assignments = assignments } = decide crowd Map.empty Set.empty None
+
+                Expect.equal
+                    (assignments |> Map.toList |> List.map snd |> List.countBy id |> List.sort)
+                    [
+                        taskId (Build "site-out"), 1
+                        taskId (Build "site-out2"), 1
+                        taskId (Upgrade "ctrl-1"), 3
+                    ]
+                    "two switches open take one builder each, and three of the five stay home"
             }
 
             test
