@@ -3900,15 +3900,20 @@ let private assignedTasks (tasks: Task list) (assignments: Assignments) : Map<st
 ///   a Layout and walk-table recompute on a hostile structure appearing
 ///   or decaying in an outpost, which is rare and is bounded by the
 ///   profile figures the outpost container plan records.
-/// - **The pending census is still the home layer's alone**, because
-///   nothing the memo carries reads a site outside it: the Layout is
-///   anchored at home and stamps that room onto every site it plans, and
-///   the outpost's own container plan is derived fresh every tick and
-///   rides no memo entry at all (ADR 0042) — which is the reason it may
-///   go unsigned. It is written as a join of its own rather than as a
-///   filter, so which room each half of the census reaches is a thing a
-///   reader can see rather than infer. Both halves name the room, so the
-///   entries stay one format.
+/// - **The pending census spans every projected room too**, and this is
+///   the tick that half widened (#169). It was the home layer's alone
+///   while nothing the memo carried read a site outside it — the Layout
+///   is anchored at home, and the outpost's own container plan is derived
+///   fresh every tick and rides no memo entry at all (ADR 0042). The
+///   walk table's far leg reads one: it floods the *goal* room's grid,
+///   and `Snapshot.projectVisible` closes a tile under an obstacle-kind
+///   construction site in whatever room it stands in — the engine refuses
+///   a creep its own site everywhere — so a site outside home moves a
+///   grid the memo holds an answer off. Left unsigned it would be ADR
+///   0017's signature gap in that room: a lead recalled through ground
+///   the successor cannot cross, for the life of the census. Both halves
+///   name the room, so the entries stay one format, and a room's whole
+///   contribution to the string is now read the one way.
 /// - **The held rate is signed per projected room**, not for home alone.
 ///   Which rooms the quota reaches is itself derived from the census —
 ///   whichever ones place a source container this tick — so a signature
@@ -3928,33 +3933,27 @@ let censusSignature (snapshot: Snapshot) : string =
     let spatial = snapshot.Spatial
     let home = SpatialInfo.homeName spatial
 
-    let census placement select =
+    // One join for both halves since #169: a target is read wherever the
+    // projection places it, standing or pending alike, because both halves
+    // move a grid the memo holds an answer off.
+    let census select =
         spatial.TargetKinds
         |> Map.toList
         |> List.choose (fun (id, kind) ->
             select kind
             |> Option.bind (fun (built: BuiltKind) ->
-                placement id
+                SpatialInfo.placementOf spatial id
                 |> Option.map (fun (room, pos) -> $"{built}@{room}:{pos.X},{pos.Y}")))
         |> List.sort
         |> String.concat ";"
 
-    // The two joins, and which room each reaches. A standing structure is
-    // read wherever the projection places it; a pending site is read in
-    // the home layer alone.
-    let anywhere id = SpatialInfo.placementOf spatial id
-
-    let atHome id =
-        Map.tryFind id (SpatialInfo.layerOf spatial home).TargetPositions
-        |> Option.map (fun pos -> home, pos)
-
     let standing =
-        census anywhere (function
+        census (function
             | Structure kind -> Some kind
             | _ -> None)
 
     let pending =
-        census atHome (function
+        census (function
             | Site kind -> Some kind
             | _ -> None)
 

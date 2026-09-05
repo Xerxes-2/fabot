@@ -137,8 +137,10 @@ type Atlas =
             /// bodies of one fatigue factor can differ in it — the factor
             /// alone would hand a heavy body the light body's flood. The
             /// **factor** and the **pricing** for ADR 0029's own reasons. It
-            /// is deliberately not the ADR 0032 spawn-walk table: that one
-            /// lives across ticks and its key carries no room at all.
+            /// is deliberately not the ADR 0032 spawn-walk table, which
+            /// names a room too since #169: that one is keyed on a
+            /// *spawner* and lives across ticks under the census, this one
+            /// on a Task's Work Area and dies with the tick.
             FarFloods:
                 System.Collections.Generic.Dictionary<
                     string * Task * bool * FatigueFactor * Pricing,
@@ -161,20 +163,22 @@ type Atlas =
             /// and traffic-blind, and there is nothing left for a key to
             /// tell two of them apart by.
             SeamWalks: System.Collections.Generic.Dictionary<string * string, int[]>
-            /// Memoised traffic-blind flood out of a spawner's tile, per
-            /// (spawner tile, fatigue factor), for bodies the Snapshot does
-            /// not carry: a lead prices a replacement that has not been
-            /// cast yet (ADR 0026), so its factor is in no creep's entry
-            /// and the Floods memo cannot be laid for it in advance. One
-            /// flood per row per spawn, however many creeps that row is
-            /// deriving a lead for — and, since ADR 0032, one per census
-            /// rather than one per tick: this is the table the Atlas is
-            /// handed rather than one it lays, recalled from the plan memo
-            /// while the census signature holds and dropped whole when it
-            /// moves. Every input the flood reads is in that
-            /// signature — the weights, and the successor's body through
-            /// the Capacity that sizes it (ADR 0017) — so a recalled entry
-            /// is the entry this tick would have flooded. The hauler
+            /// Memoised traffic-blind cast walk out of a spawner's tile,
+            /// per (spawner tile, fatigue factor, goal's room), for bodies
+            /// the Snapshot does not carry: a lead prices a replacement
+            /// that has not been cast yet (ADR 0026), so its factor is in
+            /// no creep's entry and the Floods memo cannot be laid for it
+            /// in advance. One entry per row per spawn per room a lead is
+            /// asked over, however many creeps that row is deriving a lead
+            /// for — and, since ADR 0032, one per census rather than one
+            /// per tick: this is the table the Atlas is handed rather than
+            /// one it lays, recalled from the plan memo while the census
+            /// signature holds and dropped whole when it moves. Every input
+            /// it reads is in that signature — the weights of *every*
+            /// projected room, which rooms are projected at all, and the
+            /// successor's body through the Capacity that sizes it
+            /// (ADR 0017) — so a recalled entry is the entry this tick
+            /// would have run. The hauler
             /// quota's round trip, the other traffic-blind query, keeps its
             /// own uncached floods: its origins are containers rather than
             /// spawners, so it shares no key, and it is itself memoised on
@@ -1832,6 +1836,23 @@ let private besideExit (tile: Pos) : Pos list =
     neighbours tile
     |> List.filter (fun n -> n.X >= 0 && n.X < roomSide && n.Y >= 0 && n.Y < roomSide)
 
+/// The cheapest a flood reached any tile of a set at, and None when it
+/// reached none of them — the one read every arrival at a set of tiles is
+/// taken through, so the near leg's arrival at a crossing is the same
+/// arithmetic whether the far leg is joined tile by tile (`joinedAcross`)
+/// or seeded into one flood (`castAcross`, #169), and the hauler quota's
+/// same-room leg reads its sink's approach by the same rule. Unreachable
+/// is an absence and never a number, exactly as it is inside one room
+/// (ADR 0004).
+let private nearestReached (dist: int[]) (tiles: Pos list) : int option =
+    tiles
+    |> List.choose (fun tile ->
+        let d = dist.[indexOf tile]
+        if d = unreached then None else Some d)
+    |> function
+        | [] -> None
+        | costs -> Some(List.min costs)
+
 /// What this body pays to step onto an exit tile, priced by the same rule
 /// every other step is (ADR 0029's `max(1, ceil(units / 2))` for the walk,
 /// travel cost's units for the ranking price). This is #123's narrowing of
@@ -1967,15 +1988,18 @@ let private farFlood (atlas: Atlas) (pricing: Pricing) (creep: string) (room: st
 /// already run — so no flood ever leaves its room and the join is a
 /// minimum over thirty-odd additions rather than over thirty-odd floods.
 ///
-/// The join itself and not a second one (ADR 0030). Three callers reach
+/// The join itself and not a second one (ADR 0030). Two callers reach
 /// it, and they differ in nothing but which two floods they hand it: a
 /// creep priced toward a Task (`pricedAcross`) floods out of the creep and
-/// into that Task's Work Area, the hauler quota's round trip
+/// into that Task's Work Area, and the hauler quota's round trip
 /// (`haulRoundTripTicks`) floods out of a container and into the sink's
-/// approach, and a lead's cast walk (`castWalkTicks`) floods out of *all*
-/// the tiles beside a spawner — the one many-origin near leg here, since a
-/// finished body is born on whichever of them is free — and into the tile
-/// the creep being replaced stands on. What the two floods owe this rule
+/// approach. A lead's cast walk (`castWalkTicks`) is the third reader of
+/// this arithmetic and no longer a caller: it wants the answer at *every*
+/// tile of the far room rather than at one, so since #169 it folds the
+/// same three terms into the seeds of one flood (`castAcross`) instead of
+/// summing them per goal. The sum below is the statement of the rule and
+/// that seeding is the same rule read forwards; a change here is a change
+/// there. What the two floods owe this rule
 /// is fixed: the near one is
 /// `fromRoom`'s and charges every tile it enters, the far one is the
 /// other room's and is run *into* its goals with each goal seeded at its
@@ -2029,15 +2053,6 @@ let private joinedAcross
     (near: int[])
     (far: int[])
     : (int * Pos) option =
-    let reached (dist: int[]) tiles =
-        tiles
-        |> List.choose (fun tile ->
-            let d = dist.[indexOf tile]
-            if d = unreached then None else Some d)
-        |> function
-            | [] -> None
-            | costs -> Some(List.min costs)
-
     // One price table for the whole band: every crossing in it is priced
     // for the same body under the same pricing (#168).
     let stepPrices, _ = pricingOf noTraffic factor pricing
@@ -2045,9 +2060,9 @@ let private joinedAcross
     band
     |> List.choose (fun (exitTile, landing) ->
         match
-            reached near (besideExit exitTile),
+            nearestReached near (besideExit exitTile),
             exitPrice atlas stepPrices fromRoom exitTile,
-            reached far (besideExit landing)
+            nearestReached far (besideExit landing)
         with
         | Some approach, Some crossing, Some departure ->
             Some(approach + crossing + departure, exitTile)
@@ -2454,19 +2469,10 @@ let haulRoundTripTicks
     let goals = adjacentWalkableIn atlas sinkRoom sink
     let weights = weightsOf atlas fromRoom
 
-    let nearest (dist: int[]) tiles =
-        tiles
-        |> List.choose (fun tile ->
-            let d = dist.[indexOf tile]
-            if d = unreached then None else Some d)
-        |> function
-            | [] -> None
-            | costs -> Some(List.min costs)
-
     let legTicks factor =
         if fromRoom = sinkRoom then
             let dist, _ = walkFloodFrom weights factor from
-            nearest dist goals
+            nearestReached dist goals
         else
             match seams atlas fromRoom sinkRoom with
             | [] -> None
@@ -2488,6 +2494,56 @@ let haulRoundTripTicks
     match loaded, empty with
     | Some out, Some back -> Some(out + back)
     | _ -> None
+
+/// A cast walk carried across a Seam and on into every tile of the far
+/// room at once: the answer `joinedAcross` gives for one goal, given for
+/// all of them by one flood (#169). The three terms are the same three,
+/// in the same order and charged to the same tiles — walk to a tile beside
+/// an exit, the exit's own price, walk in from the tile it lands on — but
+/// read forwards rather than summed backwards. Every tile the far room
+/// puts a creep down on is *seeded* at what it costs to arrive standing on
+/// it, the cheapest crossing that reaches it; flooding on from there
+/// charges each further tile once, so what comes back at a tile `g` is the
+/// whole lead to `g`, and it is the number the per-goal join answered,
+/// tile for tile.
+///
+/// Why this shape and not the join: a lead's far leg is flooded out of the
+/// *goal*, so the join pays one flood per goal tile — and `expiring` asks
+/// for a lead per creep, twice a tick, over a goal that only moves when a
+/// creep does. Seeded from the band instead, the flood no longer depends
+/// on the goal at all, which is what lets the whole answer go in the walk
+/// table under the census (`castWalkTicks`, ADR 0032). The minimum a join
+/// takes over `(exit, landing tile)` pairs the flood takes over its seeds,
+/// and it is the same minimum over the same pairs: a seed keeps the
+/// cheapest arrival offered it (`floodFromAllSeeded`), and every pair the
+/// band admits offers one.
+///
+/// The near leg is the colony's own room's, always: a spawner stands at
+/// home, so `fromRoom` here is `atlas.Home` and never the caller's.
+let private castAcross
+    (atlas: Atlas)
+    (factor: FatigueFactor)
+    (near: int[])
+    (band: (Pos * Pos) list)
+    (goalRoom: string)
+    : int[] =
+    let weights = weightsOf atlas goalRoom
+    let stepPrices, traffic = pricingOf noTraffic factor Walk
+
+    band
+    |> List.collect (fun (exitTile, landing) ->
+        match
+            nearestReached near (besideExit exitTile),
+            exitPrice atlas stepPrices atlas.Home exitTile
+        with
+        | Some approach, Some crossing ->
+            besideExit landing
+            |> List.choose (fun tile ->
+                entryCost weights traffic stepPrices tile
+                |> Option.map (fun cost -> tile, approach + crossing + cost))
+        | _ -> [])
+    |> floodFromAllSeeded weights traffic stepPrices
+    |> fst
 
 /// The walk in whole ticks a freshly cast body needs to stand on a tile
 /// (ADR 0026) — the half of a lead that is paid after the spawner is done.
@@ -2521,29 +2577,42 @@ let haulRoundTripTicks
 /// creeps — never expiring, replaced only once dead. A goal in the
 /// colony's own room prices as it always did, byte for byte: the same
 /// flood, the same memo entry, the same lookup. A goal across a border is
-/// the minimum over the Seam band (`joinedAcross`) — the one join the
-/// Matcher's ranking price, the mover's step and the hauler quota's round
-/// trip are all read off, never a second cross-room arithmetic of this
-/// rule's own (ADR 0030). Two rooms with no band between them lead nobody,
-/// which is the answer an unreachable tile inside one room already gets.
+/// the minimum over the Seam band — the one join the Matcher's ranking
+/// price, the mover's step and the hauler quota's round trip are all read
+/// off, never a second cross-room arithmetic of this rule's own (ADR
+/// 0030), and read here through `castAcross` rather than `joinedAcross`
+/// for the reason written there. Two rooms with no band between them lead
+/// nobody, which is the answer an unreachable tile inside one room already
+/// gets.
 ///
-/// **Only the near leg enters the memo**, and that is ADR 0032's own
-/// condition rather than an omission here. That table lives *across* ticks
-/// under the census signature and its key carries no room — safe exactly
-/// because every origin it holds is a home-room spawner's tile. The far
-/// leg is the other room's, and its origin is a bare `Pos` the home room
-/// holds too, so an entry for it would collide with a home walk on a key
-/// that cannot tell the two coordinates apart (#120's forward warning).
-/// That collision is the whole of the reason and staleness is no part of
-/// it: an outpost's ground needs no vision at all (`Snapshot.projectRoom`
-/// reads the engine's terrain for any room in the world, ADR 0031, ADR
-/// 0041), and the roads and obstacles vision does pay for are signed per
-/// projected room exactly as the home room's are (`censusSignature`). It
-/// is therefore flooded fresh — once for every ask, so a creep the home
-/// room does not place costs one flood per spawn per reader of `expiring`
-/// — and the band is read before it is run, because a pair of rooms with
-/// no crossing has no flood to pay for (`pricedAcross`'s rule, for
-/// `pricedAcross`'s reason).
+/// **Both legs enter the memo**, under the room the goal stands in
+/// (#169). ADR 0032's condition is that every input of an entry is in the
+/// census signature, and the far leg meets it exactly as the near leg
+/// does: an outpost's ground needs no vision at all
+/// (`Snapshot.projectRoom` reads the engine's terrain for any room in the
+/// world, ADR 0031, ADR 0041), the roads and obstacles vision does pay
+/// for are signed per projected room exactly as the home room's are —
+/// standing structures and obstacle-kind construction sites alike, the
+/// pending half of `censusSignature` having widened to every projected
+/// room for this entry's sake (#169) — the
+/// Seam band is border terrain and never moves, and *which* rooms are
+/// projected is signed too — so a room the stand-down gate withdraws
+/// (ADR 0043) moves the signature and drops this table whole, rather than
+/// leaving behind the answer it had while the room was still worked
+/// (`censusSignature`). What stood in the way was never staleness but the
+/// key: the far leg's answers are another room's, filed against a bare
+/// `Pos` the home room holds too, so before the room joined the key an
+/// entry for them would have collided with a home walk (#120's forward
+/// warning). With the room in it, an outpost lead costs one flood per
+/// census instead of one per ask — and `expiring` asks twice per creep
+/// per tick, for five outpost creeps, which is what put this rule 23% of
+/// a quiet tick.
+///
+/// The band is still read before anything is flooded, and before anything
+/// is written: a pair of rooms with no crossing has no flood to pay for
+/// (`pricedAcross`'s rule, for `pricedAcross`'s reason) and no answer to
+/// remember either — the memo holds what a band answered, never that one
+/// answered nothing.
 let castWalkTicks
     (atlas: Atlas)
     (body: BodyPart list)
@@ -2553,27 +2622,38 @@ let castWalkTicks
     : int option =
     let factor = emptyFactorOf body
 
+    let arrival (table: int[]) =
+        match table.[indexOf goal] with
+        | d when d = unreached -> None
+        | d -> Some d
+
     // The near leg, and the whole of a home-room lead: the flood out of the
     // tiles beside the spawner, over the colony's own room's weights,
     // recalled from the plan memo while the census holds (ADR 0032).
     let near () =
-        memoised atlas.Walks (spawn, factor) (fun () ->
+        memoised atlas.Walks (spawn, factor, atlas.Home) (fun () ->
             let dist, _ =
                 walkFloodFromAll (weightsOf atlas atlas.Home) factor (adjacentWalkable atlas spawn)
 
             dist)
 
     if goalRoom = atlas.Home then
-        match (near ()).[indexOf goal] with
-        | d when d = unreached -> None
-        | d -> Some d
+        arrival (near ())
     else
-        match seams atlas atlas.Home goalRoom with
-        | [] -> None
-        | band ->
-            let far = floodPricedInto (weightsOf atlas goalRoom) noTraffic factor Walk [ goal ]
-
-            joinedAcross atlas Walk factor atlas.Home band (near ()) far |> Option.map fst
+        // Not `memoised`: a miss has to read the band first and answer
+        // absent without writing anything, which that shape cannot do —
+        // it fills every key it is asked with. The lookup comes first all
+        // the same, so the band is walked once per census rather than
+        // once per ask.
+        match atlas.Walks.TryGetValue((spawn, factor, goalRoom)) with
+        | true, table -> arrival table
+        | _ ->
+            match seams atlas atlas.Home goalRoom with
+            | [] -> None
+            | band ->
+                let table = castAcross atlas factor (near ()) band goalRoom
+                atlas.Walks.[(spawn, factor, goalRoom)] <- table
+                arrival table
 
 /// Cheapest raw-terrain path for a trunk road (ADR 0011): plain 2, swamp
 /// 10 — no road discount and no occupancy surcharge, so the line neither

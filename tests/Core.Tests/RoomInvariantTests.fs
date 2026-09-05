@@ -1101,6 +1101,117 @@ let private standingSample (capture: RoomCapture) =
     |> List.filter (fun (index, _) -> index % crossRoomStride = 0)
     |> List.map snd
 
+/// Wall tiles of a capture, strided exactly as the standing sample is:
+/// unreachable goals nobody chose for what they prove.
+let private wallSample (capture: RoomCapture) =
+    capture.Terrain
+    |> Map.toList
+    |> List.filter (fun (_, terrain) -> terrain = Wall)
+    |> List.mapi (fun index (tile, _) -> index, tile)
+    |> List.filter (fun (index, _) -> index % crossRoomStride = 0)
+    |> List.map snd
+
+/// The eight tiles around one, unclipped — what a spawner places a
+/// finished body on, before the room says which of them is ground.
+let private neighbourhood (tile: Pos) =
+    [
+        for dx in -1 .. 1 do
+            for dy in -1 .. 1 do
+                if dx <> 0 || dy <> 0 then
+                    { X = tile.X + dx; Y = tile.Y + dy }
+    ]
+
+/// The body every lead below is priced for: one fatigue-generating part
+/// over one Move, carrying nothing. `AtlasTests.worker`'s own parts with
+/// its own empty store, so the creep standing on the birth tile and the
+/// replacement being priced for it have one fatigue factor between them
+/// (`emptyFactorOf` of this list is `fatigueFactorOf` of that creep) —
+/// which is what lets the two clocks below be compared at all.
+let private leadBody = [ Work; Carry; Move ]
+
+/// The Atlas a cross-Seam lead is priced over: two captures' ground and
+/// their rings, a spawn structure standing in the near room with every
+/// neighbour but one obstructed, and the creep it would replace standing
+/// on that one. Everything geometric is the server's; the spawner, the
+/// obstacles that fence it and the creep are the test's, and no expected
+/// value comes from any of them.
+///
+/// The fencing is what makes the comparison exact rather than approximate.
+/// A lead's near leg floods out of *all* the tiles beside the spawner
+/// (ADR 0026), and the Matcher's walk floods out of the one tile its creep
+/// stands on; leave the spawner a single free neighbour and the two floods
+/// are the same flood, so the lead's join and the Matcher's may be read
+/// against each other tile by tile (ADR 0030's one join, two readers).
+///
+/// The far room takes whatever extra sources and obstacles the caller
+/// hands it, which is how the same fencing is played on the other side of
+/// the border: a probe source laid beside one goal tile with its every
+/// other neighbour closed has that tile for its whole Work Area, so the
+/// Matcher's minimum is taken over one named tile and the two clocks can
+/// be compared *at* it rather than across a cluster (`probeBeside`).
+let private leadingAcross
+    (near: RoomCapture)
+    (far: RoomCapture)
+    (spawn: Pos)
+    (birth: Pos)
+    (probes: (string * Pos) list)
+    (fence: Set<Pos>)
+    =
+    { SpatialInfo.empty with
+        RoomName = Some near.RoomName
+        Rooms =
+            Map.ofList
+                [
+                    near.RoomName,
+                    { RoomLayer.empty with
+                        Terrain = near.Terrain
+                        TargetPositions = Map.ofList [ "spawn-1", spawn ]
+                        CreepPositions = Map.ofList [ "w", birth ]
+                        Obstacles =
+                            neighbourhood spawn
+                            |> List.filter (fun tile -> tile <> birth)
+                            |> Set.ofList
+                            |> Set.add spawn
+                    }
+                    far.RoomName,
+                    { RoomLayer.empty with
+                        Terrain = far.Terrain
+                        TargetPositions = Map.ofList (far.Sources @ probes)
+                        Obstacles = fence
+                    }
+                ]
+        Borders = Map.ofList [ near.RoomName, near.Border; far.RoomName, far.Border ]
+        TargetKinds =
+            ("spawn-1", Structure BuiltKind.Spawn)
+            :: ((far.Sources @ probes) |> List.map (fun (id, _) -> id, Source))
+            |> Map.ofList
+    }
+    |> AtlasTests.snapshotWith [ AtlasTests.worker "w" ]
+    |> ofSnapshot
+
+/// A source laid beside one goal tile, and the obstacles that leave it no
+/// other Seat: a Harvest of it has a Work Area of exactly that tile, so
+/// `walkTicks` — which minimises over a Work Area — becomes an oracle for
+/// one goal rather than for a cluster's cheapest member. The neighbour the
+/// source stands on is the first in range in `neighbourhood`'s own order,
+/// chosen by nothing about what it proves; the fence is that neighbour's
+/// whole neighbourhood but the goal, plus its own tile the way the
+/// spawner's is fenced above — a Seat is any ground beside the source and
+/// the source's tile is beside itself for nothing, but it is ground and
+/// would be a second Seat. A goal the fence happens to seal off answers
+/// absent on both clocks and is compared all the same.
+let private probeBeside (goal: Pos) : Pos * Set<Pos> =
+    let inGround (tile: Pos) =
+        tile.X >= 1 && tile.X <= 48 && tile.Y >= 1 && tile.Y <= 48
+
+    let source = neighbourhood goal |> List.filter inGround |> List.head
+
+    source,
+    neighbourhood source
+    |> List.filter (fun tile -> tile <> goal)
+    |> Set.ofList
+    |> Set.add source
+
 [<Tests>]
 let crossRoomWalkTests =
     testList
@@ -1240,6 +1351,140 @@ let crossRoomWalkTests =
                     stepped
                     0
                     "and the sweep really does walk somebody across: an empty one proves nothing"
+            }
+
+            test "a cross-Seam lead prices every goal tile exactly as the Matcher's walk does" {
+                // The pin #169's far-leg memo goes in under: by ADR 0030 the
+                // lead's cross-room clock and the Matcher's are two readers
+                // of one join, so on real terrain and with one near flood
+                // between them they agree tile by tile — whatever the lead
+                // computes the answer from. A lead priced per goal tile and
+                // a lead read out of a table filled once per census are the
+                // same number here, or this test is the alarm.
+                //
+                // Two readings, because the Matcher only ever answers a
+                // minimum over a Work Area. Over a real source's Seats that
+                // is a cluster, so the lead's per-tile answers are minimised
+                // to meet it; over a probe source fenced down to one Seat
+                // (`probeBeside`) it is one named tile, and that is where a
+                // seeding that is right at a room's cheapest tile and wrong
+                // at a dearer one would show — `leadOf` reads the tile its
+                // creep happens to stand on, never the room's minimum.
+                // Absence has to line up on both: an area whose every tile
+                // is unreachable leads nobody, exactly as it walks nobody
+                // (ADR 0004).
+                let mutable led = 0
+                let mutable pinned = 0
+
+                for border in borders do
+                    for from, into in [ border.From, border.To; border.To, border.From ] do
+                        let near = load from
+                        let far = load into
+
+                        for birth in standingSample near do
+                            // A neighbour of the birth tile, inside the
+                            // grid: which one is nobody's decision worth
+                            // making, since the spawner's own tile is fenced
+                            // off and never walked.
+                            let spawn =
+                                if birth.Y < 48 then
+                                    { birth with Y = birth.Y + 1 }
+                                else
+                                    { birth with Y = birth.Y - 1 }
+
+                            let atlas = leadingAcross near far spawn birth [] Set.empty
+
+                            Expect.equal
+                                (adjacentWalkable atlas spawn)
+                                [ birth ]
+                                $"the premise: at {spawn.X},{spawn.Y} a body is born on {birth.X},{birth.Y} and nowhere else"
+
+                            for sourceId, _ in far.Sources do
+                                let task = Harvest sourceId
+
+                                // The body-blind area, because that is the
+                                // set the far leg of a cross-room price
+                                // floods into: `workAreaFor` hands a creep
+                                // only its *own* room's tiles (ADR 0041),
+                                // and this light body narrows nothing
+                                // anyway (ADR 0020).
+                                let perTile =
+                                    workArea atlas task
+                                    |> Set.toList
+                                    |> List.choose (castWalkTicks atlas leadBody spawn into)
+
+                                let leadWalk =
+                                    match perTile with
+                                    | [] -> None
+                                    | ticks ->
+                                        led <- led + 1
+                                        Some(List.min ticks)
+
+                                Expect.equal
+                                    leadWalk
+                                    (walkTicks atlas "w" task)
+                                    $"{from} -> {into}: the lead out of {spawn.X},{spawn.Y} and the walk from {birth.X},{birth.Y} price {sourceId} alike"
+
+                            // Unreachable, tile by tile, and on the same
+                            // Atlas the reachable ones were read off: the far
+                            // room's own wall is no ground, and its ring is
+                            // no ground either — both absent, never a zero
+                            // that would leave a creep counted living for
+                            // ever.
+                            for wall in wallSample far do
+                                Expect.equal
+                                    (castWalkTicks atlas leadBody spawn into wall)
+                                    None
+                                    $"{from} -> {into}: the wall at {wall.X},{wall.Y} leads nobody"
+
+                            for exit in seams atlas into from |> List.map fst do
+                                Expect.equal
+                                    (castWalkTicks atlas leadBody spawn into exit)
+                                    None
+                                    $"{from} -> {into}: the exit at {exit.X},{exit.Y} is the ring, and no room's ground"
+
+                        // The per-tile half, one stand per direction because
+                        // each probe is an Atlas and the floods on it. The
+                        // goals are the far room's own strided sample, so
+                        // they are scattered over the whole room rather than
+                        // gathered where a source happens to sit.
+                        for birth in standingSample near |> List.truncate 1 do
+                            let spawn =
+                                if birth.Y < 48 then
+                                    { birth with Y = birth.Y + 1 }
+                                else
+                                    { birth with Y = birth.Y - 1 }
+
+                            for goal in standingSample far do
+                                let source, fence = probeBeside goal
+
+                                let atlas =
+                                    leadingAcross near far spawn birth [ "probe", source ] fence
+
+                                Expect.equal
+                                    (workArea atlas (Harvest "probe") |> Set.toList)
+                                    [ goal ]
+                                    $"the premise: the probe beside {goal.X},{goal.Y} is worked from that tile and no other"
+
+                                let led = castWalkTicks atlas leadBody spawn into goal
+
+                                if Option.isSome led then
+                                    pinned <- pinned + 1
+
+                                Expect.equal
+                                    led
+                                    (walkTicks atlas "w" (Harvest "probe"))
+                                    $"{from} -> {into}: the lead out of {spawn.X},{spawn.Y} and the walk from {birth.X},{birth.Y} price the tile {goal.X},{goal.Y} alike"
+
+                Expect.isGreaterThan
+                    led
+                    0
+                    "and the sweep really does lead somebody across: an empty one proves nothing"
+
+                Expect.isGreaterThan
+                    pinned
+                    0
+                    "and some far tile was pinned at a number rather than at absence, or the per-tile half proves nothing either"
             }
         ]
 

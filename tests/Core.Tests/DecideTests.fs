@@ -2411,14 +2411,25 @@ let withTarget id pos kind colony =
         Spatial = colony.Spatial |> withTargets [ id, pos, kind ]
     }
 
-/// The step-weight grid ADR 0032's guard compares, for the room the
-/// fixture itself names. Read off the projection rather than retyped as a
-/// literal: `stepWeights` answers every tile impassable for a room the
-/// projection does not carry (ADR 0004, ADR 0041), so a literal that
-/// drifted from its fixture would leave the one `sequenceEqual` in the
-/// group comparing two empty grids and passing whatever the census did.
-let private stepGridOf (snapshot: Snapshot) =
-    Atlas.stepWeights (Atlas.ofSnapshot snapshot) (SpatialInfo.homeName snapshot.Spatial)
+/// The step-weight grid ADR 0032's guard compares, for the room the caller
+/// names. The room is the caller's rather than the fixture's home since
+/// #169: the walk table now holds an entry per *goal* room and the far
+/// leg's entry is a pure function of that room's grid, so a guard that
+/// could only ask about home would pin the pairing in one room while the
+/// memo reads every projected one — which is the asymmetry
+/// `Atlas.stepWeights` was already given a room parameter for. Read off
+/// the projection rather than retyped as a literal: `stepWeights` answers
+/// every tile impassable for a room the projection does not carry (ADR
+/// 0004, ADR 0041), so a literal that drifted from its fixture would leave
+/// the one `sequenceEqual` in the group comparing two empty grids and
+/// passing whatever the census did.
+let private stepGridOf (room: string) (snapshot: Snapshot) =
+    Atlas.stepWeights (Atlas.ofSnapshot snapshot) room
+
+/// The same grid for the colony's own room — the reading every home-room
+/// perturbation in the guard group is compared through.
+let private homeGridOf (snapshot: Snapshot) =
+    stepGridOf (SpatialInfo.homeName snapshot.Spatial) snapshot
 
 /// The same colony with a second room's geometry beside its own: one more
 /// entry in `Rooms`, under that room's name (ADR 0041). The kind census
@@ -2758,9 +2769,60 @@ let censusSignatureTests =
                 // missed would price leads off a stale grid until a global
                 // reset, and would fail here rather than in the colony.
                 Expect.sequenceEqual
-                    (stepGridOf perturbed)
-                    (stepGridOf colony)
+                    (homeGridOf perturbed)
+                    (homeGridOf colony)
                     "and the grid the walks flood over is bitwise the same"
+
+                // The same pairing in the room the walk table only started
+                // reading with #169: the far leg's entry is a pure function
+                // of the *outpost's* grid, so a Snapshot the signature calls
+                // equal has to lay that grid bitwise too. Perturbed out
+                // there and not at home, or the assertion would be about the
+                // home layer twice over: a creep standing in the outpost and
+                // a raider beside it are vision facts, and a grid is
+                // terrain, roads and obstacles alone.
+                let ground =
+                    [
+                        for x in 23..26 do
+                            for y in 23..26 -> { X = x; Y = y }, Plain
+                    ]
+
+                let held =
+                    colony |> withOutpost "W1N2" [ "src-out", { X = 24; Y = 24 }, Source ] ground
+
+                let seen =
+                    { held with
+                        Hostiles =
+                            [
+                                {
+                                    Id = "h2"
+                                    Owner = "raider"
+                                    RoomName = "W1N2"
+                                    Pos = { X = 26; Y = 26 }
+                                    Body = [ Attack; Move ]
+                                }
+                            ]
+                        Spatial =
+                            { held.Spatial with
+                                Rooms =
+                                    Map.add
+                                        "W1N2"
+                                        { SpatialInfo.layerOf held.Spatial "W1N2" with
+                                            CreepPositions = Map.ofList [ "w1", { X = 25; Y = 25 } ]
+                                        }
+                                        held.Spatial.Rooms
+                            }
+                    }
+
+                Expect.equal
+                    (censusSignature seen)
+                    (censusSignature held)
+                    "a creep and a raider in the outpost are no census of that room either"
+
+                Expect.sequenceEqual
+                    (stepGridOf "W1N2" seen)
+                    (stepGridOf "W1N2" held)
+                    "and the grid the far leg floods over is bitwise the same"
             }
 
             // The three weights inputs beside the terrain, each perturbed
@@ -2786,8 +2848,8 @@ let censusSignatureTests =
                     }
 
                 Expect.notEqual
-                    (stepGridOf paved)
-                    (stepGridOf colony)
+                    (homeGridOf paved)
+                    (homeGridOf colony)
                     "a road discounts the ground under it"
 
                 Expect.notEqual
@@ -2813,8 +2875,8 @@ let censusSignatureTests =
                     }
 
                 Expect.notEqual
-                    (stepGridOf blocked)
-                    (stepGridOf colony)
+                    (homeGridOf blocked)
+                    (homeGridOf colony)
                     "an obstacle closes its tile to every flood"
 
                 Expect.notEqual
@@ -2840,14 +2902,80 @@ let censusSignatureTests =
                     }
 
                 Expect.notEqual
-                    (stepGridOf pending)
-                    (stepGridOf colony)
+                    (homeGridOf pending)
+                    (homeGridOf colony)
                     "the engine refuses a creep its own obstacle site, so it blocks like the structure"
 
                 Expect.notEqual
                     (censusSignature pending)
                     (censusSignature colony)
                     "and the pending census carries it, so the signature moves with it"
+            }
+
+            test "an obstacle site in an outpost moves the signature" {
+                // The fourth weights input, and the one #169 made
+                // load-bearing: the walk table's far-leg entry is a pure
+                // function of the *goal* room's grid, so every input of
+                // that grid has to be in the signature exactly as the home
+                // room's are (ADR 0032). `Snapshot.projectVisible` folds
+                // every scanned room's obstacle-kind construction sites
+                // into that room's `Obstacles` — the engine refuses a creep
+                // its own site wherever it stands — so a pending census
+                // read in the home layer alone would leave an outpost's
+                // closed tile unsigned, and a lead priced through ground
+                // the successor cannot cross would be recalled for the life
+                // of the census: ADR 0017's signature gap, in the room the
+                // memo has just started reading.
+                let colony = trunkColony 2
+                let tile = { X = 24; Y = 26 }
+
+                let ground =
+                    [
+                        for x in 23..26 do
+                            for y in 23..26 -> { X = x; Y = y }, Plain
+                    ]
+
+                let bare =
+                    colony |> withOutpost "W1N2" [ "src-out", { X = 24; Y = 24 }, Source ] ground
+
+                let sited =
+                    let placed =
+                        colony
+                        |> withOutpost
+                            "W1N2"
+                            [
+                                "src-out", { X = 24; Y = 24 }, Source
+                                "twr-site-out", tile, Site BuiltKind.Tower
+                            ]
+                            ground
+
+                    { placed with
+                        Spatial =
+                            { placed.Spatial with
+                                Rooms =
+                                    Map.add
+                                        "W1N2"
+                                        { SpatialInfo.layerOf placed.Spatial "W1N2" with
+                                            Obstacles = Set.singleton tile
+                                        }
+                                        placed.Spatial.Rooms
+                            }
+                    }
+
+                Expect.notEqual
+                    (stepGridOf "W1N2" sited)
+                    (stepGridOf "W1N2" bare)
+                    "the site closes its tile in the outpost's grid, which the far leg floods"
+
+                Expect.notEqual
+                    (censusSignature sited)
+                    (censusSignature bare)
+                    "so the pending census reaches every projected room, not the home layer alone"
+
+                Expect.notEqual
+                    (stepGridOf "W1N2" bare)
+                    (stepGridOf "W1N2" colony)
+                    "the premise: a room the projection carries no layer for is all impassable (ADR 0004), so neither grid compared above is an empty one passing whatever the census did"
             }
         ]
 
@@ -12962,26 +13090,29 @@ let outpostTests =
                     None
                     "and a site the Snapshot does not carry is no Task, however well the projection places it"
 
-                // The memo does not flinch at it either, and since #149
-                // that is a statement about the `pending` branch alone:
-                // the `standing` half of `censusSignature` spans every
-                // projected room now, because the hauler quota folds their
-                // containers, but the `pending` half is still joined
-                // against the home layer's positions — nothing the memo
-                // carries reads a site outside home, this rule's own site
-                // least of all, since it is recomputed every tick (ADR
-                // 0042). Were it signed, the Layout and the whole spawn
-                // walk table would be thrown away the tick this site
-                // appears, for geometry nothing reads while it is still a
-                // site (ADR 0017, ADR 0032) — one throw-away and not two,
-                // the tick it completes being paid either way now that the
-                // container it becomes is a standing entry of the census.
-                Expect.equal
+                // The memo *does* flinch at it, and this is the tick that
+                // changed (#169). #121 and #149 left the `pending` half
+                // joined against the home layer alone because nothing the
+                // memo carried read a site outside home — this rule's own
+                // site least of all, since it is recomputed every tick (ADR
+                // 0042) — and the throw-away it saved was one Layout and
+                // one spawn walk table on the tick the site appeared. The
+                // walk table's far leg is now a memo entry over the *goal*
+                // room's weight grid, and an obstacle-kind site closes its
+                // tile in whatever room it stands in (`projectVisible`), so
+                // a pending census stopping at the home layer is ADR 0017's
+                // signature gap out there. Signing the half whole rather
+                // than only its blocking kinds keeps one rule instead of a
+                // second asymmetry to hold in step with the App's obstacle
+                // filter; the price is exactly the throw-away above, on the
+                // handful of ticks in a colony's life that an outpost
+                // container site appears.
+                Expect.notEqual
                     (censusSignature sited)
                     (censusSignature (
                         northBorderColony { X = 10; Y = 38 } |> withNorthOutpost None |> loaded
                     ))
-                    "an outpost's pending site is no entry of the census (#121)"
+                    "an outpost's pending site is a census entry of its own since #169"
 
                 let { Intents = opening } = decide sited Map.empty Set.empty None
 

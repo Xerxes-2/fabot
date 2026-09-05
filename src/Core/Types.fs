@@ -1207,15 +1207,26 @@ type Assignments = Map<string, string>
 /// Atlas that fills it (ADR 0032).
 type FatigueFactor = { FatigueParts: int; MoveParts: int }
 
-/// The spawn-origin walk table (ADR 0032): the traffic-blind flood out of
+/// The spawn-origin walk table (ADR 0032): the traffic-blind walk out of
 /// the tiles beside a spawner, for a body's fatigue factor, as whole-tick
-/// distances per tile index (ADR 0026, ADR 0029) — the half of a lead paid
-/// after the cast. Filled on demand by the Atlas as leads are priced, and
-/// handed to the next tick's Atlas while the census signature holds: every
-/// input the flood reads is in the census, so it runs once per census
-/// rather than once per tick. Mutable, and heap-only like the memo that
-/// carries it.
-type WalkTable = System.Collections.Generic.Dictionary<Pos * FatigueFactor, int[]>
+/// distances per tile index of one room (ADR 0026, ADR 0029) — the half of
+/// a lead paid after the cast. Filled on demand by the Atlas as leads are
+/// priced, and handed to the next tick's Atlas while the census signature
+/// holds: every input it reads is in the census, so it runs once per
+/// census rather than once per tick. Mutable, and heap-only like the memo
+/// that carries it.
+///
+/// **The room in the key is the room the goal stands in**, and it is what
+/// lets an outpost's lead ride here too (#169). Under the home room the
+/// entry is the spawner's own flood; under a neighbour's it is the whole
+/// cross-Seam walk — near leg, crossing and far leg already joined
+/// (`Atlas.castWalkTicks`) — so a goal beyond a border costs one array
+/// read rather than a flood per creep per tick. Two rooms hold the same
+/// coordinates, so without the room a spawner's tile and an outpost's
+/// answer would collide on one key; with it an entry means one thing under
+/// either name: the ticks a body cast at this spawner needs to stand on
+/// each tile of *that* room.
+type WalkTable = System.Collections.Generic.Dictionary<Pos * FatigueFactor * string, int[]>
 
 /// What a Link footing is held beside (ADR 0022, ADR 0027): each planned
 /// source container, the controller container, the Storage. The Layout

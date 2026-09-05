@@ -4356,15 +4356,24 @@ let crossRoomLeadTests =
                     "and the exit tile is the home room's ring, which the flood never enters"
             }
 
-            test "the far leg stays out of the walk table, which keeps its two-field key" {
-                // ADR 0032's table lives across ticks under the census
-                // signature and its key carries no room, which is safe only
-                // while every origin in it is a home-room spawner's tile.
-                // So the crossing adds nothing to it: one entry after a
-                // cross-room lead, the same entry the home lead reads back,
-                // and it is the very array the first flood allocated.
+            test "the far leg joins the walk table, under the room the goal stands in" {
+                // #169: the far leg rides ADR 0032's table exactly as the
+                // near leg does, because every input it reads is in the
+                // census — the goal room's weight grid is signed per
+                // projected room, and the Seam band is terrain, which never
+                // moves. So the key grew the room that keeps two rooms'
+                // coordinates apart, and the table holds one entry per goal
+                // *room* rather than one per goal tile: a second tile of the
+                // same outpost is a lookup, not a flood.
                 let homeRing, outpostRing = openRings
                 let walks = WalkTable()
+
+                let byRoom () =
+                    walks
+                    |> Seq.map (fun entry ->
+                        let _, _, room = entry.Key
+                        room, entry.Value)
+                    |> Map.ofSeq
 
                 let atlas =
                     leadAcrossSnapshot homeRing outpostRing [] [] |> ofSnapshotRecalling walks
@@ -4374,25 +4383,61 @@ let crossRoomLeadTests =
                     (Some 17)
                     "the premise: the lead is priced across the border"
 
-                Expect.equal walks.Count 1 "the near leg is memoised and the far leg is not"
-                let flooded = walks |> Seq.map (fun entry -> entry.Value) |> Seq.exactlyOne
+                Expect.equal
+                    (byRoom () |> Map.toList |> List.map fst)
+                    [ "W1N1"; "W1N2" ]
+                    "the near leg is filed under home and the joined far leg under the outpost"
+
+                let flooded = byRoom ()
+
+                Expect.equal
+                    (castWalkTicks atlas hauler leadSpawn "W1N2" { X = 25; Y = 42 })
+                    (Some 16)
+                    "a second tile of the same outpost — one back toward the border, one tick nearer — is read off that same entry"
 
                 Expect.equal
                     (castWalkTicks atlas hauler leadSpawn "W1N1" { X = 25; Y = 20 })
                     (Some 9)
-                    "and the home lead reads the same key"
+                    "and the home lead reads the entry filed under home"
 
                 Expect.equal
                     walks.Count
-                    1
-                    "no second entry: the room is not one of the key's fields"
+                    2
+                    "neither adds an entry: the key names the room, never the goal"
 
-                Expect.isTrue
-                    (obj.ReferenceEquals(
-                        walks |> Seq.map (fun entry -> entry.Value) |> Seq.exactlyOne,
-                        flooded
-                    ))
-                    "and it is the flood the crossing already ran, not a second one"
+                // The recall half, both rooms at once: an Atlas handed a
+                // filled table reads the very arrays the first one flooded,
+                // so a census that has not moved pays for no second
+                // Dijkstra on either side of the border (ADR 0032).
+                let second =
+                    leadAcrossSnapshot homeRing outpostRing [] [] |> ofSnapshotRecalling walks
+
+                Expect.equal
+                    (castWalkTicks second hauler leadSpawn "W1N2" outpostSeat)
+                    (Some 17)
+                    "the recalled far leg prices the same lead"
+
+                Expect.equal
+                    (castWalkTicks second hauler leadSpawn "W1N1" { X = 25; Y = 20 })
+                    (Some 9)
+                    "and the recalled near leg the same home one"
+
+                Expect.equal walks.Count 2 "no second entry under either key"
+
+                for room in [ "W1N1"; "W1N2" ] do
+                    Expect.isTrue
+                        (obj.ReferenceEquals(Map.find room (byRoom ()), Map.find room flooded))
+                        $"the second Atlas read {room}'s flood rather than running its own"
+
+                Expect.equal
+                    (castWalkTicks second hauler leadSpawn "W5N5" outpostSeat)
+                    None
+                    "a room the projection carries no ring for is still led over by nobody"
+
+                Expect.equal
+                    walks.Count
+                    2
+                    "and leaves no entry behind: a band that answers empty is asked again, never remembered"
             }
         ]
 
