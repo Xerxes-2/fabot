@@ -9649,6 +9649,309 @@ let haulerTests =
             }
         ]
 
+/// The crowding fixture (#161): a three-row plain field y = 9..11,
+/// x = 5..35, with two containers standing on the middle row — "can-near"
+/// at (10,10) and "can-far" at (30,10). Every creep the tests below stand
+/// on it sits one step from the near store's Work Area and seventeen or
+/// more from the far one, so travel cost points the whole crowd at one
+/// container and only a capacity can send any of it to the other. Three
+/// rows and not one, so a waiting hauler is never in another's path: the
+/// occupancy surcharge (ADR 0008) prices a queue on a one-tile lane at a
+/// swamp step apiece, and a crowd that thins itself by standing in its own
+/// way would prove the cap without the cap.
+///
+/// Two containers and not a container and a Storage, because the two must
+/// sit on the *same* tier: a rank between them (ADR 0023) would decide the
+/// split before capacity was ever asked.
+let crowdField =
+    [
+        for x in 5..35 do
+            for y in 9..11 -> { X = x; Y = y }, Plain
+    ]
+
+let crowdRoom nearStock farStock =
+    { spatial [] crowdField with
+        Stores = Map.ofList [ "can-near", nearStock; "can-far", farStock ]
+    }
+    |> withTargets
+        [
+            "can-near", { X = 10; Y = 10 }, Structure BuiltKind.Container
+            "can-far", { X = 30; Y = 10 }, Structure BuiltKind.Container
+        ]
+
+/// The crowding colony: a 600-capacity bank, where the hauler row casts
+/// `[8 Carry; 4 Move]` and one trip is therefore exactly 400 energy — the
+/// number every stock below is written against. Its creeps are empty
+/// hauler bodies on the tiles given, and it has no source and no placed
+/// controller, so the only Tasks a Carry-only body is applicable to are the
+/// two Withdraws.
+let crowdColony nearStock farStock (creeps: (string * Pos) list) =
+    { bareRespawn with
+        RoomEnergy = bank 600 600
+        Sources = []
+        Creeps = [ for name, _ in creeps -> hauler name 0 100 ]
+        Spatial =
+            crowdRoom nearStock farStock
+            |> withHome (fun layer ->
+                { layer with
+                    CreepPositions = Map.ofList creeps
+                })
+    }
+
+/// Three empty haulers abreast, one step from the near store's Work Area
+/// and equally far from it, so nothing but the Matcher's own order can
+/// separate them.
+let crowdOfThree =
+    [ "h1", { X = 12; Y = 9 }; "h2", { X = 12; Y = 10 }; "h3", { X = 12; Y = 11 } ]
+
+/// The names drawing on one store, in name order.
+let drawersOf assignments storeId =
+    assignments
+    |> Map.toList
+    |> List.choose (fun (name, tid) -> if tid = taskId (Withdraw storeId) then Some name else None)
+
+/// The stock-crowding fixture: the same field with one Storage standing at
+/// (13,10) — an obstacle, as the projection carries a built one — and the
+/// same three haulers abreast, all three inside its Work Area. The colony keeps one hungry spawn
+/// so ADR 0023's gate stands open; the haulers are empty, so that Refill is
+/// inapplicable to every one of them and the stock's Withdraw is the only
+/// Task in the pool they can take.
+let stockCrowdColony stock =
+    { bareRespawn with
+        RoomEnergy = bank 600 600
+        Sources = []
+        Refillables = [ refillable "spawn-1" 300 BuiltKind.Spawn ]
+        Creeps = [ for name, _ in crowdOfThree -> hauler name 0 100 ]
+        Spatial =
+            { spatial [] crowdField with
+                Stores = Map.ofList [ "sto-c", stock ]
+            }
+            |> withTargets [ "sto-c", { X = 13; Y = 10 }, Structure BuiltKind.Storage ]
+            |> withHome (fun layer ->
+                { layer with
+                    Obstacles = Set.singleton { X = 13; Y = 10 }
+                    CreepPositions = Map.ofList [ for name, pos in crowdOfThree -> name, pos ]
+                })
+    }
+
+/// The upgrade buffer's crowd (#161 under ADR 0019): the same three-row
+/// field, the controller standing at (10,10) — an obstacle, as a
+/// projected one is — with its buffer container "can-buf" at (12,10),
+/// inside the Upgrade Work Area and on no source's Seat, and an ordinary
+/// container "can-far" holding the same 900 at (30,10), far outside it.
+///
+/// The bank is 1,800 — the live RCL5 one, and where the two rows part: the
+/// cast hauler carries 1,200 a trip and the cast worker 450. Only a Work
+/// body may draw from the buffer (ADR 0019), so the three creeps on its
+/// doorstep are cast worker bodies, and they are empty, which leaves the
+/// Upgrade beside them and the buffer's own Refill inapplicable and the
+/// two Withdraws the whole of the pool they can take.
+let bufferCrowd =
+    [ "w1", { X = 13; Y = 9 }; "w2", { X = 13; Y = 10 }; "w3", { X = 13; Y = 11 } ]
+
+let bufferCrowdColony bufferStock =
+    { bareRespawn with
+        RoomEnergy = bank 1800 1800
+        Sources = []
+        Creeps = [ for name, _ in bufferCrowd -> creepWith name 0 450 (workerBodyFor 1800) ]
+        Spatial =
+            { spatial [] crowdField with
+                Stores = Map.ofList [ "can-buf", bufferStock; "can-far", 900 ]
+            }
+            |> withTargets
+                [
+                    "ctrl-1", { X = 10; Y = 10 }, Controller
+                    "can-buf", { X = 12; Y = 10 }, Structure BuiltKind.Container
+                    "can-far", { X = 30; Y = 10 }, Structure BuiltKind.Container
+                ]
+            |> withHome (fun layer ->
+                { layer with
+                    Obstacles = Set.singleton { X = 10; Y = 10 }
+                    CreepPositions = Map.ofList bufferCrowd
+                })
+    }
+
+[<Tests>]
+let withdrawCapacityTests =
+    testList
+        "withdraw capacity"
+        [
+            test "a container that fills one hauler takes one; the rest walk to the full one" {
+                // The defect (#161): the matching key puts cost ahead of
+                // `load` (ADR 0002), so without a capacity every empty
+                // hauler picks the *nearest* stocked container whatever is
+                // in it — three bodies onto 400 energy, two of them home
+                // empty, while 2,000 stands unvisited seventeen tiles away.
+                // The stock is the cap: `ceil(400 / 400)` is one seat.
+                let { Assignments = split } =
+                    decide (crowdColony 400 2000 crowdOfThree) Map.empty Set.empty None
+
+                Expect.equal
+                    (drawersOf split "can-near")
+                    [ "h1" ]
+                    "one hauler's worth of stock admits one hauler"
+
+                Expect.equal
+                    (drawersOf split "can-far")
+                    [ "h2"; "h3" ]
+                    "and the crowd it turns away walks to the store that can fill it"
+
+                // The pairwise control: the same three creeps on the same
+                // tiles, with nothing changed but the near store's stock.
+                // Travel cost still says near for all three, and now the
+                // capacity lets it — so the split above is the stock's
+                // doing and not the geometry's.
+                let { Assignments = whole } =
+                    decide (crowdColony 2000 2000 crowdOfThree) Map.empty Set.empty None
+
+                Expect.equal
+                    (drawersOf whole "can-near")
+                    [ "h1"; "h2"; "h3" ]
+                    "stocked for five trips, the near container keeps the whole crowd"
+            }
+
+            test "the cap rounds up: one load exactly is one seat, one energy more is two" {
+                // The `ceil` (#161), pinned at the boundary the arithmetic
+                // turns on: 400 is exactly the cast hauler's load and admits
+                // one body, and 401 — a fraction of a second trip — admits
+                // the second, because the fraction a floor would drop is
+                // energy nobody would be sent for.
+                let seatsAt stock =
+                    let { Assignments = assignments } =
+                        decide
+                            (crowdColony stock 2000 (List.truncate 2 crowdOfThree))
+                            Map.empty
+                            Set.empty
+                            None
+
+                    drawersOf assignments "can-near"
+
+                Expect.equal (seatsAt 400) [ "h1" ] "one whole load is one seat"
+
+                Expect.equal
+                    (seatsAt 401)
+                    [ "h1"; "h2" ]
+                    "one energy past it is two: the cap rounds up"
+
+                Expect.equal
+                    (seatsAt 800)
+                    [ "h1"; "h2" ]
+                    "and two whole loads are two, with no third body to prove it wider"
+            }
+
+            test "a hauler still walking holds its seat: the second is turned away" {
+                // Counted at arrival like every other cap (ADR 0026): the
+                // holder is fourteen steps out and has not touched the
+                // store, and the candidate is standing on its doorstep. A
+                // cap counting only the creeps already on the tile would let
+                // the near one in and land both on 400 energy — which is the
+                // defect with an extra tick in it.
+                let {
+                        Assignments = assignments
+                        Verdicts = verdicts
+                    } =
+                    decide
+                        (crowdColony 400 2000 [ "h1", { X = 25; Y = 10 }; "h2", { X = 11; Y = 10 } ])
+                        (Map.ofList [ "h1", taskId (Withdraw "can-near") ])
+                        (Set.singleton "h2")
+                        None
+
+                Expect.equal
+                    (Map.tryFind "h1" assignments)
+                    (Some(taskId (Withdraw "can-near")))
+                    "the walking holder keeps the store it was already sent to"
+
+                Expect.equal
+                    (drawersOf assignments "can-far")
+                    [ "h2" ]
+                    "and the creep on the doorstep is sent to the far store instead"
+
+                let rejections =
+                    verdicts
+                    |> List.tryPick (function
+                        | Verdict.Scoring("h2", rows) ->
+                            rows
+                            |> List.filter (function
+                                | Candidate.Rejected _ -> true
+                                | Candidate.Scored _ -> false)
+                            |> Some
+                        | _ -> None)
+
+                Expect.equal
+                    rejections
+                    (Some
+                        [
+                            Candidate.Rejected(
+                                taskId (Withdraw "can-near"),
+                                RejectReason.CapacityFull
+                            )
+                            Candidate.Rejected(taskId (Upgrade "ctrl-1"), RejectReason.Inapplicable)
+                        ])
+                    "the near store names the cap and no gate before it — not the body, not the price; the Upgrade it has no Work for is the pool's only other loss"
+            }
+
+            test "the Storage is not special-cased: the same formula, and at 130k no cap" {
+                // ADR 0023's stock is one more store and gets one more
+                // reading of the same rule (#161) — a Storage down to one
+                // trip's worth admits one drawer, exactly as a container
+                // does. What keeps that from starving the haul cycle is the
+                // number and not an exemption: a real stock divides into
+                // hundreds of trips, so the cap is there and is never the
+                // thing that binds.
+                let { Assignments = thin } = decide (stockCrowdColony 400) Map.empty Set.empty None
+
+                Expect.equal
+                    (drawersOf thin "sto-c")
+                    [ "h1" ]
+                    "a stock holding one trip's worth admits one hauler"
+
+                let { Assignments = full } =
+                    decide (stockCrowdColony 130000) Map.empty Set.empty None
+
+                Expect.equal
+                    (drawersOf full "sto-c")
+                    [ "h1"; "h2"; "h3" ]
+                    "and a colony's real stock caps at 325 trips, which is no cap at all"
+            }
+
+            test "the upgrade buffer divides by the worker row that draws from it" {
+                // Which row draws is a fact about the store (ADR 0019): no
+                // body without a Work part may take the buffer, so its
+                // drawers are the worker row and its 900 is two cast
+                // workers' loads at this bank. Priced by the hauler the
+                // colony would cast instead — 1,200 a trip — the same 900
+                // reads `ceil(900 / 1200)` = one seat and sends the second
+                // upgrader back to a rock while the energy it came to
+                // spend stands beside it (#161).
+                let { Assignments = split } =
+                    decide (bufferCrowdColony 900) Map.empty Set.empty None
+
+                Expect.equal
+                    (drawersOf split "can-buf")
+                    [ "w1"; "w2" ]
+                    "two worker loads standing in the buffer admit two workers"
+
+                // The same 900 in a store the haul cycle owns, judged for
+                // the same three bodies: the divisor is the store's and
+                // never the candidate's, so the ordinary container admits
+                // one and takes the worker the buffer turned away.
+                Expect.equal
+                    (drawersOf split "can-far")
+                    [ "w3" ]
+                    "and an ordinary container's 900 is one hauler load, however the body that walks to it is built"
+
+                // The pairwise control: nothing changed but the buffer's
+                // stock, three loads instead of two.
+                let { Assignments = whole } =
+                    decide (bufferCrowdColony 1350) Map.empty Set.empty None
+
+                Expect.equal
+                    (drawersOf whole "can-buf")
+                    [ "w1"; "w2"; "w3" ]
+                    "three loads keep the whole crowd upgrading standing still, which is what a buffer is for"
+            }
+        ]
+
 /// The hauler quota this Snapshot decides, read off the plan memo `decide`
 /// returns — the quota's only seam, since the rule itself is private to
 /// that pipeline.

@@ -685,6 +685,19 @@ let planTasks (snapshot: Snapshot) (threats: Threats) : Task list =
 /// Screeps CARRY_CAPACITY: energy one Carry part holds.
 let private carryPartCapacity = 50
 
+/// What one body of this shape hauls in a trip: its Carry parts at the
+/// engine's per-part capacity. Two readers turn Carry parts into energy —
+/// the hauler quota divides a source's output over a round trip by it (ADR
+/// 0012), and a Withdraw's cap divides its store's stock by it (#161) — so
+/// the arithmetic is written once and neither can grow a second per-part
+/// rule. It holds nothing about the *bodies* they pass: the quota reads
+/// each spawn's own bank room and takes the minimum, the cap reads the
+/// richest bank and the row that draws the store, and those two numbers
+/// part the moment a second banked room outranks a spawn's own. Each call
+/// site argues its own choice of body where it makes it.
+let private carryCapacityOf body =
+    (body |> List.filter ((=) Carry) |> List.length) * carryPartCapacity
+
 /// Ceiling division over the quota rows' arithmetic: a quota that came
 /// out a fraction of a body hires the whole body (ADR 0012 for the hauler
 /// row, ADR 0037 for the worker row), because the fraction a floor drops
@@ -916,7 +929,7 @@ let private haulerQuota (snapshot: Snapshot) atlas : int =
 
             let body = bodyFor haulerPattern bank.Capacity
 
-            let capacity = (body |> List.filter ((=) Carry) |> List.length) * carryPartCapacity
+            let capacity = carryCapacityOf body
 
             Atlas.haulRoundTripTicks atlas body room tile spawnRoom spawnPos
             |> Option.map (fun ticks -> ceilDiv (ticks * output) capacity))
@@ -955,11 +968,16 @@ let private reservationCap = 5000
 let private claimLifetime = 600
 
 /// The richest bank the colony could fill this tick: every projected
-/// room's capacity, and the largest of them. Two readers who must not
+/// room's capacity, and the largest of them. Three readers who must not
 /// disagree — `workforceTarget` prices every row's replacement as the
-/// richest bank would cast it, and the reserver row's quota refuses to
-/// hire at all where that bank cannot buy the row's floor body — so the
-/// fold is written once here rather than twice.
+/// richest bank would cast it, the reserver row's quota refuses to hire at
+/// all where that bank cannot buy the row's floor body, and a Withdraw's
+/// cap divides its store's stock by the body this bank would cast for the
+/// row that draws there (#161) — so the fold is written once here rather
+/// than three times. The third is the one whose failure is a store
+/// admitting the wrong number of drawers rather than a mis-sized body, so
+/// narrowing the fold — to the spawn rooms a caster can draw from, say, or
+/// to `Available` — moves every Withdraw cap in the colony with it.
 let private richestCapacity (snapshot: Snapshot) =
     snapshot.RoomEnergy
     |> Map.toList
@@ -2955,6 +2973,59 @@ let private outpostContainerBuilders = 2
 /// Read off the pool like the Reserve cap, so which site this is stays
 /// said once (`isOutpostContainerSite`), and counted at arrival like every
 /// other cap (ADR 0026).
+///
+/// **A Withdraw is capped by its store's stock** (#161): `ceil(stored /
+/// one drawer's load)`, the number of bodies that store can actually
+/// fill. Nothing else in the pipeline says it. The matching key puts cost
+/// ahead of `load` (ADR 0002), so every hauler with a free slot picks the
+/// *nearest* stocked container whatever is in it: a container holding 400
+/// draws five haulers, four come home empty, and a full one on the far
+/// side of the room stands unvisited. Crowding only decides ties, and
+/// these are not ties.
+///
+/// ADR 0023 rejected *container stock as a matching weight* — an
+/// amount-aware third dimension beside rank and travel cost — and this is
+/// not that option: the key keeps its two dimensions and the stock enters
+/// as a capacity, which is the counterweight ADR 0002's own Consequences
+/// named for exactly this pile-on ("Seat caps (and future per-target
+/// capacities) are the intended counterweight"). What the live room
+/// refutes is only that ADR's reason for the rejection — that two tiers
+/// already solve the crowding — and a tier cannot: both containers sit in
+/// one, and inside a tier only cost speaks.
+///
+/// The load is the **row's** body and never the candidate's own carry: a
+/// capacity is a fact about the Task, so one store must not answer two
+/// numbers depending on which creep asked it. *Which* row is a fact about
+/// the store, and so is read here too: ADR 0019 shuts every body with no
+/// Work part out of the controller container, so the buffer's drawers are
+/// the worker row and its stock divides by `workerBodyFor`'s carry, while
+/// every other store belongs to the haul cycle and divides by the hauler
+/// row's. Both are the body the colony would cast now — the richest bank,
+/// the same reading `workforceTarget` prices every row's replacement at,
+/// and so the largest body of that row the fleet holds and the tightest
+/// cap the formula gives for it. Pricing the buffer by a hauler instead
+/// would cap it on a body that can never draw from it: at an 1,800 bank
+/// the cast hauler carries 1,200 and the cast worker 450, so 900 standing
+/// in the buffer — two upgraders' worth — would admit one and send the
+/// other back to the rock, a cap 2.67x tighter than the store it claims
+/// to describe. `haulerQuota` divides that same hauler load into the same
+/// source containers' flow one *spawn* at a time and takes the minimum;
+/// there is one number here instead, because a Task has one capacity and
+/// not one per spawn.
+///
+/// Stock and never flow (ADR 0023): the ten a tick an Anchor drops into
+/// the container while the hauler walks is counted on the tick it lands
+/// and never anticipated here — so a store holding less than a load can
+/// leave a hired hauler idle for the ticks it takes to fill, which is the
+/// honest state ADR 0019 already chose over cycling a container, and the
+/// stock climbs until the cap admits the second body. The Storage is
+/// deliberately not special-cased — the same formula over a 130,000 stock
+/// is a cap of hundreds, which is no cap at all — and neither is the
+/// controller container: it is capped like every other store, only
+/// divided by the row that actually draws from it. A stock of zero caps
+/// at zero and not at unbounded; `planTasks` pools only stocked stores, so
+/// the pool never asks, but a cap table that answered "no limit" to an
+/// empty store would be the one reading of the formula that inverts it.
 let private taskCapacities (snapshot: Snapshot) atlas (tasks: Task list) : Map<string, int> =
     let seats =
         snapshot.Sources
@@ -2965,6 +3036,26 @@ let private taskCapacities (snapshot: Snapshot) atlas (tasks: Task list) : Map<s
         tasks
         |> List.choose (function
             | Reserve _ as task -> Some(taskId task, 1)
+            | _ -> None)
+
+    let withdraws =
+        let capacity = richestCapacity snapshot
+        let haulerLoad = carryCapacityOf (bodyFor haulerPattern capacity)
+        let workerLoad = carryCapacityOf (workerBodyFor capacity)
+        let buffers = Atlas.controllerContainers atlas
+
+        tasks
+        |> List.choose (function
+            | Withdraw storeId as task ->
+                let stock = snapshot.Spatial.Stores |> Map.tryFind storeId |> Option.defaultValue 0
+
+                let load =
+                    if Set.contains storeId buffers then
+                        workerLoad
+                    else
+                        haulerLoad
+
+                Some(taskId task, ceilDiv stock load)
             | _ -> None)
 
     let outpostContainers =
@@ -2980,7 +3071,7 @@ let private taskCapacities (snapshot: Snapshot) atlas (tasks: Task list) : Map<s
             let each = outpostContainerBuilders / List.length sites |> max 1
             sites |> List.map (fun tid -> tid, each)
 
-    seats @ reserves @ outpostContainers |> Map.ofList
+    seats @ reserves @ withdraws @ outpostContainers |> Map.ofList
 
 /// Concurrent Work-heavy-harvester cap per Harvest task id (ADR 0024): the
 /// source's Post count, the standing room a heavy body actually has — its
@@ -3529,9 +3620,10 @@ let matchCreeps
     // it shares with every other harvester, and the Post count only its own
     // kind competes for. The Post cap is Harvest's alone; Reserve carries
     // the Seat-shaped one at a count of one (ADR 0042) and no Post cap at
-    // all, since no heavy body ever holds a CLAIM part. Holders are
-    // gathered inside the capped arms — the Refills, Withdraws and surplus
-    // work the pool is mostly made of never walk the assignment map.
+    // all, since no heavy body ever holds a CLAIM part. Withdraw carries a
+    // Seat-shaped one too, off its store's stock (#161). Holders are
+    // gathered inside the capped arms — the Refills and the surplus work
+    // the pool is mostly made of never walk the assignment map.
     let hasCapacity (creep: CreepInfo) acc task (arrival: Lazy<int option>) =
         let tid = taskId task
         let seatCap = Map.tryFind tid capacities
@@ -3543,9 +3635,9 @@ let matchCreeps
                 None
 
         match seatCap, postCap with
-        // Only a capped Task forces the walk: the Refills, Withdraws and
-        // surplus work the pool is mostly made of neither walk the
-        // assignment map nor pay for an arrival (ADR 0029).
+        // Only a capped Task forces the walk: the Refills and the surplus
+        // work the pool is mostly made of neither walk the assignment map
+        // nor pay for an arrival (ADR 0029).
         | None, None -> true
         | _ ->
             let holders = holdersAt acc creep task arrival.Value
