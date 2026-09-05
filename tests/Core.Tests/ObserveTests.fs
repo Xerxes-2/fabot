@@ -346,6 +346,10 @@ let quiet: Snapshot =
         ConstructionSites = []
         Creeps = []
         Hostiles = []
+        // The raid fold reads hostile *creeps*; an invader core is a
+        // structure and opens no episode until #134 gives the log its
+        // outpost family (ADR 0043).
+        InvaderCores = []
         Spatial =
             { SpatialInfo.empty with
                 RoomName = Some raidRoom

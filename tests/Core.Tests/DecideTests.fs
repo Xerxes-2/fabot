@@ -39,20 +39,62 @@ let controllerAt level =
 /// every source in it is priced at (ADR 0042). Owned and not reserved —
 /// the two halves the engine gives the same 3,000 a cycle — because that
 /// is what the colony's own room is.
-let ownedRoom: RoomControlInfo = { Owned = true; Reservation = None }
+let ownedRoom: RoomControlInfo =
+    {
+        Owner = Ownership.Ours
+        Reservation = None
+    }
 
 /// A neutral room nobody holds: seen, and worth half. Not the same fact as
 /// a room with no entry at all, which is one the colony cannot see and so
 /// cannot price (ADR 0004).
-let neutralRoom: RoomControlInfo = { Owned = false; Reservation = None }
+let neutralRoom: RoomControlInfo =
+    {
+        Owner = Ownership.Unowned
+        Reservation = None
+    }
+
+/// A room another player has taken: seen, owned, and owned by somebody
+/// else (ADR 0043). The third answer to one question, which is why it is a
+/// fixture of its own beside the two above rather than a flag on either.
+let rivalRoom: RoomControlInfo =
+    {
+        Owner = Ownership.Rival
+        Reservation = None
+    }
 
 /// A neutral room under a reservation of the given holder, with the given
-/// ticks left on it: `Ours` is what doubles the room, so a reservation
-/// another player holds is passed `false` and reads as none at all.
+/// ticks left on it: ours is what doubles the room, so `false` is the
+/// rival's reservation, which reads as none at all for pricing.
 let reservedRoom ours ticksToEnd : RoomControlInfo =
     {
-        Owned = false
-        Reservation = Some { Ours = ours; TicksToEnd = ticksToEnd }
+        Owner = Ownership.Unowned
+        Reservation =
+            Some
+                {
+                    Holder =
+                        if ours then
+                            ReservationHolder.Ours
+                        else
+                            ReservationHolder.Rival
+                    TicksToEnd = ticksToEnd
+                }
+    }
+
+/// A neutral room whose reservation the NPC Invader holds — what a
+/// level-0 invader core leaves behind it when it `attackController`s a
+/// room it expanded into (ADR 0043). The third holder, and a fixture of
+/// its own because it prices exactly as a rival's does and, under ADR
+/// 0043, withdraws on the opposite rule.
+let coreReservedRoom ticksToEnd : RoomControlInfo =
+    {
+        Owner = Ownership.Unowned
+        Reservation =
+            Some
+                {
+                    Holder = ReservationHolder.Invader
+                    TicksToEnd = ticksToEnd
+                }
     }
 
 /// The control map for a colony holding its own room and nothing else.
@@ -90,6 +132,7 @@ let bareRespawn =
         ConstructionSites = []
         Creeps = []
         Hostiles = []
+        InvaderCores = []
         Spatial = SpatialInfo.empty
     }
 
@@ -10275,6 +10318,121 @@ let sourceOutputTests =
                     "a rival's reservation prices the rock at five and hires, not at nothing"
             }
 
+            test "a room another player owns doubles nothing of ours either" {
+                // The other half of "somebody else holds it", and the one
+                // the projection could not tell from an unowned room until
+                // #133: a rival's *ownership*. ADR 0043's clockless
+                // withdrawal is triggered by either half, so either half
+                // has to be a fact the Snapshot can state — and stating it
+                // must not accidentally read as a hold of ours, which is
+                // what this pins.
+                //
+                // Pairwise against the neutral room, one rival at a time:
+                // same room, same rock, same container, same fleet. The
+                // engine pays ten a tick in a room a rival owns exactly as
+                // in one we own (`sources/tick.js` switches on
+                // `roomController.user || roomController.reservation`); the
+                // colony prices it at five for the same reason it prices a
+                // rival's reservation at five.
+                Expect.isEmpty
+                    (spawnIntents
+                        (decide
+                            (postedOutpostColony unreservedWorkers [ "W1N2", rivalRoom ])
+                            Map.empty
+                            Set.empty
+                            None)
+                            .Intents)
+                    "a rival's ownership prices the rock exactly as nobody's does"
+
+                // Five and specifically not ten, which is the failure a
+                // three-state owner exists to make unrepresentable: read
+                // as "owned, therefore held", the same rock would be worth
+                // ten and this fleet would be five worker places short.
+                // The one input that moves between this and the assertion
+                // above is whose the controller is.
+                Expect.isNonEmpty
+                    (spawnIntents
+                        (decide
+                            (postedOutpostColony unreservedWorkers [ "W1N2", ownedRoom ])
+                            Map.empty
+                            Set.empty
+                            None)
+                            .Intents)
+                    "owned by us the same rock is worth ten, so the fleet above is the neutral one"
+
+                // Five and specifically not nothing, the same strict
+                // bracket the reservation case is pinned in: sized to the
+                // blind target, the neutral rate hires and unpriceable
+                // does not.
+                Expect.isNonEmpty
+                    (spawnIntents
+                        (decide
+                            (postedOutpostColony 19 [ "W1N2", rivalRoom ])
+                            Map.empty
+                            Set.empty
+                            None)
+                            .Intents)
+                    "a rival's ownership prices the rock at five and hires, not at nothing"
+            }
+
+            test "the NPC's reservation prices like a rival's and is not the same fact" {
+                // The third holder (ADR 0043). A level-0 invader core
+                // `attackController`s the room it expanded into and holds
+                // the reservation itself — the measured core two rooms
+                // from W12S27 does exactly this
+                // (docs/research/remote-mining.md §8.4) — and that
+                // reservation is the *only* readable deadline it has,
+                // because a level-0 core carries no collapse timer.
+                //
+                // ADR 0043 reads opposite answers off the NPC's hold and a
+                // player's: the NPC's is the clock a stand-down runs to,
+                // a player's is the clockless withdrawal that never
+                // re-enters. So the two must price the same and must stay
+                // tellable apart. Pricing first, pairwise against the
+                // rival's reservation, one input at a time.
+                let priced control =
+                    spawnIntents
+                        (decide
+                            (postedOutpostColony unreservedWorkers [ "W1N2", control ])
+                            Map.empty
+                            Set.empty
+                            None)
+                            .Intents
+
+                Expect.equal
+                    (priced (coreReservedRoom 4000))
+                    (priced (reservedRoom false 4000))
+                    "the NPC's reservation prices the rock exactly as a rival's does"
+
+                Expect.isEmpty
+                    (priced (coreReservedRoom 4000))
+                    "and that price is five, not the held ten"
+
+                Expect.isNonEmpty
+                    (priced (reservedRoom true 4000))
+                    "held by us the same rock is worth ten, so the fleet above is the neutral one"
+
+                // And tellable apart, which is the whole reason the holder
+                // is a closed three-state rather than a flag. A Snapshot
+                // that answered both with one "not ours" would hand the
+                // gate ADR 0043 describes an input on which no correct
+                // answer exists: the NPC's hold read as a rival's shuts an
+                // outpost for the life of the colony, and a rival's read
+                // as the NPC's walks back into a room somebody else holds.
+                let holderOf (control: RoomControlInfo) =
+                    control.Reservation |> Option.map (fun held -> held.Holder)
+
+                Expect.notEqual
+                    (holderOf (coreReservedRoom 4000))
+                    (holderOf (reservedRoom false 4000))
+                    "the NPC's hold and a rival's are two facts, not one"
+
+                Expect.notEqual
+                    (holderOf (coreReservedRoom 4000))
+                    (holderOf (reservedRoom true 4000))
+                    "and neither of them is ours"
+            }
+
             test "an outpost the colony cannot see this tick prices no source" {
                 // ADR 0004, entry by entry: who holds a room we cannot look
                 // into is not a fact this tick, so the source is
@@ -10409,6 +10567,166 @@ let sourceOutputTests =
                     (spawnIntents recalled.Intents)
                     (spawnIntents fresh.Intents)
                     "so the fleet standing at the halved target casts nothing it does not need"
+            }
+        ]
+
+[<Tests>]
+let invaderCoreTests =
+    testList
+        "the invader core the Snapshot carries"
+        [
+            test "a core standing in an outpost moves nothing the colony decides" {
+                // ADR 0043's first step, and the whole of what it claims:
+                // the threat is projected and read by nobody. The gate
+                // that will read it withholds a room from the scan set
+                // (#136) and the episode that will carry its deadline is
+                // the raid log's (#134); until both land, a core in the
+                // projection has to leave every Task, every quota, every
+                // cast and every Verdict where it found them — reach and
+                // flee included, which is why the comparison below is over
+                // the whole decision and not over the spawn Intents alone.
+                //
+                // The colony under it is the posted outpost at its
+                // reserved target: creeps matched, a fleet with a gap, an
+                // outpost source in the pool. A quiet fixture would make
+                // the equality vacuous, so the premise is asserted first.
+                let colony = postedOutpostColony 19 [ "W1N2", reservedRoom true 4000 ]
+                let untroubled = decide colony Map.empty Set.empty None
+
+                Expect.isNonEmpty
+                    untroubled.Verdicts
+                    "the premise: this colony reaches a decision worth comparing"
+
+                Expect.isNonEmpty untroubled.Intents "and emits something for a core to disturb"
+
+                // The whole of `Decision` and not three of its four fields.
+                // `Memo` is the field the "no reader" claim is easiest to
+                // break through and hardest to notice: a reader folded
+                // into `censusSignature` moves `Memo.Signature` alone, so
+                // the next tick's `recalled` misses and the Layout and the
+                // spawn-walk table are thrown away and reflooded (ADR
+                // 0032) — a real behaviour change, and an expensive one,
+                // that leaves Intents, Assignments and Verdicts identical
+                // on this fixture because both calls are handed no memo
+                // and recompute from scratch anyway.
+                //
+                // One field of the memo cannot ride the record comparison:
+                // `Walks` is the mutable `Dictionary` the Atlas fills
+                // through the tick, and a Dictionary compares by
+                // reference, so two floods of identical walks are unequal
+                // on it for a reason that has nothing to do with a core.
+                // Its reference is swapped in and its *contents* are
+                // compared beside it, which loses nothing.
+                let walkRows (memo: PlanMemo) =
+                    memo.Walks
+                    |> Seq.map (fun entry -> entry.Key, List.ofArray entry.Value)
+                    |> List.ofSeq
+                    |> List.sortBy fst
+
+                let unchangedWith label cores =
+                    let threatened =
+                        decide { colony with InvaderCores = cores } Map.empty Set.empty None
+
+                    Expect.equal
+                        { threatened with
+                            Memo =
+                                { threatened.Memo with
+                                    Walks = untroubled.Memo.Walks
+                                }
+                        }
+                        untroubled
+                        $"{label}: the same decision, memo and census signature and all"
+
+                    Expect.equal
+                        (walkRows threatened.Memo)
+                        (walkRows untroubled.Memo)
+                        $"{label}: the same spawn walks flooded under it"
+
+                unchangedWith
+                    "a core whose collapse timer is readable"
+                    [
+                        ({
+                            RoomName = "W1N2"
+                            CollapseTick = Some(colony.Time + 64000)
+                        }
+                        : InvaderCoreInfo)
+                    ]
+
+                // The level-0 expansion core of ADR 0043: no stronghold
+                // under it, so no collapse timer, so no deadline — the
+                // case the reservation and the 2,500-tick fallback exist
+                // for, and the one a reader might treat as "no threat".
+                unchangedWith
+                    "a core carrying no deadline at all"
+                    [
+                        ({
+                            RoomName = "W1N2"
+                            CollapseTick = None
+                        }
+                        : InvaderCoreInfo)
+                    ]
+
+                // And one at home, where no outpost gate could ever apply:
+                // the list is swept over every room the colony looks into,
+                // so the spawn room can hold an entry, and the reflexes
+                // that do read the spawn room read hostile *creeps*.
+                unchangedWith
+                    "a core standing in the colony's own room"
+                    [
+                        ({
+                            RoomName = "W1N1"
+                            CollapseTick = Some colony.Time
+                        }
+                        : InvaderCoreInfo)
+                    ]
+            }
+
+            test
+                "the whole frontier case — a level-0 core and the reservation it took — decides nothing" {
+                // Both halves of the fact ADR 0043 reads, together, on the
+                // shape actually measured two rooms from W12S27
+                // (docs/research/remote-mining.md §8.4): a level-0 core
+                // carrying no collapse timer, in a room whose controller
+                // it has reserved for itself. The deadline lives only in
+                // that reservation, which is why `ReservationHolder`
+                // separates the NPC from a rival at all.
+                //
+                // Read against the same room under a *rival's*
+                // reservation and no core: everything either fact could
+                // move today is priced off the neutral rate both of them
+                // yield, so a decision that differs is a reader — of the
+                // holder or of the core — that this ticket says does not
+                // exist yet (#134 opens the episode, #136 gates on it).
+                let withControl control cores =
+                    let colony = postedOutpostColony 19 [ "W1N2", control ]
+                    decide { colony with InvaderCores = cores } Map.empty Set.empty None
+
+                let frontier =
+                    withControl
+                        (coreReservedRoom 4900)
+                        [
+                            ({
+                                RoomName = "W1N2"
+                                CollapseTick = None
+                            }
+                            : InvaderCoreInfo)
+                        ]
+
+                let rivalHeld = withControl (reservedRoom false 4900) []
+
+                Expect.isNonEmpty
+                    rivalHeld.Verdicts
+                    "the premise: this colony reaches a decision worth comparing"
+
+                Expect.equal
+                    { frontier with
+                        Memo =
+                            { frontier.Memo with
+                                Walks = rivalHeld.Memo.Walks
+                            }
+                    }
+                    rivalHeld
+                    "a core and the NPC's own reservation decide exactly what a rival's reservation does"
             }
         ]
 

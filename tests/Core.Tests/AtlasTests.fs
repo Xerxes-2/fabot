@@ -20,6 +20,10 @@ let snapshotWith creeps spatial =
         ConstructionSites = []
         Creeps = creeps
         Hostiles = []
+        // A threat prices nothing and blocks nothing either: the Atlas
+        // reads geometry, and an invader core reaches it as an ordinary
+        // structure's obstacle or not at all (ADR 0043).
+        InvaderCores = []
         Spatial = spatial
     }
 

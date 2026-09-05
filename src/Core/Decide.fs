@@ -711,9 +711,17 @@ let private ceilDiv numerator divisor = (numerator + divisor - 1) / divisor
 /// digging there really would draw ten a tick. The colony declines to
 /// size a fleet against it because a room somebody else holds is one it
 /// is withdrawing from (the stand-down, ADR 0043), and energy it is
-/// about to walk away from must not hire haulers or workers today.
+/// about to walk away from must not hire haulers or workers today. Since
+/// #133 the rival's half of that sentence is a case the projection
+/// spells (`Ownership.Rival`) rather than one it could only fail to
+/// distinguish from an unowned room; the rate it earns is unchanged, and
+/// deliberately so — this rule prices, and withdrawing is the gate's.
 let private heldRateOf (control: RoomControlInfo) =
-    if control.Owned || control.Reservation |> Option.exists (fun held -> held.Ours) then
+    if
+        control.Owner = Ownership.Ours
+        || control.Reservation
+           |> Option.exists (fun held -> held.Holder = ReservationHolder.Ours)
+    then
         heldOutputPerTick
     else
         neutralOutputPerTick
@@ -1046,7 +1054,7 @@ let private reserverClaimsOf (snapshot: Snapshot) atlas : int list =
         snapshot.RoomControl
         |> Map.tryFind room
         |> Option.bind (fun control -> control.Reservation)
-        |> Option.filter (fun held -> held.Ours)
+        |> Option.filter (fun held -> held.Holder = ReservationHolder.Ours)
         |> Option.map (fun held -> held.TicksToEnd)
         |> Option.defaultValue 0
 

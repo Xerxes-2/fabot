@@ -102,38 +102,76 @@ type ControllerInfo =
         SafeModeActive: bool
     }
 
+/// Whose CLAIM parts hold one room's reservation, as the colony reads it:
+/// three answers and not a username, the same closed shape and for the
+/// same reason as `Ownership` below.
+///
+/// The third answer is load-bearing and is not a refinement of the second.
+/// ADR 0043 gives an NPC invader's reservation and another *player's*
+/// opposite meanings: the Invader's is the **clock** a [[stand-down]] runs
+/// to where the core carries no collapse timer ("the end of the
+/// reservation it has taken"), and a player's is the **clockless**
+/// withdrawal, a room that has stopped being ours to work and is never
+/// re-entered on a timer. Read through one "not ours" flag the two are the
+/// same value, and no correct answer exists for either: an Invader's
+/// reservation outliving its core would shut an outpost forever, and a
+/// player's credited to a core would reopen a room somebody else holds.
+/// So the shell separates them where it holds the username, and Core still
+/// never sees one.
+[<RequireQualifiedAccess>]
+type ReservationHolder =
+    /// This colony's own CLAIM parts. The one answer that doubles the
+    /// room's sources and the one the reserver row sizes itself from.
+    | Ours
+    /// The NPC Invader — the user an invader core belongs to, and the
+    /// holder of the reservation a level-0 core takes with
+    /// `attackController` in a room it expanded into (ADR 0043,
+    /// docs/research/remote-mining.md §8.4). Worth the neutral rate like
+    /// any hold that is not ours, and, unlike a rival's, an expiry: this
+    /// one lapses.
+    | Invader
+    /// Another player. Worth the neutral rate, and the clockless
+    /// withdrawal of ADR 0043 — the one abandonment trigger every mature
+    /// bot implements.
+    | Rival
+
 /// The reservation standing on one room's controller this tick (ADR
 /// 0042): a neutral controller held by CLAIM parts, which doubles every
 /// source in that room, decays by one a tick and caps at 5,000.
 type ReservationInfo =
     {
-        /// True when this colony's own CLAIM parts hold it. Whose it is,
-        /// rather than whose name it carries: the engine answers holding
-        /// with a username, the colony's own name is the shell's to know
-        /// (the owner of the room its spawns stand in), and every rule
-        /// reading this asks only whether the room is ours to mine at the
-        /// full rate.
+        /// Whose CLAIM parts hold it. Whose it is, rather than whose name
+        /// it carries: the engine answers holding with a username, the
+        /// colony's own name is the shell's to know (the owner of the room
+        /// its spawns stand in), the NPC's is a name the shell knows too,
+        /// and every rule reading this asks which of the three rather than
+        /// which string.
         ///
-        /// A reservation another player holds reads here exactly as no
-        /// reservation at all does, and that is a colony decision, not the
-        /// engine's arithmetic: `sources/tick.js` switches a source to
-        /// 3,000 a cycle on `roomController.user || roomController.reservation`
-        /// — **any** owner, **any** reservation — so a creep of ours
-        /// digging in a room a rival holds really would draw ten a tick
+        /// A reservation somebody else holds reads for *pricing* exactly
+        /// as no reservation at all does, and that is a colony decision,
+        /// not the engine's arithmetic: `sources/tick.js` switches a
+        /// source to 3,000 a cycle on
+        /// `roomController.user || roomController.reservation` — **any**
+        /// owner, **any** reservation — so a creep of ours digging in a
+        /// room a rival holds really would draw ten a tick
         /// (docs/research/remote-mining.md §1.1). The colony prices it at
         /// five deliberately and conservatively: a room somebody else
         /// owns or reserves has stopped being ours to work, it is the one
         /// withdrawal trigger every mature bot implements, and the
         /// [[stand-down]] (ADR 0043) is where the withdrawal itself
         /// lands. Nothing should size a fleet against energy the colony
-        /// is about to walk away from.
-        Ours: bool
+        /// is about to walk away from. For *withdrawing* the two are not
+        /// one answer — see `ReservationHolder`.
+        Holder: ReservationHolder
         /// Ticks left on the reservation — what the reserver row's one
         /// rule sizes and quotas from, `ceil((5000 - this) / 600)` CLAIM
-        /// parts (ADR 0042, `Decide.reserverClaimsOf`). Read only where
-        /// `Ours` is true: a reservation another player holds leaves this
-        /// colony's own hold at zero, exactly as it leaves the room's
-        /// sources at the neutral rate.
+        /// parts (ADR 0042, `Decide.reserverClaimsOf`). Read as the
+        /// colony's own hold only where `Holder` is `Ours`: a reservation
+        /// somebody else holds leaves this colony's own hold at zero,
+        /// exactly as it leaves the room's sources at the neutral rate.
+        /// Under `Invader` it is the other thing this field is: the
+        /// deadline ADR 0043 falls back to when a core carries no collapse
+        /// timer.
         ///
         /// The holder and the ticks left are a single engine fact off a
         /// single binding — the reservation object arrives whole or not at
@@ -141,6 +179,39 @@ type ReservationInfo =
         /// sentence under `Reservation` below does not cover.
         TicksToEnd: int
     }
+
+/// Whose a room's controller is, as the colony reads it: three answers and
+/// not a username. Two of them are what ADR 0042 prices a source from —
+/// ours is the held rate, nobody's is half — and the third is what ADR
+/// 0043's clockless withdrawal is judged on: a room another player has
+/// taken has stopped being ours to work, whatever it yields.
+///
+/// A closed vocabulary rather than a pair of booleans, because "ours" and
+/// "somebody else's" are answers to one question and two flags could carry
+/// both at once. It is not the fourth answer, "we cannot see": that one is
+/// the absence of the whole entry (ADR 0004), because the question is only
+/// asked of a room vision answered for.
+[<RequireQualifiedAccess>]
+type Ownership =
+    /// Nobody owns the controller — the shape every neutral room and every
+    /// outpost the colony works arrives in, and the shape a room with no
+    /// controller at all is projected as. Reservable, and worth half until
+    /// it is reserved.
+    | Unowned
+    /// This colony owns it: the spawn room, and nothing else while there
+    /// is one colony. Worth the held ten a tick, and never reserved — the
+    /// engine refuses `reserveController` on a room anybody owns.
+    | Ours
+    /// Another player owns it. The engine yields ten a tick in a rival's
+    /// room exactly as in ours, and the colony prices it at five all the
+    /// same, for the reason `ReservationInfo.Holder` gives: a room
+    /// somebody else holds is one the colony is withdrawing from (ADR
+    /// 0043). No NPC case here beside `ReservationHolder`'s: an invader
+    /// core *reserves* and never owns — `expandStronghold` tests
+    /// `!controller.user` and `attackController` leaves the owner
+    /// untouched — so the NPC is a holder the colony can meet and never an
+    /// owner.
+    | Rival
 
 /// Who holds one room the colony can see this tick — the fact a source's
 /// output is read from (ADR 0042), because ten energy a tick is the
@@ -152,28 +223,25 @@ type ReservationInfo =
 /// sources are unpriceable and enter no quota (ADR 0004).
 type RoomControlInfo =
     {
-        /// True when this colony owns the room's controller (the engine's
-        /// `controller.my`) — the spawn room, and nothing else while
-        /// there is one colony. Read *beside* the reservation and never
-        /// instead of it: the engine gives a room with an owner the same
-        /// 3,000 a cycle it gives a reserved one, so a rule spelled
-        /// "reserved, or half" would price the colony's own two sources
-        /// at five and halve its hauler quota and its income base
-        /// together. Ours and not merely somebody's: a room a *rival*
-        /// owns yields the engine's ten too, and reads false here for the
-        /// same reason a rival's reservation does — see `Ours` above.
-        Owned: bool
+        /// Whose the room's controller is (the engine's `controller.my`
+        /// and `controller.owner`). Read *beside* the reservation and
+        /// never instead of it: the engine gives a room with an owner the
+        /// same 3,000 a cycle it gives a reserved one, so a rule spelled
+        /// "reserved, or half" would price the colony's own two sources at
+        /// five and halve its hauler quota and its income base together.
+        Owner: Ownership
         /// The reservation standing on the room's controller; None where
-        /// nothing reserves it. *Which* other player owns or reserves the
-        /// room is deliberately not carried: naming the rival is a second
-        /// binding and a second field, no rule reads it yet, and the
-        /// clockless stand-down that will (ADR 0043) is the tick to widen
-        /// this rather than a reason to project a field early (ADR 0007's
-        /// rule). That is a rule about a field the projection would have
-        /// to go and fetch; the `TicksToEnd` above — read every tick by
-        /// `Decide.reserverClaimsOf` since #131 — arrives inside the
-        /// reservation this one already carries, which is why it is not
-        /// the same question.
+        /// nothing reserves it. *Which* rival holds it is still
+        /// deliberately not carried, and that is now the whole of what is
+        /// left out: naming one rival apart from another is a name no rule
+        /// reads. What the pair above and here do carry is every
+        /// *question* ADR 0043 asks of a controller — whether somebody
+        /// else holds this room, as `Ownership.Rival` or as a
+        /// `ReservationHolder.Rival` reservation, and whether the holder
+        /// is instead the NPC whose reservation is a clock rather than an
+        /// exit. #133 is the tick both widenings arrived on, and they
+        /// arrived as closed three-state answers rather than as usernames
+        /// for the reason `ReservationHolder` gives.
         Reservation: ReservationInfo option
     }
 
@@ -633,6 +701,49 @@ type HostileInfo =
         Body: BodyPart list
     }
 
+/// An NPC invader core standing in a room the colony works this tick (ADR
+/// 0043). A **structure**, not a creep, which is why it reaches the
+/// projection through neither `Hostiles` nor the fire reflex: the sweep
+/// behind those is `FIND_HOSTILE_CREEPS` and a core has never been in it.
+/// It is the threat an [[outpost]] is stood down from — 100,000 hits, no
+/// creeps at level 0, and it never leaves — and the clock the stand-down
+/// runs to is read off it while there is still vision to read it with.
+///
+/// One room per entry and no tile: the gate ADR 0043 describes admits or
+/// withholds a whole room, so where in the room the core stands is a fact
+/// nothing asks for, and the projection grows a field the tick a reader
+/// exists and not before (ADR 0007's rule). A room the colony cannot see
+/// contributes no entry — a core standing unwatched is absent here rather
+/// than "no core" (ADR 0004), which is exactly why the expiry below is
+/// sampled while the room is still in sight.
+type InvaderCoreInfo =
+    {
+        /// The room it stands in. The colony works rooms, not tiles, so
+        /// this is the whole of where.
+        RoomName: string
+        /// The **absolute** tick the core's collapse timer runs out at, or
+        /// None where it carries none — an expanded level-0 core has no
+        /// stronghold to collapse, so the deadline has to be read off the
+        /// reservation it took instead (ADR 0043's fallback order), which
+        /// is the room's `RoomControlInfo.Reservation` under
+        /// `ReservationHolder.Invader` and is why that holder is a case of
+        /// its own. This is the common case on the frontier, not the rare
+        /// one: the measured core two rooms from W12S27 is level 0 and
+        /// carries no timer (docs/research/remote-mining.md §8.4).
+        ///
+        /// Absolute because the shell adds the current tick to what the
+        /// engine hands back, and the engine hands back a **relative**
+        /// count: `RoomObject.effects[].ticksRemaining` is "how many ticks
+        /// will the effect last" (docs.screeps.com, confirmed for #133).
+        /// The `endTime` in `docs/research/remote-mining.md` — 170,283 for
+        /// W15S24's stronghold — is a field of the read-only HTTP API's
+        /// raw database documents and is *not* what the runtime answers
+        /// with; stored as read it would be a deadline a hundred thousand
+        /// ticks wrong, and the gate that reads it would hold an outpost
+        /// shut for the life of the colony.
+        CollapseTick: int option
+    }
+
 /// What the decision layer knows about one owned creep this tick.
 type CreepInfo =
     {
@@ -689,6 +800,26 @@ type Snapshot =
         Creeps: CreepInfo list
         /// Hostile creeps standing in the spawn rooms this tick.
         Hostiles: HostileInfo list
+        /// The invader cores standing in the rooms the colony works this
+        /// tick and can see (ADR 0043). Its own list and not a widening of
+        /// `Hostiles`, for two independent reasons. A core is a structure,
+        /// so the `FIND_HOSTILE_CREEPS` sweep behind that list can never
+        /// answer with one. And that list is the spawn rooms' by
+        /// definition: since #138 a Threat's Reach is filed under the room
+        /// it stands in, so an outpost raider no longer carves a hole at
+        /// its coordinates in the home room — but ADR 0043 leaves
+        /// `Snapshot.Hostiles`'s standing in the Task pipeline at exactly
+        /// zero, and opening a front fifty tiles away before a worker
+        /// being shot at home runs is the wrong order (#66). Reach and
+        /// flee read none of this.
+        ///
+        /// No reader in Core yet: the fold that opens an outpost's threat
+        /// episode off it (#134) and the gate that reads that episode
+        /// (#136) come after. Projected ahead of them because the fact is
+        /// only readable while the colony still has vision in the room,
+        /// and the whole point of the gate is that the creeps who provide
+        /// that vision are about to leave.
+        InvaderCores: InvaderCoreInfo list
         /// The spawn room's spatial projection. Always present, possibly
         /// empty — absence is per-entry, never per-projection (ADR 0004).
         Spatial: SpatialInfo

@@ -294,6 +294,32 @@ let private projectVisible (terrain: RoomTerrain) (room: IRoom) : RoomProjection
             |> Map.ofArray
     }
 
+/// The absolute tick a structure's collapse timer runs out at, or None
+/// where it carries none (ADR 0043). Two engine shapes to guard: `effects`
+/// is `undefined` on an object nothing is applied to, exactly as
+/// `safeMode` and `reservation` are, and a deployed core carries other
+/// effects beside this one, so the array is searched by id rather than
+/// read at an index.
+///
+/// `Game.time +` is the whole point of this function and not a
+/// convenience. The engine's `ticksRemaining` is a **relative** count —
+/// the official documentation's "how many ticks will the effect last",
+/// confirmed against docs.screeps.com for #133 — while the read-only HTTP
+/// API's raw documents carry an absolute `endTime`, and it is the raw
+/// API's numbers (`endTime = 170,283` for W15S24) that
+/// `docs/research/remote-mining.md` and ADR 0043's prose are written in.
+/// Storing the relative count as if it were the absolute tick would put
+/// the deadline about a hundred thousand ticks early — a stand-down that
+/// expired before it began — and storing the raw API's number would put
+/// it a hundred thousand late.
+let private collapseTickOf (structure: IStructure) : int option =
+    if isNull (box structure.effects) then
+        None
+    else
+        structure.effects
+        |> Array.tryFind (fun effect -> effect.effect = effectCollapseTimer)
+        |> Option.map (fun effect -> Game.time + effect.ticksRemaining)
+
 /// One scanned room as the engine hands it back this tick, or None where
 /// the colony has no vision in it. `Game.rooms` holds only the rooms we
 /// can see, so a missing key is exactly "no vision" — and this is the one
@@ -545,20 +571,54 @@ let build () : Snapshot =
 
                 let control: RoomControlInfo =
                     if isNull (box c) then
-                        { Owned = false; Reservation = None }
+                        {
+                            Owner = Ownership.Unowned
+                            Reservation = None
+                        }
                     else
                         {
                             // `my` is undefined and not false on a
                             // controller nobody owns, the shape `safeMode`
-                            // and `ticksToRegeneration` also arrive in.
-                            Owned = not (isNull (box c.my)) && c.my
+                            // and `ticksToRegeneration` also arrive in —
+                            // so ours is asked first and off `my`, exactly
+                            // as it was before this grew a third answer.
+                            // `owner` is the undefined-when-absent half
+                            // that separates the other two: a controller
+                            // with an owner that is not us is a rival's,
+                            // and one with none at all is unowned and
+                            // reservable, which is every outpost the
+                            // colony works (ADR 0042, ADR 0043).
+                            Owner =
+                                if not (isNull (box c.my)) && c.my then Ownership.Ours
+                                elif isNull (box c.owner) then Ownership.Unowned
+                                else Ownership.Rival
                             Reservation =
                                 if isNull (box c.reservation) then
                                     None
                                 else
+                                    // Three holders and not two, because
+                                    // ADR 0043 reads opposite answers off
+                                    // the two that are not ours: the NPC's
+                                    // reservation is the clock a
+                                    // stand-down runs to where the core
+                                    // carries no collapse timer, and a
+                                    // player's is the clockless
+                                    // withdrawal. The username separating
+                                    // them is the shell's to know, exactly
+                                    // as the colony's own name is, so the
+                                    // comparison happens here and Core is
+                                    // handed the answer.
+                                    let holder =
+                                        if Some c.reservation.username = colonyOwner then
+                                            ReservationHolder.Ours
+                                        elif c.reservation.username = invaderUsername then
+                                            ReservationHolder.Invader
+                                        else
+                                            ReservationHolder.Rival
+
                                     Some
                                         {
-                                            Ours = Some c.reservation.username = colonyOwner
+                                            Holder = holder
                                             TicksToEnd = c.reservation.ticksToEnd
                                         }
                         }
@@ -629,6 +689,41 @@ let build () : Snapshot =
                     }
                     : HostileInfo))
             |> Array.toList
+        // Every room the colony is looking into, and not the spawn rooms
+        // alone — which is the whole difference between this list and the
+        // one above it (ADR 0043). An invader core is what an outpost is
+        // stood down from, and an outpost is by definition a room with no
+        // spawn in it, so the sweep that answers for one has to reach the
+        // rooms the sweep above never visits.
+        //
+        // Deliberately not folded into `Hostiles`. A core is a structure,
+        // so `FIND_HOSTILE_CREEPS` cannot answer with one whatever set it
+        // is swept over; and going the other way — letting an outpost's
+        // hostiles into that list — would put them in front of the reach
+        // and flee rules, which ADR 0043 leaves untouched down to the
+        // line. `FIND_HOSTILE_STRUCTURES` answers with every structure a
+        // rival owns, so the kind is checked here: this is the only
+        // question the shell asks of that spelling.
+        //
+        // Gated on `seen`, the rule every fact vision pays for follows: a
+        // room nothing is looking into contributes no entry at all rather
+        // than "no core" (ADR 0004). That absence is exactly why the
+        // deadline is read here and now: the creeps paying for the vision
+        // are the ones a stand-down withdraws, and after they leave there
+        // is nothing left to read it off.
+        InvaderCores =
+            seen
+            |> List.collect (fun room ->
+                room.find findHostileStructures
+                |> Array.toList
+                |> List.map (fun o -> o :?> IStructure)
+                |> List.filter (fun st -> st.structureType = structureInvaderCore)
+                |> List.map (fun st ->
+                    ({
+                        RoomName = room.name
+                        CollapseTick = collapseTickOf st
+                    }
+                    : InvaderCoreInfo)))
         // Single-colony assumption, unchanged by ADR 0041: the first
         // spawn's room is the home room, the one `RoomName` names and the
         // Layout and the census signature read. What layering adds is the

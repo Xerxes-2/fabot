@@ -324,10 +324,21 @@ let private colonyOf (room: LoadedRoom) level =
         // The captured room is this colony's own, so it is owned and its
         // sources are priced at the full rate (ADR 0042) — the sweep is
         // over one room and every one of them is a room with a spawn in it.
-        RoomControl = Map.ofList [ name, { Owned = true; Reservation = None } ]
+        RoomControl =
+            Map.ofList
+                [
+                    name,
+                    {
+                        Owner = Ownership.Ours
+                        Reservation = None
+                    }
+                ]
         ConstructionSites = []
         Creeps = []
         Hostiles = []
+        // A captured room holds no invader core: the four fixtures were
+        // taken off a sector whose cores stand four rooms away (ADR 0043).
+        InvaderCores = []
         Spatial = room.Spatial
     }
 
@@ -1461,7 +1472,13 @@ let private declaredColony level =
         RoomControl =
             (colony.RoomControl, Outpost.declared)
             ||> List.fold (fun control outpost ->
-                Map.add outpost.RoomName { Owned = false; Reservation = None } control)
+                Map.add
+                    outpost.RoomName
+                    {
+                        Owner = Ownership.Unowned
+                        Reservation = None
+                    }
+                    control)
         Sources =
             colony.Sources
             |> Outpost.pooledSources
