@@ -1095,7 +1095,7 @@ let private reserverClaimsOf (snapshot: Snapshot) atlas : int list =
 /// at minWorkforce and derived fresh each tick. A source whose Post is
 /// provided for retires its other Seats: one heavy body drains it alone,
 /// so counting seats after that is hiring for jobs that no longer exist.
-/// An unposted source of the spawn room still contributes its Seat count
+/// An unposted source of the home room still contributes its Seat count
 /// — its output is spoken for by the seat crews that walk it — so only the
 /// posted sources' output is income.
 ///

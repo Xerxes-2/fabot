@@ -436,7 +436,7 @@ let build (shut: Set<string>) : Snapshot =
     // the projection is not the only thing built off a room scan: an
     // outpost's Tasks join the *same* pool as the home room's, so the
     // entity lists the Planner pools from are scanned over the same set.
-    // Three rooms since #126 filled the declaration: the spawn room,
+    // Three rooms since #126 filled the declaration: the home room,
     // W12S27 and W13S28.
     let scanned =
         home |> Option.map (Outpost.roomsProjected outposts) |> Option.defaultValue []
@@ -501,7 +501,7 @@ let build (shut: Set<string>) : Snapshot =
                 }
                 : RefillableInfo)
             |> Array.toList
-        // Every scanned room's sources, not the spawn room's: the Harvest
+        // Every scanned room's sources, not the home room's: the Harvest
         // pool is built from this list, and ADR 0041 puts an outpost's
         // Harvest in the *same* pool ranked by the *same* order. Vision
         // answers for the rooms it covers and the declaration answers for

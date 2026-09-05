@@ -333,9 +333,10 @@ module RoomLayer =
 /// works plus positions of the entities decisions need to place on them.
 type SpatialInfo =
     {
-        /// Which entry of `Rooms` is home — the spawn room (ADR 0041) —
-        /// and still the room name the census signature and the Layout
-        /// read (ADR 0017). None for a projection that does not say which
+        /// Which entry of `Rooms` is the home room — the room the colony
+        /// plans for, which is the room its spawn happens to stand in and
+        /// is never defined by that (ADR 0041) — and still the room name
+        /// the census signature and the Layout read (ADR 0017). None for a projection that does not say which
         /// room it is, whose geometry is filed under the empty name,
         /// exactly as `Decide.censusSignature` spells that room.
         RoomName: string option
@@ -554,7 +555,7 @@ module Outpost =
         outposts
         |> List.filter (fun outpost -> not (Set.contains outpost.RoomName shut))
 
-    /// The rooms the shell projects this tick: the spawn room, and every
+    /// The rooms the shell projects this tick: the home room, and every
     /// declared outpost beside it (ADR 0041). One projection covering
     /// several rooms, never a second one (ADR 0005) — the union is taken
     /// here so the rule has one statement rather than a copy in the shell.
@@ -569,7 +570,7 @@ module Outpost =
     /// is the whole of "retreat" in an architecture that keeps no state.
     ///
     /// Home first, then the declarations in their own order, each room
-    /// once: a declaration naming the spawn room is a human's slip, and
+    /// once: a declaration naming the home room is a human's slip, and
     /// projecting that room twice would file one room's geometry under one
     /// name twice over rather than say so.
     let roomsProjected (outposts: Outpost list) (home: string) : string list =
@@ -889,8 +890,10 @@ type Snapshot =
         /// and the whole point of the gate is that the creeps who provide
         /// that vision are about to leave.
         InvaderCores: InvaderCoreInfo list
-        /// The spawn room's spatial projection. Always present, possibly
-        /// empty — absence is per-entry, never per-projection (ADR 0004).
+        /// The colony's spatial projection: the home room and every
+        /// declared outpost beside it, in one projection (ADR 0041).
+        /// Always present, possibly empty — absence is per-entry, never
+        /// per-projection (ADR 0004).
         Spatial: SpatialInfo
     }
 
