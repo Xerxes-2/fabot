@@ -293,8 +293,8 @@ type RoomLayer =
     {
         /// Terrain per tile over this room's ground (x,y in 1..48); a tile
         /// absent from the map is impassable. The border ring is not here
-        /// and is not ground: it rides in `SpatialInfo.Borders`, whose one
-        /// reader is the Seam query (ADR 0036, ADR 0041).
+        /// and is not ground: it rides in `SpatialInfo.Borders`, which the
+        /// Seam query alone is priced off (ADR 0036, ADR 0041).
         Terrain: Map<Pos, Terrain>
         /// Target id -> that target's tile in this room: the Task targets
         /// (source, refillable structure, construction site, controller)
@@ -362,7 +362,9 @@ type SpatialInfo =
         /// teleport the creep out from under its Task — which is what ADR
         /// 0036's 1..48 trim prevents and this layer must not undo. It
         /// enters no weight grid, no walkable or buildable set and no Work
-        /// Area; the Atlas's Seam query is its one reader. Keyed by room
+        /// Area; the Atlas lays it a grid of its own (`Atlas.Rings`, #173)
+        /// beside those and never inside them, and the Seam query and the
+        /// crossing's price are all that read it. Keyed by room
         /// name because a Seam joins two rooms: a room the projection does
         /// not cover is simply absent here, and answers no Seam at all
         /// (ADR 0004).

@@ -81,17 +81,47 @@ type Atlas =
             /// with whichever layer happens to hold the id.
             TargetAt: Map<string, string * Pos>
             /// Step weight per tile index, per room name, laid once a tick
-            /// for the flood's hot loop: -1 impassable, else the terrain
-            /// weight. stepCost's rules over a whole room, reached by
-            /// walking that room's collections rather than by querying it a
-            /// tile at a time (#96) — the same rules, not the same code,
-            /// so the two are held together by terrainWeight and by the
-            /// road and obstacle precedence ofSnapshot spells out. One grid
-            /// per room rather than one grid keyed by room and tile: a
-            /// flood never leaves its room (ADR 0041), so the room is
-            /// chosen once, outside the hot loop, and the loop keeps the
-            /// flat `x * 50 + y` index it had.
+            /// for the flood's hot loop: -1 impassable, else the price of
+            /// stepping onto the tile — road 1 over the ground it
+            /// discounts, plain 2, swamp 10; walls, obstacle structures and
+            /// tiles outside the projection impassable (ADR 0010,
+            /// ADR 0001). Reached by walking that room's collections rather
+            /// than by querying it a tile at a time (#96), and since #173
+            /// the *only* form the rule has: the single-tile query reads
+            /// this grid too (`weightAt`), so there is one rule and one
+            /// place it is written rather than a table and a tile query
+            /// free to drift apart. One grid per room rather than one grid
+            /// keyed by room and tile: a flood never leaves its room
+            /// (ADR 0041), so the room is chosen once, outside the hot
+            /// loop, and the loop keeps the flat `x * 50 + y` index it had.
             Weights: Map<string, int[]>
+            /// Raw terrain weight per tile index, per room name: the ground
+            /// before a road discounts it and before an obstacle blocks it
+            /// — -1 wall or off the projection, else `terrainWeight`. The
+            /// grid above minus its two overriding passes, and a grid of
+            /// its own because a Seat is counted by terrain alone: a
+            /// structure standing on a source's neighbour does not consume
+            /// the Seat (ADR 0001), so the Seat query cannot read the
+            /// walking grid and cannot afford to read the layer a `Pos` at
+            /// a time either (#173).
+            Ground: Map<string, int[]>
+            /// Terrain weight per tile index of each room's border ring —
+            /// the exit rows and columns the layers' ground deliberately
+            /// leaves out (ADR 0036) — and -1 everywhere else, which every
+            /// interior tile of this grid is. The table form of
+            /// `SpatialInfo.Borders`, laid for the Seam band and the
+            /// crossing price, whose readers ask it once per exit tile of a
+            /// band of thirty-odd, once per creep priced across a border
+            /// (#173).
+            ///
+            /// A grid of its own and never merged into the two above: a
+            /// ring tile is one a creep passes through and never one it may
+            /// stand on, so admitting it to the walking grid would offer a
+            /// Work Area or a standing candidate the engine empties the
+            /// tick a creep arrives (ADR 0041). Two grids that answer
+            /// "impassable" for every tile of the other is exactly the
+            /// separation the two layers already have.
+            Rings: Map<string, int[]>
             /// Whether a creep stands on each tile index this tick, per
             /// room name; the flood prices these tiles dearer so paths
             /// detour around standing traffic.
@@ -246,52 +276,60 @@ let private occupancyPenalty = swampWeight
 /// (ADR 0030).
 let private noTraffic: bool[] = Array.create tileCount false
 
-/// The weight grid of a room the projection does not carry: every tile
-/// impassable, which is the answer stepCost gives a tile outside the
-/// projection, read a whole room at a time (ADR 0004, ADR 0041). Absence
-/// of a room and absence of every tile in it are one answer — unpriceable
-/// geometry, never blocked geometry, so nothing is reachable through it
-/// and nothing is refused because of it. Shared and never written: the
-/// grids are the flood's read-only input, and the one query that hands one
+/// The grid of a room the projection does not carry: every tile
+/// impassable, which is the answer a single-tile query gives a tile
+/// outside the projection, read a whole room at a time (ADR 0004,
+/// ADR 0041). Absence of a room and absence of every tile in it are one
+/// answer — unpriceable geometry, never blocked geometry, so nothing is
+/// reachable through it and nothing is refused because of it. Shared by
+/// all three of the Atlas's grids and never written: they are the flood's
+/// and the tile queries' read-only input, and the one query that hands one
 /// out hands out a copy.
 let private noGround: int[] = Array.create tileCount -1
 
+/// Whether a tile is one of the room's own fifty-by-fifty — the guard
+/// every grid read passes through, because `indexOf` does no checking of
+/// its own and a `Pos` off the grid indexes off the array: under Fable
+/// that reads `undefined`, which the weight comparisons below would call
+/// walkable, while .NET throws. `neighbours` produces -1 and 50 at the
+/// edges, so this is the ordinary case and not the exotic one. The rule
+/// once, here, rather than at each of its readers.
+let private inGrid (tile: Pos) =
+    tile.X >= 0 && tile.X < roomSide && tile.Y >= 0 && tile.Y < roomSide
+
+/// The eight tiles touching this one, in (X, Y) order — the order every
+/// answer derived from them is listed in. Written out rather than
+/// generated: a comprehension compiles to a sequence and a `toList` under
+/// Fable, and this is the innermost list the Atlas builds — every Seat,
+/// every standing candidate and every approach to a Seam is eight of
+/// these (#173). Tiles off the grid are left in: what a neighbour is is
+/// geometry, and whether it can be read is the grid's own answer
+/// (`weightAt`), given once so no caller has to remember to ask.
 let private neighbours pos =
+    let x = pos.X
+    let y = pos.Y
+
     [
-        for dx in -1 .. 1 do
-            for dy in -1 .. 1 do
-                if (dx, dy) <> (0, 0) then
-                    { X = pos.X + dx; Y = pos.Y + dy }
+        { X = x - 1; Y = y - 1 }
+        { X = x - 1; Y = y }
+        { X = x - 1; Y = y + 1 }
+        { X = x; Y = y - 1 }
+        { X = x; Y = y + 1 }
+        { X = x + 1; Y = y - 1 }
+        { X = x + 1; Y = y }
+        { X = x + 1; Y = y + 1 }
     ]
 
 /// The weight of raw ground (ADR 0010): plain 2, swamp 10, wall
 /// impassable — written as the -1 the flood's weight table marks an
 /// impassable tile with. The one place the engine's terrain prices live:
-/// stepCost's single-tile answer, the table the Atlas lays and the
-/// trunk's raw-terrain flood all price off it, which is what keeps them
-/// from drifting apart.
+/// the grids the Atlas lays and the trunk's raw-terrain flood all price
+/// off it, which is what keeps them from drifting apart.
 let private terrainWeight terrain =
     match terrain with
     | Plain -> 2
     | Swamp -> swampWeight
     | Wall -> -1
-
-/// Cost of stepping onto a tile — the engine's own per-part fatigue
-/// values (ADR 0010): road 1, plain 2, swamp 10; walls, obstacle
-/// structures and tiles outside the projection are impassable (ADR 0001).
-/// A built road overrides the terrain under it; a road on a wall (a
-/// tunnel) is not modeled and stays impassable. The single-tile query —
-/// the flood reads the table the Atlas lays to the same rules. Over one
-/// room's layer, because a bare `Pos` says which tile and never which room
-/// (ADR 0041): the caller has already chosen the room, here and everywhere
-/// below.
-let private stepCost (layer: RoomLayer) tile =
-    if Set.contains tile layer.Obstacles then
-        None
-    else
-        match Map.tryFind tile layer.Terrain |> Option.map terrainWeight with
-        | Some weight when weight > 0 -> Some(if Set.contains tile layer.Roads then 1 else weight)
-        | _ -> None
 
 /// A creep's fatigue factor from its body and current load: every part
 /// except Move and except empty Carry generates fatigue — the engine
@@ -399,9 +437,11 @@ let private stepTable (stepPrice: int -> int option) : int[] =
 /// indices the loop has already proven in range — a neighbour index is
 /// built only after the `0 <= n < roomSide` guard, the heap's come from
 /// its own live size, and a step-price index is a weight the grid holds,
-/// which `stepTable` is built long enough for by construction. Used only
-/// inside `floodFromAllSeeded`; every other array read in the Atlas stays
-/// checked, since none is on the profile.
+/// which `stepTable` is built long enough for by construction. Used where
+/// the caller has already proven the index in range and the read is on the
+/// profile — the flood's inner loop, and the single-tile grid read below,
+/// which passes `inGrid` first for exactly this reason (#173). Every other
+/// array read in the Atlas stays checked.
 [<Emit("$1[$0]")>]
 let private at (index: int) (array: int[]) : int = array.[index]
 
@@ -417,6 +457,28 @@ let private heapAt (index: int) (heap: ResizeArray<int>) : int = heap.[index]
 [<Emit("$1[$0] = $2")>]
 let private setHeapAt (index: int) (heap: ResizeArray<int>) (value: int) : unit =
     heap.[index] <- value
+
+/// One tile's weight in one of the Atlas's grids, and -1 — impassable —
+/// for a tile off the grid. The single-tile ground query (#173): the grids
+/// are laid once a tick by walking each room's collections, so asking one
+/// about a tile is an array index, where asking the layer was a `Pos`
+/// compared down a tree three times over — structural comparison the
+/// profile put at about a fifth of the tick across the readers below,
+/// none of it algorithm. The rules are the grid's, spelled where it
+/// is laid (`ofSnapshotRecalling`), so the tile query and the flood answer
+/// off the same numbers rather than off two copies of one rule.
+///
+/// The room is the caller's, as it is on every query below (ADR 0041): a
+/// bare `Pos` says which tile and never which room, so the caller chooses
+/// the grid and this reads it.
+let private weightAt (grid: int[]) (tile: Pos) : int =
+    if inGrid tile then at (indexOf tile) grid else -1
+
+/// Whether a tile is passable in one of the Atlas's grids — the -1 above
+/// read as the one thing it means. A tile off the grid, off the
+/// projection, walled, or blocked in whichever grid is being asked is not
+/// walkable in it, which is one answer and not four (ADR 0004).
+let private walkableAt (grid: int[]) (tile: Pos) : bool = weightAt grid tile >= 0
 
 /// Dijkstra flood over the weight grid from every tile in `starts`, each
 /// starting at the cost the caller seeds it with, priced by `stepPrices`
@@ -747,22 +809,28 @@ let ofSnapshotRecalling (walks: WalkTable) (snapshot: Snapshot) : Atlas =
         |> List.map (fun creep -> creep.Name, fatigueFactorOf creep)
         |> Map.ofList
 
-    // The flood's weight table, one grid per projected room, filled by
-    // walking that room's three collections rather than by asking stepCost
-    // per tile. Walking a tree compares nothing; only a lookup does, and
-    // the per-tile form cost three Pos-keyed lookups a tile — 2500 tiles'
-    // worth of structural comparison, the largest single cost in the tick
-    // (#96). Layering by room name keeps that: the room is chosen once,
-    // and inside a grid nothing is keyed by `Pos` at all. The passes layer
-    // in stepCost's own precedence: terrain first, then roads over the
-    // passable ground they discount, then obstacles over everything. The
-    // array's initial -1 is the answer for every tile outside the
-    // projection, which is stepCost's answer for one too.
+    // The room's grids, one set per projected room, filled by walking that
+    // room's four collections rather than by asking a rule per tile.
+    // Walking a tree compares nothing; only a lookup does, and the per-tile
+    // form cost three Pos-keyed lookups a tile — 2500 tiles' worth of
+    // structural comparison, the largest single cost in the tick (#96).
+    // Layering by room name keeps that: the room is chosen once, and inside
+    // a grid nothing is keyed by `Pos` at all. Since #173 these are also
+    // the *only* form of the rules — every single-tile query reads one of
+    // them (`weightAt`) — so the precedence spelled here is spelled
+    // nowhere else: terrain first, then roads over the passable ground
+    // they discount, then obstacles over everything. The array's initial
+    // -1 is the answer for every tile outside the projection.
     let gridOf (layer: RoomLayer) =
-        let weights = Array.create tileCount -1
+        let ground = Array.create tileCount -1
 
         layer.Terrain
-        |> Map.iter (fun tile terrain -> weights.[indexOf tile] <- terrainWeight terrain)
+        |> Map.iter (fun tile terrain -> ground.[indexOf tile] <- terrainWeight terrain)
+
+        // The walking grid starts as the raw ground and takes the two
+        // overriding passes; the ground itself keeps neither, because a
+        // Seat is counted by terrain alone (ADR 0001).
+        let weights = Array.copy ground
 
         // A road discounts the ground under it, never ground the projection
         // calls impassable: a road on a wall (a tunnel, which ADR 0010 does
@@ -780,11 +848,25 @@ let ofSnapshotRecalling (walks: WalkTable) (snapshot: Snapshot) : Atlas =
 
         layer.CreepPositions |> Map.iter (fun _ tile -> occupied.[indexOf tile] <- true)
 
-        weights, occupied
+        ground, weights, occupied
+
+    // The border ring's own grid, laid off the border layer and keyed by
+    // its rooms rather than by `Rooms`: a room the projection carries a
+    // ring for but no ground, or ground but no ring, is each half a room
+    // and answers -1 for the half it has not got (ADR 0004).
+    let ringOf (ring: Map<Pos, Terrain>) =
+        let grid = Array.create tileCount -1
+
+        ring
+        |> Map.iter (fun tile terrain -> grid.[indexOf tile] <- terrainWeight terrain)
+
+        grid
 
     let grids = spatial.Rooms |> Map.map (fun _ layer -> gridOf layer)
-    let weights = grids |> Map.map (fun _ (grid, _) -> grid)
-    let occupied = grids |> Map.map (fun _ (_, standing) -> standing)
+    let ground = grids |> Map.map (fun _ (bare, _, _) -> bare)
+    let weights = grids |> Map.map (fun _ (_, grid, _) -> grid)
+    let occupied = grids |> Map.map (fun _ (_, _, standing) -> standing)
+    let rings = spatial.Borders |> Map.map (fun _ ring -> ringOf ring)
 
     {
         Spatial = spatial
@@ -794,6 +876,8 @@ let ofSnapshotRecalling (walks: WalkTable) (snapshot: Snapshot) : Atlas =
         CreepAt = creepAt
         TargetAt = targetAt
         Weights = weights
+        Ground = ground
+        Rings = rings
         Occupied = occupied
         Floods =
             placed
@@ -850,14 +934,29 @@ let ofSnapshot (snapshot: Snapshot) : Atlas =
 /// The rule itself is `SpatialInfo.layerOf`'s, spelled once there and
 /// reached from here with the Atlas's own projection, so the tick that
 /// changes what a room with no entry answers there is the tick these
-/// fourteen call sites change with it.
+/// eight call sites change with it — eight and not fourteen since #173,
+/// the tile-at-a-time readers having moved onto the grids, where the same
+/// absence is the same all-impassable answer (`noGround`).
 let private layerOf (atlas: Atlas) (room: string) : RoomLayer =
     SpatialInfo.layerOf atlas.Spatial room
 
 /// One room's step-weight grid, and the all-impassable grid for a room the
-/// projection does not carry.
+/// projection does not carry — which is the same answer `layerOf` gives
+/// that room, read a whole room at a time: an empty layer has no passable
+/// tile in it either.
 let private weightsOf (atlas: Atlas) (room: string) : int[] =
     Map.tryFind room atlas.Weights |> Option.defaultValue noGround
+
+/// One room's raw terrain grid — the ground before roads and obstacles —
+/// and the all-impassable grid for a room the projection does not carry.
+let private groundOf (atlas: Atlas) (room: string) : int[] =
+    Map.tryFind room atlas.Ground |> Option.defaultValue noGround
+
+/// One room's border-ring grid, and the all-impassable grid for a room the
+/// projection carries no border for: a room with no ring has no crossing
+/// on it, which is the empty band `seams` already answered with (ADR 0004).
+let private ringOf (atlas: Atlas) (room: string) : int[] =
+    Map.tryFind room atlas.Rings |> Option.defaultValue noGround
 
 /// One room's standing traffic, and no traffic at all for a room the
 /// projection does not carry — which is what an empty room holds anyway.
@@ -1219,10 +1318,13 @@ let isSwamp (atlas: Atlas) (tile: Pos) : bool =
 /// creep's own room's, and since #145 the Resolver arbitrates every
 /// projected room, so a creep filed under an outpost is offered that
 /// room's ground and never home's. A room the projection does not carry
-/// has no walkable tile beside anything.
+/// has no walkable tile beside anything. Read off that room's weight grid,
+/// which is where the rule lives (#173) — so a tile off the fifty-by-fifty
+/// is not walkable, exactly as a tile the projection does not carry is
+/// not: `neighbours` produces both at the room's edge.
 let adjacentWalkableIn (atlas: Atlas) (room: string) (pos: Pos) : Pos list =
-    let layer = layerOf atlas room
-    neighbours pos |> List.filter (fun tile -> (stepCost layer tile).IsSome)
+    let weights = weightsOf atlas room
+    neighbours pos |> List.filter (walkableAt weights)
 
 /// `adjacentWalkableIn` for the colony's own room: every caller left on
 /// this spelling — the spawner's birth tiles, a sink's approach — is
@@ -1230,10 +1332,11 @@ let adjacentWalkableIn (atlas: Atlas) (room: string) (pos: Pos) : Pos list =
 let adjacentWalkable (atlas: Atlas) (pos: Pos) : Pos list = adjacentWalkableIn atlas atlas.Home pos
 
 /// Every tile of the room a creep may stand on — `adjacentWalkable`'s
-/// answer over the whole projection, read off the weight grid rather than
-/// a tile at a time: the same rules, held together the way the grid itself
-/// is (`stepCost`, and the road and obstacle precedence `ofSnapshot`
-/// spells out). The room-wide half nothing wanted until a Task's Work
+/// answer over the whole room rather than around one tile, and the same
+/// rules because it is the same grid: the terrain, road and obstacle
+/// precedence `ofSnapshotRecalling` spells out, which since #173 is the
+/// only place that rule is written. The room-wide half nothing wanted
+/// until a Task's Work
 /// Area was the room itself (ADR 0033). The room rides on the API, as
 /// `adjacentWalkableIn`'s does: this is Flee's safe ground, and a creep
 /// runs over the ground of the room it stands in — which since #138 is
@@ -1303,16 +1406,12 @@ let private actionOn =
 
 /// Seat tiles of a placed source: walkable (non-wall) neighbours of its
 /// tile, by terrain alone — structures and creeps do not consume Seats
-/// (ADR 0001).
-let private seatTiles (layer: RoomLayer) (pos: Pos) : Set<Pos> =
-    neighbours pos
-    |> List.filter (fun tile ->
-        match Map.tryFind tile layer.Terrain with
-        | Some Plain
-        | Some Swamp -> true
-        | Some Wall
-        | None -> false)
-    |> Set.ofList
+/// (ADR 0001). Read off that room's raw terrain grid and not its weight
+/// grid, which is the whole of "by terrain alone" in table form: the
+/// weight grid has taken the road and obstacle passes, and a Seat with an
+/// extension standing on it is still a Seat (#173).
+let private seatTiles (ground: int[]) (pos: Pos) : Set<Pos> =
+    neighbours pos |> List.filter (walkableAt ground) |> Set.ofList
 
 /// Seat tiles of a source — the geometry behind `seats`, for the Layout's
 /// source-container pick (ADR 0012). Empty for a source the projection
@@ -1323,7 +1422,7 @@ let private seatTiles (layer: RoomLayer) (pos: Pos) : Set<Pos> =
 /// never a home tile of the same coordinate.
 let seatTilesOf (atlas: Atlas) (sourceId: string) : Set<Pos> =
     Map.tryFind sourceId atlas.TargetAt
-    |> Option.map (fun (room, pos) -> seatTiles (layerOf atlas room) pos)
+    |> Option.map (fun (room, pos) -> seatTiles (groundOf atlas room) pos)
     |> Option.defaultValue Set.empty
 
 /// Seats of a source: its Seat tile count. None for a source the
@@ -1331,7 +1430,7 @@ let seatTilesOf (atlas: Atlas) (sourceId: string) : Set<Pos> =
 /// geometry never counts against a Task.
 let seats (atlas: Atlas) (sourceId: string) : int option =
     Map.tryFind sourceId atlas.TargetAt
-    |> Option.map (fun (room, pos) -> seatTiles (layerOf atlas room) pos |> Set.count)
+    |> Option.map (fun (room, pos) -> seatTiles (groundOf atlas room) pos |> Set.count)
 
 /// The Work Area geometry behind `workArea`: the passable tiles within
 /// the action's range of its target. Empty for a Task the projection
@@ -1350,7 +1449,7 @@ let private buildWorkArea (atlas: Atlas) (task: Task) : Set<Pos> =
         // by where the target stands, never by which room the reader is
         // working in.
         | Some(room, target) ->
-            let layer = layerOf atlas room
+            let weights = weightsOf atlas room
 
             Set.ofList
                 [
@@ -1358,7 +1457,7 @@ let private buildWorkArea (atlas: Atlas) (task: Task) : Set<Pos> =
                         for y in target.Y - r .. target.Y + r do
                             let tile = { X = x; Y = y }
 
-                            if (stepCost layer tile).IsSome then
+                            if walkableAt weights tile then
                                 tile
                 ]
 
@@ -1400,12 +1499,12 @@ let workArea (atlas: Atlas) (task: Task) : Set<Pos> =
 /// a Dual Seat in neither — a phantom Post, a phantom Anchor place, and an
 /// outpost source reading as posted without a container.
 let private seatUnionIn (atlas: Atlas) (room: string) : Set<Pos> =
-    let layer = layerOf atlas room
+    let ground = groundOf atlas room
 
     targetsOfKind atlas Source
     |> List.choose (fun id ->
         match Map.tryFind id atlas.TargetAt with
-        | Some(where, pos) when where = room -> Some(seatTiles layer pos)
+        | Some(where, pos) when where = room -> Some(seatTiles ground pos)
         | _ -> None)
     |> List.fold Set.union Set.empty
 
@@ -1782,30 +1881,30 @@ let private borderPairs offset : (Pos * Pos) list =
 /// neighbour (ADR 0041). The third kind of geometry beside the Seat and
 /// the Post — those are tiles a creep works from, a Seam is one it can
 /// only pass through — and never a tile anything offers to stand on: it
-/// is answered from the projection's border layer, which enters no weight
-/// grid, no walkable or buildable set and no Work Area, so the Matcher
-/// cannot pick one and have the engine empty it the tick a creep arrives.
+/// is answered from the projection's border layer, which enters no
+/// walking weight grid, no walkable or buildable set and no Work Area —
+/// the Atlas lays it a grid of its own beside those (`Atlas.Rings`) and
+/// never inside them — so the Matcher cannot pick one and have the engine
+/// empty it the tick a creep arrives.
 /// A pair is in the band when neither side is wall; a swamp exit is in
 /// it, dearly, exactly as swamp ground is. Deterministic (X, Y) order.
 /// Total (ADR 0004): two rooms that are not orthogonal neighbours, and a
 /// room the projection carries no border for, answer with the empty
 /// band — an unpriceable Seam is no Seam, never a blocked one, so it
 /// costs nothing and blocks nothing.
+///
+/// Both sides are read off the ring grids (#173), which is the border
+/// layer in the same table form the ground has: the band is asked for once
+/// per creep priced across a border, and each of its forty-eight candidate
+/// pairs cost a `Pos` compared down two terrain trees before that.
 let seams (atlas: Atlas) (fromRoom: string) (toRoom: string) : (Pos * Pos) list =
-    let passable (ring: Map<Pos, Terrain>) tile =
-        match Map.tryFind tile ring with
-        | Some terrain -> terrainWeight terrain > 0
-        | None -> false
+    match worldCoordsOf fromRoom, worldCoordsOf toRoom with
+    | Some(hereX, hereY), Some(thereX, thereY) ->
+        let near = ringOf atlas fromRoom
+        let far = ringOf atlas toRoom
 
-    match
-        Map.tryFind fromRoom atlas.Spatial.Borders,
-        Map.tryFind toRoom atlas.Spatial.Borders,
-        worldCoordsOf fromRoom,
-        worldCoordsOf toRoom
-    with
-    | Some near, Some far, Some(hereX, hereY), Some(thereX, thereY) ->
         borderPairs (thereX - hereX, thereY - hereY)
-        |> List.filter (fun (here, there) -> passable near here && passable far there)
+        |> List.filter (fun (here, there) -> walkableAt near here && walkableAt far there)
     | _ -> []
 
 /// Whether a creep stands on a Seam — its room's border ring, the tile the
@@ -1832,9 +1931,7 @@ let standsOnSeam (atlas: Atlas) (creep: string) : bool =
 /// no index at all. Diagonals included — the engine lets a creep step onto
 /// an exit diagonally, and onto its first tile in the new room the same
 /// way.
-let private besideExit (tile: Pos) : Pos list =
-    neighbours tile
-    |> List.filter (fun n -> n.X >= 0 && n.X < roomSide && n.Y >= 0 && n.Y < roomSide)
+let private besideExit (tile: Pos) : Pos list = neighbours tile |> List.filter inGrid
 
 /// The cheapest a flood reached any tile of a set at, and None when it
 /// reached none of them — the one read every arrival at a set of tiles is
@@ -1879,14 +1976,16 @@ let private nearestReached (dist: int[]) (tiles: Pos list) : int option =
 ///
 /// Priced off the body's `stepTable`, which the caller hands in already
 /// laid: both callers ask this once per crossing over a band of thirty-odd
-/// (#168), and the table is the same for every one of them.
+/// (#168), and the table is the same for every one of them — and off the
+/// room's ring grid rather than its border map, for the same reason (#173).
 let private exitPrice (atlas: Atlas) (stepPrices: int[]) room tile =
-    Map.tryFind room atlas.Spatial.Borders
-    |> Option.bind (Map.tryFind tile)
-    |> Option.map terrainWeight
-    |> Option.filter (fun weight -> weight > 0)
-    |> Option.map (fun weight -> stepPrices.[weight])
-    |> Option.filter (fun step -> step >= 0)
+    let weight = weightAt (ringOf atlas room) tile
+
+    if weight > 0 then
+        let step = stepPrices.[weight]
+        if step >= 0 then Some step else None
+    else
+        None
 
 /// The body a *plan* is priced for: fatigue parity, one fatigue-generating
 /// part to one Move (ADR 0003), which under the walk's rounding is a tick
@@ -1952,7 +2051,7 @@ let private seamWalkFlood (atlas: Atlas) (fromRoom: string) (toRoom: string) : i
 /// is no Seam, never a blocked one, so it costs nothing and blocks
 /// nothing.
 let seamWalkTicks (atlas: Atlas) (fromRoom: string) (toRoom: string) (from: Pos) : int option =
-    if from.X < 0 || from.X >= roomSide || from.Y < 0 || from.Y >= roomSide then
+    if not (inGrid from) then
         None
     else
         let stepPrices, traffic = pricingOf noTraffic planningFactor Walk
@@ -2269,7 +2368,7 @@ let mayAct (atlas: Atlas) (creep: string) (task: Task) (area: Set<Pos>) : bool =
     | Some(targetId, actionRange) ->
         match Map.tryFind creep atlas.CreepAt, Map.tryFind targetId atlas.TargetAt with
         | Some(creepRoom, creepPos), Some(_, targetPos) ->
-            if (stepCost (layerOf atlas creepRoom) creepPos).IsNone then
+            if not (walkableAt (weightsOf atlas creepRoom) creepPos) then
                 range creepPos targetPos <= actionRange
             else
                 Set.contains creepPos area

@@ -14261,7 +14261,7 @@ let outpostTests =
                 // On plain ground on purpose, and that is the whole reason
                 // this fixture exists rather than an assertion over the
                 // committed captures: both declared controllers stand on
-                // terrain the capture reads as wall, so `stepCost` refuses
+                // terrain the capture reads as wall, so the weight grid refuses
                 // their tiles before `Obstacles` is ever consulted and the
                 // rule would be pinned by the terrain rather than by the
                 // code (ADR 0036 supplies counterexamples, not cover).

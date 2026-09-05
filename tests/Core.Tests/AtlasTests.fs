@@ -182,6 +182,62 @@ let seatTests =
                     "plain and swamp are Seats; wall and absent are not"
             }
 
+            test "a source on the room's edge Seats only tiles of the grid" {
+                // The Seat query reads the room's terrain grid a tile at a
+                // time (#173), and an index off the grid is no index at
+                // all: under Fable an unchecked read of one answers
+                // `undefined`, which the weight test would call walkable
+                // ground the engine has never heard of, while .NET throws.
+                // Both corners and a mid-edge tile, because `neighbours`
+                // produces a -1 at one end and a 50 at the other. The ring
+                // itself is not ground (ADR 0036), so a source standing on
+                // it Seats none of its own row — the fourth case, and the
+                // one a real capture actually holds.
+                let atlas =
+                    { SpatialInfo.empty with
+                        RoomName = Some "W1N1"
+                    }
+                    |> withHome (fun layer ->
+                        { layer with
+                            Terrain =
+                                Map.ofList
+                                    [
+                                        for x in 1..48 do
+                                            for y in 1..48 -> { X = x; Y = y }, Plain
+                                    ]
+                            TargetPositions =
+                                Map.ofList
+                                    [
+                                        "src-low", { X = 0; Y = 0 }
+                                        "src-high", { X = 49; Y = 49 }
+                                        "src-side", { X = 0; Y = 25 }
+                                        "src-in", { X = 1; Y = 1 }
+                                    ]
+                        })
+                    |> snapshotWith []
+                    |> ofSnapshot
+
+                Expect.equal
+                    (seatTilesOf atlas "src-low")
+                    (Set.singleton { X = 1; Y = 1 })
+                    "the low corner Seats its one ground neighbour, and no negative coordinate"
+
+                Expect.equal
+                    (seatTilesOf atlas "src-high")
+                    (Set.singleton { X = 48; Y = 48 })
+                    "the high corner Seats its one ground neighbour, and nothing at 50"
+
+                Expect.equal
+                    (seatTilesOf atlas "src-side")
+                    (Set.ofList [ { X = 1; Y = 24 }; { X = 1; Y = 25 }; { X = 1; Y = 26 } ])
+                    "a mid-edge tile Seats the three ground tiles inside it"
+
+                Expect.equal
+                    (seatTilesOf atlas "src-in")
+                    (Set.ofList [ { X = 1; Y = 2 }; { X = 2; Y = 1 }; { X = 2; Y = 2 } ])
+                    "and a source one tile in Seats no exit tile: the ring is not ground"
+            }
+
             test "an unplaced source has no Seat count at all" {
                 let atlas = spatial [] [ { X = 9; Y = 10 }, Plain ] |> snapshotWith [] |> ofSnapshot
 
@@ -215,6 +271,47 @@ let standingTests =
                     (adjacentWalkable atlas { X = 10; Y = 10 })
                     [ { X = 9; Y = 10 }; { X = 10; Y = 11 } ]
                     "unlike Seats, standing respects obstacles"
+            }
+
+            test "standing tiles at the room's edge stop at the grid" {
+                // `adjacentWalkableIn` reads the room's weight grid a tile
+                // at a time (#173) over the eight `neighbours` produces,
+                // which at an edge are a -1 or a 50 away from being an
+                // index at all — unchecked under Fable, where the read
+                // answers `undefined` and would price as walkable, and a
+                // throw on .NET. Both corners and a mid-edge tile, and the
+                // answers are the room's own ground: an exit tile is not
+                // ground (ADR 0036) and is no tile to stand on.
+                let atlas =
+                    { SpatialInfo.empty with
+                        RoomName = Some "W1N1"
+                    }
+                    |> withHome (fun layer ->
+                        { layer with
+                            Terrain =
+                                Map.ofList
+                                    [
+                                        for x in 1..48 do
+                                            for y in 1..48 -> { X = x; Y = y }, Plain
+                                    ]
+                        })
+                    |> snapshotWith []
+                    |> ofSnapshot
+
+                Expect.equal
+                    (adjacentWalkableIn atlas "W1N1" { X = 0; Y = 0 })
+                    [ { X = 1; Y = 1 } ]
+                    "the low corner stands on its one ground neighbour, and no negative coordinate"
+
+                Expect.equal
+                    (adjacentWalkableIn atlas "W1N1" { X = 49; Y = 49 })
+                    [ { X = 48; Y = 48 } ]
+                    "the high corner stands on its one ground neighbour, and nothing at 50"
+
+                Expect.equal
+                    (adjacentWalkableIn atlas "W1N1" { X = 0; Y = 25 })
+                    [ { X = 1; Y = 24 }; { X = 1; Y = 25 }; { X = 1; Y = 26 } ]
+                    "a mid-edge tile stands on the three ground tiles inside it, in (X, Y) order"
             }
 
             test "walkableTiles is the whole room's standing ground, on adjacentWalkable's rules" {
