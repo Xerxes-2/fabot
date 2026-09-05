@@ -328,11 +328,19 @@ let private emptyFactorOf (body: BodyPart list) : FatigueFactor =
 /// surplus may price a step below a whole tick, which keeps a road step
 /// cheaper than plain for every body. A body without Move parts cannot
 /// step at all (the engine's move refuses with ERR_NO_BODYPART).
+///
+/// The one-unit floor is a branch and not `max`: F#'s `max` is generic, so
+/// Fable compiles it to a call through the structural comparer, and this
+/// was 3.5% of the tick when the flood asked for a price per relaxation
+/// (#168). The table below asks once per weight in the domain instead —
+/// `swampWeight + 1` times a pricing, never once a relaxation — but the
+/// branch is what the arithmetic means anyway.
 let private stepUnits (factor: FatigueFactor) weight =
     if factor.MoveParts = 0 then
         None
     else
-        Some(max 1 ((weight * factor.FatigueParts + factor.MoveParts - 1) / factor.MoveParts))
+        let units = (weight * factor.FatigueParts + factor.MoveParts - 1) / factor.MoveParts
+        Some(if units < 1 then 1 else units)
 
 /// Whole ticks the body needs to step onto a tile of the given terrain
 /// weight — the walk's price (ADR 0029). Two cost units make a tick and a
@@ -348,7 +356,35 @@ let private stepUnits (factor: FatigueFactor) weight =
 /// floors from having to be read together. A body without Move parts steps
 /// nowhere, exactly as travel cost has it.
 let private stepTicks (factor: FatigueFactor) weight =
-    stepUnits factor weight |> Option.map (fun units -> max 1 ((units + 1) / 2))
+    stepUnits factor weight
+    |> Option.map (fun units ->
+        let ticks = (units + 1) / 2
+        if ticks < 1 then 1 else ticks)
+
+/// What a step costs this body on every weight the ground can carry, laid
+/// out once per pricing — `pricingOf` lays it, and two of its callers
+/// price a crossing without ever flooding: the index is the tile's weight
+/// in the grid and the value is the price of stepping onto it, written as
+/// the same -1 the weight grid marks impassable ground with when the body
+/// cannot step at all. That shared sentinel is the point: the flood's
+/// inner loop tests one integer instead of calling a pricing closure,
+/// unwrapping an `int option` and comparing through Fable's generic `max`
+/// — together half the tick before #168, and all of it constant overhead
+/// per relaxation rather than algorithm.
+///
+/// Filled by `stepUnits`/`stepTicks`, which stay the one place a step's
+/// price is computed (ADR 0010, ADR 0029): the table is nothing but their
+/// answers cached over a domain of three values — road 1, plain 2, swamp
+/// `swampWeight`. Its length follows `swampWeight` rather than a literal,
+/// so swamp growing dearer carries the table with it; every index in
+/// between is filled by the same arithmetic and simply never read. What
+/// the length does not follow is a *dearer terrain than swamp*, so
+/// `swampWeight` has to stay the dearest weight a grid can hold — a
+/// weight past the table's end reads as a free step under Fable, where
+/// the index is unchecked, while .NET throws. `stepWeights` hands the
+/// whole domain out, and a test pins it there.
+let private stepTable (stepPrice: int -> int option) : int[] =
+    Array.init (swampWeight + 1) (fun weight -> stepPrice weight |> Option.defaultValue -1)
 
 /// The flood's array accessors: checked on .NET (the F# body is the
 /// ordinary index, so `dotnet test` runs the flood bounds-checked) and a
@@ -357,10 +393,11 @@ let private stepTicks (factor: FatigueFactor) weight =
 /// the index and carries a throw path, and offers no switch to drop it;
 /// in the flood that helper was ~28% of the tick (#91), re-checking
 /// indices the loop has already proven in range — a neighbour index is
-/// built only after the `0 <= n < roomSide` guard, and the heap's come
-/// from its own `Count`. Used only inside `floodFromAllSeeded`; every
-/// other array read in the Atlas stays checked, since none is on the
-/// profile.
+/// built only after the `0 <= n < roomSide` guard, the heap's come from
+/// its own live size, and a step-price index is a weight the grid holds,
+/// which `stepTable` is built long enough for by construction. Used only
+/// inside `floodFromAllSeeded`; every other array read in the Atlas stays
+/// checked, since none is on the profile.
 [<Emit("$1[$0]")>]
 let private at (index: int) (array: int[]) : int = array.[index]
 
@@ -378,15 +415,21 @@ let private setHeapAt (index: int) (heap: ResizeArray<int>) (value: int) : unit 
     heap.[index] <- value
 
 /// Dijkstra flood over the weight grid from every tile in `starts`, each
-/// starting at the cost the caller seeds it with, priced by `stepPrice` —
-/// one body's price for a step onto a tile of a given terrain weight, and,
-/// beside the occupancy the caller passes, the only thing that differs
-/// between the tick's floods (ADR 0029, ADR 0030): cheapest cost to every
-/// reachable tile (`unreached` elsewhere), plus each tile's predecessor
-/// index on a
+/// starting at the cost the caller seeds it with, priced by `stepPrices`
+/// — one body's `stepTable`, its price for a step onto a tile of each
+/// terrain weight, and, beside the occupancy the caller passes, the only
+/// thing
+/// that differs between the tick's floods (ADR 0029, ADR 0030): cheapest
+/// cost to every reachable tile (`unreached` elsewhere), plus each tile's
+/// predecessor index on a
 /// cheapest path (-1 elsewhere). This is the tick's hottest loop, so it
 /// runs on flat arrays with a binary min-heap of dist-then-index keys —
-/// the key ordering also keeps tie-breaking deterministic. A start tile
+/// the key ordering also keeps tie-breaking deterministic — and every
+/// per-relaxation cost that is not the algorithm is kept out of it: the
+/// price is a table read and not a closure call through an `int option`,
+/// the heap sifts by moving a hole rather than through a `swap` closure,
+/// and it pops by shrinking its own length rather than by splicing the
+/// array (#168). A start tile
 /// takes its seed even when it cannot be stepped onto — a creep already
 /// stands there, or is about to be placed there, or stands on the border
 /// ring the engine put it down on, which is no tile of the projection's
@@ -413,51 +456,89 @@ let private setHeapAt (index: int) (heap: ResizeArray<int>) (value: int) : unit 
 let private floodFromAllSeeded
     (weights: int[])
     (occupied: bool[])
-    (stepPrice: int -> int option)
+    (stepPrices: int[])
     (starts: (Pos * int) list)
     : int[] * int[] =
     let dist = Array.create tileCount unreached
     let parents = Array.create tileCount -1
 
     // Binary min-heap over dist * tileCount + index: one int per entry.
+    // `size` is the live length and `heap` only ever grows, so a pop is a
+    // decrement rather than a `RemoveAt` — which Fable compiles to
+    // `splice`, a linear-time array rebuild for the one entry at the end
+    // (#168). Every slot at or past `size` is stale and never read.
     let heap = ResizeArray<int>()
+    let mutable size = 0
 
-    let swap i j =
-        let t = heapAt i heap
-        setHeapAt i heap (heapAt j heap)
-        setHeapAt j heap t
-
+    // Sift up by moving the hole, not by swapping: the climbing key is held
+    // in a local and each dearer parent is copied one level down, so a
+    // climb of k levels writes k + 1 slots instead of 3k. A push past the
+    // high-water mark grows the backing array with a slot the sift is
+    // about to fill anyway, so the key itself is written exactly once, at
+    // the hole it settles in.
     let push key =
-        heap.Add key
-        let mutable i = heap.Count - 1
+        if size >= heap.Count then
+            heap.Add 0
 
-        while i > 0 && heapAt ((i - 1) / 2) heap > heapAt i heap do
-            swap ((i - 1) / 2) i
-            i <- (i - 1) / 2
+        let mutable hole = size
+        size <- size + 1
+        let mutable climbing = hole > 0
 
+        while climbing do
+            let parent = (hole - 1) / 2
+            let parentKey = heapAt parent heap
+
+            if parentKey > key then
+                setHeapAt hole heap parentKey
+                hole <- parent
+                climbing <- hole > 0
+            else
+                climbing <- false
+
+        setHeapAt hole heap key
+
+    // The mirror of `push`: the root is the answer, the last entry becomes
+    // the key looking for a home, and the cheaper child of each pair is
+    // pulled up into the hole while it undercuts that key. No two keys in
+    // the heap are ever equal — a tile is pushed only where its dist
+    // strictly falls, and the index term parts two tiles at one cost — so
+    // pop order is fixed by the key encoding whatever shape the sift
+    // takes, and with it every path the flood picks between equal costs is
+    // the one it always was. The left child's win on a tie, which the
+    // swapping form's `smallest` also gave it, is belt and braces.
     let pop () =
         let top = heapAt 0 heap
-        setHeapAt 0 heap (heapAt (heap.Count - 1) heap)
-        heap.RemoveAt(heap.Count - 1)
-        let mutable i = 0
-        let mutable sinking = true
+        size <- size - 1
 
-        while sinking do
-            let l = 2 * i + 1
-            let r = 2 * i + 2
-            let mutable smallest = i
+        if size > 0 then
+            let key = heapAt size heap
+            let mutable hole = 0
+            let mutable sinking = true
 
-            if l < heap.Count && heapAt l heap < heapAt smallest heap then
-                smallest <- l
+            while sinking do
+                let left = 2 * hole + 1
 
-            if r < heap.Count && heapAt r heap < heapAt smallest heap then
-                smallest <- r
+                if left >= size then
+                    sinking <- false
+                else
+                    let right = left + 1
+                    let mutable child = left
+                    let mutable childKey = heapAt left heap
 
-            if smallest = i then
-                sinking <- false
-            else
-                swap i smallest
-                i <- smallest
+                    if right < size then
+                        let rightKey = heapAt right heap
+
+                        if rightKey < childKey then
+                            child <- right
+                            childKey <- rightKey
+
+                    if childKey < key then
+                        setHeapAt hole heap childKey
+                        hole <- child
+                    else
+                        sinking <- false
+
+            setHeapAt hole heap key
 
         top
 
@@ -471,7 +552,7 @@ let private floodFromAllSeeded
             dist.[startIndex] <- seed
             push (seed * tileCount + startIndex)
 
-    while heap.Count > 0 do
+    while size > 0 do
         let key = pop ()
         let index = key % tileCount
         let d = key / tileCount
@@ -493,9 +574,13 @@ let private floodFromAllSeeded
                         let weight = at next weights
 
                         if weight >= 0 then
-                            match stepPrice weight with
-                            | None -> ()
-                            | Some step ->
+                            // -1 in the price table is a body that cannot
+                            // step onto this weight at all, written as the
+                            // -1 the weight grid marks impassable ground
+                            // with: one test settles both.
+                            let step = at weight stepPrices
+
+                            if step >= 0 then
                                 let candidate =
                                     d
                                     + step
@@ -511,16 +596,16 @@ let private floodFromAllSeeded
 /// The flood every origin starts free at — the shape every caller but the
 /// far leg of a cross-room walk wants, since a creep pays nothing to be
 /// where it already is.
-let private floodFromAll weights occupied stepPrice (starts: Pos list) =
-    floodFromAllSeeded weights occupied stepPrice [ for start in starts -> start, 0 ]
+let private floodFromAll weights occupied stepPrices (starts: Pos list) =
+    floodFromAllSeeded weights occupied stepPrices [ for start in starts -> start, 0 ]
 
 /// The one-origin flood the trunk's router wants, and nothing else does
 /// any more: a raw-terrain flood out of a source's tile with no creep in
 /// it and no traffic seen (`trunkPath`, its only caller). Every priced
 /// flood in the tick reaches `floodFromAll` through `floodPriced` instead,
 /// so a new `Pricing` row is wired into `pricingOf` and never here.
-let private floodFrom weights occupied stepPrice (start: Pos) =
-    floodFromAll weights occupied stepPrice [ start ]
+let private floodFrom weights occupied stepPrices (start: Pos) =
+    floodFromAll weights occupied stepPrices [ start ]
 
 /// What a step costs and whether the crowd is seen, for one pricing over
 /// one body: the ranking price sees today's traffic and counts half-ticks,
@@ -531,11 +616,18 @@ let private floodFrom weights occupied stepPrice (start: Pos) =
 /// where a reader expects another. A caller with no room's occupancy in
 /// hand passes `noTraffic`, which is what two of the three rows answer
 /// anyway.
+///
+/// The price half comes out as a `stepTable` rather than as the pricing
+/// function itself, because this is already the one place the two choices
+/// are made together and a table is a step price the flood can read
+/// without calling anything (#168). Laying it costs one pass over the
+/// weight domain per flood, against one closure call per relaxation — of
+/// which a 2,500-tile flood does some twenty thousand.
 let private pricingOf (occupied: bool[]) (factor: FatigueFactor) (pricing: Pricing) =
     match pricing with
-    | TravelCost -> stepUnits factor, occupied
-    | Walk -> stepTicks factor, noTraffic
-    | Baseline -> stepUnits factor, noTraffic
+    | TravelCost -> stepTable (stepUnits factor), occupied
+    | Walk -> stepTable (stepTicks factor), noTraffic
+    | Baseline -> stepTable (stepUnits factor), noTraffic
 
 /// The walk's flood over one body, from anywhere in `starts` (ADR 0029):
 /// whole ticks a step and blind to today's traffic — the `Walk` row of
@@ -544,8 +636,8 @@ let private pricingOf (occupied: bool[]) (factor: FatigueFactor) (pricing: Prici
 /// trip). Every clock in the colony floods through here or through that
 /// row, and there is only the one row.
 let private walkFloodFromAll weights factor (starts: Pos list) =
-    let stepPrice, traffic = pricingOf noTraffic factor Walk
-    floodFromAll weights traffic stepPrice starts
+    let stepPrices, traffic = pricingOf noTraffic factor Walk
+    floodFromAll weights traffic stepPrices starts
 
 /// The one-origin walk: a creep, or a container, prices from the tile it
 /// sits on.
@@ -555,24 +647,35 @@ let private walkFloodFrom weights factor (start: Pos) =
 /// The flood one pricing wants over one body, out of one origin: the
 /// memoised flood a placed creep prices from.
 let private floodPriced weights occupied factor pricing (start: Pos) =
-    let stepPrice, traffic = pricingOf occupied factor pricing
-    floodFromAll weights traffic stepPrice [ start ]
+    let stepPrices, traffic = pricingOf occupied factor pricing
+    floodFromAll weights traffic stepPrices [ start ]
 
 /// What the flood charges for a step landing on a tile — the step price
 /// plus the occupancy surcharge, exactly as the relaxation inside
 /// `floodFromAllSeeded` charges it. None for a tile outside the
 /// projection or one this body cannot step onto at all. Spelled once here
 /// so a seeded flood's origins carry the same charge the loop would have
-/// put on them.
-let private entryCost (weights: int[]) (occupied: bool[]) stepPrice (tile: Pos) : int option =
+/// put on them — off the same `stepTable`, so no origin can be seeded at a
+/// price the loop would not have charged (#168). Checked indexing: this
+/// runs once a seed, not once a relaxation.
+let private entryCost
+    (weights: int[])
+    (occupied: bool[])
+    (stepPrices: int[])
+    (tile: Pos)
+    : int option =
     let index = indexOf tile
     let weight = weights.[index]
 
     if weight < 0 then
         None
     else
-        stepPrice weight
-        |> Option.map (fun step -> step + (if occupied.[index] then occupancyPenalty else 0))
+        let step = stepPrices.[weight]
+
+        if step < 0 then
+            None
+        else
+            Some(step + (if occupied.[index] then occupancyPenalty else 0))
 
 /// The same pricing flooded *into* a set of goals rather than out of one
 /// origin: cheapest cost from every tile of the room to the nearest goal,
@@ -589,12 +692,12 @@ let private entryCost (weights: int[]) (occupied: bool[]) stepPrice (tile: Pos) 
 /// Distances only: a route into the far room is not a route anything
 /// steps along, because arbitrated movement stays single-room (ADR 0041).
 let private floodPricedInto weights occupied factor pricing (goals: Pos list) : int[] =
-    let stepPrice, traffic = pricingOf occupied factor pricing
+    let stepPrices, traffic = pricingOf occupied factor pricing
 
     goals
     |> List.choose (fun goal ->
-        entryCost weights traffic stepPrice goal |> Option.map (fun cost -> goal, cost))
-    |> floodFromAllSeeded weights traffic stepPrice
+        entryCost weights traffic stepPrices goal |> Option.map (fun cost -> goal, cost))
+    |> floodFromAllSeeded weights traffic stepPrices
     |> fst
 
 /// The Atlas over a Snapshot, recalling a spawn walk table rather than
@@ -1752,14 +1855,17 @@ let private besideExit (tile: Pos) : Pos list =
 /// tick after. None for an exit the
 /// projection has no terrain for, or a wall, or a body that cannot step at
 /// all — an unpriceable crossing is no crossing (ADR 0004).
-let private exitPrice (atlas: Atlas) (pricing: Pricing) (factor: FatigueFactor) room tile =
-    let stepPrice, _ = pricingOf noTraffic factor pricing
-
+///
+/// Priced off the body's `stepTable`, which the caller hands in already
+/// laid: both callers ask this once per crossing over a band of thirty-odd
+/// (#168), and the table is the same for every one of them.
+let private exitPrice (atlas: Atlas) (stepPrices: int[]) room tile =
     Map.tryFind room atlas.Spatial.Borders
     |> Option.bind (Map.tryFind tile)
     |> Option.map terrainWeight
     |> Option.filter (fun weight -> weight > 0)
-    |> Option.bind stepPrice
+    |> Option.map (fun weight -> stepPrices.[weight])
+    |> Option.filter (fun step -> step >= 0)
 
 /// The body a *plan* is priced for: fatigue parity, one fatigue-generating
 /// part to one Move (ADR 0003), which under the walk's rounding is a tick
@@ -1784,18 +1890,18 @@ let private planningFactor: FatigueFactor = { FatigueParts = 1; MoveParts = 1 }
 let private seamWalkFlood (atlas: Atlas) (fromRoom: string) (toRoom: string) : int[] =
     memoised atlas.SeamWalks (fromRoom, toRoom) (fun () ->
         let weights = weightsOf atlas fromRoom
-        let stepPrice, traffic = pricingOf noTraffic planningFactor Walk
+        let stepPrices, traffic = pricingOf noTraffic planningFactor Walk
 
         seams atlas fromRoom toRoom
         |> List.collect (fun (exitTile, _) ->
-            match exitPrice atlas Walk planningFactor fromRoom exitTile with
+            match exitPrice atlas stepPrices fromRoom exitTile with
             | None -> []
             | Some crossing ->
                 besideExit exitTile
                 |> List.choose (fun tile ->
-                    entryCost weights traffic stepPrice tile
+                    entryCost weights traffic stepPrices tile
                     |> Option.map (fun cost -> tile, cost + crossing)))
-        |> floodFromAllSeeded weights traffic stepPrice
+        |> floodFromAllSeeded weights traffic stepPrices
         |> fst)
 
 /// The walk in whole ticks from one tile of a room's own ground out to the
@@ -1828,13 +1934,13 @@ let seamWalkTicks (atlas: Atlas) (fromRoom: string) (toRoom: string) (from: Pos)
     if from.X < 0 || from.X >= roomSide || from.Y < 0 || from.Y >= roomSide then
         None
     else
-        let stepPrice, traffic = pricingOf noTraffic planningFactor Walk
+        let stepPrices, traffic = pricingOf noTraffic planningFactor Walk
         let reached = (seamWalkFlood atlas fromRoom toRoom).[indexOf from]
 
         if reached = unreached then
             None
         else
-            entryCost (weightsOf atlas fromRoom) traffic stepPrice from
+            entryCost (weightsOf atlas fromRoom) traffic stepPrices from
             |> Option.map (fun own -> reached - own)
 
 /// The far leg's flood for one Task and one body, memoised colony-wide:
@@ -1932,11 +2038,15 @@ let private joinedAcross
             | [] -> None
             | costs -> Some(List.min costs)
 
+    // One price table for the whole band: every crossing in it is priced
+    // for the same body under the same pricing (#168).
+    let stepPrices, _ = pricingOf noTraffic factor pricing
+
     band
     |> List.choose (fun (exitTile, landing) ->
         match
             reached near (besideExit exitTile),
-            exitPrice atlas pricing factor fromRoom exitTile,
+            exitPrice atlas stepPrices fromRoom exitTile,
             reached far (besideExit landing)
         with
         | Some approach, Some crossing, Some departure ->
@@ -2486,7 +2596,8 @@ let trunkPath (atlas: Atlas) (avoid: Set<Pos>) (origin: Pos) (goals: Set<Pos>) :
         if not (Set.contains tile home.Obstacles) && not (Set.contains tile avoid) then
             weights.[indexOf tile] <- terrainWeight terrain)
 
-    let dist, parents = floodFrom weights noTraffic (stepUnits planningFactor) origin
+    let dist, parents =
+        floodFrom weights noTraffic (stepTable (stepUnits planningFactor)) origin
 
     goals
     |> Set.toList

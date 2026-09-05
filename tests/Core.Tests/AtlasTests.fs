@@ -845,6 +845,229 @@ let travelUnitTests =
             }
         ]
 
+/// Two lanes to one Seat, so a route can be read off the weights alone.
+/// The source at (9,9) sits in wall with (10,10) its only Seat; the creep
+/// "w" stands at (10,12). One swamp tile at (10,11) joins the two in two
+/// steps; a five-tile paved ring — (11,13), (12,12), (12,11), (12,10),
+/// (11,9) — joins them in six. Nothing else is projected, so no diagonal
+/// links the lanes and the only choice is which one to take.
+let forkedLanes creeps =
+    let ring =
+        [
+            { X = 11; Y = 13 }
+            { X = 12; Y = 12 }
+            { X = 12; Y = 11 }
+            { X = 12; Y = 10 }
+            { X = 11; Y = 9 }
+        ]
+
+    spatial
+        [ "src-a", { X = 9; Y = 9 } ]
+        ([
+            { X = 9; Y = 9 }, Wall
+            { X = 10; Y = 10 }, Plain
+            { X = 10; Y = 11 }, Swamp
+            { X = 10; Y = 12 }, Plain
+         ]
+         @ [ for tile in ring -> tile, Plain ])
+    |> withHome (fun layer ->
+        { layer with
+            Roads = Set.ofList ring
+            CreepPositions = Map.ofList creeps
+        })
+
+[<Tests>]
+let stepPriceTableTests =
+    testList
+        "atlas step price table"
+        [
+            test "travel cost prices every weight the ground carries as the body's fatigue" {
+                // The flood reads a step's price off a table laid once per
+                // flood rather than by asking per relaxation (#168), so the
+                // table's whole domain is pinned here against the fatigue
+                // arithmetic it stands for: ceil(weight × fatigue parts /
+                // Move parts), never below one unit (ADR 0010, ADR 0029).
+                // Three weights — road 1, plain 2, swamp 10 — against four
+                // bodies, read off one step onto the Seat.
+                let unitsOn terrain roads body =
+                    let atlas =
+                        seatPriced terrain roads
+                        |> snapshotWith [ creepWith "w" 0 body ]
+                        |> ofSnapshot
+
+                    travelCost atlas "w" (Harvest "src-a")
+
+                let seat = Set.singleton { X = 10; Y = 11 }
+
+                let priceOn body =
+                    unitsOn Plain seat body,
+                    unitsOn Plain Set.empty body,
+                    unitsOn Swamp Set.empty body
+
+                Expect.equal
+                    (priceOn [ Work; Carry; Move ])
+                    (Some 1, Some 2, Some 10)
+                    "one fatigue part on one Move pays the weight itself: 1, 2, 10"
+
+                Expect.equal
+                    (priceOn [ Work; Work; Work; Work; Work; Carry; Move ])
+                    (Some 5, Some 10, Some 50)
+                    "five fatigue parts on one Move pay five times it: 5, 10, 50"
+
+                Expect.equal
+                    (priceOn [ Work; Move; Move; Move ])
+                    (Some 1, Some 1, Some 4)
+                    "three Moves under one part: ceil(1/3) and ceil(2/3) hit the one-unit floor, ceil(10/3) = 4"
+
+                Expect.equal
+                    (priceOn [ Work; Work; Move; Move ])
+                    (Some 1, Some 2, Some 10)
+                    "fatigue parity pays the weight again: the ratio is what prices a step, not the part count"
+            }
+
+            test "the walk prices the same weights in whole ticks" {
+                // The `Walk` row of the same table: two units make a tick,
+                // a part of one still costs a whole tick, and no step
+                // crosses a tile in less than one (ADR 0029). Same three
+                // weights, same four bodies, so the two rows are pinned
+                // over one domain and can be read side by side.
+                let ticksOn terrain roads body =
+                    let atlas =
+                        seatPriced terrain roads
+                        |> snapshotWith [ creepWith "w" 0 body ]
+                        |> ofSnapshot
+
+                    walkTicks atlas "w" (Harvest "src-a")
+
+                let seat = Set.singleton { X = 10; Y = 11 }
+
+                let ticksFor body =
+                    ticksOn Plain seat body,
+                    ticksOn Plain Set.empty body,
+                    ticksOn Swamp Set.empty body
+
+                Expect.equal
+                    (ticksFor [ Work; Carry; Move ])
+                    (Some 1, Some 1, Some 5)
+                    "ceil(1/2) and ceil(2/2) are one tick, ceil(10/2) is five"
+
+                Expect.equal
+                    (ticksFor [ Work; Work; Work; Work; Work; Carry; Move ])
+                    (Some 3, Some 5, Some 25)
+                    "ceil(5/2) = 3, ceil(10/2) = 5, ceil(50/2) = 25"
+
+                Expect.equal
+                    (ticksFor [ Work; Move; Move; Move ])
+                    (Some 1, Some 1, Some 2)
+                    "a Move surplus buys the walk nothing below a tick: 1, 1, ceil(4/2) = 2"
+
+                Expect.equal
+                    (ticksFor [ Work; Work; Move; Move ])
+                    (Some 1, Some 1, Some 5)
+                    "fatigue parity walks the worker unit's ticks"
+            }
+
+            test "the traffic-blind route prices the same weights, and a Move surplus moves it" {
+                // The `Baseline` row (ADR 0030), whose only reader is the
+                // reroute attribution's route, so it is read as a choice
+                // rather than as a number. Two lanes to one Seat: two steps
+                // over swamp, or six over road. The worker unit pays
+                // 10 + 2 = 12 for the swamp lane and 5 × 1 + 2 = 7 for the
+                // paved one, and takes the long way round; three Moves
+                // under one part floor every road step at one unit, so the
+                // paved lane costs 5 × 1 + 1 = 6 against the swamp lane's
+                // ceil(10/3) + 1 = 5, and the same geometry sends that body
+                // the short way. The flip is the table's whole weight
+                // domain and the one-unit floor in one assertion.
+                let blindStepFor body =
+                    let atlas =
+                        forkedLanes [ "w", { X = 10; Y = 12 } ]
+                        |> snapshotWith [ creepWith "w" 0 body ]
+                        |> ofSnapshot
+
+                    firstStepBlindFor atlas "w" (Harvest "src-a")
+
+                Expect.equal
+                    (blindStepFor [ Work; Carry; Move ])
+                    (Some { X = 11; Y = 13 })
+                    "the worker unit rounds the paved ring: five road steps beat one swamp step"
+
+                Expect.equal
+                    (blindStepFor [ Work; Move; Move; Move ])
+                    (Some { X = 10; Y = 11 })
+                    "the surplus body cuts across the swamp: its road steps cannot price below one unit"
+            }
+
+            test "a body with no Move parts prices no weight at all, under every pricing" {
+                // The table's impassable row: `stepUnits` refuses a body
+                // the engine's move refuses, and it is written as the same
+                // -1 the weight grid marks a wall with, so one test in the
+                // flood settles both. Every weight, and all three pricings
+                // — travel cost, the walk, and the traffic-blind route.
+                let atlasOn terrain roads =
+                    seatPriced terrain roads
+                    |> snapshotWith [ creepWith "w" 0 [ Work; Carry ] ]
+                    |> ofSnapshot
+
+                let seat = Set.singleton { X = 10; Y = 11 }
+
+                let answers =
+                    [
+                        for terrain, roads in [ Plain, seat; Plain, Set.empty; Swamp, Set.empty ] do
+                            let atlas = atlasOn terrain roads
+                            yield travelCost atlas "w" (Harvest "src-a") |> Option.isSome
+                            yield walkTicks atlas "w" (Harvest "src-a") |> Option.isSome
+                            yield firstStepBlindFor atlas "w" (Harvest "src-a") |> Option.isSome
+                    ]
+
+                Expect.allEqual answers false "no weight is steppable by a body that cannot move"
+            }
+
+            test "the weight grid carries no weight the price table has no slot for" {
+                // The table spans 0..`swampWeight`, and the flood reads it
+                // unchecked, so it is in range only while swamp stays the
+                // dearest ground a grid can hold (ADR 0010). A terrain
+                // priced above swamp would index past the end, which under
+                // Fable reads as a *free* step where .NET throws — the two
+                // halves of one table disagreeing. So the grid's whole
+                // weight domain is pinned here, off `stepWeights`: every
+                // terrain the projection knows, a road over one and an
+                // obstacle over another.
+                let weights =
+                    spatial
+                        []
+                        [
+                            { X = 1; Y = 1 }, Plain
+                            { X = 1; Y = 2 }, Swamp
+                            { X = 1; Y = 3 }, Wall
+                            { X = 2; Y = 1 }, Plain
+                            { X = 2; Y = 2 }, Swamp
+                            { X = 2; Y = 3 }, Plain
+                        ]
+                    |> withHome (fun layer ->
+                        { layer with
+                            Roads = Set.ofList [ { X = 2; Y = 1 }; { X = 2; Y = 2 } ]
+                            Obstacles = Set.singleton { X = 2; Y = 3 }
+                        })
+                    |> snapshotWith []
+                    |> ofSnapshot
+                    // The projection names no room, so its ground is filed
+                    // under the empty name (ADR 0041).
+                    |> fun atlas -> stepWeights atlas ""
+
+                let swamp = weights.[1 * 50 + 2]
+
+                Expect.equal
+                    (Set.ofArray weights)
+                    (Set.ofList [ -1; 1; 2; swamp ])
+                    "four weights and no more: impassable -1, road 1, plain 2, swamp"
+
+                Expect.isTrue
+                    (weights |> Array.forall (fun weight -> weight <= swamp))
+                    "and swamp is the dearest of them — the table's last slot is swamp's own"
+            }
+        ]
+
 /// A paved lane running east from the source's only Seat: source at
 /// (10,10) in wall, Seat at (11,10), road tiles from there out to
 /// (19,10). A creep at (19,10) is eight road steps from the Seat —
