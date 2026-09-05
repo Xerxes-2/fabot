@@ -2986,10 +2986,17 @@ let private taskCapacities (snapshot: Snapshot) atlas (tasks: Task list) : Map<s
 /// source's Post count, the standing room a heavy body actually has — its
 /// Harvest Work Area is that source's Posts alone (ADR 0020), so the Seat
 /// cap would admit garrisons to tiles they may not work from and pile two
-/// Anchors onto one Post. A source with no Post derives no cap: nothing
-/// narrows a heavy body's area there (the pre-container fallback), and the
-/// Seat cap is the only one. Rides beside the Seat cap rather than
-/// replacing it — a Post is a capacity unit of its own, and both must hold.
+/// Anchors onto one Post. A source with no Post derives no cap, and the
+/// two rooms mean different things by that: at home nothing narrows a
+/// heavy body's area (ADR 0020's pre-container fallback), so the Seat cap
+/// is the only one; in an outpost that area is *empty* (#159), so the
+/// reachability gate rejects the pair for every heavy body — `Unreachable`
+/// and not `Inapplicable`, that area being read as a price and not as a
+/// body — and a cap of zero would only be a second way to say so. The Seat
+/// cap still rides there, as it does for the light bodies that may work
+/// the rock, and it is consulted first: the cascade below asks capacity
+/// before reachability. Rides beside the Seat cap rather than replacing it
+/// — a Post is a capacity unit of its own, and both must hold.
 let private postCapacities (snapshot: Snapshot) atlas : Map<string, int> =
     snapshot.Sources
     |> List.choose (fun s ->

@@ -3765,6 +3765,16 @@ let crossRoomTests =
                 // twenty to the Post. Three Work over two Move is heavy by
                 // ADR 0016's predicate; every plain step costs it two ticks,
                 // so the light body's numbers are half of its own.
+                //
+                // Unposted, this case read `Some 36` until #159: the heavy
+                // body took ADR 0020's bare-Seat fallback across the border
+                // and walked to a rock with no container under it. That
+                // fallback is home's bootstrap and an outpost has another
+                // one (ADR 0042), so the far leg now floods out of nothing
+                // and there is no walk at all — the same answer a blocked
+                // Post gives, one room over. The light body's own walk to
+                // that Seat is untouched, which is what says the narrowing
+                // is still the body's and not the room's.
                 let outpost =
                     { RoomLayer.empty with
                         Terrain =
@@ -3804,8 +3814,13 @@ let crossRoomTests =
 
                 Expect.equal
                     (walkTicks bare "heavy" (Harvest "src-out"))
-                    (Some 36)
-                    "unposted, the heavy body walks to the nearest Seat: eighteen tiles at two ticks"
+                    None
+                    "unposted and a room away, the heavy body has nowhere to walk to at all"
+
+                Expect.equal
+                    (walkTicks bare "w" (Harvest "src-out"))
+                    (Some 18)
+                    "while the light body still walks the eighteen tiles to that same Seat"
 
                 Expect.equal
                     (walkTicks posted "heavy" (Harvest "src-out"))
@@ -3816,6 +3831,136 @@ let crossRoomTests =
                     (walkTicks posted "w" (Harvest "src-out"))
                     (Some 18)
                     "and the light body ignores the Post, over the same border on the same tick"
+            }
+        ]
+
+/// The two rooms the narrowing's own room rule is read in: the cross-room
+/// corridor, with a rock at (25,20) of the colony's own room and a rock at
+/// (25,40) of the outpost — neither with a container on it — and a
+/// Work-heavy body and a light one standing in each room.
+///
+/// Both rooms, because the room is the whole of what the rule turns on and
+/// one room cannot show it. Creeps on both sides, because the two halves
+/// are read at different queries: `workAreaFor` answers a creep only in
+/// its target's own room (ADR 0041), so the tiles are read from inside
+/// each room, and the price is read from the home pair, which is where a
+/// fresh Anchor really stands when the Matcher asks.
+///
+/// The caller places what stands in the outpost, so the same geometry
+/// serves the unposted case and the posted one and nothing but the
+/// container moves between them.
+let private twoRockRooms placed kinds =
+    northOf
+        { corridorHome [ "a", { X = 25; Y = 10 }; "w", { X = 25; Y = 11 } ] with
+            TargetPositions = Map.ofList [ "src-home", { X = 25; Y = 20 } ]
+        }
+        [ { X = 25; Y = 0 }, Plain ]
+        { corridorOutpost with
+            TargetPositions =
+                (corridorOutpost.TargetPositions, placed)
+                ||> List.fold (fun targets (id, pos) -> Map.add id pos targets)
+            CreepPositions = Map.ofList [ "a-out", { X = 25; Y = 44 }; "w-out", { X = 25; Y = 45 } ]
+        }
+        [ { X = 25; Y = 49 }, Plain ]
+        (("src-home", Source) :: ("src-out", Source) :: kinds)
+        [
+            creepWith "a" 0 [ Work; Work; Carry; Move ]
+            worker "w"
+            creepWith "a-out" 0 [ Work; Work; Carry; Move ]
+            worker "w-out"
+        ]
+
+/// The Seats of the outpost's rock, which sits on ground the projection
+/// does not carry: the corridor tile above it and the one below.
+let private outpostSeats = Set.ofList [ { X = 25; Y = 39 }; { X = 25; Y = 41 } ]
+
+[<Tests>]
+let outpostHeavyAreaTests =
+    testList
+        "atlas outpost heavy work area"
+        [
+            test "an unposted rock a room away is no ground at all for a Work-heavy body" {
+                // ADR 0020's fallback to the bare Seats is home's bootstrap:
+                // before the first container stands, an Anchor there still
+                // has to dig, and it does it a few tiles from the spawn that
+                // replaces it and the haulers already working the room. An
+                // outpost bootstraps through a reserver and a light builder
+                // instead (ADR 0042), so the fallback would put a heavy body
+                // on a rock with nothing under it to catch twelve a tick and
+                // no hauler quota to collect it — the strand ADR 0042 names
+                // when it makes the container the switch.
+                let bare = twoRockRooms [] []
+
+                Expect.isEmpty (postsOf bare "src-out") "the premise: no container, no Post"
+
+                Expect.equal
+                    (workArea bare (Harvest "src-out"))
+                    outpostSeats
+                    "the body-blind area is still the rock's two Seats"
+
+                Expect.isEmpty
+                    (workAreaFor bare "a-out" (Harvest "src-out"))
+                    "and a heavy body standing in that room is handed none of them"
+
+                Expect.equal
+                    (workAreaFor bare "w-out" (Harvest "src-out"))
+                    outpostSeats
+                    "while a light body beside it keeps every Seat: the narrowing is the body's"
+
+                Expect.equal
+                    (travelCost bare "a" (Harvest "src-out"))
+                    None
+                    "so the Task is inapplicable to the Anchor that would have crossed for it"
+
+                Expect.isSome
+                    (travelCost bare "w" (Harvest "src-out"))
+                    "and applicable to the light body, over the same Seam on the same tick"
+            }
+
+            test "the same body, the same tick, keeps the bare Seats of the rock at home" {
+                // The discriminator, in one projection: two rocks with no
+                // container on either, one heavy body's answer for each, and
+                // the room the only difference between them. Read on the
+                // home creep rather than the outpost one because that is
+                // where ADR 0020's fallback has to survive — a colony whose
+                // own first container is not built yet.
+                let bare = twoRockRooms [] []
+
+                Expect.isEmpty (postsOf bare "src-home") "the home rock has no container either"
+
+                Expect.equal
+                    (workAreaFor bare "a" (Harvest "src-home"))
+                    (workArea bare (Harvest "src-home"))
+                    "at home the bare Seats are still the fallback (ADR 0020)"
+
+                Expect.isSome
+                    (travelCost bare "a" (Harvest "src-home"))
+                    "and the Task the outpost's rock lost stays applicable here"
+            }
+
+            test "a container standing on the outpost Seat gives the heavy body its ground back" {
+                // The switch, at the geometry (ADR 0042). Nothing here is a
+                // rule about outposts and heavy bodies: it is the same
+                // narrowing to the Posts the home room has always had, and
+                // the outpost's answer moves the tick a container stands.
+                let posted =
+                    twoRockRooms
+                        [ "cont-out", { X = 25; Y = 41 } ]
+                        [ "cont-out", Structure BuiltKind.Container ]
+
+                Expect.equal
+                    (postsOf posted "src-out")
+                    (Set.singleton { X = 25; Y = 41 })
+                    "the Seat under the container is the rock's Post"
+
+                Expect.equal
+                    (workAreaFor posted "a-out" (Harvest "src-out"))
+                    (Set.singleton { X = 25; Y = 41 })
+                    "and it is the one tile the heavy body may work from"
+
+                Expect.isSome
+                    (travelCost posted "a" (Harvest "src-out"))
+                    "so the Anchor at home is priced across the border again"
             }
         ]
 

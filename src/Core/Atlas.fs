@@ -1435,14 +1435,35 @@ let private sharesRoom (atlas: Atlas) (creep: string) (task: Task) : bool =
 /// the source has any: a heavy body digs from the tile that catches its
 /// overflow or lets it upgrade in place, and travel cost walks it there
 /// rather than leaving it on whichever Seat it happened to land on. A
-/// source with no Post narrows nothing — the fallback that carries the
-/// colony before the first container is built. A source that has a Post
-/// narrows to it even when the projection blocks it: an area with nothing
-/// standable in it makes the Task inapplicable, exactly as an unreachable
-/// one does for every Task, rather than silently widening back to the
-/// Seats (ADR 0020). Only Harvest narrows, so
+/// source that has a Post narrows to it even when the projection blocks
+/// it: an area with nothing standable in it makes the Task inapplicable,
+/// exactly as an unreachable one does for every Task, rather than silently
+/// widening back to the Seats (ADR 0020). Only Harvest narrows, so
 /// this never re-enters the `posts` derivation that reads the Upgrade
 /// area. Memoised per Task for the tick beside the unnarrowed areas.
+///
+/// A source with **no** Post narrows nothing at home and narrows to
+/// nothing everywhere else, and the room is the whole of what separates
+/// the two. ADR 0020's fallback to the bare Seats is a *bootstrap* rule —
+/// it is what carries the colony's own room before its first container is
+/// built, and there a stranded Anchor is a few tiles from a spawn that can
+/// replace it and from haulers already working the room. An outpost
+/// bootstraps through neither: its first steps are a reserver and a light
+/// builder raising the container (ADR 0042, #157), and a heavy body on an
+/// outpost Seat with no container under it digs twelve a tick onto the
+/// ground, in a room whose haul quota does not exist yet because that
+/// quota is what the container switches on. Travel cost, which reads only
+/// that the Seat is near, is exactly what walks it there — an Anchor hired
+/// for one outpost's Post spent on another outpost's bare rock. So this is
+/// the geometric dual of ADR 0042's "an unposted outpost source is worth
+/// nothing to the workforce": worth nothing in the quotas, and standable
+/// on by nobody in the geometry. The switch is the same one — a container
+/// standing on a Seat — read here as ground rather than as income.
+///
+/// A source the projection does not place keeps the fallback (ADR 0004):
+/// it has no room to be outside of, and its Work Area is empty in either
+/// reading, so absence answers as it did before there was a second room
+/// rather than becoming a third answer.
 ///
 /// Two readers, and the split between them is the room: `workAreaFor`
 /// below hands these tiles to a creep already standing in the room they
@@ -1456,10 +1477,15 @@ let private narrowedArea (atlas: Atlas) (creep: string) (task: Task) : Set<Pos> 
         memoised atlas.HeavyAreas task (fun () ->
             let postTiles = postsOf atlas sourceId
 
-            if Set.isEmpty postTiles then
-                workArea atlas task
+            if not (Set.isEmpty postTiles) then
+                Set.intersect (workArea atlas task) postTiles
             else
-                Set.intersect (workArea atlas task) postTiles)
+                // Absence is home's answer and not an outpost's: only a
+                // source the projection places in another room loses the
+                // fallback.
+                match targetRoom atlas sourceId with
+                | Some room when room <> atlas.Home -> Set.empty
+                | _ -> workArea atlas task)
     | _ -> workArea atlas task
 
 /// Work Area of a Task for one creep — the body-aware query every reader

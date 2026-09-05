@@ -13760,6 +13760,152 @@ let outpostTests =
             }
         ]
 
+/// The colony with **two** outposts and one Anchor standing beside the
+/// wrong one — the live report #159 was filed on, at the seam it is
+/// decided at.
+///
+/// Home is the north corridor with a west arm along row 26 joining it, and
+/// the Anchor stands two tiles from the west border and thirty-three from
+/// the north one — the asymmetry the live colony had, both numbers walked
+/// to the border tile itself. W1N2 across the north border carries a rock
+/// with a container standing on one of its Seats; W2N1 across the west
+/// carries a rock with nothing on it — the shape the live colony really
+/// had, the north container built and the west ones not.
+///
+/// `northBorderColony`'s own rock is not a third one: `Sources` is
+/// replaced, `src-home` is dropped from the kind census and the home
+/// layer's `TargetPositions` is emptied, so the position handed to it
+/// places nothing and the pool really is the two outpost Harvests.
+///
+/// The Anchor quota is the colony's Post count (ADR 0042): with the west
+/// rock bare that count is one, so the north container hires exactly this
+/// one body — and nothing in the Matcher knows which Post it was hired
+/// for. It is ranked by `(rank, cost, load)` like every other body, which
+/// is what sent the live one west. With a container on the west rock the
+/// count is two and this body is the first of them; nothing here casts the
+/// second, the fixture having no spawn.
+///
+/// The pool is those two Harvests and nothing else: no controller, no
+/// refillable, no site, and Withdraw and Flee are inapplicable to a
+/// Work-heavy body (ADR 0016, ADR 0033). Pairwise by construction, so a
+/// Matched Verdict here names this pair and no third candidate stands in
+/// for either side of it.
+let private twoRockColony (westContainer: (string * Pos) list) =
+    let colony = northBorderColony { X = 10; Y = 38 }
+
+    { colony with
+        Sources = [ source "src-north"; source "src-west" ]
+        Creeps = [ creepWith "anchor" 0 50 [ Work; Work; Carry; Move ] ]
+        Spatial =
+            { colony.Spatial with
+                Borders =
+                    colony.Spatial.Borders |> Map.add "W1N2" plainRing |> Map.add "W2N1" plainRing
+                TargetKinds =
+                    (colony.Spatial.TargetKinds, westContainer)
+                    ||> List.fold (fun kinds (id, _) ->
+                        Map.add id (Structure BuiltKind.Container) kinds)
+                    |> Map.remove "src-home"
+                    |> Map.add "src-north" Source
+                    |> Map.add "src-west" Source
+                    |> Map.add "cont-north" (Structure BuiltKind.Container)
+            }
+            |> withHome (fun layer ->
+                { layer with
+                    Terrain =
+                        (layer.Terrain, [ for x in 1..10 -> { X = x; Y = 26 } ])
+                        ||> List.fold (fun terrain pos -> Map.add pos Plain terrain)
+                    TargetPositions = Map.empty
+                    CreepPositions = Map.ofList [ "anchor", { X = 2; Y = 26 } ]
+                })
+            |> withNeighbour
+                "W1N2"
+                { RoomLayer.empty with
+                    Terrain = Map.ofList (corridor 10 40 48)
+                    TargetPositions =
+                        Map.ofList
+                            [ "src-north", { X = 10; Y = 46 }; "cont-north", { X = 10; Y = 45 } ]
+                }
+            |> withNeighbour
+                "W2N1"
+                { RoomLayer.empty with
+                    Terrain = Map.ofList [ for x in 41..48 -> { X = x; Y = 26 }, Plain ]
+                    TargetPositions = Map.ofList (("src-west", { X = 45; Y = 26 }) :: westContainer)
+                }
+    }
+
+/// Which Task won the one Anchor, and what separated it from its closest
+/// rival — `matchOf`'s reading for the body these cases hire (ADR 0009).
+let private anchorMatch (colony: Snapshot) =
+    let { Verdicts = verdicts } = decide colony Map.empty Set.empty None
+
+    verdicts
+    |> List.tryPick (function
+        | Verdict.Matched("anchor", task, factor) -> Some(task, factor)
+        | _ -> None)
+
+[<Tests>]
+let twoOutpostAnchorTests =
+    testList
+        "an Anchor between two outposts"
+        [
+            test "an unposted outpost rock is not a rival, however near it stands" {
+                // The live failure: the colony's one container stood in the
+                // north outpost, the Anchor its Post hired was born in the
+                // spawn room, and it walked *west* — to a room with no
+                // container at all — because ADR 0020's bare-Seat fallback
+                // made those Seats reachable and travel cost had nothing
+                // left to say but "nearer".
+                //
+                // The fix is geometric and not a rank or a quota: the west
+                // rock's Work Area for this body is empty, so the Task has
+                // no travel cost and never enters the pool. The factor
+                // therefore reads `only-candidate` rather than
+                // `travel-cost`, which is the whole claim — the near rock
+                // is not a rival the far one beat, it is not a candidate.
+                Expect.equal
+                    (anchorMatch (twoRockColony []))
+                    (Some(taskId (Harvest "src-north"), MatchFactor.OnlyCandidate))
+                    "the posted rock a room and thirty-eight tiles away is the only Task there is"
+
+                let { Intents = intents } = decide (twoRockColony []) Map.empty Set.empty None
+
+                Expect.equal
+                    (moveIntents intents)
+                    [ "anchor", Right ]
+                    "and the Anchor walks back up the west arm toward the northern Seam"
+
+                Expect.isEmpty
+                    (actionIntents intents)
+                    "digging nothing on the way: it may not act on a target a room away"
+            }
+
+            test "a container standing on the west rock makes it a rival again, and it wins" {
+                // The other half, and the only reading under which the case
+                // above says anything: nothing here refuses an outpost, or
+                // ranks a near room behind a far one. Put a container on the
+                // west rock's Seat and that rock is posted, its Work Area is
+                // that Post, and travel cost — the one comparison left
+                // between two feeding-tier Harvests — sends the Anchor to
+                // the near one exactly as it always did.
+                Expect.equal
+                    (anchorMatch (twoRockColony [ "cont-west", { X = 46; Y = 26 } ]))
+                    (Some(taskId (Harvest "src-west"), MatchFactor.TravelCost))
+                    "two posted rocks are two candidates, and the near one is cheaper"
+
+                let { Intents = intents } =
+                    decide
+                        (twoRockColony [ "cont-west", { X = 46; Y = 26 } ])
+                        Map.empty
+                        Set.empty
+                        None
+
+                Expect.equal
+                    (moveIntents intents)
+                    [ "anchor", Left ]
+                    "and the same body walks the other way, two tiles to the western Seam"
+            }
+        ]
+
 /// A colony with an outpost beside it whose ground and furniture are the
 /// case's own: the room's whole floor, and everything placed in it, said
 /// here rather than inherited. The container pick is a choice *between*
