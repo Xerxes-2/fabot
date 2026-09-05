@@ -744,6 +744,43 @@ type InvaderCoreInfo =
         CollapseTick: int option
     }
 
+/// Which of ADR 0043's deadlines an [[outpost]]'s [[stand-down]] runs to
+/// — the provenance of the tick, carried beside it because it cannot be
+/// recovered from the tick afterwards. The fold that picked it is the only
+/// place that still knows whether 2,600 was a collapse timer, a
+/// reservation or the fallback, and an operator asking why an outpost is
+/// shut is asking exactly that (#117).
+///
+/// The three answers are the ADR's own fallback order, best first: the
+/// core's collapse timer, the end of the reservation the core took, and
+/// the stronghold expansion period. A closed vocabulary and not a string,
+/// for the reason `Ownership` gives — these are answers to one question —
+/// and it crosses the wire, so it is spelt once in `standDownBasisName`
+/// and round-tripped against the union itself by `Core.Tests` (#80).
+///
+/// The other withdrawal — a room another player owns or reserves — is
+/// deliberately not a fourth case. ADR 0043 makes it the clockless
+/// trigger, "not a threat episode": it opens no episode, carries no expiry
+/// for a basis to explain, and is judged straight off the Snapshot's
+/// `RoomControlInfo` where the gate stands.
+[<RequireQualifiedAccess>]
+type StandDownBasis =
+    /// The core's own `EFFECT_COLLAPSE_TIMER`: the tick the engine put on
+    /// the stronghold that expanded here, and the first answer wherever
+    /// it can be read.
+    | CollapseTimer
+    /// The end of the reservation the core took with `attackController` —
+    /// what a level-0 core answers with, having no stronghold to collapse
+    /// and so no timer. The measured case on this colony's frontier, not
+    /// the rare one (docs/research/remote-mining.md §8.4).
+    | Reservation
+    /// Neither deadline was readable, so the clock is the 2,500-tick
+    /// stronghold expansion period. The one answer the colony chose
+    /// rather than read, and it errs long deliberately: ADR 0043's gate
+    /// may be wrong only in the direction that costs an outpost's income
+    /// rather than a creep a cycle.
+    | Fallback
+
 /// What the decision layer knows about one owned creep this tick.
 type CreepInfo =
     {
@@ -1607,6 +1644,32 @@ let containerTargetOf =
         [
             Option.map ContainerTarget.Source
             (fun _ -> Some ContainerTarget.Controller)
+        ]
+
+/// The wire spelling of each StandDownBasis, on the Raid log's Memory
+/// leaf (ADR 0043), as `footingKindName` is the Layout channel's. The
+/// Raid log's own first vocabulary beside the body parts its roster
+/// already carries, and under the same rule: one spelling, written once
+/// here, reversed by the table below and round-tripped against the union
+/// itself by `Core.Tests`, so a fourth basis added without a name is a red
+/// test rather than a stand-down that decodes to nothing.
+let standDownBasisName =
+    function
+    | StandDownBasis.CollapseTimer -> "collapse-timer"
+    | StandDownBasis.Reservation -> "reservation"
+    | StandDownBasis.Fallback -> "fallback"
+
+/// The StandDownBasis a wire name spells, or None for a name this
+/// vocabulary does not have — a row whose basis will not read back is a
+/// stand-down that cannot say why, and the shell drops that row rather
+/// than inventing a reason for it.
+let standDownBasisOf =
+    reverseOf
+        standDownBasisName
+        [
+            StandDownBasis.CollapseTimer
+            StandDownBasis.Reservation
+            StandDownBasis.Fallback
         ]
 
 /// One row of a verbose scoring: a Task in the pool, either scored on the

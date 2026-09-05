@@ -346,9 +346,11 @@ let quiet: Snapshot =
         ConstructionSites = []
         Creeps = []
         Hostiles = []
-        // The raid fold reads hostile *creeps*; an invader core is a
-        // structure and opens no episode until #134 gives the log its
-        // outpost family (ADR 0043).
+        // The raid fold reads hostile *creeps* here; an invader core is a
+        // structure, opens the log's other family and is folded from this
+        // list (ADR 0043) — empty for every fixture the spawn room's raid
+        // is measured through, which is what makes those measurements a
+        // regression against the second family arriving.
         InvaderCores = []
         Spatial =
             { SpatialInfo.empty with
@@ -1011,6 +1013,329 @@ let damageTests =
                     raiding.Hits
                     (Map.ofList [ "ram-1", 100_000 ])
                     "an open episode carries this tick's hits into the next"
+            }
+        ]
+
+/// The outpost the threat fixtures stand in: a room of the scan set that
+/// is not the spawn room, so the two families are told apart by the room
+/// a record names and never by both being blank.
+let outpostRoom = "W12S27"
+
+/// An invader core standing in a room, with or without a collapse timer to
+/// read a deadline off. A level-0 core — the measured case on this
+/// colony's frontier — carries none.
+let core room collapse : InvaderCoreInfo =
+    {
+        RoomName = room
+        CollapseTick = collapse
+    }
+
+/// A colony that can see these cores, and nothing else going on.
+let seen cores = { quiet with InvaderCores = cores }
+
+/// The room as vision answers for it: nobody owns it, and this is what
+/// stands on its controller. `RoomControl` carries an entry only for a
+/// room the colony can see (ADR 0004), so putting one there is how a
+/// fixture says the colony is looking.
+let visible room reservation (colony: Snapshot) =
+    { colony with
+        RoomControl =
+            colony.RoomControl
+            |> Map.add
+                room
+                {
+                    Owner = Ownership.Unowned
+                    Reservation = reservation
+                }
+    }
+
+/// A reservation on that controller, carrying the engine's own *relative*
+/// count of what is left to run on it.
+let heldBy holder ticks =
+    Some { Holder = holder; TicksToEnd = ticks }
+
+/// The recorded stand-downs as (room, opened, last seen, expiry, basis),
+/// oldest first — the whole of what the outpost family records.
+let standDowns (state: RaidState) =
+    state.Outposts
+    |> List.map (fun e -> e.RoomName, e.Opened, e.LastSeen, e.Expiry, e.Basis)
+
+[<Tests>]
+let outpostTests =
+    testList
+        "raid fold: outpost episodes"
+        [
+            test "an invader core opens a stand-down that runs to its collapse timer" {
+                // The best of ADR 0043's three deadlines, and the only one
+                // the engine hands over already absolute — the shell added
+                // this tick to `ticksRemaining` on the way in (#133).
+                let state = RaidState.empty |> raidTick 100 (seen [ core outpostRoom (Some 900) ])
+
+                Expect.equal
+                    (standDowns state)
+                    [ outpostRoom, 100, 100, 900, StandDownBasis.CollapseTimer ]
+                    "the room, the tick it opened on, and the tick read off the threat itself"
+            }
+
+            test "a core with no collapse timer runs to the end of the reservation it took" {
+                // A level-0 core has no stronghold to collapse and carries
+                // no timer, so the only deadline it has is the hold it took
+                // with `attackController`. `TicksToEnd` is relative, so the
+                // tick is this one plus it: stored as read it would be a
+                // deadline three hundred ticks after the epoch.
+                let state =
+                    RaidState.empty
+                    |> raidTick
+                        100
+                        (seen [ core outpostRoom None ]
+                         |> visible outpostRoom (heldBy ReservationHolder.Invader 300))
+
+                Expect.equal
+                    (standDowns state)
+                    [ outpostRoom, 100, 100, 400, StandDownBasis.Reservation ]
+                    "three hundred ticks left on the hold is a deadline at tick 400, not at tick 300"
+            }
+
+            test "with neither deadline readable the clock is the expansion period" {
+                // Nothing is unreadable here by accident: a core with no
+                // timer in a room nothing holds is the shape the fallback
+                // exists for, and no path may answer "indefinitely" or
+                // "now".
+                let state = RaidState.empty |> raidTick 100 (seen [ core outpostRoom None ])
+
+                Expect.equal
+                    (standDowns state)
+                    [ outpostRoom, 100, 100, 2600, StandDownBasis.Fallback ]
+                    "2,500 ticks on from the sighting, and the record says it was chosen and not read"
+            }
+
+            test "only the invader's own hold is a clock" {
+                // Pairwise, one holder at a time: a rule reading "not ours"
+                // would take a rival's reservation for the core's and shut
+                // the room until a tick that says nothing about the core,
+                // and ADR 0043 answers those two oppositely. Both fall back
+                // rather than reading a deadline off a hold that is not the
+                // threat's.
+                let held holder =
+                    RaidState.empty
+                    |> raidTick
+                        100
+                        (seen [ core outpostRoom None ] |> visible outpostRoom (heldBy holder 300))
+                    |> standDowns
+
+                Expect.equal
+                    (held ReservationHolder.Rival)
+                    [ outpostRoom, 100, 100, 2600, StandDownBasis.Fallback ]
+                    "a player's hold is the clockless withdrawal, never a deadline for this one"
+
+                Expect.equal
+                    (held ReservationHolder.Ours)
+                    [ outpostRoom, 100, 100, 2600, StandDownBasis.Fallback ]
+                    "and the colony's own hold says nothing about the core standing in it"
+            }
+
+            test "a core still standing there extends the stand-down and re-reads its clock" {
+                let state =
+                    RaidState.empty
+                    |> raidTick 100 (seen [ core outpostRoom None ])
+                    |> raidTick 110 (seen [ core outpostRoom None ])
+
+                Expect.equal
+                    (standDowns state)
+                    [ outpostRoom, 100, 110, 2610, StandDownBasis.Fallback ]
+                    "one episode, its window carried to the last sighting and its clock read at it"
+            }
+
+            test "a re-read never shortens a stand-down that is already running" {
+                // The gate may be wrong in one direction only (ADR 0043's
+                // Consequences): a stale stand-down costs an outpost's
+                // income until its clock runs out, and the failure it
+                // prevents costs a creep a cycle. A later sighting can
+                // land on a worse deadline than the one already recorded
+                // — the core drains our hold and takes its own, freshly
+                // at a handful of ticks, or our reserver takes it back and
+                // the read falls through to the fallback — and reading
+                // that in would cut the stand-down short, which is the
+                // other direction. The same rule `deadlines` applies to
+                // two cores in one tick, applied across ticks.
+                let shortened =
+                    RaidState.empty
+                    |> raidTick
+                        100
+                        (seen [ core outpostRoom None ]
+                         |> visible outpostRoom (heldBy ReservationHolder.Invader 4000))
+                    |> raidTick 110 (seen [ core outpostRoom None ])
+
+                Expect.equal
+                    (standDowns shortened)
+                    [ outpostRoom, 100, 110, 4100, StandDownBasis.Reservation ]
+                    "the window still extends to the sighting, and the clock and the reason it was read off both stand"
+
+                let lengthened =
+                    RaidState.empty
+                    |> raidTick 100 (seen [ core outpostRoom None ])
+                    |> raidTick
+                        110
+                        (seen [ core outpostRoom None ]
+                         |> visible outpostRoom (heldBy ReservationHolder.Invader 4000))
+
+                Expect.equal
+                    (standDowns lengthened)
+                    [ outpostRoom, 100, 110, 4110, StandDownBasis.Reservation ]
+                    "and a longer deadline is taken, with the basis of the tick that won"
+            }
+
+            test "a tick without vision moves no clock and closes no stand-down" {
+                // The dangerous case (#117): losing vision reads exactly
+                // like peace, and the quiet gap here is five ticks, so the
+                // spawn family would have closed this episode six times
+                // over. This family is exempt — the colony stops looking
+                // the moment it withdraws, so silence is never evidence.
+                let standing = RaidState.empty |> raidTick 100 (seen [ core outpostRoom None ])
+
+                let blind =
+                    (standing, [ 101..130 ])
+                    ||> List.fold (fun state t -> state |> raidTick t quiet)
+
+                Expect.equal
+                    (standDowns blind)
+                    [ outpostRoom, 100, 100, 2600, StandDownBasis.Fallback ]
+                    "thirty blind ticks leave the record exactly as the last tick with vision left it"
+            }
+
+            test "a room seen clear stands down all the same, until its clock runs out" {
+                // Re-entry is a clock running out and never a second look
+                // (ADR 0043). A tick with vision and no core is not
+                // evidence the core is gone — it is what a creep passing
+                // the wrong tile sees — and even a true one does not open
+                // the gate early.
+                let state =
+                    RaidState.empty
+                    |> raidTick 100 (seen [ core outpostRoom None ])
+                    |> raidTick 101 (quiet |> visible outpostRoom None)
+
+                Expect.equal
+                    (standDowns state)
+                    [ outpostRoom, 100, 100, 2600, StandDownBasis.Fallback ]
+                    "the room looking clear neither closed the episode nor moved its expiry"
+            }
+
+            test "the clock runs out, and the next core seen opens a second stand-down" {
+                let state =
+                    RaidState.empty
+                    |> raidTick 100 (seen [ core outpostRoom (Some 105) ])
+                    |> raidTick 105 (seen [ core outpostRoom (Some 130) ])
+
+                Expect.equal
+                    (standDowns state)
+                    [
+                        (outpostRoom, 100, 100, 105, StandDownBasis.CollapseTimer)
+                        (outpostRoom, 105, 105, 130, StandDownBasis.CollapseTimer)
+                    ]
+                    "the expiry is the first tick the room may be re-entered, so a sighting on it is a new stand-down and the spent one stays in the ring"
+            }
+
+            test "each outpost's clock is its own" {
+                let other = "W13S28"
+
+                let state =
+                    RaidState.empty
+                    |> raidTick 100 (seen [ core outpostRoom (Some 500); core other (Some 700) ])
+                    |> raidTick 110 (seen [ core other (Some 700) ])
+
+                Expect.equal
+                    (standDowns state)
+                    [
+                        (outpostRoom, 100, 100, 500, StandDownBasis.CollapseTimer)
+                        (other, 100, 110, 700, StandDownBasis.CollapseTimer)
+                    ]
+                    "the tick that saw one room and not the other moved that room's episode alone"
+            }
+
+            test "a ring full of raids evicts no stand-down that is running" {
+                // One ring shared between the families would drop the
+                // episode driving the gate and reopen the room in the
+                // middle of a stand-down (#117). The cap is three here and
+                // four raids overflow it.
+                let state =
+                    (RaidState.empty |> raidTick 10 (seen [ core outpostRoom (Some 500) ]),
+                     [ 20; 30; 40; 50 ])
+                    ||> List.fold (fun state t -> state |> raidTick t (raid squad))
+
+                Expect.equal
+                    (standDowns state)
+                    [ outpostRoom, 10, 10, 500, StandDownBasis.CollapseTimer ]
+                    "the stand-down is still there with its clock untouched"
+
+                Expect.equal
+                    (windows state)
+                    [ (30, 30); (40, 40); (50, 50) ]
+                    "while the raid ring trims to the cap exactly as it did before"
+            }
+
+            test "a stand-down still running survives a ring overflowing past it" {
+                // Six spent stand-downs in one room around one long-running
+                // one somewhere else, against a cap of three. The overflow
+                // is paid out of the finished rows and never out of the one
+                // holding a room shut.
+                let other = "W13S28"
+
+                let state =
+                    RaidState.empty
+                    |> raidTick 10 (seen [ core outpostRoom (Some 11) ])
+                    |> raidTick 12 (seen [ core outpostRoom (Some 13) ])
+                    |> raidTick 14 (seen [ core outpostRoom (Some 15) ])
+                    |> raidTick 16 (seen [ core other (Some 5000) ])
+                    |> raidTick 18 (seen [ core outpostRoom (Some 19) ])
+                    |> raidTick 20 (seen [ core outpostRoom (Some 21) ])
+                    |> raidTick 22 (seen [ core outpostRoom (Some 23) ])
+
+                Expect.equal
+                    (standDowns state)
+                    [
+                        (other, 16, 16, 5000, StandDownBasis.CollapseTimer)
+                        (outpostRoom, 20, 20, 21, StandDownBasis.CollapseTimer)
+                        (outpostRoom, 22, 22, 23, StandDownBasis.CollapseTimer)
+                    ]
+                    "the oldest row is the one still standing down, and it is the one row the trim would not take"
+            }
+
+            test "a core in an outpost leaves the spawn room's raid exactly as it was" {
+                // The regression #117 asks for. The two families share a
+                // Memory leaf and nothing else, so every step the raid fold
+                // takes — the window, the roster, the closest approach, the
+                // losses and the damage, plus both baselines it carries
+                // between ticks — must read the same with a core standing
+                // next door as without one. Compared as whole states rather
+                // than through the projections, so a field no list here
+                // reads is covered too.
+                let sequence colony =
+                    (RaidState.empty, [ 10..14 ])
+                    ||> List.fold (fun state t ->
+                        { colony with
+                            Creeps = if t < 12 then [ ours "w1"; ours "w2" ] else [ ours "w1" ]
+                        }
+                        |> withHits "ram-1" BuiltKind.Rampart (100_000 - 200 * t)
+                        |> fun tick -> state |> raidTick t tick)
+
+                let alone = sequence { placed with Hostiles = squad }
+
+                let beside =
+                    sequence
+                        { placed with
+                            Hostiles = squad
+                            InvaderCores = [ core outpostRoom None ]
+                        }
+
+                Expect.equal
+                    { beside with Outposts = [] }
+                    alone
+                    "the raid reads byte for byte the same, roster, approach, losses, damage and baselines alike"
+
+                Expect.equal
+                    (standDowns beside)
+                    [ outpostRoom, 10, 14, 2514, StandDownBasis.Fallback ]
+                    "while the core standing next door recorded a stand-down of its own"
             }
         ]
 

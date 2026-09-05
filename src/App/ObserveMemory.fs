@@ -300,6 +300,53 @@ let private decodeEpisode (raw: obj) : RaidEpisode =
         Damage = if isNull raw?damage then 0 else unbox<int> raw?damage
     }
 
+// One outpost episode on the wire (ADR 0043): the room it shuts, the
+// window, the tick the stand-down runs to, and which of the three
+// deadlines that tick was read off. A key of its own beside `episodes`
+// rather than rows mixed into it, the way the two families are two rings
+// in Core: a reader of either family reads it whole and never a filter,
+// and a row of one that will not decode costs the other nothing.
+let private encodeOutpost (episode: OutpostEpisode) =
+    let o = createEmpty<obj>
+    o?room <- episode.RoomName
+    o?opened <- episode.Opened
+    o?last <- episode.LastSeen
+    o?expiry <- episode.Expiry
+    o?basis <- standDownBasisName episode.Basis
+    o
+
+let private decodeOutpost (raw: obj) : OutpostEpisode =
+    {
+        RoomName = string raw?room
+        Opened = unbox<int> raw?opened
+        LastSeen = unbox<int> raw?last
+        // The one number the gate reads, and the one field here that has
+        // no honest default: `unbox` is a cast and not a check, so a row
+        // written without this key would decode to `undefined`, every
+        // comparison against it would answer false, and `standingDown`
+        // would report a running stand-down as spent — a gate that says
+        // "come back in" because a field was missing, which is the one
+        // direction ADR 0043 does not allow it to be wrong in. So it
+        // costs its row, the way the basis below does; zero is not a
+        // fallback here, it is "go back in".
+        Expiry =
+            if isNull raw?expiry then
+                failwith "missing expiry"
+            else
+                unbox<int> raw?expiry
+        // A basis the vocabulary does not have costs its row rather than
+        // reading as some other basis: "shut until 2,600" without the
+        // reason is a stand-down that refuses to say why it is holding an
+        // outpost, and `loadRaids` already degrades episode by episode
+        // (ADR 0028). The `Damage` default above is not the precedent to
+        // follow here — a missing number has an honest zero, a missing
+        // reason has no honest answer.
+        Basis =
+            match standDownBasisOf (string raw?basis) with
+            | Some basis -> basis
+            | None -> failwith "unknown wire name"
+    }
+
 // The observe subtree is created on demand and replaced whole only when
 // what stands there is not an object. Each writer then assigns its own
 // leaf, so `creeps`, `verbose` and `raids` never clobber one another.
@@ -398,6 +445,24 @@ let loadRaids () : RaidState =
                         with _ ->
                             None)
                     |> Array.toList
+                // The outpost family's ring (ADR 0043), absent from a
+                // bundle written before it existed — and an empty ring is
+                // exactly what that says, since no stand-down was recorded
+                // then. Degraded row by row like the ring above it: a
+                // stand-down that will not decode costs its own room's
+                // gate and not the others'.
+                Outposts =
+                    if isNull raids?outposts then
+                        []
+                    else
+                        raids?outposts
+                        |> unbox<obj[]>
+                        |> Array.choose (fun raw ->
+                            try
+                                Some(decodeOutpost raw)
+                            with _ ->
+                                None)
+                        |> Array.toList
                 Living = raids?living |> unbox<string[]> |> Set.ofArray
                 // The damage baseline, absent from a bundle written before
                 // it existed: an empty baseline charges the next tick
@@ -421,6 +486,7 @@ let loadRaids () : RaidState =
 let saveRaids (state: RaidState) =
     let raids = createEmpty<obj>
     raids?episodes <- state.Episodes |> List.map encodeEpisode |> List.toArray
+    raids?outposts <- state.Outposts |> List.map encodeOutpost |> List.toArray
     raids?living <- state.Living |> Set.toArray
 
     let hits = createEmpty<obj>

@@ -163,6 +163,7 @@ if (command === "console") {
   //   { episodes: [{ opened, last, roster: [{ id, owner, body: { part: n } }],
   //                  closest?: { range, x, y, t }, losses: [{ creep, t }],
   //                  damage }],
+  //     outposts: [{ room, opened, last, expiry, basis }],
   //     living: [creep], hits: { <structure id>: hits } }
   // Stored oldest first like the Transition log's ring, printed newest
   // first. `closest` is simply absent when nothing of ours could be placed.
@@ -173,7 +174,10 @@ if (command === "console") {
   // than reporting no raids. `living` and `hits` are the fold's own
   // baselines, scratch state and not part of the record, so --json prints
   // the episodes alone. `damage` is absent on an episode written before
-  // ADR 0034 and reads as zero.
+  // ADR 0034 and reads as zero. `outposts` is the Raid log's second family
+  // (ADR 0043) — one row per [[stand-down]], the room it shuts, the tick it
+  // runs to and which deadline that tick was read off; this command does
+  // not print it yet, and reading it out from the terminal is #135's.
   const stored = await memoryGet("fabot.observe.raids");
   if (stored == null || typeof stored !== "object") {
     fail(

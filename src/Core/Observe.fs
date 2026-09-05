@@ -206,12 +206,102 @@ type RaidEpisode =
         Damage: int
     }
 
+/// One [[outpost]]'s threat episode: the Raid log's second family (ADR
+/// 0043), opened by an invader core standing in a room the colony works
+/// rather than by a hostile creep in a spawn room, and carrying the one
+/// field a raid never needed — the tick the [[stand-down]] it drives
+/// expires.
+///
+/// A record of its own beside `RaidEpisode` rather than a widening of it,
+/// for two reasons pointing the same way. The four things a raid episode
+/// records cannot be read off a core at all: `InvaderCoreInfo` carries a
+/// room and a deadline and nothing else (#133) — no id, no tile, no body,
+/// no owner — because the projection grows a field the tick a reader
+/// exists (ADR 0007) and the gate reads none of those, so a shared shape
+/// would be four fields structurally empty for every row of this family.
+/// And the spawn family's behaviour has to come through this change
+/// byte-identical (#117): two rings and two shapes give that by
+/// construction, where one shared list has to argue for it step by step —
+/// the losses, the hits baseline and the reassembly are all written around
+/// there being exactly one open episode, and two families are two.
+type OutpostEpisode =
+    {
+        /// The room the core stands in, which is the whole of where: the
+        /// gate admits or withholds a room, so the tile a core stands on
+        /// is a fact nothing asks for, and W12S27 standing down says
+        /// nothing about W13S28 (ADR 0043's independent gates).
+        RoomName: string
+        /// The tick this stand-down opened.
+        Opened: int
+        /// The last tick a core was actually seen in the room. A record
+        /// for the reader and never the openness test — see
+        /// `standingDown`: the colony stops looking the moment it
+        /// withdraws, so silence here says nobody is there to look and
+        /// never that the room is clear.
+        LastSeen: int
+        /// The **absolute** tick the stand-down runs to, read off the
+        /// threat and not chosen (ADR 0043). Sampled only on the ticks a
+        /// core is actually seen, because the creeps that pay for the
+        /// vision are the ones the gate withdraws: after they leave this
+        /// is the last number anybody read, and holding it is the whole
+        /// mechanism.
+        Expiry: int
+        /// Which of ADR 0043's three deadlines `Expiry` came off. Carried
+        /// because it cannot be recovered from the tick afterwards, and
+        /// because "shut until 2,600" and "shut until 2,600 because
+        /// nothing could be read" are different answers to an operator
+        /// (#117).
+        Basis: StandDownBasis
+    }
+
+/// Whether an outpost episode still holds its room shut at this tick: ADR
+/// 0043's "re-entry is a clock running out, not a look", written as the
+/// one place the family's openness is decided. The expiry tick is the
+/// first tick the room may be re-entered.
+///
+/// This family is exempt from the quiet gap that closes a raid, and the
+/// exemption is the load-bearing part rather than a shortcut. The gap
+/// answers "has the squad left?" — a question about creeps that move, can
+/// be watched leaving, and are watched by a colony sitting in the room
+/// they came to. Neither half holds here: an invader core has 100,000
+/// hits, spawns nothing at level 0 and never leaves, so its absence from a
+/// Snapshot is never evidence that it is gone; and the stand-down's whole
+/// effect is to withdraw the creeps whose vision would see it. Under the
+/// gap a stood-down outpost goes quiet because nobody is looking, the
+/// episode closes fifty ticks later, the gate opens, and the creeps walk
+/// forty-seven tiles back into the same core — the ~150-tick oscillation
+/// ADR 0043 exists to forbid, arriving through the episode's lifecycle
+/// instead of through the gate's test. So silence closes nothing here, and
+/// only the clock does.
+let standingDown (tick: int) (episode: OutpostEpisode) = tick < episode.Expiry
+
+/// The stand-down a threat gave no readable deadline for: 2,500 ticks, the
+/// stronghold expansion period (ADR 0043). The last of the three answers
+/// and the only one the colony chose rather than read, so it is the one
+/// number here that had to be justified: it is the cadence on which the
+/// thing that put the core there puts another one somewhere, and it errs
+/// long by construction, which is the only direction the gate is allowed
+/// to be wrong in — a stale stand-down costs an outpost's income until the
+/// clock runs out, and the failure it prevents costs a creep a cycle for
+/// the life of the core.
+let standDownFallback = 2500
+
 /// The whole persisted Raid log.
 type RaidState =
     {
         /// The episode ring: oldest first, trimmed from the front — the
         /// Transition log's own convention.
         Episodes: RaidEpisode list
+        /// The outpost family's own ring beside it, oldest first as that
+        /// one is (ADR 0043). Its own ring and not rows mixed into it,
+        /// because a shared list is a shared depth: twenty spawn-room
+        /// raids would evict the very episode holding an outpost shut and
+        /// the gate would reopen in the middle of a stand-down — the
+        /// failure ADR 0043 was written for, reached through the ring
+        /// rather than through the clock (#117). So the `cap` the fold
+        /// takes is a depth per family and never a total, and this ring
+        /// trims by one further rule of its own (`trimOutposts`).
+        Outposts: OutpostEpisode list
         /// The owned creep names the previous tick projected, less the
         /// ones whose life ran out on it: the baseline this tick's losses
         /// are read against. Carried only while an episode is open, so a
@@ -232,6 +322,7 @@ module RaidState =
     let empty =
         {
             Episodes = []
+            Outposts = []
             Living = Set.empty
             Hits = Map.empty
         }
@@ -347,6 +438,119 @@ let private enrol roster (hostile: HostileInfo) =
             }
             roster
 
+/// The tick one core's stand-down runs to, and which of ADR 0043's three
+/// deadlines it was read off, in the ADR's own order of availability.
+///
+/// The reservation branch takes the core's own hold and nobody else's. A
+/// rival's is the *clockless* withdrawal and never a clock, and the
+/// colony's own says nothing about the core at all — which is why the
+/// holder arrived as three answers rather than as one "not ours" flag
+/// (#133). `TicksToEnd` is the engine's relative count, so the tick it
+/// names is this one plus it: the same addition the shell already made on
+/// the collapse-timer branch, made here instead because that field is
+/// carried relative for the reserver row that sizes itself off "how much
+/// is left" (#133). Storing it as read would shut an outpost until a tick
+/// a hundred thousand in the past.
+let private deadlineOf (snapshot: Snapshot) (core: InvaderCoreInfo) =
+    match core.CollapseTick with
+    | Some tick -> tick, StandDownBasis.CollapseTimer
+    | None ->
+        snapshot.RoomControl
+        |> Map.tryFind core.RoomName
+        |> Option.bind (fun control -> control.Reservation)
+        |> Option.filter (fun held -> held.Holder = ReservationHolder.Invader)
+        |> Option.map (fun held -> snapshot.Time + held.TicksToEnd, StandDownBasis.Reservation)
+        |> Option.defaultValue (snapshot.Time + standDownFallback, StandDownBasis.Fallback)
+
+/// This tick's deadline for each room a core was seen in — the sighting
+/// the fold below folds, and the only tick on which a stand-down's clock
+/// moves at all. A room with no entry here is a room the colony cannot
+/// see or one nothing stands in, and those two read alike on purpose:
+/// neither is evidence, so neither touches an episode (ADR 0004,
+/// `standingDown`).
+///
+/// One entry per room and never per core: the gate withholds a room, so
+/// two cores in one room are one stand-down, and the later of their
+/// deadlines is the one kept — the direction ADR 0043 allows the gate to
+/// be wrong in.
+let private deadlines (snapshot: Snapshot) =
+    snapshot.InvaderCores
+    |> List.map (fun core -> core.RoomName, deadlineOf snapshot core)
+    |> List.groupBy fst
+    |> List.map (fun (room, seen) -> room, seen |> List.map snd |> List.maxBy fst)
+
+/// Fold one room's sighting into the outpost ring: the room's standing
+/// episode takes it — its window extends and its clock is re-read, since
+/// this is a tick with vision — and where the room has none standing, the
+/// sighting opens one. At most one episode per room can be standing, so
+/// the re-read lands on one row.
+///
+/// The re-read only ever moves a running clock outward: the later of the
+/// recorded deadline and this tick's is the one kept, and the basis with
+/// it, so the record still names the read that is actually holding the
+/// room. That is `deadlines`' rule above applied across ticks rather than
+/// within one, and for the same reason — the sighting that lands on a
+/// worse deadline is real (the core drains our hold and takes its own,
+/// freshly at a handful of ticks; or our reserver takes it back and the
+/// read falls through to the fallback), and reading it in would cut a
+/// stand-down short, which is the direction ADR 0043's Consequences
+/// forbid: a stale stand-down costs an outpost's income until its clock
+/// runs out, and the failure it prevents costs a creep a cycle for the
+/// life of the core.
+let private sight tick (room, (expiry, basis)) (episodes: OutpostEpisode list) =
+    let holds (episode: OutpostEpisode) =
+        episode.RoomName = room && standingDown tick episode
+
+    if episodes |> List.exists holds then
+        episodes
+        |> List.map (fun episode ->
+            if holds episode then
+                { episode with
+                    LastSeen = tick
+                    Expiry = max episode.Expiry expiry
+                    Basis = if expiry > episode.Expiry then basis else episode.Basis
+                }
+            else
+                episode)
+    else
+        episodes
+        @ [
+            {
+                RoomName = room
+                Opened = tick
+                LastSeen = tick
+                Expiry = expiry
+                Basis = basis
+            }
+        ]
+
+/// Trim the outpost ring to the cap, oldest first — and never over an
+/// episode that is still standing down.
+///
+/// The ring is there to bound Memory, and the row it would drop first is
+/// the one holding creeps out of a room: evicting that reopens the gate
+/// mid-stand-down, which is exactly the failure ADR 0043 is written
+/// against, reached through the ring rather than through the clock. So a
+/// standing episode is never a candidate and the ring may run past its cap
+/// — by at most one row per room a core stands in, and the rooms are the
+/// scan set's, a declaration a human moves (ADR 0041), so the overrun is
+/// bounded by a constant in the source. It is paid back out of the
+/// finished stand-downs behind it the moment there are any.
+let private trimOutposts cap tick (episodes: OutpostEpisode list) =
+    let overflow = List.length episodes - cap
+
+    if overflow <= 0 then
+        episodes
+    else
+        ((overflow, []), episodes)
+        ||> List.fold (fun (left, kept) episode ->
+            if left > 0 && not (standingDown tick episode) then
+                left - 1, kept
+            else
+                left, episode :: kept)
+        |> snd
+        |> List.rev
+
 /// The Raid-log fold (ADR 0028): this tick's Snapshot plus the previous
 /// Raid log produce the new one. An episode opens on the first tick a
 /// spawn room holds a hostile, stays open while hostiles keep appearing,
@@ -355,6 +559,17 @@ let private enrol roster (hostile: HostileInfo) =
 /// Two baselines are carried across ticks while an episode is open and
 /// dropped with it: the names this tick's losses are read against, and the
 /// hits this tick's damage is (ADR 0034).
+///
+/// Beside all of that, and sharing nothing with it but the leaf they are
+/// written to, the outpost family (ADR 0043): an invader core seen in a
+/// room the colony works opens or extends that room's stand-down and sets
+/// the tick it runs to, in its own ring, on its own clock, with no quiet
+/// gap. The two halves are deliberately disjoint — the family above reads
+/// `Hostiles` and this one reads `InvaderCores`, and the engine's own
+/// sweeps guarantee no object is in both, a core being a structure — so a
+/// core changes nothing a raid records and a raid changes nothing a
+/// stand-down does. `cap` is read as a depth per family and not a total,
+/// for the reason `RaidState.Outposts` gives.
 let foldRaids (cap: int) (gap: int) (snapshot: Snapshot) (prior: RaidState) : RaidState =
     // The baseline the next tick reads its losses against: this tick's
     // names, less the creeps whose clock runs out on it. A name gone
@@ -473,6 +688,14 @@ let foldRaids (cap: int) (gap: int) (snapshot: Snapshot) (prior: RaidState) : Ra
             match episode with
             | Some episode -> earlier @ [ episode ] |> trim cap
             | None -> earlier
+        // The outpost family's whole tick: the rooms a core was seen in,
+        // each folded into the ring. A tick that sees none — no vision, or
+        // vision and a room that is clear — leaves every stand-down
+        // exactly as it found it, clock included.
+        Outposts =
+            (prior.Outposts, deadlines snapshot)
+            ||> List.fold (fun episodes seen -> sight snapshot.Time seen episodes)
+            |> trimOutposts cap snapshot.Time
         Living = if Option.isSome episode then surviving else Set.empty
         Hits = if Option.isSome episode then defended else Map.empty
     }

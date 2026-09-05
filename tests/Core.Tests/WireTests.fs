@@ -123,6 +123,17 @@ let wireVocabularyTests =
                     (casesOf<RejectReason> ())
                     rejectReasonName
                     (rejectReasonOf sampleNumbers)
+
+                // The Raid log's own vocabulary (ADR 0043): which of the
+                // three deadlines a [[stand-down]]'s expiry tick was read
+                // off. It rides the same Memory subtree as the rest, and a
+                // basis that will not read back costs its episode the
+                // reason it is holding an outpost shut.
+                roundTrips
+                    "StandDownBasis"
+                    (casesOf<StandDownBasis> ())
+                    standDownBasisName
+                    standDownBasisOf
             }
 
             test "the engine vocabularies round-trip over their own lists" {
