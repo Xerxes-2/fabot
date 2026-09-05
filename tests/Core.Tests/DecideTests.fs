@@ -468,6 +468,37 @@ let patternTableTests =
                     "sixteen blocks fill 48 parts"
             }
 
+            test "the reserver row builds whole blocks and nothing else" {
+                // 1,800 is the colony's live RCL5 bank (#116's deployment
+                // note) and 650 a `[Claim; Move]` block, so the bank buys
+                // two and strands 500: ADR 0042's own `[2Claim;2Move]`,
+                // the body every arithmetic in that ADR is written for.
+                // The row is not in `patternTable` and nothing casts it
+                // yet (#131) — `bodyFor` reaches it because a lead is
+                // priced off the row's own body (ADR 0026).
+                Expect.equal
+                    (bodyFor reserverPattern 1800)
+                    [ Claim; Claim; Move; Move ]
+                    "capacity buys whole [Claim; Move] blocks; the remainder stays banked"
+            }
+
+            test "the reserver row never casts below its block" {
+                // A CLAIM part is indivisible: a body under one block
+                // reserves nothing, and an empty body would price a
+                // reserver's succession at zero ticks of cast time.
+                Expect.equal
+                    (bodyFor reserverPattern 100)
+                    [ Claim; Move ]
+                    "the block is the row's minimal cast"
+            }
+
+            test "the reserver body never exceeds the 50-part engine cap" {
+                Expect.equal
+                    (bodyFor reserverPattern 100000)
+                    (List.replicate 25 Claim @ List.replicate 25 Move)
+                    "twenty-five blocks fill the 50 parts exactly"
+            }
+
             test "spawn planning casts from the pattern table's row" {
                 // An established colony at full capacity: the spawned body
                 // is the table row sized to capacity, and the creep name
@@ -13681,5 +13712,383 @@ let layeredThreatTests =
                 Expect.isEmpty
                     (castsWith [ hostileIn "W1N1" { X = 25; Y = 29 } [ Attack; Move ] ])
                     "the same Threat at home holds it"
+            }
+        ]
+
+/// The outpost the Reserve tests hold: one room across the north border,
+/// its controller declared under the engine's own id and laid into the
+/// projection the way the shell lays one (`Outpost.place`, ADR 0041) — so
+/// it is in the pool with no vision at all, and its tile is an obstacle,
+/// which is what puts the reserver beside the controller and never on it.
+///
+/// No rock declared. The pool these fixtures want is the one Reserve and
+/// nothing else, because the Matcher scores a winner against its cheapest
+/// rival alone: a second candidate would leave every comparison below
+/// reporting on some third Task.
+let private reserveDeclaration =
+    {
+        RoomName = "W1N2"
+        Sources = []
+        // Off the corridor on purpose: a controller stands in `Obstacles`
+        // whether vision found it or a declaration laid it, and one on the
+        // corridor would seal the room rather than leave the tiles beside
+        // it to stand on.
+        Controller = "ctrl-out", { X = 11; Y = 44 }
+    }
+
+/// The colony the Reserve tests run in: the home corridor with no Task in
+/// it at all, the declared outpost across the border, and the creeps the
+/// test names standing in that outpost — filed under its own layer,
+/// because a creep is placed in the room it stands in and nowhere else
+/// (ADR 0041).
+let private reserveColony (creeps: (CreepInfo * Pos) list) =
+    let colony = northBorderColony { X = 10; Y = 38 } |> withNorthOutpost None
+    let spatial = Outpost.place [ reserveDeclaration ] colony.Spatial
+    let outpost = SpatialInfo.layerOf spatial "W1N2"
+
+    { colony with
+        Sources = []
+        Creeps = creeps |> List.map fst
+        Spatial =
+            spatial
+            |> withNeighbour
+                "W1N2"
+                { outpost with
+                    CreepPositions =
+                        creeps |> List.map (fun (creep, pos) -> creep.Name, pos) |> Map.ofList
+                }
+    }
+
+/// The second outpost, across the *west* border: `Outpost.declared` takes
+/// two rooms at once (ADR 0042) and one of them is not enough to tell "one
+/// reserver per outpost" apart from "every reserver on whichever
+/// controller is nearest". Its controller is off its corridor for the same
+/// reason the north one is, and the two tiles left beside it are the
+/// declared shape W12S27's `37,43` really has.
+let private westReserveDeclaration =
+    {
+        RoomName = "W2N1"
+        Sources = []
+        Controller = "ctrl-west", { X = 41; Y = 25 }
+    }
+
+/// The colony with both outposts declared and a west arm of home leading
+/// to the second: home's `1,26` opens onto W2N1's `48,26` (ADR 0041 reads
+/// the join out of the two room names), and the west corridor runs from
+/// there to the tiles beside `ctrl-west`. The creeps stand in that arm, a
+/// dozen steps from the west controller and some thirty-five from the
+/// north one — so travel cost alone prefers the *same* controller for
+/// every one of them, which is what makes the per-Task cap the only thing
+/// that can spread them.
+let private twoOutpostColony (creeps: (CreepInfo * Pos) list) =
+    let colony = reserveColony []
+
+    let spatial =
+        { colony.Spatial with
+            Borders = Map.add "W2N1" plainRing colony.Spatial.Borders
+        }
+        |> withHome (fun layer ->
+            { layer with
+                Terrain =
+                    (layer.Terrain, [ for x in 1..10 -> { X = x; Y = 26 } ])
+                    ||> List.fold (fun terrain pos -> Map.add pos Plain terrain)
+                CreepPositions =
+                    creeps |> List.map (fun (creep, pos) -> creep.Name, pos) |> Map.ofList
+            })
+        |> withNeighbour
+            "W2N1"
+            { RoomLayer.empty with
+                Terrain = Map.ofList [ for x in 41..48 -> { X = x; Y = 26 }, Plain ]
+            }
+        |> Outpost.place [ westReserveDeclaration ]
+
+    { colony with
+        Creeps = creeps |> List.map fst
+        Spatial = spatial
+    }
+
+/// ADR 0042's own reserver: two CLAIM parts and two Move, 1,300 energy.
+/// Carrying nothing and with nowhere to put anything — a CLAIM body has no
+/// Carry part — so no gate below can be passing on an energy state.
+let private reserver name =
+    creepWith name 0 0 [ Claim; Claim; Move; Move ]
+
+let private reserveTasks tasks =
+    tasks
+    |> List.choose (function
+        | Reserve controllerId -> Some controllerId
+        | _ -> None)
+
+[<Tests>]
+let reserveTests =
+    testList
+        "reserve"
+        [
+            test
+                "an outpost's controller is a Reserve; the colony's own is Upgraded, never reserved" {
+                // The pool rule (ADR 0042), read off the projection's kind
+                // census: every controller in it but ours. The colony's own
+                // is excluded by id — the engine refuses reserveController
+                // on a room it owns — so the two controllers here answer
+                // the two different Tasks a controller can carry.
+                let colony =
+                    { bareRespawn with
+                        Sources = []
+                        Refillables = []
+                        Spatial =
+                            { SpatialInfo.empty with
+                                TargetKinds =
+                                    Map.ofList [ "ctrl-1", Controller; "ctrl-out", Controller ]
+                            }
+                    }
+
+                let tasks = planTasks colony noThreats
+
+                Expect.equal
+                    (reserveTasks tasks)
+                    [ "ctrl-out" ]
+                    "the outpost's controller is the one Reserve in the pool"
+
+                Expect.contains tasks (Upgrade "ctrl-1") "and the colony's own is still Upgraded"
+
+                Expect.isEmpty
+                    (reserveTasks (planTasks bareRespawn noThreats))
+                    "a colony projecting one room reserves nothing: the pool is the pool it always was"
+            }
+
+            test "a CLAIM body is matched to the outpost's Reserve and reserves it" {
+                // The whole path in one tick (ADR 0042): the Task is pooled
+                // off the declaration, the CLAIM body is the one body it
+                // applies to, the Matcher hands it over, and the Emitter
+                // issues the reserve. The creep stands at (10,44), one tile
+                // from the controller at (11,44) — inside the Work Area
+                // already, so the act is this tick's and not a walk's.
+                let {
+                        Assignments = assignments
+                        Intents = intents
+                        Verdicts = verdicts
+                    } =
+                    decide
+                        (reserveColony [ reserver "r1", { X = 10; Y = 44 } ])
+                        Map.empty
+                        Set.empty
+                        None
+
+                Expect.equal
+                    (Map.tryFind "r1" assignments)
+                    (Some(taskId (Reserve "ctrl-out")))
+                    "the reserver holds the outpost's controller"
+
+                Expect.contains
+                    verdicts
+                    (Verdict.Matched("r1", taskId (Reserve "ctrl-out"), MatchFactor.OnlyCandidate))
+                    "and it is the only Task in the pool it fits"
+
+                Expect.contains
+                    intents
+                    (ReserveController("r1", "ctrl-out"))
+                    "the Intent is the engine's reserve act, aimed at the declared controller"
+
+                Expect.contains
+                    intents
+                    (SayCreep("r1", "🚩"))
+                    "and the bubble carries the Reserve glyph"
+            }
+
+            test "a body with no CLAIM part is never matched to Reserve" {
+                // Pairwise against the test above: the same colony, the
+                // same tile beside the same controller, one body swapped.
+                // A generalist can do everything else this colony ever asks
+                // and cannot push a reservation up by a tick.
+                let {
+                        Assignments = assignments
+                        Intents = intents
+                    } =
+                    decide
+                        (reserveColony [ worker "w1" 0 50, { X = 10; Y = 44 } ])
+                        Map.empty
+                        Set.empty
+                        None
+
+                Expect.isEmpty
+                    (Map.toList assignments)
+                    "the one Task in the pool asks for a part this body has none of"
+
+                Expect.isEmpty
+                    (intents
+                     |> List.filter (function
+                         | ReserveController _ -> true
+                         | _ -> false))
+                    "and nothing reserves anything"
+            }
+
+            test "a CLAIM body fits no other Task: without a Reserve it stands still" {
+                // ADR 0042's pairing rule, in as many words: every other
+                // Task gates on a Work part or a Carry part and a
+                // `[2Claim;2Move]` body has neither, so a reserver cast
+                // before this Task existed would have stood where it was
+                // born for its whole 600-tick life. It is also why the
+                // quota may not arrive before the Task (#131).
+                let colony =
+                    { bareRespawn with
+                        Sources = [ source "src-a" ]
+                        ConstructionSites = [ { Id = "site-1" } ]
+                        Refillables = [ refillable "spawn-1" 300 BuiltKind.Spawn ]
+                        Creeps = [ reserver "r1" ]
+                        Spatial =
+                            { SpatialInfo.empty with
+                                TargetKinds = Map.ofList [ "cont-1", Structure BuiltKind.Container ]
+                                Stores = Map.ofList [ "cont-1", 500 ]
+                            }
+                    }
+                    |> withHits "road-1" BuiltKind.Road 100 5000
+
+                let pool = planTasks colony noThreats
+
+                Expect.equal
+                    (pool |> List.map taskId |> List.sort)
+                    (List.sort
+                        [
+                            taskId (Harvest "src-a")
+                            taskId (Withdraw "cont-1")
+                            taskId (Refill "spawn-1")
+                            taskId (Build "site-1")
+                            taskId (Repair "road-1")
+                            taskId (Upgrade "ctrl-1")
+                        ])
+                    "the premise: every Task but Reserve and Flee is in the pool"
+
+                let { Assignments = assignments } = decide colony Map.empty Set.empty None
+
+                Expect.isEmpty
+                    (Map.toList assignments)
+                    "and the CLAIM body is applicable to none of them"
+            }
+
+            test "a reserver under fire runs: Safety outranks the tier Reserve sits on" {
+                // The one comparison the tier choice actually settles
+                // today. Reserve is on the feeding tier — ADR 0042's own
+                // argument for casting the row first is that it decides
+                // whether the income is five a tick or ten — and Safety
+                // sits above every tier of work (ADR 0033), so a reserver
+                // being shot at leaves the controller. Both Tasks are in
+                // this creep's pool: the Reach takes two of the
+                // controller's three standing tiles and leaves one, so
+                // Reserve is applicable and loses on rank rather than
+                // vanishing.
+                let colony = reserveColony [ reserver "r1", { X = 10; Y = 44 } ]
+
+                let raided =
+                    { colony with
+                        Hostiles = [ hostileIn "W1N2" { X = 10; Y = 41 } [ Attack; Move ] ]
+                    }
+
+                let {
+                        Assignments = assignments
+                        Verdicts = verdicts
+                    } =
+                    decide raided Map.empty Set.empty None
+
+                Expect.equal
+                    (Map.tryFind "r1" assignments)
+                    (Some(taskId Flee))
+                    "the reserver runs rather than holding the reservation"
+
+                Expect.contains
+                    verdicts
+                    (Verdict.Matched("r1", taskId Flee, MatchFactor.Rank))
+                    "and rank is what separated the two: Safety above Feeding"
+            }
+
+            test "one reserver per controller: the second is pushed to the outpost nobody holds" {
+                // ADR 0042 casts one reserver *per posted outpost* — "two
+                // reservers at 4.33 energy a tick buy three sources their
+                // second five" — and a second body on a controller the
+                // first already holds buys nothing at all, because a
+                // reservation is capped and one body's CLAIM parts are
+                // sized to hold it. Travel cost cannot produce that on its
+                // own: both bodies stand in the west arm, both price the
+                // west controller cheapest, and `load` is only the key's
+                // third component, so it never separates two candidates
+                // whose costs differ. The per-Task cap is what does, and
+                // without it the north outpost is pooled, applicable and
+                // matched by nobody for the whole 600-tick life of both
+                // creeps — silently, since both report Matched.
+                let colony =
+                    twoOutpostColony
+                        [ reserver "r1", { X = 5; Y = 26 }; reserver "r2", { X = 6; Y = 26 } ]
+
+                let { Assignments = assignments } = decide colony Map.empty Set.empty None
+
+                Expect.equal
+                    (assignments |> Map.toList |> List.map snd |> List.sort)
+                    [ taskId (Reserve "ctrl-out"); taskId (Reserve "ctrl-west") ]
+                    "the two reservers hold the two declared controllers, one each"
+            }
+        ]
+
+/// A colony standing exactly at its Workforce target with one reserver in
+/// it: no Post, no source container and no placed rock, so the target is
+/// the floor of two and the two living creeps meet it. One body leaving
+/// the count is therefore one cast, which is what makes a lead readable
+/// (ADR 0026). The bank is 1,300 — ADR 0042's own reserver body at
+/// capacity — and the reserver stands at (25,29), three plain steps from
+/// the tile a replacement is born on.
+let private leadColony life =
+    let room = atLevel 2 (openRoom 6)
+
+    { room with
+        RoomEnergy = bank 1300 1300
+        Creeps = [ worker "w1" 0 50; reserver "r1" |> withLife life ]
+        Spatial =
+            room.Spatial
+            |> withHome (fun layer ->
+                { layer with
+                    CreepPositions =
+                        Map.ofList [ "w1", { X = 25; Y = 27 }; "r1", { X = 25; Y = 29 } ]
+                })
+    }
+
+[<Tests>]
+let reserverLeadTests =
+    testList
+        "the reserver row's lead"
+        [
+            test "a CLAIM body's lead is the reserver row's, not the generalist's" {
+                // `patternOf` reads a living body back to the row it was
+                // cast from (ADR 0006), and the row is what sizes the
+                // replacement a lead prices (ADR 0026). A `[Claim; Move]`
+                // body has neither Work nor Carry, so before ADR 0042's row
+                // existed it fell through to the generalist and was priced
+                // as one.
+                //
+                // The two arithmetics, at this colony's 1,300 bank: the
+                // reserver row casts `[2Claim;2Move]`, four parts, 12 ticks
+                // in the spawner, and its two Move carry its two fatigue
+                // parts over a plain tile in the walk's one-tick floor — 3
+                // ticks for the three steps, a lead of 15. The generalist
+                // row at the same bank is twenty parts: 60 ticks in the
+                // spawner and the same 3 of walking, a lead of 63. Every
+                // life between the two is where the rows disagree.
+                let casts life =
+                    spawnIntents (decide (leadColony life) Map.empty Set.empty None).Intents
+
+                Expect.isEmpty
+                    (casts 30)
+                    "at 30 ticks the reserver still counts; read off the generalist row it would not"
+
+                Expect.isEmpty (casts 16) "one tick outside its own row's lead it still counts"
+
+                match casts 15 with
+                | [ (_, body, creepName) ] ->
+                    Expect.stringStarts
+                        creepName
+                        "worker-"
+                        "at its lead the colony is one short — and casts a generalist, the reserver row having no quota yet (#131)"
+
+                    Expect.isFalse
+                        (List.contains Claim body)
+                        "nothing this ticket added casts a CLAIM part"
+                | other -> failtest $"expected exactly one SpawnCreep intent, got %A{other}"
             }
         ]

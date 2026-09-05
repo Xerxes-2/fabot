@@ -64,6 +64,12 @@ let private execute (intent: Intent) : Outcome =
         withCreepTarget creepName structureId (fun c t -> c.repair t)
     | UpgradeController(creepName, controllerId) ->
         withCreepTarget creepName controllerId (fun c t -> c.upgradeController t)
+    // The outpost controller is a target like any other: a declared one is
+    // in the projection without vision (ADR 0041), so the id can name an
+    // object this tick's `getObjectById` cannot answer for, and that is
+    // exactly the ActorMissing the shared guard already reports.
+    | ReserveController(creepName, controllerId) ->
+        withCreepTarget creepName controllerId (fun c t -> c.reserveController t)
     | PickupEnergy(creepName, resourceId) ->
         withCreepTarget creepName resourceId (fun c t -> c.pickup t)
     | MoveCreep(creepName, direction) ->

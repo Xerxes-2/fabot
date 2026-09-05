@@ -41,6 +41,27 @@ let haulerPattern =
         Block = [ Carry; Carry; Move ]
     }
 
+/// The reserver row (ADR 0042): the CLAIM body that walks to an outpost's
+/// controller and holds its reservation, which is what makes that room's
+/// sources worth ten a tick rather than five. `[2Claim;2Move]` is 1,300
+/// energy amortised over a CLAIM part's 600-tick life — 2.17 a tick — so
+/// it pays for itself twice over on a single source.
+///
+/// Declared here and deliberately **not a row of the table below**. ADR
+/// 0006's law is that a row arrives with its quota or does not arrive, and
+/// this row's quota — one reserver per posted outpost, sized off the
+/// reservation deficit — is #131's. Nothing casts a reserver until it
+/// lands. What this value is for meanwhile is reading a *living* CLAIM
+/// body back to the row it came from (`patternOf`), which is how ADR
+/// 0026 prices a succession: in the table it would be cast with no colony
+/// fact saying when; outside it, it still prices the bodies a later
+/// ticket puts in the room.
+let reserverPattern =
+    {
+        Name = "reserver"
+        Block = [ Claim; Move ]
+    }
+
 /// The pattern table: every body the colony casts is a row here, sized by
 /// energy under the row's own sizing rule. A future pattern is one more
 /// data row plus its own quota rule — a colony fact deciding when it is
@@ -148,6 +169,25 @@ let private anchorBodyFor capacity =
 
     List.replicate work Work @ [ Carry; Move ]
 
+/// The whole-block rows' shared arithmetic: as many whole blocks as the
+/// capacity buys, never below one and never past the engine's 50-part cap,
+/// with the parts grouped by kind in the block's own order — so damage
+/// strips a row's output before its legs, as every row here wants. Two
+/// rows size this way (the hauler's and the reserver's) and their *reasons*
+/// differ, which is why each keeps its own name and its own doc below; what
+/// they must not each keep is a second copy of the cap, since a body over
+/// 50 parts is refused outright by the engine and the spawn silently does
+/// nothing that tick.
+let private wholeBlockBodyFor (block: BodyPart list) capacity =
+    let repeats =
+        capacity / bodyCost block |> max 1 |> min (maxBodyParts / List.length block)
+
+    block
+    |> List.distinct
+    |> List.collect (fun part ->
+        let perBlock = block |> List.filter ((=) part) |> List.length
+        List.replicate (repeats * perBlock) part)
+
 /// The hauler row's sizing rule (ADR 0012): as many whole [Carry; Carry;
 /// Move] blocks as capacity buys (never below one), and nothing else. The
 /// row's parity declaration is road parity — two loaded Carry generate
@@ -156,23 +196,38 @@ let private anchorBodyFor capacity =
 /// remainder stays banked. Parts are grouped Carry then Move so damage
 /// strips capacity first and mobility last.
 let private haulerBodyFor capacity =
-    let repeats =
-        capacity / bodyCost haulerPattern.Block
-        |> max 1
-        |> min (maxBodyParts / List.length haulerPattern.Block)
+    wholeBlockBodyFor haulerPattern.Block capacity
 
-    List.replicate (2 * repeats) Carry @ List.replicate repeats Move
+/// The reserver row's sizing rule: as many whole [Claim; Move] blocks as
+/// capacity buys, never below one. The bank's truncation and nothing else
+/// — ADR 0042 sizes this row off the reservation deficit,
+/// `ceil((5000 - ticksToEnd) / 600)` CLAIM parts *capped by the bank*,
+/// and #131 lands the deficit half beside the cap this is.
+///
+/// It is here ahead of that ticket because a lead is priced off the row's
+/// own body (ADR 0026), and `parityBodyFor` cannot price this one: it
+/// counts Work, Carry and Move out of a block and emits only those, so a
+/// [Claim; Move] row read through it sizes to a body with no CLAIM part in
+/// it at all — eight Carry and four Move at an 1,800 bank — and prices the
+/// reserver's succession off a body that could not reserve anything.
+/// Parts are grouped Claim then Move so damage strips the reservation
+/// before the legs, as every other row strips its output first.
+let private reserverBodyFor capacity =
+    wholeBlockBodyFor reserverPattern.Block capacity
 
 /// Body for a pattern at an energy capacity, under the row's own sizing
 /// rule (ADR 0006): the anchor row spends on Work beside its fixed
 /// Carry/Move pair, the hauler row buys whole blocks at its own road
-/// parity, and every other block-replicating row pads its remainder at
-/// plain fatigue parity.
+/// parity, the reserver row buys whole blocks of the one part that holds a
+/// reservation, and every other block-replicating row pads its remainder
+/// at plain fatigue parity.
 let bodyFor pattern capacity =
     if pattern.Name = anchorPattern.Name then
         anchorBodyFor capacity
     elif pattern.Name = haulerPattern.Name then
         haulerBodyFor capacity
+    elif pattern.Name = reserverPattern.Name then
+        reserverBodyFor capacity
     else
         parityBodyFor pattern.Block capacity
 
@@ -189,6 +244,7 @@ let taskId =
     | Build siteId -> $"build:{siteId}"
     | Repair structureId -> $"repair:{structureId}"
     | Upgrade controllerId -> $"upgrade:{controllerId}"
+    | Reserve controllerId -> $"reserve:{controllerId}"
     // One Flee for the whole colony: it has no target to be identified by,
     // and every creep inside a Reach is running from the same thing.
     | Flee -> "flee"
@@ -457,6 +513,41 @@ let planTasks (snapshot: Snapshot) (threats: Threats) : Task list =
     let upgrades =
         snapshot.Controller |> Option.toList |> List.map (fun c -> Upgrade c.Id)
 
+    // The ids of one projected kind, in id order. The containers, the
+    // Storage and the controllers are all pooled by the projection's kind
+    // — never by position, never by name — so the rule is written once.
+    let idsOfKind kind =
+        snapshot.Spatial.TargetKinds
+        |> Map.toList
+        |> List.choose (fun (id, k) -> if k = kind then Some id else None)
+
+    // One Reserve per projected controller that is not the colony's own
+    // (ADR 0042): a neutral controller held by CLAIM parts pays its room's
+    // sources ten a tick instead of five, the hold decays by one a tick,
+    // and so the Task stands whatever the reservation has left on it —
+    // what the ticks remaining size is the body (#131), not the pool.
+    //
+    // Read off the projection's kind census and never off
+    // `Outpost.declared`: the declaration is the shell's input to the
+    // projection and every other rule here derives from what the
+    // projection actually carries (ADR 0041), so a room a stand-down keeps
+    // out of the scan set (ADR 0043) leaves this pool with it rather than
+    // through a second gate free to disagree with the first. The census is
+    // id-keyed and so unlayered, which is exactly right here: whose
+    // controller it is turns on the id and never on a tile, so no
+    // coordinate two rooms share can answer it.
+    //
+    // The colony's own controller is excluded by id. The engine refuses
+    // reserveController on a room we own, and the home controller is what
+    // Upgrade acts on: pooling both for one target would put a Task in the
+    // pool no body can ever execute.
+    let reserves =
+        let home = snapshot.Controller |> Option.map (fun c -> c.Id)
+
+        idsOfKind Controller
+        |> List.filter (fun id -> Some id <> home)
+        |> List.map Reserve
+
     // The haul cycle's intake (ADR 0012), shaped over the projection's
     // stores rather than energy's name: every stocked container yields a
     // Withdraw, at feeding tier beside Harvest — whether to dig or to
@@ -464,16 +555,8 @@ let planTasks (snapshot: Snapshot) (threats: Threats) : Task list =
     let stored id =
         snapshot.Spatial.Stores |> Map.tryFind id |> Option.defaultValue 0
 
-    // The standing structures of one built kind, in id order. Both the
-    // containers and the Storage are pooled by the projection's kind —
-    // never by position, never by name — so the rule is written once.
-    let targetsOfKind kind =
-        snapshot.Spatial.TargetKinds
-        |> Map.toList
-        |> List.choose (fun (id, k) -> if k = Structure kind then Some id else None)
-
-    let containers = targetsOfKind BuiltKind.Container
-    let storages = targetsOfKind BuiltKind.Storage
+    let containers = idsOfKind (Structure BuiltKind.Container)
+    let storages = idsOfKind (Structure BuiltKind.Storage)
 
     let withdraws =
         containers |> List.filter (fun id -> stored id > 0) |> List.map Withdraw
@@ -550,6 +633,7 @@ let planTasks (snapshot: Snapshot) (threats: Threats) : Task list =
     @ builds
     @ repairs
     @ upgrades
+    @ reserves
     @ containerRefills
     @ storageRefills
     @ storageWithdraws
@@ -841,13 +925,35 @@ let private isHaulerBody (creep: CreepInfo) =
 
     count Work = 0 && count Carry > 0
 
+/// Whether a living body was cast from the reserver row: it carries a
+/// CLAIM part. The one part no other row buys (ADR 0042), so it identifies
+/// the row on its own and is asked before the other two — a body holding
+/// one is out reserving a controller whatever else it is made of, and the
+/// two comparative tests below would read a [Claim; Carry; Move] body as a
+/// hauler on the strength of a part the reserver merely happens to have.
+let private isReserverBody (creep: CreepInfo) =
+    creep.Body |> Map.tryFind Claim |> Option.exists (fun n -> n > 0)
+
 /// The pattern row a living body was cast from, read off the parts alone
-/// (ADR 0006): more Work than Move is the anchor row, no Work beside a
-/// Carry is the hauler row, and every other body is the generalist. The
-/// row is what sizes the replacement a lead prices (ADR 0026), so the one
-/// rule serves every row and none of them needs a constant of its own.
+/// (ADR 0006): a CLAIM part is the reserver row, more Work than Move is
+/// the anchor row, no Work beside a Carry is the hauler row, and every
+/// other body is the generalist. The row is what sizes the replacement a
+/// lead prices (ADR 0026), so the one rule serves every row and none of
+/// them needs a constant of its own.
+///
+/// The reserver arm is what keeps ADR 0026 honest for a CLAIM body (ADR
+/// 0042): `[Claim; Move]` has neither Work nor Carry, so before it existed
+/// a reserver fell through to the generalist row and had its lead priced
+/// off a worker unit's cast time and a worker unit's fatigue factor — the
+/// wrong body on both counts, and wrong in the expensive direction, since
+/// the worker row sized to the live RCL5 bank of 1,800 is nine whole
+/// units — twenty-seven parts, no remainder to pad — against the
+/// reserver's four. The row is not in `patternTable` and nothing casts one
+/// yet (#131); the rule is written where the body is read, not where it is
+/// cast, so it is right the tick the first reserver exists.
 let private patternOf atlas (creep: CreepInfo) =
-    if Atlas.workHeavy atlas creep.Name then anchorPattern
+    if isReserverBody creep then reserverPattern
+    elif Atlas.workHeavy atlas creep.Name then anchorPattern
     elif isHaulerBody creep then haulerPattern
     else workerPattern
 
@@ -886,7 +992,15 @@ let private patternOf atlas (creep: CreepInfo) =
 /// at all — stopped holding when #123 landed the cross-room walk; the
 /// honest cross-room lead is the minimum over the Seam band, the same
 /// join `Atlas.haulRoundTripTicks` already prices this leg with, and it
-/// is unpriced here pending its own ticket rather than by design.
+/// is unpriced here pending its own ticket (#153) rather than by design.
+///
+/// The reserver row (ADR 0042) is the second row standing in that gap, and
+/// it stands in it for the whole of a reserver's life rather than for part
+/// of one: a reserver's work *is* the far side of a Seam. So `patternOf`'s
+/// CLAIM arm below prices the row correctly and reaches a living reserver
+/// only while it is still walking out through the home room — which is why
+/// #153 names this row too, and why nothing here should be read as ADR
+/// 0026's succession working for a reserver at its controller.
 let private leadOf (snapshot: Snapshot) atlas (creep: CreepInfo) : int =
     let pattern = patternOf atlas creep
 
@@ -1932,6 +2046,10 @@ let private tooEarly (snapshot: Snapshot) atlas (creep: CreepInfo) task (walk: L
     | Build _
     | Repair _
     | Upgrade _
+    // A controller is always there to be reserved: a reservation has no
+    // restock and no stock, so a reserver that has walked to one is never
+    // early (ADR 0042).
+    | Reserve _
     | Flee -> None
 
 /// The room a Task's Work Area lies in: its target's, since the area is
@@ -1946,7 +2064,8 @@ let private roomOfWork atlas task =
     | Refill id
     | Build id
     | Repair id
-    | Upgrade id -> Atlas.targetRoom atlas id
+    | Upgrade id
+    | Reserve id -> Atlas.targetRoom atlas id
     | Flee -> None
 
 /// The tiles a creep may work a Task from this tick (ADR 0033): its Work
@@ -2054,6 +2173,16 @@ let private applicable (threats: Threats) atlas (creep: CreepInfo) task =
     | Build _
     | Repair _
     | Upgrade _ -> has Work && creep.Energy > 0
+    // Part arithmetic and nothing else (ADR 0006): a reservation is pushed
+    // up by CLAIM parts, so a body without one can no more reserve than a
+    // Work-less one can dig, and a body with one asks for no energy state
+    // — a reserver carries nothing and spends nothing. The gate cuts both
+    // ways and that is the whole of ADR 0042's pairing rule: every other
+    // Task needs a Work part or a Carry part, so a `[Claim; Move]` body is
+    // applicable to this Task and to Flee and to no other, and a colony
+    // that cast one before this Task existed would have stood it on the
+    // spawn for its whole 600-tick life.
+    | Reserve _ -> has Claim
     // Flee asks for no part and no energy state, only for a creep that is
     // being shot at and can run (ADR 0033). A Work-heavy body is exempt: at
     // four to seven ticks a step an Anchor leaving its Post neither escapes
@@ -2078,6 +2207,7 @@ let private intentFor (creep: CreepInfo) task =
     | Build siteId -> Some(BuildSite(creep.Name, siteId))
     | Repair structureId -> Some(RepairStructure(creep.Name, structureId))
     | Upgrade controllerId -> Some(UpgradeController(creep.Name, controllerId))
+    | Reserve controllerId -> Some(ReserveController(creep.Name, controllerId))
     | Flee -> None
 
 /// Chat-bubble glyph of a Task: the whole colony's current matching is
@@ -2090,6 +2220,7 @@ let private glyphFor =
     | Build _ -> "🔨"
     | Repair _ -> "🔧"
     | Upgrade _ -> "⚡"
+    | Reserve _ -> "🚩"
     | Flee -> "🏃"
 
 /// The full downgrade timer per controller level (Screeps
@@ -2121,9 +2252,10 @@ type private Tier =
     /// it sits above every other tier and above the downgrade deadline
     /// too, because no other work matters while a creep is being killed.
     | Safety
-    /// Feeding the economy: Harvest, a container's Withdraw, and the
-    /// Refill of a spawn or an extension — the flow the colony's
-    /// reproduction runs on.
+    /// Feeding the economy: Harvest, a container's Withdraw, the Refill of
+    /// a spawn or an extension, and Reserve — the flow the colony's
+    /// reproduction runs on, and the one Task that decides how fast a
+    /// third of it flows (ADR 0042).
     | Feeding
     /// The Storage's Withdraw (ADR 0023): the colony's stock as an
     /// intake, one tier below the source containers the flow fills. An
@@ -2193,6 +2325,24 @@ let private tierOf (snapshot: Snapshot) task =
     match task with
     | Flee -> Safety
     | Harvest _ -> Feeding
+    // **A decision made here, because nothing else made it.** ADR 0042 and
+    // #116 both fix the reserver row's *casting* order — in front of the
+    // Anchor, hauler and worker rows — and neither says a word about its
+    // *matching* order, and `rankOfTier` is exhaustive on purpose, so a
+    // tier had to be chosen. Reserve joins the feeding tier on the casting
+    // order's own argument: every other row spends the colony's income,
+    // this one decides whether that income is five a tick or ten, so it
+    // ranks with the flow reproduction runs on and above everything that
+    // merely spends it.
+    //
+    // The choice is nearly free today — the only body Reserve applies to
+    // is a CLAIM body, and a CLAIM body applies to no other Task but Flee
+    // — so what it really settles is two comparisons. Below Safety, so a
+    // reserver being shot at runs (ADR 0033) instead of standing at a
+    // controller to die; and above Surplus, so the day a body carries
+    // CLAIM beside Work it holds the reservation before it spends on
+    // anything.
+    | Reserve _ -> Feeding
     | Withdraw storeId ->
         let kind = Map.tryFind storeId snapshot.Spatial.TargetKinds
 
@@ -2242,11 +2392,34 @@ let private rank (snapshot: Snapshot) task =
 /// unbounded. Harvest is capped by its source's Seat count — a source the
 /// projection does not place derives no cap, so behaviour without terrain
 /// data is unchanged.
-let private taskCapacities (snapshot: Snapshot) atlas : Map<string, int> =
-    snapshot.Sources
-    |> List.choose (fun s ->
-        Atlas.seats atlas s.Id |> Option.map (fun count -> taskId (Harvest s.Id), count))
-    |> Map.ofList
+///
+/// Reserve is capped at **one holder per controller** (ADR 0042): the ADR
+/// casts one reserver per posted outpost — "two reservers at 4.33 energy a
+/// tick buy three sources their second five" — and a reservation is a
+/// single capped number one body's CLAIM parts are sized to hold, so a
+/// second body on a controller the first already holds buys nothing while
+/// the other outpost stays at five a tick. Nothing else in the pipeline
+/// produces that: the quota (#131) counts bodies and not assignments, and
+/// the matching key puts cost ahead of `load`, so two reservers standing
+/// together are matched to the same nearest controller and the collapse is
+/// silent — both report Matched. The cap is read off the pool rather than
+/// re-deriving it, so which controllers are reserved is still said once,
+/// in `planTasks`; and it counts holders at arrival like every other cap
+/// (ADR 0026), so a reserver's successor is cast and matched while the
+/// incumbent still holds the reservation.
+let private taskCapacities (snapshot: Snapshot) atlas (tasks: Task list) : Map<string, int> =
+    let seats =
+        snapshot.Sources
+        |> List.choose (fun s ->
+            Atlas.seats atlas s.Id |> Option.map (fun count -> taskId (Harvest s.Id), count))
+
+    let reserves =
+        tasks
+        |> List.choose (function
+            | Reserve _ as task -> Some(taskId task, 1)
+            | _ -> None)
+
+    seats @ reserves |> Map.ofList
 
 /// Concurrent Work-heavy-harvester cap per Harvest task id (ADR 0024): the
 /// source's Post count, the standing room a heavy body actually has — its
@@ -2290,6 +2463,7 @@ let private actionIntents
         | Build _
         | Repair _
         | Upgrade _
+        | Reserve _
         | Flee -> false
 
     if
@@ -2730,7 +2904,7 @@ let matchCreeps
     (verbose: Set<string>)
     : Assignments * Verdict list =
     let byId = tasks |> List.map (fun t -> taskId t, t) |> Map.ofList
-    let capacities = taskCapacities snapshot atlas
+    let capacities = taskCapacities snapshot atlas tasks
     let postCaps = postCapacities snapshot atlas
 
     // Each living creep's remaining life, hoisted for the tick as the two
@@ -2785,7 +2959,9 @@ let matchCreeps
 
     // A heavy body is judged against both caps (ADR 0024): the Seat count
     // it shares with every other harvester, and the Post count only its own
-    // kind competes for. Only Harvest is capped at all, so the holders are
+    // kind competes for. The Post cap is Harvest's alone; Reserve carries
+    // the Seat-shaped one at a count of one (ADR 0042) and no Post cap at
+    // all, since no heavy body ever holds a CLAIM part. Holders are
     // gathered inside the capped arms — the Refills, Withdraws and surplus
     // work the pool is mostly made of never walk the assignment map.
     let hasCapacity (creep: CreepInfo) acc task (arrival: Lazy<int option>) =

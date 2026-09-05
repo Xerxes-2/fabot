@@ -167,6 +167,10 @@ type ICreep =
     abstract build: target: obj -> int
     abstract repair: target: obj -> int
     abstract upgradeController: target: obj -> int
+    /// Push a neutral controller's reservation up by one tick per CLAIM
+    /// part (ADR 0042). Range 1, and refused on a controller anybody owns
+    /// — including ours, which is Upgraded instead.
+    abstract reserveController: target: obj -> int
     abstract pickup: target: obj -> int
     /// Single-step move by direction constant (TOP = 1, clockwise). The
     /// only movement API the bot uses — moveTo is forbidden (ADR 0001).

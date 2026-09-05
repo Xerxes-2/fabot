@@ -704,6 +704,23 @@ type Task =
     | Build of siteId: string
     | Repair of structureId: string
     | Upgrade of controllerId: string
+    /// Holding a neutral controller with CLAIM parts (ADR 0042): a
+    /// reservation is what makes that room's sources worth the held ten a
+    /// tick rather than the neutral five, and it decays by one a tick, so
+    /// this is work that is never finished. One per projected controller
+    /// that is not the colony's own — the engine refuses reserveController
+    /// on a room we own, and the colony's own controller is Upgraded, not
+    /// reserved.
+    ///
+    /// Pooled whatever the reservation has left on it: the ticks remaining
+    /// size the *body* (`ceil((5000 - ticksToEnd) / 600)` CLAIM, ADR 0042,
+    /// #131) and never the Task, because a Task that vanished at the
+    /// 5,000 cap would release its holder there and re-match it the tick
+    /// after — a flicker ADR 0013 took out of Harvest for the same reason.
+    /// Which rooms the colony works at all is the one gate above this, and
+    /// it is the projection's: an outpost withdrawn from is out of the
+    /// scan set entirely (ADR 0043).
+    | Reserve of controllerId: string
     /// Getting out of a Threat's Reach (ADR 0033). The one Task with no
     /// target and no action: its Work Area is the tiles no Threat can
     /// hurt, and the Emitter issues movement for it and nothing else.
@@ -968,6 +985,11 @@ type Intent =
     | BuildSite of creepName: string * siteId: string
     | RepairStructure of creepName: string * structureId: string
     | UpgradeController of creepName: string * controllerId: string
+    /// The reserve act (ADR 0042): a CLAIM body standing beside a neutral
+    /// controller pushes its reservation up by one tick per CLAIM part,
+    /// which is what doubles that room's sources. Range 1, like the
+    /// engine's other three touching acts.
+    | ReserveController of creepName: string * controllerId: string
     | PickupEnergy of creepName: string * resourceId: string
     | MoveCreep of creepName: string * direction: Direction
     | SayCreep of creepName: string * message: string

@@ -1389,6 +1389,28 @@ let outpostDeclarationTests =
                         area
                         (fun tile -> range tile controllerPos <= 3 && walkable tile)
                         $"{where}: every Work Area tile walkable within the Upgrade range"
+
+                    // The area the reserver actually stands on (ADR 0042):
+                    // reserveController acts at range 1 and a controller's
+                    // own tile is an obstacle, so this is its walkable
+                    // neighbours and nothing else — a much narrower set
+                    // than the Upgrade area above, and W12S27's is two
+                    // tiles of swamp. Named as a property and never as
+                    // those tiles (ADR 0036): what must hold is that the
+                    // set is non-empty, because an empty one is silent —
+                    // the Task stays pooled, `threatened` reads an empty
+                    // area as unthreatened, and the reserver matched to it
+                    // is rejected as unreachable for its whole life.
+                    let reserveArea = workArea atlas (Reserve controllerId)
+
+                    Expect.isNonEmpty
+                        reserveArea
+                        $"{where}: a controller nobody can stand beside can never be reserved"
+
+                    Expect.all
+                        reserveArea
+                        (fun tile -> range tile controllerPos = 1 && walkable tile)
+                        $"{where}: every Reserve Work Area tile a walkable neighbour of the controller"
             }
         ]
 

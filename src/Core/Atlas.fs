@@ -1164,15 +1164,23 @@ let targetRoom (atlas: Atlas) (targetId: string) : string option =
     Map.tryFind targetId atlas.TargetAt |> Option.map fst
 
 /// What a Task acts on, and the Chebyshev range its action reaches from
-/// (Screeps: harvest, withdraw and transfer act at range 1; build, repair
-/// and upgrade at range 3) — the one pair every geometry query starts
-/// from. None for a Task that acts on nothing: Flee has no target and no
-/// action (ADR 0033), so no area of the projection's own is derived for
-/// it and no action is ever permitted.
+/// (Screeps: harvest, withdraw, transfer and reserveController act at
+/// range 1; build, repair and upgrade at range 3) — the one pair every
+/// geometry query starts from. None for a Task that acts on nothing: Flee
+/// has no target and no action (ADR 0033), so no area of the projection's
+/// own is derived for it and no action is ever permitted.
+///
+/// Reserve is a range-1 act, and its target is an obstacle: a controller's
+/// own tile is in `Obstacles` whether the projection saw it or a
+/// declaration laid it (`Outpost.place`), so the Work Area below is its
+/// walkable neighbours and the reserver stands beside the controller and
+/// never on it. At W12S27's `37,43` that area is two tiles, both swamp
+/// (ADR 0042) — a fact about that room's ground, not a special case here.
 let private actionOn =
     function
     | Harvest id
     | Withdraw id
+    | Reserve id
     | Refill id -> Some(id, 1)
     | Build id
     | Repair id
