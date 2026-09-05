@@ -321,6 +321,10 @@ let private colonyOf (room: LoadedRoom) level =
                     SafeModeAvailable = 1
                     SafeModeActive = false
                 })
+        // The captured room is this colony's own, so it is owned and its
+        // sources are priced at the full rate (ADR 0042) — the sweep is
+        // over one room and every one of them is a room with a spawn in it.
+        RoomControl = Map.ofList [ name, { Owned = true; Reservation = None } ]
         ConstructionSites = []
         Creeps = []
         Hostiles = []

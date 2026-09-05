@@ -340,6 +340,9 @@ let quiet: Snapshot =
         Refillables = []
         Sources = []
         Controller = None
+        // The Raid fold prices no source, so who holds the room is nothing
+        // it reads (ADR 0042).
+        RoomControl = Map.empty
         ConstructionSites = []
         Creeps = []
         Hostiles = []

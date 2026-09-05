@@ -102,6 +102,79 @@ type ControllerInfo =
         SafeModeActive: bool
     }
 
+/// The reservation standing on one room's controller this tick (ADR
+/// 0042): a neutral controller held by CLAIM parts, which doubles every
+/// source in that room, decays by one a tick and caps at 5,000.
+type ReservationInfo =
+    {
+        /// True when this colony's own CLAIM parts hold it. Whose it is,
+        /// rather than whose name it carries: the engine answers holding
+        /// with a username, the colony's own name is the shell's to know
+        /// (the owner of the room its spawns stand in), and every rule
+        /// reading this asks only whether the room is ours to mine at the
+        /// full rate.
+        ///
+        /// A reservation another player holds reads here exactly as no
+        /// reservation at all does, and that is a colony decision, not the
+        /// engine's arithmetic: `sources/tick.js` switches a source to
+        /// 3,000 a cycle on `roomController.user || roomController.reservation`
+        /// — **any** owner, **any** reservation — so a creep of ours
+        /// digging in a room a rival holds really would draw ten a tick
+        /// (docs/research/remote-mining.md §1.1). The colony prices it at
+        /// five deliberately and conservatively: a room somebody else
+        /// owns or reserves has stopped being ours to work, it is the one
+        /// withdrawal trigger every mature bot implements, and the
+        /// [[stand-down]] (ADR 0043) is where the withdrawal itself
+        /// lands. Nothing should size a fleet against energy the colony
+        /// is about to walk away from.
+        Ours: bool
+        /// Ticks left on the reservation — what the reserver row's one
+        /// rule sizes and quotas from, `ceil((5000 - this) / 600)` CLAIM
+        /// parts (ADR 0042, #131).
+        ///
+        /// The one field here no rule reads yet, and the exception the
+        /// sentence under `Reservation` below does not cover: the holder
+        /// and the ticks left are a single engine fact off a single
+        /// binding — the reservation object arrives whole or not at all —
+        /// so projecting the pair costs nothing over projecting `Ours`
+        /// alone, and #131 splits neither of them.
+        TicksToEnd: int
+    }
+
+/// Who holds one room the colony can see this tick — the fact a source's
+/// output is read from (ADR 0042), because ten energy a tick is the
+/// *held* rate and a neutral room's source yields five.
+///
+/// One entry per room vision answered for, home included. A room the
+/// colony cannot see has no entry at all, and that absence is not "half":
+/// who holds a room we cannot look into is not a fact this tick, so its
+/// sources are unpriceable and enter no quota (ADR 0004).
+type RoomControlInfo =
+    {
+        /// True when this colony owns the room's controller (the engine's
+        /// `controller.my`) — the spawn room, and nothing else while
+        /// there is one colony. Read *beside* the reservation and never
+        /// instead of it: the engine gives a room with an owner the same
+        /// 3,000 a cycle it gives a reserved one, so a rule spelled
+        /// "reserved, or half" would price the colony's own two sources
+        /// at five and halve its hauler quota and its income base
+        /// together. Ours and not merely somebody's: a room a *rival*
+        /// owns yields the engine's ten too, and reads false here for the
+        /// same reason a rival's reservation does — see `Ours` above.
+        Owned: bool
+        /// The reservation standing on the room's controller; None where
+        /// nothing reserves it. *Which* other player owns or reserves the
+        /// room is deliberately not carried: naming the rival is a second
+        /// binding and a second field, no rule reads it yet, and the
+        /// clockless stand-down that will (ADR 0043) is the tick to widen
+        /// this rather than a reason to project a field early (ADR 0007's
+        /// rule). That is a rule about a field the projection would have
+        /// to go and fetch; the unread `TicksToEnd` above arrives inside
+        /// the reservation this one already carries, which is why it is
+        /// not the same question.
+        Reservation: ReservationInfo option
+    }
+
 /// A tile coordinate inside a room.
 type Pos = { X: int; Y: int }
 
@@ -589,6 +662,14 @@ type Snapshot =
         Sources: SourceInfo list
         /// None when no spawn room has an owned controller (should not happen in practice).
         Controller: ControllerInfo option
+        /// Who holds each room the colony has vision in this tick, under
+        /// that room's name — what a source's output per tick is priced
+        /// from (ADR 0042). Keyed by room and not by controller id: the
+        /// question a quota asks is about the room a source stands in, and
+        /// the room is what the projection files a source under (ADR
+        /// 0041). Absent for a room vision did not answer for, per-entry
+        /// as every other absence is (ADR 0004).
+        RoomControl: Map<string, RoomControlInfo>
         ConstructionSites: ConstructionSiteInfo list
         Creeps: CreepInfo list
         /// Hostile creeps standing in the spawn rooms this tick.

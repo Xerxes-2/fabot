@@ -407,6 +407,23 @@ let build () : Snapshot =
     // needs no vision at all (ADR 0041).
     let seen = scanned |> List.choose roomSeen
 
+    // The name the engine spells this colony, off the controller of the
+    // room its spawns stand in — a spawn cannot stand in a room this
+    // colony does not own, so that owner is us. Read here and nowhere
+    // else: whose a reservation is, is a comparison against this name,
+    // and Core is handed the answer rather than the two names, because
+    // asking the engine who anybody is is the shell's half of ADR 0042
+    // and the economics is Core's.
+    let colonyOwner =
+        spawns
+        |> Array.tryPick (fun s ->
+            let c = s.room.controller
+
+            if isNull (box c) || isNull (box c.owner) then
+                None
+            else
+                Some c.owner.username)
+
     {
         Time = Game.time
         Spawns =
@@ -510,6 +527,42 @@ let build () : Snapshot =
                     )
                 else
                     None)
+        // Who holds each room the colony can see this tick, home included
+        // (ADR 0042). One entry per *seen* room and never per scanned one:
+        // a reservation is exactly the changing half of an outpost that
+        // vision pays for, so a room we cannot look into contributes no
+        // entry and its sources are unpriceable rather than half-rate (ADR
+        // 0004). A seen room with no controller at all — a highway, a
+        // sector centre — does get an entry, and a truthful one: nobody
+        // owns or reserves it, which is the neutral rate and not an
+        // unknown.
+        RoomControl =
+            seen
+            |> List.map (fun room ->
+                let c = room.controller
+
+                let control: RoomControlInfo =
+                    if isNull (box c) then
+                        { Owned = false; Reservation = None }
+                    else
+                        {
+                            // `my` is undefined and not false on a
+                            // controller nobody owns, the shape `safeMode`
+                            // and `ticksToRegeneration` also arrive in.
+                            Owned = not (isNull (box c.my)) && c.my
+                            Reservation =
+                                if isNull (box c.reservation) then
+                                    None
+                                else
+                                    Some
+                                        {
+                                            Ours = Some c.reservation.username = colonyOwner
+                                            TicksToEnd = c.reservation.ticksToEnd
+                                        }
+                        }
+
+                room.name, control)
+            |> Map.ofList
         ConstructionSites =
             spawns
             |> Array.collect (fun s -> s.room.find findMyConstructionSites)

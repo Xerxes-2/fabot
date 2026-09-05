@@ -35,6 +35,35 @@ let controllerAt level =
         SafeModeActive = false
     }
 
+/// A room this colony owns: the spawn room's control entry, and the rate
+/// every source in it is priced at (ADR 0042). Owned and not reserved —
+/// the two halves the engine gives the same 3,000 a cycle — because that
+/// is what the colony's own room is.
+let ownedRoom: RoomControlInfo = { Owned = true; Reservation = None }
+
+/// A neutral room nobody holds: seen, and worth half. Not the same fact as
+/// a room with no entry at all, which is one the colony cannot see and so
+/// cannot price (ADR 0004).
+let neutralRoom: RoomControlInfo = { Owned = false; Reservation = None }
+
+/// A neutral room under a reservation of the given holder, with the given
+/// ticks left on it: `Ours` is what doubles the room, so a reservation
+/// another player holds is passed `false` and reads as none at all.
+let reservedRoom ours ticksToEnd : RoomControlInfo =
+    {
+        Owned = false
+        Reservation = Some { Ours = ours; TicksToEnd = ticksToEnd }
+    }
+
+/// The control map for a colony holding its own room and nothing else.
+/// Both names the fixtures below file a home layer under: `SpatialInfo.empty`
+/// and the `spatial` funnel leave `RoomName` unset and file under the empty
+/// name, `openRoom` names the room "W1N1", and the control map is keyed by
+/// room like every other room-keyed fact (ADR 0041). Holding both keeps one
+/// default honest for either funnel; an entry for a room the fixture has no
+/// layer for is read by nothing.
+let homeControl = Map.ofList [ "", ownedRoom; "W1N1", ownedRoom ]
+
 /// A stocked source: a restock of zero, ready to dig now (ADR 0025).
 let source id : SourceInfo = { Id = id; TicksToRestock = 0 }
 
@@ -57,6 +86,7 @@ let bareRespawn =
         Refillables = [ refillable "spawn-1" 0 BuiltKind.Spawn ]
         Sources = [ source "src-a"; source "src-b" ]
         Controller = Some(controllerAt 1)
+        RoomControl = homeControl
         ConstructionSites = []
         Creeps = []
         Hostiles = []
@@ -2475,6 +2505,54 @@ let censusSignatureTests =
                     (censusSignature renamed)
                     (censusSignature colony)
                     "terrain is keyed by the room, so the name is a signature input"
+            }
+
+            test "who holds the home room moves the signature" {
+                // The hauler quota's second load-bearing input since ADR
+                // 0042: it prices each container at its source's own
+                // output, and that output is read off `RoomControl`. A
+                // vision fact riding a census memo has to be signed, or
+                // the memo hands back a quota sized for the held rate on
+                // the tick the room stops being held — the signature gap
+                // ADR 0017 names as its failure mode.
+                let colony = trunkColony 2
+
+                let holding control =
+                    { colony with
+                        RoomControl = homeControl |> Map.map (fun _ _ -> control)
+                    }
+
+                Expect.notEqual
+                    (censusSignature (holding neutralRoom))
+                    (censusSignature (holding ownedRoom))
+                    "a room that stopped being held prices its sources at half: a memo input"
+
+                Expect.equal
+                    (censusSignature (holding (reservedRoom true 4000)))
+                    (censusSignature (holding ownedRoom))
+                    "owned or reserved by us is one rate, so the two sign the same"
+
+                Expect.notEqual
+                    (censusSignature { colony with RoomControl = Map.empty })
+                    (censusSignature (holding neutralRoom))
+                    "and no vision at all is a third answer, not the neutral one (ADR 0004)"
+            }
+
+            test "the ticks left on a reservation leave the signature alone" {
+                // The half of the reservation the quota does *not* read.
+                // `TicksToEnd` decays by one every tick, so signing it
+                // would throw the Layout and the walk table away on every
+                // tick the colony holds an outpost — the memo would never
+                // survive its own input.
+                let holding control =
+                    { trunkColony 2 with
+                        RoomControl = homeControl |> Map.map (fun _ _ -> control)
+                    }
+
+                Expect.equal
+                    (censusSignature (holding (reservedRoom true 4000)))
+                    (censusSignature (holding (reservedRoom true 3999)))
+                    "the rate is the input, and the countdown under it is not"
             }
 
             test "everything outside the census leaves the signature alone" {
@@ -9922,6 +10000,279 @@ let outpostWorkforceTests =
                     (placementIntents (decide joined Map.empty Set.empty None).Intents)
                     (placementIntents (decide colony Map.empty Set.empty None).Intents)
                     "the same room plans the same tiles: a source a room away is no source of its"
+            }
+        ]
+
+/// The W12S28 fleet at a given hauler and worker count: one Anchor per
+/// home Post — the one row no case below moves — beside the two rows that
+/// do. The hauler row is a parameter because it halves with the home
+/// room's output: a case that neutralises the spawn room and leaves four
+/// haulers standing is reading a fleet two bodies above the quota it says
+/// it is sized to.
+let private incomeFleetRows haulers workers =
+    [ anchor "a1" 0 50; anchor "a2" 0 50 ]
+    @ [ for i in 1..haulers -> hauler $"h{i}" 0 100 ]
+    @ [ for i in 1..workers -> worker $"w{i}" 0 50 ]
+
+/// The same fleet at the held home room's hauler quota of four, which is
+/// every case whose home room stays this colony's own. `incomeFleet` is
+/// this fleet at 19 workers, which the first case below re-derives rather
+/// than assumes.
+let private incomeFleetOf workers = incomeFleetRows 4 workers
+
+/// The W12S28 colony with a **posted** outpost source beside it: the same
+/// rock in the same three-Seat field the unposted case above leaves out of
+/// every quota, with a container standing on one of its Seats — the switch
+/// that admits an outpost into the economy (ADR 0042). The fleet is the
+/// caller's, and so is who holds W1N2: everything else is `incomeColony`,
+/// unmoved, so a difference between two calls is the reservation and
+/// nothing else.
+///
+/// Its Anchor and hauler quotas are the home room's either way. One Anchor
+/// per Post counts `Atlas.posts`, the colony's own room, and the hauler
+/// quota folds the containers the home layer places — so the outpost's
+/// Post and its container are in neither, and the income base is the one
+/// addend this fixture moves. That is what makes a worker count the whole
+/// reading of it.
+let private postedOutpostColony workers (control: (string * RoomControlInfo) list) =
+    let rock = { X = 40; Y = 40 }
+
+    let colony =
+        incomeColonyPlus (
+            withOutpost
+                "W1N2"
+                [
+                    "src-out", rock, Source
+                    "can-out", { rock with X = rock.X - 1 }, Structure BuiltKind.Container
+                ]
+                (threeSeatField rock)
+        )
+
+    { colony with
+        Creeps = incomeFleetOf workers
+        RoomControl =
+            (colony.RoomControl, control)
+            ||> List.fold (fun acc (room, holder) -> Map.add room holder acc)
+    }
+
+[<Tests>]
+let sourceOutputTests =
+    testList
+        "a source's output and the room that holds it"
+        [
+            // Ten is the *reserved* rate (ADR 0042). The colony that holds
+            // W1N2 counts ten energy a tick from its rock and the colony
+            // that does not counts five, and five over a 1,500-tick
+            // lifetime is five worker places at this bank's Work drain of
+            // one. So the fleet below is sized to the *unreserved* target:
+            // the unreserved colony has no gap to cast into and the
+            // reserved one does, which is a difference no shared cap and
+            // no one-body-per-spawn limit can hide.
+            //
+            // Unreserved the target is 2 Anchors + 4 haulers +
+            // ceil(((20 + 5) × 1500 − 1800) / 1500) = 24 workers = 30;
+            // reserved it is 29 workers and 35.
+            let unreservedWorkers = 24
+
+            test "the same outpost source is worth twice as much reserved" {
+                Expect.equal
+                    (incomeFleetOf 19)
+                    incomeFleet
+                    "the premise: this is the W12S28 fleet, one worker count at a time"
+
+                Expect.isNonEmpty
+                    (Atlas.postsOf
+                        (Atlas.ofSnapshot (postedOutpostColony unreservedWorkers []))
+                        "src-out")
+                    "the premise: the container standing on its Seat makes the rock a Post"
+
+                Expect.isEmpty
+                    (spawnIntents
+                        (decide
+                            (postedOutpostColony unreservedWorkers [ "W1N2", neutralRoom ])
+                            Map.empty
+                            Set.empty
+                            None)
+                            .Intents)
+                    "unreserved, the rock is worth five a tick and the fleet already matches"
+
+                Expect.isNonEmpty
+                    (spawnIntents
+                        (decide
+                            (postedOutpostColony
+                                unreservedWorkers
+                                [ "W1N2", reservedRoom true 4000 ])
+                            Map.empty
+                            Set.empty
+                            None)
+                            .Intents)
+                    "reserved, the same rock is worth ten and the colony hires against it"
+            }
+
+            test "a reservation another player holds doubles nothing of ours" {
+                // Pairwise, one rival at a time: the same room, the same
+                // rock, the same reservation standing on the same
+                // controller — only whose it is moves. The engine pays
+                // ten a tick in a room a rival holds as readily as in one
+                // we hold (docs/research/remote-mining.md §1.1); the
+                // colony prices it at five anyway, because a room
+                // somebody else holds is one it is withdrawing from.
+                Expect.isEmpty
+                    (spawnIntents
+                        (decide
+                            (postedOutpostColony
+                                unreservedWorkers
+                                [ "W1N2", reservedRoom false 4000 ])
+                            Map.empty
+                            Set.empty
+                            None)
+                            .Intents)
+                    "another player's reservation prices the rock exactly as none at all does"
+
+                // Five and specifically not nothing. The assertion above
+                // is sized to the neutral target, so it would hold just
+                // as well if a rival's reservation made the rock
+                // *unpriceable* — the answer ADR 0004 reserves for a room
+                // with no vision. This fleet is the blind target below,
+                // which the neutral rate outgrows and the blind one does
+                // not, so the branch is pinned strictly between the two.
+                Expect.isNonEmpty
+                    (spawnIntents
+                        (decide
+                            (postedOutpostColony 19 [ "W1N2", reservedRoom false 4000 ])
+                            Map.empty
+                            Set.empty
+                            None)
+                            .Intents)
+                    "a rival's reservation prices the rock at five and hires, not at nothing"
+            }
+
+            test "an outpost the colony cannot see this tick prices no source" {
+                // ADR 0004, entry by entry: who holds a room we cannot look
+                // into is not a fact this tick, so the source is
+                // unpriceable and enters no quota. Unpriceable is not
+                // half — half is what a room we *can* see and nobody holds
+                // is worth, and the pair below is what separates the two.
+                let blind = postedOutpostColony 19 []
+
+                Expect.isEmpty
+                    (spawnIntents (decide blind Map.empty Set.empty None).Intents)
+                    "no entry for W1N2: the rock counts nothing and the W12S28 fleet still matches"
+
+                Expect.isNonEmpty
+                    (spawnIntents
+                        (decide
+                            { blind with
+                                RoomControl = Map.add "W1N2" neutralRoom blind.RoomControl
+                            }
+                            Map.empty
+                            Set.empty
+                            None)
+                            .Intents)
+                    "seen and held by nobody, the same rock is worth five and hires"
+            }
+
+            test "the colony's own room is priced on its owner, not on a reservation" {
+                // The trap #116's prose walks into and ADR 0042's rule does
+                // not: taken as "reserved, or half", the spawn room — which
+                // is owned and which nothing reserves — would price both its
+                // sources at five, halving the income base and the hauler
+                // quota together. The engine gives a room with an owner the
+                // same 3,000 a cycle it gives a reserved one.
+                //
+                // Sized to the halved target so the direction is
+                // readable, and the hauler row halves with the output it
+                // ships: 2 Anchors + 2 haulers, whose amortization is
+                // 2 × 300 + 2 × 300 = 1,200, + ceil((10 × 1500 − 1,200) /
+                // 1500) = 10 workers = 14. Held it would be 2 + 4 + 19 =
+                // 25, which is what the second half reads.
+                let halved =
+                    { incomeColony with
+                        Creeps = incomeFleetRows 2 10
+                        RoomControl = homeControl |> Map.map (fun _ _ -> neutralRoom)
+                    }
+
+                Expect.isEmpty
+                    (spawnIntents (decide halved Map.empty Set.empty None).Intents)
+                    "the premise: a neutral spawn room's whole target is these fourteen"
+
+                Expect.isNonEmpty
+                    (spawnIntents
+                        (decide
+                            { halved with
+                                RoomControl = homeControl
+                            }
+                            Map.empty
+                            Set.empty
+                            None)
+                            .Intents)
+                    "owned, the same two sources are worth ten each and the fleet is eleven short"
+            }
+
+            test "the hauler quota prices each container at its own source's output" {
+                // The quota's other reader (ADR 0042). It folds the home
+                // layer's containers and prices each at *that*
+                // container's source. The home room is the only room it
+                // can ask about — `Atlas.haulRoundTripTicks` floods one
+                // room, and #123 landed the Seam-band price without
+                // widening it — so the rate is moved under the home room
+                // rather than under an outpost. ceil(24 × 10 / 200) is
+                // two haulers a container and ceil(24 × 5 / 200) is one.
+                Expect.equal (quotaOf incomeColony) 4 "the premise: the reserved rate hires four"
+
+                Expect.equal
+                    (quotaOf
+                        { incomeColony with
+                            RoomControl = homeControl |> Map.map (fun _ _ -> neutralRoom)
+                        })
+                    2
+                    "half the output is half the haul, one hauler a container"
+
+                Expect.equal
+                    (quotaOf
+                        { incomeColony with
+                            RoomControl = Map.empty
+                        })
+                    0
+                    "a container whose source's room prices nothing hires nobody (ADR 0004)"
+            }
+
+            test "a quota memoised while the room was held is not handed back when it lapses" {
+                // ADR 0017's stated failure mode, at the seam that would
+                // ship it: the hauler quota rides the census memo, and
+                // since ADR 0042 it reads who holds the room — a per-tick
+                // vision fact, not a census one. `Main.fs` keeps the memo
+                // in heap and hands `decide` last tick's every tick, so a
+                // signature blind to the rate would recall four haulers
+                // for a room now worth half, and would size the worker
+                // row off that amortization too. Every census input here
+                // is byte-identical between the two Snapshots: the
+                // reservation is the only thing that moved.
+                let lapsed =
+                    { incomeColony with
+                        Creeps = incomeFleetRows 2 10
+                        RoomControl = homeControl |> Map.map (fun _ _ -> neutralRoom)
+                    }
+
+                let previous = (decide incomeColony Map.empty Set.empty None).Memo
+
+                Expect.equal
+                    previous.HaulerQuota
+                    4
+                    "the premise: held, the two home containers hire four"
+
+                let recalled = decide lapsed Map.empty Set.empty (Some previous)
+                let fresh = decide lapsed Map.empty Set.empty None
+
+                Expect.equal
+                    recalled.Memo.HaulerQuota
+                    fresh.Memo.HaulerQuota
+                    "the stale memo recomputes to the fresh quota: half the output, half the haul"
+
+                Expect.equal
+                    (spawnIntents recalled.Intents)
+                    (spawnIntents fresh.Intents)
+                    "so the fleet standing at the halved target casts nothing it does not need"
             }
         ]
 

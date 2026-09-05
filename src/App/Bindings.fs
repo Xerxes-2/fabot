@@ -75,10 +75,31 @@ type IConstructionSite =
     abstract structureType: string
     abstract pos: IRoomPosition
 
+/// The `owner` sub-object every owned game object carries.
+type IOwner =
+    abstract username: string
+
+/// The reservation standing on a neutral controller: who holds it, and
+/// how long it has left. Undefined on a controller nothing reserves, and
+/// on every owned one — a reservation and an owner are exclusive.
+type IReservation =
+    /// The username holding it.
+    abstract username: string
+    /// Ticks left before it lapses; decays by one a tick, caps at 5,000.
+    abstract ticksToEnd: int
+
 type IController =
     abstract id: string
-    /// True when this controller is owned by us.
+    /// True when this controller is owned by us; undefined on a
+    /// controller nobody owns, the shape `safeMode` also arrives in.
     abstract my: bool
+    /// Whose controller this is; undefined on an unowned one. Read only
+    /// off the room the colony spawns in, for the one name a reservation
+    /// is compared against (ADR 0042).
+    abstract owner: IOwner
+    /// The reservation standing on this controller; undefined when none
+    /// does.
+    abstract reservation: IReservation
     /// Controller level (RCL).
     abstract level: int
     /// Ticks left on the downgrade timer; undefined on unowned controllers.
@@ -118,10 +139,6 @@ type ISpawn =
 type IBodyPartDef =
     /// Part-type string, e.g. "work" or "claim".
     abstract ``type``: string
-
-/// The `owner` sub-object every owned game object carries.
-type IOwner =
-    abstract username: string
 
 type ICreep =
     abstract id: string

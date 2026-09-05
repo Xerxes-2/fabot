@@ -62,10 +62,17 @@ let bodyCost body =
 // Screeps MAX_CREEP_SIZE: the engine rejects bodies over 50 parts.
 let private maxBodyParts = 50
 
-/// Screeps source regen: 3000 energy per 300 ticks — the output per tick
-/// a continuously drained source yields, and what its container's hauler
-/// share must ship.
-let private sourceOutputPerTick = 10
+/// Screeps source regen in a room whose controller carries an owner or a
+/// reservation: 3,000 energy per 300 ticks — the output per tick a
+/// continuously drained source yields there, and what its container's
+/// hauler share must ship.
+let private heldOutputPerTick = 10
+
+/// The same source in a neutral room: 1,500 per 300 ticks, half the rate.
+/// Ten is the *held* rate (ADR 0042), which is the whole reason a source's
+/// output stopped being a module constant — sizing miners and haulers at
+/// ten against a source yielding five overbuilds both rows twofold.
+let private neutralOutputPerTick = 5
 
 /// Screeps HARVEST_POWER: energy one Work part digs from a source a tick.
 let private harvestPerWork = 2
@@ -76,7 +83,18 @@ let private harvestPerWork = 2
 /// sooner and idles until it regenerates; the spare drains it 50 ticks
 /// early, and those ticks absorb an unmanned Post's gap (death, recast,
 /// the walk back) at no cost in output.
-let private anchorWorkCap = sourceOutputPerTick / harvestPerWork + 1
+///
+/// Read at the held rate and still a constant. ADR 0042 narrows this rule
+/// to a *source's* saturation — "unchanged as a rule and changed as a
+/// number" — and #132 is where the narrowing lands, because the number is
+/// consumed inside `anchorBodyFor`, reached through `bodyFor` from a
+/// `planSpawns` that does not know which Post the Anchor it casts will
+/// fill. Pairing an unmanned Post to its source is a wider change than
+/// pricing a container, so the two are separate tickets; until then the
+/// cap is a held room's, which is what every outpost this colony declares
+/// is (ADR 0042 reserves all of them from the first version), and the
+/// wrong number shows only while a reservation has lapsed.
+let private anchorWorkCap = heldOutputPerTick / harvestPerWork + 1
 
 /// The worker row's sizing rule: the largest affordable repetition of the
 /// block (never below one repeat), with the remainder spent on Carry/Move
@@ -372,11 +390,20 @@ let threatsOf (snapshot: Snapshot) atlas : Threats =
 /// the two rules below ask it of every source of one room at once.
 let private servesSource (sourcePos: Pos) (tile: Pos) = range tile sourcePos <= 1
 
-/// Whether a tile of the named room is a source container's: within range
-/// 1 of a placed source **standing in that same room**. The one geometry
-/// judgement behind both rules that care about the kind and not the source
-/// — the Planner keeps source containers out of Refill, the hauler quota
-/// counts them. Unplaced geometry classifies nothing (ADR 0004).
+/// The source a tile of the named room is a container's for: the placed
+/// source **standing in that same room** within range 1 of it, or None
+/// where there is none. The one geometry judgement behind both rules that
+/// care about a source container — the Planner keeps them out of Refill,
+/// the hauler quota counts them. Unplaced geometry classifies nothing
+/// (ADR 0004).
+///
+/// The source's identity and not merely its existence, because since ADR
+/// 0042 the hauler quota prices a container at *that* source's own output:
+/// a room's reservation decides whether the rock under a container is
+/// worth ten a tick or five, and a tile alone cannot say which rock it is.
+/// Of several sources within range 1 — geometry this colony has none of,
+/// two rocks would have to stand two tiles apart — the first in Snapshot
+/// order answers, deterministically.
 ///
 /// The room is matched before the range, and it has to be (ADR 0041): a
 /// `Pos` carries no room, so a fold over every source compares a home
@@ -386,10 +413,19 @@ let private servesSource (sourcePos: Pos) (tile: Pos) = range tile sourcePos <= 
 /// as a source's, and drops out of the Refill pool as one — so the two
 /// rules below hand in the room the tile came out of rather than the tile
 /// alone.
-let private isSourceContainerTile (snapshot: Snapshot) (room: string) (pos: Pos) =
+let private sourceContainerServes (snapshot: Snapshot) (room: string) (pos: Pos) : string option =
     snapshot.Sources
-    |> List.choose (fun s -> SpatialInfo.placementOf snapshot.Spatial s.Id)
-    |> List.exists (fun (sourceRoom, sourcePos) -> sourceRoom = room && servesSource sourcePos pos)
+    |> List.tryFind (fun s ->
+        match SpatialInfo.placementOf snapshot.Spatial s.Id with
+        | Some(sourceRoom, sourcePos) -> sourceRoom = room && servesSource sourcePos pos
+        | None -> false)
+    |> Option.map (fun s -> s.Id)
+
+/// Whether a tile of the named room is a source container's at all — the
+/// half of the rule above that the Refill pool asks, which needs to know
+/// that the tile is spoken for and never which rock spoke for it.
+let private isSourceContainerTile (snapshot: Snapshot) (room: string) (pos: Pos) =
+    sourceContainerServes snapshot room pos |> Option.isSome
 
 /// Planner: rebuild this tick's full Task pool from the Snapshot. Pure and
 /// from scratch every tick — Tasks are never persisted.
@@ -529,14 +565,70 @@ let private carryPartCapacity = 50
 /// answers for it.
 let private ceilDiv numerator divisor = (numerator + divisor - 1) / divisor
 
+/// What one source of a room the colony holds this way is worth per tick
+/// (ADR 0042): the held rate in a room this colony owns or reserves, half
+/// of it in a room nobody holds. The whole rate rule, so that the census
+/// signature below can sign exactly what the memoised quota reads rather
+/// than a paraphrase of it.
+///
+/// Owned **or** reserved, never reserved alone. The engine gives a room
+/// carrying either the same 3,000 a cycle, and the colony's own room is
+/// owned while nothing reserves it: read as "reserved, or half", the two
+/// home sources would price at five each and halve the hauler quota and
+/// the income base together.
+///
+/// A room another player owns or reserves is priced at the neutral rate,
+/// and that is a colony decision rather than an engine fact: the engine
+/// gives *any* held room 3,000 a cycle, a rival's included, so a creep
+/// digging there really would draw ten a tick. The colony declines to
+/// size a fleet against it because a room somebody else holds is one it
+/// is withdrawing from (the stand-down, ADR 0043), and energy it is
+/// about to walk away from must not hire haulers or workers today.
+let private heldRateOf (control: RoomControlInfo) =
+    if control.Owned || control.Reservation |> Option.exists (fun held -> held.Ours) then
+        heldOutputPerTick
+    else
+        neutralOutputPerTick
+
+/// One source's output per tick (ADR 0042), read off the room it stands
+/// in. A fact read per source and not a module constant, because a
+/// reservation can lapse — a reserver dies, an invader core taps the
+/// controller — and quotas sized for the held rate against a source
+/// yielding five overbuild their rows twofold.
+///
+/// None for a source in a room the colony has no vision in this tick, and
+/// for one the projection does not place: who holds a room we cannot look
+/// into is not a fact this tick, so the source is unpriceable, enters no
+/// quota and blocks nothing (ADR 0004). Unpriceable is not half — half is
+/// what a room we can *see* nobody holds is worth, and the two answers
+/// have to stay apart or a blind outpost would hire against income the
+/// colony has no evidence for.
+///
+/// Which room a source stands in is the Atlas's id-to-room join, the layer
+/// that places its id (ADR 0041), never the outpost declaration: the quota
+/// is derived from the projection, and a source the projection does not
+/// place counts nothing wherever it was declared.
+let private sourceOutputOf (snapshot: Snapshot) atlas (sourceId: string) : int option =
+    Atlas.targetRoom atlas sourceId
+    |> Option.bind (fun room -> Map.tryFind room snapshot.RoomControl)
+    |> Option.map heldRateOf
+
 /// The hauler row's quota rule (ADR 0012) — the row's colony fact, per
 /// ADR 0006's law that a row arrives with its quota or not at all: per
-/// source container, ceil(round-trip travel ticks to the spawn × source
-/// output ÷ the cast body's carry capacity), so a farther container hires
-/// proportionally more haul capacity and never quietly overflows. The
-/// spawn is the canonical sink because the trunks radiate from it; of
-/// several spawns the cheapest wins. No source containers, no placed
-/// spawns, or unreachable geometry hire nothing.
+/// source container, ceil(round-trip travel ticks to the spawn × that
+/// container's own source's output ÷ the cast body's carry capacity), so a
+/// farther container hires proportionally more haul capacity and never
+/// quietly overflows. The spawn is the canonical sink because the trunks
+/// radiate from it; of several spawns the cheapest wins. No source
+/// containers, no placed spawns, or unreachable geometry hire nothing.
+///
+/// The output is that source's and not the colony's (ADR 0042), which is
+/// why the fold resolves each tile back to the rock it serves rather than
+/// only asking whether it serves one: a container over an unreserved
+/// source ships half as much, and a colony-wide ten would put twice the
+/// haul capacity on it. A container whose source's room the colony cannot
+/// price hires nobody at all, the same answer unreachable geometry gets
+/// (ADR 0004).
 ///
 /// The colony's own room and no other (ADR 0041). The kind census spans
 /// every room the projection carries, so the containers are read out of
@@ -545,15 +637,24 @@ let private ceilDiv numerator divisor = (numerator + divisor - 1) / divisor
 /// `Atlas.haulRoundTripTicks`, which floods the home room's grid, so an
 /// outpost container handed to it would be walked over home terrain and
 /// hire a fleet for a haul nobody makes. The honest cross-room price is a
-/// minimum over the Seam band (#123), and the outpost's own quota is the
-/// economics ADR 0042 owns; until both land, a container the home room
-/// does not place hires nobody, which is ADR 0004's answer for geometry
-/// this query cannot price.
+/// minimum over the Seam band, which #123 landed inside the Atlas and did
+/// *not* widen `Atlas.haulRoundTripTicks` to use — that flood is still one
+/// room's, by its own stated decision. Until it is widened, and until the
+/// outpost's own quota (the economics ADR 0042 owns) lands, a container
+/// the home room does not place hires nobody, which is ADR 0004's answer
+/// for geometry this query cannot price. That is also why this rule can
+/// only ever read the *home* room's control entry, which is what makes
+/// signing that one entry (`censusSignature`) the whole of what the memo
+/// owes.
 let private haulerQuota (snapshot: Snapshot) atlas : int =
     let home = SpatialInfo.homeName snapshot.Spatial
     let placed = (SpatialInfo.layerOf snapshot.Spatial home).TargetPositions
 
-    let sourceContainerTiles =
+    // Each source container beside the output of the rock it serves: the
+    // tile alone cannot be priced, so a tile the fold cannot resolve to a
+    // source, or to a source whose room it cannot price, leaves the list
+    // here rather than entering the sum at some default rate.
+    let sourceContainers =
         snapshot.Spatial.TargetKinds
         |> Map.toList
         |> List.choose (fun (id, kind) ->
@@ -561,15 +662,18 @@ let private haulerQuota (snapshot: Snapshot) atlas : int =
                 Map.tryFind id placed
             else
                 None)
-        |> List.filter (isSourceContainerTile snapshot home)
+        |> List.choose (fun tile ->
+            sourceContainerServes snapshot home tile
+            |> Option.bind (sourceOutputOf snapshot atlas)
+            |> Option.map (fun output -> tile, output))
 
     let spawns =
         snapshot.Spawns
         |> List.choose (fun s ->
             Atlas.positionOf atlas s.Id |> Option.map (fun pos -> s.RoomName, pos))
 
-    sourceContainerTiles
-    |> List.sumBy (fun tile ->
+    sourceContainers
+    |> List.sumBy (fun (tile, output) ->
         spawns
         |> List.choose (fun (roomName, spawnPos) ->
             let bank =
@@ -582,7 +686,7 @@ let private haulerQuota (snapshot: Snapshot) atlas : int =
             let capacity = (body |> List.filter ((=) Carry) |> List.length) * carryPartCapacity
 
             Atlas.haulRoundTripTicks atlas body tile spawnPos
-            |> Option.map (fun ticks -> ceilDiv (ticks * sourceOutputPerTick) capacity))
+            |> Option.map (fun ticks -> ceilDiv (ticks * output) capacity))
         |> function
             | [] -> 0
             | quotas -> List.min quotas)
@@ -630,6 +734,14 @@ let private upgradeDrainPerWork = 1
 /// read that outpost source as posted with no container under it, and put
 /// a phantom ten energy a tick into the income base below.
 ///
+/// Income is counted per source at that source's own output and never at
+/// a colony-wide ten (ADR 0042): an unreserved source is worth half a held
+/// one, and a posted source whose room the colony cannot see this tick is
+/// worth nothing at all rather than half (ADR 0004). This is the reader
+/// #116 and ADR 0042 both leave out of their enumeration of the two —
+/// their own prose is what puts it in, "posted ones enter the income base
+/// at the source's output".
+///
 /// From that income the anchor and hauler rows' replacement amortization
 /// (body cost spread over a creep's lifetime) is deducted; every energy
 /// per tick left feeds upgrade mouths at one worker body's Work drain,
@@ -674,8 +786,15 @@ let private workforceTarget (snapshot: Snapshot) atlas anchorQuota haulerQuota =
     // amortization above income leaves the surplus negative, and max 0 is
     // the row's floor for it.
     let incomeWorkers =
-        let surplusOverLifetime =
-            List.length posted * sourceOutputPerTick * creepLifetime - amortization
+        // Summed over the posted sources at each one's own output, never a
+        // count times a constant (ADR 0042): a source the colony cannot
+        // price contributes nothing, which is the same zero it would
+        // contribute by not being posted.
+        let income =
+            posted
+            |> List.sumBy (fun s -> sourceOutputOf snapshot atlas s.Id |> Option.defaultValue 0)
+
+        let surplusOverLifetime = income * creepLifetime - amortization
 
         ceilDiv surplusOverLifetime (workerDrain * creepLifetime) |> max 0
 
@@ -2688,13 +2807,31 @@ let private assignedTasks (tasks: Task list) (assignments: Assignments) : Map<st
 /// The census signature (ADR 0017): a string over exactly the inputs the
 /// census-derived plans read — the (kind, position) census of standing
 /// structures, the (kind, position) census of pending sites, the
-/// controller level, and the room name. Any one input moving moves the
-/// signature; everything else a Snapshot carries — creeps, stores, hits,
-/// dropped piles, hostiles, banked energy, the tick — is invisible to it.
-/// The hauler quota rides the same signature on one load-bearing
-/// derivation: the RoomEnergy Capacity it sizes bodies from is the
-/// engine's energyCapacityAvailable — a function of the standing
-/// spawn/extension census and the controller level, both covered here.
+/// controller level, the room name, and who holds that room. Any one input
+/// moving moves the signature; everything else a Snapshot carries —
+/// creeps, stores, hits, dropped piles, hostiles, banked energy, the
+/// tick — is invisible to it.
+///
+/// The hauler quota rides the same signature on two load-bearing
+/// derivations, and both are covered here rather than assumed. The
+/// RoomEnergy Capacity it sizes bodies from is the engine's
+/// energyCapacityAvailable — a function of the standing spawn/extension
+/// census and the controller level, both signed above. Since ADR 0042 it
+/// also prices each container at its source's own output, which is read
+/// off `RoomControl` — a **vision** fact and not a census one, so it is
+/// signed explicitly: without it a lapsed reservation would leave the
+/// signature byte-identical and the memo would hand back a quota sized
+/// for the held rate, which is exactly the signature gap ADR 0017 names
+/// as its failure mode. It is signed as the *rate* and never as the
+/// reservation's `TicksToEnd`, which decays every tick and would throw
+/// the Layout and the walk table away on every one of them.
+///
+/// One entry is enough because the quota can reach exactly one room: it
+/// folds the home layer's containers and resolves each to a source
+/// standing in that same room, so home's is the only control entry any
+/// memoised value reads. The tick a memo entry prices a second room's
+/// container is the tick this has to widen with it, on the same terms as
+/// the position join below.
 ///
 /// It signs **one room**, and since ADR 0041 it says which: the home
 /// entry of the layer, the room `RoomName` names and `SpatialInfo.homeName`
@@ -2744,7 +2881,15 @@ let censusSignature (snapshot: Snapshot) : string =
         |> Option.map (fun c -> string c.Level)
         |> Option.defaultValue ""
 
-    $"{home}|{level}|{standing}|{pending}"
+    // The rate the home room's sources are priced at this tick, the empty
+    // string where vision answered for no room at all — the third answer
+    // the quota gives, and a different one from either rate (ADR 0004).
+    let held =
+        Map.tryFind home snapshot.RoomControl
+        |> Option.map (heldRateOf >> string)
+        |> Option.defaultValue ""
+
+    $"{home}|{level}|{held}|{standing}|{pending}"
 
 /// The decision seam: Snapshot in — with the verbose list of creep names
 /// owed the manufactured-evidence Verdicts (full candidate scoring, reroute
