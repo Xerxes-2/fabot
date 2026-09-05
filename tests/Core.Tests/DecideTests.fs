@@ -11551,6 +11551,41 @@ let private withNorthOutpost (outpostSource: Pos option) (colony: Snapshot) =
                 }
     }
 
+/// The same colony with a construction site of ours standing in the
+/// outpost — the one the container rule places there and nothing else,
+/// because that rule is the only thing that places outside the home room
+/// (ADR 0042). It arrives in the three pieces the shell hands Core it in:
+/// the id-keyed kind census, the outpost layer's own tile, and the
+/// `ConstructionSites` entry vision pays for (#150). Merges into whatever
+/// layer `withNorthOutpost` already laid, so the two compose in either
+/// order.
+let private withOutpostSite (site: Pos) (colony: Snapshot) =
+    let outpost = SpatialInfo.layerOf colony.Spatial "W1N2"
+
+    { colony with
+        ConstructionSites = colony.ConstructionSites @ [ { Id = "site-out" } ]
+        Spatial =
+            { colony.Spatial with
+                TargetKinds =
+                    Map.add "site-out" (Site BuiltKind.Container) colony.Spatial.TargetKinds
+            }
+            |> withNeighbour
+                "W1N2"
+                { outpost with
+                    TargetPositions = Map.add "site-out" site outpost.TargetPositions
+                }
+    }
+
+/// The same worker, carrying a full load: Harvest asks for free capacity
+/// and Build asks for carried energy (`applicable`), so a full worker
+/// leaves the home source's Task inapplicable and is matched over a pool
+/// whose one candidate is the Build — pairwise by construction, with no
+/// third rival standing in for either side of a comparison.
+let private loaded (colony: Snapshot) =
+    { colony with
+        Creeps = [ worker "w" 50 0 ]
+    }
+
 /// What the tick decided, less the plan memo: the memo carries a mutable
 /// walk table whose identity is not a decision, and these three are the
 /// whole of what leaves the colony.
@@ -11789,6 +11824,218 @@ let outpostTests =
                     (drive { X = 9; Y = 49 } [])
                     ([ { X = 10; Y = 48 }; { X = 10; Y = 47 } ], { X = 10; Y = 47 })
                     "off the landing tile onto the corridor, up to the seat, and the source is dug from there"
+            }
+
+            test "our site in the outpost is a Build the one pool holds" {
+                // #150's reproduction, at the seam it was reproduced on.
+                // The container rule placed a site in the outpost, saw it
+                // standing on the next tick and correctly declined to place
+                // a second — and nothing ever built the first, because the
+                // Build pool is `Snapshot.ConstructionSites` mapped one to
+                // one and that list was the spawn rooms' alone. A container
+                // that is never built is a source that never becomes a
+                // Post, so ADR 0042's switch could not close.
+                //
+                // Nothing in the Build path is outpost-shaped: the Task
+                // names the site by id, its Work Area is the site's own
+                // room's (ADR 0041, ADR 0020) and its price sums the legs
+                // over the Seam (#123), exactly as the outpost Harvest
+                // above does. What was missing was the entry, and this is
+                // the entry.
+                let sited =
+                    northBorderColony { X = 10; Y = 38 }
+                    |> withNorthOutpost None
+                    |> withOutpostSite { X = 10; Y = 43 }
+                    |> loaded
+
+                Expect.equal
+                    (matchOf sited)
+                    (Some(taskId (Build "site-out"), MatchFactor.OnlyCandidate))
+                    "the site a room away is a Task this worker is given"
+
+                // The pool is that list and never the kind census: a site
+                // the projection places but the shell did not hand over —
+                // which is every site in a room the colony cannot see this
+                // tick (ADR 0004) — names no Task at all.
+                Expect.equal
+                    (matchOf { sited with ConstructionSites = [] })
+                    None
+                    "and a site the Snapshot does not carry is no Task, however well the projection places it"
+
+                // The memo does not flinch at it either. #121's own test
+                // pins that with a *standing* container in the outpost and
+                // so walks `censusSignature`'s `standing` branch; the site
+                // this fixture stands there walks the `pending` one, and
+                // both are joined against the home layer's positions
+                // alone, so neither carries an entry. Without this the
+                // Layout and the whole spawn walk table would be thrown
+                // away every tick an outpost site stands (ADR 0017, ADR
+                // 0032).
+                Expect.equal
+                    (censusSignature sited)
+                    (censusSignature (
+                        northBorderColony { X = 10; Y = 38 } |> withNorthOutpost None |> loaded
+                    ))
+                    "an outpost's site is no entry of the home room's census (#121)"
+
+                let { Intents = opening } = decide sited Map.empty Set.empty None
+
+                Expect.equal
+                    (moveIntents opening)
+                    [ "w", Top ]
+                    "so the worker is walked up its own corridor toward the border"
+
+                Expect.isEmpty
+                    (actionIntents opening)
+                    "and may not build a site a room away, however well priced (ADR 0041)"
+            }
+
+            test "and the worker that landed in the outpost builds it" {
+                // The far half of the same walk, driven the way the engine
+                // drives it: #145 arbitrates the outpost as a room of its
+                // own, so the creep the engine put down on W1N2's border
+                // row gets a step off the ring exactly as one standing at
+                // home does, and the tick it stands inside the site's Work
+                // Area — build reaches three tiles — the Intent it has
+                // been walking toward is emitted.
+                //
+                // A slow answer and the right one (ADR 0042): whoever
+                // holds this Task spends five hits a tick per Work part
+                // into a 5,000-hit container. There is no outpost builder
+                // row, and this ticket invents none — which creep holds it
+                // is the ranking's answer, pinned in the test below.
+                let landedAt pos =
+                    let colony =
+                        northBorderColony { X = 10; Y = 38 }
+                        |> withNorthOutpost None
+                        |> withOutpostSite { X = 10; Y = 43 }
+                        |> loaded
+
+                    { colony with
+                        Spatial =
+                            colony.Spatial
+                            |> withHome (fun layer ->
+                                { layer with
+                                    CreepPositions = Map.empty
+                                })
+                            |> withNeighbour
+                                "W1N2"
+                                { SpatialInfo.layerOf colony.Spatial "W1N2" with
+                                    CreepPositions = Map.ofList [ "w", pos ]
+                                }
+                    }
+
+                let assigned = Map.ofList [ "w", taskId (Build "site-out") ]
+
+                let {
+                        Intents = landing
+                        Verdicts = verdicts
+                    } =
+                    decide (landedAt { X = 9; Y = 49 }) assigned Set.empty None
+
+                Expect.equal
+                    landing
+                    [ SayCreep("w", "🔨"); MoveCreep("w", TopRight) ]
+                    "off the landing tile onto the corridor, and no build from a tile out of range"
+
+                Expect.equal
+                    verdicts
+                    [ Verdict.Kept("w", taskId (Build "site-out")) ]
+                    "and anti-thrash keeps the Task it is now walking to"
+
+                let rec drive pos walked =
+                    if List.length walked > 10 then
+                        failtest "the creep never started building"
+                    else
+                        let { Intents = intents } = decide (landedAt pos) assigned Set.empty None
+
+                        match actionIntents intents, moveIntents intents with
+                        | [ BuildSite("w", "site-out") ], [] -> List.rev walked, pos
+                        | [], [ _, direction ] ->
+                            let next = stepFrom pos direction
+                            drive next (next :: walked)
+                        | _ -> failtest $"at {pos.X},{pos.Y} the tick neither walked nor built"
+
+                Expect.equal
+                    (drive { X = 9; Y = 49 } [])
+                    ([ { X = 10; Y = 48 }; { X = 10; Y = 47 }; { X = 10; Y = 46 } ],
+                     { X = 10; Y = 46 })
+                    "off the ring onto the corridor, down to build range, and the container rises"
+            }
+
+            test "which creep builds it is the ranking's answer, not the ticket's" {
+                // The two cases above hold one worker and no controller,
+                // which is what makes their factor name the Build's one
+                // rival. The colony that really exists has a controller,
+                // and it changes who wins: Build and Upgrade share the
+                // surplus tier (CONTEXT.md), so nothing but travel cost
+                // separates them, and a loaded worker standing at home is a
+                // corridor from its own controller and a Seam plus fifty
+                // tiles from the site. It upgrades — every tick, however
+                // long the container has stood as a site.
+                //
+                // That is not a hole in ADR 0042's switch, and this pins
+                // both halves of why: the creep the site *is* cheapest for
+                // is the one already out there. A worker walks into the
+                // outpost for the source's own Harvest, which is feeding
+                // tier and so outranks the home Upgrade whatever the
+                // distance (#123, ADR 0041); it fills up, Harvest goes
+                // inapplicable, and the cheapest surplus Task left to it is
+                // the container three tiles away. Pairwise both times: one
+                // Build, one Upgrade, no third candidate standing in.
+                let sited controller =
+                    let colony =
+                        northBorderColony { X = 10; Y = 38 }
+                        |> withNorthOutpost None
+                        |> withOutpostSite { X = 10; Y = 43 }
+                        |> loaded
+
+                    { colony with
+                        Controller = Some(controllerAt 2)
+                        Spatial =
+                            { colony.Spatial with
+                                TargetKinds =
+                                    Map.add
+                                        "ctrl-1"
+                                        TargetKind.Controller
+                                        colony.Spatial.TargetKinds
+                            }
+                            |> withHome (fun layer ->
+                                { layer with
+                                    TargetPositions =
+                                        Map.add "ctrl-1" controller layer.TargetPositions
+                                })
+                    }
+
+                Expect.equal
+                    (matchOf (sited { X = 10; Y = 5 }))
+                    (Some(taskId (Upgrade "ctrl-1"), MatchFactor.TravelCost))
+                    "a worker at home upgrades: the site shares Upgrade's tier and loses on distance"
+
+                // The same colony, the same load, the same pool — the
+                // creep is standing in the outpost instead, where it would
+                // be the tick it filled up on the rock it walked there for.
+                let landed =
+                    let colony = sited { X = 10; Y = 5 }
+
+                    { colony with
+                        Spatial =
+                            colony.Spatial
+                            |> withHome (fun layer ->
+                                { layer with
+                                    CreepPositions = Map.empty
+                                })
+                            |> withNeighbour
+                                "W1N2"
+                                { SpatialInfo.layerOf colony.Spatial "W1N2" with
+                                    CreepPositions = Map.ofList [ "w", { X = 10; Y = 46 } ]
+                                }
+                    }
+
+                Expect.equal
+                    (matchOf landed)
+                    (Some(taskId (Build "site-out"), MatchFactor.TravelCost))
+                    "and the worker already in the outpost builds it, which is how the switch closes"
             }
 
             test

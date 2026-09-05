@@ -483,9 +483,11 @@ let build () : Snapshot =
         // The lists beside it stay home-only on purpose. `Refillables`,
         // `Controller` and `RoomEnergy` are about rooms we own, and an
         // outpost is by definition one we do not; `Hostiles` says so in
-        // its own comment below; and `ConstructionSites` would make a
-        // cross-room Build, which #115 puts outside this work with the
-        // rest of paving an outpost (ADR 0042).
+        // its own comment below. `ConstructionSites` was one of them until
+        // #150 and is not any more — a site of ours in an outpost is one
+        // nobody would ever build, which is where ADR 0042's switch stuck;
+        // it reads `seen` now, and its own comment below says why that set
+        // and not this one's.
         Sources =
             seen
             |> List.collect (fun room -> room.find findSources |> Array.toList)
@@ -563,12 +565,35 @@ let build () : Snapshot =
 
                 room.name, control)
             |> Map.ofList
+        // Our sites in every room the colony is looking into, not the spawn
+        // rooms' alone (#150). The Build pool is this list mapped one to
+        // one (`Decide.planTasks`), so a site missing from it is a site no
+        // Task ever names and no creep is ever sent to — which is exactly
+        // where the outpost stalled: the container rule placed a site,
+        // saw it standing there on the next tick and correctly declined to
+        // place a second, and nothing ever built the first. ADR 0042 makes
+        // a standing container the switch that admits an outpost into the
+        // economy, and a site nobody builds is a switch that cannot close.
+        //
+        // Gated on `seen` and not on `scanned`, the rule `RoomControl`
+        // follows and `Sources` above deliberately does not: a site is a
+        // thing vision pays for and no declaration carries, so a room we
+        // cannot look into contributes none of them (ADR 0004) rather than
+        // a guess. The dedupe the spawn-keyed read needed goes with it —
+        // `seen` is `scanned` filtered by vision (`List.choose`), and
+        // `scanned` names each room once (`Outpost.roomsProjected`), so no
+        // room's sites can be collected twice.
+        //
+        // This is not cross-room paving, which stays out of scope (ADR
+        // 0042). The container rule is the only thing that places outside
+        // the home room, so a container's is the only site that can appear
+        // in an outpost; roads there would drag in the Layout's
+        // spawn-anchored trunk and ADR 0010's whole-line Repair, and they
+        // are their own ticket.
         ConstructionSites =
-            spawns
-            |> Array.collect (fun s -> s.room.find findMyConstructionSites)
-            |> Array.map (fun o -> ({ Id = (o :?> IConstructionSite).id }: ConstructionSiteInfo))
-            |> Array.distinctBy (fun site -> site.Id)
-            |> Array.toList
+            seen
+            |> List.collect (fun room -> room.find findMyConstructionSites |> Array.toList)
+            |> List.map (fun o -> ({ Id = (o :?> IConstructionSite).id }: ConstructionSiteInfo))
         Creeps =
             objectValues<ICreep> Game.creeps
             // A creep still inside the spawn cannot act; keep it out of the pool.

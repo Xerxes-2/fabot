@@ -1705,13 +1705,28 @@ let private planLayout
 /// source no Seat of which can reach one all plan nothing — unpriceable
 /// geometry is never planned onto, and never blocks.
 ///
-/// One gap this rule's output does not close on its own, named here so the
-/// next reader does not have to find it: a site standing in an outpost is
-/// named by no Build Task, because `Snapshot.ConstructionSites` is the
-/// spawn rooms' alone (#115 left a cross-room Build out with the rest of
-/// paving an outpost). Until that widens, the site is placed and nothing
-/// builds it, so ADR 0042's switch cannot close — recorded as #150
-/// rather than widened into here.
+/// What finishes what this rule starts, named here because the two halves
+/// are read apart: the site placed here becomes a Build Task like any
+/// other, because `Snapshot.ConstructionSites` is every room the colony
+/// can see and no longer the spawn rooms' alone (#150). Nothing in the
+/// Build path is outpost-shaped — the Task names a site by id, its Work
+/// Area is that site's room's (ADR 0041) and its price crosses the Seam
+/// like every other cross-room price (#123).
+///
+/// *Which* creep builds it is the ordinary ranking's answer and nothing
+/// this rule arranges, which is worth writing down because the obvious
+/// reading is wrong: Build and Upgrade share the surplus tier, so travel
+/// cost alone separates them, and a loaded worker standing at home is
+/// nearer its own controller than a site a Seam and fifty tiles away —
+/// it upgrades, every tick. The creep this site is cheapest for is the
+/// one already out there: a worker that walked into the outpost for the
+/// source's own Harvest (feeding tier, so it outranks the home Upgrade
+/// whatever the distance) and filled up on it, whose cheapest surplus
+/// Task is then the container three tiles from where it stands. That is
+/// the slow, right answer ADR 0042 asks for — no outpost builder row,
+/// and this rule invents none. Until the pool widened, the site was
+/// named by no Task at all and the switch could not close however near
+/// a creep stood.
 let private planOutpostContainers (snapshot: Snapshot) atlas : Intent list =
     let home = SpatialInfo.homeName snapshot.Spatial
 

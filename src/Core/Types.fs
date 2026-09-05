@@ -670,6 +670,12 @@ type Snapshot =
         /// 0041). Absent for a room vision did not answer for, per-entry
         /// as every other absence is (ADR 0004).
         RoomControl: Map<string, RoomControlInfo>
+        /// Our construction sites in every scanned room the colony has
+        /// vision in this tick, and not the spawn rooms' alone (#150): the
+        /// Build pool is this list one to one (`Decide.planTasks`), so an
+        /// outpost's site is a Task like the home room's. A site is a thing
+        /// vision pays for and no declaration carries, so a room nothing
+        /// looks into contributes none of them (ADR 0004, ADR 0042).
         ConstructionSites: ConstructionSiteInfo list
         Creeps: CreepInfo list
         /// Hostile creeps standing in the spawn rooms this tick.
