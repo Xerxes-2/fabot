@@ -1922,10 +1922,26 @@ let private idleRank = System.Int32.MaxValue
 /// area, which is just as immobilising — is parked: stay put,
 /// displaceable to any adjacent walkable tile.
 ///
-/// The parked branch's displacement tiles are the colony's own room's
-/// (`Atlas.adjacentWalkable`), which costs nothing to be sure of: every
-/// creep reaching this is one the Resolver placed, and the Resolver
-/// arbitrates the home room alone (ADR 0041).
+/// The displacement tiles — the parked creep's, and the ones a creep
+/// inside its area may shuffle to — are its own room's
+/// (`Atlas.adjacentWalkableIn`): the Resolver arbitrates each projected
+/// room by itself (#145, ADR 0041's Consequences), so the room a creep is
+/// filed under rides in beside its tile, and a creep in an outpost is
+/// offered that room's ground and never home's.
+///
+/// One tile is never a candidate: the creep's own, when that tile is a
+/// Seam (`Atlas.standsOnSeam`) — the border ring the engine put it down
+/// on the tick it crossed (#142). The ring is no room's ground (ADR
+/// 0036), and a creep that ends its tick on it is moved out of the room
+/// by the engine again, so "stay put" there is not a wait but a bounce
+/// across the border every other tick. A ring creep therefore walks
+/// inward first (#145): parked, its candidates are the ground tiles
+/// beside it alone; travelling, its step comes first and the other ground
+/// tiles beside it after, so a contested step becomes a step off the ring
+/// rather than a stay on it. Only when no ground lies beside it at all is
+/// its own tile offered, so a Move Intent's candidates stay non-empty and
+/// arbitration's own fallback — stay, and let the engine fail the move —
+/// is the answer it always was.
 ///
 /// The Task goes to `Atlas.firstStep` beside the area, and that is what
 /// gives a creep matched across a border somewhere to walk (#142): its
@@ -1940,16 +1956,24 @@ let private moveIntentFor
     (rankOf: Task -> int)
     (threats: Threats)
     atlas
+    (room: string)
     (creep: string)
     (pos: Pos)
     (task: Task option)
     : MoveIntent =
+    let beside = Atlas.adjacentWalkableIn atlas room pos
+    let onSeam = Atlas.standsOnSeam atlas creep && not (List.isEmpty beside)
+
+    // Where this creep may stay: its own tile, unless that tile is a Seam
+    // with ground beside it to walk onto.
+    let staying = if onSeam then [] else [ pos ]
+
     let parked rank =
         {
             Creep = creep
             Pos = pos
             Rank = rank
-            Candidates = pos :: Atlas.adjacentWalkable atlas pos
+            Candidates = staying @ beside
         }
 
     match task with
@@ -1965,10 +1989,7 @@ let private moveIntentFor
                 Creep = creep
                 Pos = pos
                 Rank = rankOf task
-                Candidates =
-                    pos
-                    :: (Atlas.adjacentWalkable atlas pos
-                        |> List.filter (fun tile -> Set.contains tile area))
+                Candidates = pos :: (beside |> List.filter (fun tile -> Set.contains tile area))
             }
         else
             match Atlas.firstStep atlas creep task area with
@@ -1977,7 +1998,11 @@ let private moveIntentFor
                     Creep = creep
                     Pos = pos
                     Rank = rankOf task
-                    Candidates = [ step ]
+                    Candidates =
+                        if onSeam then
+                            step :: (beside |> List.filter ((<>) step))
+                        else
+                            [ step ]
                 }
             | None -> parked (rankOf task)
 
@@ -2082,13 +2107,30 @@ let private directionTo (from: Pos) (dest: Pos) : Direction option =
     | -1, -1 -> Some TopLeft
     | _ -> None
 
-/// Resolver, room pass: every rested creep the Atlas places registers a
-/// Move Intent, arbitration settles them into at most one single-step move
-/// per creep, and the settled standing tiles become move Intents in
-/// Snapshot creep order. Takes the tick's assigned Task per creep as data;
-/// a creep absent from the map is idle. A fatigued creep sits arbitration
-/// out — the engine would answer its move with ERR_TIRED — and its tile is
-/// blocked for the tick, so nobody plans a step through it.
+/// One room's arbitration, settled: what each of its rested creeps was
+/// settled on and what it asked for first, and the fatigued creeps' tiles
+/// and the occupants the settlement was made against — the four things
+/// the Verdicts read back, all keyed on that room's tiles alone (#145).
+type private RoomPass =
+    {
+        /// Each rested creep's settled standing tile.
+        Standing: Map<string, Pos>
+        /// Each rested creep's preferred standing tile: the head of its
+        /// candidate list — a Move Intent's candidates are never empty.
+        Preferences: Map<string, Pos>
+        /// The fatigued creeps' tiles, pre-claimed for the tick (ADR 0008).
+        Blocked: Set<Pos>
+        /// Who stands where at tick start.
+        Occupants: Map<Pos, string>
+    }
+
+/// Resolver: every rested creep the Atlas places registers a Move Intent,
+/// arbitration settles them into at most one single-step move per creep,
+/// and the settled standing tiles become move Intents in Snapshot creep
+/// order. Takes the tick's assigned Task per creep as data; a creep absent
+/// from the map is idle. A fatigued creep sits arbitration out — the
+/// engine would answer its move with ERR_TIRED — and its tile is blocked
+/// for the tick, so nobody plans a step through it.
 ///
 /// Beside the moves ride the movement Verdicts (ADR 0009), in Snapshot
 /// creep order: grounded for each creep whose tile is blocked by fatigue;
@@ -2106,30 +2148,34 @@ let private directionTo (from: Pos) (dest: Pos) : Direction option =
 /// Grounded and yielded fall out of work the arbitration already did and
 /// stay always-on.
 ///
-/// The colony's own room and no other, which ADR 0041's Consequences
-/// decide rather than defer: geometry crosses the Seam and arbitration
-/// does not. `occupants` is a `Map<Pos, string>` and `blocked` a
-/// `Set<Pos>`, both keyed on a tile with no room on it, so a second room's
-/// creeps unioned in would collapse two creeps standing on one coordinate
-/// of two rooms into one occupant and let a fatigued outpost creep
-/// pre-claim a home tile — deleting a home creep's `MoveCreep` outright.
-/// `Atlas.placedCreeps` answers home for exactly that reason.
+/// Once per projected room, and never across two (#145): arbitrated
+/// movement is a room's (ADR 0001, ADR 0008), and ADR 0041's Consequences
+/// keep it so — geometry crosses the Seam and arbitration does not,
+/// decomposed strictly per room as screeps-cartographer decomposes
+/// `reconcileTraffic`. Each room's `occupants`, `blocked` and Move Intents
+/// are built from `Atlas.placedCreepsByRoom`'s group for that room and
+/// settled by `arbitrate` over that room's tiles alone — a `Map<Pos,
+/// string>` and a `Set<Pos>` carry no room on their key, so a union across
+/// rooms would collapse two creeps standing on one coordinate of two rooms
+/// into one occupant and let a fatigued outpost creep pre-claim a home
+/// tile, deleting a home creep's `MoveCreep` outright. `arbitrate` itself
+/// is unchanged: it solves one room's Move Intents, and is simply called
+/// per room. The Verdicts' attribution is each room's own for the same
+/// reason. What is *not* arbitrated is the border tile: two creeps
+/// aiming at one exit from its two sides are never checked against each
+/// other, which ADR 0041 accepts in as many words.
 ///
-/// What crosses the Seam is the *destination*, never the arbitration
-/// (#142): a creep standing at home and matched to an outpost's Task is
-/// arbitrated here like any other, over a step that is a tile of this room
-/// — the near side of the Seam it was priced at — and the engine puts it
-/// down in the neighbour at the end of that tick.
-///
-/// From that tick on it is registered here nowhere: no Move Intent, no
-/// `MoveCreep`, so it stands where it landed holding its Task, and the
-/// step the Atlas has for it is never asked for. The room filter is ADR
-/// 0041's boundary and #142 kept it deliberately. The *consequence* is a
-/// gap and is written down rather than assumed away: walking a creep on
-/// once it is over the border is a second arbitration, per room, which is
-/// its own issue — and filling the outpost constants puts it on the
-/// server, so that is what #126 must wait on. `DecideTests` asserts this
-/// state at the seam rather than leaving it to be discovered.
+/// What crosses the Seam is the *destination* (#142): a creep standing at
+/// home and matched to an outpost's Task is arbitrated at home over a
+/// step that is a home tile — the near side of the Seam it was priced at
+/// — and the engine puts it down in the neighbour at the end of that
+/// tick. The next tick the projection files it under the neighbour's
+/// name, and that room's pass walks it on from its landing tile: the ring
+/// is not ground, but a flood seeds its start tile regardless, so
+/// `Atlas.firstStep` steps it off the ring onto the room's own floor
+/// exactly as it stepped the near side onto the exit. Before #145 the
+/// far side was deferred and the creep stood where it landed for the rest
+/// of its life; that gap was what #126 waited on.
 let resolve
     (snapshot: Snapshot)
     atlas
@@ -2137,48 +2183,69 @@ let resolve
     (assigned: Map<string, Task>)
     (verbose: Set<string>)
     : Intent list * Verdict list =
-    let placed = Atlas.placedCreeps atlas
+    let byRoom = Atlas.placedCreepsByRoom atlas
 
     let tired =
         snapshot.Creeps
         |> List.choose (fun c -> if c.Fatigue > 0 then Some c.Name else None)
         |> Set.ofList
 
-    let moveIntents =
-        placed
-        |> List.filter (fun (name, _) -> not (Set.contains name tired))
-        |> List.map (fun (name, pos) ->
-            moveIntentFor (rank snapshot) threats atlas name pos (Map.tryFind name assigned))
+    let settleRoom (room: string) (placed: (string * Pos) list) : RoomPass =
+        let moveIntents =
+            placed
+            |> List.filter (fun (name, _) -> not (Set.contains name tired))
+            |> List.map (fun (name, pos) ->
+                moveIntentFor
+                    (rank snapshot)
+                    threats
+                    atlas
+                    room
+                    name
+                    pos
+                    (Map.tryFind name assigned))
 
-    let blocked =
-        placed
-        |> List.choose (fun (name, pos) -> if Set.contains name tired then Some pos else None)
-        |> Set.ofList
+        let blocked =
+            placed
+            |> List.choose (fun (name, pos) -> if Set.contains name tired then Some pos else None)
+            |> Set.ofList
 
-    let occupants = placed |> List.map (fun (name, pos) -> pos, name) |> Map.ofList
-    let standing = arbitrate occupants blocked moveIntents
+        let occupants = placed |> List.map (fun (name, pos) -> pos, name) |> Map.ofList
+
+        {
+            Standing = arbitrate occupants blocked moveIntents
+            Preferences =
+                moveIntents |> List.map (fun i -> i.Creep, List.head i.Candidates) |> Map.ofList
+            Blocked = blocked
+            Occupants = occupants
+        }
+
+    // Every placed creep beside its room's pass, in Snapshot creep order
+    // across the rooms: the order the Intents and Verdicts leave in.
+    let placed =
+        byRoom
+        |> List.map (fun (room, placed) -> room, placed, settleRoom room placed)
+        |> List.collect (fun (_, placed, pass) ->
+            placed |> List.map (fun (name, pos) -> name, pos, pass))
+        |> List.sortBy (fun (name, _, _) ->
+            snapshot.Creeps |> List.findIndex (fun c -> c.Name = name))
 
     let intents =
         placed
-        |> List.choose (fun (name, pos) ->
-            Map.tryFind name standing
+        |> List.choose (fun (name, pos, pass) ->
+            Map.tryFind name pass.Standing
             |> Option.bind (directionTo pos)
             |> Option.map (fun direction -> MoveCreep(name, direction)))
 
-    // Each rested creep's preferred standing tile: the head of its
-    // candidate list — a Move Intent's candidates are never empty.
-    let preferences =
-        moveIntents |> List.map (fun i -> i.Creep, List.head i.Candidates) |> Map.ofList
-
-    // Who holds a tile this creep did not get: the creep settled on it, or
-    // the fatigued occupant whose blocked tile pre-claimed it.
-    let counterpartAt tile self =
-        standing
+    // Who holds a tile this creep did not get, in this creep's room: the
+    // creep settled on it, or the fatigued occupant whose blocked tile
+    // pre-claimed it.
+    let counterpartAt (pass: RoomPass) tile self =
+        pass.Standing
         |> Map.tryPick (fun name settled ->
             if settled = tile && name <> self then Some name else None)
         |> Option.orElse (
-            if Set.contains tile blocked then
-                Map.tryFind tile occupants
+            if Set.contains tile pass.Blocked then
+                Map.tryFind tile pass.Occupants
             else
                 None
         )
@@ -2195,7 +2262,7 @@ let resolve
 
     let verdicts =
         placed
-        |> List.collect (fun (name, _) ->
+        |> List.collect (fun (name, _, pass) ->
             if Set.contains name tired then
                 [ Verdict.Grounded name ]
             else
@@ -2208,9 +2275,9 @@ let resolve
                         []
 
                 let yielded =
-                    match Map.tryFind name preferences, Map.tryFind name standing with
+                    match Map.tryFind name pass.Preferences, Map.tryFind name pass.Standing with
                     | Some preferred, Some settled when settled <> preferred ->
-                        counterpartAt preferred name
+                        counterpartAt pass preferred name
                         |> Option.map (fun other -> Verdict.Yielded(name, other))
                         |> Option.toList
                     | _ -> []

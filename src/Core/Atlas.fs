@@ -371,7 +371,11 @@ let private setHeapAt (index: int) (heap: ResizeArray<int>) (value: int) : unit 
 /// runs on flat arrays with a binary min-heap of dist-then-index keys —
 /// the key ordering also keeps tie-breaking deterministic. A start tile
 /// takes its seed even when it cannot be stepped onto — a creep already
-/// stands there, or is about to be placed there. Several starts price a
+/// stands there, or is about to be placed there, or stands on the border
+/// ring the engine put it down on, which is no tile of the projection's
+/// ground at all: the far-side mover floods from there (#145), and
+/// `firstStep` from a ring tile answers the ground beside it only because
+/// the seeding does not ask what the start tile weighs. Several starts price a
 /// body that may begin anywhere in a set, which is how a spawner places a
 /// finished creep beside itself (ADR 0026). A tile marked occupied costs
 /// occupancyPenalty extra, so paths detour around standing traffic when a
@@ -781,23 +785,40 @@ let private flood (atlas: Atlas) (pricing: Pricing) (room: string) (creep: strin
     | Some memo -> memo.Value
     | None -> floodPriced (weightsOf atlas room) (occupiedOf atlas room) factor pricing pos
 
+/// The creeps the projection places, grouped under the room each is filed
+/// in — every room the projection places a creep in, and each room's
+/// creeps in Snapshot creep order, the canonical order for everything
+/// derived per creep. This is the Resolver's list (#145): arbitrated
+/// movement (ADR 0001, ADR 0008) is a room's — ADR 0041's Consequences
+/// keep it single-room, decomposed strictly per room as
+/// screeps-cartographer decomposes `reconcileTraffic` — so it runs once
+/// per group here, each over that room's tiles and no other's. A group
+/// hands out bare `Pos`es, and they are safe to key a `Set<Pos>` of
+/// blocked tiles or a `Map<Pos, string>` of occupants on precisely because
+/// the group is one room's: unioned across groups, two creeps standing on
+/// one coordinate of two rooms would collapse into one occupant, and a
+/// fatigued outpost creep would pre-claim a home tile. The rooms come in
+/// the order their first creep does, which no reader depends on: the
+/// Resolver emits in Snapshot creep order across the groups. An
+/// unplaceable creep is in no group — the answer ADR 0004 gives for
+/// geometry a query cannot place.
+let placedCreepsByRoom (atlas: Atlas) : (string * (string * Pos) list) list =
+    atlas.Placed
+    |> List.groupBy (fun (_, room, _) -> room)
+    |> List.map (fun (room, creeps) -> room, creeps |> List.map (fun (name, _, pos) -> name, pos))
+
 /// The creeps the projection places in the colony's own room, in Snapshot
-/// creep order. `Placed` carries every room's, because each seeds a flood
-/// in the room the projection files it under; this hands out a bare `Pos`,
-/// and ADR 0041's Consequences keep arbitrated movement (ADR 0001, ADR
-/// 0008) and the occupancy surcharge single-room, unchanged — the Seam
-/// is where geometry and arbitration part company. Its three readers each
-/// key on `Pos` alone: the Resolver unions these tiles into a `Set<Pos>`
-/// of blocked tiles and a `Map<Pos, string>` of occupants, the pickup
-/// reflex measures range against home-room piles, and the lead prices the
-/// tile off the home room's flood. A second room's creep unioned in would
-/// ground a home creep from another room, collapse two creeps onto one
-/// occupant, and price an outpost tile on home terrain. The mover does not
-/// learn the room later either: ADR 0041 settles arbitration at one room,
-/// so this is the answer, not a placeholder for one. A creep the colony's
-/// own room does not place is simply not arbitrated and not led — the
-/// answer ADR 0004 gives for geometry a query cannot place, here reached
-/// by picking the room rather than by failing to find the tile.
+/// creep order: the home group of `placedCreepsByRoom`, handed out as a
+/// bare `Pos` list for the two readers whose other side is home geometry
+/// and no other room's — the pickup reflex measures range against home
+/// piles, and the lead prices the tile off the home room's flood (ADR
+/// 0041). A second room's creep unioned in would pair an outpost creep
+/// with a home pile at the same coordinate and price an outpost tile on
+/// home terrain. The Resolver reads the grouped query instead (#145). A
+/// creep the colony's own room does not place is simply not picked up
+/// for and not led — the answer ADR 0004 gives for geometry a query
+/// cannot place, here reached by picking the room rather than by failing
+/// to find the tile.
 let placedCreeps (atlas: Atlas) : (string * Pos) list =
     atlas.Placed
     |> List.choose (fun (name, room, pos) -> if room = atlas.Home then Some(name, pos) else None)
@@ -1032,14 +1053,22 @@ let linkTiles (atlas: Atlas) : Set<Pos> =
 let isSwamp (atlas: Atlas) (tile: Pos) : bool =
     Map.tryFind tile (layerOf atlas atlas.Home).Terrain = Some Swamp
 
-/// Walkable tiles adjacent to `pos`, in deterministic (X, Y) order.
-/// Standing respects obstacles, unlike Seat counting. Of the colony's own
-/// room: the tile handed in carries no room of its own, and every caller —
-/// the mover's candidates, the spawner's birth tiles, a sink's approach —
-/// is home-room geometry.
-let adjacentWalkable (atlas: Atlas) (pos: Pos) : Pos list =
-    let home = layerOf atlas atlas.Home
-    neighbours pos |> List.filter (fun tile -> (stepCost home tile).IsSome)
+/// Walkable tiles adjacent to `pos` read as a tile of `room`, in
+/// deterministic (X, Y) order. Standing respects obstacles, unlike Seat
+/// counting. The tile handed in carries no room of its own (ADR 0041), so
+/// the room rides on the API: the mover's standing candidates are the
+/// creep's own room's, and since #145 the Resolver arbitrates every
+/// projected room, so a creep filed under an outpost is offered that
+/// room's ground and never home's. A room the projection does not carry
+/// has no walkable tile beside anything.
+let adjacentWalkableIn (atlas: Atlas) (room: string) (pos: Pos) : Pos list =
+    let layer = layerOf atlas room
+    neighbours pos |> List.filter (fun tile -> (stepCost layer tile).IsSome)
+
+/// `adjacentWalkableIn` for the colony's own room: every caller left on
+/// this spelling — the spawner's birth tiles, a sink's approach — is
+/// home-room geometry.
+let adjacentWalkable (atlas: Atlas) (pos: Pos) : Pos list = adjacentWalkableIn atlas atlas.Home pos
 
 /// Every tile of the room a creep may stand on — `adjacentWalkable`'s
 /// answer over the whole projection, read off the weight grid rather than
@@ -1520,6 +1549,21 @@ let seams (atlas: Atlas) (fromRoom: string) (toRoom: string) : (Pos * Pos) list 
         |> List.filter (fun (here, there) -> passable near here && passable far there)
     | _ -> []
 
+/// Whether a creep stands on a Seam — its room's border ring, the tile the
+/// engine put it down on the tick it crossed (#142). Never ground: the
+/// projection's floor stops at 1..48 (ADR 0036), and a creep that ends a
+/// tick on the ring is moved out of the room again by the engine, so a
+/// ring tile is no place the Resolver may settle a creep on — the far-side
+/// mover's rule (#145) reads this to walk a landed creep inward rather
+/// than leave it where it stands. Read off the coordinate alone, because
+/// the ring is the ring whatever its terrain: a creep is only ever on a
+/// passable tile of it. Total (ADR 0004): a creep the projection does not
+/// place stands on no Seam.
+let standsOnSeam (atlas: Atlas) (creep: string) : bool =
+    match Map.tryFind creep atlas.CreepAt with
+    | Some(_, pos) -> pos.X = 0 || pos.X = exitEdge || pos.Y = 0 || pos.Y = exitEdge
+    | None -> false
+
 /// The tiles of a room's own ground next to one of its exit tiles — the
 /// only tiles a flood can price a Seam's near side from, or step off its
 /// far side onto, because the border ring is not ground and no flood ever
@@ -1937,7 +1981,11 @@ let private stepAcross (atlas: Atlas) (pricing: Pricing) (creep: string) (task: 
 /// they are empty or unreachable. Of equally cheap goals the lowest
 /// (cost, tile) wins, matching the flood's tie-breaking. The goals are
 /// read as tiles of the creep's own room, the room its flood runs in
-/// (ADR 0041): a step is a step inside a room.
+/// (ADR 0041): a step is a step inside a room. A creep standing on the
+/// room's border ring — where the engine lands it the tick after a
+/// crossing — is not on ground, and still gets a step: the flood seeds
+/// its start tile regardless of weight, so the answer is the ground tile
+/// beside the ring that the cheapest path leaves by (#145).
 ///
 /// The Task rides beside them for the one case a bare tile set cannot
 /// carry (#142): a target the projection files under another room name

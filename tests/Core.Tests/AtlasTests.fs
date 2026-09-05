@@ -3069,13 +3069,13 @@ let roomTests =
             test "placedCreeps answers the room the mover moves in" {
                 // ADR 0041's Consequences: arbitrated movement (ADR 0001,
                 // ADR 0008) and the occupancy surcharge stay single-room,
-                // unchanged. The Resolver unions these tiles into a
-                // `Set<Pos>` and a `Map<Pos, string>`, the pickup reflex
-                // measures range against home piles, and the lead prices
-                // the tile off the home room's flood — all three of which
-                // read a second room's creep as a creep of this one when
-                // the coordinates agree. The floods still get every room's
-                // creep; this query is what the mover sees.
+                // unchanged. The pickup reflex measures range against home
+                // piles, and the lead prices the tile off the home room's
+                // flood — both of which read a second room's creep as a
+                // creep of this one when the coordinates agree. The floods
+                // still get every room's creep, and the Resolver reads the
+                // grouped query beside this one (#145); this bare list is
+                // home's.
                 let home =
                     { SpatialInfo.empty with
                         RoomName = Some "W1N1"
@@ -3108,6 +3108,61 @@ let roomTests =
                     (creepTile atlas "w-out")
                     (Some { X = 10; Y = 11 })
                     "the other room's creep is still placed — it is the bare list that is home's"
+            }
+
+            test "placedCreepsByRoom files each room's creeps under its own name, in Snapshot order" {
+                // The Resolver's list since #145: arbitration runs once per
+                // room, each over that room's creeps and tiles alone (ADR
+                // 0041's Consequences), so the grouping is the seam that
+                // keeps two rooms' coordinates from ever meeting in one
+                // `Map<Pos, string>`. Within a group the order is the
+                // Snapshot's, as every per-creep derivation's is; a creep
+                // the projection places nowhere is in no group (ADR 0004).
+                let home =
+                    { SpatialInfo.empty with
+                        RoomName = Some "W1N1"
+                    }
+                    |> withHome (fun layer ->
+                        { layer with
+                            Terrain =
+                                Map.ofList (plainLine [ for y in 10..17 -> { X = 10; Y = y } ])
+                            CreepPositions =
+                                Map.ofList
+                                    [ "b-home", { X = 10; Y = 12 }; "a-home", { X = 10; Y = 10 } ]
+                        })
+
+                let outpost =
+                    { RoomLayer.empty with
+                        Terrain = Map.ofList (plainLine [ for y in 10..17 -> { X = 10; Y = y } ])
+                        CreepPositions = Map.ofList [ "w-out", { X = 10; Y = 10 } ]
+                    }
+
+                let atlas =
+                    home
+                    |> withOutpost "W2N1" outpost
+                    |> snapshotWith
+                        [ worker "b-home"; worker "w-out"; worker "a-home"; worker "ghost" ]
+                    |> ofSnapshot
+
+                // The order the rooms come in is no promise — no reader
+                // depends on it — so the groups are compared as a map.
+                Expect.equal
+                    (placedCreepsByRoom atlas |> Map.ofList)
+                    (Map.ofList
+                        [
+                            "W1N1", [ "b-home", { X = 10; Y = 12 }; "a-home", { X = 10; Y = 10 } ]
+                            "W2N1", [ "w-out", { X = 10; Y = 10 } ]
+                        ])
+                    "each room's creeps under its name, Snapshot order inside, the unplaced in none"
+
+                Expect.equal
+                    (adjacentWalkableIn atlas "W2N1" { X = 10; Y = 10 })
+                    [ { X = 10; Y = 11 } ]
+                    "and the standing tiles beside an outpost creep are read off its own room's ground"
+
+                Expect.isEmpty
+                    (adjacentWalkableIn atlas "W3N1" { X = 10; Y = 10 })
+                    "a room the projection does not carry has no ground beside anything"
             }
         ]
 
@@ -3667,12 +3722,12 @@ let crossRoomStepTests =
                 // gate is still shut there — the landing tile is no Work
                 // Area tile, and the raw-range escape a ringed creep takes
                 // measures nine, not one — and the Atlas answers the step
-                // that opens it. What walks that step is the Resolver, and
-                // the Resolver arbitrates the home room alone (ADR 0041),
-                // so a creep the projection files in the outpost is handed
-                // no `MoveCreep` at all: the far-side mover is its own
-                // issue, deliberately outside #142, whose subject is the
-                // near side of the crossing.
+                // that opens it. What walks that step is the Resolver,
+                // which arbitrates each projected room by itself (ADR
+                // 0041, #145): the outpost's pass hands the landed creep
+                // that step, and `DecideTests` drives it from the landing
+                // tile to the dig. This test's subject is the gate, which
+                // the Atlas keeps shut until the creep may stand.
                 Expect.isFalse
                     (mayActFor landed "w" (Harvest "src-out"))
                     "the tile the engine puts it down on is no tile of the Work Area"
@@ -3690,6 +3745,43 @@ let crossRoomStepTests =
                     (firstStepFor there "w" (Harvest "src-out"))
                     None
                     "standing in the Work Area it has arrived at, it has no step left to take"
+            }
+
+            test
+                "a creep on the border ring stands on a Seam, and one on ground or nowhere does not" {
+                // The fact the far-side mover reads (#145): the tile the
+                // engine lands a crossing creep on is a Seam, never ground
+                // (ADR 0036), and a creep left standing on it is moved out
+                // of the room again at the end of the tick. Read off the
+                // coordinate, in whichever room the projection files the
+                // creep under; a creep it places nowhere stands on no Seam
+                // (ADR 0004).
+                let at homeCreeps outpostCreeps =
+                    northOf
+                        (corridorHome homeCreeps)
+                        [ { X = 25; Y = 0 }, Plain ]
+                        { corridorOutpost with
+                            CreepPositions = Map.ofList outpostCreeps
+                        }
+                        [ { X = 25; Y = 49 }, Plain ]
+                        [ "src-out", Source ]
+                        [ worker "w" ]
+
+                Expect.isTrue
+                    (standsOnSeam (at [] [ "w", { X = 25; Y = 49 } ]) "w")
+                    "landed on the outpost's ring"
+
+                Expect.isTrue
+                    (standsOnSeam (at [ "w", { X = 25; Y = 0 } ] []) "w")
+                    "and on the home room's exit row alike"
+
+                Expect.isFalse
+                    (standsOnSeam (at [] [ "w", { X = 25; Y = 48 } ]) "w")
+                    "one step inside, the creep is on ground"
+
+                Expect.isFalse
+                    (standsOnSeam (at [] []) "w")
+                    "and a creep the projection cannot place stands on no Seam"
             }
 
             test "a tied band is committed to, not shuttled between" {
