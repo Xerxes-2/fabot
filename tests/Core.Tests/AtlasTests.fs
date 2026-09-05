@@ -283,23 +283,6 @@ let standingTests =
                 Expect.equal (creepTile atlas "amy") (Some { X = 5; Y = 5 }) "the tile it stands on"
                 Expect.isNone (creepTile atlas "ghost") "a creep the projection does not place"
             }
-
-            test "placedCreeps keeps Snapshot creep order and skips the unplaced" {
-                let atlas =
-                    spatial [] [ { X = 5; Y = 5 }, Plain ]
-                    |> withHome (fun layer ->
-                        { layer with
-                            CreepPositions =
-                                Map.ofList [ "zed", { X = 5; Y = 5 }; "amy", { X = 6; Y = 6 } ]
-                        })
-                    |> snapshotWith [ worker "zed"; worker "ghost"; worker "amy" ]
-                    |> ofSnapshot
-
-                Expect.equal
-                    (placedCreeps atlas)
-                    [ "zed", { X = 5; Y = 5 }; "amy", { X = 6; Y = 6 } ]
-                    "Snapshot order, not Map order; the unplaced creep is absent"
-            }
         ]
 
 [<Tests>]
@@ -366,9 +349,15 @@ let placementQueryTests =
                     "free plain and swamp tiles only, sorted by (X, Y)"
             }
 
-            test "droppedEnergy lists placed piles in id order; buildableTiles ignores them" {
+            test
+                "droppedEnergyIn lists a room's placed piles in id order; buildableTiles ignores them" {
                 // A pile is a target the reflex reads, not a thing standing
                 // on the tile: it never keeps a construction site off it.
+                /// The room this funnel files its geometry under: the
+                /// projection names none, so it is filed under the empty
+                /// name (`SpatialInfo.homeName`).
+                let home = SpatialInfo.homeName SpatialInfo.empty
+
                 let atlas =
                     { spatial
                           [ "pile-b", { X = 10; Y = 11 }; "pile-a", { X = 10; Y = 10 } ]
@@ -379,9 +368,13 @@ let placementQueryTests =
                     |> ofSnapshot
 
                 Expect.equal
-                    (droppedEnergy atlas)
+                    (droppedEnergyIn atlas home)
                     [ "pile-a", { X = 10; Y = 10 }; "pile-b", { X = 10; Y = 11 } ]
                     "both piles placed, id order"
+
+                Expect.isEmpty
+                    (droppedEnergyIn atlas "W9N9")
+                    "a room the projection does not carry places no pile (ADR 0004)"
 
                 Expect.equal
                     (buildableTiles atlas)
@@ -3317,49 +3310,43 @@ let roomTests =
                 Expect.equal (postCount atlas) 0 "so the Anchor row hires nobody for it"
             }
 
-            test "placedCreeps answers the room the mover moves in" {
-                // ADR 0041's Consequences: arbitrated movement (ADR 0001,
-                // ADR 0008) and the occupancy surcharge stay single-room,
-                // unchanged. The pickup reflex measures range against home
-                // piles, which would read a second room's creep as a creep
-                // of this one when the coordinates agree. The floods still
-                // get every room's creep; the Resolver reads the grouped
-                // query beside this one (#145) and the lead reads
-                // `creepRoom` and `creepTile` (#153), because a succession
-                // is priced wherever the creep stands. This bare list is
-                // home's.
+            test "droppedEnergyIn answers each room's own piles on one coordinate" {
+                // The pickup reflex's geometry since #166: it measures a
+                // bare pile `Pos` against a bare creep `Pos`, so the two
+                // have to come out of one layer or a pile at home and a
+                // creep in the outpost on the same coordinate read as range
+                // 0 (ADR 0041). The kind census stays flat and world-unique
+                // — both ids are Dropped here — and it is the join to a
+                // *named* room's positions that separates them.
                 let home =
                     { SpatialInfo.empty with
                         RoomName = Some "W1N1"
+                        TargetKinds = Map.ofList [ "pile-home", Dropped; "pile-out", Dropped ]
                     }
                     |> withHome (fun layer ->
                         { layer with
                             Terrain =
                                 Map.ofList (plainLine [ for y in 10..17 -> { X = 10; Y = y } ])
-                            CreepPositions = Map.ofList [ "w-home", { X = 10; Y = 10 } ]
+                            TargetPositions = Map.ofList [ "pile-home", { X = 10; Y = 10 } ]
                         })
 
                 let outpost =
                     { RoomLayer.empty with
                         Terrain = Map.ofList (plainLine [ for y in 10..17 -> { X = 10; Y = y } ])
-                        CreepPositions = Map.ofList [ "w-out", { X = 10; Y = 11 } ]
+                        TargetPositions = Map.ofList [ "pile-out", { X = 10; Y = 10 } ]
                     }
 
-                let atlas =
-                    home
-                    |> withOutpost "W2N1" outpost
-                    |> snapshotWith [ worker "w-home"; worker "w-out" ]
-                    |> ofSnapshot
+                let atlas = home |> withOutpost "W2N1" outpost |> snapshotWith [] |> ofSnapshot
 
                 Expect.equal
-                    (placedCreeps atlas)
-                    [ "w-home", { X = 10; Y = 10 } ]
-                    "the home room's creeps and no other"
+                    (droppedEnergyIn atlas "W1N1")
+                    [ "pile-home", { X = 10; Y = 10 } ]
+                    "the home room's pile and no other, though both share the tile"
 
                 Expect.equal
-                    (creepTile atlas "w-out")
-                    (Some { X = 10; Y = 11 })
-                    "the other room's creep is still placed — it is the bare list that is home's"
+                    (droppedEnergyIn atlas "W2N1")
+                    [ "pile-out", { X = 10; Y = 10 } ]
+                    "and the outpost's own, off the layer it is filed in"
             }
 
             test "placedCreepsByRoom files each room's creeps under its own name, in Snapshot order" {

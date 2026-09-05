@@ -199,16 +199,18 @@ let private projectVisible (terrain: RoomTerrain) (room: IRoom) : RoomProjection
             // arbitrates against (ADR 0001) and a tile the Raid log
             // measures a raider's closest approach to. A creep the
             // projection cannot place is ADR 0004's absence, which is the
-            // answer `Atlas.placedCreeps` already gives it. Load-bearing
-            // rather than defensive since #142: the mover now aims a creep
-            // matched across a border at an exit tile, and the engine puts
-            // it down on the neighbour's border row for the next tick to
-            // read, so `Game.creeps` really does report one of ours outside
-            // this room and this filter is what files it under the room it
-            // stands in. #126 puts three rooms in the scan set and this
-            // call still projects one of them, so the filter answers for
-            // every other room whether or not the colony has anyone out
-            // there this tick — do not simplify it away as a dead branch.
+            // answer `Atlas.placedCreepsByRoom` already gives it: it is in
+            // no group, so no room's geometry is measured against it.
+            // Load-bearing rather than defensive since #142: the mover now
+            // aims a creep matched across a border at an exit tile, and the
+            // engine puts it down on the neighbour's border row for the
+            // next tick to read, so `Game.creeps` really does report one of
+            // ours outside this room and this filter is what files it under
+            // the room it stands in. #126 puts three rooms in the scan set
+            // and this call still projects one of them, so the filter
+            // answers for every other room whether or not the colony has
+            // anyone out there this tick — do not simplify it away as a
+            // dead branch.
             CreepPositions =
                 objectValues<ICreep> Game.creeps
                 |> Array.filter (fun c -> not c.spawning && c.room.name = room.name)

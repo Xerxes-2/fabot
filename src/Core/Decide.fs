@@ -1289,17 +1289,17 @@ let private patternOf atlas (creep: CreepInfo) =
 ///
 /// Read wherever the creep stands, home or an outpost (#153). The tile and
 /// its room come off the same lookup — `Atlas.creepRoom` beside
-/// `Atlas.creepTile`, never `Atlas.placedCreeps`, which answers the home
-/// room by construction — and the walk from `Atlas.castWalkTicks`, which
-/// floods home for the near leg and joins over the Seam band for a goal
-/// beyond it. One row, one rule, both sides of a border: an outpost's Post
-/// hires its Anchor off this row (ADR 0042) and a reserver's whole working
-/// life is the far side of a Seam, so a lead that could price only home
-/// tiles left ADR 0026's succession switched off for exactly the creeps
-/// whose replacement has the furthest to walk — the outpost Anchor read as
-/// never expiring, its successor cast the tick *after* it died, and its
-/// Post unmanned for the cast plus the crossing every 1,500 ticks while
-/// the workforce target went on hiring against its nominal output.
+/// `Atlas.creepTile`, never a query that has already picked a room — and
+/// the walk from `Atlas.castWalkTicks`, which floods home for the near leg
+/// and joins over the Seam band for a goal beyond it. One row, one rule,
+/// both sides of a border: an outpost's Post hires its Anchor off this row
+/// (ADR 0042) and a reserver's whole working life is the far side of a
+/// Seam, so a lead that could price only home tiles left ADR 0026's
+/// succession switched off for exactly the creeps whose replacement has
+/// the furthest to walk — the outpost Anchor read as never expiring, its
+/// successor cast the tick *after* it died, and its Post unmanned for the
+/// cast plus the crossing every 1,500 ticks while the workforce target
+/// went on hiring against its nominal output.
 ///
 /// The totality above gains one more absence and no new rule: a creep
 /// whose room shares no priceable crossing with home answers 0 too, exactly
@@ -2358,35 +2358,47 @@ let private planOutpostContainers (snapshot: Snapshot) atlas : Intent list =
 /// is already in reach (death drops, harvest overflow), and duplicate
 /// pickups on one pile are the engine's to settle.
 ///
-/// Both sides come out of the colony's own room, and they have to come out
-/// of the same one (ADR 0041): the piles and the creeps are bare `Pos`es,
-/// so a pile in one room and a creep in another at the same coordinate
-/// would read as range 0 and emit a pickup the engine answers
-/// ERR_NOT_IN_RANGE. `Atlas.droppedEnergy` and `Atlas.placedCreeps` both
-/// answer home, so the pairing never crosses a border; an outpost's
-/// overflow is left where it lies until a cross-room reflex has a walk to
-/// price (#123).
+/// Paired once per room the projection places a creep in, and never across
+/// two (#166). Both sides are bare `Pos`es and `range` is Chebyshev over
+/// two coordinates, so a pile in one room and a creep in another on the
+/// same coordinate read as range 0 and would draw a pickup the engine
+/// answers ERR_NOT_IN_RANGE — the room dimension lives on the API and not
+/// on `Pos` (ADR 0041), so the pairing takes it from the group it is
+/// working: `Atlas.placedCreepsByRoom`'s creeps for a room against
+/// `Atlas.droppedEnergyIn` for that same room. Nothing is priced and no
+/// walk is needed for this, which is why it does not wait on a cross-room
+/// reflex: range 1 is the whole of the geometry, and it is only ever asked
+/// inside one layer.
+///
+/// The room that made it necessary is the outpost (ADR 0042): its hauler
+/// runs one container (one creep, a long round trip), so the Anchor's
+/// overflow lands on the container's own tile, and a full container turns
+/// that overflow into a pile that no later withdrawal takes back. The
+/// hauler then stands *on* the pile — range 0 — and, while both sides
+/// answered home, walked away from it.
 let private planPickups (snapshot: Snapshot) atlas : Intent list =
-    match Atlas.droppedEnergy atlas with
-    | [] -> []
-    | piles ->
-        let hungry =
-            snapshot.Creeps
-            |> List.filter (fun c -> c.FreeCapacity > 0)
-            |> List.map (fun c -> c.Name)
-            |> Set.ofList
+    let hungry =
+        snapshot.Creeps
+        |> List.filter (fun c -> c.FreeCapacity > 0)
+        |> List.map (fun c -> c.Name)
+        |> Set.ofList
 
-        Atlas.placedCreeps atlas
-        |> List.collect (fun (name, pos) ->
-            if Set.contains name hungry then
-                piles
-                |> List.choose (fun (pile, tile) ->
-                    if range pos tile <= 1 then
-                        Some(PickupEnergy(name, pile))
-                    else
-                        None)
-            else
-                [])
+    Atlas.placedCreepsByRoom atlas
+    |> List.collect (fun (room, placed) ->
+        match Atlas.droppedEnergyIn atlas room with
+        | [] -> []
+        | piles ->
+            placed
+            |> List.collect (fun (name, pos) ->
+                if Set.contains name hungry then
+                    piles
+                    |> List.choose (fun (pile, tile) ->
+                        if range pos tile <= 1 then
+                            Some(PickupEnergy(name, pile))
+                        else
+                            None)
+                else
+                    []))
 
 /// Ticks until a source restocks (ADR 0025), 0 while it holds energy —
 /// and 0 for a source the Snapshot does not carry at all, so a source

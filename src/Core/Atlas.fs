@@ -820,25 +820,17 @@ let private flood (atlas: Atlas) (pricing: Pricing) (room: string) (creep: strin
 /// Resolver emits in Snapshot creep order across the groups. An
 /// unplaceable creep is in no group — the answer ADR 0004 gives for
 /// geometry a query cannot place.
+///
+/// The pickup reflex reads the same grouping for the same reason (#166):
+/// it measures a creep's tile against a pile's, and it pairs a group with
+/// `droppedEnergyIn` for that group's room, so the two bare `Pos`es it
+/// compares always come out of one layer. There is deliberately no bare
+/// home-only list beside this one any more — it existed for the reflex,
+/// and answering home was exactly the bug.
 let placedCreepsByRoom (atlas: Atlas) : (string * (string * Pos) list) list =
     atlas.Placed
     |> List.groupBy (fun (_, room, _) -> room)
     |> List.map (fun (room, creeps) -> room, creeps |> List.map (fun (name, _, pos) -> name, pos))
-
-/// The creeps the projection places in the colony's own room, in Snapshot
-/// creep order: the home group of `placedCreepsByRoom`, handed out as a
-/// bare `Pos` list for the reader whose other side is home geometry and no
-/// other room's — the pickup reflex measures range against home piles (ADR
-/// 0041). A second room's creep unioned in would pair an outpost creep with
-/// a home pile at the same coordinate. The Resolver reads the grouped query
-/// instead (#145), and the lead reads `creepRoom` beside `creepTile`, since
-/// #153 prices a succession wherever the creep stands. A creep the colony's
-/// own room does not place is simply not picked up for — the answer ADR
-/// 0004 gives for geometry a query cannot place, here reached by picking
-/// the room rather than by failing to find the tile.
-let placedCreeps (atlas: Atlas) : (string * Pos) list =
-    atlas.Placed
-    |> List.choose (fun (name, room, pos) -> if room = atlas.Home then Some(name, pos) else None)
 
 /// Name of the colony's own room — the entry of the layer that is home
 /// (ADR 0041), which the Layout gates on and stamps onto every site it
@@ -900,8 +892,8 @@ let private targetsOfKind (atlas: Atlas) (kind: TargetKind) : string list =
 // else (ADR 0042) — no extension, tower or storage can enter the census
 // from one. Their reader is the Layout's gap rule, `allowed at RCL − built
 // − pending`, which is a fact about the home controller: the tick a
-// projected room can hold one of these kinds, these six have to join the
-// home layer the way `placedOfKind` does, or the Layout counts a
+// projected room can hold one of these kinds, these six have to join a
+// named layer the way `placedOfKindIn` does, or the Layout counts a
 // neighbour's structures against its own allowance.
 
 /// Extensions already standing.
@@ -930,27 +922,43 @@ let builtStorages (atlas: Atlas) : int =
 let pendingStorages (atlas: Atlas) : int =
     targetsOfKind atlas (Site BuiltKind.Storage) |> List.length
 
-/// Placed targets of one kind in the colony's own room: id and tile, in id
-/// order. One of the joins between the flat kind census and the layered
-/// positions, and it picks the home room (ADR 0041): its readers are the
-/// reflexes, which aim at a bare `Pos`, and a tile from a second room
-/// would aim them at the same coordinate at home.
-let private placedOfKind (atlas: Atlas) (kind: TargetKind) : (string * Pos) list =
-    let home = layerOf atlas atlas.Home
+/// Placed targets of one kind in one named room: id and tile, in id order.
+/// One of the joins between the flat kind census and the layered positions,
+/// and the room is named rather than searched (ADR 0041, the rule
+/// `tilesWhereIn` states): its readers are the reflexes, which aim at a
+/// bare `Pos` and measure it against a creep's, so a tile drawn from
+/// whichever layer happened to hold the id would aim them at the same
+/// coordinate of another room. A room the projection does not carry places
+/// nothing — ADR 0004's absence, reached here by reading an empty layer.
+let private placedOfKindIn (atlas: Atlas) (room: string) (kind: TargetKind) : (string * Pos) list =
+    let layer = layerOf atlas room
 
     targetsOfKind atlas kind
     |> List.choose (fun id ->
-        Map.tryFind id home.TargetPositions |> Option.map (fun pos -> id, pos))
+        Map.tryFind id layer.TargetPositions |> Option.map (fun pos -> id, pos))
 
-/// Towers standing in the room: id and tile, in id order — the fire
-/// reflex's whole view of a tower (ADR 0014): no store is projected, a
-/// dry tower's shot simply fails at the engine.
+/// Towers standing in the colony's own room: id and tile, in id order —
+/// the fire reflex's whole view of a tower (ADR 0014): no store is
+/// projected, a dry tower's shot simply fails at the engine. Home, and
+/// asking for no other room, because a tower stands only in a room we own
+/// and an outpost is one we do not (ADR 0042).
 let placedTowers (atlas: Atlas) : (string * Pos) list =
-    placedOfKind atlas (Structure BuiltKind.Tower)
+    placedOfKindIn atlas atlas.Home (Structure BuiltKind.Tower)
 
-/// Dropped energy piles the projection places: id and tile, in id order.
-/// The pickup reflex's whole view of a pile — no amount is projected.
-let droppedEnergy (atlas: Atlas) : (string * Pos) list = placedOfKind atlas Dropped
+/// Dropped energy piles one room's layer places: id and tile, in id order.
+/// The pickup reflex's whole view of a pile — no amount is projected, since
+/// no decision reads one; a pile worth more than one carry is several trips,
+/// which is a Task's arithmetic and not a reflex's.
+///
+/// The room is the caller's, and the reflex asks once for each room it has
+/// a creep in (#166). Before that both sides of the pairing answered home
+/// and an outpost's overflow lay where it fell: an Anchor standing on its
+/// container spills onto the tile it stands on, the hauler that comes for
+/// the container stands on that same tile, and the two never met — 3,000
+/// energy on the ground across two outposts at t140,810, decaying at a
+/// thousandth a tick.
+let droppedEnergyIn (atlas: Atlas) (room: string) : (string * Pos) list =
+    placedOfKindIn atlas room Dropped
 
 /// Tiles holding a built road in the colony's own room — the projection's
 /// road census, one half of what the Layout's road gap subtracts

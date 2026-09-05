@@ -6775,6 +6775,37 @@ let pileColony creeps positions =
                 })
     }
 
+/// The same colony with a second room's layer beside its own (ADR 0041):
+/// that room's ground, the piles it names, and the creeps standing on its
+/// tiles — and its coordinates deliberately collide with `pileColony`'s.
+/// A `Pos` carries no room, so a reflex that unioned the two rooms' piles
+/// or the two rooms' creeps would pair across the border at range 0 and
+/// emit a pickup the engine answers ERR_NOT_IN_RANGE (#166). The creeps
+/// still enter `Creeps`, which is the colony's fleet and no room's.
+let private withPileRoom room piles positions (colony: Snapshot) =
+    { colony with
+        Spatial =
+            { colony.Spatial with
+                Rooms =
+                    Map.add
+                        room
+                        { RoomLayer.empty with
+                            Terrain =
+                                Map.ofList
+                                    [
+                                        for x in 8..12 do
+                                            for y in 8..12 -> { X = x; Y = y }, Plain
+                                    ]
+                            TargetPositions = Map.ofList piles
+                            CreepPositions = Map.ofList positions
+                        }
+                        colony.Spatial.Rooms
+                TargetKinds =
+                    (colony.Spatial.TargetKinds, piles)
+                    ||> List.fold (fun kinds (id, _) -> Map.add id Dropped kinds)
+            }
+    }
+
 [<Tests>]
 let pickupReflexTests =
     testList
@@ -6867,6 +6898,73 @@ let pickupReflexTests =
                     (placedTiles placedWith.Intents)
                     (placedTiles placedWithout.Intents)
                     "the Layout does not see piles"
+            }
+
+            test "an outpost creep picks up the pile at its own feet" {
+                // The live gap (#166): an outpost's Anchor stands on its
+                // container, overflows onto the tile it stands on, and the
+                // pile is at range 0 for the hauler that comes for the
+                // container — 3,000 energy decaying on the ground at
+                // t140,810 because both sides of the pairing answered home.
+                // The home pile shares the coordinate and stays untouched.
+                let snapshot =
+                    pileColony [ worker "w-out" 0 50 ] []
+                    |> withPileRoom
+                        "W1N2"
+                        [ "pile-out", { X = 10; Y = 10 } ]
+                        [ "w-out", { X = 10; Y = 10 } ]
+
+                let { Intents = intents } = decide snapshot Map.empty Set.empty None
+
+                Expect.equal
+                    (pickups intents)
+                    [ "w-out", "pile-out" ]
+                    "its own room's pile, and only that one"
+            }
+
+            test "a pile at home draws no creep standing in the outpost" {
+                // The pairing never crosses a border (ADR 0041): the pile
+                // and the creep are bare `Pos`es on one coordinate of two
+                // rooms, which is range 0 to `range` and out of the world
+                // to the engine.
+                let snapshot =
+                    pileColony [ worker "w-out" 0 50 ] []
+                    |> withPileRoom "W1N2" [] [ "w-out", { X = 10; Y = 10 } ]
+
+                let { Intents = intents } = decide snapshot Map.empty Set.empty None
+                Expect.isEmpty (pickups intents) "same coordinate, different room, no reach"
+            }
+
+            test "two rooms each pair their own pile with their own creep" {
+                let snapshot =
+                    pileColony
+                        [ worker "w1" 0 50; worker "w-out" 0 50 ]
+                        [ "w1", { X = 10; Y = 11 } ]
+                    |> withPileRoom
+                        "W1N2"
+                        [ "pile-out", { X = 10; Y = 10 } ]
+                        [ "w-out", { X = 9; Y = 10 } ]
+
+                let { Intents = intents } = decide snapshot Map.empty Set.empty None
+
+                Expect.equal
+                    (pickups intents |> List.sort)
+                    [ "w-out", "pile-out"; "w1", "pile-1" ]
+                    "one Intent a room, each creep on the pile of the room it stands in"
+            }
+
+            test "a creep the projection places nowhere reaches no pile" {
+                // ADR 0004's absence, unchanged by the pairing going per
+                // room: a creep in the fleet and in no layer is in no
+                // group, so it is measured against nothing rather than
+                // against every room's piles at once.
+                let snapshot =
+                    { pileColony [ worker "w1" 0 50 ] [ "w1", { X = 10; Y = 11 } ] with
+                        Creeps = [ worker "w1" 0 50; worker "ghost" 0 50 ]
+                    }
+
+                let { Intents = intents } = decide snapshot Map.empty Set.empty None
+                Expect.equal (pickups intents) [ "w1", "pile-1" ] "the unplaced creep picks nothing"
             }
         ]
 
