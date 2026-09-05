@@ -1227,3 +1227,162 @@ let crossRoomWalkTests =
                     "and the sweep really does walk somebody across: an empty one proves nothing"
             }
         ]
+
+/// The Atlas over the projection of one declared outpost, built out of
+/// the declaration itself over that room's committed terrain: the room's
+/// ground, and its declared sources and controller placed at the declared
+/// tiles under the declared ids. That is the shape the shell hands Core
+/// for a room it can see (`Snapshot.buildSpatial`), and the Atlas is what
+/// prices it (CONTEXT.md keeps the two apart: the projection is the data,
+/// the Atlas the query interface over it) — so a declaration that named a
+/// tile the room walls, or an id nothing places, is priced here the way
+/// the live colony would price it.
+///
+/// The home room's name is the one the declaration is written relative to
+/// — W12S28 — and it carries no geometry, because what is under test is
+/// the outpost's own: every query below is asked of the outpost's layer
+/// and would answer the empty set for a room the projection did not carry
+/// (ADR 0004, ADR 0041).
+let private declaredAtlas (outpost: Outpost) =
+    let capture = load outpost.RoomName
+
+    let targets =
+        [ for id, pos in outpost.Sources -> id, pos, Source ]
+        @ [ fst outpost.Controller, snd outpost.Controller, Controller ]
+
+    { SpatialInfo.empty with
+        RoomName = Some "W12S28"
+        Rooms =
+            Map.ofList
+                [
+                    outpost.RoomName,
+                    { RoomLayer.empty with
+                        Terrain = capture.Terrain
+                        TargetPositions =
+                            targets |> List.map (fun (id, pos, _) -> id, pos) |> Map.ofList
+                        Obstacles = Set.singleton (snd outpost.Controller)
+                    }
+                ]
+        Borders = Map.ofList [ outpost.RoomName, capture.Border ]
+        TargetKinds = targets |> List.map (fun (id, _, kind) -> id, kind) |> Map.ofList
+    }
+    |> AtlasTests.snapshotWith []
+    |> ofSnapshot
+
+[<Tests>]
+let outpostDeclarationTests =
+    testList
+        "the declared outposts against their captures"
+        [
+            test "each declaration names its own capture's furniture, id and tile alike" {
+                // ADR 0042 declares W12S27 and W13S28 in the engine's own
+                // ids (ADR 0041's decision, pinned in the loader tests
+                // above), and this is where the constant and the committed
+                // capture are made to agree. Compared against the capture
+                // rather than against a literal: two literals of the same
+                // ids agree with each other and with nothing the server
+                // ever said, and a re-capture that moved a rock would leave
+                // both of them green.
+                //
+                // Order included, and it carries a claim: W13S28's sources
+                // are `16,7` then `18,4`, the reverse of ADR 0042's prose,
+                // so a declaration written from the prose would pair each
+                // id with the other rock. Nothing downstream may read a
+                // source by its index — the tile is the identity — and this
+                // is the line that says which tile each id is.
+                Expect.isNonEmpty Outpost.declared "a declaration nobody made is nothing to check"
+
+                for outpost in Outpost.declared do
+                    let capture = load outpost.RoomName
+
+                    Expect.equal
+                        outpost.RoomName
+                        capture.RoomName
+                        "the capture read is the room the declaration names"
+
+                    Expect.equal
+                        outpost.Sources
+                        capture.RealSources
+                        $"{outpost.RoomName}: every source the server answered with, in its order"
+
+                    Expect.equal
+                        (Some outpost.Controller)
+                        capture.RealController
+                        $"{outpost.RoomName}: the controller a reserver would hold (ADR 0042)"
+            }
+
+            test "every declared source and controller is geometry the projection can price" {
+                // ADR 0042's first acceptance: the three outpost sources
+                // and the two outpost controllers are *in* the projection
+                // and answerable by the geometry queries — Seats for a
+                // source, an Upgrade Work Area for a controller. Both are
+                // read in the target's own room off its id (ADR 0041), so
+                // an empty answer here would be a declaration the colony
+                // can see and never work.
+                //
+                // Named as properties, never as tiles: a Seat is a
+                // walkable neighbour of its source, and a Work Area tile is
+                // walkable within the Upgrade range of its controller. The
+                // capture supplies the terrain and the test supplies no
+                // expected value (ADR 0036).
+                for outpost in Outpost.declared do
+                    let capture = load outpost.RoomName
+                    let atlas = declaredAtlas outpost
+
+                    let walkable tile =
+                        match Map.tryFind tile capture.Terrain with
+                        | Some terrain -> terrain <> Wall
+                        | None -> false
+
+                    for id, pos in outpost.Sources do
+                        let seatTiles = seatTilesOf atlas id
+                        let where = $"{outpost.RoomName} source {id}"
+
+                        Expect.equal
+                            (targetRoom atlas id)
+                            (Some outpost.RoomName)
+                            $"{where}: filed under its own room, so its Seats are that room's ground"
+
+                        Expect.isNonEmpty
+                            seatTiles
+                            $"{where}: a source nobody can stand beside is no outpost"
+
+                        Expect.equal
+                            (seats atlas id)
+                            (Some(Set.count seatTiles))
+                            $"{where}: the Seat count is the Seat tiles'"
+
+                        Expect.all
+                            seatTiles
+                            (fun tile -> range tile pos = 1 && walkable tile)
+                            $"{where}: every Seat a walkable neighbour of the rock"
+
+                        // The container is the switch that admits an
+                        // outpost into the economy (ADR 0042), and no
+                        // container stands in either room yet — so every
+                        // one of these sources is unposted, which is
+                        // exactly what makes it worth nothing to the
+                        // workforce target this ticket narrowed.
+                        Expect.isEmpty
+                            (postsOf atlas id)
+                            $"{where}: no container stands, so the source has no Post"
+
+                    let controllerId, controllerPos = outpost.Controller
+                    let area = workArea atlas (Upgrade controllerId)
+                    let where = $"{outpost.RoomName} controller {controllerId}"
+
+                    Expect.equal
+                        (targetRoom atlas controllerId)
+                        (Some outpost.RoomName)
+                        $"{where}: filed under its own room"
+
+                    Expect.isNonEmpty
+                        area
+                        $"{where}: a controller with no ground around it is unreservable"
+
+                    Expect.all
+                        area
+                        (fun tile -> range tile controllerPos <= 3 && walkable tile)
+                        $"{where}: every Work Area tile walkable within the Upgrade range"
+            }
+        ]

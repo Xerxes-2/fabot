@@ -205,9 +205,10 @@ let private projectVisible (terrain: RoomTerrain) (room: IRoom) : RoomProjection
             // it down on the neighbour's border row for the next tick to
             // read, so `Game.creeps` really does report one of ours outside
             // this room and this filter is what files it under the room it
-            // stands in. Unreachable only while the outpost set is empty
-            // (#124), which is the tick #126 spends — do not simplify it
-            // away as a dead branch.
+            // stands in. #126 puts three rooms in the scan set and this
+            // call still projects one of them, so the filter answers for
+            // every other room whether or not the colony has anyone out
+            // there this tick — do not simplify it away as a dead branch.
             CreepPositions =
                 objectValues<ICreep> Game.creeps
                 |> Array.filter (fun c -> not c.spawning && c.room.name = room.name)
@@ -246,10 +247,12 @@ let private projectVisible (terrain: RoomTerrain) (room: IRoom) : RoomProjection
         Layer = layer
         // The border ring of the room, under its own name once the caller
         // files it: the Atlas answers a Seam from these and from nothing
-        // else (ADR 0041). With the outposts declared empty the projection
-        // covers one room, so every Seam query answers empty — the
-        // neighbour is not projected — which is ADR 0004's per-entry
-        // absence and not a special case.
+        // else (ADR 0041). Since #126 declared W12S27 and W13S28 the
+        // projection carries a ring for each of the three scanned rooms,
+        // so the home room's two declared joins are answerable; a room
+        // outside the scan set has no ring here and answers no Seam at
+        // all, which is ADR 0004's per-entry absence and not a special
+        // case.
         Border = terrain.Border
         // Same array order as the layer's TargetPositions, so a controller
         // that also travels through FIND_STRUCTURES resolves to Controller
@@ -379,8 +382,8 @@ let build () : Snapshot =
     // the projection is not the only thing built off a room scan: an
     // outpost's Tasks join the *same* pool as the home room's, so the
     // entity lists the Planner pools from are scanned over the same set.
-    // The declaration is empty, so this is the one room it has always
-    // been.
+    // Three rooms since #126 filled the declaration: the spawn room,
+    // W12S27 and W13S28.
     let scanned =
         home
         |> Option.map (Outpost.roomsProjected Outpost.declared)
@@ -431,10 +434,16 @@ let build () : Snapshot =
             |> Array.toList
         // Every scanned room's sources, not the spawn room's: the Harvest
         // pool is built from this list, and ADR 0041 puts an outpost's
-        // Harvest in the *same* pool ranked by the *same* order. What an
-        // unposted outpost source is worth to the quotas is ADR 0042's
-        // question and not this list's — the declaration is empty, so this
-        // is today's two rocks either way.
+        // Harvest in the *same* pool ranked by the *same* order. Read off
+        // `seen` and not off `scanned`: a source is an entity, so a
+        // declared outpost we have no vision in this tick contributes
+        // none of its rocks, by the same per-entry absence `projectRoom`
+        // gives its geometry (ADR 0004, #124's fourth criterion). So the
+        // list is the three declared rocks *plus* today's two only on a
+        // tick the colony can see those rooms. What an unposted outpost
+        // source is worth to the quotas is not this list's question: it is
+        // answered once, in `Decide.workforceTarget`, and the answer is
+        // nothing (ADR 0042).
         //
         // The lists beside it stay home-only on purpose. `Refillables`,
         // `Controller` and `RoomEnergy` are about rooms we own, and an

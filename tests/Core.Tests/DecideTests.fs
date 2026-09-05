@@ -9755,6 +9755,176 @@ let incomeWorkforceTests =
             }
         ]
 
+/// A rock in the middle of a three-tile field, placed wherever a test puts
+/// it: three Seats, all Plain, and nothing else within reach of it. The
+/// field is written relative to the rock so the same shape can be dropped
+/// into the home room and into an outpost, and the only difference between
+/// the two fixtures is which room's layer it lands in — which is the whole
+/// of what ADR 0042's narrowing turns on.
+let private threeSeatField (rock: Pos) =
+    [
+        { rock with X = rock.X - 1 }, Plain
+        { rock with X = rock.X + 1 }, Plain
+        { rock with Y = rock.Y - 1 }, Plain
+    ]
+
+/// The W12S28 colony at its whole target with one more source somewhere:
+/// the fleet already matches, so any Seat the target counts on top shows
+/// up as a spawn Intent and nothing else can.
+let private incomeColonyPlus (place: Snapshot -> Snapshot) =
+    { incomeColony with
+        Creeps = incomeFleet
+        Sources = incomeColony.Sources @ [ source "src-out" ]
+    }
+    |> place
+
+[<Tests>]
+let outpostWorkforceTests =
+    testList
+        "an outpost source and the workforce target"
+        [
+            // The premise every case below is read against: the W12S28
+            // fleet is the whole target, so an empty spawn list means the
+            // target did not move and a non-empty one says how far it did.
+            let atTarget =
+                { incomeColony with
+                    Creeps = incomeFleet
+                }
+
+            let rock = { X = 40; Y = 40 }
+
+            test "an outpost source with no container leaves the target exactly where it was" {
+                // ADR 0042's most important regression, and the reason the
+                // constant and this narrowing land in one commit. The
+                // unposted-seat rule counts a source's Seats into the target
+                // because "its output is spoken for by the seat crews that
+                // walk it" — which presumes the walk is cheap. Across a
+                // border it is not: the three declared outpost sources carry
+                // six Seats between them, five of them swamp, and counted
+                // here they would hire six generalists to commute
+                // forty-seven to fifty-six tiles to dig them.
+                //
+                // So a source whose room has no container is a source the
+                // quotas cannot see, and the proof of it is that the colony
+                // decides what it decides with the room not there at all.
+                let withOutpostSource =
+                    incomeColonyPlus (
+                        withOutpost "W1N2" [ "src-out", rock, Source ] (threeSeatField rock)
+                    )
+
+                Expect.isEmpty
+                    (spawnIntents (decide atTarget Map.empty Set.empty None).Intents)
+                    "the premise: the fleet already matches the target"
+
+                Expect.equal
+                    (spawnIntents (decide withOutpostSource Map.empty Set.empty None).Intents)
+                    (spawnIntents (decide atTarget Map.empty Set.empty None).Intents)
+                    "three Seats a room away hire nobody: the same colony casts the same bodies"
+            }
+
+            test "the same rock in the spawn room still contributes its Seats" {
+                // The other half of the pair, and the only reading under
+                // which the case above says anything: the same source, the
+                // same three Plain Seats, the same fleet — filed under the
+                // home room's layer rather than an outpost's. ADR 0042
+                // narrows the unposted-seat rule to the spawn room and does
+                // not repeal it, so this colony hires the three walkers it
+                // always did. Without this case a rule that counted no
+                // Seats anywhere would pass the one above.
+                let atHome =
+                    incomeColonyPlus (fun colony ->
+                        { colony with
+                            Spatial =
+                                colony.Spatial
+                                |> withTargets [ "src-out", rock, Source ]
+                                |> withHome (fun layer ->
+                                    { layer with
+                                        Terrain =
+                                            (layer.Terrain, threeSeatField rock)
+                                            ||> List.fold (fun acc (tile, terrain) ->
+                                                Map.add tile terrain acc)
+                                    })
+                        })
+
+                Expect.hasLength
+                    (spawnIntents (decide atHome Map.empty Set.empty None).Intents)
+                    3
+                    "three Seats at home raise the target by three, and the idle spawns cast into it"
+            }
+
+            test "an outpost Seat on a home Post's coordinates posts nothing" {
+                // The trap ADR 0042 names as the most dangerous in the
+                // whole set, at the one query that was still asking it
+                // room-blind. A `Pos` carries no room, so testing an
+                // outpost source's Seats against the *home* room's Posts
+                // answers yes on a bare coordinate collision — and that
+                // outpost source then reads as posted with no container
+                // under it, puts ten energy a tick of income that does not
+                // exist into the base, and the colony hires the workers to
+                // spend it.
+                //
+                // The rock stands at (11,11) of the outpost, so its Seat
+                // (11,10) is the very tile the home room's `can-a` stands
+                // on. Judged in the source's own room (`Atlas.postsOf`) the
+                // collision means nothing whatever.
+                let collidingRock = { X = 11; Y = 11 }
+
+                let colliding =
+                    incomeColonyPlus (
+                        withOutpost
+                            "W1N2"
+                            [ "src-out", collidingRock, Source ]
+                            (threeSeatField collidingRock)
+                    )
+
+                Expect.contains
+                    (Atlas.posts (Atlas.ofSnapshot atTarget))
+                    { X = 11; Y = 10 }
+                    "the premise: (11,10) really is a Post of the home room"
+
+                Expect.equal
+                    (spawnIntents (decide colliding Map.empty Set.empty None).Intents)
+                    (spawnIntents (decide atTarget Map.empty Set.empty None).Intents)
+                    "a home container on the coordinates of an outpost Seat is no Post of that source's"
+            }
+
+            test "an outpost source moves no tile of the home room's Layout" {
+                // The fourth room-blind `Pos` join of the family the ticket's
+                // Traps section says to verify rather than assume, and the
+                // one that was still open: the Layout plans off
+                // `snapshot.Sources`, which since #124 is every scanned
+                // room's. An outpost source counted there widens the footing
+                // reservation by a slot and moves the clustered picks with
+                // it, floods a trunk *at home* from the outpost's
+                // coordinates, and plants a container site on a home tile
+                // that is a Seat of a source a room away. ADR 0042: "The
+                // outpost gets a container and nothing else. No roads, and
+                // no Layout."
+                //
+                // The rock stands at (15,30), which is plain walkable ground
+                // of the *home* fixture as well — that is what makes the
+                // phantom trunk routable and the collision real rather than
+                // theoretical.
+                let colony = trunkColony 2
+                let rock = { X = 15; Y = 30 }
+
+                let joined =
+                    { colony with
+                        Sources = colony.Sources @ [ source "src-out" ]
+                    }
+                    |> withOutpost "W1N2" [ "src-out", rock, Source ] (threeSeatField rock)
+
+                Expect.isNonEmpty
+                    (placementIntents (decide colony Map.empty Set.empty None).Intents)
+                    "the premise: this colony really does place a plan to move"
+
+                Expect.equal
+                    (placementIntents (decide joined Map.empty Set.empty None).Intents)
+                    (placementIntents (decide colony Map.empty Set.empty None).Intents)
+                    "the same room plans the same tiles: a source a room away is no source of its"
+            }
+        ]
+
 /// A lane with one Post at one end and the spawn at the other: the source
 /// in wall at (10,10), its built container on the Seat (11,10) — the only
 /// tile a Work-heavy body may dig that source from (ADR 0020) — and the
@@ -11541,18 +11711,28 @@ let outpostTests =
                     "a room with no geometry decides exactly what no room at all decides"
             }
 
-            test "the declared outposts land empty, so the shell scans the one room" {
-                // The landing's whole claim (ADR 0041): the capability to
-                // project a neighbour, and no behaviour. The set the shell
-                // scans is the spawn room alone until ADR 0042 fills the
-                // declaration, which is why every fixture in this suite and
-                // every byte `decide` answers is what it was.
-                Expect.equal Outpost.declared [] "no outpost is declared yet"
+            test "the declared outposts are the two ADR 0042 names, so the shell scans three rooms" {
+                // #124 landed this constant empty and pinned the emptiness,
+                // because ADR 0041 ships the capability to project a
+                // neighbour and deliberately no behaviour. ADR 0042 fills
+                // it, and this is where that pin turns over: the rooms, in
+                // the order a human wrote them, and the scan set the shell
+                // takes from them.
+                //
+                // Which ids and which tiles is a claim about the committed
+                // captures rather than about this list, so it is pinned
+                // where the captures are read (`RoomInvariantTests`) and
+                // never retyped here — two literals of the same ids would
+                // agree with each other and with nothing else.
+                Expect.equal
+                    (Outpost.declared |> List.map (fun outpost -> outpost.RoomName))
+                    [ "W12S27"; "W13S28" ]
+                    "the north outpost and the west one"
 
                 Expect.equal
                     (Outpost.roomsProjected Outpost.declared "W12S28")
-                    [ "W12S28" ]
-                    "so the projection covers today's one room"
+                    [ "W12S28"; "W12S27"; "W13S28" ]
+                    "so the projection covers the spawn room and both of them"
             }
 
             test "a declared outpost joins the spawn room in the set the shell scans" {

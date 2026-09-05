@@ -338,17 +338,44 @@ type Outpost =
 
 [<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
 module Outpost =
-    /// The colony's outposts. Empty, and the emptiness is this landing's
-    /// whole claim: ADR 0041 delivers the capability to project a
-    /// neighbour and deliberately no behaviour, so the room set below is
-    /// the one room the shell has always projected and `decide` answers
-    /// byte for byte what it answered before the layering. ADR 0042 fills
-    /// it — W12S27 north and W13S28 west — together with the rules that
-    /// make an outpost pay. Filling it first would walk straight into the
-    /// trap that ADR names: an outpost source with no container joins
-    /// `snapshot.Sources`, and `workforceTarget`'s unposted-seat rule
-    /// hires generalists to commute fifty tiles to a swamp.
-    let declared: Outpost list = []
+    /// The colony's outposts (ADR 0042): W12S27 across the north edge and
+    /// W13S28 across the west, three sources and two controllers between
+    /// them. Chosen by a human in an ADR and moved by a human in a commit,
+    /// exactly as the Layout's horizon is (ADR 0039) — the type above
+    /// carries why there is no discovery and why the ids are the engine's.
+    ///
+    /// Filling this is half of ADR 0042's first step and never the whole
+    /// of it. The other half is in `Decide.workforceTarget`, which counts
+    /// an unposted source's Seats into the target on the grounds that its
+    /// output is spoken for by the crews that walk it. Filled alone, that
+    /// rule reads these three sources' six Seats — five of them swamp —
+    /// and hires six generalists to commute forty-seven to fifty-six tiles
+    /// to dig them, which is why the narrowing lands in the same commit as
+    /// the declaration and not one after it.
+    ///
+    /// W13S28's sources are paired to their tiles and never to their
+    /// order: they are written `16,7` before `18,4`, the reverse of the
+    /// order ADR 0042's prose reads them in, because that is the order the
+    /// server answered the room in and the order the committed capture
+    /// keeps (`RoomFixtures.RealSources`, pinned in `RoomInvariantTests`).
+    /// `16,7` is the single-Seat far source, not the two-Seat one.
+    let declared: Outpost list =
+        [
+            {
+                RoomName = "W12S27"
+                Sources = [ "6a8caabadd4872bccd3194a6", { X = 16; Y = 45 } ]
+                Controller = "6a8caabadd4872bccd3194a5", { X = 37; Y = 43 }
+            }
+            {
+                RoomName = "W13S28"
+                Sources =
+                    [
+                        "6a8caaaddd4872bccd319362", { X = 16; Y = 7 }
+                        "6a8caaaddd4872bccd319361", { X = 18; Y = 4 }
+                    ]
+                Controller = "6a8caaaddd4872bccd319363", { X = 24; Y = 17 }
+            }
+        ]
 
     /// The rooms the shell projects this tick: the spawn room, and every
     /// declared outpost beside it (ADR 0041). One projection covering
@@ -356,9 +383,11 @@ module Outpost =
     /// here so the rule has one statement rather than a copy in the shell.
     ///
     /// The outposts are handed in rather than read from `declared`
-    /// straight, for two reasons that outlive this landing: the union rule
-    /// is then checkable while the declaration itself stays empty, and the
-    /// stand-down gate (ADR 0043) has exactly one place to narrow the set
+    /// straight, for two reasons: the union rule is then checkable against
+    /// any declaration — the empty one #124 shipped, the two rooms #126
+    /// filled in, a third a human adds — rather than only against the one
+    /// the colony happens to ship, and the stand-down gate (ADR 0043) has
+    /// exactly one place to narrow the set
     /// — a room withdrawn from does not enter the projection at all, which
     /// is the whole of "retreat" in an architecture that keeps no state.
     ///

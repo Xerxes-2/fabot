@@ -605,9 +605,31 @@ let private upgradeDrainPerWork = 1
 /// workers the income arithmetic — floored at minWorkforce and derived
 /// fresh each tick. A source whose Post is provided for retires its other
 /// Seats: one heavy body drains it alone, so counting seats after that is
-/// hiring for jobs that no longer exist. An unposted source still
-/// contributes its Seat count as today — its output is spoken for by the
-/// seat crews that walk it, so only the posted sources' output is income.
+/// hiring for jobs that no longer exist. An unposted source of the spawn
+/// room still contributes its Seat count — its output is spoken for by the
+/// seat crews that walk it — so only the posted sources' output is income.
+///
+/// An unposted source of an outpost contributes nothing at all (ADR 0042).
+/// The seat-crew justification presumes the walk is cheap, and across a
+/// border it is not: the three declared outpost sources carry six Seats
+/// between them, five of them swamp, and counted here they would hire six
+/// generalists to commute forty-seven to fifty-six tiles to dig them. The
+/// useful half of that exclusion is that a standing container is the
+/// switch admitting an outpost into the economy — until one stands the
+/// room is invisible to every quota, and the tick it stands the source
+/// becomes a Post and enters the income base at its own output. Which room
+/// a source stands in is the Atlas's own id-to-room join — the layer that
+/// places its id, precomputed for every reader holding an Atlas (ADR
+/// 0041) — never the constant: the projection is what the quota is derived
+/// from, and a source the projection does not place is unpriceable and
+/// counts nothing wherever it was declared (ADR 0004).
+///
+/// Being posted is judged in the source's own room, by `Atlas.postsOf` and
+/// not by testing its Seats against the home room's Posts: a `Pos` carries
+/// no room, so a home Post standing on an outpost Seat's coordinates would
+/// read that outpost source as posted with no container under it, and put
+/// a phantom ten energy a tick into the income base below.
+///
 /// From that income the anchor and hauler rows' replacement amortization
 /// (body cost spread over a creep's lifetime) is deducted; every energy
 /// per tick left feeds upgrade mouths at one worker body's Work drain,
@@ -616,15 +638,15 @@ let private upgradeDrainPerWork = 1
 /// them. The arithmetic runs scaled by the lifetime so the amortization
 /// never rounds away.
 let private workforceTarget (snapshot: Snapshot) atlas anchorQuota haulerQuota =
-    let posts = Atlas.posts atlas
+    let home = SpatialInfo.homeName snapshot.Spatial
 
     let posted, unposted =
         snapshot.Sources
-        |> List.partition (fun s ->
-            Atlas.seatTilesOf atlas s.Id |> Set.exists (fun seat -> Set.contains seat posts))
+        |> List.partition (fun s -> Atlas.postsOf atlas s.Id |> Set.isEmpty |> not)
 
     let unpostedSeats =
         unposted
+        |> List.filter (fun s -> Atlas.targetRoom atlas s.Id = Some home)
         |> List.sumBy (fun s -> Atlas.seats atlas s.Id |> Option.defaultValue 0)
 
     let capacity =
@@ -1065,6 +1087,22 @@ let private planLayout
         // the spawn's colour, leaving the other colour free for movement.
         let parity = (spawnPos.X + spawnPos.Y) % 2
 
+        // The sources this plan is for: the home room's alone (ADR 0041).
+        // `snapshot.Sources` is every scanned room's since #124 — the
+        // Harvest pool is one pool — while every use of a source below
+        // joins a bare `Pos` to the *home* grid: a footing slot widens a
+        // home reservation, a trunk is a home flood started from the
+        // source's coordinate, and a container pick lands on a home tile.
+        // An outpost source read here draws a trunk and plants a container
+        // site out of another room's coordinates onto home ground, which
+        // is the Layout ADR 0042 promises the outpost will never get ("The
+        // outpost gets a container and nothing else. No roads, and no
+        // Layout"). The room is resolved through the Atlas's own id join
+        // (ADR 0041), as every other reader holding one resolves it.
+        let homeSources =
+            snapshot.Sources
+            |> List.filter (fun s -> Atlas.targetRoom atlas s.Id = Some room)
+
         // The working ground — every source's Seats and the controller's
         // Upgrade Work Area — is off-limits (ADR 0022): a clustered
         // structure there eats a tile an Anchor or an upgrader stands on,
@@ -1115,7 +1153,7 @@ let private planLayout
         // too (ADR 0027). Without the widening a pick lands past the
         // window on ground the flood never dodged, and the tick its site
         // stands the trunk reroutes around it.
-        let footingSlots = List.length snapshot.Sources + 2
+        let footingSlots = List.length homeSources + 2
 
         let clustered =
             ordering
@@ -1149,7 +1187,7 @@ let private planLayout
         // its container (ADR 0012), while the goals stay apart for the
         // reason `TrunkGoal` is a type — the loss below is per goal.
         let sourceRoutes =
-            snapshot.Sources
+            homeSources
             |> List.sortBy (fun s -> s.Id)
             |> List.choose (fun s ->
                 Atlas.positionOf atlas s.Id
