@@ -603,6 +603,40 @@ let saveLayout
     ensureObserve ()
     Memory?fabot?observe?layout <- layout
 
+/// The phase split off one CPU row, field by field, or `None` when the row
+/// carries none (#170). Absent and malformed are the same answer here and
+/// deliberately: a row from a bundle that predates the split has no phase
+/// keys at all, and one whose keys will not decode is a row nobody
+/// measured either — while its `ms`, which passed its own check, is still
+/// the number ADR 0041's trigger is read off. So a phase group that fails
+/// costs the phases alone and leaves the tick in the window, which is the
+/// same degradation the line as a whole is written under.
+///
+/// All six or none: the fold writes them together, one tick's boundaries,
+/// and a half-decoded group would price a phase against a boundary that
+/// was never read. `observe.mjs cpu` is the half that shouts about it —
+/// the reader can afford to fail loudly where the bot cannot (#135).
+let private decodeCpuPhases (raw: obj) : CpuPhases option =
+    if
+        jsTypeof raw?entry = "number"
+        && jsTypeof raw?snapshot = "number"
+        && jsTypeof raw?decide = "number"
+        && jsTypeof raw?save = "number"
+        && jsTypeof raw?execute = "number"
+        && jsTypeof raw?intents = "number"
+    then
+        Some
+            {
+                Entry = unbox<float> raw?entry
+                Snapshot = unbox<float> raw?snapshot
+                Decide = unbox<float> raw?decide
+                Save = unbox<float> raw?save
+                Execute = unbox<float> raw?execute
+                Intents = unbox<int> raw?intents
+            }
+    else
+        None
+
 /// The prior CPU line, or empty when the leaf is absent, from an older
 /// bundle, or otherwise unreadable — a discarded line costs the ticks it
 /// held and nothing else. A row that will not decode costs that row alone,
@@ -640,6 +674,7 @@ let loadCpu () : CpuState =
                                     {
                                         Tick = unbox<int> raw?t
                                         Ms = unbox<float> raw?ms
+                                        Phases = decodeCpuPhases raw
                                     }
                             else
                                 None
@@ -661,6 +696,14 @@ let loadCpu () : CpuState =
 /// because the tick number is the half a reader cannot reconstruct: the
 /// window is only as long as the ticks in it, and a missing tick is a tick
 /// the loop did not finish.
+///
+/// A row split into phases (#170) carries them beside those two, one key
+/// each and spelt as the column it prints under — `entry`, `snapshot`,
+/// `decide`, `save`, `execute`, `intents`. Written only when the row has
+/// them, the way the closest approach's key is: a row read back from an
+/// older bundle keeps its absence through the ring rather than being
+/// rewritten as six zeros, and the ring carries no more than a hundred
+/// rows, so a deploy's worth of unsplit rows is gone within one window.
 let saveCpu (state: CpuState) =
     let cpu = createEmpty<obj>
 
@@ -670,6 +713,17 @@ let saveCpu (state: CpuState) =
             let o = createEmpty<obj>
             o?t <- sample.Tick
             o?ms <- sample.Ms
+
+            match sample.Phases with
+            | Some phases ->
+                o?entry <- phases.Entry
+                o?snapshot <- phases.Snapshot
+                o?decide <- phases.Decide
+                o?save <- phases.Save
+                o?execute <- phases.Execute
+                o?intents <- phases.Intents
+            | None -> ()
+
             o)
         |> List.toArray
 

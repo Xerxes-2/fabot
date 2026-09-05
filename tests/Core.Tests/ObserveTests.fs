@@ -1653,6 +1653,25 @@ let gateTests =
 let private line (state: CpuState) =
     state.Ticks |> List.map (fun sample -> sample.Tick, sample.Ms)
 
+/// Each row's phase split, oldest first — `None` for a row written by a
+/// bundle that did not measure the boundaries (#170).
+let private splits (state: CpuState) =
+    state.Ticks |> List.map (fun sample -> sample.Phases)
+
+/// A tick that cost `ms` in total and whose boundaries were all read at the
+/// end of it. The total is the last reading, so the rows these tests fold
+/// carry exactly the costs they carried before the phases arrived, and the
+/// window's shape stays the one the trigger is judged over.
+let private costing (ms: float) =
+    {
+        AtEntry = 0.0
+        AtSnapshot = ms
+        AtDecide = ms
+        AtSave = ms
+        AtExecute = ms
+        Intents = 0
+    }
+
 [<Tests>]
 let cpuTests =
     testList
@@ -1663,7 +1682,9 @@ let cpuTests =
                 // two ticks that cost the same are two rows, because the
                 // distribution is the whole point (ADR 0041).
                 let state =
-                    CpuState.empty |> foldCpu capCpuTicks 100 21.0 |> foldCpu capCpuTicks 101 21.0
+                    CpuState.empty
+                    |> foldCpu capCpuTicks 100 (costing 21.0)
+                    |> foldCpu capCpuTicks 101 (costing 21.0)
 
                 Expect.equal
                     (line state)
@@ -1676,7 +1697,9 @@ let cpuTests =
                 // — writing nothing — is visible as a missing number rather
                 // than as a cheap tick that never happened.
                 let state =
-                    CpuState.empty |> foldCpu capCpuTicks 100 21.0 |> foldCpu capCpuTicks 102 19.5
+                    CpuState.empty
+                    |> foldCpu capCpuTicks 100 (costing 21.0)
+                    |> foldCpu capCpuTicks 102 (costing 19.5)
 
                 Expect.equal
                     (line state)
@@ -1687,7 +1710,7 @@ let cpuTests =
             test "the ring keeps the newest cap-many ticks" {
                 let state =
                     (CpuState.empty, [ 1..5 ])
-                    ||> List.fold (fun state t -> foldCpu 3 t (float t) state)
+                    ||> List.fold (fun state t -> foldCpu 3 t (costing (float t)) state)
 
                 Expect.equal
                     (line state)
@@ -1701,12 +1724,127 @@ let cpuTests =
                 // are Memory paid for noise.
                 let state =
                     CpuState.empty
-                    |> foldCpu capCpuTicks 100 21.2345674
-                    |> foldCpu capCpuTicks 101 8.0009
+                    |> foldCpu capCpuTicks 100 (costing 21.2345674)
+                    |> foldCpu capCpuTicks 101 (costing 8.0009)
 
                 Expect.equal
                     (line state)
                     [ 100, 21.235; 101, 8.001 ]
                     "each cost rounds to three decimal places"
+            }
+
+            test "the readings are differenced into phases, the entry alone" {
+                // The shape of a live tick the day the split was built: an
+                // engine prelude already spent before `loop` runs, then the
+                // Snapshot, `decide`, the Memory writes and the Executor's
+                // intents (#170). The engine's counter is cumulative and
+                // every phase is a difference — except the entry, which is
+                // the prelude itself and is carried as it was read.
+                let state =
+                    CpuState.empty
+                    |> foldCpu
+                        capCpuTicks
+                        141584
+                        {
+                            AtEntry = 0.4
+                            AtSnapshot = 3.4
+                            AtDecide = 44.2
+                            AtSave = 46.0
+                            AtExecute = 49.4
+                            Intents = 44
+                        }
+
+                Expect.equal
+                    (splits state)
+                    [
+                        Some
+                            {
+                                Entry = 0.4
+                                Snapshot = 3.0
+                                Decide = 40.8
+                                Save = 1.8
+                                Execute = 3.4
+                                Intents = 44
+                            }
+                    ]
+                    "each phase is the ground it covers, not the counter it ended at"
+
+                Expect.equal
+                    (line state)
+                    [ 141584, 49.4 ]
+                    "the tick's total is the last reading — the number the trigger has always judged"
+            }
+
+            test "a phase is kept to the microsecond, like the total" {
+                // The differences are rounded the same way the total is, so
+                // a phase never arrives with the float noise of a
+                // subtraction: the digits Memory pays for are the ones a
+                // reader could act on.
+                let state =
+                    CpuState.empty
+                    |> foldCpu
+                        capCpuTicks
+                        100
+                        {
+                            AtEntry = 0.1234564
+                            AtSnapshot = 1.2345674
+                            AtDecide = 2.0009
+                            AtSave = 2.0015
+                            AtExecute = 3.9999996
+                            Intents = 1
+                        }
+
+                Expect.equal
+                    (splits state)
+                    [
+                        Some
+                            {
+                                Entry = 0.123
+                                Snapshot = 1.111
+                                Decide = 0.766
+                                Save = 0.001
+                                Execute = 1.998
+                                Intents = 1
+                            }
+                    ]
+                    "every phase rounds to three decimal places"
+            }
+
+            test "a tick the engine took no intent on says nothing was taken" {
+                // Zero is a measurement here, unlike an absent phase group:
+                // a tick with no accepted intent is the one shape that
+                // proves the engine's 0.2-per-intent charge is not what the
+                // tick cost.
+                let state = CpuState.empty |> foldCpu capCpuTicks 100 (costing 21.0)
+
+                Expect.equal
+                    (splits state |> List.map (Option.map (fun phases -> phases.Intents)))
+                    [ Some 0 ]
+                    "the count rides the row at zero rather than going missing"
+            }
+
+            test "a row written before the phases keeps its absence" {
+                // What the ring holds for the first hundred ticks after the
+                // split is deployed, and what a rollback puts back in it.
+                // The old row keeps its total — the window the trigger is
+                // read over never shortens — and its phases stay absent
+                // rather than being filled with zeros, which would say the
+                // Snapshot cost nothing rather than that nobody measured it.
+                let unsplit =
+                    {
+                        Ticks = [ { Tick = 99; Ms = 6.1; Phases = None } ]
+                    }
+
+                let state = unsplit |> foldCpu capCpuTicks 100 (costing 21.0)
+
+                Expect.equal
+                    (line state)
+                    [ 99, 6.1; 100, 21.0 ]
+                    "the older row rides on with the cost it was written with"
+
+                Expect.equal
+                    (splits state |> List.map Option.isSome)
+                    [ false; true ]
+                    "absence is preserved, and only the new row is split"
             }
         ]

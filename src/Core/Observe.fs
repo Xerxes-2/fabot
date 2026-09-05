@@ -839,13 +839,80 @@ let foldRaids (cap: int) (gap: int) (snapshot: Snapshot) (prior: RaidState) : Ra
         Hits = if Option.isSome episode then defended else Map.empty
     }
 
+/// What `Game.cpu.getUsed()` answered at each of the loop's phase
+/// boundaries, in the order the tick ran them, plus the intents the engine
+/// accepted (#170). Cumulative, every one of them, because that is what the
+/// engine's counter is: the differencing is this module's job and happens
+/// once, here, rather than in each of the readers.
+///
+/// `AtEntry` is the odd one out and the reason the split was built. It is
+/// read on the loop's first line, so it is not a phase of the bot's at all
+/// — it is what the engine had already spent before `loop` was entered,
+/// and it stands on its own in every readout.
+///
+/// The order is the loop's own rather than the tick's four nouns in the
+/// obvious sequence: the Memory writes land *before* `Executor.run`,
+/// deliberately — a throw inside the Executor must not discard the tick's
+/// anti-thrash state — so `AtSave` is read between `decide` and the
+/// intents rather than after them.
+type CpuReadings =
+    {
+        AtEntry: float
+        AtSnapshot: float
+        AtDecide: float
+        AtSave: float
+        AtExecute: float
+        Intents: int
+    }
+
+/// One tick's cost, split at the loop's phase boundaries: the engine's
+/// prelude and then four differences, each in milliseconds, and the count
+/// of intents the engine accepted that tick (#170).
+///
+/// The split exists to attribute a gap the ruler cannot see. `npm run
+/// profile` measures the same scenario at 10.45 ms/tick while the live
+/// colony's line reads a 49.4 ms mean — 4.7×, where #97's era was 3× — and
+/// the harness has no engine: no 0.2 CPU per intent, no prelude, no Memory
+/// parse. A single total cannot say which of those the missing 1.6× is, so
+/// every row carries the phases and the intent count, and the arithmetic is
+/// left to whoever reads it (ADR 0041: measured, not budgeted).
+///
+/// Each phase is the ground between two of the loop's boundaries and not a
+/// noun's price, which is what a reader attributing the gap has to hold on
+/// to. `Snapshot` carries the Memory parse — `Memory` deserializes on the
+/// loop's first touch of it, which is the Raid log's read inside that phase
+/// — so the parse is fused with the shell's `find` sweep and not with the
+/// prelude. `Save` spans the observe folds as well as the writes they feed,
+/// because the boundary sits where the writes end, not where they begin.
+type CpuPhases =
+    {
+        Entry: float
+        Snapshot: float
+        Decide: float
+        Save: float
+        Execute: float
+        Intents: int
+    }
+
 /// One tick's cost, as the engine measured it: the tick it was measured
-/// on, and the milliseconds the bot had spent by the time it stopped
-/// looking (ADR 0041). The tick number rides the row rather than being
-/// implied by its place in the ring, because a tick the loop never
-/// finished writes no row at all — a gap in the numbers is the one thing
-/// this line can say that a bare list of costs cannot.
-type CpuSample = { Tick: int; Ms: float }
+/// on, the milliseconds the bot had spent by the time it stopped looking
+/// (ADR 0041), and — for a row this bundle wrote — where those went.
+/// The tick number rides the row rather than being implied by its place in
+/// the ring, because a tick the loop never finished writes no row at all —
+/// a gap in the numbers is the one thing this line can say that a bare list
+/// of costs cannot.
+///
+/// The phases are an option and not a record of zeros: a row written before
+/// #170 was never split, and a zero would say the phase cost nothing rather
+/// than that nobody measured it. Nothing this fold writes is ever `None` —
+/// the absence arrives only off the wire, and the ring replaces itself with
+/// split rows within one window of a deploy.
+type CpuSample =
+    {
+        Tick: int
+        Ms: float
+        Phases: CpuPhases option
+    }
 
 /// The whole persisted CPU line: oldest first, capped, exactly as the
 /// other two rings are. A record rather than a bare list so the leaf can
@@ -866,7 +933,11 @@ module CpuState =
 /// several times the cost of its neighbours; at the sibling channels'
 /// twenty that recompute is a twentieth of the mean, and at a hundred it
 /// is a percent. A hundred rows of `{ t, ms }` is about 2.5KB against the
-/// 2MB Memory, which is what buys the longer window.
+/// 2MB Memory, which is what buys the longer window. The phases (#170)
+/// take a row from 22 bytes of JSON to 109 — about 11KB for the window,
+/// against a whole observe subtree that measured 26.6KB the day they were
+/// added — and the window is what buys the attribution, so the ring keeps
+/// its hundred.
 let capCpuTicks = 100
 
 /// The measured cost, kept to the microsecond. The engine hands back a
@@ -891,7 +962,34 @@ let private toMicrosecond (ms: float) = floor (ms * 1000.0 + 0.5) / 1000.0
 /// not: skipping a tick collides with the safe-mode reflex (ADR 0007,
 /// ADR 0015), which has to be able to fire on the very tick a guard would
 /// skip.
-let foldCpu (cap: int) (tick: int) (ms: float) (prior: CpuState) : CpuState =
+///
+/// The readings arrive cumulative and are differenced here (#170), which is
+/// the one place they can be: the shell reads a counter at each boundary
+/// and knows nothing else, and a reader handed cumulative numbers would
+/// have to subtract them again — every reader, the same way, off a shape
+/// nothing pins. The tick's total stays `AtExecute`, the last reading, so
+/// the row the trigger judges is the number it always was.
+let foldCpu (cap: int) (tick: int) (readings: CpuReadings) (prior: CpuState) : CpuState =
+    let phases =
+        {
+            // Not a difference: nothing of the bot's ran before it.
+            Entry = toMicrosecond readings.AtEntry
+            Snapshot = toMicrosecond (readings.AtSnapshot - readings.AtEntry)
+            Decide = toMicrosecond (readings.AtDecide - readings.AtSnapshot)
+            Save = toMicrosecond (readings.AtSave - readings.AtDecide)
+            Execute = toMicrosecond (readings.AtExecute - readings.AtSave)
+            Intents = readings.Intents
+        }
+
     {
-        Ticks = prior.Ticks @ [ { Tick = tick; Ms = toMicrosecond ms } ] |> trim cap
+        Ticks =
+            prior.Ticks
+            @ [
+                {
+                    Tick = tick
+                    Ms = toMicrosecond readings.AtExecute
+                    Phases = Some phases
+                }
+            ]
+            |> trim cap
     }

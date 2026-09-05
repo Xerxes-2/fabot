@@ -83,8 +83,9 @@ let private execute (intent: Intent) : Outcome =
             withActor (Game.getObjectById towerId :?> ITower) (fun tower -> tower.attack target))
 
 /// Replay every Intent and answer back what the engine said. Failures are
-/// logged here, once and uniformly; the outcome list is the seam a future
-/// sim harness reads.
+/// logged here, once and uniformly; the outcome list is the seam `Main.loop`
+/// counts the engine's accepted intents off (#170), and a future sim harness
+/// reads.
 let run (intents: Intent list) : (Intent * Outcome) list =
     intents
     |> List.map (fun intent ->

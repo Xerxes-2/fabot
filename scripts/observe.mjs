@@ -22,8 +22,10 @@
 //                                  to, the deadline that tick was read off, and
 //                                  the rooms another player took, shut by no clock
 //   observe.mjs layout             what the Layout could not deliver this plan
-//   observe.mjs cpu                the per-tick CPU line, with ADR 0041's
-//                                  revisit trigger read off it
+//   observe.mjs cpu                the per-tick CPU line — the tick's total,
+//                                  where it went phase by phase, how many
+//                                  intents the engine took, and ADR 0041's
+//                                  revisit trigger read off the totals
 //   observe.mjs verbose            the verbose list as stored
 //   observe.mjs verbose add <creep>     put a creep on the verbose list
 //   observe.mjs verbose remove <creep>  take a creep off the verbose list
@@ -634,7 +636,7 @@ if (command === "console") {
   // ---- cpu: the per-tick CPU line ---------------------------------------
 
   // The wire shape written by ObserveMemory.fs:
-  //   { ticks: [{ t, ms }] }
+  //   { ticks: [{ t, ms, entry?, snapshot?, decide?, save?, execute?, intents? }] }
   // One row per tick the loop finished, oldest first, capped at the ring
   // Core keeps (ADR 0041). The tick number rides each row because the
   // window is only as long as the ticks in it: a tick that threw before
@@ -643,6 +645,13 @@ if (command === "console") {
   // stopped looking — after the Executor's intents, before the engine
   // serializes Memory — so it is the tick's cost minus a constant nobody
   // can move.
+  //
+  // The six optional keys are the phase split (#170) and they are what
+  // this command exists to print: the local ruler measures the same
+  // scenario at 10.45 ms/tick against a 49.4 ms mean here, and the ruler
+  // has no engine — no prelude, no 0.2 CPU per intent — so a single total
+  // cannot say where the difference sits. The judgement below still reads
+  // the totals alone, unchanged: the split is attribution, not a threshold.
   //
   // A missing leaf is a missing channel and fails loudly the way `raids`
   // and `layout` do: reading it as an empty window would print a
@@ -674,9 +683,20 @@ if (command === "console") {
   const ticks = stored.ticks.filter(readable);
   const unreadable = stored.ticks.length - ticks.length;
 
+  // The phase columns, in the order the loop reads them and spelt exactly
+  // as `saveCpu` writes them. `entry` leads and is not a phase of the
+  // bot's at all: it is what the engine had already spent by the time
+  // `loop` was entered.
+  const PHASES = ["entry", "snapshot", "decide", "save", "execute"];
+  const COLUMNS = [...PHASES, "intents"];
+
   // `--json` is the stored rows, not the judged ones: the raw structure is
   // what a jq reader came for, and a row hidden from it could not be seen
-  // anywhere at all.
+  // anywhere at all — which is why the malformed-split guard below sits
+  // inside the printed path and not above this branch. A row carrying half
+  // a split is exactly the row an operator opens `--json` to find and
+  // repair, and a guard that killed the dump first would leave it visible
+  // nowhere.
   if (json) {
     console.log(JSON.stringify(stored.ticks, null, 2));
   } else if (stored.ticks.length === 0) {
@@ -688,10 +708,92 @@ if (command === "console") {
         'its wire shape has moved. Not read as "nothing measured".',
     );
   } else {
-    const width = Math.max(...ticks.map((row) => String(row.t).length));
+    // The split is readable when absent and fatal when malformed, which is
+    // #135's asymmetry rather than the one the totals above are dropped
+    // under. A row from a bundle older than the split carries no phase key
+    // at all, and printing its columns empty says something true about that
+    // row. A row carrying half a split, or a phase that is not a number,
+    // would print the same empty columns and say the same thing about a
+    // bundle that is measuring right now — and Core keeps such a row while
+    // dropping its group (`decodeCpuPhases`), so the silence here would be
+    // this reader's invention. An own-key test rather than `row[key] !==
+    // undefined`, for the reason spelt out in the `outposts` branch above:
+    // every object answers `constructor` and `toString` with something.
     for (const row of ticks) {
-      console.log(`${String(row.t).padStart(width)}  ${row.ms.toFixed(3).padStart(8)} ms`);
+      const named = COLUMNS.filter((key) => Object.hasOwn(row, key));
+      if (named.length === 0) continue;
+      if (named.length !== COLUMNS.length || named.some((key) => typeof row[key] !== "number")) {
+        fail(
+          `the phase split on the row for tick ${row.t} at Memory.fabot.observe.cpu is off the ` +
+            `wire shape: ${JSON.stringify(row)} — the leaf was hand-edited, or its wire shape ` +
+            'has moved. Not printed as "that tick was never split": the bundle writing this row ' +
+            "measured the boundaries and this reader cannot say what they were. `--json` still " +
+            "dumps the row.",
+        );
+      }
     }
+
+    // Every key or none, by the guard above, so the first of them answers
+    // for the group.
+    const isSplit = (row) => Object.hasOwn(row, "entry");
+    const split = ticks.filter(isSplit);
+
+    const width = Math.max(4, ...ticks.map((row) => String(row.t).length));
+    const ms = (value) => value.toFixed(3).padStart(8);
+    // A split the row does not carry is a dash and never a zero: nobody
+    // measured that phase, which is a different statement from measuring
+    // it at nothing.
+    const absent = "—".padStart(8);
+    const cells = (row) =>
+      isSplit(row)
+        ? [...PHASES.map((key) => ms(row[key])), String(row.intents).padStart(8)]
+        : COLUMNS.map(() => absent);
+
+    console.log(
+      [
+        "tick".padStart(width),
+        "total ms".padStart(8),
+        ...COLUMNS.map((key) => key.padStart(8)),
+      ].join("  "),
+    );
+
+    for (const row of ticks) {
+      console.log([String(row.t).padStart(width), ms(row.ms), ...cells(row)].join("  "));
+    }
+
+    console.log("");
+
+    // The window's phase means, which are the attribution the split was
+    // built for: the engine's prelude, the shell's sweep (the Memory parse
+    // rides in it), the decision, the observe folds and the Memory writes,
+    // and the intents. Averaged over the rows that carry a split rather
+    // than over the window, so a deploy's first hundred ticks do not divide
+    // five phases by rows that have none.
+    //
+    // The intent mean is printed on a line of its own, under its own unit:
+    // it is a count, and a sixth term on a line headed "mean ms" would read
+    // as milliseconds — on the very readout this window is pasted from. The
+    // engine's 0.2 CPU an intent is multiplied out here rather than left to
+    // the reader, because that product is the candidate the local ruler
+    // cannot simulate and the whole reason the count is on the row.
+    if (split.length === 0) {
+      console.log(
+        `no row carries a phase split — the deployed bundle predates it, ` +
+          "or it has not written a full window since",
+      );
+    } else {
+      const mean = (key) => split.reduce((total, row) => total + row[key], 0) / split.length;
+      console.log(
+        `mean ms over ${split.length} split row${split.length === 1 ? "" : "s"}: ` +
+          PHASES.map((key) => `${key} ${mean(key).toFixed(2)}`).join("  "),
+      );
+      console.log(
+        `mean intents the engine accepted, per split row: ${mean("intents").toFixed(1)} — ` +
+          `a count, not milliseconds; ≈ ${(mean("intents") * 0.2).toFixed(2)} CPU at the ` +
+          "engine's 0.2 an intent, which the local ruler does not charge",
+      );
+    }
+
     console.log("");
 
     if (unreadable > 0) {
