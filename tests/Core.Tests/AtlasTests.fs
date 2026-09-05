@@ -3193,6 +3193,105 @@ let roomTests =
                     "and the other room's container catches nothing this creep digs"
             }
 
+            test "two rooms' Posts on one coordinate are two Posts, not one" {
+                // The Anchor row's quota crosses the border since ADR 0042
+                // — an outpost's Post hires an Anchor exactly as a home
+                // Post does — and this is the shape that decides whether
+                // it may be counted by unioning the rooms' tiles. It may
+                // not: a `Pos` carries no room, so these two garrison
+                // tiles are a room apart at one coordinate, and a union
+                // would hire one Anchor to stand on both. Counted room by
+                // room they are two.
+                let home =
+                    { SpatialInfo.empty with
+                        RoomName = Some "W1N1"
+                        TargetKinds =
+                            Map.ofList
+                                [
+                                    "src-home", Source
+                                    "can-home", Structure BuiltKind.Container
+                                    "src-out", Source
+                                    "can-out", Structure BuiltKind.Container
+                                ]
+                    }
+                    |> withHome (fun layer ->
+                        { layer with
+                            Terrain = Map.ofList (plainLine [ { X = 10; Y = 10 } ])
+                            TargetPositions =
+                                Map.ofList
+                                    [
+                                        "src-home", { X = 10; Y = 9 }
+                                        "can-home", { X = 10; Y = 10 }
+                                    ]
+                        })
+
+                let outpost =
+                    { RoomLayer.empty with
+                        Terrain = Map.ofList (plainLine [ { X = 10; Y = 10 } ])
+                        TargetPositions =
+                            Map.ofList
+                                [ "src-out", { X = 10; Y = 11 }; "can-out", { X = 10; Y = 10 } ]
+                    }
+
+                let atlas = home |> withOutpost "W2N1" outpost |> snapshotWith [] |> ofSnapshot
+
+                Expect.equal
+                    (posts atlas)
+                    (Set.singleton { X = 10; Y = 10 })
+                    "the premise: the home room's own Post is that one tile"
+
+                Expect.equal
+                    (postsOf atlas "src-out")
+                    (Set.singleton { X = 10; Y = 10 })
+                    "and the outpost rock's Post stands on the same coordinate"
+
+                Expect.equal (postCount atlas) 2 "so the Anchor row is two, never the union's one"
+            }
+
+            test "an outpost's Dual Seat is no Post: the colony upgrades one controller" {
+                // The Dual Seat half of a Post presumes a controller the
+                // colony upgrades, and it upgrades its own room's alone —
+                // an outpost's controller it reserves (ADR 0042). Taken
+                // across the border the intersection would name a tile
+                // nobody ever upgrades from, and that tile would be a Post:
+                // an Anchor place and an income share for an outpost source
+                // with no container standing under it, which is exactly the
+                // switch the container is supposed to be.
+                let home =
+                    { SpatialInfo.empty with
+                        RoomName = Some "W1N1"
+                        TargetKinds = Map.ofList [ "src-out", Source; "ctrl-out", Controller ]
+                    }
+                    |> withHome (fun layer ->
+                        { layer with
+                            Terrain = Map.ofList (plainLine [ { X = 20; Y = 20 } ])
+                        })
+
+                let outpost =
+                    { RoomLayer.empty with
+                        Terrain = Map.ofList (plainLine [ { X = 10; Y = 10 }; { X = 10; Y = 11 } ])
+                        TargetPositions =
+                            Map.ofList
+                                [ "src-out", { X = 10; Y = 10 }; "ctrl-out", { X = 10; Y = 12 } ]
+                    }
+
+                let atlas = home |> withOutpost "W2N1" outpost |> snapshotWith [] |> ofSnapshot
+
+                Expect.isTrue
+                    (Set.contains { X = 10; Y = 11 } (seatTilesOf atlas "src-out"))
+                    "the premise: (10,11) is a Seat of the outpost rock"
+
+                Expect.isTrue
+                    (Set.contains { X = 10; Y = 11 } (workArea atlas (Upgrade "ctrl-out")))
+                    "and the outpost controller's Upgrade area covers it"
+
+                Expect.isEmpty
+                    (postsOf atlas "src-out")
+                    "yet the rock has no Post: nothing is built on that Seat"
+
+                Expect.equal (postCount atlas) 0 "so the Anchor row hires nobody for it"
+            }
+
             test "placedCreeps answers the room the mover moves in" {
                 // ADR 0041's Consequences: arbitrated movement (ADR 0001,
                 // ADR 0008) and the occupancy surcharge stay single-room,

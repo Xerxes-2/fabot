@@ -1335,14 +1335,58 @@ let dualSeats (atlas: Atlas) : Set<Pos> = dualSeatsIn atlas atlas.Home
 /// answers with the empty set (ADR 0004). Derived fresh each tick, never
 /// persisted. Within one room, three room-local censuses intersected: a
 /// Post is one tile carrying a Seat and a container (ADR 0041).
+///
+/// The Dual Seat half is the colony's own room's alone, and only the
+/// container half crosses a border (ADR 0042). A Dual Seat is a tile a
+/// creep harvests *and upgrades* from without moving, and the colony
+/// upgrades one controller — its own (`planTasks` pools an Upgrade for
+/// `snapshot.Controller`, never for a declared outpost's controller,
+/// which it reserves instead). Counted in an outpost the intersection
+/// would name a tile nobody ever upgrades from, and that tile would be a
+/// Post: an Anchor place and an income share for an outpost source with
+/// no container standing under it — precisely the switch ADR 0042 makes
+/// the container be. So a room the colony does not upgrade in has exactly
+/// the Posts its built containers give it.
 let private postsIn (atlas: Atlas) (room: string) : Set<Pos> =
-    Set.intersect
-        (seatUnionIn atlas room)
-        (tilesOfKindIn atlas room (Structure BuiltKind.Container))
-    |> Set.union (dualSeatsIn atlas room)
+    let containerPosts =
+        Set.intersect
+            (seatUnionIn atlas room)
+            (tilesOfKindIn atlas room (Structure BuiltKind.Container))
+
+    if room = atlas.Home then
+        Set.union containerPosts (dualSeatsIn atlas room)
+    else
+        containerPosts
 
 /// The Posts of the colony's own room — the doc above governs both.
 let posts (atlas: Atlas) : Set<Pos> = postsIn atlas atlas.Home
+
+/// Every projected room's Posts, counted: the Anchor row's quota (ADR
+/// 0012, widened to the outpost layer by ADR 0042). An outpost's Post is
+/// the same garrison tile a home Post is and hires the same row — one
+/// Anchor apiece, sized by the same rule and walked there by travel cost
+/// like any other body, which is why the outpost needs no remote-miner
+/// concept of its own.
+///
+/// Counted room by room and summed, never unioned (ADR 0041): a `Pos`
+/// carries no room, so two rooms whose Posts share a coordinate are two
+/// garrison tiles fifty tiles and a border apart, and a union would hire
+/// one Anchor for the pair.
+///
+/// A Post is a **vision fact**, and this row flaps with vision. It is not
+/// the layer that gates it: a declared outpost always carries one, terrain
+/// and all, whether or not the colony can see the room this tick — that is
+/// the half of ADR 0041 vision may not gate, and reading absence onto the
+/// declaration instead is the deadlock #148 broke. What vision gates is
+/// the *container*: a standing structure is a seen entity, absent from the
+/// census entry by entry until vision returns (ADR 0004), so a blind
+/// outpost's Seat has nothing built on it here and hires no Anchor —
+/// including on the tick its own Anchor died and stopped supplying the
+/// vision that counted it. A room leaves this fold altogether only when
+/// the scan set drops it (ADR 0043).
+let postCount (atlas: Atlas) : int =
+    atlas.Spatial.Rooms
+    |> Map.fold (fun total room _ -> total + Set.count (postsIn atlas room)) 0
 
 /// Tiles holding a standing container on a Post — the tiles a work-heavy
 /// body garrisons and cannot flee from (ADR 0033), ramparted beside the

@@ -10097,14 +10097,17 @@ let private incomeFleetOf workers = incomeFleetRows 4 workers
 /// unmoved, so a difference between two calls is the reservation and
 /// nothing else.
 ///
-/// Its Anchor and hauler quotas are the home room's either way. One Anchor
-/// per Post counts `Atlas.posts`, the colony's own room; and the hauler
-/// quota does fold this container since #149, but W1N2 arrives here with
-/// no border ring, so the two rooms share no Seam band, the haul has no
-/// price and the container hires nobody (ADR 0004). The income base is
-/// therefore still the one addend this fixture moves, which is what makes
-/// a worker count the whole reading of it — the quota's own outpost case
-/// is `outpostHaulTests`, on a fixture that lays the rings.
+/// Its hauler quota is the home room's either way: the quota does fold
+/// this container since #149, but W1N2 arrives here with no border ring,
+/// so the two rooms share no Seam band, the haul has no price and the
+/// container hires nobody (ADR 0004) — the quota's own outpost case is
+/// `outpostHaulTests`, on a fixture that lays the rings. Its Anchor row
+/// is *three* since #129: the container standing on that Seat makes the
+/// rock a Post, and one Anchor per Post counts every projected room's
+/// Posts (ADR 0042), so the fleet below carries the outpost's Anchor
+/// beside the home room's two. Which leaves the income base as the one
+/// addend a reservation moves, and a worker count as the whole reading of
+/// it.
 let private postedOutpostColony workers (control: (string * RoomControlInfo) list) =
     let rock = { X = 40; Y = 40 }
 
@@ -10120,7 +10123,7 @@ let private postedOutpostColony workers (control: (string * RoomControlInfo) lis
         )
 
     { colony with
-        Creeps = incomeFleetOf workers
+        Creeps = incomeFleetOf workers @ [ anchor "a-out" 0 50 ]
         RoomControl =
             (colony.RoomControl, control)
             ||> List.fold (fun acc (room, holder) -> Map.add room holder acc)
@@ -10140,9 +10143,10 @@ let sourceOutputTests =
             // reserved one does, which is a difference no shared cap and
             // no one-body-per-spawn limit can hide.
             //
-            // Unreserved the target is 2 Anchors + 4 haulers +
-            // ceil(((20 + 5) × 1500 − 1800) / 1500) = 24 workers = 30;
-            // reserved it is 29 workers and 35.
+            // Unreserved the target is 3 Anchors — the outpost's Post
+            // hires one since #129 — + 4 haulers +
+            // ceil(((20 + 5) × 1500 − 2100) / 1500) = 24 workers = 31;
+            // reserved it is 29 workers and 36.
             let unreservedWorkers = 24
 
             test "the same outpost source is worth twice as much reserved" {
@@ -10224,11 +10228,19 @@ let sourceOutputTests =
                 // unpriceable and enters no quota. Unpriceable is not
                 // half — half is what a room we *can* see and nobody holds
                 // is worth, and the pair below is what separates the two.
+                //
+                // What is blind here is the *control* entry alone, which is
+                // the one input this test moves. The fixture's container
+                // still stands in the projection, so its Post is still in
+                // the Anchor row and the fleet still carries `a-out` — live
+                // the two arrive and vanish together, because the shell
+                // gates the structure census and the control entry on the
+                // same `seen` list.
                 let blind = postedOutpostColony 19 []
 
                 Expect.isEmpty
                     (spawnIntents (decide blind Map.empty Set.empty None).Intents)
-                    "no entry for W1N2: the rock counts nothing and the W12S28 fleet still matches"
+                    "no entry for W1N2: the rock's output prices at nothing and the fleet still matches"
 
                 Expect.isNonEmpty
                     (spawnIntents
@@ -13253,6 +13265,265 @@ let outpostHaulTests =
                     (spawnIntents recalled.Intents)
                     (spawnIntents fresh.Intents)
                     "and the fleet the colony casts is the one the new haul asked for"
+            }
+        ]
+
+/// The switch's home half: the same corridor down column 25 of W1N1 with
+/// the spawn at (25,10), and one home source in the rock beside it at
+/// (24,20) with its container standing on the Seat (25,20). A home Post,
+/// a home hauler term and a home income share, so this colony is already
+/// running an economy well clear of `minWorkforce` before the outpost is
+/// asked to add anything to it — which is what lets the pair below read a
+/// *difference* rather than a floor.
+let private switchHome =
+    { bareRespawn with
+        Controller = None
+        Refillables = []
+        Sources = [ source "src-home" ]
+        RoomEnergy = bank 300 300
+        Spatial =
+            { SpatialInfo.empty with
+                RoomName = Some "W1N1"
+                Borders = Map.ofList [ "W1N1", plainRing; "W1N2", plainRing ]
+                TargetKinds =
+                    Map.ofList
+                        [
+                            "spawn-1", Structure BuiltKind.Spawn
+                            "src-home", Source
+                            "can-home", Structure BuiltKind.Container
+                        ]
+            }
+            |> withHome (fun layer ->
+                { layer with
+                    Terrain = Map.ofList (({ X = 24; Y = 20 }, Wall) :: corridor 25 1 48)
+                    TargetPositions =
+                        Map.ofList
+                            [
+                                "spawn-1", { X = 25; Y = 10 }
+                                "src-home", { X = 24; Y = 20 }
+                                "can-home", { X = 25; Y = 20 }
+                            ]
+                    Obstacles = Set.singleton { X = 25; Y = 10 }
+                })
+    }
+
+/// The same colony with the outpost's rock declared one room north and
+/// reserved — projected, priced, and with nothing built on it. This is the
+/// tick before the switch: the Harvest is pooled, the room is held, and
+/// every quota still reads the home room alone.
+let private switchUnposted =
+    { switchHome with
+        Sources = switchHome.Sources @ [ source "src-out" ]
+        RoomControl = Map.add "W1N2" (reservedRoom true 4000) switchHome.RoomControl
+        Spatial =
+            { switchHome.Spatial with
+                TargetKinds = switchHome.Spatial.TargetKinds |> Map.add "src-out" Source
+            }
+            |> withNeighbour
+                "W1N2"
+                { RoomLayer.empty with
+                    Terrain = Map.ofList (corridor 25 41 48)
+                    TargetPositions = Map.ofList [ "src-out", { X = 25; Y = 40 } ]
+                }
+    }
+
+/// And the tick the switch closes: the container standing on the outpost
+/// rock's one Seat, and nothing else in the world different (ADR 0042).
+let private switchPosted =
+    let outpost = SpatialInfo.layerOf switchUnposted.Spatial "W1N2"
+
+    { switchUnposted with
+        Spatial =
+            { switchUnposted.Spatial with
+                TargetKinds =
+                    switchUnposted.Spatial.TargetKinds
+                    |> Map.add "can-out" (Structure BuiltKind.Container)
+            }
+            |> withNeighbour
+                "W1N2"
+                { outpost with
+                    TargetPositions =
+                        outpost.TargetPositions |> Map.add "can-out" { X = 25; Y = 41 }
+                }
+    }
+
+/// The home room's whole target, one row at a time: its one Post's Anchor,
+/// the two haulers its container's round trip to the spawn hires, and the
+/// ten workers ten energy a tick feeds once the two rows above are
+/// amortized — ceil((10 × 1500 − 3 × 300) / 1500) = 10 (ADR 0012, ADR
+/// 0037). Thirteen bodies, and every case below reads against it.
+let private switchHomeFleet =
+    [ anchor "a-home" 0 50; hauler "h-home1" 0 100; hauler "h-home2" 0 100 ]
+    @ [ for i in 1..10 -> worker $"w{i}" 0 50 ]
+
+/// What the outpost's container adds, and nothing else: one Anchor for the
+/// Post it makes, the three haulers its own round trip across the Seam
+/// hires at its own source's held output, and its income share — the
+/// worker row goes from ten to nineteen, because twenty a tick less the
+/// five rows' amortization over one worker's Work drain is
+/// ceil((20 × 1500 − 7 × 300) / 1500) = 19. Thirteen more bodies, which is
+/// the whole of ADR 0042's switch stated as a fleet.
+let private switchOutpostRows =
+    [
+        anchor "a-out" 0 50
+        hauler "h-out1" 0 100
+        hauler "h-out2" 0 100
+        hauler "h-out3" 0 100
+    ]
+    @ [ for i in 11..19 -> worker $"w{i}" 0 50 ]
+
+[<Tests>]
+let containerSwitchTests =
+    testList
+        "the container is the switch"
+        [
+            // Read against the fleet, one body at a time: a colony standing
+            // exactly at its target casts nothing, and the same colony one
+            // body short casts one — so a target that moved by n shows up as
+            // n bodies and cannot hide inside a spawn's one-cast-a-tick
+            // limit.
+            let casts colony fleet =
+                spawnIntents
+                    (decide { colony with Creeps = fleet } Map.empty Set.empty None).Intents
+
+            let short fleet =
+                List.truncate (List.length fleet - 1) fleet
+
+            test "an outpost rock with nothing built on it moves no row of the target" {
+                // ADR 0042's exclusion, read forward rather than backward:
+                // the room is projected, held by us and its rock is pooled
+                // for Harvest, and still the colony hires exactly the fleet
+                // it hired without it. Until a container stands, an outpost
+                // is invisible to every quota.
+                //
+                // Pairwise, one rival at a time: the two colonies differ in
+                // the outpost rock and in nothing else.
+                Expect.isEmpty
+                    (casts switchHome switchHomeFleet)
+                    "the premise: thirteen is the home room's whole target"
+
+                Expect.hasLength
+                    (casts switchHome (short switchHomeFleet))
+                    1
+                    "the premise is tight: one body short and the colony casts"
+
+                Expect.equal
+                    (quotaOf switchUnposted)
+                    (quotaOf switchHome)
+                    "the unposted rock hires no haul"
+
+                Expect.isEmpty
+                    (casts switchUnposted switchHomeFleet)
+                    "and no Anchor and no worker either: the same thirteen are the whole target"
+            }
+
+            test "the container standing is one Anchor, its own haul and its income share" {
+                // The switch itself (ADR 0042). One tick's difference — a
+                // container standing on the outpost rock's one Seat — and
+                // the colony hires thirteen more bodies: the Anchor for the
+                // Post the container makes, the three haulers its own round
+                // trip hires at its own source's output, and the nine
+                // workers the rock's ten a tick feeds once those four rows
+                // are amortized.
+                Expect.isEmpty
+                    (casts switchPosted (switchHomeFleet @ switchOutpostRows))
+                    "posted, the target is the home fleet plus the outpost's own rows"
+
+                Expect.hasLength
+                    (casts switchPosted (short (switchHomeFleet @ switchOutpostRows)))
+                    1
+                    "and it is tight: one body short and the colony casts"
+
+                Expect.equal
+                    (quotaOf switchPosted - quotaOf switchUnposted)
+                    3
+                    "three of the thirteen are the container's own hauler term"
+            }
+
+            test "the Anchor the container hires is one, from the row the home Posts hire from" {
+                // ADR 0042 pins the outpost's Anchor on the *same* row as
+                // the home room's, walked to its Post by travel cost like
+                // any other body — no remote-miner row, no second sizing
+                // rule. So the proof is a swap at a fixed headcount: one
+                // body short of the target the colony casts a worker while
+                // both Anchors stand, and the same twenty-five bodies with
+                // the outpost's Anchor spelled as a worker cast an Anchor
+                // instead. Only a row gap can move between the two, because
+                // the deficit is one either way.
+                let shortFleet = short (switchHomeFleet @ switchOutpostRows)
+
+                let swapped =
+                    shortFleet
+                    |> List.map (fun creep ->
+                        if creep.Name = "a-out" then worker "w20" 0 50 else creep)
+
+                match casts switchPosted shortFleet with
+                | [ (_, _, name) ] ->
+                    Expect.stringStarts
+                        name
+                        "worker-"
+                        "the premise: with both Anchors it is a worker"
+                | other -> failtest $"expected exactly one SpawnCreep intent, got %A{other}"
+
+                match casts switchPosted swapped with
+                | [ (_, _, name) ] -> Expect.stringStarts name "anchor-" "the gap is an Anchor gap"
+                | other -> failtest $"expected exactly one SpawnCreep intent, got %A{other}"
+            }
+
+            test "a standing outpost container adds no Task; stocked it adds its own Withdraw" {
+                // The pool's half of the switch. A rock is pooled for
+                // Harvest whichever room it stands in and whether or not it
+                // is posted (ADR 0041) — one pool, one ranking — so the
+                // container standing adds no Task by standing. It adds one
+                // the tick it holds energy, and that Task is a Withdraw on
+                // the container itself: nothing here becomes a Refill
+                // target, because an outpost's container is no upgrade
+                // buffer of a controller a room away (ADR 0010) — the join
+                // that answers that is pinned by `roomLayerTests`, on a
+                // fixture that has a controller to be wrong about.
+                //
+                // Standing is not the container's only way into the pool,
+                // and the ticket's own Trap names the other: a container is
+                // a repairable kind, so once its hits fall under half its
+                // max `hungryStructures` pools a cross-room `Repair` for it
+                // beside this Withdraw. That is no conflict with ADR 0010 —
+                // `isHungry` judges every structure against its own kind's
+                // whole line, so an outpost container's decay drags no home
+                // container's line with it — and nothing here is decayed.
+                Expect.equal
+                    (planTasks switchPosted noThreats)
+                    (planTasks switchUnposted noThreats)
+                    "an empty container standing changes no Task in the pool"
+
+                let stocked =
+                    { switchPosted with
+                        Spatial =
+                            { switchPosted.Spatial with
+                                Stores = Map.add "can-out" 500 switchPosted.Spatial.Stores
+                            }
+                    }
+
+                Expect.equal
+                    (List.except (planTasks switchPosted noThreats) (planTasks stocked noThreats))
+                    [ Withdraw "can-out" ]
+                    "and stocked it adds exactly one Task, the Withdraw of its own store"
+
+                let decayed =
+                    { switchPosted with
+                        Spatial =
+                            { switchPosted.Spatial with
+                                Hits =
+                                    Map.add
+                                        "can-out"
+                                        { Hits = 1000; HitsMax = 2500 }
+                                        switchPosted.Spatial.Hits
+                            }
+                    }
+
+                Expect.equal
+                    (List.except (planTasks switchPosted noThreats) (planTasks decayed noThreats))
+                    [ Repair "can-out" ]
+                    "and decayed it adds exactly one more, its own Repair across the Seam"
             }
         ]
 

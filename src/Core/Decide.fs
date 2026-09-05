@@ -641,6 +641,16 @@ let private sourceOutputOf (snapshot: Snapshot) atlas (sourceId: string) : int o
 /// unpaved, so an outpost container hires two haulers where a home one
 /// hires one: the number is large because the haul is long.
 ///
+/// **That number does not reopen ADR 0038.** ADR 0038 declined to fill the
+/// colony's Link footings and said its refusal flips "when the hauler row
+/// leaves its floor", and these containers do lift the row off it. But a
+/// link cannot cross rooms — the engine resolves a transfer's target out
+/// of the *local* room's objects — so the pair of links ADR 0038 declined
+/// can never reach an outpost's container, and no haul they could ever
+/// shorten is counted here. ADR 0038's flip condition is about the home
+/// room's source containers alone (ADR 0042); a reader arriving at it with
+/// this fold's outpost total in hand is holding the wrong number.
+///
 /// The room is the container's own throughout, carried beside its tile
 /// rather than assumed, because a `Pos` names none (ADR 0041): the source
 /// judgement is made inside the container's room, so a home container
@@ -734,8 +744,15 @@ let private upgradeDrainPerWork = 1
 /// useful half of that exclusion is that a standing container is the
 /// switch admitting an outpost into the economy — until one stands the
 /// room is invisible to every quota, and the tick it stands the source
-/// becomes a Post and enters the income base at its own output. Which room
-/// a source stands in is the Atlas's own id-to-room join — the layer that
+/// becomes a Post: an Anchor place on the one row every Post hires from
+/// (`Atlas.postCount`, in `planSpawns`), a hauler term at its own round
+/// trip across the Seam, and a share of the income base at its own
+/// output. Three existing rows widened, and among these three no rule an
+/// outpost has of its own — which is not to say it has none: the reserver
+/// is a fourth pattern row whose quota *is* an outpost rule, one per
+/// posted outpost, gated on this same switch (ADR 0042, #131), and it
+/// arrives with that quota or does not arrive (ADR 0006). Which room a
+/// source stands in is the Atlas's own id-to-room join — the layer that
 /// places its id, precomputed for every reader holding an Atlas (ADR
 /// 0041) — never the constant: the projection is what the quota is derived
 /// from, and a source the projection does not place is unpriceable and
@@ -858,10 +875,18 @@ let private patternOf atlas (creep: CreepInfo) =
 /// `Atlas.castWalkTicks`, which floods the home grid and rides a memo ADR
 /// 0032 keys on the census signature — a key with no room on it, because
 /// no flood leaves the room it started in. So a creep the home room does
-/// not place answers 0 and is never expiring: its successor is not cast
-/// early, which is the safe direction of the two while a spawn cannot
-/// walk to it at all. The honest cross-room lead is the minimum over the
-/// Seam band (#123).
+/// not place answers 0 and is never expiring: its successor is cast only
+/// after it has died, never while it still works.
+///
+/// That is a **gap, not a rule**, and since #129 it has a row standing in
+/// it: an outpost's Post hires an Anchor off this same row, and that
+/// Anchor lives its whole life on the far side of a Seam, so ADR 0026's
+/// succession is off for it while it is on for the home half of the row.
+/// The clause that used to excuse it — that a spawn could not walk there
+/// at all — stopped holding when #123 landed the cross-room walk; the
+/// honest cross-room lead is the minimum over the Seam band, the same
+/// join `Atlas.haulRoundTripTicks` already prices this leg with, and it
+/// is unpriced here pending its own ticket rather than by design.
 let private leadOf (snapshot: Snapshot) atlas (creep: CreepInfo) : int =
     let pattern = patternOf atlas creep
 
@@ -949,7 +974,16 @@ let private planSpawns
         // still proves both identical; moved, it may have moved for only one
         // of them. Both quotas are addends of the target itself — inside it
         // by construction, never on top of it.
-        let anchorQuota = Atlas.posts atlas |> Set.count
+        //
+        // One Anchor per Post of *every* projected room (ADR 0042): an
+        // outpost's Post is the same garrison tile a home Post is, so it
+        // hires from the same row rather than from a remote-miner row of
+        // its own — the body is sized the same way, and travel cost pins
+        // each Anchor on the Post nearest it exactly as it pins the home
+        // ones. Only the container makes the Post, so an outpost with
+        // nothing built in it adds nothing here, and the tick a container
+        // stands the row grows by one (`Atlas.postCount`).
+        let anchorQuota = Atlas.postCount atlas
         let target = workforceTarget snapshot atlas anchorQuota haulerQuota
 
         // The deficit and both row gaps count the creeps that will still be
