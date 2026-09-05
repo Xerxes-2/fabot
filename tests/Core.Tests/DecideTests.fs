@@ -13558,6 +13558,200 @@ let containerSwitchTests =
             }
         ]
 
+/// The whole fleet the switch hires: the home rows and the outpost's,
+/// twenty-six bodies standing exactly at `switchPosted`'s target and
+/// thirteen over `switchUnposted`'s.
+let private switchFleet = switchHomeFleet @ switchOutpostRows
+
+/// The same fleet with the named bodies respelled as generalists — the
+/// headcount never moves, so a case reading against it reads a *row gap*
+/// and nothing else, the deficit being the same number whichever row the
+/// twenty-six bodies were cast from. The spare bodies are named off a
+/// prefix of this helper's own, so growing `switchOutpostRows` can never
+/// mint a name twice into one fleet.
+let private respelled names fleet =
+    fleet
+    |> List.mapFold
+        (fun n (creep: CreepInfo) ->
+            if List.contains creep.Name names then
+                worker $"gen{n}" 0 50, n + 1
+            else
+                creep, n)
+        1
+    |> fst
+
+/// The fleet with both Anchors respelled: twenty-six bodies alive and
+/// every Post in the colony standing empty.
+let private unmannedPosts = respelled [ "a-home"; "a-out" ] switchFleet
+
+/// The fleet with all five haulers respelled: twenty-six bodies alive and
+/// no shipping at all.
+let private unshippedFleet =
+    respelled [ "h-home1"; "h-home2"; "h-out1"; "h-out2"; "h-out3" ] switchFleet
+
+[<Tests>]
+let rowGapTests =
+    testList
+        "the deficit gates the worker row alone"
+        [
+            // Read as the switch's own tests are, one body at a time off
+            // the one idle spawn `switchHome` stands: a tick casts at most
+            // one body, so the list this returns is either empty or names
+            // the row whose gap was answered first.
+            let casts colony fleet =
+                spawnIntents
+                    (decide { colony with Creeps = fleet } Map.empty Set.empty None).Intents
+
+            // The premise every case below rests on, asserted where it is
+            // used rather than assumed: at `switchUnposted`'s target of
+            // thirteen a fleet of twenty-six is far over, and one body
+            // fewer is still over — so nothing that follows can be the
+            // ordinary deficit hiring.
+            let overTarget colony fleet =
+                Expect.isEmpty
+                    (casts colony (List.truncate (List.length fleet - 1) fleet))
+                    "the premise: a body short of this fleet the colony is still over target"
+
+            test "the tick a source unposts, the home room's empty Post is cast for anyway" {
+                // #154's reproduction, and the reason the gate moved. The
+                // colony loses vision of its outpost for one tick: the
+                // source there unposts, and its Anchor place, its haul and
+                // its income share leave the target together (ADR 0042,
+                // ADR 0004), dropping it under the living count. The home
+                // room's Post is empty across both ticks and is a fact
+                // about the ground either way — gated on the deficit it
+                // went unfilled until ordinary deaths had paid off the
+                // whole thirteen-body overshoot, and the colony cast
+                // nothing at all, in its own room included, in the
+                // meantime.
+                //
+                // Pairwise, one rival at a time: the two fleets differ in
+                // the two Anchors' bodies and in nothing else.
+                Expect.isEmpty
+                    (casts switchUnposted switchFleet)
+                    "with every row manned the same twenty-six cast nothing"
+
+                overTarget switchUnposted switchFleet
+
+                match casts switchUnposted unmannedPosts with
+                | [ (_, body, name) ] ->
+                    Expect.stringStarts
+                        name
+                        "anchor-"
+                        "the empty Post is filled from the Anchor row"
+
+                    Expect.equal
+                        body
+                        [ Work; Work; Carry; Move ]
+                        "and sized to the bank exactly as that row always is"
+                | other -> failtest $"expected exactly one SpawnCreep intent, got %A{other}"
+            }
+
+            test "a standing container's hauler gap is filled under the target too" {
+                // The same rule on the row beside it (ADR 0012): a source
+                // container standing wants its round trip shipped whatever
+                // the headcount is, and the tick the target fell the
+                // container did not stop standing. Both Anchors stay alive
+                // here, so the Anchor row has no gap and the hauler row is
+                // the only rival the cast can come from.
+                Expect.isEmpty
+                    (casts switchUnposted switchFleet)
+                    "with every row manned the same twenty-six cast nothing"
+
+                overTarget switchUnposted switchFleet
+
+                match casts switchUnposted unshippedFleet with
+                | [ (_, _, name) ] ->
+                    Expect.stringStarts
+                        name
+                        "hauler-"
+                        "the home container's own round trip hires it"
+                | other -> failtest $"expected exactly one SpawnCreep intent, got %A{other}"
+            }
+
+            test "the worker row is the one the deficit is the quota of, and it still stops" {
+                // The half of the gate that does not move (ADR 0012): the
+                // worker row's quota *is* whatever the target has left over
+                // once the specialist rows are counted, so with nothing
+                // left over it hires nobody however far the fleet has
+                // overshot. Pairwise against the same fleet under a target
+                // that reaches it — one room's vision richer, where those
+                // twenty-six are the target — and one body short there is a
+                // worker.
+                Expect.isEmpty
+                    (casts switchUnposted switchFleet)
+                    "thirteen over target, every row manned, and no generalist"
+
+                overTarget switchUnposted switchFleet
+
+                match casts switchPosted (List.truncate 25 switchFleet) with
+                | [ (_, _, name) ] ->
+                    Expect.stringStarts
+                        name
+                        "worker-"
+                        "posted, the target reaches the fleet and the remainder is the worker row's"
+                | other -> failtest $"expected exactly one SpawnCreep intent, got %A{other}"
+            }
+
+            test "a row standing over its quota still holds the worker row down" {
+                // What the deficit is and is not (ADR 0012). It gates the
+                // worker row; it is not that row's own gap, and the
+                // difference shows the tick a specialist row stands over
+                // quota. Under `switchUnposted` the Anchor row wants one
+                // and the hauler row two: a fleet of two Anchors, five
+                // haulers and six workers is thirteen bodies exactly at
+                // the target, four of them surplus specialists, and the
+                // worker row is four short of its own quota of ten. The
+                // surplus holds it there — #154 moves the specialist rows
+                // off the deficit and deliberately leaves this half of the
+                // gate standing.
+                //
+                // Pairwise against the same target with the specialist
+                // rows at quota, where the whole-fleet gap and the worker
+                // row's own gap coincide and one body short is a worker.
+                let overSpecialised =
+                    switchFleet
+                    |> List.filter (fun creep ->
+                        not (List.contains creep.Name [ for i in 7..19 -> $"w{i}" ]))
+
+                Expect.hasLength
+                    overSpecialised
+                    13
+                    "the premise: thirteen bodies, standing exactly at the target"
+
+                Expect.isEmpty
+                    (casts switchUnposted overSpecialised)
+                    "four surplus specialists, and the worker row hires none of its four missing"
+
+                match casts switchUnposted (List.truncate 12 switchHomeFleet) with
+                | [ (_, _, name) ] ->
+                    Expect.stringStarts
+                        name
+                        "worker-"
+                        "with every specialist row at quota the same shortfall is hired"
+                | other -> failtest $"expected exactly one SpawnCreep intent, got %A{other}"
+            }
+
+            test
+                "the doorstep hold still comes first: an empty Post is no reason to cast into a Reach" {
+                // ADR 0033's gate is asked before anything is priced and
+                // this ticket does not move it (#154). The row gap that
+                // now outlives a negative deficit is exactly the case that
+                // could have walked past it — the hold is the outer
+                // question, the deficit an inner one.
+                let hot =
+                    switchUnposted |> facing [ hostileAt "h-1" { X = 25; Y = 13 } [ Attack; Move ] ]
+
+                Expect.isNonEmpty
+                    (casts switchUnposted unmannedPosts)
+                    "the premise: quiet, the empty Post is cast for"
+
+                Expect.isEmpty
+                    (casts hot unmannedPosts)
+                    "and under fire the same empty Post casts nothing"
+            }
+        ]
+
 /// The ticket's reproduction (#138): the home corridor with `src-home`
 /// midway down it and one worker above, and the outpost's corridor with
 /// `src-out` near its foot and one worker two tiles short of it. Two rooms

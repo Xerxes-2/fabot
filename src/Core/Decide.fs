@@ -1039,10 +1039,12 @@ let private leadOf (snapshot: Snapshot) atlas (creep: CreepInfo) : int =
 let private expiring (snapshot: Snapshot) atlas (creep: CreepInfo) =
     creep.TicksToLive <= leadOf snapshot atlas creep
 
-/// Pre-Task bootstrap step: spawn Intents needed to keep the workforce at
-/// the Workforce target. Spawning is a colony-level need, not a Task creeps
-/// get matched to, so it sits beside the Planner/Matcher pipeline rather
-/// than inside it.
+/// Pre-Task bootstrap step: the spawn Intents the Workforce target's rows
+/// are owed. The target is the quota the *generalist* row is hired
+/// against; every other row is hired against its own unfilled quota and
+/// can carry the fleet past the target (#154). Spawning is a colony-level
+/// need, not a Task creeps get matched to, so it sits beside the
+/// Planner/Matcher pipeline rather than inside it.
 let private planSpawns
     (snapshot: Snapshot)
     atlas
@@ -1133,56 +1135,87 @@ let private planSpawns
                 else
                     None
 
-        if deficit <= 0 then
-            []
-        else
-            // Anchor gaps are filled before hauler gaps, hauler gaps before
-            // generalist gaps — the casting order runs Anchor, hauler, worker
-            // — and the worker row's quota is whatever the target has left.
-            let anchorGap =
-                anchorQuota
-                - (living
-                   |> List.filter (fun creep -> Atlas.workHeavy atlas creep.Name)
-                   |> List.length)
-                |> max 0
+        // Anchor gaps are filled before hauler gaps, hauler gaps before
+        // generalist gaps — the casting order runs Anchor, hauler, worker
+        // — and the worker row's quota is whatever the target has left.
+        //
+        // Each specialist gap is that row's own unfilled quota, and it is
+        // answered on its own terms rather than out of the deficit (#154):
+        // an empty Post is a fact about the ground, and the row that hires
+        // for it does not stop hiring because the headcount overshot some
+        // other row's arithmetic. A target can fall under the living count
+        // in one tick — a container demolished, an RCL step, or the
+        // outpost tick whose lost vision unposts a source and withdraws
+        // its Anchor place, its haul and its income share from the target
+        // together (ADR 0042, ADR 0004) — and a deficit gate over the
+        // whole cascade would then cast *nothing*, in the home room
+        // included, until ordinary deaths had paid off the entire
+        // overshoot. The gaps below are each floored at zero, so a row
+        // standing over its quota still hires nobody; only a row genuinely
+        // short of its own quota gets a body.
+        let anchorGap =
+            anchorQuota
+            - (living
+               |> List.filter (fun creep -> Atlas.workHeavy atlas creep.Name)
+               |> List.length)
+            |> max 0
 
-            let haulerGap =
-                haulerQuota - (living |> List.filter isHaulerBody |> List.length) |> max 0
+        let haulerGap =
+            haulerQuota - (living |> List.filter isHaulerBody |> List.length) |> max 0
 
-            // Idle spawns draw from their room's one bank in list order — each
-            // body debits the budget the next spawn sees, so the same energy is
-            // never committed twice.
-            let intents, _ =
-                snapshot.Spawns
-                |> List.filter (fun s -> not s.IsSpawning)
-                |> List.fold
-                    (fun (intents, banks: Map<string, RoomEnergy>) s ->
-                        let bank =
-                            banks
-                            |> Map.tryFind s.RoomName
-                            |> Option.defaultValue { Available = 0; Capacity = 0 }
+        // Idle spawns draw from their room's one bank in list order — each
+        // body debits the budget the next spawn sees, so the same energy is
+        // never committed twice.
+        let intents, _ =
+            snapshot.Spawns
+            |> List.filter (fun s -> not s.IsSpawning)
+            |> List.fold
+                (fun (intents, banks: Map<string, RoomEnergy>) s ->
+                    let bank =
+                        banks
+                        |> Map.tryFind s.RoomName
+                        |> Option.defaultValue { Available = 0; Capacity = 0 }
 
-                        let planned = List.length intents
+                    let planned = List.length intents
 
-                        let wanted =
-                            if planned < anchorGap then anchorPattern
-                            elif planned < anchorGap + haulerGap then haulerPattern
-                            else workerPattern
+                    // The deficit gates the *worker* row alone, and is
+                    // asked here rather than over the whole cascade. It
+                    // stands in for that row's own gap rather than being
+                    // it: ADR 0012 hires the row against whatever the
+                    // target has left over once the specialist rows are
+                    // counted, and the whole-fleet gap less the two gaps
+                    // above is exactly that remainder while both
+                    // specialist rows are at or under quota. A row
+                    // standing over its quota holds the worker row down by
+                    // the surplus instead — the half of the old gate #154
+                    // keeps, pinned by `rowGapTests`. The disaster
+                    // fallback keeps its place inside `castFromBank`: an
+                    // empty colony's first body is a worker unit whichever
+                    // row asked for it.
+                    let cast =
+                        if planned < anchorGap then
+                            castFromBank anchorPattern bank
+                        elif planned < anchorGap + haulerGap then
+                            castFromBank haulerPattern bank
+                        elif planned < deficit then
+                            castFromBank workerPattern bank
+                        else
+                            None
 
-                        match castFromBank wanted bank with
-                        | Some(pattern, body) when planned < deficit ->
-                            SpawnCreep(s.Name, body, $"{pattern.Name}-{snapshot.Time}-{s.Name}")
-                            :: intents,
-                            banks
-                            |> Map.add
-                                s.RoomName
-                                { bank with
-                                    Available = bank.Available - bodyCost body
-                                }
-                        | _ -> intents, banks)
-                    ([], snapshot.RoomEnergy)
+                    match cast with
+                    | Some(pattern, body) ->
+                        SpawnCreep(s.Name, body, $"{pattern.Name}-{snapshot.Time}-{s.Name}")
+                        :: intents,
+                        banks
+                        |> Map.add
+                            s.RoomName
+                            { bank with
+                                Available = bank.Available - bodyCost body
+                            }
+                    | None -> intents, banks)
+                ([], snapshot.RoomEnergy)
 
-            List.rev intents
+        List.rev intents
 
 /// The claimer range at which safe mode fires (ADR 0015): the precise
 /// deadline is 2 — attackController is range 1 and judged from
