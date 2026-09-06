@@ -6935,6 +6935,49 @@ let safeModeTests =
                 Expect.equal (activations intents) [ "ctrl-1" ] "safe mode fires immediately"
             }
 
+            test "with no tower standing, the first armed hostile fires safe mode" {
+                // #217. Pairwise on the tower and on the arms: the same
+                // armed hostile fires the reflex in a tower-less room with
+                // a whole Keep, does not in the same room with a tower
+                // standing (the tower's job; the Keep arm still waits for
+                // a dent), and an unarmed scout fires nothing in either.
+                let armed = hostile [ Tough; Move; Move; RangedAttack; Attack; Move ]
+                let scout = hostile [ Move; Move ]
+
+                let towerless hostiles =
+                    bareRespawn
+                    |> withHits "spawn-1" BuiltKind.Spawn 5000 5000
+                    |> fun colony -> { colony with Hostiles = hostiles }
+
+                let towered hostiles =
+                    { wholeKeep with
+                        Spatial =
+                            wholeKeep.Spatial
+                            |> withTargets
+                                [ "tower-1", { X = 20; Y = 20 }, Structure BuiltKind.Tower ]
+                        Hostiles = hostiles
+                    }
+
+                let fires (colony: Snapshot) =
+                    let { Intents = intents } = decide colony Map.empty Set.empty None
+                    activations intents
+
+                Expect.equal
+                    (fires (towerless [ armed ]))
+                    [ "ctrl-1" ]
+                    "no tower: the invader is met with safe mode at once"
+
+                Expect.isEmpty
+                    (fires (towered [ armed ]))
+                    "a tower stands: the Keep arm waits for a dent, as before"
+
+                Expect.isEmpty
+                    (fires (towerless [ scout ]))
+                    "a scout is not armed and spends nothing"
+
+                Expect.isEmpty (fires (towerless [])) "and a quiet room fires nothing"
+            }
+
             test "a claimer beyond reach holds the stock — the towers get their window" {
                 // attackController is range 1 and judged from tick-start
                 // position, so a claimer 4 tiles out cannot tap for at
@@ -6962,9 +7005,16 @@ let safeModeTests =
                 Expect.equal (activations intents) [ "ctrl-1" ] "the deadline is now"
             }
 
-            test "a hostile without CLAIM parts does not spend the activation" {
+            test "a hostile without CLAIM parts does not spend the activation while a tower stands" {
+                // The tower is the answer to a fighter (ADR 0014); the stock
+                // is for the controller and the Keep. Without a tower the
+                // undefended arm fires instead (#217, the test below).
                 let snapshot =
                     { bareRespawn with
+                        Spatial =
+                            bareRespawn.Spatial
+                            |> withTargets
+                                [ "tower-1", { X = 20; Y = 20 }, Structure BuiltKind.Tower ]
                         Hostiles = [ hostile [ Tough; Attack; RangedAttack; Heal; Move ] ]
                     }
 
@@ -7038,8 +7088,15 @@ let safeModeTests =
                 Expect.isEmpty (activations intents) "nobody is here to be held off"
             }
 
-            test "a full Keep with a hostile in the room fires nothing" {
-                let snapshot = wholeKeep |> facing [ hostile [ Attack; Attack; Move ] ]
+            test "a full Keep with a hostile in the room fires nothing while a tower stands" {
+                let snapshot =
+                    { wholeKeep with
+                        Spatial =
+                            wholeKeep.Spatial
+                            |> withTargets
+                                [ "tower-1", { X = 20; Y = 20 }, Structure BuiltKind.Tower ]
+                    }
+                    |> facing [ hostile [ Attack; Attack; Move ] ]
 
                 let { Intents = intents } = decide snapshot Map.empty Set.empty None
                 Expect.isEmpty (activations intents) "an intact Keep is not yet certain harm"
@@ -7189,9 +7246,10 @@ let fireReflexTests =
                 Expect.isEmpty (shots intents) "no hostile, no reflex"
             }
 
-            test "a towerless room shoots nothing and keeps the safe-mode rule intact" {
-                // A clawless hostile before RCL3: no tower to answer with,
-                // and the safe-mode stock stays banked (ADR 0007).
+            test "a towerless room shoots nothing and meets the fighter with safe mode" {
+                // A clawless room before RCL3: no tower to answer with, so
+                // the undefended arm of the safe-mode reflex answers (#217)
+                // — the stock is exactly for the room that has nothing else.
                 let snapshot =
                     { bareRespawn with
                         Hostiles = [ hostileAt "h-1" { X = 20; Y = 20 } [ Attack; Move ] ]
@@ -7199,7 +7257,11 @@ let fireReflexTests =
 
                 let { Intents = intents } = decide snapshot Map.empty Set.empty None
                 Expect.isEmpty (shots intents) "no tower, no shot"
-                Expect.isEmpty (activations intents) "fighters never spend the stock"
+
+                Expect.equal
+                    (activations intents)
+                    [ "ctrl-1" ]
+                    "and the fighter is met with safe mode instead"
             }
         ]
 

@@ -2987,7 +2987,27 @@ let private planSafeMode (snapshot: Snapshot) atlas : Intent list =
             not (List.isEmpty here)
             && hungryStructures snapshot |> List.exists (snd >> isKeep)
 
-        if claimerInReach || keepDamaged then
+        // The undefended arm (#217, ADR 0034 as it amends it): a colony
+        // with no tower standing fires on the first armed hostile in its
+        // room. The two arms above were derived for a home with a tower —
+        // the tower handles creeps, safe mode is for the Keep — and a
+        // bootstrapping colony has nothing that can hurt a hostile, so
+        // for it the one thing safe mode protects is the colony's ability
+        // to exist: W13S28 at RCL2 lost four workers to one invader over
+        // 217 ticks while its Keep stood at full hits and its one safe
+        // mode sat unused. Armed means an ATTACK or RANGED_ATTACK part; a
+        // scout or a claimer spends nothing here (the claimer has its own
+        // arm). The tower is read off the same census the tower reflex
+        // fires from (`Atlas.placedTowers`), so the tick a tower stands
+        // this arm stops and the Keep arm is the whole of the rule again.
+        let undefended =
+            List.isEmpty (Atlas.placedTowers atlas)
+            && here
+               |> List.exists (fun h ->
+                   List.contains BodyPart.Attack h.Body
+                   || List.contains BodyPart.RangedAttack h.Body)
+
+        if claimerInReach || keepDamaged || undefended then
             [ ActivateSafeMode controller.Id ]
         else
             []
