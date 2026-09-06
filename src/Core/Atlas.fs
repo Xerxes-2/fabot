@@ -2118,6 +2118,24 @@ let private narrowedArea (atlas: Atlas) (creep: string) (task: Task) : Set<Pos> 
                 match targetRoom atlas sourceId with
                 | Some room when room <> atlas.Home -> Set.empty
                 | _ -> workArea atlas task)
+    // A Post's Seat is the garrison's (ADR 0051): a light body's Harvest
+    // Work Area is the source's Seats less its Posts. The heavy arm above
+    // narrows *to* the Posts, and this is its complement — the two kinds
+    // of body stand on disjoint tiles of one source, so a light crowd
+    // cannot squat the tile the Anchor was hired for (W13S28, t~170,1xx:
+    // both Posts stood on by 1W workers, both Anchors `none-free`). A
+    // source with no Post keeps every Seat for the light body, which is
+    // the bare-Seat bootstrap ADR 0045 keeps for the home room; a source
+    // whose every Seat is a Post hands a light body nothing, and that is
+    // the rule's point rather than its edge. Not memoised: the difference
+    // is over a handful of tiles and `workArea` beneath it already is.
+    | Harvest sourceId ->
+        let postTiles = postsOf atlas sourceId
+
+        if Set.isEmpty postTiles then
+            workArea atlas task
+        else
+            Set.difference (workArea atlas task) postTiles
     | _ -> workArea atlas task
 
 /// Work Area of a Task for one creep — the body-aware query every reader

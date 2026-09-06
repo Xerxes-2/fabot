@@ -1807,14 +1807,21 @@ let workAreaForTests =
                     "the body-blind area keeps every Seat"
             }
 
-            test "a light body keeps every Seat of the same source" {
+            test "a light body keeps the Seats beyond the Posts of the same source" {
+                // ADR 0051: the complement of the heavy narrowing. The Post
+                // is the garrison's tile, so a light body's area is every
+                // other Seat.
                 let atlas =
                     posted [ "w", { X = 10; Y = 11 } ] |> snapshotWith [ worker "w" ] |> ofSnapshot
 
                 Expect.equal
                     (workAreaFor atlas "w" (Harvest "src-a"))
-                    (workArea atlas (Harvest "src-a"))
-                    "Work <= Move narrows nothing"
+                    (Set.difference (workArea atlas (Harvest "src-a")) (postsOf atlas "src-a"))
+                    "Work <= Move keeps the Seats less the Posts"
+
+                Expect.isFalse
+                    (workAreaFor atlas "w" (Harvest "src-a") |> Set.isEmpty)
+                    "and this source has a bare Seat to keep"
             }
 
             test "a source with no Post narrows nothing, heavy body or not" {

@@ -8197,11 +8197,20 @@ let logisticsTests =
                 // At (15,10) the buffer's Work Area is two steps away, the
                 // nearest Seat four: collect beats dig. At (12,10) the Seat
                 // is one step away: dig beats collect. Same rule both ways.
+                //
+                // The source is read unposted here (ADR 0051): with the
+                // container standing, the Seat a light body may dig from is
+                // the one across the wall at (9,10) and the near one at
+                // (11,10) is the garrison's, so the dig would lose on
+                // reachability and not on price, which is not what this
+                // test is about.
                 let colonyAt pos =
                     { haulColony with
                         Creeps = [ worker "w1" 0 50 ]
                         Spatial =
-                            haulRoom
+                            { haulRoom with
+                                TargetKinds = haulRoom.TargetKinds |> Map.remove "can-src"
+                            }
                             |> withHome (fun layer ->
                                 { layer with
                                     CreepPositions = Map.ofList [ "w1", pos ]
@@ -9355,7 +9364,13 @@ let postCapacityTests =
                     "the fresh match stops at the Post count too"
             }
 
-            test "a light body still fills every Seat: the Post cap governs heavy bodies alone" {
+            test "a Post's Seat is the garrison's: the light crowd gets the Seats beyond the Posts" {
+                // ADR 0051 (#212). `haulRoom`'s src-a has two Seats, (9,10)
+                // and (11,10), and the container stands on (11,10): one
+                // Post, one bare Seat. Two light bodies want it; one is
+                // admitted, to the bare Seat, and the second reads
+                // none-free — where before both were admitted and an Anchor
+                // arriving after them found no standing room at all.
                 let snapshot =
                     { haulColony with
                         Creeps = [ worker "w1" 0 50; worker "w2" 0 50 ]
@@ -9372,9 +9387,83 @@ let postCapacityTests =
                 let { Assignments = assignments } = decide snapshot Map.empty Set.empty None
 
                 Expect.equal
-                    (harvesters assignments "src-a")
+                    (harvesters assignments "src-a" |> List.length)
+                    1
+                    "two Seats less one Post admits one light body"
+
+                // Pairwise on the Post alone: the same two bodies with the
+                // container gone from the census fill both Seats, which is
+                // ADR 0045's bare-Seat bootstrap unchanged.
+                let unposted =
+                    { snapshot with
+                        Spatial =
+                            { snapshot.Spatial with
+                                TargetKinds = snapshot.Spatial.TargetKinds |> Map.remove "can-src"
+                            }
+                    }
+
+                let { Assignments = both } = decide unposted Map.empty Set.empty None
+
+                Expect.equal
+                    (harvesters both "src-a")
                     [ "w1"; "w2" ]
-                    "a light body stands on any Seat, so the Seat count is its only cap"
+                    "with no Post every Seat is a light body's"
+            }
+
+            test "an Anchor and a light body share a source on disjoint tiles" {
+                // The live case (#212): the Anchor cast for a Post found the
+                // Seat cap full of light bodies. Now the light body's Work
+                // Area is the bare Seat alone and its cap the Seats beyond
+                // the Posts, so the Post is the garrison's by geometry and
+                // by cap together — both harvest, each on its own tile.
+                let snapshot =
+                    { haulColony with
+                        Creeps = [ worker "w1" 0 50; anchor "a1" 0 50 ]
+                        Spatial =
+                            haulRoom
+                            |> withHome (fun layer ->
+                                { layer with
+                                    CreepPositions =
+                                        Map.ofList
+                                            [ "w1", { X = 9; Y = 10 }; "a1", { X = 12; Y = 10 } ]
+                                })
+                    }
+
+                let { Assignments = assignments } = decide snapshot Map.empty Set.empty None
+
+                Expect.equal
+                    (harvesters assignments "src-a")
+                    [ "a1"; "w1" ]
+                    "the Anchor is admitted to the Post and the worker to the bare Seat"
+            }
+
+            test "a light body kept on a Post's Seat is released, not grandfathered" {
+                // ADR 0024's squatter sat on a Post since t69135 because a
+                // remembered assignment outlived the rule; the capacity gate
+                // reads memory too, so two light bodies remembered on a
+                // one-bare-Seat source lose one of them.
+                let snapshot =
+                    { haulColony with
+                        Creeps = [ worker "w1" 0 50; worker "w2" 0 50 ]
+                        Spatial =
+                            haulRoom
+                            |> withHome (fun layer ->
+                                { layer with
+                                    CreepPositions =
+                                        Map.ofList
+                                            [ "w1", { X = 9; Y = 10 }; "w2", { X = 11; Y = 10 } ]
+                                })
+                    }
+
+                let remembered =
+                    Map.ofList [ "w1", taskId (Harvest "src-a"); "w2", taskId (Harvest "src-a") ]
+
+                let { Verdicts = verdicts } = decide snapshot remembered Set.empty None
+
+                Expect.contains
+                    verdicts
+                    (Verdict.Released("w2", taskId (Harvest "src-a"), ReleaseReason.OverCapacity))
+                    "the second light holder is released over the light cap"
             }
 
             test "a source with no Post caps heavy harvesters at its Seats" {

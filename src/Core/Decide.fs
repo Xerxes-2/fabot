@@ -5575,23 +5575,43 @@ let matchCreeps
             | Build siteId when Atlas.standsOnPostSite atlas creep.Name siteId -> None
             | _ -> Map.tryFind tid capacities
 
-        let postCap =
-            if Atlas.workHeavy atlas creep.Name then
-                Map.tryFind tid postCaps
-            else
-                None
+        let heavy = Atlas.workHeavy atlas creep.Name
 
-        match seatCap, postCap with
+        let postCap = if heavy then Map.tryFind tid postCaps else None
+
+        // The light body's own cap (ADR 0051): the Seats a posted source
+        // has *beyond* its Posts. The Post cap above keeps the garrisons
+        // to the Posts; this keeps the light crowd off them, so a source
+        // with two Seats and one Post admits one light body and one
+        // heavy, never two light and an Anchor `none-free` in the swamp.
+        // Harvest's alone, as the Post cap is, and read only where a Post
+        // cap exists: an unposted source keeps the Seat cap as its only
+        // one, which is ADR 0045's bare-Seat bootstrap unchanged.
+        let lightCap =
+            match task, seatCap, Map.tryFind tid postCaps with
+            | Harvest _, Some seatCount, Some postCount when not heavy ->
+                Some(max 0 (seatCount - postCount))
+            | _ -> None
+
+        match seatCap, postCap, lightCap with
         // Only a capped Task forces the walk: the Refills and the surplus
         // work the pool is mostly made of neither walk the assignment map
         // nor pay for an arrival (ADR 0029).
-        | None, None -> true
+        | None, None, None -> true
         | _ ->
             let holders = holdersAt acc creep task arrival.Value
 
             let withinSeats =
                 match seatCap with
                 | Some cap -> List.length holders < cap
+                | None -> true
+
+            let withinLight =
+                match lightCap with
+                | Some cap ->
+                    let light = holders |> List.filter (Atlas.workHeavy atlas >> not) |> List.length
+
+                    light < cap
                 | None -> true
 
             let withinPosts =
@@ -5609,7 +5629,7 @@ let matchCreeps
                     heavy + garrison < cap
                 | None -> true
 
-            withinSeats && withinPosts
+            withinSeats && withinPosts && withinLight
 
     // Capacity applies to remembered assignments too: memory can carry an
     // oversell from before a cap existed (e.g. across a redeploy). So does
