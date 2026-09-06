@@ -1329,11 +1329,12 @@ function buildOutpostWorld() {
   // *container*. The hauler row itself is hired and stood at the home
   // spawn, which is the storage end of every round trip; these three are
   // the far end, which nothing else in a frozen world stands at. It is a
-  // floor and not a quota — ADR 0042 sizes two haulers per container for
-  // an unpaved outpost, and the row's own quota already prices these three
-  // round trips into the home hires — so the count is deliberately under
-  // what the colony runs, and what the bundle would hire *instead of* it
-  // is ADR 0012's arithmetic and not this harness's to guess.
+  // floor and not a quota — the row's own quota already prices these three
+  // round trips into the home hires, one rounding for the whole colony
+  // (ADR 0049, which is where ADR 0042's "two haulers per container"
+  // reading of an unpaved outpost went) — so the count is deliberately
+  // under what the colony runs, and what the bundle would hire *instead
+  // of* it is ADR 0012's arithmetic and not this harness's to guess.
   //
   // They are crewed *after* the fleet is hired, and cast from the bodies
   // the bundle itself cast at home — an outpost hauler is the home

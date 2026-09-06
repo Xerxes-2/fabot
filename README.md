@@ -209,15 +209,20 @@ fleet at all**, not the two extra levels — an RCL3 run on today's harness
 is dearer than the RCL5 default, not cheaper. One more number to keep
 beside the `outpost` run: ADR 0041 sizes the layered projection against
 *roughly sixteen creeps over three rooms*, and at the RCL5 default the
-scenario now stands 23 — twenty hired by the bundle's own arithmetic
-against a three-room income (fifteen of them standing at home, which is
-what the live colony held at t140,810, and five stationed in the outposts),
-plus a three-hauler crew the harness stands on the outpost containers. The
-crew is a floor and not a quota — ADR 0042 sizes two haulers per container
-for an unpaved outpost, and the hired hauler row already prices the same
-round trips — so it is stood *after* the fleet is hired, and what the
-bundle would have hired instead of it is ADR 0012's arithmetic and not this
-harness's to guess.
+scenario stood 23 when it was last measured — twenty hired by the bundle's
+own arithmetic against a three-room income (fifteen of them standing at
+home, which is what the live colony held at t140,810, and five stationed in
+the outposts), plus a three-hauler crew the harness stands on the outpost
+containers. That reading is from **before ADR 0049**, which rounds the
+hauler quota once for the colony rather than once per container, so the
+hired half is now smaller by three or four bodies; the harness has not been
+re-run against it (`node scripts/profile.mjs` currently throws on the `stub`
+scenario, which the run predates and #194 did not touch). The crew is a
+floor and not a quota — the hired hauler row already prices the same round
+trips, and ADR 0042's own "two haulers per container" reading of them is
+ADR 0049's to correct — so it is stood *after* the fleet is hired, and what
+the bundle would have hired instead of it is ADR 0012's arithmetic and not
+this harness's to guess.
 
 Current numbers, the live CPU history, and the per-hotspot attribution are
 tracked in #50 — read that, not this file, for where the time goes.

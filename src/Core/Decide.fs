@@ -972,6 +972,11 @@ let private carryCapacityOf body =
 /// is demand nobody is hired for. A numerator at or below zero lands at
 /// or below zero — F# divides toward zero — and each row's own floor
 /// answers for it.
+///
+/// What it never says is *how much* demand one call is rounding: that is
+/// the granularity, and it belongs to each row's own rule. The hauler
+/// row's is the colony (ADR 0049) — one call over the summed round trips,
+/// where it used to be one call per source container.
 let private ceilDiv numerator divisor = (numerator + divisor - 1) / divisor
 
 /// What one source of a room the colony holds this way is worth per tick
@@ -1104,14 +1109,56 @@ let private anchorWorkCapOf (snapshot: Snapshot) atlas : int =
         | [] -> heldWorkCap
         | outputs -> List.max outputs |> workCapOf
 
+/// The richest bank the colony could fill this tick: every projected
+/// room's capacity, and the largest of them. Four readers who must not
+/// disagree — `workforceTarget` prices every row's replacement as the
+/// richest bank would cast it, the reserver row's quota refuses to hire at
+/// all where that bank cannot buy the row's floor body, a Withdraw's cap
+/// divides its store's stock by the body this bank would cast for the row
+/// that draws there (#161), and the hauler row's own quota divides the
+/// colony's summed haul by that same hauler's carry capacity (ADR 0049) —
+/// so the fold is written once here rather than four times. The third is
+/// the one whose failure is a store admitting the wrong number of drawers
+/// rather than a mis-sized body, so narrowing the fold — to the spawn
+/// rooms a caster can draw from, say, or to `Available` — moves every
+/// Withdraw cap in the colony with it.
+let private richestCapacity (snapshot: Snapshot) =
+    snapshot.RoomEnergy
+    |> Map.toList
+    |> List.map (fun (_, bank) -> bank.Capacity)
+    |> function
+        | [] -> 0
+        | caps -> List.max caps
+
 /// The hauler row's quota rule (ADR 0012) — the row's colony fact, per
-/// ADR 0006's law that a row arrives with its quota or not at all: per
-/// source container, ceil(round-trip travel ticks to the spawn × that
-/// container's own source's output ÷ the cast body's carry capacity), so a
-/// farther container hires proportionally more haul capacity and never
-/// quietly overflows. The spawn is the canonical sink because the trunks
-/// radiate from it; of several spawns the cheapest wins. No source
-/// containers, no placed spawns, or unreachable geometry hire nothing.
+/// ADR 0006's law that a row arrives with its quota or not at all:
+/// ceil(Σ over the source containers of round-trip travel ticks to the
+/// spawn × that container's own source's output, ÷ the cast body's carry
+/// capacity), so a farther container hires proportionally more haul
+/// capacity and never quietly overflows. The spawn is the canonical sink
+/// because the trunks radiate from it; of several spawns the cheapest
+/// wins. No source containers, no placed spawns, or unreachable geometry
+/// hire nothing.
+///
+/// **One rounding, for the colony** (ADR 0049, succeeding ADR 0012 and ADR
+/// 0037 on the granularity alone): the demands are summed first and the
+/// ceiling is taken once. Rounding each container up on its own bought a
+/// body per fraction — three outpost containers wanting 1.3 haulers each
+/// hired six where the flow asks for four — because a hauler is not the
+/// property of the container it was hired for: since #161 a Withdraw's
+/// capacity is its own store's stock divided by a hauler load, so a
+/// container that fills faster than it is drained admits more drawers than
+/// one that does not, and the shared integer is spent where the energy
+/// actually stands rather than pinned per container at hiring time. The
+/// cap is a **capacity and not an order** — `tierOf` files every source
+/// container's Withdraw on the feeding tier alike and travel cost ranks
+/// inside it, which is the near container's advantage and not the far
+/// one's — so what the cap buys the row is room at the far end, never
+/// priority there. What ADR 0012 rejected was the *flat* quota, one hauler
+/// per container regardless of distance, and this is the opposite of that:
+/// every container's own round trip is still priced, and only the fraction
+/// it leaves behind is now added to its neighbours' instead of being
+/// bought outright.
 ///
 /// The output is that source's and not the colony's (ADR 0042), which is
 /// why the fold resolves each tile back to the rock it serves rather than
@@ -1129,8 +1176,9 @@ let private anchorWorkCapOf (snapshot: Snapshot) atlas : int =
 /// arithmetic #123 landed for the walk and the ranking price, run once
 /// per leg because the loaded body and the empty one are two journeys
 /// (ADR 0029, ADR 0030). ADR 0042 costs that trip at 138–168 ticks
-/// unpaved, so an outpost container hires two haulers where a home one
-/// hires one: the number is large because the haul is long.
+/// unpaved, so such a container puts one to one and a half bodies of
+/// demand into the sum where a home one puts a fifth of a body: the
+/// number is large because the haul is long.
 ///
 /// **That number does not reopen ADR 0038.** ADR 0038 declined to fill the
 /// colony's Link footings and said its refusal flips "when the hauler row
@@ -1175,35 +1223,46 @@ let private haulerQuota (snapshot: Snapshot) atlas : int =
             |> Option.bind (sourceOutputOf snapshot atlas)
             |> Option.map (fun output -> room, tile, output))
 
+    // One load, for the whole colony, and the row's own body cast at the
+    // richest bank: rounding once (ADR 0049) sums demands before it
+    // divides, so every term has to be a fraction of the *same* body or
+    // the integer at the end counts nothing. `richestCapacity` is the load
+    // the rest of the pipeline already means — `workforceTarget` charges
+    // this row's amortization at it and a Withdraw's cap divides its
+    // store's stock by it (#161) — so denominating the sum anywhere else
+    // would give the colony a third reading of "one hauler load" and let
+    // the quota, the charge and the cap disagree with each other. Never
+    // zero: the row's sizing casts one whole block at any bank
+    // (`wholeBlockBodyFor`), so the divisor is a hundred at worst.
+    let body = bodyFor haulerPattern (richestCapacity snapshot)
+
+    let capacity = carryCapacityOf body
+
     // The sink's room is the projection's and never `SpawnInfo.RoomName`:
     // the two agree on the live colony and a fixture that names one and
-    // files the other would flood an empty grid (ADR 0041). The bank is
-    // still the spawn's own room's, which is the name the engine's
-    // energyCapacityAvailable is keyed by.
-    let spawns =
+    // files the other would flood an empty grid (ADR 0041).
+    let sinks =
         snapshot.Spawns
-        |> List.choose (fun s ->
-            SpatialInfo.placementOf snapshot.Spatial s.Id
-            |> Option.map (fun (room, pos) -> s.RoomName, room, pos))
+        |> List.choose (fun s -> SpatialInfo.placementOf snapshot.Spatial s.Id)
 
-    sourceContainers
-    |> List.sumBy (fun (room, tile, output) ->
-        spawns
-        |> List.choose (fun (bankRoom, spawnRoom, spawnPos) ->
-            let bank =
-                snapshot.RoomEnergy
-                |> Map.tryFind bankRoom
-                |> Option.defaultValue { Available = 0; Capacity = 0 }
+    // Each container's own round trip at its own cheapest sink, priced at
+    // its own source's output — the fraction of a hauler it asks for, and
+    // never that fraction rounded — summed over the colony. The minimum is
+    // over travel and nothing else now that one body prices every leg, so
+    // "its cheapest spawn" is the near one rather than the rich one.
+    let demand =
+        sourceContainers
+        |> List.sumBy (fun (room, tile, output) ->
+            sinks
+            |> List.choose (fun (spawnRoom, spawnPos) ->
+                Atlas.haulRoundTripTicks atlas body room tile spawnRoom spawnPos
+                |> Option.map (fun ticks -> ticks * output))
+            |> function
+                | [] -> 0
+                | demands -> List.min demands)
 
-            let body = bodyFor haulerPattern bank.Capacity
-
-            let capacity = carryCapacityOf body
-
-            Atlas.haulRoundTripTicks atlas body room tile spawnRoom spawnPos
-            |> Option.map (fun ticks -> ceilDiv (ticks * output) capacity))
-        |> function
-            | [] -> 0
-            | quotas -> List.min quotas)
+    // The colony's whole haul, rounded once (ADR 0049).
+    ceilDiv demand capacity
 
 /// Screeps CREEP_LIFE_TIME: the ticks a spawned creep lives — the horizon
 /// a body's replacement cost is amortized over.
@@ -1249,25 +1308,6 @@ let private reservationCap = 5000
 /// would read as 0.87 and undercharge the row by a factor of two and a
 /// half.
 let private claimLifetime = 600
-
-/// The richest bank the colony could fill this tick: every projected
-/// room's capacity, and the largest of them. Three readers who must not
-/// disagree — `workforceTarget` prices every row's replacement as the
-/// richest bank would cast it, the reserver row's quota refuses to hire at
-/// all where that bank cannot buy the row's floor body, and a Withdraw's
-/// cap divides its store's stock by the body this bank would cast for the
-/// row that draws there (#161) — so the fold is written once here rather
-/// than three times. The third is the one whose failure is a store
-/// admitting the wrong number of drawers rather than a mis-sized body, so
-/// narrowing the fold — to the spawn rooms a caster can draw from, say, or
-/// to `Available` — moves every Withdraw cap in the colony with it.
-let private richestCapacity (snapshot: Snapshot) =
-    snapshot.RoomEnergy
-    |> Map.toList
-    |> List.map (fun (_, bank) -> bank.Capacity)
-    |> function
-        | [] -> 0
-        | caps -> List.max caps
 
 /// The reserver row's body for one outpost (ADR 0042): the deficit sizing
 /// and the bank truncation, whichever asks for less, never below one
@@ -3840,10 +3880,12 @@ let private outpostContainerBuilders = 2
 /// the generalists', the defect #161 put the cap here for. Which body a
 /// two-row store divides by is a question this ticket does not carry, and
 /// it goes back to the tracker with the reading above rather than being
-/// settled in passing. `haulerQuota` divides that same hauler load into the same
-/// source containers' flow one *spawn* at a time and takes the minimum;
-/// there is one number here instead, because a Task has one capacity and
-/// not one per spawn.
+/// settled in passing. `haulerQuota` divides this very load — the same
+/// `richestCapacity` body, on purpose (ADR 0049) — into the same source
+/// containers' flow, taking the minimum over the spawns to find each
+/// container's cheapest sink; the two must agree, because a row sized
+/// against one load and dispatched against another would hire bodies the
+/// caps never admit.
 ///
 /// Stock and never flow (ADR 0023): the ten a tick an Anchor drops into
 /// the container while the hauler walks is counted on the tick it lands

@@ -10213,17 +10213,25 @@ let haulerTests =
                 Expect.equal (haulerCasts far.Intents) 5 "27 steps hire five"
             }
 
-            test "the measured room's quota does not move: the fix was not a resizing" {
+            test "the repricing does not move the measured room's quota: the fix was not a resizing" {
                 // ADR 0029 repriced each leg of the round trip as a walk,
                 // and both legs got dearer — the live room's two containers
-                // move from 3 and 5 round-trip ticks to 4 and 6. Neither
-                // crosses the 20 ticks that would buy a second body against
-                // the 200-carry hauler a 300 bank casts — the live room's
-                // 16-Carry body wants one only past 80 — so the quota stays
-                // one apiece and the fleet is the size it was. The error this corrects bites
+                // move from 3 and 5 round-trip ticks to 4 and 6. The pair's
+                // demand rises with them, from 80 to 100 energy-ticks
+                // against the 200-carry hauler a 300 bank casts, and stays
+                // under the one body that clears it — the live room's
+                // 16-Carry body wants a second only past 80 ticks — so the
+                // fleet is the size it was. The error this corrects bites
                 // at remote-mining distances, not at home; a future reader
                 // finding the fleet unchanged is looking at the right
                 // outcome, not at a fix that failed to land.
+                //
+                // One body and not one apiece since ADR 0049: the two
+                // containers are summed and rounded once, which is what
+                // took this room's row from two down to one. The claim
+                // under test is unmoved by that — both roundings, before
+                // ADR 0029's repricing and after it, still land on the same
+                // fleet.
                 let snapshot =
                     { bareRespawn with
                         Spawns =
@@ -10265,8 +10273,8 @@ let haulerTests =
 
                 Expect.equal
                     (haulerCasts intents)
-                    2
-                    "one hauler per container, exactly as the halved round trip hired"
+                    1
+                    "the same one body the halved round trip hired, summed and rounded once"
             }
 
             test "no source containers hires no haulers" {
@@ -11433,6 +11441,201 @@ let roomLayerTests =
             }
         ]
 
+/// The arms of the paved cross below, each an id, its container's tile and
+/// the rock that container serves — the rock a tile off the lane, range 1
+/// from its own container and out of reach of every other. Four arms are
+/// fixed and the north one is the caller's, which is the single tile the
+/// pairwise case moves.
+///
+/// The distances are chosen to make the demands read off the page. At a
+/// 300 bank the hauler row casts `[4Carry;2Move]` — 200 of carry — and a
+/// paved step is a tick on either leg, so a container `n` steps from the
+/// tile a transfer reaches the spawn from is a round trip of `2n` ticks
+/// and a demand of `2n × 10 / 200 = n / 10` of a body: 1.3 apiece thirteen
+/// steps out and 0.5 apiece five steps out.
+let private haulRoundingArms north =
+    [
+        "e13", { X = 39; Y = 25 }, { X = 39; Y = 24 }
+        "e5", { X = 31; Y = 25 }, { X = 31; Y = 24 }
+        "w13", { X = 11; Y = 25 }, { X = 11; Y = 24 }
+        "w5", { X = 19; Y = 25 }, { X = 19; Y = 24 }
+        "n", north, { north with X = 24 }
+    ]
+
+/// The colony those arms make: a paved lane down row 25 and column 25 of
+/// the colony's own room with the spawn standing at their crossing, and
+/// one built source container on each arm. No controller and no
+/// refillable, so the hauler quota is the only thing this fixture answers
+/// — three outpost containers and two home ones are the live shape the
+/// rounding was measured on (#194), and one room's arms are that shape's
+/// arithmetic without a Seam to price it through.
+let private haulRoundingColony arms =
+    let spawnPos = { X = 25; Y = 25 }
+
+    let lane =
+        [ for x in 4..46 -> { X = x; Y = 25 } ]
+        @ [ for y in 4..24 -> { X = 25; Y = y } ]
+
+    let targets =
+        arms
+        |> List.collect (fun (name, tile, rock) ->
+            [
+                $"can-{name}", tile, Structure BuiltKind.Container
+                $"src-{name}", rock, Source
+            ])
+
+    { bareRespawn with
+        Controller = None
+        Refillables = []
+        Sources = arms |> List.map (fun (name, _, _) -> source $"src-{name}")
+        Spatial =
+            { SpatialInfo.empty with
+                RoomName = Some "W1N1"
+                TargetKinds = Map.ofList [ "spawn-1", Structure BuiltKind.Spawn ]
+            }
+            |> withHome (fun layer ->
+                { layer with
+                    Terrain =
+                        Map.ofList (
+                            [ for tile in lane -> tile, Plain ]
+                            @ [ for (_, _, rock) in arms -> rock, Wall ]
+                        )
+                    TargetPositions = Map.ofList [ "spawn-1", spawnPos ]
+                    Obstacles = Set.singleton spawnPos
+                    Roads = Set.ofList lane
+                })
+            |> withTargets targets
+    }
+
+/// The hauler body this fixture's bank casts, read from the row's own
+/// sizing rule rather than restated as a literal: the premise assertions
+/// below price their round trips off the Atlas, and a body spelled by hand
+/// here would go on passing them against a body the colony no longer
+/// casts while the quota beside them moved.
+let private haulRoundingBody = bodyFor haulerPattern 300
+
+[<Tests>]
+let haulRoundingTests =
+    testList
+        "the hauler quota rounds once for the colony"
+        [
+            test "the row is the sum of the demands, never the sum of their ceilings" {
+                // ADR 0049, on the live shape's own arithmetic: three
+                // containers wanting 1.3 of a hauler and two wanting 0.5
+                // come to 4.9 and hire **five**. A ceiling apiece — the
+                // rule until #194 — bought a body for each of those five
+                // fractions and hired eight: three bodies the flow never
+                // asked for, which is the overhire the live colony was
+                // seen carrying.
+                let colony = haulRoundingColony (haulRoundingArms { X = 25; Y = 11 })
+                let atlas = Atlas.ofSnapshot colony
+                let home = SpatialInfo.homeName colony.Spatial
+
+                let roundTrip from =
+                    Atlas.haulRoundTripTicks
+                        atlas
+                        haulRoundingBody
+                        home
+                        from
+                        home
+                        { X = 25; Y = 25 }
+
+                Expect.equal
+                    (roundTrip { X = 39; Y = 25 })
+                    (Some 26)
+                    "the premise: thirteen paved steps out and back, a tick a tile"
+
+                Expect.equal
+                    (roundTrip { X = 31; Y = 25 })
+                    (Some 10)
+                    "the premise: and five steps out and back on the short arm"
+
+                Expect.equal (quotaOf colony) 5 "3 × 1.3 + 2 × 0.5 = 4.9, and the colony hires five"
+            }
+
+            test "one container of the same colony still rounds up on its own" {
+                // The granularity is all that moved (ADR 0049): a colony
+                // with one container rounds one demand up exactly as ADR
+                // 0012 always did, because a sum of one is its own
+                // summand. Pairwise against the case above, whose long arm
+                // this is.
+                let alone = haulRoundingColony [ List.head (haulRoundingArms { X = 25; Y = 11 }) ]
+
+                Expect.equal (quotaOf alone) 2 "1.3 of a body alone is still two bodies"
+            }
+
+            test "a longer round trip on one arm moves the row by a body" {
+                // What the sum buys, read pairwise on one tile: the north
+                // container moves from thirteen steps out to twenty, its
+                // own demand from 1.3 to 2.0, and the colony's from 4.9 to
+                // 5.6. Under a ceiling apiece that arm was two bodies
+                // either way and the whole move was invisible; under one
+                // rounding the fraction it grew by is a hire.
+                let near = haulRoundingColony (haulRoundingArms { X = 25; Y = 11 })
+                let far = haulRoundingColony (haulRoundingArms { X = 25; Y = 4 })
+                let atlas = Atlas.ofSnapshot far
+                let home = SpatialInfo.homeName far.Spatial
+
+                Expect.equal
+                    (Atlas.haulRoundTripTicks
+                        atlas
+                        haulRoundingBody
+                        home
+                        { X = 25; Y = 4 }
+                        home
+                        { X = 25; Y = 25 })
+                    (Some 40)
+                    "the premise: twenty paved steps out and back"
+
+                Expect.equal (quotaOf near) 5 "the premise: 4.9 of a body hires five"
+                Expect.equal (quotaOf far) 6 "and 5.6 hires six, off one arm's seven extra steps"
+            }
+
+            test "one divisor for the colony too: the row's own body at the colony's bank" {
+                // The other half of "rounded once" (ADR 0049), and the one
+                // no arithmetic case above can see: the sum is divided by
+                // **one** load and never by a load per spawn. The load is
+                // the row's own cast at `richestCapacity` — the same body
+                // `workforceTarget` charges this row's amortization at and
+                // the same one a Withdraw's cap divides its store's stock
+                // by (#161) — so a quota denominated anywhere else would
+                // let the three disagree about what one hauler carries and
+                // hire bodies the caps never admit.
+                //
+                // The same five arms, the same 980 energy-ticks of haul,
+                // and only the bank moves: a 300 bank's hauler carries 200
+                // and the colony hires five, an RCL4 bank's carries 800
+                // and it hires two. Road parity holds at every size, so
+                // the round trips themselves do not move with the body —
+                // asserted, because if they did the two numbers would not
+                // be one division apart.
+                let colony = haulRoundingColony (haulRoundingArms { X = 25; Y = 11 })
+
+                let rich =
+                    { colony with
+                        RoomEnergy = bank 1300 1300
+                    }
+
+                let atlas = Atlas.ofSnapshot rich
+                let home = SpatialInfo.homeName rich.Spatial
+
+                Expect.equal
+                    (Atlas.haulRoundTripTicks
+                        atlas
+                        (bodyFor haulerPattern 1300)
+                        home
+                        { X = 39; Y = 25 }
+                        home
+                        { X = 25; Y = 25 })
+                    (Some 26)
+                    "the premise: the sixteen-Carry body pays the same paved tick a tile"
+
+                Expect.equal (quotaOf colony) 5 "the premise: 980 energy-ticks over a 200 load"
+
+                Expect.equal (quotaOf rich) 2 "and over the 800 load the same bank casts, two"
+            }
+        ]
+
 /// The W12S28 shape (ADR 0012): a 3-wide plain field y = 9..11 from x = 8
 /// to 32, two sources embedded in wall at (10,10) and (30,10) with their
 /// built containers on the Seats (11,10) and (29,10) — two Posts, no Dual
@@ -11486,13 +11689,15 @@ let incomeColony =
     }
 
 /// The income-based fleet the W12S28 shape pins (ADR 0012): one Anchor
-/// per Post (2), the throughput quota (2 haulers per container at 8
-/// steps — the round trip is 16 ticks out loaded and 8 back empty, and
-/// ceil(24 × 10 / 200) is 2 since ADR 0029 priced each leg as a walk),
-/// and the income workers — 2 posted sources × 10 e/tick × the 1500-tick
-/// lifetime = 30,000, minus the anchor and hauler rows' replacement
-/// amortization (2 × 300 + 4 × 300 = 1,800), over one worker body's Work
-/// drain × lifetime (1 × 1500) → ceil(18.8) = 19 (ADR 0037).
+/// per Post (2), the throughput quota (3 haulers — each container's round
+/// trip is 16 ticks out loaded and 8 back empty since ADR 0029 priced each
+/// leg as a walk, and the colony's demand is ceil((24 + 24) × 10 / 200) =
+/// 3, rounded once for the colony and not once per container: ADR 0049 hires
+/// three where a ceiling apiece hired four), and the income workers — 2
+/// posted sources × 10 e/tick × the 1500-tick lifetime = 30,000, minus the
+/// anchor and hauler rows' replacement amortization (2 × 300 + 3 × 300 =
+/// 1,500), over one worker body's Work drain × lifetime (1 × 1500) →
+/// ceil(19.0) = 19 (ADR 0037).
 let incomeFleet =
     [
         anchor "a1" 0 50
@@ -11500,7 +11705,6 @@ let incomeFleet =
         hauler "h1" 0 100
         hauler "h2" 0 100
         hauler "h3" 0 100
-        hauler "h4" 0 100
     ]
     @ [ for i in 1..19 -> worker $"w{i}" 0 50 ]
 
@@ -11508,21 +11712,23 @@ let incomeFleet =
 /// untouched — same sources, same containers, same four idle spawns — and
 /// only the bank moves, to 1300 against 1300, so every row's body grows
 /// with it. Anchor 6W/1C/1M = 700, hauler 16C/8M = 1200 (16 Carry is 800
-/// capacity, so the 24-tick round trip's 240 energy is one hauler a
-/// container, halving the row to 2), worker 6W/7C/7M — a Work drain of 6.
-/// That drain is the granularity the worker row's rounding is paid in,
-/// and it grows with RCL: the fixture the row was pinned at banks 300,
-/// where the drain is 1 and a lost fraction is worth 0.8 e/tick.
+/// capacity, so the pair's 480 energy-ticks of demand is 0.6 of a body and
+/// the row is one, where the 300 bank's smaller body hires three), worker
+/// 6W/7C/7M — a Work drain of 6. That drain is the granularity the worker
+/// row's rounding is paid in, and it grows with RCL: the fixture the row
+/// was pinned at banks 300, where the drain is 1 and a lost fraction is
+/// worth 0.8 e/tick.
 let richIncomeColony =
     { incomeColony with
         RoomEnergy = bank 1300 1300
     }
 
 /// The rich bank's fleet at a given worker count: the rows its quotas
-/// pin — one Anchor per Post (2) beside one hauler per container (2) —
-/// and as many workers as the case under it is pinning.
+/// pin — one Anchor per Post (2) beside the one hauler this bank's body
+/// clears both containers with (ADR 0049) — and as many workers as the
+/// case under it is pinning.
 let richIncomeFleet workers =
-    [ anchor "a1" 0 50; anchor "a2" 0 50; hauler "h1" 0 100; hauler "h2" 0 100 ]
+    [ anchor "a1" 0 50; anchor "a2" 0 50; hauler "h1" 0 100 ]
     @ [ for i in 1..workers -> worker $"w{i}" 0 50 ]
 
 [<Tests>]
@@ -11530,7 +11736,7 @@ let incomeWorkforceTests =
     testList
         "income-based workforce"
         [
-            test "the W12S28 fleet is the whole target: 2 Anchors + 4 haulers + 19 workers" {
+            test "the W12S28 fleet is the whole target: 2 Anchors + 3 haulers + 19 workers" {
                 // Each posted source retires its 8 Seats: a seat base would
                 // add 16 on top and the idle spawns would cast into it.
                 let snapshot =
@@ -11558,14 +11764,15 @@ let incomeWorkforceTests =
                 | other -> failtest $"expected exactly one SpawnCreep intent, got %A{other}"
             }
 
-            test "at a 1300 bank the whole fleet is 2 Anchors + 2 haulers + 3 workers" {
-                // One Anchor per Post (2), one hauler per container (2 at
-                // this bank's 800 carry capacity), and the income workers
-                // — 30,000 of lifetime income less 2 × 700 + 2 × 1200 of
-                // amortization over the row's 6 × 1500 → ceil(2.911) = 3.
+            test "at a 1300 bank the whole fleet is 2 Anchors + 1 hauler + 4 workers" {
+                // One Anchor per Post (2), one hauler for both containers
+                // (0.6 of a body at this bank's 800 carry capacity, rounded
+                // once for the colony — ADR 0049), and the income workers
+                // — 30,000 of lifetime income less 2 × 700 + 1 × 1200 of
+                // amortization over the row's 6 × 1500 → ceil(3.044) = 4.
                 let snapshot =
                     { richIncomeColony with
-                        Creeps = richIncomeFleet 3
+                        Creeps = richIncomeFleet 4
                     }
 
                 let { Intents = intents } = decide snapshot Map.empty Set.empty None
@@ -11574,15 +11781,15 @@ let incomeWorkforceTests =
 
             test "the worker row rounds up at a Work drain of 6, not down to a body short" {
                 // The whole defect at one RCL: 30,000 of lifetime income
-                // less 3,800 of anchor and hauler amortization over the
-                // worker row's 6 × 1500 is 2.911 bodies. Truncating gives
-                // 2 and pins upgrade throughput at 12 e/tick whatever the
-                // surplus is; rounding up gives the third body (ADR 0037).
-                // The fleet below is two workers, so only the rounded-up
-                // target has a gap to cast into.
+                // less 2,600 of anchor and hauler amortization over the
+                // worker row's 6 × 1500 is 3.044 bodies. Truncating gives
+                // 3 and pins upgrade throughput whatever the surplus is;
+                // rounding up gives the fourth body (ADR 0037). The fleet
+                // below is three workers, so only the rounded-up target
+                // has a gap to cast into.
                 let snapshot =
                     { richIncomeColony with
-                        Creeps = richIncomeFleet 2
+                        Creeps = richIncomeFleet 3
                     }
 
                 let { Intents = intents } = decide snapshot Map.empty Set.empty None
@@ -11766,20 +11973,21 @@ let outpostWorkforceTests =
 
 /// The W12S28 fleet at a given hauler and worker count: one Anchor per
 /// home Post — the one row no case below moves — beside the two rows that
-/// do. The hauler row is a parameter because it halves with the home
-/// room's output: a case that neutralises the spawn room and leaves four
-/// haulers standing is reading a fleet two bodies above the quota it says
-/// it is sized to.
+/// do. The hauler row is a parameter because it falls with the home
+/// room's output — three bodies held against two at the neutral rate — so
+/// a case that neutralises the spawn room and leaves the held count
+/// standing is reading a fleet a body above the quota it says it is sized
+/// to.
 let private incomeFleetRows haulers workers =
     [ anchor "a1" 0 50; anchor "a2" 0 50 ]
     @ [ for i in 1..haulers -> hauler $"h{i}" 0 100 ]
     @ [ for i in 1..workers -> worker $"w{i}" 0 50 ]
 
-/// The same fleet at the held home room's hauler quota of four, which is
+/// The same fleet at the held home room's hauler quota of three, which is
 /// every case whose home room stays this colony's own. `incomeFleet` is
 /// this fleet at 19 workers, which the first case below re-derives rather
 /// than assumes.
-let private incomeFleetOf workers = incomeFleetRows 4 workers
+let private incomeFleetOf workers = incomeFleetRows 3 workers
 
 /// The W12S28 colony with a **posted** outpost source beside it: the same
 /// rock in the same three-Seat field the unposted case above leaves out of
@@ -11836,9 +12044,9 @@ let sourceOutputTests =
             // no one-body-per-spawn limit can hide.
             //
             // Unreserved the target is 3 Anchors — the outpost's Post
-            // hires one since #129 — + 4 haulers +
-            // ceil(((20 + 5) × 1500 − 2100) / 1500) = 24 workers = 31;
-            // reserved it is 29 workers and 36.
+            // hires one since #129 — + 3 haulers +
+            // ceil(((20 + 5) × 1500 − 1800) / 1500) = 24 workers = 30;
+            // reserved it is 29 workers and 35.
             let unreservedWorkers = 24
 
             test "the same outpost source is worth twice as much reserved" {
@@ -12106,9 +12314,11 @@ let sourceOutputTests =
                 // source, so moving the rate under the home room moves
                 // the home containers' half of it and nothing else. The
                 // outpost half is `outpostHaulTests`, on a fixture with a
-                // Seam to cross. ceil(24 × 10 / 200) is two haulers a
-                // container and ceil(24 × 5 / 200) is one.
-                Expect.equal (quotaOf incomeColony) 4 "the premise: the reserved rate hires four"
+                // Seam to cross. The two containers' demands are summed and
+                // rounded once (ADR 0049): ceil((24 + 24) × 10 / 200) is
+                // three haulers for the pair and ceil((24 + 24) × 5 / 200)
+                // is two.
+                Expect.equal (quotaOf incomeColony) 3 "the premise: the reserved rate hires three"
 
                 Expect.equal
                     (quotaOf
@@ -12116,7 +12326,7 @@ let sourceOutputTests =
                             RoomControl = homeControl |> Map.map (fun _ _ -> neutralRoom)
                         })
                     2
-                    "half the output is half the haul, one hauler a container"
+                    "half the output is half the haul, and the pool is a body lighter"
 
                 Expect.equal
                     (quotaOf
@@ -12133,7 +12343,7 @@ let sourceOutputTests =
                 // since ADR 0042 it reads who holds the room — a per-tick
                 // vision fact, not a census one. `Main.fs` keeps the memo
                 // in heap and hands `decide` last tick's every tick, so a
-                // signature blind to the rate would recall four haulers
+                // signature blind to the rate would recall three haulers
                 // for a room now worth half, and would size the worker
                 // row off that amortization too. Every census input here
                 // is byte-identical between the two Snapshots: the
@@ -12148,8 +12358,8 @@ let sourceOutputTests =
 
                 Expect.equal
                     previous.HaulerQuota
-                    4
-                    "the premise: held, the two home containers hire four"
+                    3
+                    "the premise: held, the two home containers hire three"
 
                 let recalled = decide lapsed Map.empty Set.empty (Some previous)
                 let fresh = decide lapsed Map.empty Set.empty None
@@ -16017,6 +16227,39 @@ let private beforeHaulContainer (colony: Snapshot) =
                 }
     }
 
+/// The same outpost with a **second** rock and container standing down a
+/// side branch of its corridor, the container's tile the caller's. What it
+/// buys is the shape acceptance criterion 1 names and one container cannot
+/// exercise: more than one Seam-crossing term in the same sum, so a join
+/// that priced only one of them — or collapsed two into one — moves a
+/// number here where a single-container fixture would stay green. The
+/// branch runs east along y = 44, so the tile alone lengthens this
+/// container's haul and nothing else's.
+let private withSecondHaulContainer (tile: Pos) (colony: Snapshot) =
+    let outpost = SpatialInfo.layerOf colony.Spatial "W1N2"
+
+    { colony with
+        Sources = source "src-out2" :: colony.Sources
+        Spatial =
+            { colony.Spatial with
+                TargetKinds =
+                    colony.Spatial.TargetKinds
+                    |> Map.add "src-out2" Source
+                    |> Map.add "can-out2" (Structure BuiltKind.Container)
+            }
+            |> withNeighbour
+                "W1N2"
+                { outpost with
+                    Terrain =
+                        (outpost.Terrain, [ for x in 26..40 -> { X = x; Y = 44 } ])
+                        ||> List.fold (fun acc branch -> Map.add branch Plain acc)
+                    TargetPositions =
+                        outpost.TargetPositions
+                        |> Map.add "src-out2" { tile with Y = 43 }
+                        |> Map.add "can-out2" tile
+                }
+    }
+
 [<Tests>]
 let outpostHaulTests =
     testList
@@ -16053,6 +16296,72 @@ let outpostHaulTests =
                     (quotaOf (haulHome |> withHaulOutpost None))
                     0
                     "and a room the colony cannot see prices no rock at all (ADR 0004)"
+            }
+
+            test "two containers across the same Seam are one sum, rounded once" {
+                // Acceptance criterion 1's own geometry (#194): the
+                // arithmetic case `haulRoundingTests` carries has no Seam
+                // in it, so until here nothing pooled *two* cross-room
+                // terms and a join that mispriced the second one would
+                // have moved no number in the suite.
+                //
+                // Both rocks are held, so each ships ten a tick, and the
+                // 300 bank's hauler carries 200 — a body per 20 ticks of
+                // round trip. The two crossings below come to 51 and 63,
+                // so the colony's haul is 5.7 bodies and hires six; a
+                // ceiling apiece bought 2.55 → 3 and 3.15 → 4 and hired
+                // seven.
+                let colony =
+                    haulHome
+                    |> withHaulOutpost (Some(reservedRoom true 4000))
+                    |> withSecondHaulContainer { X = 33; Y = 44 }
+
+                let atlas = Atlas.ofSnapshot colony
+
+                let roundTrip from =
+                    Atlas.haulRoundTripTicks
+                        atlas
+                        haulRoundingBody
+                        "W1N2"
+                        from
+                        "W1N1"
+                        { X = 25; Y = 10 }
+
+                Expect.equal
+                    (roundTrip { X = 25; Y = 41 })
+                    (Some 51)
+                    "the premise: the near container's Seam crossing"
+
+                Expect.equal
+                    (roundTrip { X = 33; Y = 44 })
+                    (Some 63)
+                    "the premise: and the branch container's, eight steps out along the branch"
+
+                Expect.equal (quotaOf colony) 6 "the two crossings are summed and rounded once"
+            }
+
+            test "one crossing container's longer haul moves the pair by a body" {
+                // The pairwise half of the criterion, on the shape it
+                // names: the branch container's round trip goes from 63 to
+                // 72 ticks, which is 3.15 of a body to 3.6 — its own
+                // ceiling is four either way, so under the old rule the
+                // move was invisible. Pooled, the colony goes from 5.7 to
+                // 6.15 and hires the body, because the fraction the haul
+                // grew by is now spent rather than already bought.
+                let atTile tile =
+                    haulHome
+                    |> withHaulOutpost (Some(reservedRoom true 4000))
+                    |> withSecondHaulContainer tile
+
+                Expect.equal
+                    (quotaOf (atTile { X = 33; Y = 44 }))
+                    6
+                    "the premise: eight steps down the branch hires six"
+
+                Expect.equal
+                    (quotaOf (atTile { X = 36; Y = 44 }))
+                    7
+                    "three steps further out is one body more"
             }
 
             test "a container in a room the projection does not carry hires nobody" {
@@ -16359,19 +16668,18 @@ let private switchHomeFleet =
     @ [ for i in 1..10 -> worker $"w{i}" 0 50 ]
 
 /// What the outpost's container adds, and nothing else: one Anchor for the
-/// Post it makes, the three haulers its own round trip across the Seam
-/// hires at its own source's held output, and its income share — the
-/// worker row goes from ten to nineteen, because twenty a tick less the
-/// five rows' amortization over one worker's Work drain is
-/// ceil((20 × 1500 − 7 × 300) / 1500) = 19. Thirteen more bodies, which is
+/// Post it makes, the two haulers its own round trip across the Seam adds
+/// to the colony's pool at its own source's held output, and its income
+/// share — the worker row goes from ten to nineteen, because twenty a tick
+/// less the six rows' amortization over one worker's Work drain is
+/// ceil((20 × 1500 − 6 × 300) / 1500) = 19. Twelve more bodies, which is
 /// the whole of ADR 0042's switch stated as a fleet.
+///
+/// Two haulers and not three because the pool is rounded once (ADR 0049):
+/// the home container's 1.35 of a body and the outpost's 2.55 come to 3.9
+/// and hire four, where a ceiling apiece hired two and three.
 let private switchOutpostRows =
-    [
-        anchor "a-out" 0 50
-        hauler "h-out1" 0 100
-        hauler "h-out2" 0 100
-        hauler "h-out3" 0 100
-    ]
+    [ anchor "a-out" 0 50; hauler "h-out1" 0 100; hauler "h-out2" 0 100 ]
     @ [ for i in 11..19 -> worker $"w{i}" 0 50 ]
 
 [<Tests>]
@@ -16422,11 +16730,11 @@ let containerSwitchTests =
             test "the container standing is one Anchor, its own haul and its income share" {
                 // The switch itself (ADR 0042). One tick's difference — a
                 // container standing on the outpost rock's one Seat — and
-                // the colony hires thirteen more bodies: the Anchor for the
-                // Post the container makes, the three haulers its own round
-                // trip hires at its own source's output, and the nine
-                // workers the rock's ten a tick feeds once those four rows
-                // are amortized.
+                // the colony hires twelve more bodies: the Anchor for the
+                // Post the container makes, the two haulers its own round
+                // trip adds to the colony's rounded-once pool (ADR 0049),
+                // and the nine workers the rock's ten a tick feeds once
+                // those rows are amortized.
                 Expect.isEmpty
                     (casts switchPosted (switchHomeFleet @ switchOutpostRows))
                     "posted, the target is the home fleet plus the outpost's own rows"
@@ -16438,8 +16746,8 @@ let containerSwitchTests =
 
                 Expect.equal
                     (quotaOf switchPosted - quotaOf switchUnposted)
-                    3
-                    "three of the thirteen are the container's own hauler term"
+                    2
+                    "two of the twelve are what the container's own haul adds to the pool"
             }
 
             test "the Anchor the container hires is one, from the row the home Posts hire from" {
@@ -16448,7 +16756,7 @@ let containerSwitchTests =
                 // any other body — no remote-miner row, no second sizing
                 // rule. So the proof is a swap at a fixed headcount: one
                 // body short of the target the colony casts a worker while
-                // both Anchors stand, and the same twenty-five bodies with
+                // both Anchors stand, and the same twenty-four bodies with
                 // the outpost's Anchor spelled as a worker cast an Anchor
                 // instead. Only a row gap can move between the two, because
                 // the deficit is one either way.
@@ -16530,14 +16838,14 @@ let containerSwitchTests =
         ]
 
 /// The whole fleet the switch hires: the home rows and the outpost's,
-/// twenty-six bodies standing exactly at `switchPosted`'s target and
-/// thirteen over `switchUnposted`'s.
+/// twenty-five bodies standing exactly at `switchPosted`'s target and
+/// twelve over `switchUnposted`'s.
 let private switchFleet = switchHomeFleet @ switchOutpostRows
 
 /// The same fleet with the named bodies respelled as generalists — the
 /// headcount never moves, so a case reading against it reads a *row gap*
 /// and nothing else, the deficit being the same number whichever row the
-/// twenty-six bodies were cast from. The spare bodies are named off a
+/// twenty-five bodies were cast from. The spare bodies are named off a
 /// prefix of this helper's own, so growing `switchOutpostRows` can never
 /// mint a name twice into one fleet.
 let private respelled names fleet =
@@ -16551,14 +16859,14 @@ let private respelled names fleet =
         1
     |> fst
 
-/// The fleet with both Anchors respelled: twenty-six bodies alive and
+/// The fleet with both Anchors respelled: twenty-five bodies alive and
 /// every Post in the colony standing empty.
 let private unmannedPosts = respelled [ "a-home"; "a-out" ] switchFleet
 
-/// The fleet with all five haulers respelled: twenty-six bodies alive and
+/// The fleet with all four haulers respelled: twenty-five bodies alive and
 /// no shipping at all.
 let private unshippedFleet =
-    respelled [ "h-home1"; "h-home2"; "h-out1"; "h-out2"; "h-out3" ] switchFleet
+    respelled [ "h-home1"; "h-home2"; "h-out1"; "h-out2" ] switchFleet
 
 [<Tests>]
 let rowGapTests =
@@ -16575,7 +16883,7 @@ let rowGapTests =
 
             // The premise every case below rests on, asserted where it is
             // used rather than assumed: at `switchUnposted`'s target of
-            // thirteen a fleet of twenty-six is far over, and one body
+            // thirteen a fleet of twenty-five is far over, and one body
             // fewer is still over — so nothing that follows can be the
             // ordinary deficit hiring.
             let overTarget colony fleet =
@@ -16592,7 +16900,7 @@ let rowGapTests =
                 // room's Post is empty across both ticks and is a fact
                 // about the ground either way — gated on the deficit it
                 // went unfilled until ordinary deaths had paid off the
-                // whole thirteen-body overshoot, and the colony cast
+                // whole twelve-body overshoot, and the colony cast
                 // nothing at all, in its own room included, in the
                 // meantime.
                 //
@@ -16600,7 +16908,7 @@ let rowGapTests =
                 // the two Anchors' bodies and in nothing else.
                 Expect.isEmpty
                     (casts switchUnposted switchFleet)
-                    "with every row manned the same twenty-six cast nothing"
+                    "with every row manned the same twenty-five cast nothing"
 
                 overTarget switchUnposted switchFleet
 
@@ -16627,7 +16935,7 @@ let rowGapTests =
                 // the only rival the cast can come from.
                 Expect.isEmpty
                     (casts switchUnposted switchFleet)
-                    "with every row manned the same twenty-six cast nothing"
+                    "with every row manned the same twenty-five cast nothing"
 
                 overTarget switchUnposted switchFleet
 
@@ -16647,15 +16955,15 @@ let rowGapTests =
                 // left over it hires nobody however far the fleet has
                 // overshot. Pairwise against the same fleet under a target
                 // that reaches it — one room's vision richer, where those
-                // twenty-six are the target — and one body short there is a
+                // twenty-five are the target — and one body short there is a
                 // worker.
                 Expect.isEmpty
                     (casts switchUnposted switchFleet)
-                    "thirteen over target, every row manned, and no generalist"
+                    "twelve over target, every row manned, and no generalist"
 
                 overTarget switchUnposted switchFleet
 
-                match casts switchPosted (List.truncate 25 switchFleet) with
+                match casts switchPosted (List.truncate 24 switchFleet) with
                 | [ (_, _, name) ] ->
                     Expect.stringStarts
                         name
@@ -16669,10 +16977,10 @@ let rowGapTests =
                 // worker row; it is not that row's own gap, and the
                 // difference shows the tick a specialist row stands over
                 // quota. Under `switchUnposted` the Anchor row wants one
-                // and the hauler row two: a fleet of two Anchors, five
-                // haulers and six workers is thirteen bodies exactly at
-                // the target, four of them surplus specialists, and the
-                // worker row is four short of its own quota of ten. The
+                // and the hauler row two: a fleet of two Anchors, four
+                // haulers and seven workers is thirteen bodies exactly at
+                // the target, three of them surplus specialists, and the
+                // worker row is three short of its own quota of ten. The
                 // surplus holds it there — #154 moves the specialist rows
                 // off the deficit and deliberately leaves this half of the
                 // gate standing.
@@ -16683,7 +16991,7 @@ let rowGapTests =
                 let overSpecialised =
                     switchFleet
                     |> List.filter (fun creep ->
-                        not (List.contains creep.Name [ for i in 7..19 -> $"w{i}" ]))
+                        not (List.contains creep.Name [ for i in 8..19 -> $"w{i}" ]))
 
                 Expect.hasLength
                     overSpecialised
@@ -16692,7 +17000,7 @@ let rowGapTests =
 
                 Expect.isEmpty
                     (casts switchUnposted overSpecialised)
-                    "four surplus specialists, and the worker row hires none of its four missing"
+                    "three surplus specialists, and the worker row hires none of its three missing"
 
                 match casts switchUnposted (List.truncate 12 switchHomeFleet) with
                 | [ (_, _, name) ] ->
@@ -17558,14 +17866,15 @@ let reserverRowTests =
                 // for a tick waits on 650 energy.
                 //
                 // The fleet is short in every row at once: two Anchors
-                // against three Posts, one hauler against the two-body
-                // quota, and a whole-fleet deficit under all of it. Four
+                // against three Posts, no hauler against the one-body
+                // quota the two home containers come to at this bank (ADR
+                // 0049), and a whole-fleet deficit under all of it. Four
                 // idle spawns cast one body each, so the whole order is
                 // readable in one tick.
                 let colony =
                     reserverColony
                         [ northOutpost true ]
-                        ([ anchor "a1" 0 50; anchor "a2" 0 50; hauler "h1" 0 100 ])
+                        ([ anchor "a1" 0 50; anchor "a2" 0 50 ])
                         [ "W1N2", reservedRoom true 5000 ]
 
                 match spawnIntents (decide colony Map.empty Set.empty None).Intents with
@@ -17733,16 +18042,17 @@ let reserverRowTests =
                 // its largest body against its smallest income.
                 //
                 // Income 10 + 10 + 5 = 25 a tick over 1,500 = 37,500.
-                // Amortization: 3 Anchors × 700 = 2,100, 2 haulers × 2,400
-                // = 4,800, and one 9-block reserver at 5,850 spread over
-                // 600 and re-scaled onto 1,500 = 14,625 — 21,525 in all.
-                // The surplus 15,975 over a 16-Work body's drain × 1,500 =
-                // 24,000 rounds up to one worker (ADR 0037). Charged over
-                // 1,500 instead, the same row would leave 24,750 and hire
-                // two.
+                // Amortization: 3 Anchors × 700 = 2,100, one hauler ×
+                // 2,400 — the two home containers' demands summed and
+                // rounded once (ADR 0049) — and one 9-block reserver at
+                // 5,850 spread over 600 and re-scaled onto 1,500 = 14,625
+                // — 19,125 in all. The surplus 18,375 over a 16-Work
+                // body's drain × 1,500 = 24,000 rounds up to one worker
+                // (ADR 0037). Charged over 1,500 instead, the same row
+                // would leave 27,150 and hire two.
                 let fleetOf workers =
                     [ for i in 1..3 -> anchor $"a{i}" 0 50 ]
-                    @ [ for i in 1..2 -> hauler $"h{i}" 0 100 ]
+                    @ [ hauler "h1" 0 100 ]
                     @ [ reserver "r1" ]
                     @ [ for i in 1..workers -> worker $"w{i}" 0 50 ]
 
@@ -17763,12 +18073,12 @@ let reserverRowTests =
 
                 Expect.equal
                     (atFleet 1).Memo.HaulerQuota
-                    2
-                    "the premise: the two home containers hire one body each at this bank"
+                    1
+                    "the premise: the two home containers come to one body at this bank"
 
                 Expect.isEmpty
                     (spawnIntents (atFleet 1).Intents)
-                    "3 Anchors + 2 haulers + 1 reserver + 1 worker is the whole target: seven"
+                    "3 Anchors + 1 hauler + 1 reserver + 1 worker is the whole target: six"
 
                 match spawnIntents (atFleet 0).Intents with
                 | [ (_, _, creepName) ] ->
@@ -18001,25 +18311,26 @@ let standDownGateTests =
                     "the fourth Post goes with the room, and the Anchor it would have hired goes with it"
 
                 // The workforce target counts each posted source's output
-                // and the withheld room's rock was one: at two workers the
-                // colony working both rooms hires a third.
+                // and the withheld room's rock was one: at three workers
+                // the colony working both rooms hires a fourth.
                 Expect.equal
-                    (gated 4 3 2)
+                    (gated 4 1 3)
                     ([ "reserver"; "reserver"; "worker" ], [ "reserver" ])
                     "the withheld rock's ten a tick leaves the income the worker row is sized off"
 
                 // The fourth row is deliberately not pinned by a cast. At
-                // ADR 0042's 1,800 capacity one hauler covers a container's
-                // round trip, and this colony's two home containers set the
-                // row at two either way — the outposts move it by nothing
-                // there is a body's granularity to see. What the row reads
-                // is the projection's containers, and the withheld room's
-                // is gone with the room, which the Task pool above already
-                // shows: no Withdraw names it.
+                // ADR 0042's 1,800 capacity one hauler covers both home
+                // containers' round trips together (ADR 0049), and this
+                // colony's two home containers set the row at one either
+                // way — the outposts move it by nothing there is a body's
+                // granularity to see. What the row reads is the
+                // projection's containers, and the withheld room's is gone
+                // with the room, which the Task pool above already shows:
+                // no Withdraw names it.
                 Expect.equal
-                    (gated 4 1 40)
+                    (gated 4 0 40)
                     ([ "reserver"; "reserver"; "hauler" ], [ "reserver"; "hauler" ])
-                    "the hauler row wants its two home bodies on either side of the gate"
+                    "the hauler row wants its one home body on either side of the gate"
             }
 
             test "two outposts are two gates" {
@@ -18726,10 +19037,11 @@ let private upgraderColony room =
     }
 
 /// The two rows the ground hires, and as many of the two surplus rows as
-/// the case wants: two Anchors for the two Posts, two haulers for the two
-/// round trips, then upgraders and generalists.
+/// the case wants: two Anchors for the two Posts, the one hauler both
+/// round trips come to together at this bank (ADR 0049), then upgraders
+/// and generalists.
 let private upgraderFleet upgraders workers =
-    [ anchor "a1" 0 50; anchor "a2" 0 50; hauler "h1" 0 100; hauler "h2" 0 100 ]
+    [ anchor "a1" 0 50; anchor "a2" 0 50; hauler "h1" 0 100 ]
     @ [
         for i in 1..upgraders -> creepWith $"u{i}" 0 50 (bodyFor upgraderPattern 1800)
     ]
@@ -18794,12 +19106,13 @@ let upgraderQuotaTests =
 
             test "a built buffer hires the standing row out of the surplus" {
                 // ADR 0046's whole arithmetic at the live bank, and the
-                // numbers are the ADR's own. Twenty a tick from two posted
-                // sources over a 1,500-tick life is 30,000; the two rows
-                // hired off the ground cost 2 × 700 of Anchor and 2 × 1,800
-                // of hauler, so the surplus is 25,000 and one standing
-                // body's eleven Work drinks 16,500 of it — a quota of two,
-                // rounded up as the worker row's is (ADR 0037).
+                // numbers are the ADR's own, less the hauler body ADR 0049
+                // took off the row. Twenty a tick from two posted sources
+                // over a 1,500-tick life is 30,000; the two rows hired off
+                // the ground cost 2 × 700 of Anchor and 1 × 1,800 of
+                // hauler, so the surplus is 26,800 and one standing body's
+                // eleven Work drinks 16,500 of it — a quota of two, rounded
+                // up as the worker row's is (ADR 0037).
                 //
                 // The body is the row's sizing rule and not the
                 // generalist's: eleven Work, one Carry, eleven Move for
@@ -18822,7 +19135,7 @@ let upgraderQuotaTests =
                 // structure. A row hired against a promise would stand
                 // beside a hole with nothing to withdraw from, so the
                 // quota is zero and the surplus goes back to the
-                // generalist row — ceil((25,000 − 0) / (9 × 1,500)) = 2
+                // generalist row — ceil((26,800 − 0) / (9 × 1,500)) = 2
                 // workers, which is the count this colony hired before the
                 // row existed.
                 let pending = upgraderColony (withBuffer (Site BuiltKind.Container))
@@ -18873,7 +19186,7 @@ let upgraderQuotaTests =
                     "anchor-"
                     "an empty Post is filled before the buffer is manned"
 
-                let noHauler = upgraderFleet 0 0 |> List.filter (fun creep -> creep.Name <> "h2")
+                let noHauler = upgraderFleet 0 0 |> List.filter (fun creep -> creep.Name <> "h1")
 
                 Expect.stringStarts
                     (castName (
@@ -19019,8 +19332,13 @@ let upgraderQuotaTests =
                     "worker-"
                     "fifty energy poorer the same cast is `4W/1C/4M` and the row is not hired"
 
+                // The RCL2 bank's hauler body carries 300 where the 800
+                // bank's carries 500, so the two containers' summed demand
+                // comes to two bodies there and one here (ADR 0049); the
+                // reading is the row *under* the hauler's, so its own gap
+                // is filled before the case is read.
                 Expect.stringStarts
-                    (castName (casts (atBank 550 2) (upgraderFleet 0 0)))
+                    (castName (casts (atBank 550 2) (upgraderFleet 0 0 @ [ hauler "h2" 0 100 ])))
                     "worker-"
                     "and at the RCL2 bank, where the cast is `3W/1C/3M`, the surplus is the generalist's"
             }
