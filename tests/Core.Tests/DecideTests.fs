@@ -2163,11 +2163,13 @@ let rampartTests =
                     "a container adjacent to no source gets no cover"
             }
 
-            test "the cover waits for RCL2 and then never grows" {
-                // The rule is placed the tick the thing it covers stands and
-                // needs no level of its own past the one the engine allows a
-                // rampart at — none at RCL1, 2,500 from RCL2 up. Below it
-                // every site would be refused, every tick (ADR 0034).
+            test "the cover waits for the bootstrap level and then never grows" {
+                // The rule is placed the tick the thing it covers stands, from
+                // the level the colony keeps ramparts at (#214): the engine
+                // allows one from RCL2, and the Layout waits one level more,
+                // because a room earning eight a tick cannot hold a
+                // 100,000-hit floor and buy its extensions too (ADR 0034 as
+                // #214 amends it, ADR 0047's own line for "bootstrapped").
                 let at level =
                     let { Intents = intents } =
                         decide (atLevel level keepRoom) Map.empty Set.empty None
@@ -2175,7 +2177,8 @@ let rampartTests =
                     sitesOfKind Rampart intents
 
                 Expect.isEmpty (at 1) "at RCL1 the engine allows no rampart, so none is planned"
-                Expect.equal (at 2) keepCover "at RCL2 the whole cover is planned at once"
+                Expect.isEmpty (at 2) "at RCL2 the engine allows one and the Layout still waits"
+                Expect.equal (at 3) keepCover "at RCL3 the whole cover is planned at once"
                 Expect.equal (at 8) keepCover "and RCL8 adds nothing to it"
             }
         ]
@@ -5413,14 +5416,22 @@ let repairTests =
                 // The floor, not half of max (ADR 0034): a rampart's max is
                 // three million at RCL4, so the decaying kinds' fraction
                 // would leave it hungry forever. The number restates the
-                // tunable, exactly as the road tests restate the half.
+                // tunable, exactly as the road tests restate the half. At
+                // the level the colony keeps ramparts from (#214): below it
+                // the floor is not read at all — the pairwise test beside
+                // this one.
                 let floor = 100_000
                 let max = 3_000_000
 
-                let below = bareRespawn |> withHits "ram-1" BuiltKind.Rampart (floor - 1) max
-                let at = bareRespawn |> withHits "ram-1" BuiltKind.Rampart floor max
-                let fresh = bareRespawn |> withHits "ram-1" BuiltKind.Rampart 1 max
-                let over = bareRespawn |> withHits "ram-1" BuiltKind.Rampart (max / 2) max
+                let keeping =
+                    { bareRespawn with
+                        Controller = Some(controllerAt 3)
+                    }
+
+                let below = keeping |> withHits "ram-1" BuiltKind.Rampart (floor - 1) max
+                let at = keeping |> withHits "ram-1" BuiltKind.Rampart floor max
+                let fresh = keeping |> withHits "ram-1" BuiltKind.Rampart 1 max
+                let over = keeping |> withHits "ram-1" BuiltKind.Rampart (max / 2) max
 
                 Expect.equal
                     (repairTasks (planTasks below noThreats))
@@ -5439,6 +5450,44 @@ let repairTests =
                 Expect.isEmpty
                     (repairTasks (planTasks over noThreats))
                     "half of a rampart's max is far over the floor: nothing to do"
+            }
+
+            test "below the bootstrap level a rampart has no floor: it decays away unrepaired" {
+                // #214: a child at RCL2 raised three ramparts the tick the
+                // engine allowed them and then held four of its five loaded
+                // workers repairing them toward a floor derived for the
+                // home. Below `rampartLevel` a standing rampart is not the
+                // pool's business; the decaying kinds and the Keep are.
+                let floor = 100_000
+                let max = 300_000
+
+                let young =
+                    { bareRespawn with
+                        Controller = Some(controllerAt 2)
+                    }
+                    |> withHits "ram-1" BuiltKind.Rampart 1 max
+
+                Expect.isEmpty
+                    (repairTasks (planTasks young noThreats))
+                    "a rampart at 1 hit in an RCL2 room is left to decay"
+
+                let youngRoad = young |> withHits "road-1" BuiltKind.Road 1000 5000
+
+                Expect.equal
+                    (repairTasks (planTasks youngRoad noThreats))
+                    [ "road-1" ]
+                    "the decaying kinds keep their trigger in the same room"
+
+                let grown =
+                    { bareRespawn with
+                        Controller = Some(controllerAt 3)
+                    }
+                    |> withHits "ram-1" BuiltKind.Rampart (floor - 1) max
+
+                Expect.equal
+                    (repairTasks (planTasks grown noThreats))
+                    [ "ram-1" ]
+                    "one level up the same rampart is hungry under the same floor"
             }
 
             test "a surplus creep is sent to repair: assignment, intent and bubble" {

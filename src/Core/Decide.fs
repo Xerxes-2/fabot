@@ -478,6 +478,31 @@ let private repairTrigger = 0.5
 /// tick puts a rampart that just dipped back over the line.
 let private rampartFloor = 100_000
 
+/// The level the colony keeps ramparts from (ADR 0034 as #214 amends it):
+/// `Colony.bootstrapLevel`, one past the engine's own unlock (Screeps
+/// CONTROLLER_STRUCTURES for "rampart": none at RCL1, 2,500 from RCL2
+/// up). The covering rule's one gate and the floor's one gate, one
+/// spelling for both: a room below it places no rampart and counts none
+/// of its standing ramparts hungry, so the three a child raised at RCL2
+/// decay away instead of holding four workers to a 100,000-hit floor
+/// derived for a home with a tower and a Storage behind it (W13S28,
+/// t~170,8xx: four of five loaded workers on Repair while the extension
+/// sites — the 550 bank — sat at a few hundred progress). What defends a
+/// bootstrapping room's one-spawn Keep is the safe-mode reflex, whose
+/// Keep arm reads the spawn's own hits and never a rampart's, so that arm
+/// is not gated here. A level rather than an allowance because the count
+/// is never what constrains the cover — the Keep and the Posts are a
+/// handful of tiles against thousands — and the bootstrap line rather
+/// than a second number for the reason `roadLevel` reads it (#209).
+let private rampartLevel = Colony.bootstrapLevel
+
+/// Whether this colony keeps ramparts this tick: its controller stands at
+/// `rampartLevel` or past it. A colony with no controller in the
+/// projection keeps none, which is the same answer the covering rule
+/// gives a room it cannot orient itself in.
+let private keepsRamparts (snapshot: Snapshot) =
+    snapshot.Controller |> Option.exists (fun c -> c.Level >= rampartLevel)
+
 /// Whether a structure of this kind, carrying these hits, is hungry: its
 /// own whole line, read off the kind (ADR 0034). The decaying kinds sit
 /// below a fraction of max (ADR 0010), a rampart below the floor, the Keep
@@ -501,10 +526,15 @@ let private isHungry kind (hits: HitsInfo) =
 /// judged here — the decision layer owns what it reads, off the same table
 /// the projection filtered by.
 let private hungryStructures (snapshot: Snapshot) : (string * BuiltKind) list =
+    let ramparts = keepsRamparts snapshot
+
     snapshot.Spatial.Hits
     |> Map.toList
     |> List.choose (fun (id, hits) ->
         match Map.tryFind id snapshot.Spatial.TargetKinds with
+        // A rampart below the line the colony keeps them from is not
+        // hungry: it is decaying away (#214, `rampartLevel`).
+        | Some(Structure BuiltKind.Rampart) when not ramparts -> None
         | Some(Structure kind) when isHungry kind hits -> Some(id, kind)
         | _ -> None)
 
@@ -3019,13 +3049,6 @@ let private storageAllowance level =
 /// once an extension takes it, so the reservation must outlive any
 /// revisit of the horizon.
 let private storageLevel = 4
-
-/// The level the engine unlocks ramparts at (Screeps CONTROLLER_STRUCTURES
-/// for "rampart": none at RCL1, 2,500 from RCL2 up). The covering rule's
-/// one gate, and a level rather than an allowance because the count is
-/// never what constrains it — the Keep and the Posts are a handful of
-/// tiles against thousands (ADR 0034).
-let private rampartLevel = 2
 
 /// The level the Layout places **road sites** from (ADR 0011 as #209
 /// amends it). Not an engine unlock — the engine allows a road at RCL1 —
