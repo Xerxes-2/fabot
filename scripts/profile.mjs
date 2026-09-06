@@ -318,15 +318,19 @@ function claimsIn(world, roomName) {
   return claimed;
 }
 
-// The reserver row read off the hired fleet, as `room x,y` per body. Both
-// scenarios print it (see their `describe`), because the fleet line above
-// counts a row's bodies and never says which tile they hold: a reserver
-// parked on the spawn's doorstep and one holding an outpost's controller
-// are the same number in every other count the report prints, and the
-// difference between them is this ticket's whole subject.
-const reserverStations = (creeps) =>
+// One row of the hired fleet read back as `room x,y` per body — where the
+// row actually ended up, which is `stations` resolved through
+// `nearestFree` and not the tile that was asked for. Both scenarios print
+// two of these (see their `describe`), because the fleet line above counts
+// a row's bodies and never says which tile they hold, and for two rows
+// that difference is the whole point of the seat: a reserver parked on the
+// spawn's doorstep and one holding an outpost's controller are the same
+// number in every other count the report prints, and an upgrader beside
+// the buffer and one anywhere else are a body that works standing still
+// against a body on a walk it never finishes in a frozen world (ADR 0046).
+const stationsOf = (creeps, row) =>
   creeps
-    .filter((creep) => creep.name.split("-")[0] === "reserver")
+    .filter((creep) => creep.name.split("-")[0] === row)
     .map((creep) => `${creep.room.name} ${keyOf(creep.pos)}`);
 
 function* neighbours(p) {
@@ -801,6 +805,22 @@ function buildStubWorld() {
       reserver: stationsIn(room, grid, [SPAWN_POS]),
       anchor: stationsIn(room, grid, [SOURCE_A, SOURCE_B]),
       hauler: stationsIn(room, grid, [SPAWN_POS]),
+      // The upgrader row stands at the controller container — the upgrade
+      // buffer (ADR 0046): it draws from the store at its feet and spends
+      // it into the controller from where it stands, so its tile is the
+      // buffer's Upgrade Work Area and nothing else in the room. Written
+      // as the container's own tile and left to `nearestFree` like every
+      // other station: the container is claimed ground, so what a body
+      // gets is the nearest free ground outward from it — a walkable
+      // neighbour of the buffer while that ring has room, and a tile
+      // further out once it is full. Either way it is ground the row can
+      // act from, since the buffer stands at range 1 of the controller
+      // and the Upgrade Work Area reaches 3: the widest row either
+      // scenario hires at any level the flag accepts is five bodies, and
+      // all five stand inside range 3. Standing this row anywhere else
+      // would time a body walking to work that is defined as work done in
+      // place.
+      upgrader: stationsIn(room, grid, [CONTAINER_B]),
       worker: stationsIn(room, grid, [CONTROLLER, ...cluster.sites.map((site) => site.pos)]),
     },
     // One room, so one claimed-tile set: everything the colony already
@@ -818,11 +838,20 @@ function buildStubWorld() {
         `${furnitureLine()}, ${plural(roads.length, "road")}, ` +
         `${plural(containers.length, "container")}, ${plural(cluster.sites.length, "site")}, ` +
         `${plural(creeps.length, "creep")})`,
-      `  ${plural(reserverStations(creeps).length, "reserver")} at ` +
-        `${reserverStations(creeps).join(", ") || "no station"} — this world models no declared ` +
-        "outpost and answers every one of them as solid rock, so their Reserve target is " +
-        "unreachable and they stand where they were cast; the walk is the outpost scenario's " +
+      `  ${plural(stationsOf(creeps, "reserver").length, "reserver")} at ` +
+        `${stationsOf(creeps, "reserver").join(", ") || "no station"} — this world models no ` +
+        "declared outpost and answers every one of them as solid rock, so their Reserve target " +
+        "is unreachable and they stand where they were cast; the walk is the outpost scenario's " +
         "to measure",
+      `  ${plural(stationsOf(creeps, "upgrader").length, "upgrader")} at ` +
+        `${stationsOf(creeps, "upgrader").join(", ") || "no station"} — beside the controller ` +
+        `container at ${keyOf(CONTAINER_B)}, in the Upgrade Work Area it buffers (ADR 0046). ` +
+        "Two gates divide this scenario's levels between them: under an 800 bank the row's own " +
+        "cast is no standing body and none is hired at all (ADR 0046, #187), and above it the " +
+        "quota is the surplus divided by one body's upgrade drain, rounded down (#195) — over " +
+        "an income base of one posted source, since one of this room's two sources stands a " +
+        "container and the other counts zero (ADR 0042). So the seat stands empty at every " +
+        "level, which is the row costing nothing here, not the row missing",
     ],
     spareTiles: spare.length,
   };
@@ -892,7 +921,11 @@ function pavingPerturbation({ spare, structures, byId, structure }) {
 // reserver row is *not* one of these, though its quota is one per declared
 // outpost: the stub scenario deliberately stands both of its reservers at
 // the one station it can offer, because it models neither outpost, and
-// says so in its report.
+// says so in its report. Neither is the upgrader row, and for a different
+// reason again: its quota is the surplus divided by one body's upgrade
+// drain (ADR 0046), a number with no places in it at all, so however many
+// the colony hires they all belong at the one buffer and the cursor is
+// meant to wrap them around it.
 const ONE_PER_STATION = new Set(["anchor"]);
 
 // The fleet, hired by the bundle rather than written down.
@@ -913,13 +946,16 @@ const FILLS = [0, 0.5, 1];
 // a Post (ADR 0042), so the `outpost` scenario now hires against five
 // held sources instead of two, and the count is largest where the bank is
 // smallest — a 300-energy body is a single Work part, so the income buys
-// a great many of them. Measured across every level the flag accepts,
-// `outpost` converges at 74 hires at RCL1, 52 at RCL2, 35 at RCL3, 25 at
-// RCL4, **20 at the RCL5 default** (the live colony held 22 creeps at
-// t140,810: 15 at home, 3 in W12S27, 4 in W13S28), 18 at RCL6 and 15 at
-// RCL7 and RCL8; `stub` never passes 21. So the ceiling clears the worst
-// of them with room to spare and still catches a fleet that is genuinely
-// running away.
+// a great many of them. Re-measured at #199 across every level the flag
+// accepts, now that ADR 0049 rounds the hauler quota once for the colony
+// (#194) and ADR 0046's upgrader row takes a whole body's drink out of
+// the surplus before the worker row divides the remainder (#187, #195):
+// `outpost` converges at 73 hires at RCL1, 51 at RCL2, 33 at RCL3, 21 at
+// RCL4, **17 at the RCL5 default** (2 reservers, 5 Anchors, 5 haulers, 3
+// upgraders, 2 workers; the live colony held 22 creeps at t140,810: 15 at
+// home, 3 in W12S27, 4 in W13S28), 15 at RCL6 and 13 at RCL7 and RCL8;
+// `stub` never passes 21. So the ceiling clears the worst of them with
+// room to spare and still catches a fleet that is genuinely running away.
 const HIRE_CAP = 120;
 
 // Fill the home room's fleet the way the colony would: run the bundle,
@@ -976,14 +1012,19 @@ function hireFleet(world, game, loop) {
       // places. Falling back would be the shape ADR 0027 names and
       // refuses: code that hides a broken invariant instead of failing on
       // it. This is the throw ADR 0042's reserver row tripped the tick
-      // #131 cast one (#163) — a real row arriving, correctly refused a
-      // seat it had not been given, and given one here rather than a
-      // fallback.
+      // #131 cast one (#163), and ADR 0046's upgrader row tripped again
+      // the tick #187 cast one (#199) — a real row arriving, correctly
+      // refused a seat it had not been given, and given one here rather
+      // than a fallback. Twice is a pattern, so the message now names the
+      // edit that closes it: the reader of this throw is whoever just
+      // landed the row.
       if (!Object.hasOwn(world.stations, row)) {
         throw new Error(
           `the bundle cast a "${row}" body and the ${scenario} scenario stations no such row ` +
             `(it knows: ${Object.keys(world.stations).join(", ")}), so this run would profile a ` +
-            "fleet standing where the colony would not have put it"
+            "fleet standing where the colony would not have put it. A row added to Decide's " +
+            "patternTable owes this harness a station in *both* scenarios' `stations` — the " +
+            "tile that row does its work from — or every profile run throws here"
         );
       }
       const stations = world.stations[row];
@@ -1192,14 +1233,21 @@ function buildOutpostWorld() {
   // beside the controller. Placed by the terrain rather than by hand, so
   // the scenario does not smuggle in a tile the room does not have.
   const containerTargets = [...home.sources.map((s) => s.pos), home.controller.pos];
+  // The controller's is the last of them, and it is the one that is a
+  // different thing from the rest: the upgrade buffer (ADR 0046). Named
+  // rather than left as an index expression, because two rules read it —
+  // it is stocked at 800 where a source container holds 1500, and it is
+  // where the upgrader row stands.
+  const bufferIndex = containerTargets.length - 1;
   const containers = containerTargets.map((target, i) =>
     structure(`cont-${i}`, "container", claim(nearestFree(home, target, taken)), {
       store: store({
-        used: i === containerTargets.length - 1 ? 800 : 1500,
+        used: i === bufferIndex ? 800 : 1500,
         capacity: CONTAINER_CAPACITY,
       }),
     })
   );
+  const buffer = containers[bufferIndex];
 
   const spawn = structure("spawn-1", "spawn", HOME_SPAWN, {
     store: store({ used: SPAWN_ENERGY_CAPACITY, capacity: SPAWN_ENERGY_CAPACITY }),
@@ -1472,6 +1520,24 @@ function buildOutpostWorld() {
         ),
       ],
       hauler: stationsIn(homeRoom, home, [HOME_SPAWN]),
+      // The upgrader row at the buffer it drinks from (ADR 0046) — this
+      // room's real controller container, wherever the terrain put it,
+      // rather than a tile written down here. `nearestFree` resolves each
+      // body to the nearest free ground outward from it — a walkable
+      // neighbour of the buffer while that ring has room, and a tile
+      // further out once it is full, which the widest row this scenario
+      // hires (five, at RCL4) is: its last two bodies stand at range 2 of
+      // the buffer. All of them are still ground the row can act from,
+      // which is what the seat is for: the buffer stands at range 1 of the
+      // controller while the Upgrade Work Area reaches 3, and measured
+      // across every level the flag accepts no body of this row lands
+      // outside it. It pools over the one tile the way the hauler row
+      // pools over the spawn,
+      // rather than holding places the way the Anchor row does: its quota
+      // is a division of the surplus (ADR 0046) and has no count of places
+      // in it, so how many stand here is the colony's arithmetic and they
+      // all belong at the one buffer.
+      upgrader: stationsIn(homeRoom, home, [buffer.pos]),
       worker: stationsIn(homeRoom, home, [
         home.controller.pos,
         ...cluster.sites.map((site) => site.pos),
@@ -1503,9 +1569,14 @@ function buildOutpostWorld() {
           `${OUTPOST_RESERVATION_TICKS} ticks, ` +
           `${plural(outpost.containers.length, "container")}, vision`
       ),
-      `  ${plural(reserverStations(creeps).length, "reserver")} beside the outpost ` +
-        `controllers at ${reserverStations(creeps).join(", ") || "no station"}, one per ` +
+      `  ${plural(stationsOf(creeps, "reserver").length, "reserver")} beside the outpost ` +
+        `controllers at ${stationsOf(creeps, "reserver").join(", ") || "no station"}, one per ` +
         "declared outpost in Outpost.declared's own order",
+      `  ${plural(stationsOf(creeps, "upgrader").length, "upgrader")} at ` +
+        `${stationsOf(creeps, "upgrader").join(", ") || "no station"}, around the controller ` +
+        `container at ${keyOf(buffer.pos)} — the upgrade buffer, whose Upgrade Work Area is ` +
+        "this row's working ground (ADR 0046); the count is the three-room surplus divided by " +
+        "one body's upgrade drain, rounded down (#195), and not a number in this file",
     ],
     spareTiles: spare.length,
   };

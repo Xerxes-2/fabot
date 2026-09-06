@@ -70,7 +70,18 @@ Two scenarios:
   vision — and this world has nowhere for them to go, so they stand beside
   the spawn with a Reserve target across a border that has no exits. A
   reserver here is a creep that cannot reach its work; the `outpost`
-  scenario is where that walk and that hold are measured.
+  scenario is where that walk and that hold are measured. Its upgrade
+  buffer is seated too, at the controller container — and that seat stands
+  empty at every level the flag accepts, for two reasons that divide the
+  levels between them. Under an 800 bank (RCL1 to RCL3 here) the row is not
+  hired at all: its own cast is no standing body there and is read back to
+  the generalist (ADR 0046 as #187 amended it). From RCL4 up it is the
+  income — this room stands one source container, so one of its two sources
+  is a Post and the other counts zero (ADR 0042), and one rock's surplus
+  never reaches a whole body's lifetime drain once the division rounds down
+  (#195). The report says both rather than leaving the reader to wonder. An
+  empty seat is the row costing this scenario nothing; a *missing* seat is
+  the run throwing.
 - **`outpost`** builds the colony's own room and its two declared
   neighbours from the committed room captures (`W12S28`, `W12S27`,
   `W13S28`), on real terrain rather than synthetic (ADR 0036), and stands
@@ -82,12 +93,16 @@ Two scenarios:
   spawn that cast them and the harness stations them there: an Anchor on
   each outpost container (one per Post, ADR 0042) and a reserver beside
   each outpost's controller, one per declared outpost in
-  `Outpost.declared`'s order. On top of them one crew the bundle does not
-  hire — a hauler per outpost container, standing the far end of a round
-  trip whose near end is the hired hauler row at the home spawn. It is the
-  world ADR 0041's layered
-  projection is sized against, and with the constant filled (ADR 0042) the
-  scan set really is all three rooms: the run prints the terrain read per
+  `Outpost.declared`'s order. A third row stays at home but not at the
+  spawn: the upgrader (ADR 0046) is stood at the home room's own controller
+  container, the upgrade buffer it draws from, inside the Upgrade Work Area
+  it spends from — a row whose whole definition is work done in place, so
+  seating it anywhere else would time a walk instead. On top of them one
+  crew the bundle does not hire — a hauler per outpost container, standing
+  the far end of a round trip whose near end is the hired hauler row at the
+  home spawn. It is the world ADR 0041's layered projection is sized
+  against, and with the constant filled (ADR 0042) the scan set really is
+  all three rooms: the run prints the terrain read per
   room, and says so out loud if a room of the world ever falls outside the
   scan (a declaration removed, or ADR 0043's stand-down shutting one).
 
@@ -104,6 +119,16 @@ anywhere and honours every `SpawnCreep` intent until the bot stops asking
 count is the Workforce target at that bank (ADR 0012) and not a number in
 the script. Moving the colony a level is one flag, and no count in
 `scripts/profile.mjs` has to be re-checked by hand.
+
+What a derived fleet does ask for by hand is one line per **row**. The
+harness stations a hire by the row its name carries, and a row it has no
+station for is refused rather than stood among the workers, so **a row
+added to `Decide.patternTable` owes both scenarios a `stations` entry** —
+the tile that row does its work from — or every profile run throws on the
+first body of it that is cast. That bill has now come due twice, both
+times a level's worth of measurement after the row landed: ADR 0042's
+reserver (#131, seated in #163) and ADR 0046's upgrader (#187, seated in
+#199). The throw names the edit that closes it.
 
 Two things about that furnishing are worth having in front of you when you
 read a number against #144's own table. The three construction sites are
@@ -162,67 +187,97 @@ same class of reason: `Outpost.declared` had been filled, so the bundle was
 casting a row (ADR 0042's reserver) the harness stationed nowhere and every
 run threw, and once the `outpost` scenario stood its neighbours' containers
 and reservations it profiles three *worked* rooms rather than three visible
-ones. The current anchor, on this hardware, 100 ticks: unflagged `stub`
-means **6.6 ms/tick** (was 4.0), `--scenario outpost` **10.7** (was 2.3),
-and a perturbed tick under `--census-every 10` **15.5** on `stub` and
-**21.7** on `outpost`. Only runs at the same `--scenario` and `--level` are
-comparable with each other.
+ones. **And re-measured again at #199**, once ADR 0046's upgrader row had a
+seat and both scenarios ran to the end again.
 
-The two scenarios moved for different reasons, and the split is worth
-keeping straight. `stub` furnishes and derives exactly as it did before
-#163 — the same room, one creep more — so its 4.0 → 6.6 is not this
-harness's world changing but the bundle's work growing: the two declared
-outposts entered the scan set (#126) and are projected as solid rock every
-tick, and the reserver row (#131) hires two bodies that stand beside the
-spawn with nowhere to walk. #163 only gave that row a seat, and the ms it
-was already costing became measurable rather than fatal.
+Most of what moved between that anchor and this one is neither scenario's
+world and neither one's fleet: it is the **Atlas perf line** the log
+records between them, seven `perf(atlas)` commits each measured on this
+same RCL5 `outpost` run — 10.5 → 7.9 (#168), → 6.1 (#169), → 4.2 (#173),
+→ 2.8 (#174), → 2.7 (#175), the band read inside noise (#176), and the
+Layout's ground readers leaving quiet ticks at 2.6 (#177). The readers
+they rewrote are the `stub` scenario's too, which is why its number falls
+without its world changing. What #199 adds on top of that line is the
+**fleet**, and only for `outpost` (below). Hardware moves the whole set at
+once, so only runs at the same `--scenario`, the same `--level` and the
+same machine compare with each other; the run-to-run spread here is about
+a tenth of a millisecond, so read the shape of these numbers and not their
+last digit. The earlier anchors this section carried are where that line
+starts — `stub` 2.4 → 4.0 (#144: furnishing the room and deriving the
+fleet at all, not the two extra levels) → 6.6 (#163), `outpost` 2.3 →
+10.7, and perturbed ticks of 15.5 and 21.7. The current anchor, 100 ticks
+at the RCL5 default: unflagged `stub` means **2.6 ms/tick** and
+`--scenario outpost` **2.0**, and a perturbed tick under `--census-every
+10` costs **6.7** on `stub` and **7.4** on `outpost` — against 2.6 and 2.0
+on that run's quiet ticks, which is the whole point of splitting them.
 
-The `outpost` jump from 2.3 to 10.7 is that scenario finally measuring what
-it was built for, not a regression: before #163 its two neighbours held a
-controller and their sources and nothing else, so every quota priced them
-at nothing — an unposted outpost source counts zero (ADR 0042) — and the
-Task pool, the Atlas floods and the Matcher all did one room's work in a
-three-room world. With the containers standing, the sources are Posts, the
-reservation doubles them, and the fleet the bundle hires against that
-income is twenty over three rooms against thirteen in the one-room `stub`.
+The two scenarios reached that anchor by different routes, and the split is
+worth keeping straight. `stub` furnishes and derives exactly as it did
+before #163 — the same room, one creep more — so what moved its number
+between #144 and #163 was not this harness's world changing but the
+bundle's work growing: the two declared outposts entered the scan set
+(#126) and are projected as solid rock every tick, and the reserver row
+(#131) hires two bodies that stand beside the spawn with nowhere to walk.
+#163 only gave that row a seat, and the ms it was already costing became
+measurable rather than fatal. #199 did the same for the upgrader row, and
+this scenario hires none, so nothing about `stub`'s world moved at all.
 
-Worth knowing before reading a level change: **a higher level is a cheaper
-tick, not a dearer one**, and both halves of that are worth having straight
-before a number surprises you.
+`outpost` moved twice, and only the first move was the scenario's own. #163
+was it finally measuring what it was built for, not a regression: before it
+the two neighbours held a controller and their sources and nothing else, so
+every quota priced them at nothing — an unposted outpost source counts zero
+(ADR 0042) — and the Task pool, the Atlas floods and the Matcher all did
+one room's work in a three-room world. The second move is the **fleet**,
+and it is the decision layer's — the last step of the two, from the perf
+line's 2.6 to today's 2.0: ADR 0049 rounds the hauler quota once for the
+colony instead of once per container (#194), and ADR 0046's upgrader row
+takes a whole body's drink out of the surplus that used to buy generalists
+outright, leaving the remainder to the worker row (#187, #195). It is the
+one standing body of the two: the worker row is outside that predicate by
+its own fatigue parity (ADR 0046). At the RCL5 default the bundle now hires
+**17** where it hired twenty — 2 reservers, 5 Anchors, 5 haulers, 3
+upgraders and 2 workers — against thirteen in the one-room `stub`.
+
+Worth knowing before reading a level change: **the fleet shrinks as the
+level climbs, and the tick follows it down** — with one turn at the top
+that is worth having straight before a number surprises you.
 
 - Raising the level does not enlarge the Layout. The plan is computed to
   ADR 0039's horizon whatever the current level is, so `planLayout` on a
-  perturbed tick does not grow with the level — it costs 6.9 ms at RCL5
-  against 7.6 at RCL3, if anything shrinking, because the further the room
+  perturbed tick does not grow with the level — it costs 3.1 ms at RCL5
+  against 3.2 at RCL3, if anything shrinking, because the further the room
   is built out the fewer placements are left to make.
 - A derived fleet gets **smaller** as the level climbs: a bigger bank buys
   bigger bodies, and a Workforce target is an arithmetic of quotas and
   income (ADR 0012), so the count falls. `stub` hires 15 creeps at RCL3, 13
-  at RCL5 and 12 at RCL8; the `outpost` world stands 38 creeps at RCL3, 23
-  at RCL5 and 18 at RCL8 — a three-room income buying three-room bodies,
-  and the swing across the levels is far wider than one room's. Measured
-  means follow it: `stub` is 7.0 ms at RCL3 against 6.6 at RCL5, `outpost`
-  15.5 against 10.7.
+  at RCL5 and 12 at RCL8; the `outpost` world stands 36 at RCL3, 20 at RCL5
+  and 16 at RCL8 — a three-room income buying three-room bodies, and the
+  swing across the levels is far wider than one room's.
+- Measured means follow that down and then **stop**: `stub` is 2.7 ms at
+  RCL3, 2.6 at RCL5 and 2.7 again at RCL8, and `outpost` 3.1, 2.0 and 2.2.
+  Both bottom out at the RCL5 default. The fleet has stopped shrinking by
+  then — `stub` hires 12 at RCL7 and RCL8 alike, `outpost` 13 — while the
+  bank keeps buying larger bodies, so the last levels add parts to count
+  without taking creeps away, and the highest level is not the cheapest
+  tick.
 
-So the 2.4 → 4.0 step on `stub` was **furnishing the room and deriving the
-fleet at all**, not the two extra levels — an RCL3 run on today's harness
-is dearer than the RCL5 default, not cheaper. One more number to keep
-beside the `outpost` run: ADR 0041 sizes the layered projection against
-*roughly sixteen creeps over three rooms*, and at the RCL5 default the
-scenario stood 23 when it was last measured — twenty hired by the bundle's
-own arithmetic against a three-room income (fifteen of them standing at
-home, which is what the live colony held at t140,810, and five stationed in
-the outposts), plus a three-hauler crew the harness stands on the outpost
-containers. That reading is from **before ADR 0049**, which rounds the
-hauler quota once for the colony rather than once per container, so the
-hired half is now smaller by three or four bodies; the harness has not been
-re-run against it (`node scripts/profile.mjs` currently throws on the `stub`
-scenario, which the run predates and #194 did not touch). The crew is a
-floor and not a quota — the hired hauler row already prices the same round
-trips, and ADR 0042's own "two haulers per container" reading of them is
-ADR 0049's to correct — so it is stood *after* the fleet is hired, and what
-the bundle would have hired instead of it is ADR 0012's arithmetic and not
-this harness's to guess.
+One more number to keep beside the `outpost` run: ADR 0041 sizes the
+layered projection against *roughly sixteen creeps over three rooms*, and
+at the RCL5 default the scenario now stands **20** — the 17 hired above (12
+of them standing at home and 5 stationed in the outposts), plus a
+three-hauler crew the harness stands on the outpost containers. That is
+down from the 23 measured at #163. Where the three went is arithmetic on
+the two readings rather than a second measurement, but only one split fits
+them: the reserver and Anchor rows are unchanged at 2 and 5, so the 13
+haulers-and-workers standing at home in the #163 reading are today's 5
+haulers, 3 upgraders and 2 workers — ADR 0049 took three haulers when the
+rounding became one for the colony instead of one per container, and ADR
+0046's row took its three out of the generalists rather than out of the
+count. The crew is a floor and not a quota — the hired hauler row already
+prices the same round trips, and ADR 0042's own "two haulers per
+container" reading of them is ADR 0049's to correct — so it is stood
+*after* the fleet is hired, and what the bundle would have hired instead
+of it is ADR 0012's arithmetic and not this harness's to guess.
 
 Current numbers, the live CPU history, and the per-hotspot attribution are
 tracked in #50 — read that, not this file, for where the time goes.
