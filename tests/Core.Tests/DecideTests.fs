@@ -14225,6 +14225,46 @@ let fleeTests =
                     "and rank is what decided it against the deadline Upgrade"
             }
 
+            test "under safe mode a hostile in the home room is no Threat, and nobody flees" {
+                // The engine refuses every harmful act in a room under safe
+                // mode, so the Reach is empty there and the creep keeps its
+                // work; pairwise on the flag alone, the same room and the
+                // same hostile. A hostile in another room keeps its Reach:
+                // safe mode is the controller's room's.
+                let facingHostile (active: bool) =
+                    { laneColony [ worker "w1" 50 0 ] [ "w1", { X = 25; Y = 22 } ] with
+                        Refillables = [ refillable "spawn-1" 50 BuiltKind.Spawn ]
+                        Controller =
+                            Some
+                                { controllerAt 2 with
+                                    SafeModeActive = active
+                                    SafeModeAvailable = 0
+                                }
+                    }
+                    |> facing [ hostileAt "h-1" { X = 25; Y = 20 } [ Attack; Move ] ]
+
+                let assignmentOf colony =
+                    let { Assignments = assignments } = decide colony Map.empty Set.empty None
+                    Map.tryFind "w1" assignments
+
+                Expect.equal
+                    (assignmentOf (facingHostile false))
+                    (Some(taskId Flee))
+                    "without safe mode the creep runs"
+
+                Expect.notEqual
+                    (assignmentOf (facingHostile true))
+                    (Some(taskId Flee))
+                    "under safe mode it keeps working beside the hostile"
+
+                let atlas = Atlas.ofSnapshot (facingHostile true)
+
+                Expect.equal
+                    (threatsOf (facingHostile true) atlas)
+                    noThreats
+                    "and the tick derives no Reach at all"
+            }
+
             test "a body with no Work part flees too: no part and no capacity are asked" {
                 let hauler = creepWith "h1" 50 100 [ Carry; Carry; Move ]
 

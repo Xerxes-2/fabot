@@ -667,11 +667,24 @@ module Threats =
 /// walks that room alone. Derived once here and handed down; the layering
 /// does not make it once per creep.
 let threatsOf (snapshot: Snapshot) atlas : Threats =
+    // Under safe mode a hostile in the home room can hurt nothing — the
+    // engine refuses every harmful act there for the whole window — so it
+    // is no Threat and has no Reach, and the colony's creeps stand and
+    // work beside it (user, 2026-09-06: "safe mode enable 的时候不要
+    // flee"). The home room alone: safe mode is the controller's room's,
+    // and a raider in an outpost is as dangerous as ever.
+    let shielded =
+        match snapshot.Controller with
+        | Some controller when controller.SafeModeActive ->
+            Some(SpatialInfo.homeName snapshot.Spatial)
+        | _ -> None
+
     // The hostiles are asked first, so a quiet colony walks nothing:
     // neither the rampart census nor any room's own tiles are read on a
     // tick with nothing in it to run from.
     match
         snapshot.Hostiles
+        |> List.filter (fun hostile -> shielded <> Some hostile.RoomName)
         |> List.choose (fun hostile ->
             weaponRange hostile |> Option.map (fun r -> hostile.RoomName, hostile.Pos, r))
     with
