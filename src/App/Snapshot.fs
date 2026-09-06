@@ -712,9 +712,11 @@ let build (shut: Set<string>) : Snapshot =
         // room's sites can be collected twice.
         //
         // This is not cross-room paving, which stays out of scope (ADR
-        // 0042). The container rule is the only thing that places outside
-        // the home room, so a container's is the only site that can appear
-        // in an outpost; roads there would drag in the Layout's
+        // 0042). The container rule is the only thing *this colony* places
+        // outside the home room, so a container's is the only site the bot
+        // ever puts in an outpost — a human places what he likes there,
+        // and since ADR 0047 the whole nursery rule is built on his doing
+        // exactly that; roads there would drag in the Layout's
         // spawn-anchored trunk and ADR 0010's whole-line Repair, and they
         // are their own ticket.
         ConstructionSites =

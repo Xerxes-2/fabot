@@ -14086,9 +14086,11 @@ let private withNorthOutpost (outpostSource: Pos option) (colony: Snapshot) =
     }
 
 /// The same colony with a construction site of ours standing in the
-/// outpost — the one the container rule places there and nothing else,
-/// because that rule is the only thing that places outside the home room
-/// (ADR 0042). It arrives in the three pieces the shell hands Core it in:
+/// outpost — the one the container rule places there, because that rule is
+/// the only thing *this colony* places outside the home room (ADR 0042).
+/// A human's hand is the other way a site gets out there, and that is
+/// `withNorthSpawnSite` below, which the nursery cases are built on.
+/// It arrives in the three pieces the shell hands Core it in:
 /// the id-keyed kind census, the outpost layer's own tile, and the
 /// `ConstructionSites` entry vision pays for (#150). Merges into whatever
 /// layer `withNorthOutpost` already laid, so the two compose in either
@@ -18144,6 +18146,438 @@ let reserverLeadTests =
                         (List.contains BodyPart.Claim body)
                         "the row that replaces a reserver is the reserver row's quota, and here it is zero"
                 | other -> failtest $"expected exactly one SpawnCreep intent, got %A{other}"
+            }
+        ]
+
+/// The north room with a **spawn** construction site of ours standing in
+/// it: the site a human places in a [[nursery]] by hand, and the one no
+/// rule of this colony's would ever place (ADR 0047). Built beside
+/// `withOutpostSite` and deliberately not out of it — the kind is the
+/// whole point of every case below, because an outpost's *container* site
+/// is already feeding-tier work (#157) and a case built on one could not
+/// tell the nursery rule apart from that one.
+let private withNorthSpawnSite (site: Pos) (colony: Snapshot) =
+    let outpost = SpatialInfo.layerOf colony.Spatial "W1N2"
+
+    { colony with
+        ConstructionSites = colony.ConstructionSites @ [ { Id = "site-spawn" } ]
+        Spatial =
+            { colony.Spatial with
+                TargetKinds = Map.add "site-spawn" (Site BuiltKind.Spawn) colony.Spatial.TargetKinds
+            }
+            |> withNeighbour
+                "W1N2"
+                { outpost with
+                    TargetPositions = Map.add "site-spawn" site outpost.TargetPositions
+                }
+    }
+
+/// The same colony with the north room declared a home of ours and still
+/// unowned: a [[candidate colony]], the tick before the claim lands. The
+/// baseline every nursery case below is read against, because it holds the
+/// human's half of the declaration fixed and leaves only the ownership to
+/// move.
+let private asCandidate (colony: Snapshot) =
+    { colony with
+        RoomControl = Map.add "W1N2" neutralRoom colony.RoomControl
+        ColonyHomes = [ SpatialInfo.homeName colony.Spatial; "W1N2" ]
+    }
+
+/// And the tick after: the same declaration, the same room, ours now
+/// (ADR 0047 decision 4). One fact apart from `asCandidate` — who holds
+/// the controller — which is the whole of what turns a candidate into a
+/// **nursery**, there being no spawn of ours in that room in any fixture
+/// here until `withNorthSpawn` puts one there.
+let private asNursery (colony: Snapshot) =
+    { colony with
+        RoomControl = Map.add "W1N2" ownedRoom colony.RoomControl
+        ColonyHomes = [ SpatialInfo.homeName colony.Spatial; "W1N2" ]
+    }
+
+/// The same colony with a spawn of ours standing in the north room:
+/// independence, and the end of the nursery (ADR 0047). The Snapshot fact
+/// the rule actually reads and nothing beside it — `Snapshot.Spawns` is
+/// every spawn the colony has, so a second entry in it is the whole of
+/// what the tick a spawn is finished changes for this rule, and the
+/// human's edit splitting `Colony.declared` in two follows that tick
+/// rather than causing it.
+let private withNorthSpawn (colony: Snapshot) =
+    { colony with
+        Spawns =
+            colony.Spawns
+            @ [
+                {
+                    Name = "Spawn2"
+                    Id = "spawn-2"
+                    RoomName = "W1N2"
+                    IsSpawning = false
+                }
+            ]
+    }
+
+[<Tests>]
+let nurseryTests =
+    testList
+        "the nursery"
+        [
+            test "every site in a nursery is feeding-tier work, and in an outpost none of them is" {
+                // ADR 0047 decision 4, at the seam it decides at. #157
+                // lifted one site off the surplus tier — an outpost's
+                // container, the switch on whether that room is in the
+                // economy at all — and a nursery lifts every site in the
+                // room, because what a human is building there is the spawn
+                // that ends the nursery and no rule of this colony's places
+                // that site for the kind census to recognise.
+                //
+                // A **spawn** site on purpose: read by kind alone it is the
+                // ordinary surplus Build every home site is, so nothing here
+                // can be #157's container rule answering under another name.
+                //
+                // The factor is `Rank` and deliberately not `TravelCost`:
+                // the site is a Seam and forty tiles away and the colony's
+                // own controller is three, so on one tier the controller
+                // wins every loaded worker every tick — which is exactly the
+                // switch that was laid down and never closed before #157.
+                // Pairwise, one rival at a time: one Build, one Upgrade, and
+                // a home Harvest inapplicable to a body with nothing free to
+                // fill.
+                let sited =
+                    northBorderColony { X = 10; Y = 38 }
+                    |> withNorthOutpost None
+                    |> withNorthSpawnSite { X = 10; Y = 43 }
+                    |> loaded
+                    |> withHomeController { X = 10; Y = 5 }
+
+                Expect.equal
+                    (matchOf sited)
+                    (Some(taskId (Upgrade "ctrl-1"), MatchFactor.TravelCost))
+                    "an ordinary outpost's spawn site is surplus work and loses to the sink underfoot"
+
+                Expect.equal
+                    (matchOf (asCandidate sited))
+                    (Some(taskId (Upgrade "ctrl-1"), MatchFactor.TravelCost))
+                    "declared and not yet claimed, it is a candidate colony and the site has not moved"
+
+                Expect.equal
+                    (matchOf (asNursery sited))
+                    (Some(taskId (Build "site-spawn"), MatchFactor.Rank))
+                    "claimed, the same site outranks the sink and the worker crosses for it"
+
+                // The other end of the nursery, and the one fact that
+                // closes it: a spawn of ours standing in that room. Nothing
+                // waits on the human's edit to `Colony.declared` — the room
+                // is independent the tick its spawn stands, and this rule
+                // reads that tick and not the commit that follows it.
+                Expect.equal
+                    (matchOf (asNursery sited |> withNorthSpawn))
+                    (Some(taskId (Upgrade "ctrl-1"), MatchFactor.TravelCost))
+                    "and a spawn standing in it ends the nursery: the site is surplus again"
+            }
+
+            test "the mother's worker row rises by three while the nursery stands" {
+                // The pioneers (ADR 0047 decision 4). Read against the fleet
+                // one body at a time, the way the container switch is: a
+                // colony standing exactly at its target casts nothing and
+                // the same colony one body short casts one, so a target that
+                // moved by three shows up as three bodies rather than hiding
+                // inside a spawn's one-cast-a-tick limit.
+                //
+                // The home half is `switchHome`, whose whole target is
+                // thirteen — an Anchor, two haulers and ten workers — so
+                // this colony is running an economy well clear of its floor
+                // before the nursery is asked to add anything to it, and
+                // what the cases below read is a difference and never a
+                // floor.
+                let casts colony fleet =
+                    spawnIntents
+                        (decide { colony with Creeps = fleet } Map.empty Set.empty None).Intents
+
+                let short fleet =
+                    List.truncate (List.length fleet - 1) fleet
+
+                let pioneers = [ for i in 1..3 -> worker $"p{i}" 0 50 ]
+                let nursery = asNursery switchHome
+
+                Expect.isEmpty
+                    (casts switchHome switchHomeFleet)
+                    "the premise: thirteen is the whole target of a colony with no nursery"
+
+                Expect.hasLength
+                    (casts switchHome (short switchHomeFleet))
+                    1
+                    "and the premise is tight: one body short and the colony casts"
+
+                Expect.isEmpty
+                    (casts nursery (switchHomeFleet @ pioneers))
+                    "with a nursery standing the same colony wants sixteen, and sixteen casts nothing"
+
+                match casts nursery (short (switchHomeFleet @ pioneers)) with
+                | [ (_, _, name) ] ->
+                    Expect.stringStarts
+                        name
+                        "worker-"
+                        "one short of sixteen it casts, and the row the addend sits on is the generalist's"
+                | other -> failtest $"expected exactly one SpawnCreep intent, got %A{other}"
+
+                // Pairwise on each half of what a nursery is, one at a
+                // time, and both halves read the target back down to
+                // thirteen: a room declared and not yet ours is a candidate
+                // colony hiring nobody, and a room of ours with a spawn
+                // standing in it is independent.
+                Expect.isEmpty
+                    (casts (asCandidate switchHome) switchHomeFleet)
+                    "declared and unclaimed, thirteen is the target again"
+
+                Expect.isEmpty
+                    (casts (withNorthSpawn nursery) switchHomeFleet)
+                    "claimed with a spawn standing in it, thirteen again"
+
+                // Hired off the room's state and not off the pool, which is
+                // ADR 0047's own sentence — the quota rises until the child
+                // is independent — and is visible here because this fixture
+                // projects no layer for that room at all and so pools no
+                // Build in it. The three bodies are walked toward a room
+                // that is going to need them, and the site a human places
+                // finds a crowd already across the Seam rather than one
+                // starting the fifty-tile walk on the tick it appears.
+                Expect.isEmpty
+                    (planTasks nursery noThreats
+                     |> List.filter (function
+                         | Build _ -> true
+                         | _ -> false))
+                    "and no Build is pooled in this fixture at all: the addend is the room's, not the pool's"
+            }
+
+            test "the builders' budget does not reach a nursery: every worker may cross" {
+                // #157 caps the crowd on an outpost's container site at
+                // `outpostContainerBuilders`, a colony-wide two, because on
+                // the feeding tier the site outbids the home Upgrade for
+                // every loaded worker at once and travel cost cannot thin a
+                // crowd that is a Seam away to a tile. A nursery is the
+                // exception ADR 0047 names: the mother has already hired
+                // three more bodies for exactly this job, and what they are
+                // building is the colony the whole ticket is about.
+                //
+                // Read on the *container* site rather than the spawn site,
+                // so what moves between the two colonies below is the cap
+                // alone: the same site, on the same tier in both, capped in
+                // one and uncapped in the other. Pairwise on one fact —
+                // whether the room is ours yet.
+                let crowd colony =
+                    let colony =
+                        colony
+                        |> withNorthOutpost None
+                        |> withOutpostSite { X = 10; Y = 43 }
+                        |> withHomeController { X = 10; Y = 5 }
+
+                    { colony with
+                        Creeps = [ for name in [ "w1"; "w2"; "w3" ] -> worker name 50 0 ]
+                        Spatial =
+                            colony.Spatial
+                            |> withHome (fun layer ->
+                                { layer with
+                                    CreepPositions =
+                                        Map.ofList
+                                            [
+                                                "w1", { X = 10; Y = 2 }
+                                                "w2", { X = 10; Y = 3 }
+                                                "w3", { X = 10; Y = 4 }
+                                            ]
+                                })
+                    }
+
+                let held colony =
+                    let { Assignments = assignments } = decide colony Map.empty Set.empty None
+
+                    assignments |> Map.toList |> List.map snd |> List.countBy id |> List.sort
+
+                Expect.equal
+                    (held (crowd (northBorderColony { X = 10; Y = 38 }) |> asCandidate))
+                    [ taskId (Build "site-out"), 2; taskId (Upgrade "ctrl-1"), 1 ]
+                    "a candidate colony is an outpost still: two hold the site and the third upgrades"
+
+                Expect.equal
+                    (held (crowd (northBorderColony { X = 10; Y = 38 }) |> asNursery))
+                    [ taskId (Build "site-out"), 3 ]
+                    "claimed, the budget lets go and all three cross for it"
+            }
+
+            test "a Work-heavy body still may not cross for a nursery's site" {
+                // The body gate #157 put on the one Build it lifted, moved
+                // with the tier rather than left behind it. On the feeding
+                // tier there is no travel cost left to pin an Anchor at its
+                // Post, and a heavy body's cross-room work is a Post and
+                // never a fifty-tile delivery (ADR 0020). A nursery has
+                // Posts of its own — it is still the mother's outpost, so
+                // the container rule places a container on its source and
+                // a standing one makes that Seat a Post (`Atlas.postsIn`)
+                // — which is the reason the gate matters here rather than
+                // an exception to it: what it refuses is walking that
+                // room's own Anchor off its own Post.
+                //
+                // Pairwise on the body alone: the same colony, the same two
+                // Tasks, one loaded generalist against one loaded Anchor.
+                let sited creeps =
+                    let colony =
+                        northBorderColony { X = 10; Y = 38 }
+                        |> withNorthOutpost None
+                        |> withNorthSpawnSite { X = 10; Y = 43 }
+                        |> withHomeController { X = 10; Y = 5 }
+                        |> asNursery
+
+                    { colony with Creeps = creeps }
+
+                Expect.equal
+                    (matchOf (sited [ worker "w" 50 0 ]))
+                    (Some(taskId (Build "site-spawn"), MatchFactor.Rank))
+                    "the premise: a loaded generalist crosses for the site over the sink underfoot"
+
+                Expect.equal
+                    (matchOf (sited [ anchor "w" 50 0 ]))
+                    (Some(taskId (Upgrade "ctrl-1"), MatchFactor.OnlyCandidate))
+                    "the same load on a heavy body is not offered the site at all, and it stays home"
+            }
+
+            test "the declaration and the home exclusion each do their own work" {
+                // `isNurseryRoom` is three facts, and the cases above read
+                // two of them: ownership moves between `asCandidate` and
+                // `asNursery`, and the spawn moves under `withNorthSpawn`.
+                // These are the other two, one at a time, because a rule
+                // whose guard clauses nothing reads is two weaker rules
+                // wearing one name.
+                let sited =
+                    northBorderColony { X = 10; Y = 38 }
+                    |> withNorthOutpost None
+                    |> withNorthSpawnSite { X = 10; Y = 43 }
+                    |> loaded
+                    |> withHomeController { X = 10; Y = 5 }
+
+                // Owned, spawnless, projected — and **undeclared**. A human
+                // reaches this by taking a room out of `Colony.declared`
+                // while leaving it in a mother's outpost list: a rollback,
+                // or a room claimed for some reason of his own. Ownership
+                // and the spawn clause both answer "nursery" here and only
+                // the declaration says otherwise, so without it every site
+                // in that room would be uncapped feeding-tier work on the
+                // strength of a fact no human wrote down.
+                Expect.equal
+                    (matchOf
+                        { asNursery sited with
+                            ColonyHomes = [ SpatialInfo.homeName sited.Spatial ]
+                        })
+                    (Some(taskId (Upgrade "ctrl-1"), MatchFactor.TravelCost))
+                    "a room of ours nobody declared a home is an outpost still, and its site is surplus"
+
+                // And the colony's own home, excluded by name (ADR 0047).
+                // `Main.loop` runs `decide` only for a colony whose home
+                // holds a spawn, so the other three facts can hold at home
+                // only in a Snapshot the shell does not build — which is
+                // what makes this clause a guard rather than a live rule,
+                // and why a test has to lay that Snapshot by hand for it to
+                // be read at all. Read without it, #157's "home Build is
+                // untouched and stays Surplus" would grow a condition.
+                let homeSited =
+                    let colony =
+                        northBorderColony { X = 10; Y = 38 }
+                        |> loaded
+                        |> withHomeController { X = 10; Y = 5 }
+
+                    { colony with
+                        ConstructionSites = colony.ConstructionSites @ [ { Id = "site-home" } ]
+                        ColonyHomes = [ SpatialInfo.homeName colony.Spatial ]
+                        Spatial =
+                            { colony.Spatial with
+                                TargetKinds =
+                                    Map.add
+                                        "site-home"
+                                        (Site BuiltKind.Spawn)
+                                        colony.Spatial.TargetKinds
+                            }
+                            |> withHome (fun layer ->
+                                { layer with
+                                    TargetPositions =
+                                        Map.add
+                                            "site-home"
+                                            { X = 10; Y = 40 }
+                                            layer.TargetPositions
+                                })
+                    }
+
+                Expect.equal
+                    (matchOf homeSited)
+                    (Some(taskId (Upgrade "ctrl-1"), MatchFactor.TravelCost))
+                    "the colony's own spawnless home is no nursery of its own: its site stays surplus"
+            }
+
+            test "a nursery's site keeps its place in the builders' budget" {
+                // The budget is a colony-wide two spread over the outpost
+                // container sites the pool holds, floored at one apiece
+                // (#157), and it falls to the survivors only as sites are
+                // **finished**. A nursery's site is not finished — it is
+                // standing, and drawing more builders than it ever could
+                // under the cap — so it keeps its place in the divisor and
+                // loses only its own entry. Dropped from the count instead,
+                // claiming a third room would hand a sibling outpost's site
+                // two builders where it had one, which is a #157 behaviour
+                // ADR 0047 does not move ("the budget stays behind").
+                //
+                // Two outposts with one container site apiece, and the one
+                // fact that moves between the readings is whether the north
+                // room is ours yet. The west site is the near one, so the
+                // budget it carries is read off how many of the four
+                // workers stop there before the rest walk on.
+                let twoOutposts (colony: Snapshot) =
+                    let west =
+                        { RoomLayer.empty with
+                            Terrain = Map.ofList [ for x in 45..49 -> { X = x; Y = 2 }, Plain ]
+                            TargetPositions = Map.ofList [ "site-west", { X = 48; Y = 2 } ]
+                        }
+
+                    { colony with
+                        ConstructionSites = colony.ConstructionSites @ [ { Id = "site-west" } ]
+                        Creeps = [ for i in 1..4 -> worker $"w{i}" 50 0 ]
+                        Spatial =
+                            { colony.Spatial with
+                                Borders = Map.add "W2N1" plainRing colony.Spatial.Borders
+                                TargetKinds =
+                                    Map.add
+                                        "site-west"
+                                        (Site BuiltKind.Container)
+                                        colony.Spatial.TargetKinds
+                            }
+                            |> withNeighbour "W2N1" west
+                            |> withHome (fun layer ->
+                                { layer with
+                                    Terrain =
+                                        (layer.Terrain, [ for x in 0..10 -> { X = x; Y = 2 } ])
+                                        ||> List.fold (fun acc pos -> Map.add pos Plain acc)
+                                    CreepPositions =
+                                        Map.ofList
+                                            [ for i in 1..4 -> $"w{i}", { X = 2 + i; Y = 2 } ]
+                                })
+                    }
+
+                let sites control =
+                    northBorderColony { X = 10; Y = 38 }
+                    |> withNorthOutpost None
+                    |> withOutpostSite { X = 10; Y = 43 }
+                    |> twoOutposts
+                    |> control
+
+                let held colony =
+                    let { Assignments = assignments } = decide colony Map.empty Set.empty None
+
+                    assignments |> Map.toList |> List.map snd |> List.countBy id |> List.sort
+
+                Expect.equal
+                    (held (sites asCandidate))
+                    [ taskId (Build "site-out"), 1; taskId (Build "site-west"), 1 ]
+                    "two ordinary outpost sites share the colony's two builders, one apiece"
+
+                Expect.equal
+                    (held (sites asNursery))
+                    [ taskId (Build "site-out"), 3; taskId (Build "site-west"), 1 ]
+                    "claimed, the north site is uncapped and the west one keeps the one it had"
             }
         ]
 

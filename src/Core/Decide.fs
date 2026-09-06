@@ -803,6 +803,50 @@ let private claimTargets (snapshot: Snapshot) : (string * string) list =
         else
             None)
 
+/// Whether the named room is this colony's **nursery**: a declared colony
+/// of ours that has been claimed and has no spawn of its own yet, and so
+/// is not independent (ADR 0047 decision 4). Its home goes on being
+/// projected as this colony's [[outpost]], and three rules read that
+/// state — every site in it is feeding-tier work (`isNurserySite`, which
+/// `isFeedingSite` carries to the tier and to the body gate together), the
+/// concurrent-builder budget does not reach those sites
+/// (`taskCapacities`), and the worker row hires `pioneerCount` more bodies
+/// (`workforceTarget`) — so it is one spelling and not three gates free to
+/// disagree, the sentence `colonyOwns` and `claimTargets` above are both
+/// written under. The budget is the one of the three that does not read it
+/// through `isFeedingSite`, because what it asks is narrower than the tier
+/// (`taskCapacities`), so a change to what a nursery *is* has to be
+/// followed to all three from here.
+///
+/// Three facts, each doing its own work. A **declared** home
+/// (`Snapshot.ColonyHomes`), because a room the colony merely mines is
+/// nobody's child and its sites are the surplus work every other room's
+/// are: this is the same human sentence `claimTargets` reads, one tick
+/// later in the same story. **Owned by us**, which is exactly what
+/// `claimTargets` stops answering to the tick the claim lands — the pool
+/// empties itself and this rule takes over, with no state kept and no
+/// constant to reset — and which carries a second fact for free: a control
+/// entry is something vision pays for (ADR 0004), and the vision is bought
+/// by the mother projecting the room, so a declared home nobody projects
+/// is no nursery here, the same silence `claimTargets` gives one. And **no
+/// spawn of ours standing in it** (`Snapshot.Spawns`, every spawn the
+/// colony has and not the home room's alone), because a spawn is what
+/// independence *is*: the nursery ends the tick one stands, and the human's
+/// edit splitting the declaration in two follows that tick rather than
+/// causing it.
+///
+/// The colony's own home is excluded by name and not by luck. `Main.loop`
+/// runs `decide` only for a **living** colony, one whose home holds a spawn
+/// of ours (ADR 0047 decision 1), so a home with no spawn is not a tick
+/// this rule is ever asked about; and leaving it in would put a condition
+/// on #157's "home Build is untouched and stays Surplus", which is a
+/// sentence rather than a sentence with an exception.
+let private isNurseryRoom (snapshot: Snapshot) room =
+    room <> SpatialInfo.homeName snapshot.Spatial
+    && List.contains room snapshot.ColonyHomes
+    && colonyOwns snapshot room
+    && not (snapshot.Spawns |> List.exists (fun spawn -> spawn.RoomName = room))
+
 /// Planner: rebuild this tick's full Task pool from the Snapshot. Pure and
 /// from scratch every tick — Tasks are never persisted.
 let planTasks (snapshot: Snapshot) (threats: Threats) : Task list =
@@ -1860,10 +1904,40 @@ let private workerFloor (tasks: Task list) =
 
     if building then 2 else 1
 
+/// The **pioneers**: how many more [[worker unit]]s the mother hires while
+/// a nursery of hers stands (ADR 0047 decision 4). The addend on the worker
+/// row's own share of the target, and the whole of what a nursery costs the
+/// mother in bodies.
+///
+/// The worker row and no other, because what a nursery needs is a Build:
+/// the hauler row carries no Work part, an [[anchor]]'s cross-room work is a
+/// [[post]] and never a delivery (ADR 0020), and a [[standing body]] is shut
+/// out of all three deliveries (ADR 0046). The generalist is the one row
+/// that crosses a [[seam]] and spends into a site, which is the same reason
+/// #157 gave for the outpost [[container]]'s builder.
+///
+/// **Three is a tunable and this is the reason for it.** A spawn is 15,000
+/// progress against a generalist's fifty energy a trip, so the child's first
+/// tick is many round trips away whatever the crowd, and the crowd is what
+/// decides whether that is this cycle or the next; the user chose the crowd
+/// over letting a 300-energy bank bootstrap itself, which ADR 0047 rejects
+/// as an order of magnitude slower. Small because each of these bodies is
+/// one the mother's own surplus work does without for the length of the
+/// walk — the same price #157's builder cap is written against, and the
+/// reason the number is a crowd rather than the worker row.
+///
+/// A **flat** addend and not one per nursery: ADR 0047 says the quota rises
+/// by this while the child is not independent, and a declaration is written
+/// one candidate at a time (`Colony.declared`). Two nurseries at once would
+/// share these three between them, which is a state a human who wrote two
+/// candidate colonies into the constant can see and raise this number for.
+let private pioneerCount = 3
+
 /// Workforce target (ADR 0012, ADR 0046): five addends, each a pattern
 /// row's own colony fact — reservers one per declared outpost, Anchors one
 /// per Post, haulers the throughput quota, upgraders the surplus divided
 /// by a standing body's drain, workers the income arithmetic that is left
+/// and the pioneers a nursery adds to it (ADR 0047)
 /// — floored at minWorkforce and derived fresh each tick. A source whose
 /// Post is provided for retires its other Seats: one heavy body drains it
 /// alone, so counting seats after that is hiring for jobs that no longer
@@ -1972,6 +2046,37 @@ let private workforceTarget
     let incomeWorkers =
         ceilDiv (surplus - upgraderCost) (workerDrain * creepLifetime) |> max 0
 
+    // The pioneers (ADR 0047 decision 4): while a room this colony has
+    // claimed still has no spawn in it, the mother hires `pioneerCount`
+    // more generalists to go and raise one. Hired off a fact about the
+    // *world* and not out of the surplus — a nursery is a room a human
+    // declared and the colony has taken, exactly as the reserver row is
+    // hired off a declared outpost — so it is added to the row rather than
+    // divided out of what the upgrader row left. The analogy stops at the
+    // target: this is an addend on the generalist row and reaches a spawn
+    // through that row's whole-fleet gate, where the reserver row hires
+    // against a gap of its own, so a specialist row standing over quota
+    // holds these three down with the rest of the row (#154, unchanged).
+    //
+    // On top of the whole row and outside its floor. The floor is the
+    // smallest crowd that can take a delivery at all (ADR 0046), and these
+    // bodies are hired for a delivery that exists whatever the colony is
+    // otherwise doing: a colony sitting at its floor with a nursery to
+    // build hires three more, where a floor `max` over the sum would have
+    // hired none of them.
+    //
+    // No term of `surplus` answers for these three, which is deliberate
+    // and is the worker row's pre-existing shape (ADR 0042 names it): this
+    // row's own replacement cost is not deducted anywhere, so a pioneer is
+    // charged like every other generalist — which is to say not at all —
+    // and the nursery's cost to the mother is the bodies and not a second
+    // arithmetic.
+    let pioneers =
+        if snapshot.ColonyHomes |> List.exists (isNurseryRoom snapshot) then
+            pioneerCount
+        else
+            0
+
     // The generalist row's whole share of the target, and the floor sits
     // here rather than on the income term beside it (ADR 0046): both
     // addends hire the same body from the same row — a seat crew is a
@@ -1981,8 +2086,10 @@ let private workforceTarget
     // fourth against a job that does not exist. What the floor is for is
     // the colony where this sum is *zero*: every source posted, the
     // surplus eaten whole by the standing row, and nothing left in the
-    // fleet that may take a delivery.
-    let workerRow = unpostedSeats + incomeWorkers |> max (workerFloor tasks)
+    // fleet that may take a delivery. The pioneers sit outside that `max`
+    // for the reason recorded above them.
+    let workerRow =
+        (unpostedSeats + incomeWorkers |> max (workerFloor tasks)) + pioneers
 
     List.length reserverClaims
     + anchorQuota
@@ -3265,14 +3372,20 @@ let private planLayout
 /// Area and its price stay outpost-blind — it names a site by id, the area
 /// is that site's room's (ADR 0041) and the price crosses the Seam like
 /// every other cross-room price (#123). Its **tier**, its **cap** and its
-/// **applicability** are not, since #157, and `isOutpostContainerSite` is
-/// the one place all three ask which site this is.
+/// **applicability** are not, since #157, and all three ask
+/// `isOutpostContainerSite` which site this is — the tier and the
+/// applicability through `isFeedingSite`, which since ADR 0047 lifts a
+/// [[nursery]]'s sites onto the same tier by their room alone, and the cap
+/// off the rule below it, which is deliberately the narrower question of
+/// the two.
 ///
 /// *Which* creep builds it is the ordinary ranking's answer and nothing
 /// this rule arranges — but the ranking had to be corrected before that
 /// answer was anybody (#157). This site's Build is **feeding tier**, not
 /// surplus: it is the switch that admits a room into the economy, so it
-/// ranks with the flow, is capped at two concurrent builders, and a
+/// ranks with the flow, is capped at two concurrent builders outside a
+/// nursery — where the budget lets go of the site this rule places along
+/// with every other one in that room (ADR 0047) — and a
 /// loaded home worker with no Refill left to do walks the Seam for it
 /// (`tierOf`, `taskCapacities`). Read on the surplus tier it lost to the
 /// home Upgrade every tick, and the answer #150 wrote down here — that
@@ -3611,7 +3724,10 @@ let private threatened (threats: Threats) atlas (creep: CreepInfo) task =
 /// Three readers, which is why it is a rule and not a line inlined three
 /// times — the applicability gate just below, the tier that gate exists
 /// because of, and the concurrency cap that keeps the tier from emptying
-/// the home room across the Seam.
+/// the home room across the Seam. The first two ask it through
+/// `isFeedingSite` since ADR 0047, which is the one spelling those two
+/// share; the cap asks it here, and asks it alone, because what the budget
+/// covers is narrower than what the tier lifts.
 ///
 /// Both halves come off the projection and neither off the declaration
 /// (ADR 0041), exactly as the Reserve pool's does: the id-keyed kind
@@ -3632,6 +3748,44 @@ let private isOutpostContainerSite (snapshot: Snapshot) atlas siteId =
     Map.tryFind siteId snapshot.Spatial.TargetKinds = Some(Site BuiltKind.Container)
     && Atlas.targetRoom atlas siteId
        |> Option.exists (fun room -> room <> SpatialInfo.homeName snapshot.Spatial)
+
+/// Whether a construction site stands in a **nursery** — a room this
+/// colony has claimed and not yet stood a spawn in (`isNurseryRoom`, ADR
+/// 0047 decision 4). The room half of `isOutpostContainerSite` above with
+/// its kind half deliberately dropped: in a nursery **every** site is the
+/// switch, where in an ordinary outpost only the container is.
+///
+/// Which is the ADR's own generalisation and not a widening for its own
+/// sake. What is being built there is the spawn that ends the nursery, and
+/// the site is one a *human* places by hand — the Layout plans the home
+/// room alone (ADR 0011) and `planOutpostContainers` places containers —
+/// so a rule that picked sites out by kind here would be a list of the
+/// kinds a human is allowed to want built, and a spawn site placed beside
+/// the extensions that feed it would have raised half of what it needs.
+///
+/// The room join is `isOutpostContainerSite`'s, for the reason recorded
+/// there: a `Pos` carries no room (ADR 0041), so the site's room comes off
+/// the layer that places its id. Total (ADR 0004): a site the projection
+/// does not place names no room, answers false, and is the ordinary
+/// surplus Build every site outside a nursery is.
+let private isNurserySite (snapshot: Snapshot) atlas siteId =
+    Atlas.targetRoom atlas siteId |> Option.exists (isNurseryRoom snapshot)
+
+/// Whether this Build is on the feeding tier rather than in the surplus
+/// the colony's other sites are spent out of — the two rules that lift one
+/// there, said once, because the tier and the body gate that exists
+/// *because* of the tier must never be able to disagree about which sites
+/// they are talking about.
+///
+/// An outpost's container site, the switch on whether that room is in the
+/// economy at all (ADR 0042, #157); and every site in a nursery, the
+/// switch on whether there is going to be a second colony at all (ADR
+/// 0047). One question deeper each time, and the same shape of answer: a
+/// Build the colony's reproduction is waiting on is not work it does with
+/// energy it already has.
+let private isFeedingSite (snapshot: Snapshot) atlas siteId =
+    isOutpostContainerSite snapshot atlas siteId
+    || isNurserySite snapshot atlas siteId
 
 /// Whether a creep can usefully work this Task right now. The body must
 /// physically be able to do it — Work-part tasks need a Work part, energy
@@ -3768,11 +3922,29 @@ let private applicable (snapshot: Snapshot) (threats: Threats) atlas (creep: Cre
     // (ADR 0020), so the switch is light bodies' work; it costs the colony
     // nothing, because a Post — and so an Anchor — exists in an outpost
     // only once that very container stands.
+    //
+    // The gate follows the *tier* and not the container, which is why it
+    // asks `isFeedingSite` and not the container rule alone: ADR 0047's
+    // nursery lifts every site in a claimed room onto the same tier, so
+    // the same Anchor that was walked off its Post by a container site is
+    // walked off it by a spawn site, and the reason it may not go is the
+    // one above word for word: a heavy body's cross-room work is a Post
+    // and never a delivery (ADR 0020).
+    //
+    // A nursery is *not* the empty-handed room the sentence above says an
+    // outpost with a pending container is. It is still the mother's
+    // outpost, so `planOutpostContainers` places a container on its source
+    // like any other, and the tick that container stands the room has a
+    // Post of its own (`Atlas.postsIn` counts a built container's Seat in
+    // every room, and only the Dual Seat half is the home room's) and
+    // hires an Anchor to stand on it. That Anchor is the body this gate is
+    // written for, and the trip it refuses is off a Post the colony is
+    // already paid for and inside the room it digs in.
     | Build siteId ->
         has Work
         && creep.Energy > 0
         && not (isStandingBody creep)
-        && not (isOutpostContainerSite snapshot atlas siteId && Atlas.workHeavy atlas creep.Name)
+        && not (isFeedingSite snapshot atlas siteId && Atlas.workHeavy atlas creep.Name)
     // Repair leaves Upgrade's arm with ADR 0046's gate (a delivery, and a
     // standing body's Carry is one trip's worth), and the two stay
     // otherwise identical: a Work part and something to spend.
@@ -3903,11 +4075,14 @@ type private Tier =
     /// too, because no other work matters while a creep is being killed.
     | Safety
     /// Feeding the economy: Harvest, a container's Withdraw, the Refill of
-    /// a spawn or an extension, Reserve, and an **outpost** container
-    /// site's Build (#157) — the flow the colony's reproduction runs on,
-    /// and beside it ADR 0042's two switches on a third of that flow: the
-    /// Reserve that decides how fast an outpost's rock gives, and the
-    /// Build that decides whether the room is in the economy at all.
+    /// a spawn or an extension, Reserve, an **outpost** container site's
+    /// Build (#157) and every site in a **nursery** (ADR 0047) — the flow
+    /// the colony's reproduction runs on, and beside it ADR 0042's two
+    /// switches on a third of that flow: the Reserve that decides how fast
+    /// an outpost's rock gives, and the Build that decides whether the room
+    /// is in the economy at all. The nursery's sites are the third switch
+    /// and the deepest of them: the colony's reproduction is a spawn, and
+    /// those are the sites a second one is waiting on.
     | Feeding
     /// The Storage's Withdraw (ADR 0023): the colony's stock as an
     /// intake, one tier below the source containers the flow fills. An
@@ -3923,10 +4098,10 @@ type private Tier =
     /// Surplus work: a tower Refill (ADR 0010), Build, Repair and
     /// Upgrade. The colony feeds its own reproduction before its guns,
     /// and everything it merely spends energy on waits behind the flow.
-    /// Build with one site excepted — the outpost container's, which is a
-    /// switch and not a spend (`isOutpostContainerSite`, #157); every
-    /// other site the colony ever has, its own container sites included,
-    /// is surplus here.
+    /// Build with the switches excepted — an outpost container's site and
+    /// a nursery's, which decide whether income exists rather than
+    /// spending it (`isFeedingSite`, #157, ADR 0047); every other site the
+    /// colony ever has, its own container sites included, is surplus here.
     | Surplus
     /// The controller container's Refill (ADR 0012): a full creep beside
     /// the buffer sinks its load into the controller rather than dumping
@@ -3977,8 +4152,11 @@ let private rankOfTier =
 /// reaches here. Everything the three tests miss is a spawn or an
 /// extension: the flow. On Withdraw the layering is the one line: the
 /// stock is drawn on a tier below every container, source and controller
-/// alike. On Build the layering is by target too, and by the site's room
-/// as well as its kind: `isOutpostContainerSite` above.
+/// alike. On Build the layering is by target too, and by the site's room:
+/// `isFeedingSite` above, which is the room *and* the kind for an
+/// outpost's container (`isOutpostContainerSite`) and the room alone for
+/// every site in a nursery (`isNurserySite`), where the kind is never
+/// asked.
 ///
 /// Reads the Atlas because that room is a question only the projection's
 /// id-to-room join answers.
@@ -4084,7 +4262,33 @@ let private tierOf (snapshot: Snapshot) atlas task =
     // is waiting on — but it is a real change of behaviour under a raid on
     // the home room, and the answer for a raid is the stand-down (ADR
     // 0043, #136) and not a rank.
-    | Build siteId when isOutpostContainerSite snapshot atlas siteId -> Feeding
+    //
+    // And the same argument one question deeper for a **nursery**'s sites
+    // (ADR 0047 decision 4): a container decides whether a room is in the
+    // economy, and the spawn a human has placed in a room this colony has
+    // already claimed decides whether there is going to be a second colony
+    // at all. So the tier lifts there too — and lifts *every* site in that
+    // room, not the container alone, because the site the whole nursery
+    // exists for is one no rule of this colony's places (`isNurserySite`).
+    //
+    // The builder cap the ordinary outpost site rides does *not* ride here
+    // (`taskCapacities`) — the argument for it is that a tenth body buys
+    // nothing on a 5,000-progress container, and a nursery's spawn is
+    // three times that with a whole colony waiting on it.
+    //
+    // So what this costs the mother is **not** bounded, and the bound is
+    // named here because it is the thing a reader will look for. The
+    // pioneers are what the mother *hired* for the job (`pioneerCount`,
+    // `workforceTarget`); they are not a ceiling on who takes it, because
+    // nothing in the Matcher hires a body to a Task by the row it was cast
+    // for. While a site stands in the nursery every loaded Work-part body
+    // in the colony outranks the home Upgrade for it and may cross, and
+    // the home room's surplus Build and Repair go unheld for as long as
+    // that lasts. That is the price ADR 0047 decision 4 was chosen at —
+    // the mother's own surplus work stops while the child is raised — and
+    // it is bounded in *time* by the site being finished and by nothing
+    // else.
+    | Build siteId when isFeedingSite snapshot atlas siteId -> Feeding
     | Build _
     | Repair _
     | Upgrade _ -> Surplus
@@ -4303,13 +4507,42 @@ let private taskCapacities (snapshot: Snapshot) atlas (tasks: Task list) : Map<s
             tasks
             |> List.choose (function
                 | Build siteId as task when isOutpostContainerSite snapshot atlas siteId ->
-                    Some(taskId task)
+                    Some(taskId task, isNurserySite snapshot atlas siteId)
                 | _ -> None)
         with
         | [] -> []
         | sites ->
+            // A nursery's sites carry no cap at all (ADR 0047 decision 4),
+            // and the exclusion is by **room**, so it takes the container
+            // site the outpost rule places in that room with it. The
+            // reason is the room's and not the spawn's 15,000 progress:
+            // once the colony has claimed a room, everything standing in
+            // it is the switch on whether there is a second colony, and
+            // the budget is an argument about how much of the home room's
+            // surplus work a *third of the income* is worth (#157) — a
+            // different question, asked about a room the colony merely
+            // mines.
+            //
+            // What the exclusion costs is written at `tierOf`: nothing
+            // bounds the crowd that crosses for a nursery's site while it
+            // stands. That is the decision, not an oversight, and the
+            // pioneers are the bodies hired for the job rather than a
+            // ceiling on who takes it.
+            //
+            // Excluded from the **entries** and not from the divisor. The
+            // budget is spread over the outpost container sites the pool
+            // holds, and it falls to the survivors only as sites are
+            // *finished* (above); a nursery's site is still standing and
+            // still drawing builders — more of them than ever — so
+            // dropping it from the count would hand a sibling outpost's
+            // site two builders where it had one, on the strength of a
+            // third room being claimed. Which site this is stays said once
+            // (`isOutpostContainerSite`); the nursery decides only which
+            // of those sites an entry is emitted for.
             let each = outpostContainerBuilders / List.length sites |> max 1
-            sites |> List.map (fun tid -> tid, each)
+
+            sites
+            |> List.choose (fun (tid, nursery) -> if nursery then None else Some(tid, each))
 
     seats @ reserves @ draws @ outpostContainers |> Map.ofList
 
