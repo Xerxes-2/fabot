@@ -15320,8 +15320,8 @@ let outpostTests =
 
                 Expect.equal
                     (Colony.homes Colony.declared)
-                    [ "W12S28" ]
-                    "one colony is declared, and it is the room this bot has always run"
+                    [ "W12S28"; "W13S28" ]
+                    "two colonies are declared: the room this bot has always run, and the candidate (ADR 0047)"
 
                 Expect.equal
                     (outposts |> List.map (fun outpost -> outpost.RoomName))
@@ -15330,6 +15330,10 @@ let outpostTests =
 
                 Expect.isEmpty
                     (Colony.outpostsOf Colony.declared "W13S28")
+                    "and the candidate colony works no outposts of its own yet"
+
+                Expect.isEmpty
+                    (Colony.outpostsOf Colony.declared "W1N1")
                     "and a room nobody declared a colony for works no outposts at all"
 
                 Expect.equal

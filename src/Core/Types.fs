@@ -788,6 +788,14 @@ module Colony =
                         }
                     ]
             }
+            // The second colony (ADR 0047): W13S28 is declared a home of its
+            // own while it stays the first colony's outpost above. Until
+            // this colony owns it the entry is a candidate — its controller
+            // is claimed rather than reserved — and once claimed but still
+            // without a spawn it is a nursery the mother builds. The spawn
+            // tile the human will place is (16,12) (#188). Moved by a
+            // human, like every declaration here.
+            { Home = "W13S28"; Outposts = [] }
         ]
 
     /// The outposts one home room works: its own declaration's, and none
