@@ -4,13 +4,13 @@ open Expecto
 open Fabot.Core.Types
 open Fabot.Core.Atlas
 
-/// Minimal Snapshot around a spatial projection: the Atlas reads only the
+/// Minimal ColonyView around a spatial projection: the Atlas reads only the
 /// projection and the creep list's order.
 let snapshotWith creeps spatial =
     {
         Time = 1
         Spawns = []
-        RoomEnergy = Map.empty
+        Bank = { Available = 0; Capacity = 0 }
         Refillables = []
         Sources = []
         Controller = None
@@ -28,11 +28,19 @@ let snapshotWith creeps spatial =
         // A declaration prices nothing here either: the Atlas reads
         // geometry, and which rooms a human means to own is the Planner's
         // question (ADR 0047).
-        ColonyHomes = []
+        Declared = []
         // And neither does a [[stage]]: where a colony stands in its life
         // decides what it builds and who it raises (ADR 0052 decision 3),
         // and the Atlas builds nothing.
         Stages = Map.empty
+        // Nor another colony's bodies: the Atlas places the creeps a view
+        // holds, and a body it does not hold is on no tile of its layers
+        // (ADR 0052 decision 1).
+        Foreign = Map.empty
+        // And nothing is borrowed: what one colony may take of a child's
+        // room decides Tasks, and the Atlas decides none (ADR 0047
+        // decision 4).
+        Borrowed = { Rooms = [] }
     }
 
 let worker name =
@@ -130,7 +138,7 @@ let workAreaTests =
                             { X = 10; Y = 9 }, Wall
                         ]
                     |> snapshotWith []
-                    |> ofSnapshot
+                    |> ofView
 
                 Expect.equal
                     (workArea atlas (Harvest "src-a"))
@@ -139,7 +147,7 @@ let workAreaTests =
             }
 
             test "an unplaced target has an empty Work Area" {
-                let atlas = spatial [] [ { X = 9; Y = 10 }, Plain ] |> snapshotWith [] |> ofSnapshot
+                let atlas = spatial [] [ { X = 9; Y = 10 }, Plain ] |> snapshotWith [] |> ofView
 
                 Expect.equal (workArea atlas (Harvest "ghost")) Set.empty "nowhere to stand"
             }
@@ -152,7 +160,7 @@ let workAreaTests =
                     ]
 
                 let atlas =
-                    spatial [ "ctrl-1", { X = 10; Y = 10 } ] tiles |> snapshotWith [] |> ofSnapshot
+                    spatial [ "ctrl-1", { X = 10; Y = 10 } ] tiles |> snapshotWith [] |> ofView
 
                 let area = workArea atlas (Upgrade "ctrl-1")
                 Expect.hasLength area 49 "the full 7x7 square is passable"
@@ -182,7 +190,7 @@ let seatTests =
                             Obstacles = Set.singleton { X = 9; Y = 10 }
                         })
                     |> snapshotWith []
-                    |> ofSnapshot
+                    |> ofView
 
                 Expect.equal
                     (seats atlas "src-a")
@@ -223,7 +231,7 @@ let seatTests =
                                     ]
                         })
                     |> snapshotWith []
-                    |> ofSnapshot
+                    |> ofView
 
                 Expect.equal
                     (seatTilesOf atlas "src-low")
@@ -247,7 +255,7 @@ let seatTests =
             }
 
             test "an unplaced source has no Seat count at all" {
-                let atlas = spatial [] [ { X = 9; Y = 10 }, Plain ] |> snapshotWith [] |> ofSnapshot
+                let atlas = spatial [] [ { X = 9; Y = 10 }, Plain ] |> snapshotWith [] |> ofView
 
                 Expect.equal (seats atlas "ghost") None "no position, no derivable capacity"
             }
@@ -273,7 +281,7 @@ let standingTests =
                             Obstacles = Set.singleton { X = 11; Y = 10 }
                         })
                     |> snapshotWith []
-                    |> ofSnapshot
+                    |> ofView
 
                 Expect.equal
                     (adjacentWalkable atlas { X = 10; Y = 10 })
@@ -304,7 +312,7 @@ let standingTests =
                                     ]
                         })
                     |> snapshotWith []
-                    |> ofSnapshot
+                    |> ofView
 
                 Expect.equal
                     (adjacentWalkableIn atlas "W1N1" { X = 0; Y = 0 })
@@ -343,7 +351,7 @@ let standingTests =
                             Roads = Set.singleton { X = 10; Y = 11 }
                         })
                     |> snapshotWith []
-                    |> ofSnapshot
+                    |> ofView
 
                 Expect.equal
                     (walkableTiles atlas)
@@ -364,7 +372,7 @@ let standingTests =
                             CreepPositions = Map.ofList [ "w", { X = 10; Y = 11 } ]
                         })
                     |> snapshotWith [ worker "w" ]
-                    |> ofSnapshot
+                    |> ofView
 
                 Expect.isTrue
                     (mayActFor atlas "w" (Harvest "src-a"))
@@ -383,7 +391,7 @@ let standingTests =
                             CreepPositions = Map.ofList [ "amy", { X = 5; Y = 5 } ]
                         })
                     |> snapshotWith [ worker "amy"; worker "ghost" ]
-                    |> ofSnapshot
+                    |> ofView
 
                 Expect.equal (creepTile atlas "amy") (Some { X = 5; Y = 5 }) "the tile it stands on"
                 Expect.isNone (creepTile atlas "ghost") "a creep the projection does not place"
@@ -401,17 +409,17 @@ let placementQueryTests =
                         RoomName = Some "W1N1"
                     }
                     |> snapshotWith []
-                    |> ofSnapshot
+                    |> ofView
 
                 Expect.equal (homeRoom named) (Some "W1N1") "the projection names its room"
 
-                let bare = SpatialInfo.empty |> snapshotWith [] |> ofSnapshot
+                let bare = SpatialInfo.empty |> snapshotWith [] |> ofView
                 Expect.equal (homeRoom bare) None "an empty projection covers no room"
             }
 
             test "positionOf finds a projected target and misses an absent one" {
                 let atlas =
-                    spatial [ "spawn-1", { X = 25; Y = 25 } ] [] |> snapshotWith [] |> ofSnapshot
+                    spatial [ "spawn-1", { X = 25; Y = 25 } ] [] |> snapshotWith [] |> ofView
 
                 Expect.equal
                     (positionOf atlas "spawn-1")
@@ -446,7 +454,7 @@ let placementQueryTests =
                             CreepPositions = Map.ofList [ "w", { X = 10; Y = 10 } ]
                         })
                     |> snapshotWith [ worker "w" ]
-                    |> ofSnapshot
+                    |> ofView
 
                 Expect.equal
                     (buildableTiles atlas)
@@ -467,7 +475,7 @@ let placementQueryTests =
                 let atlas =
                     spatial [] [ { X = 11; Y = 9 }, Plain; { X = 10; Y = 12 }, Plain ]
                     |> snapshotWith []
-                    |> ofSnapshot
+                    |> ofView
 
                 Expect.equal
                     (buildableTiles atlas)
@@ -501,7 +509,7 @@ let placementQueryTests =
                                     projection.Rooms
                         }
                     |> snapshotWith []
-                    |> ofSnapshot
+                    |> ofView
 
                 Expect.equal
                     (buildableTiles atlas)
@@ -548,7 +556,7 @@ let placementQueryTests =
                                     projection.Rooms
                         }
                     |> snapshotWith []
-                    |> ofSnapshot
+                    |> ofView
 
                 Expect.isTrue
                     (isSwamp atlas { X = 10; Y = 10 })
@@ -581,7 +589,7 @@ let placementQueryTests =
                             Roads = Set.singleton { X = 10; Y = 10 }
                         })
                     |> snapshotWith []
-                    |> ofSnapshot
+                    |> ofView
 
                 Expect.isTrue
                     (isSwamp atlas { X = 10; Y = 10 })
@@ -604,7 +612,7 @@ let placementQueryTests =
                         TargetKinds = Map.ofList [ "pile-a", Dropped; "pile-b", Dropped ]
                     }
                     |> snapshotWith []
-                    |> ofSnapshot
+                    |> ofView
 
                 Expect.equal
                     (droppedEnergyIn atlas home)
@@ -638,7 +646,7 @@ let placementQueryTests =
                                 ]
                     }
                     |> snapshotWith []
-                    |> ofSnapshot
+                    |> ofView
 
                 Expect.equal
                     (linkTiles atlas)
@@ -676,7 +684,7 @@ let placementQueryTests =
                             CreepPositions = Map.ofList [ "w", { X = 7; Y = 7 } ]
                         })
                     |> snapshotWith [ worker "w" ]
-                    |> ofSnapshot
+                    |> ofView
 
                 let area = workArea atlas (Repair "cont-1")
 
@@ -708,7 +716,7 @@ let placementQueryTests =
                             CreepPositions = Map.ofList [ "w", { X = 10; Y = 10 } ]
                         })
                     |> snapshotWith [ worker "w" ]
-                    |> ofSnapshot
+                    |> ofView
 
                 Expect.equal (workArea atlas (Repair "cont-1")) Set.empty "nowhere to stand"
 
@@ -739,7 +747,7 @@ let placementQueryTests =
                                 ]
                     }
                     |> snapshotWith []
-                    |> ofSnapshot
+                    |> ofView
 
                 Expect.equal (builtExtensions atlas) 2 "only standing extensions are built"
 
@@ -775,9 +783,7 @@ let travelCostTests =
         [
             test "the cost is the cheapest path to any Work Area tile, swamp priced in" {
                 let atlas =
-                    corridor [ "w", { X = 10; Y = 15 } ]
-                    |> snapshotWith [ worker "w" ]
-                    |> ofSnapshot
+                    corridor [ "w", { X = 10; Y = 15 } ] |> snapshotWith [ worker "w" ] |> ofView
 
                 Expect.equal
                     (travelCost atlas "w" (Harvest "src-a"))
@@ -787,9 +793,7 @@ let travelCostTests =
 
             test "a creep already inside the Work Area costs 0" {
                 let atlas =
-                    corridor [ "w", { X = 11; Y = 13 } ]
-                    |> snapshotWith [ worker "w" ]
-                    |> ofSnapshot
+                    corridor [ "w", { X = 11; Y = 13 } ] |> snapshotWith [ worker "w" ] |> ofView
 
                 Expect.equal (travelCost atlas "w" (Harvest "src-a")) (Some 0) "already there"
             }
@@ -805,7 +809,7 @@ let travelCostTests =
                             Terrain = Map.add { X = 20; Y = 20 } Plain layer.Terrain
                         })
                     |> snapshotWith [ worker "w" ]
-                    |> ofSnapshot
+                    |> ofView
 
                 Expect.equal
                     (travelCost atlas "w" (Harvest "src-a"))
@@ -814,7 +818,7 @@ let travelCostTests =
             }
 
             test "an unplaced creep prices everything at 0" {
-                let atlas = corridor [] |> snapshotWith [ worker "w" ] |> ofSnapshot
+                let atlas = corridor [] |> snapshotWith [ worker "w" ] |> ofView
 
                 Expect.equal
                     (travelCost atlas "w" (Harvest "src-a"))
@@ -830,7 +834,7 @@ let travelCostTests =
                 let atlas =
                     corridor [ "w", { X = 10; Y = 15 }; "b", { X = 11; Y = 13 } ]
                     |> snapshotWith [ worker "w"; worker "b" ]
-                    |> ofSnapshot
+                    |> ofView
 
                 Expect.equal
                     (travelCost atlas "w" (Harvest "src-a"))
@@ -840,9 +844,7 @@ let travelCostTests =
 
             test "an unplaced target prices at 0, not None" {
                 let atlas =
-                    corridor [ "w", { X = 10; Y = 15 } ]
-                    |> snapshotWith [ worker "w" ]
-                    |> ofSnapshot
+                    corridor [ "w", { X = 10; Y = 15 } ] |> snapshotWith [ worker "w" ] |> ofView
 
                 Expect.equal
                     (travelCost atlas "w" (Harvest "ghost"))
@@ -895,8 +897,7 @@ let roadPricingTests =
         [
             test "a built road prices a step at 1: half a plain step, a tenth of a swamp step" {
                 let costOn terrain roads =
-                    let atlas =
-                        seatPriced terrain roads |> snapshotWith [ worker "w" ] |> ofSnapshot
+                    let atlas = seatPriced terrain roads |> snapshotWith [ worker "w" ] |> ofView
 
                     travelCost atlas "w" (Harvest "src-a")
 
@@ -924,7 +925,7 @@ let roadPricingTests =
                                 Map.ofList [ "w", { X = 10; Y = 12 }; "b", { X = 10; Y = 11 } ]
                         })
                     |> snapshotWith [ worker "w"; worker "b" ]
-                    |> ofSnapshot
+                    |> ofView
 
                 Expect.equal
                     (travelCost atlas "w" (Harvest "src-a"))
@@ -946,7 +947,7 @@ let roadPricingTests =
                                     [ "src-a", { X = 10; Y = 10 }; "site-1", { X = 10; Y = 11 } ]
                         })
                     |> snapshotWith [ worker "w" ]
-                    |> ofSnapshot
+                    |> ofView
 
                 Expect.equal
                     (travelCost atlas "w" (Harvest "src-a"))
@@ -964,7 +965,7 @@ let roadPricingTests =
                     let atlas =
                         corridorThrough middle roads obstacles
                         |> snapshotWith [ worker "w" ]
-                        |> ofSnapshot
+                        |> ofView
 
                     travelCost atlas "w" (Harvest "src-a")
 
@@ -1008,7 +1009,7 @@ let travelUnitTests =
                 // Carry rides free in both bodies (engine fatigue rules).
                 let costFor creep =
                     let atlas =
-                        corridor [ "w", { X = 10; Y = 15 } ] |> snapshotWith [ creep ] |> ofSnapshot
+                        corridor [ "w", { X = 10; Y = 15 } ] |> snapshotWith [ creep ] |> ofView
 
                     travelCost atlas "w" (Harvest "src-a")
 
@@ -1027,7 +1028,7 @@ let travelUnitTests =
                 // (weight 2) the same surplus-Move body pays ceil(2 / 3) =
                 // 1: the one-unit floor, never a fraction of a unit.
                 let costOn terrain creep =
-                    let atlas = seatPriced terrain Set.empty |> snapshotWith [ creep ] |> ofSnapshot
+                    let atlas = seatPriced terrain Set.empty |> snapshotWith [ creep ] |> ofView
                     travelCost atlas "w" (Harvest "src-a")
 
                 Expect.equal
@@ -1058,7 +1059,7 @@ let travelUnitTests =
                     let atlas =
                         corridor [ "w", { X = 10; Y = 15 } ]
                         |> snapshotWith [ creepWith "w" energy [ Work; Carry; Move ] ]
-                        |> ofSnapshot
+                        |> ofView
 
                     travelCost atlas "w" (Harvest "src-a")
 
@@ -1070,7 +1071,7 @@ let travelUnitTests =
                 let atlasAt pos =
                     corridor [ "w", pos ]
                     |> snapshotWith [ creepWith "w" 0 [ Work; Carry ] ]
-                    |> ofSnapshot
+                    |> ofView
 
                 Expect.equal
                     (travelCost (atlasAt { X = 10; Y = 15 }) "w" (Harvest "src-a"))
@@ -1130,9 +1131,7 @@ let stepPriceTableTests =
                 // bodies, read off one step onto the Seat.
                 let unitsOn terrain roads body =
                     let atlas =
-                        seatPriced terrain roads
-                        |> snapshotWith [ creepWith "w" 0 body ]
-                        |> ofSnapshot
+                        seatPriced terrain roads |> snapshotWith [ creepWith "w" 0 body ] |> ofView
 
                     travelCost atlas "w" (Harvest "src-a")
 
@@ -1172,9 +1171,7 @@ let stepPriceTableTests =
                 // over one domain and can be read side by side.
                 let ticksOn terrain roads body =
                     let atlas =
-                        seatPriced terrain roads
-                        |> snapshotWith [ creepWith "w" 0 body ]
-                        |> ofSnapshot
+                        seatPriced terrain roads |> snapshotWith [ creepWith "w" 0 body ] |> ofView
 
                     walkTicks atlas "w" (Harvest "src-a")
 
@@ -1222,7 +1219,7 @@ let stepPriceTableTests =
                     let atlas =
                         forkedLanes [ "w", { X = 10; Y = 12 } ]
                         |> snapshotWith [ creepWith "w" 0 body ]
-                        |> ofSnapshot
+                        |> ofView
 
                     firstStepBlindFor atlas "w" (Harvest "src-a")
 
@@ -1246,7 +1243,7 @@ let stepPriceTableTests =
                 let atlasOn terrain roads =
                     seatPriced terrain roads
                     |> snapshotWith [ creepWith "w" 0 [ Work; Carry ] ]
-                    |> ofSnapshot
+                    |> ofView
 
                 let seat = Set.singleton { X = 10; Y = 11 }
 
@@ -1289,7 +1286,7 @@ let stepPriceTableTests =
                             Obstacles = Set.singleton { X = 2; Y = 3 }
                         })
                     |> snapshotWith []
-                    |> ofSnapshot
+                    |> ofView
                     // The projection names no room, so its ground is filed
                     // under the empty name (ADR 0041).
                     |> fun atlas -> stepWeights atlas ""
@@ -1398,7 +1395,7 @@ let walkTests =
                                 let atlas =
                                     mixedRoom [ name, start ]
                                     |> snapshotWith [ creepWith name energy body ]
-                                    |> ofSnapshot
+                                    |> ofView
 
                                 for source in sources do
                                     let task = Harvest source
@@ -1430,7 +1427,7 @@ let walkTests =
                 let atlas =
                     roadCorridor [ "h", { X = 19; Y = 10 } ]
                     |> snapshotWith [ creepWith "h" 0 [ Carry; Carry; Move ] ]
-                    |> ofSnapshot
+                    |> ofView
 
                 Expect.equal
                     (walkTicks atlas "h" (Harvest "src-a"))
@@ -1450,8 +1447,7 @@ let walkTests =
                 // charges — ceil(10 / 2) — rather than flattening to the
                 // floor beside it.
                 let walkOn terrain roads =
-                    let atlas =
-                        seatPriced terrain roads |> snapshotWith [ worker "w" ] |> ofSnapshot
+                    let atlas = seatPriced terrain roads |> snapshotWith [ worker "w" ] |> ofView
 
                     walkTicks atlas "w" (Harvest "src-a")
 
@@ -1474,7 +1470,7 @@ let walkTests =
                 let atlas =
                     plainCorridor [ "s", { X = 17; Y = 10 } ]
                     |> snapshotWith [ creepWith "s" 0 [ Work; Move; Move; Move ] ]
-                    |> ofSnapshot
+                    |> ofView
 
                 Expect.equal
                     (travelCost atlas "s" (Harvest "src-a"))
@@ -1493,14 +1489,12 @@ let walkTests =
                 // not move, because a creep standing in the lane this tick
                 // is not part of the path's physical length.
                 let clear =
-                    corridor [ "w", { X = 10; Y = 15 } ]
-                    |> snapshotWith [ worker "w" ]
-                    |> ofSnapshot
+                    corridor [ "w", { X = 10; Y = 15 } ] |> snapshotWith [ worker "w" ] |> ofView
 
                 let crowded =
                     corridor [ "w", { X = 10; Y = 15 }; "b", { X = 11; Y = 13 } ]
                     |> snapshotWith [ worker "w"; worker "b" ]
-                    |> ofSnapshot
+                    |> ofView
 
                 Expect.equal
                     (travelCost clear "w" (Harvest "src-a"),
@@ -1519,7 +1513,7 @@ let walkTests =
                 // pricing, never the contract): unplaceable geometry prices
                 // 0, an unreachable Work Area has no walk at all, and a
                 // creep already inside has none left to walk.
-                let unplaced = corridor [] |> snapshotWith [ worker "w" ] |> ofSnapshot
+                let unplaced = corridor [] |> snapshotWith [ worker "w" ] |> ofView
 
                 Expect.equal
                     (walkTicks unplaced "w" (Harvest "src-a"))
@@ -1527,9 +1521,7 @@ let walkTests =
                     "an unplaced creep prices at 0"
 
                 let placed =
-                    corridor [ "w", { X = 10; Y = 15 } ]
-                    |> snapshotWith [ worker "w" ]
-                    |> ofSnapshot
+                    corridor [ "w", { X = 10; Y = 15 } ] |> snapshotWith [ worker "w" ] |> ofView
 
                 Expect.equal
                     (walkTicks placed "w" (Harvest "ghost"))
@@ -1537,9 +1529,7 @@ let walkTests =
                     "an unplaced target prices at 0, not None"
 
                 let inside =
-                    corridor [ "w", { X = 11; Y = 13 } ]
-                    |> snapshotWith [ worker "w" ]
-                    |> ofSnapshot
+                    corridor [ "w", { X = 11; Y = 13 } ] |> snapshotWith [ worker "w" ] |> ofView
 
                 Expect.equal
                     (walkTicks inside "w" (Harvest "src-a"))
@@ -1555,7 +1545,7 @@ let walkTests =
                             Terrain = Map.add { X = 20; Y = 20 } Plain layer.Terrain
                         })
                     |> snapshotWith [ worker "w" ]
-                    |> ofSnapshot
+                    |> ofView
 
                 Expect.equal
                     (walkTicks stranded "w" (Harvest "src-a"))
@@ -1590,7 +1580,7 @@ let firstStepTests =
                             CreepPositions = Map.ofList [ "w", { X = 10; Y = 14 } ]
                         })
                     |> snapshotWith [ worker "w" ]
-                    |> ofSnapshot
+                    |> ofView
 
                 Expect.equal
                     (firstStepFor atlas "w" (Harvest "src-a"))
@@ -1621,7 +1611,7 @@ let firstStepTests =
                                 Map.ofList [ "w", { X = 10; Y = 14 }; "b", { X = 10; Y = 13 } ]
                         })
                     |> snapshotWith [ worker "w"; worker "b" ]
-                    |> ofSnapshot
+                    |> ofView
 
                 Expect.equal
                     (firstStepFor atlas "w" (Harvest "src-a"))
@@ -1631,9 +1621,7 @@ let firstStepTests =
 
             test "a creep already inside the Work Area has no step to take" {
                 let atlas =
-                    corridor [ "w", { X = 11; Y = 13 } ]
-                    |> snapshotWith [ worker "w" ]
-                    |> ofSnapshot
+                    corridor [ "w", { X = 11; Y = 13 } ] |> snapshotWith [ worker "w" ] |> ofView
 
                 Expect.equal (firstStepFor atlas "w" (Harvest "src-a")) None "already there"
             }
@@ -1648,13 +1636,13 @@ let firstStepTests =
                             Terrain = Map.add { X = 20; Y = 20 } Plain layer.Terrain
                         })
                     |> snapshotWith [ worker "w" ]
-                    |> ofSnapshot
+                    |> ofView
 
                 Expect.equal (firstStepFor atlas "w" (Harvest "src-a")) None "no path, no step"
             }
 
             test "an unplaced creep has no step: no movement without geometry" {
-                let atlas = corridor [] |> snapshotWith [ worker "w" ] |> ofSnapshot
+                let atlas = corridor [] |> snapshotWith [ worker "w" ] |> ofView
 
                 Expect.equal (firstStepFor atlas "w" (Harvest "src-a")) None "nothing derivable"
             }
@@ -1690,7 +1678,7 @@ let firstStepIgnoringTrafficTests =
                                 Map.ofList [ "w", { X = 10; Y = 14 }; "b", { X = 10; Y = 13 } ]
                         })
                     |> snapshotWith [ worker "w"; worker "b" ]
-                    |> ofSnapshot
+                    |> ofView
 
                 Expect.equal
                     (firstStepFor atlas "w" (Harvest "src-a"))
@@ -1736,7 +1724,7 @@ let firstStepIgnoringTrafficTests =
                             CreepPositions = Map.ofList [ "w", { X = 13; Y = 10 } ]
                         })
                     |> snapshotWith [ worker "w" ]
-                    |> ofSnapshot
+                    |> ofView
 
                 Expect.equal
                     (travelCost atlas "w" (Harvest "src-a"))
@@ -1798,7 +1786,7 @@ let workAreaForTests =
 
             test "a Work-heavy body harvests a posted source from its Posts alone" {
                 let atlas =
-                    posted [ "a", { X = 10; Y = 11 } ] |> snapshotWith [ anchor "a" ] |> ofSnapshot
+                    posted [ "a", { X = 10; Y = 11 } ] |> snapshotWith [ anchor "a" ] |> ofView
 
                 Expect.equal
                     (workAreaFor atlas "a" (Harvest "src-a"))
@@ -1816,7 +1804,7 @@ let workAreaForTests =
                 // is the garrison's tile, so a light body's area is every
                 // other Seat.
                 let atlas =
-                    posted [ "w", { X = 10; Y = 11 } ] |> snapshotWith [ worker "w" ] |> ofSnapshot
+                    posted [ "w", { X = 10; Y = 11 } ] |> snapshotWith [ worker "w" ] |> ofView
 
                 Expect.equal
                     (workAreaFor atlas "w" (Harvest "src-a"))
@@ -1846,7 +1834,7 @@ let workAreaForTests =
                             CreepPositions = Map.ofList [ "a", { X = 10; Y = 11 } ]
                         })
                     |> snapshotWith [ anchor "a" ]
-                    |> ofSnapshot
+                    |> ofView
 
                 Expect.equal
                     (workAreaFor atlas "a" (Harvest "src-a"))
@@ -1856,7 +1844,7 @@ let workAreaForTests =
 
             test "only Harvest narrows: the heavy body's Upgrade area is untouched" {
                 let atlas =
-                    posted [ "a", { X = 10; Y = 11 } ] |> snapshotWith [ anchor "a" ] |> ofSnapshot
+                    posted [ "a", { X = 10; Y = 11 } ] |> snapshotWith [ anchor "a" ] |> ofView
 
                 Expect.equal
                     (workAreaFor atlas "a" (Upgrade "ctrl-1"))
@@ -1866,7 +1854,7 @@ let workAreaForTests =
 
             test "an unplaceable source stays empty for a heavy body" {
                 let atlas =
-                    posted [ "a", { X = 10; Y = 11 } ] |> snapshotWith [ anchor "a" ] |> ofSnapshot
+                    posted [ "a", { X = 10; Y = 11 } ] |> snapshotWith [ anchor "a" ] |> ofView
 
                 Expect.equal (workAreaFor atlas "a" (Harvest "ghost")) Set.empty "nowhere to stand"
             }
@@ -1890,7 +1878,7 @@ let workAreaForTests =
                             CreepPositions = Map.ofList [ "a", { X = 10; Y = 11 } ]
                         })
                     |> snapshotWith [ creepWith "a" 0 [ Work; Work; Carry; Move ] ]
-                    |> ofSnapshot
+                    |> ofView
 
                 Expect.equal
                     (postsOf atlas "src-a")
@@ -1910,7 +1898,7 @@ let workAreaForTests =
 
             test "travel cost and first step price the Post, not the nearer Seat" {
                 let atlas =
-                    posted [ "a", { X = 10; Y = 11 } ] |> snapshotWith [ anchor "a" ] |> ofSnapshot
+                    posted [ "a", { X = 10; Y = 11 } ] |> snapshotWith [ anchor "a" ] |> ofView
 
                 Expect.isSome
                     (travelCost atlas "a" (Harvest "src-a"))
@@ -1943,7 +1931,7 @@ let mayActTests =
                             CreepPositions = Map.ofList [ "w", creepPos ]
                         })
                     |> snapshotWith [ worker "w" ]
-                    |> ofSnapshot
+                    |> ofView
 
                 Expect.isTrue
                     (mayActFor (atlasAt { X = 10; Y = 11 }) "w" (Harvest "src-a"))
@@ -1968,7 +1956,7 @@ let mayActTests =
                             CreepPositions = Map.ofList [ "w", creepPos ]
                         })
                     |> snapshotWith [ worker "w" ]
-                    |> ofSnapshot
+                    |> ofView
 
                 Expect.isTrue
                     (mayActFor (atlasAt { X = 10; Y = 13 }) "w" (Repair "road-1"))
@@ -1981,9 +1969,7 @@ let mayActTests =
 
             test "a creep or target the projection cannot place never blocks the action" {
                 let atlas =
-                    corridor [ "w", { X = 10; Y = 15 } ]
-                    |> snapshotWith [ worker "w" ]
-                    |> ofSnapshot
+                    corridor [ "w", { X = 10; Y = 15 } ] |> snapshotWith [ worker "w" ] |> ofView
 
                 Expect.isTrue (mayActFor atlas "ghost" (Harvest "src-a")) "unplaced creep acts"
                 Expect.isTrue (mayActFor atlas "w" (Harvest "ghost")) "unplaced target is acted on"
@@ -2005,7 +1991,7 @@ let mayActTests =
                             CreepPositions = Map.ofList [ "a", creepPos ]
                         })
                     |> snapshotWith [ creepWith "a" 0 [ Work; Work; Carry; Move ] ]
-                    |> ofSnapshot
+                    |> ofView
 
                 Expect.isTrue
                     (mayActFor (atlasAt { X = 9; Y = 10 }) "a" (Harvest "src-a"))
@@ -2027,7 +2013,7 @@ let mayActTests =
                             CreepPositions = Map.ofList [ "w", { X = 10; Y = 11 } ]
                         })
                     |> snapshotWith [ worker "w" ]
-                    |> ofSnapshot
+                    |> ofView
 
                 Expect.equal
                     (workArea atlas (Harvest "src-a"))
@@ -2068,7 +2054,7 @@ let dualSeatTests =
                             Map.ofList [ "src-a", Source; "ctrl-1", Controller; "src-b", Source ]
                     }
                     |> snapshotWith []
-                    |> ofSnapshot
+                    |> ofView
 
                 Expect.equal
                     (dualSeats atlas)
@@ -2091,7 +2077,7 @@ let dualSeatTests =
                             Obstacles = Set.singleton { X = 11; Y = 10 }
                         })
                     |> snapshotWith []
-                    |> ofSnapshot
+                    |> ofView
 
                 Expect.equal (dualSeats atlas) Set.empty "an unstandable Seat is no Dual Seat"
             }
@@ -2102,7 +2088,7 @@ let dualSeatTests =
                         TargetKinds = Map.ofList [ "src-a", Source ]
                     }
                     |> snapshotWith []
-                    |> ofSnapshot
+                    |> ofView
 
                 Expect.equal (dualSeats atlas) Set.empty "no Upgrade Work Area to intersect"
             }
@@ -2113,7 +2099,7 @@ let dualSeatTests =
                         TargetKinds = Map.ofList [ "ctrl-1", Controller ]
                     }
                     |> snapshotWith []
-                    |> ofSnapshot
+                    |> ofView
 
                 Expect.equal (dualSeats atlas) Set.empty "no Seats to intersect"
             }
@@ -2126,7 +2112,7 @@ let dualSeatTests =
                         TargetKinds = Map.ofList [ "src-a", Source; "ctrl-1", Controller ]
                     }
                     |> snapshotWith []
-                    |> ofSnapshot
+                    |> ofView
 
                 Expect.equal (dualSeats atlas) Set.empty "a disjoint intersection is just empty"
             }
@@ -2158,7 +2144,7 @@ let postTests =
                                 ]
                     }
                     |> snapshotWith []
-                    |> ofSnapshot
+                    |> ofView
 
                 Expect.equal
                     (posts atlas)
@@ -2189,7 +2175,7 @@ let postTests =
                             Map.ofList [ "src-a", Source; "cont-1", Site BuiltKind.Container ]
                     }
                     |> snapshotWith []
-                    |> ofSnapshot
+                    |> ofView
 
                 Expect.equal
                     (posts atlas)
@@ -2223,7 +2209,7 @@ let postTests =
                             Map.ofList [ "src-a", Source; "cont-1", Site BuiltKind.Container ]
                     }
                     |> snapshotWith []
-                    |> ofSnapshot
+                    |> ofView
 
                 Expect.isTrue
                     (Set.contains { X = 11; Y = 10 } (seatTilesOf atlas "src-a"))
@@ -2243,7 +2229,7 @@ let postTests =
                             Map.ofList [ "src-a", Source; "cont-1", Structure BuiltKind.Container ]
                     }
                     |> snapshotWith []
-                    |> ofSnapshot
+                    |> ofView
 
                 Expect.equal (posts atlas) Set.empty "only a Seat under a container is a Post"
             }
@@ -2259,7 +2245,7 @@ let postTests =
                             Map.ofList [ "src-a", Source; "cont-1", Structure BuiltKind.Container ]
                     }
                     |> snapshotWith []
-                    |> ofSnapshot
+                    |> ofView
 
                 Expect.equal
                     (posts atlas)
@@ -2291,7 +2277,7 @@ let workingGroundTests =
                         TargetKinds = Map.ofList [ "src-a", Source; "ctrl-1", Controller ]
                     }
                     |> snapshotWith []
-                    |> ofSnapshot
+                    |> ofView
 
                 Expect.equal
                     (workingGround atlas)
@@ -2311,7 +2297,7 @@ let workingGroundTests =
                         TargetKinds = Map.ofList [ "spawn-1", Structure BuiltKind.Spawn ]
                     }
                     |> snapshotWith []
-                    |> ofSnapshot
+                    |> ofView
 
                 Expect.equal
                     (workingGround atlas)
@@ -2373,7 +2359,7 @@ let consistencyTests =
                                 CreepPositions = Map.ofList [ "w", pos ]
                             })
                         |> snapshotWith [ worker "w" ]
-                        |> ofSnapshot
+                        |> ofView
 
                     let area = workArea atlas task
                     let cost = travelCost atlas "w" task
@@ -2416,7 +2402,7 @@ let consistencyTests =
                             Obstacles = Set.singleton { X = 9; Y = 10 }
                         })
                     |> snapshotWith []
-                    |> ofSnapshot
+                    |> ofView
 
                 let area = workArea atlas (Harvest "src-a")
 
@@ -2461,7 +2447,7 @@ let trunkPathTests =
                                 yield { X = x; Y = 10 }, Plain
                         ]
                     |> snapshotWith []
-                    |> ofSnapshot
+                    |> ofView
 
                 Expect.equal
                     (trunkPath atlas Set.empty { X = 10; Y = 10 } (Set.singleton { X = 14; Y = 10 }))
@@ -2475,7 +2461,7 @@ let trunkPathTests =
             }
 
             test "routes around avoided tiles" {
-                let atlas = corridor |> snapshotWith [] |> ofSnapshot
+                let atlas = corridor |> snapshotWith [] |> ofView
 
                 let path =
                     trunkPath
@@ -2504,7 +2490,7 @@ let trunkPathTests =
                             Roads = Set.singleton { X = 12; Y = 10 }
                         })
                     |> snapshotWith []
-                    |> ofSnapshot
+                    |> ofView
 
                 let path =
                     trunkPath atlas Set.empty { X = 10; Y = 10 } (Set.singleton { X = 14; Y = 10 })
@@ -2536,7 +2522,7 @@ let trunkPathTests =
                             Roads = Set.singleton { X = 12; Y = 9 }
                         })
                     |> snapshotWith []
-                    |> ofSnapshot
+                    |> ofView
 
                 let path =
                     trunkPath atlas Set.empty { X = 10; Y = 10 } (Set.singleton { X = 14; Y = 10 })
@@ -2575,7 +2561,7 @@ let trunkPathTests =
                             Rooms = Map.add "W1N1" RoomLayer.empty projection.Rooms
                         }
                     |> snapshotWith []
-                    |> ofSnapshot
+                    |> ofView
 
                 Expect.equal
                     (trunkPath atlas Set.empty { X = 10; Y = 10 } (Set.singleton { X = 14; Y = 10 }))
@@ -2593,7 +2579,7 @@ let trunkPathTests =
                 // grid index does no checking of its own (#173), so a tile
                 // outside the room has to fall out before it is marked
                 // rather than index off the end of the grid.
-                let atlas = corridor |> snapshotWith [] |> ofSnapshot
+                let atlas = corridor |> snapshotWith [] |> ofView
 
                 Expect.equal
                     (trunkPath
@@ -2606,7 +2592,7 @@ let trunkPathTests =
             }
 
             test "unreachable goals pave nothing" {
-                let atlas = corridor |> snapshotWith [] |> ofSnapshot
+                let atlas = corridor |> snapshotWith [] |> ofView
 
                 Expect.isEmpty
                     (trunkPath atlas Set.empty { X = 10; Y = 10 } (Set.singleton { X = 30; Y = 30 }))
@@ -2614,7 +2600,7 @@ let trunkPathTests =
             }
 
             test "of equally cheap goals the lowest (cost, tile) wins" {
-                let atlas = corridor |> snapshotWith [] |> ofSnapshot
+                let atlas = corridor |> snapshotWith [] |> ofView
 
                 let path =
                     trunkPath
@@ -2646,7 +2632,7 @@ let haulRoundTripTests =
                         CreepPositions = Map.ofList creeps
                     })
                 |> snapshotWith []
-                |> ofSnapshot
+                |> ofView
 
             // Both tiles are the colony's own room's, and these fixtures
             // file it under the empty name (`SpatialInfo.homeName`): since
@@ -2745,7 +2731,7 @@ let haulRoundTripTests =
                             Obstacles = Set.singleton { X = 20; Y = 10 }
                         })
                     |> snapshotWith []
-                    |> ofSnapshot
+                    |> ofView
 
                 Expect.equal
                     (atHome gapped [ Carry; Carry; Move ] { X = 10; Y = 10 } { X = 20; Y = 10 })
@@ -2774,7 +2760,7 @@ let castWalkTicksTests =
                         CreepPositions = Map.ofList creeps
                     })
                 |> snapshotWith []
-                |> ofSnapshot
+                |> ofView
 
             /// The Anchor row's shape empty: four Work and a Carry over one
             /// Move, so a plain step costs 8 units.
@@ -2903,7 +2889,7 @@ let castWalkTicksTests =
                             Obstacles = Set.singleton { X = 20; Y = 10 }
                         })
                     |> snapshotWith []
-                    |> ofSnapshot
+                    |> ofView
 
                 Expect.equal
                     (castWalkTicks
@@ -2929,7 +2915,7 @@ let castWalkTicksTests =
                             Obstacles = Set.ofList [ { X = 20; Y = 10 }; { X = 19; Y = 10 } ]
                         })
                     |> snapshotWith []
-                    |> ofSnapshot
+                    |> ofView
 
                 Expect.equal
                     (castWalkTicks
@@ -2983,7 +2969,7 @@ let walkRecallTests =
                 // an Atlas handed a filled table reads the entry instead of
                 // running the Dijkstra a second time.
                 let walks = WalkTable()
-                let first = corridorSnapshot () |> ofSnapshotRecalling walks
+                let first = corridorSnapshot () |> ofViewRecalling walks
 
                 Expect.equal
                     (castWalkTicks first hauler spawnTile home goal)
@@ -2993,7 +2979,7 @@ let walkRecallTests =
                 Expect.equal walks.Count 1 "and leaves the flood in the table it was handed"
                 let flooded = flood walks
 
-                let second = corridorSnapshot () |> ofSnapshotRecalling walks
+                let second = corridorSnapshot () |> ofViewRecalling walks
 
                 Expect.equal
                     (castWalkTicks second hauler spawnTile home goal)
@@ -3012,7 +2998,7 @@ let walkRecallTests =
                 // flooded into, so a caller that dropped its memo prices the
                 // same lead off its own Dijkstra.
                 let fresh = WalkTable()
-                let atlas = corridorSnapshot () |> ofSnapshotRecalling fresh
+                let atlas = corridorSnapshot () |> ofViewRecalling fresh
 
                 Expect.equal
                     (castWalkTicks atlas hauler spawnTile home goal)
@@ -3022,7 +3008,7 @@ let walkRecallTests =
                 Expect.equal fresh.Count 1 "the flood it ran is left in it"
 
                 Expect.equal
-                    (castWalkTicks (corridorSnapshot () |> ofSnapshot) hauler spawnTile home goal)
+                    (castWalkTicks (corridorSnapshot () |> ofView) hauler spawnTile home goal)
                     (Some 9)
                     "and the plain entry point, which lays its own table, agrees"
             }
@@ -3056,7 +3042,7 @@ let controllerContainerTests =
                                 ]
                     }
                     |> snapshotWith []
-                    |> ofSnapshot
+                    |> ofView
 
                 Expect.equal
                     (controllerContainers atlas)
@@ -3073,7 +3059,7 @@ let controllerContainerTests =
                         TargetKinds = Map.ofList kinds
                     }
                     |> snapshotWith []
-                    |> ofSnapshot
+                    |> ofView
 
                 Expect.equal
                     (controllerContainers (
@@ -3140,7 +3126,7 @@ let seamTests =
                             ]
                         ]
                     |> snapshotWith []
-                    |> ofSnapshot
+                    |> ofView
 
                 Expect.equal
                     (seams atlas "W12S28" "W12S27")
@@ -3158,7 +3144,7 @@ let seamTests =
                             "W12S27", [ { X = 10; Y = 49 }, Wall; { X = 11; Y = 49 }, Plain ]
                         ]
                     |> snapshotWith []
-                    |> ofSnapshot
+                    |> ofView
 
                 Expect.equal
                     (seams atlas "W12S28" "W12S27")
@@ -3176,7 +3162,7 @@ let seamTests =
                             "W13S28", [ { X = 49; Y = 30 }, Plain; { X = 49; Y = 31 }, Swamp ]
                         ]
                     |> snapshotWith []
-                    |> ofSnapshot
+                    |> ofView
 
                 Expect.equal
                     (seams atlas "W12S28" "W13S28")
@@ -3196,7 +3182,7 @@ let seamTests =
                             "W13S28", [ { X = 49; Y = 30 }, Plain ]
                         ]
                     |> snapshotWith []
-                    |> ofSnapshot
+                    |> ofView
 
                 Expect.equal
                     (seams atlas "W12S27" "W12S28")
@@ -3220,7 +3206,7 @@ let seamTests =
                 let atlas =
                     bordered [ ring "W12S28" 0; ring "W13S27" 49; ring "W12S26" 49 ]
                     |> snapshotWith []
-                    |> ofSnapshot
+                    |> ofView
 
                 Expect.isEmpty (seams atlas "W12S28" "W13S27") "a diagonal pair joins nowhere"
                 Expect.isEmpty (seams atlas "W12S28" "W12S26") "two rooms apart share no border"
@@ -3249,7 +3235,7 @@ let seamTests =
                             "W13S28", [ { X = 49; Y = 0 }, Plain; { X = 49; Y = 1 }, Plain ]
                         ]
                     |> snapshotWith []
-                    |> ofSnapshot
+                    |> ofView
 
                 Expect.equal
                     (seams atlas "W12S28" "W12S27")
@@ -3278,7 +3264,7 @@ let seamTests =
                             "the outpost", [ { X = 10; Y = 49 }, Plain ]
                         ]
                     |> snapshotWith []
-                    |> ofSnapshot
+                    |> ofView
 
                 Expect.isEmpty
                     (seams atlas "W12S28" "W12S27")
@@ -3323,7 +3309,7 @@ let seamTests =
                                 ]
                     }
                     |> snapshotWith []
-                    |> ofSnapshot
+                    |> ofView
 
                 Expect.hasLength
                     (seams corner "W12S28" "W12S27")
@@ -3387,7 +3373,7 @@ let private seamGround ground rings =
         Borders = rings |> List.map (fun (room, tiles) -> room, Map.ofList tiles) |> Map.ofList
     }
     |> snapshotWith []
-    |> ofSnapshot
+    |> ofView
 
 /// A plain three-tile column running up to the room's north exit, and the
 /// exit's plain landing across it — the smallest room that has a walk out
@@ -3544,7 +3530,7 @@ let roomTests =
                     home
                     |> withOutpost "W2N1" outpost
                     |> snapshotWith [ worker "w-home"; worker "w-out" ]
-                    |> ofSnapshot
+                    |> ofView
 
                 Expect.equal
                     (creepTile atlas "w-home", creepTile atlas "w-out")
@@ -3603,10 +3589,7 @@ let roomTests =
                     }
 
                 let atlas =
-                    home
-                    |> withOutpost "W2N1" outpost
-                    |> snapshotWith [ worker "w-home" ]
-                    |> ofSnapshot
+                    home |> withOutpost "W2N1" outpost |> snapshotWith [ worker "w-home" ] |> ofView
 
                 Expect.isNonEmpty
                     (workArea atlas (Harvest "src-out"))
@@ -3690,7 +3673,7 @@ let roomTests =
                     home
                     |> withOutpost "W2N1" outpost
                     |> snapshotWith [ worker "w-home"; worker "w-out" ]
-                    |> ofSnapshot
+                    |> ofView
 
                 Expect.equal
                     (creepTile atlas "w-out")
@@ -3727,7 +3710,7 @@ let roomTests =
                         "a room with no layer at all", home
                         "a room named and empty", home |> withOutpost "W3N1" RoomLayer.empty
                     ] do
-                    let atlas = spatial |> snapshotWith [ worker "w-home" ] |> ofSnapshot
+                    let atlas = spatial |> snapshotWith [ worker "w-home" ] |> ofView
 
                     Expect.equal (positionOf atlas "src-far") None $"{label}: nowhere to place it"
                     Expect.equal (seats atlas "src-far") None $"{label}: no Seats to derive"
@@ -3794,10 +3777,7 @@ let roomTests =
                     }
 
                 let atlas =
-                    home
-                    |> withOutpost "W2N1" outpost
-                    |> snapshotWith [ worker "w-home" ]
-                    |> ofSnapshot
+                    home |> withOutpost "W2N1" outpost |> snapshotWith [ worker "w-home" ] |> ofView
 
                 Expect.isTrue
                     (Set.contains { X = 10; Y = 10 } (seatTilesOf atlas "src-home"))
@@ -3856,7 +3836,7 @@ let roomTests =
                                 [ "src-out", { X = 10; Y = 11 }; "can-out", { X = 10; Y = 10 } ]
                     }
 
-                let atlas = home |> withOutpost "W2N1" outpost |> snapshotWith [] |> ofSnapshot
+                let atlas = home |> withOutpost "W2N1" outpost |> snapshotWith [] |> ofView
 
                 Expect.equal
                     (posts atlas)
@@ -3898,7 +3878,7 @@ let roomTests =
                                 [ "src-out", { X = 10; Y = 10 }; "ctrl-out", { X = 10; Y = 12 } ]
                     }
 
-                let atlas = home |> withOutpost "W2N1" outpost |> snapshotWith [] |> ofSnapshot
+                let atlas = home |> withOutpost "W2N1" outpost |> snapshotWith [] |> ofView
 
                 Expect.isTrue
                     (Set.contains { X = 10; Y = 11 } (seatTilesOf atlas "src-out"))
@@ -3941,7 +3921,7 @@ let roomTests =
                         TargetPositions = Map.ofList [ "pile-out", { X = 10; Y = 10 } ]
                     }
 
-                let atlas = home |> withOutpost "W2N1" outpost |> snapshotWith [] |> ofSnapshot
+                let atlas = home |> withOutpost "W2N1" outpost |> snapshotWith [] |> ofView
 
                 Expect.equal
                     (droppedEnergyIn atlas "W1N1")
@@ -3954,13 +3934,14 @@ let roomTests =
                     "and the outpost's own, off the layer it is filed in"
             }
 
-            test "placedCreepsByRoom files each room's creeps under its own name, in Snapshot order" {
+            test
+                "placedCreepsByRoom files each room's creeps under its own name, in ColonyView order" {
                 // The Resolver's list since #145: arbitration runs once per
                 // room, each over that room's creeps and tiles alone (ADR
                 // 0041's Consequences), so the grouping is the seam that
                 // keeps two rooms' coordinates from ever meeting in one
                 // `Map<Pos, string>`. Within a group the order is the
-                // Snapshot's, as every per-creep derivation's is; a creep
+                // ColonyView's, as every per-creep derivation's is; a creep
                 // the projection places nowhere is in no group (ADR 0004).
                 let home =
                     { SpatialInfo.empty with
@@ -3986,7 +3967,7 @@ let roomTests =
                     |> withOutpost "W2N1" outpost
                     |> snapshotWith
                         [ worker "b-home"; worker "w-out"; worker "a-home"; worker "ghost" ]
-                    |> ofSnapshot
+                    |> ofView
 
                 // The order the rooms come in is no promise — no reader
                 // depends on it — so the groups are compared as a map.
@@ -3997,7 +3978,7 @@ let roomTests =
                             "W1N1", [ "b-home", { X = 10; Y = 12 }; "a-home", { X = 10; Y = 10 } ]
                             "W2N1", [ "w-out", { X = 10; Y = 10 } ]
                         ])
-                    "each room's creeps under its name, Snapshot order inside, the unplaced in none"
+                    "each room's creeps under its name, ColonyView order inside, the unplaced in none"
 
                 Expect.equal
                     (adjacentWalkableIn atlas "W2N1" { X = 10; Y = 10 })
@@ -4063,7 +4044,7 @@ let heavyPinJoinTests =
                 let atlas =
                     pinnedTwoRooms [ "beside", { X = 10; Y = 9 }; "two-out", { X = 10; Y = 8 } ] []
                     |> snapshotWith [ worker "beside"; worker "two-out"; worker "ghost" ]
-                    |> ofSnapshot
+                    |> ofView
 
                 Expect.isTrue (standsAtSource atlas "beside" "src") "range 1 is in position"
 
@@ -4089,7 +4070,7 @@ let heavyPinJoinTests =
                 let atlas =
                     pinnedTwoRooms [ "off-grid", { X = 11; Y = 10 } ] []
                     |> snapshotWith [ worker "off-grid" ]
-                    |> ofSnapshot
+                    |> ofView
 
                 Expect.isFalse
                     (Set.contains { X = 11; Y = 10 } (seatTilesOf atlas "src"))
@@ -4110,7 +4091,7 @@ let heavyPinJoinTests =
                         [ "home-body", { X = 10; Y = 9 } ]
                         [ "out-body", { X = 10; Y = 9 } ]
                     |> snapshotWith [ worker "home-body"; worker "out-body" ]
-                    |> ofSnapshot
+                    |> ofView
 
                 Expect.isTrue
                     (standsAtSource atlas "out-body" "src-out")
@@ -4132,7 +4113,7 @@ let heavyPinJoinTests =
                         [ "home-dual", { X = 10; Y = 11 }; "home-plain", { X = 10; Y = 9 } ]
                         [ "out-dual", { X = 10; Y = 11 } ]
                     |> snapshotWith [ worker "home-dual"; worker "home-plain"; worker "out-dual" ]
-                    |> ofSnapshot
+                    |> ofView
 
                 Expect.isTrue
                     (Set.contains { X = 10; Y = 11 } (dualSeats atlas))
@@ -4163,9 +4144,9 @@ let heavyPinJoinTests =
 /// beside the ground and never inside it (ADR 0041), which is what makes a
 /// crossing priceable without any exit tile becoming a tile to stand on.
 ///
-/// The Snapshot is handed out beside the Atlas because one case below
+/// The ColonyView is handed out beside the Atlas because one case below
 /// prices a lead over a walk table it supplies itself
-/// (`ofSnapshotRecalling`, ADR 0032); every other case wants the Atlas and
+/// (`ofViewRecalling`, ADR 0032); every other case wants the Atlas and
 /// takes the shorthand.
 let private northOfSnapshot
     (home: RoomLayer)
@@ -4185,7 +4166,7 @@ let private northOfSnapshot
     |> snapshotWith creeps
 
 let private northOf (home: RoomLayer) homeRing (outpost: RoomLayer) outpostRing kinds creeps =
-    northOfSnapshot home homeRing outpost outpostRing kinds creeps |> ofSnapshot
+    northOfSnapshot home homeRing outpost outpostRing kinds creeps |> ofView
 
 /// The colony's own room as every cross-room case below shapes it: one
 /// plain corridor down column 25 to the exit row, with the creeps standing
@@ -4449,7 +4430,7 @@ let crossRoomTests =
             }
 
             test "the price crosses the border and the standing tiles do not" {
-                // ADR 0041's Consequences drawn on one Snapshot: geometry
+                // ADR 0041's Consequences drawn on one ColonyView: geometry
                 // crosses, arbitration does not. The creep has an honest
                 // number for a Task in the outpost — that is what puts the
                 // outpost's Harvest in the same pool as home's — and no tile
@@ -4713,7 +4694,7 @@ let private outpostSeat = { X = 25; Y = 41 }
 
 /// The two rooms every lead below is priced over: the cross-room fixture's
 /// own corridors, with the spawn structure standing in the home one and the
-/// rings the caller shapes. The Snapshot, because one case hands its own
+/// rings the caller shapes. The ColonyView, because one case hands its own
 /// walk table in (ADR 0032).
 let private leadAcrossSnapshot homeRing outpostRing placed creeps =
     northOfSnapshot
@@ -4728,7 +4709,7 @@ let private leadAcrossSnapshot homeRing outpostRing placed creeps =
         creeps
 
 let private leadAcross homeRing outpostRing placed creeps =
-    leadAcrossSnapshot homeRing outpostRing placed creeps |> ofSnapshot
+    leadAcrossSnapshot homeRing outpostRing placed creeps |> ofView
 
 [<Tests>]
 let crossRoomLeadTests =
@@ -4863,7 +4844,7 @@ let crossRoomLeadTests =
 
             test "a creep on the border ring itself leads nobody, on either side of it" {
                 // The tick a crossing lands: the engine parks the creep on
-                // the far room's ring tile and `Snapshot` files it there, so
+                // the far room's ring tile and `ColonyView.ofWorld` files it there, so
                 // a lead asked for that tick is asked about a tile that is
                 // in no room's ground (ADR 0041 keeps the rings beside the
                 // projection, never inside it). Unpriceable, therefore, and
@@ -4903,8 +4884,7 @@ let crossRoomLeadTests =
                         room, entry.Value)
                     |> Map.ofSeq
 
-                let atlas =
-                    leadAcrossSnapshot homeRing outpostRing [] [] |> ofSnapshotRecalling walks
+                let atlas = leadAcrossSnapshot homeRing outpostRing [] [] |> ofViewRecalling walks
 
                 Expect.equal
                     (castWalkTicks atlas hauler leadSpawn "W1N2" outpostSeat)
@@ -4937,8 +4917,7 @@ let crossRoomLeadTests =
                 // filled table reads the very arrays the first one flooded,
                 // so a census that has not moved pays for no second
                 // Dijkstra on either side of the border (ADR 0032).
-                let second =
-                    leadAcrossSnapshot homeRing outpostRing [] [] |> ofSnapshotRecalling walks
+                let second = leadAcrossSnapshot homeRing outpostRing [] [] |> ofViewRecalling walks
 
                 Expect.equal
                     (castWalkTicks second hauler leadSpawn "W1N2" outpostSeat)
@@ -5605,7 +5584,7 @@ let trunkPricingTests =
                             { X = 10; Y = 15 }, Plain
                         ]
                     |> snapshotWith []
-                    |> ofSnapshot
+                    |> ofView
 
                 let path =
                     trunkPath
@@ -5639,7 +5618,7 @@ let trunkPricingTests =
                             { X = 10; Y = 13 }, Plain
                         ]
                     |> snapshotWith []
-                    |> ofSnapshot
+                    |> ofView
 
                 Expect.equal
                     (List.last (

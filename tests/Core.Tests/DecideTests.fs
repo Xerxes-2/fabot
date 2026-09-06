@@ -14,16 +14,14 @@ let spawn =
         IsSpawning = false
     }
 
-/// The default room's bank holding the given energy against the given capacity.
-let bank energy capacity =
-    Map.ofList
-        [
-            "W1N1",
-            {
-                Available = energy
-                Capacity = capacity
-            }
-        ]
+/// The colony's bank holding the given energy against the given capacity
+/// (ADR 0052 decision 1): one account, its home room's, and no longer a
+/// map keyed by room — every spawn a colony casts from stands in its home.
+let bank energy capacity : RoomEnergy =
+    {
+        Available = energy
+        Capacity = capacity
+    }
 
 /// A controller far from its downgrade deadline, stock intact.
 let controllerAt level =
@@ -150,7 +148,7 @@ let bareRespawn =
     {
         Time = 42
         Spawns = [ spawn ]
-        RoomEnergy = bank 300 300
+        Bank = bank 300 300
         Refillables = [ refillable "spawn-1" 0 BuiltKind.Spawn ]
         Sources = [ source "src-a"; source "src-b" ]
         Controller = Some(controllerAt 1)
@@ -160,11 +158,11 @@ let bareRespawn =
         Hostiles = []
         InvaderCores = []
         Spatial = SpatialInfo.empty
-        // No colony declared but the one this Snapshot is: a **candidate
+        // No colony declared but the one this ColonyView is: a **candidate
         // colony** is a declared home the colony does not own yet (ADR
         // 0047), so an empty list is every fixture that claims nothing —
         // which is every fixture but the claim tests' own.
-        ColonyHomes = []
+        Declared = []
         // And no [[stage]] for it either (ADR 0052 decision 3), which is
         // deliberate and is the same sentence: this fixture's home is
         // `SpatialInfo.empty`'s unnamed room, and a fixture that named a
@@ -175,6 +173,14 @@ let bareRespawn =
         // fixture actually has, and a colony with none answers every stage
         // rule the way one whose controller cannot be placed does.
         Stages = Map.empty
+        // One colony in the world, so every body standing in its rooms is
+        // its own: another colony's creeps are the ones this one cannot
+        // move and does not price (ADR 0052 decision 1), and the fixtures
+        // that need one put it here by name.
+        Foreign = Map.empty
+        // And nothing borrowed: this colony raises no child, so no room's
+        // Upgrade and Build are hers to take (ADR 0047 decision 4).
+        Borrowed = { Rooms = [] }
     }
 
 /// A creep with the given body's part counts, freshly cast: a full
@@ -774,7 +780,7 @@ let patternTableTests =
                 // carries the row's name — not a hard-coded worker shape.
                 let snapshot =
                     { bareRespawn with
-                        RoomEnergy = bank 550 550
+                        Bank = bank 550 550
                         Creeps = [ worker "w1" 0 50 ]
                     }
 
@@ -966,7 +972,7 @@ let openRoom radius =
         })
 
 /// The room with extra targets standing (or being built) on given tiles.
-let withTargets targets room =
+let withTargets targets (room: SpatialInfo) =
     { room with
         TargetKinds =
             (room.TargetKinds, targets)
@@ -1006,7 +1012,7 @@ let atLevel level room =
 
 /// The same rule for a colony a fixture has already assembled: move the
 /// level and the stage together, never one alone.
-let withLevel level (colony: Snapshot) =
+let withLevel level (colony: ColonyView) =
     { colony with
         Controller = Some(controllerAt level)
         Stages = homeStages colony.Spatial level
@@ -1388,7 +1394,7 @@ let layoutTests =
                         "the tower's pick comes before every extension in the one ordering"
             }
 
-            test "the same Snapshot recomputes to the identical site set" {
+            test "the same ColonyView recomputes to the identical site set" {
                 let first = decide (trunkColony 2) Map.empty Set.empty None
                 let second = decide (trunkColony 2) Map.empty Set.empty None
 
@@ -1747,7 +1753,7 @@ let layoutTests =
                     }
 
                 Expect.equal
-                    (Atlas.posts (Atlas.ofSnapshot built))
+                    (Atlas.posts (Atlas.ofView built))
                     (Set.singleton orphan)
                     "one Post, on the Seat the container actually stands on"
 
@@ -2755,12 +2761,12 @@ let withTarget id pos kind colony =
 /// 0004, ADR 0041), so a literal that drifted from its fixture would leave
 /// the one `sequenceEqual` in the group comparing two empty grids and
 /// passing whatever the census did.
-let private stepGridOf (room: string) (snapshot: Snapshot) =
-    Atlas.stepWeights (Atlas.ofSnapshot snapshot) room
+let private stepGridOf (room: string) (snapshot: ColonyView) =
+    Atlas.stepWeights (Atlas.ofView snapshot) room
 
 /// The same grid for the colony's own room — the reading every home-room
 /// perturbation in the guard group is compared through.
-let private homeGridOf (snapshot: Snapshot) =
+let private homeGridOf (snapshot: ColonyView) =
     stepGridOf (SpatialInfo.homeName snapshot.Spatial) snapshot
 
 /// The same colony with a second room's geometry beside its own: one more
@@ -2771,7 +2777,7 @@ let private homeGridOf (snapshot: Snapshot) =
 /// replaces the map, so the colony's own layer survives it and the helper
 /// is order-blind: a `withTarget` composed either side of it is still
 /// read.
-let withOutpost room targets tiles (colony: Snapshot) =
+let withOutpost room targets tiles (colony: ColonyView) =
     { colony with
         Spatial =
             { colony.Spatial with
@@ -2939,7 +2945,7 @@ let censusSignatureTests =
 
                 // And not the container kind alone. The quota prices that
                 // container by a round trip flooded over the outpost's
-                // step-weight grid, and `Snapshot.projectVisible` lays a
+                // step-weight grid, and `World.seenFacts` lays a
                 // room's `Roads` and `Obstacles` out of the same
                 // every-owner structure array the kind census comes from —
                 // so a road paved along the haul lane, or a hostile core
@@ -3063,7 +3069,7 @@ let censusSignatureTests =
                 let perturbed =
                     { colony with
                         Time = colony.Time + 100
-                        RoomEnergy = bank 0 300
+                        Bank = bank 0 300
                         Sources = [ drained "src-a" 120 ]
                         Creeps = [ worker "w1" 25 25 ]
                         Hostiles =
@@ -3096,7 +3102,7 @@ let censusSignatureTests =
 
                 // ADR 0032's guard, the inverse of every test above: the
                 // spawn walks behind the leads are recalled on this
-                // signature alone, so two Snapshots it calls equal have to
+                // signature alone, so two views it calls equal have to
                 // lay the same weight grid. A weights input the signature
                 // missed would price leads off a stale grid until a global
                 // reset, and would fail here rather than in the colony.
@@ -3107,7 +3113,7 @@ let censusSignatureTests =
 
                 // The same pairing in the room the walk table only started
                 // reading with #169: the far leg's entry is a pure function
-                // of the *outpost's* grid, so a Snapshot the signature calls
+                // of the *outpost's* grid, so a ColonyView the signature calls
                 // equal has to lay that grid bitwise too. Perturbed out
                 // there and not at home, or the assertion would be about the
                 // home layer twice over: a creep standing in the outpost and
@@ -3249,7 +3255,7 @@ let censusSignatureTests =
                 // load-bearing: the walk table's far-leg entry is a pure
                 // function of the *goal* room's grid, so every input of
                 // that grid has to be in the signature exactly as the home
-                // room's are (ADR 0032). `Snapshot.projectVisible` folds
+                // room's are (ADR 0032). `World.seenFacts` folds
                 // every scanned room's obstacle-kind construction sites
                 // into that room's `Obstacles` — the engine refuses a creep
                 // its own site wherever it stands — so a pending census
@@ -3883,7 +3889,7 @@ let travelCostTests =
         "travel-cost matching"
         [
             test
-                "live-bug regression: a fresh creep takes the near source regardless of Snapshot order" {
+                "live-bug regression: a fresh creep takes the near source regardless of ColonyView order" {
                 // The creep stands three steps from the near source, seven
                 // from the far one.
                 let snapshotWith (sources: SourceInfo list) =
@@ -3996,7 +4002,7 @@ let travelCostTests =
                     "sticky assignments are never re-evaluated for a closer target"
             }
 
-            test "an unplaced creep is matched as today: Snapshot order decides the tie" {
+            test "an unplaced creep is matched as today: ColonyView order decides the tie" {
                 // The projection places both sources but not the creep, so
                 // no flood can run — the pick falls back to (rank, load).
                 let snapshot =
@@ -4528,18 +4534,13 @@ let stepFrom pos direction =
 /// snapshot's Atlas; a creep absent from the list is idle. Move Intents
 /// only; the movement Verdicts riding beside them are resolveVerdictsOn.
 let resolveOn snapshot assigned =
-    resolve snapshot (Atlas.ofSnapshot snapshot) noThreats (Map.ofList assigned) Set.empty
+    resolve snapshot (Atlas.ofView snapshot) noThreats (Map.ofList assigned) Set.empty
     |> fst
 
 /// The Resolver's movement Verdicts at the same seam, with the named
 /// creeps on the verbose list (ADR 0018).
 let resolveVerdictsVerboseOn snapshot assigned verbose =
-    resolve
-        snapshot
-        (Atlas.ofSnapshot snapshot)
-        noThreats
-        (Map.ofList assigned)
-        (Set.ofList verbose)
+    resolve snapshot (Atlas.ofView snapshot) noThreats (Map.ofList assigned) (Set.ofList verbose)
     |> snd
 
 /// The same for a quiet colony: nobody on the verbose list.
@@ -4548,7 +4549,7 @@ let resolveVerdictsOn snapshot assigned =
 
 /// Run the Emitter at its own seam, over the same tick-start Atlas.
 let emitOn snapshot assigned =
-    emit snapshot (Atlas.ofSnapshot snapshot) noThreats (Map.ofList assigned)
+    emit snapshot (Atlas.ofView snapshot) noThreats (Map.ofList assigned)
 
 /// Two single-Seat sources at the ends of a two-tile corridor; each creep
 /// stands on the other's Seat.
@@ -5377,7 +5378,7 @@ let sayTests =
 /// onto a snapshot — position-less: unpriceable geometry never counts
 /// against a Task (ADR 0004), so the pool and matching are exercised
 /// without terrain.
-let withHits id kind hits hitsMax (snapshot: Snapshot) =
+let withHits id kind hits hitsMax (snapshot: ColonyView) =
     { snapshot with
         Spatial =
             { snapshot.Spatial with
@@ -5420,7 +5421,7 @@ let repairTests =
             }
 
             test "kinds with no whole line never enter the pool on low hits" {
-                // The Snapshot projects hits on repairable kinds only, but the
+                // The ColonyView projects hits on repairable kinds only, but the
                 // kind gate holds in the Planner regardless of what arrives.
                 // The extensions are deliberately outside the Keep (ADR
                 // 0034): cheap, twenty of them, and no creep lives on one.
@@ -6404,10 +6405,7 @@ let tests =
             }
 
             test "no spawn Intent when energy is below a worker body cost" {
-                let snapshot =
-                    { bareRespawn with
-                        RoomEnergy = bank 100 300
-                    }
+                let snapshot = { bareRespawn with Bank = bank 100 300 }
 
                 let { Intents = intents } = decide snapshot Map.empty Set.empty None
                 Expect.isEmpty (spawnIntents intents) "cannot afford a worker"
@@ -6457,7 +6455,16 @@ let tests =
                 | other -> failtest $"expected exactly one SpawnCreep intent, got %A{other}"
             }
 
-            test "spawns in different rooms each draw their own bank" {
+            // One colony, one bank, whatever room a spawn record names
+            // (ADR 0052 decision 1). This pinned the opposite until R2a:
+            // the projection carried a bank per room and a spawn filed
+            // under a second room drew a second full one — a colony with
+            // two homes, which is the shape #191 split into two colonies
+            // and ADR 0047 gave one `decide` each. The spawn below is the
+            // same shape it was and the answer is now the one the shared
+            // bank gives above: 300 buys one body, and the second spawn
+            // waits.
+            test "a spawn filed under another room still draws the colony's one bank" {
                 let snapshot =
                     { bareRespawn with
                         Spawns =
@@ -6469,8 +6476,7 @@ let tests =
                                     RoomName = "W2N2"
                                 }
                             ]
-                        RoomEnergy =
-                            bank 300 300 |> Map.add "W2N2" { Available = 300; Capacity = 300 }
+                        Bank = bank 300 300
                         Creeps = [ worker "w1" 0 50 ]
                         Spatial = threeSeats
                     }
@@ -6479,8 +6485,8 @@ let tests =
 
                 Expect.equal
                     (spawnIntents intents |> List.map (fun (name, _, _) -> name))
-                    [ "Spawn1"; "Spawn2" ]
-                    "full banks in separate rooms fund one body each"
+                    [ "Spawn1" ]
+                    "one bank funds one body, and the second spawn waits"
             }
 
             test "with zero creeps one bank funds two minimal bodies at once" {
@@ -6494,7 +6500,7 @@ let tests =
                                     Id = "spawn-2"
                                 }
                             ]
-                        RoomEnergy = bank 550 550
+                        Bank = bank 550 550
                     }
 
                 let { Intents = intents } = decide snapshot Map.empty Set.empty None
@@ -6508,7 +6514,7 @@ let tests =
             test "at 550 capacity the whole capacity is spent" {
                 let snapshot =
                     { bareRespawn with
-                        RoomEnergy = bank 550 550
+                        Bank = bank 550 550
                         Creeps = [ worker "worker-1" 0 50 ]
                     }
 
@@ -6543,7 +6549,7 @@ let tests =
             test "below minimum workforce, spawning waits for full capacity" {
                 let snapshot =
                     { bareRespawn with
-                        RoomEnergy = bank 400 550
+                        Bank = bank 400 550
                         Creeps = [ worker "worker-1" 0 50 ]
                     }
 
@@ -6555,10 +6561,7 @@ let tests =
             }
 
             test "with zero creeps a minimal body is spawned from available energy" {
-                let snapshot =
-                    { bareRespawn with
-                        RoomEnergy = bank 250 550
-                    }
+                let snapshot = { bareRespawn with Bank = bank 250 550 }
 
                 let { Intents = intents } = decide snapshot Map.empty Set.empty None
 
@@ -6572,10 +6575,7 @@ let tests =
             }
 
             test "with zero creeps and unaffordable minimal body, no spawn Intent" {
-                let snapshot =
-                    { bareRespawn with
-                        RoomEnergy = bank 150 550
-                    }
+                let snapshot = { bareRespawn with Bank = bank 150 550 }
 
                 let { Intents = intents } = decide snapshot Map.empty Set.empty None
                 Expect.isEmpty (spawnIntents intents) "even the fallback needs its unit cost"
@@ -6933,7 +6933,7 @@ let hostile body = hostileAt "h-1" { X = 25; Y = 25 } body
 /// for, so every reader that joins a hostile to the geometry around it —
 /// the Raid log's closest approach today, the reflexes' Reach at #117 —
 /// would measure it against nothing.
-let facing hostiles (snapshot: Snapshot) =
+let facing hostiles (snapshot: ColonyView) =
     { snapshot with
         Hostiles =
             hostiles
@@ -6944,7 +6944,7 @@ let facing hostiles (snapshot: Snapshot) =
     }
 
 /// The same colony reading its safe-mode gates off the given controller.
-let governedBy controller (snapshot: Snapshot) =
+let governedBy controller (snapshot: ColonyView) =
     { snapshot with
         Controller = Some controller
     }
@@ -7000,7 +7000,7 @@ let safeModeTests =
                         Hostiles = hostiles
                     }
 
-                let fires (colony: Snapshot) =
+                let fires (colony: ColonyView) =
                     let { Intents = intents } = decide colony Map.empty Set.empty None
                     activations intents
 
@@ -7341,7 +7341,7 @@ let pileColony creeps positions =
 /// or the two rooms' creeps would pair across the border at range 0 and
 /// emit a pickup the engine answers ERR_NOT_IN_RANGE (#166). The creeps
 /// still enter `Creeps`, which is the colony's fleet and no room's.
-let private withPileRoom room piles positions (colony: Snapshot) =
+let private withPileRoom room piles positions (colony: ColonyView) =
     { colony with
         Spatial =
             { colony.Spatial with
@@ -7895,7 +7895,7 @@ let anchorTests =
                 // hold every Anchor replacement past RCL3 for nothing.
                 let snapshot =
                     { dualSeatColony with
-                        RoomEnergy = bank 700 1300
+                        Bank = bank 700 1300
                         Creeps = [ worker "w1" 0 50 ]
                     }
 
@@ -7915,7 +7915,7 @@ let anchorTests =
             test "a bank short of the capped Anchor's cost still waits" {
                 let snapshot =
                     { dualSeatColony with
-                        RoomEnergy = bank 650 1300
+                        Bank = bank 650 1300
                         Creeps = [ worker "w1" 0 50 ]
                     }
 
@@ -8002,7 +8002,7 @@ let anchorTests =
                 let snapshot =
                     { dualSeatColony with
                         Spawns = [ spawn; secondSpawn ]
-                        RoomEnergy = bank 600 300
+                        Bank = bank 600 300
                         Creeps = [ worker "w1" 0 50 ]
                         Spatial = threeSeatRoom
                     }
@@ -8029,7 +8029,7 @@ let anchorTests =
                 let snapshot =
                     { dualSeatColony with
                         Spawns = [ spawn; secondSpawn ]
-                        RoomEnergy = bank 600 300
+                        Bank = bank 600 300
                         Creeps = anchor "a1" 0 50 :: [ for i in 1..3 -> worker $"w{i}" 0 50 ]
                         Spatial = threeSeatRoom
                     }
@@ -10038,7 +10038,7 @@ let restockTests =
                 // five ticks of phantom arrival, and the gate dispatched a
                 // creep on a crowd that had moved on by the next tick —
                 // then released it TooEarly. The walk is blind to today's
-                // traffic, so the same Snapshot decides the same way with
+                // traffic, so the same ColonyView decides the same way with
                 // the bystander and without it, at every wait either side
                 // of the boundary.
                 let decides crowded ticks =
@@ -10504,7 +10504,7 @@ let quotaColony spawnX spawnCount available =
                         Id = (if i = 1 then "spawn-1" else $"spawn-{i}")
                     }
             ]
-        RoomEnergy = bank available 300
+        Bank = bank available 300
         Sources = [ source "src-a" ]
         Spatial = quotaRoom spawnX
     }
@@ -10613,7 +10613,7 @@ let haulerTests =
                                         Id = (if i = 1 then "spawn-1" else $"spawn-{i}")
                                     }
                             ]
-                        RoomEnergy = bank 1200 300
+                        Bank = bank 1200 300
                         Sources = [ source "src-a"; source "src-b" ]
                         Spatial = shortHaulRoom
                         // The generalist beside the two Anchors is the
@@ -10627,7 +10627,7 @@ let haulerTests =
                         Creeps = [ anchor "a1" 0 50; anchor "a2" 0 50; worker "w1" 0 50 ]
                     }
 
-                let atlas = Atlas.ofSnapshot snapshot
+                let atlas = Atlas.ofView snapshot
                 let haulerBody = [ Carry; Carry; Carry; Carry; Move; Move ]
 
                 // Container and spawn alike stand in the colony's own
@@ -10957,7 +10957,7 @@ let crowdRoom nearStock farStock =
 /// two Withdraws.
 let crowdColony nearStock farStock (creeps: (string * Pos) list) =
     { bareRespawn with
-        RoomEnergy = bank 600 600
+        Bank = bank 600 600
         Sources = []
         Creeps = [ for name, _ in creeps -> hauler name 0 100 ]
         Spatial =
@@ -10988,7 +10988,7 @@ let drawersOf assignments storeId =
 /// Task in the pool they can take.
 let stockCrowdColony stock =
     { bareRespawn with
-        RoomEnergy = bank 600 600
+        Bank = bank 600 600
         Sources = []
         Refillables = [ refillable "spawn-1" 300 BuiltKind.Spawn ]
         Creeps = [ for name, _ in crowdOfThree -> hauler name 0 100 ]
@@ -11021,7 +11021,7 @@ let bufferCrowd =
 
 let bufferCrowdColony bufferStock =
     { bareRespawn with
-        RoomEnergy = bank 1800 1800
+        Bank = bank 1800 1800
         Sources = []
         Creeps = [ for name, _ in bufferCrowd -> creepWith name 0 450 (workerBodyFor 1800) ]
         Spatial =
@@ -11241,7 +11241,7 @@ let pickersOf assignments pileId =
 /// Task.
 let pileTaskColony amount (creeps: (string * Pos) list) =
     { bareRespawn with
-        RoomEnergy = bank 150 150
+        Bank = bank 150 150
         Sources = []
         Creeps = [ for name, _ in creeps -> hauler name 0 100 ]
         Spatial =
@@ -11261,7 +11261,7 @@ let pileTaskColony amount (creeps: (string * Pos) list) =
 /// another walk over it, so its Work Area includes its own tile.
 let tombColony energy (creeps: (string * Pos) list) =
     { bareRespawn with
-        RoomEnergy = bank 150 150
+        Bank = bank 150 150
         Sources = []
         Creeps = [ for name, _ in creeps -> hauler name 0 100 ]
         Spatial =
@@ -11535,7 +11535,7 @@ let pickupTaskTests =
                 // asked, and the factor says which happened.
                 let colony =
                     { bareRespawn with
-                        RoomEnergy = bank 150 150
+                        Bank = bank 150 150
                         Sources = []
                         Creeps = [ hauler "h1" 0 100 ]
                         Spatial =
@@ -11570,7 +11570,7 @@ let pickupTaskTests =
                 // ordering is right as well as inherited.
                 let colony =
                     { bareRespawn with
-                        RoomEnergy = bank 150 150
+                        Bank = bank 150 150
                         Sources = []
                         Refillables = [ refillable "spawn-1" 300 BuiltKind.Spawn ]
                         Creeps = [ hauler "h1" 0 100 ]
@@ -11614,7 +11614,7 @@ let pickupTaskTests =
 
                 let snapshot =
                     { colony with
-                        RoomEnergy = bank 150 150
+                        Bank = bank 150 150
                         Spatial =
                             { colony.Spatial with
                                 Stores = Map.ofList [ "pile-out", 150 ]
@@ -11643,7 +11643,7 @@ let pickupTaskTests =
             }
         ]
 
-/// The hauler quota this Snapshot decides, read off the plan memo `decide`
+/// The hauler quota this ColonyView decides, read off the plan memo `decide`
 /// returns — the quota's only seam, since the rule itself is private to
 /// that pipeline.
 let quotaOf snapshot =
@@ -11919,7 +11919,7 @@ let haulRoundingTests =
                 // asked for, which is the overhire the live colony was
                 // seen carrying.
                 let colony = haulRoundingColony (haulRoundingArms { X = 25; Y = 11 })
-                let atlas = Atlas.ofSnapshot colony
+                let atlas = Atlas.ofView colony
                 let home = SpatialInfo.homeName colony.Spatial
 
                 let roundTrip from =
@@ -11967,7 +11967,7 @@ let haulRoundingTests =
                 // rounding the fraction it grew by is a hire.
                 let near = haulRoundingColony (haulRoundingArms { X = 25; Y = 11 })
                 let far = haulRoundingColony (haulRoundingArms { X = 25; Y = 4 })
-                let atlas = Atlas.ofSnapshot far
+                let atlas = Atlas.ofView far
                 let home = SpatialInfo.homeName far.Spatial
 
                 Expect.equal
@@ -12016,15 +12016,12 @@ let haulRoundingTests =
                 // either side.
                 let colony =
                     { haulRoundingColony (haulRoundingArms { X = 25; Y = 11 }) with
-                        RoomEnergy = bank 600 600
+                        Bank = bank 600 600
                     }
 
-                let rich =
-                    { colony with
-                        RoomEnergy = bank 1300 1300
-                    }
+                let rich = { colony with Bank = bank 1300 1300 }
 
-                let atlas = Atlas.ofSnapshot rich
+                let atlas = Atlas.ofView rich
                 let home = SpatialInfo.homeName rich.Spatial
 
                 Expect.equal
@@ -12091,7 +12088,7 @@ let incomeColony =
                         Id = (if i = 1 then "spawn-1" else $"spawn-{i}")
                     }
             ]
-        RoomEnergy = bank 1200 300
+        Bank = bank 1200 300
         Sources = [ source "src-a"; source "src-b" ]
         Spatial = incomeRoom
     }
@@ -12139,7 +12136,7 @@ let incomeFleet =
 /// rule is a cap and not a discount.
 let richIncomeColony =
     { incomeColony with
-        RoomEnergy = bank 1300 1300
+        Bank = bank 1300 1300
     }
 
 /// The rich bank's fleet at a given worker count: the rows its quotas
@@ -12164,7 +12161,7 @@ let richIncomeFleet workers =
 /// half that says the rule is a cap and not a discount.
 let richestIncomeColony =
     { incomeColony with
-        RoomEnergy = bank 7200 1800
+        Bank = bank 7200 1800
     }
 
 /// That bank's fleet at a given worker count: 2 Anchors, the one hauler
@@ -12397,7 +12394,7 @@ let private threeSeatField (rock: Pos) =
 /// The W12S28 colony at its whole target with one more source somewhere:
 /// the fleet already matches, so any Seat the target counts on top shows
 /// up as a spawn Intent and nothing else can.
-let private incomeColonyPlus (place: Snapshot -> Snapshot) =
+let private incomeColonyPlus (place: ColonyView -> ColonyView) =
     { incomeColony with
         Creeps = incomeFleet
         Sources = incomeColony.Sources @ [ source "src-out" ]
@@ -12504,7 +12501,7 @@ let outpostWorkforceTests =
                     )
 
                 Expect.contains
-                    (Atlas.posts (Atlas.ofSnapshot atTarget))
+                    (Atlas.posts (Atlas.ofView atTarget))
                     { X = 11; Y = 10 }
                     "the premise: (11,10) really is a Post of the home room"
 
@@ -12562,7 +12559,7 @@ let outpostWorkforceTests =
 /// is the answer, which is what these cases exist to read.
 let private midIncomeColony =
     { incomeColony with
-        RoomEnergy = bank 2400 600
+        Bank = bank 2400 600
     }
 
 /// That colony's fleet at a given hauler and worker count: one Anchor per
@@ -12617,7 +12614,7 @@ let private postedOutpostColony workers (control: (string * RoomControlInfo) lis
 
     { colony with
         Creeps = incomeFleetOf workers @ [ anchor "a-out" 0 50 ]
-        RoomEnergy = midIncomeColony.RoomEnergy
+        Bank = midIncomeColony.Bank
         RoomControl =
             (colony.RoomControl, control)
             ||> List.fold (fun acc (room, holder) -> Map.add room holder acc)
@@ -12662,7 +12659,7 @@ let sourceOutputTests =
 
                 Expect.isNonEmpty
                     (Atlas.postsOf
-                        (Atlas.ofSnapshot (postedOutpostColony unreservedWorkers []))
+                        (Atlas.ofView (postedOutpostColony unreservedWorkers []))
                         "src-out")
                     "the premise: the container standing on its Seat makes the rock a Post"
 
@@ -12732,7 +12729,7 @@ let sourceOutputTests =
                 // the projection could not tell from an unowned room until
                 // #133: a rival's *ownership*. ADR 0043's clockless
                 // withdrawal is triggered by either half, so either half
-                // has to be a fact the Snapshot can state — and stating it
+                // has to be a fact the ColonyView can state — and stating it
                 // must not accidentally read as a hold of ours, which is
                 // what this pins.
                 //
@@ -12822,7 +12819,7 @@ let sourceOutputTests =
                     "held by us the same rock is worth ten, so the fleet above is the neutral one"
 
                 // And tellable apart, which is the whole reason the holder
-                // is a closed three-state rather than a flag. A Snapshot
+                // is a closed three-state rather than a flag. A ColonyView
                 // that answered both with one "not ours" would hand the
                 // gate ADR 0043 describes an input on which no correct
                 // answer exists: the NPC's hold read as a rival's shuts an
@@ -12956,7 +12953,7 @@ let sourceOutputTests =
                 // signature blind to the rate would recall three haulers
                 // for a room now worth half, and would size the worker
                 // row off that amortization too. Every census input here
-                // is byte-identical between the two Snapshots: the
+                // is byte-identical between the two views: the
                 // reservation is the only thing that moved.
                 let lapsed =
                     { midIncomeColony with
@@ -12989,7 +12986,7 @@ let sourceOutputTests =
 [<Tests>]
 let invaderCoreTests =
     testList
-        "the invader core the Snapshot carries"
+        "the invader core the ColonyView carries"
         [
             test "a core standing in an outpost moves nothing the colony decides" {
                 // ADR 0043's first step, and the whole of what it claims:
@@ -13152,7 +13149,7 @@ let invaderCoreTests =
 /// is the one arrangement where a neutral rate is the *richest* rate the
 /// Anchor row hires for, and so the only one where the row's ceiling can
 /// be read off a cast body at all.
-let private withoutHomePosts (colony: Snapshot) =
+let private withoutHomePosts (colony: ColonyView) =
     { colony with
         Spatial =
             { colony.Spatial with
@@ -13182,7 +13179,7 @@ let private anchorCapColony homePosts (control: (string * RoomControlInfo) list)
 
     let colony =
         { incomeColony with
-            RoomEnergy = bank 1300 1300
+            Bank = bank 1300 1300
             Sources = incomeColony.Sources @ [ source "src-out" ]
             Creeps = [ worker "w1" 0 50 ]
         }
@@ -13244,7 +13241,7 @@ let private anchorChargeColony workers =
 
     let colony =
         { incomeColony with
-            RoomEnergy = bank 1400 1400
+            Bank = bank 1400 1400
             Sources = incomeColony.Sources @ [ for i in 0..2 -> source $"src-out{i}" ]
             Creeps =
                 [ for i in 1..3 -> anchor $"a{i}" 0 50 ]
@@ -13314,7 +13311,7 @@ let anchorWorkCapTests =
                 Expect.equal
                     (anchorCastBy
                         { incomeColony with
-                            RoomEnergy = bank 1300 1300
+                            Bank = bank 1300 1300
                             Creeps = [ worker "w1" 0 50 ]
                         })
                     sixWork
@@ -13426,7 +13423,7 @@ let rcl3Succession incumbent successor life =
         creepWith name 0 50 [ Work; Work; Work; Work; Work; Carry; Move ]
 
     { successionColony with
-        RoomEnergy = bank 600 600
+        Bank = bank 600 600
         Creeps = [ rcl3Anchor incumbent |> withLife life; rcl3Anchor successor ]
         Spatial =
             successionRoom
@@ -13779,13 +13776,13 @@ let arrivalCapacityTests =
 
 
 /// The Reach of one tick, read at the seam its three readers share (ADR
-/// 0033) — the Threats are derived once from the Snapshot and the Atlas,
+/// 0033) — the Threats are derived once from the ColonyView and the Atlas,
 /// and this is that derivation, not a second one. The home room's share,
 /// since the Reach is filed by room (#138) and these colonies stand their
 /// hostiles at home.
 let reachIn snapshot =
     Threats.reachIn
-        (threatsOf snapshot (Atlas.ofSnapshot snapshot))
+        (threatsOf snapshot (Atlas.ofView snapshot))
         (SpatialInfo.homeName snapshot.Spatial)
 
 /// The open colony facing one hostile of the given body on the given tile.
@@ -14309,7 +14306,7 @@ let fleeTests =
                     (Some(taskId Flee))
                     "under safe mode it keeps working beside the hostile"
 
-                let atlas = Atlas.ofSnapshot (facingHostile true)
+                let atlas = Atlas.ofView (facingHostile true)
 
                 Expect.equal
                     (threatsOf (facingHostile true) atlas)
@@ -14676,7 +14673,7 @@ let private northBorderColony (homeSource: Pos) =
 /// tile a crossing lands a creep on opens onto ground.
 ///
 /// `None` is the room before anything is laid into it: the whole of what
-/// `Snapshot.projectRoom` builds for a room with no vision — its terrain
+/// `World.factsOf` builds for a room with no vision — its terrain
 /// and its border ring, because `Game.map.getRoomTerrain` needs neither —
 /// and not one entry more, because everything vision pays for is absent
 /// entry by entry until vision returns (ADR 0004).
@@ -14687,7 +14684,7 @@ let private northBorderColony (homeSource: Pos) =
 /// this is the baseline the declaration is added to and never a blind
 /// outpost as the colony really projects one — the tests below that want
 /// one build it by calling `place`, as the shell does.
-let private withNorthOutpost (outpostSource: Pos option) (colony: Snapshot) =
+let private withNorthOutpost (outpostSource: Pos option) (colony: ColonyView) =
     { colony with
         Sources = colony.Sources @ [ for _ in Option.toList outpostSource -> source "src-out" ]
         Spatial =
@@ -14725,7 +14722,7 @@ let private withNorthOutpost (outpostSource: Pos option) (colony: Snapshot) =
 /// it, and a site of any other kind on the same tile is the ordinary
 /// surplus work it always was. Pairwise cases below swap the kind and
 /// nothing else.
-let private withOutpostSiteOf (kind: BuiltKind) (site: Pos) (colony: Snapshot) =
+let private withOutpostSiteOf (kind: BuiltKind) (site: Pos) (colony: ColonyView) =
     let outpost = SpatialInfo.layerOf colony.Spatial "W1N2"
 
     { colony with
@@ -14743,7 +14740,7 @@ let private withOutpostSiteOf (kind: BuiltKind) (site: Pos) (colony: Snapshot) =
 
 /// The container site the outpost rule really places — the kind every case
 /// but #205's pairwise ones wants.
-let private withOutpostSite (site: Pos) (colony: Snapshot) =
+let private withOutpostSite (site: Pos) (colony: ColonyView) =
     withOutpostSiteOf BuiltKind.Container site colony
 
 /// The same worker, carrying a full load: Harvest asks for free capacity
@@ -14751,7 +14748,7 @@ let private withOutpostSite (site: Pos) (colony: Snapshot) =
 /// leaves the home source's Task inapplicable and is matched over a pool
 /// whose one candidate is the Build — pairwise by construction, with no
 /// third rival standing in for either side of a comparison.
-let private loaded (colony: Snapshot) =
+let private loaded (colony: ColonyView) =
     { colony with
         Creeps = [ worker "w" 50 0 ]
     }
@@ -14759,13 +14756,13 @@ let private loaded (colony: Snapshot) =
 /// What the tick decided, less the plan memo: the memo carries a mutable
 /// walk table whose identity is not a decision, and these three are the
 /// whole of what leaves the colony.
-let private outcomeOf (colony: Snapshot) =
+let private outcomeOf (colony: ColonyView) =
     let decision = decide colony Map.empty Set.empty None
     decision.Intents, decision.Assignments, decision.Verdicts
 
 /// Which Task won the one worker, and what separated it from its closest
 /// rival (ADR 0009's Matched Verdict).
-let private matchOf (colony: Snapshot) =
+let private matchOf (colony: ColonyView) =
     let { Verdicts = verdicts } = decide colony Map.empty Set.empty None
 
     verdicts
@@ -14778,7 +14775,7 @@ let private matchOf (colony: Snapshot) =
 /// the one the fixtures above leave out so that their Matched factor can
 /// name a single comparison. Level 2 and far from its downgrade deadline,
 /// so nothing here is ADR 0007's deadline rank in disguise.
-let private withHomeController (pos: Pos) (colony: Snapshot) =
+let private withHomeController (pos: Pos) (colony: ColonyView) =
     { colony with
         Controller = Some(controllerAt 2)
         Spatial =
@@ -15019,7 +15016,7 @@ let outpostTests =
                 // The container rule placed a site in the outpost, saw it
                 // standing on the next tick and correctly declined to place
                 // a second — and nothing ever built the first, because the
-                // Build pool is `Snapshot.ConstructionSites` mapped one to
+                // Build pool is `ColonyView.ConstructionSites` mapped one to
                 // one and that list was the spawn rooms' alone. A container
                 // that is never built is a source that never becomes a
                 // Post, so ADR 0042's switch could not close.
@@ -15048,7 +15045,7 @@ let outpostTests =
                 Expect.equal
                     (matchOf { sited with ConstructionSites = [] })
                     None
-                    "and a site the Snapshot does not carry is no Task, however well the projection places it"
+                    "and a site the ColonyView does not carry is no Task, however well the projection places it"
 
                 // The memo *does* flinch at it, and this is the tick that
                 // changed (#169). #121 and #149 left the `pending` half
@@ -15938,7 +15935,7 @@ let outpostTests =
                 //
                 // Read through the colony that declares them (ADR 0047):
                 // the outposts are one colony's now, so the home room is
-                // the key the shell looks them up under (`Snapshot.build`
+                // the key the shell looks them up under (`ColonyView.ofWorld`
                 // takes it off the first spawn) and the rooms and the scan
                 // set are what that lookup answers with. A home nobody
                 // declared answers with none, which is the other half of
@@ -16032,7 +16029,7 @@ let outpostTests =
                 // sent to make that tick happen.
                 //
                 // The room here is shaped exactly as the shell shapes one
-                // it cannot see (`Snapshot.projectRoom`): terrain and a
+                // it cannot see (`World.factsOf`): terrain and a
                 // border ring, because `Game.map.getRoomTerrain` needs no
                 // vision, and not one entry more. Everything the outpost
                 // contributes below is the declaration's.
@@ -16073,7 +16070,7 @@ let outpostTests =
                 // border, the crossing itself, and two down the outpost's
                 // corridor to the Seat at (10,47), four plain tiles at
                 // travel cost's 2 apiece (ADR 0010's half-ticks).
-                let atlas = Atlas.ofSnapshot declared
+                let atlas = Atlas.ofView declared
 
                 Expect.equal
                     (Atlas.targetRoom atlas "src-out")
@@ -16264,7 +16261,7 @@ let outpostTests =
                 let blind = northBorderColony { X = 10; Y = 38 } |> withNorthOutpost None
 
                 let atlas =
-                    Atlas.ofSnapshot
+                    Atlas.ofView
                         { blind with
                             Spatial = Outpost.place [ declaration ] blind.Spatial
                         }
@@ -16356,7 +16353,7 @@ let private twoRockColony (westContainer: (string * Pos) list) =
 
 /// Which Task won the one Anchor, and what separated it from its closest
 /// rival — `matchOf`'s reading for the body these cases hire (ADR 0009).
-let private anchorMatch (colony: Snapshot) =
+let private anchorMatch (colony: ColonyView) =
     let { Verdicts = verdicts } = decide colony Map.empty Set.empty None
 
     verdicts
@@ -16563,7 +16560,7 @@ let heavyPinAcrossTests =
 /// rule waits for, and what the Executor needs to create anything there.
 /// Neutral rather than reserved because nothing here reads the rate; the
 /// blind room is a case of its own below.
-let private withOutpostGround room terrain placed (colony: Snapshot) =
+let private withOutpostGround room terrain placed (colony: ColonyView) =
     { colony with
         Sources = colony.Sources @ [ source "src-out" ]
         RoomControl = Map.add room neutralRoom colony.RoomControl
@@ -16587,7 +16584,7 @@ let private withOutpostGround room terrain placed (colony: Snapshot) =
 
 /// Every container site the tick asks for, room beside tile, in the order
 /// the colony emits them — the whole of what this rule adds to a Decision.
-let private containerSites (colony: Snapshot) =
+let private containerSites (colony: ColonyView) =
     let { Intents = intents } = decide colony Map.empty Set.empty None
 
     intents
@@ -16631,7 +16628,7 @@ let outpostContainerTests =
                     |> withOutpostGround "W1N2" detourGround [ "src-out", outpostSource, Source ]
 
                 Expect.equal
-                    (Atlas.seatTilesOf (Atlas.ofSnapshot colony) "src-out")
+                    (Atlas.seatTilesOf (Atlas.ofView colony) "src-out")
                     (Set.ofList [ { X = 10; Y = 45 }; { X = 11; Y = 43 } ])
                     "the premise: the rock has two Seats, and the nearer one to the border is (10,45)"
 
@@ -16766,7 +16763,7 @@ let outpostContainerTests =
                     |> withOutpostGround "W1N2" ground [ "src-out", outpostSource, Source ]
 
                 Expect.equal
-                    (Atlas.seatTilesOf (Atlas.ofSnapshot colony) "src-out")
+                    (Atlas.seatTilesOf (Atlas.ofView colony) "src-out")
                     (Set.ofList [ { X = 9; Y = 45 }; { X = 11; Y = 45 } ])
                     "the premise: two Seats, one swamp and one plain, over the same apron"
 
@@ -16889,7 +16886,7 @@ let private haulHome =
         Controller = None
         Refillables = []
         Sources = [ source "src-out" ]
-        RoomEnergy = bank 600 600
+        Bank = bank 600 600
         Spatial =
             { SpatialInfo.empty with
                 RoomName = Some "W1N1"
@@ -16910,7 +16907,7 @@ let private haulHome =
 /// (ADR 0042). Who holds W1N2 is the caller's and is the only thing that
 /// moves between two calls; `None` is the room the colony sees nobody in,
 /// which is a third answer and not the neutral one (ADR 0004).
-let private withHaulOutpost (control: RoomControlInfo option) (colony: Snapshot) =
+let private withHaulOutpost (control: RoomControlInfo option) (colony: ColonyView) =
     { colony with
         RoomControl =
             match control with
@@ -16936,7 +16933,7 @@ let private withHaulOutpost (control: RoomControlInfo option) (colony: Snapshot)
 /// projected and the room held exactly as above, and `can-out` simply
 /// absent, which is what a Seat with nothing built on it is. The standing
 /// census is then the only census input that moves between the two.
-let private beforeHaulContainer (colony: Snapshot) =
+let private beforeHaulContainer (colony: ColonyView) =
     let outpost = SpatialInfo.layerOf colony.Spatial "W1N2"
 
     { colony with
@@ -16959,7 +16956,7 @@ let private beforeHaulContainer (colony: Snapshot) =
 /// number here where a single-container fixture would stay green. The
 /// branch runs east along y = 44, so the tile alone lengthens this
 /// container's haul and nothing else's.
-let private withSecondHaulContainer (tile: Pos) (colony: Snapshot) =
+let private withSecondHaulContainer (tile: Pos) (colony: ColonyView) =
     let outpost = SpatialInfo.layerOf colony.Spatial "W1N2"
 
     { colony with
@@ -17040,7 +17037,7 @@ let outpostHaulTests =
                     |> withHaulOutpost (Some(reservedRoom true 4000))
                     |> withSecondHaulContainer { X = 33; Y = 44 }
 
-                let atlas = Atlas.ofSnapshot colony
+                let atlas = Atlas.ofView colony
 
                 // The body the quota itself divides by — this fixture's
                 // 600 bank, not `haulRoundingBody`'s 300 (#208). Road
@@ -17120,7 +17117,7 @@ let outpostHaulTests =
                 // reads a *second* room's held rate, so the census
                 // signature had to widen to sign every projected room's —
                 // and this is what the widening buys. Every census input
-                // below is byte-identical between the two Snapshots: the
+                // below is byte-identical between the two views: the
                 // reservation is the only thing that moved.
                 let lapsed = haulHome |> withHaulOutpost (Some neutralRoom)
 
@@ -17158,7 +17155,7 @@ let outpostHaulTests =
                 // this one moves nothing but whether `can-out` stands in
                 // W1N2, which only the *standing* census spanning every
                 // projected room can see. Joined against the home layer
-                // alone the two Snapshots sign one string, so the colony
+                // alone the two views sign one string, so the colony
                 // would recall the container-less nothing for ever and ADR
                 // 0042's switch would never fire.
                 let standing = haulHome |> withHaulOutpost (Some(reservedRoom true 4000))
@@ -17199,7 +17196,7 @@ let outpostHaulTests =
 /// of Anchors alone can put nothing into an extension and the colony hires
 /// a carrier in front of every row — which is the row these cases would
 /// then read instead of the one they are about.
-let private withOutpostGarrison life (colony: Snapshot) =
+let private withOutpostGarrison life (colony: ColonyView) =
     let outpost = SpatialInfo.layerOf colony.Spatial "W1N2"
 
     { colony with
@@ -17228,16 +17225,14 @@ let private withOutpostGarrison life (colony: Snapshot) =
 /// here rather than inherited so a case that reads a tick count says which
 /// body it counted.
 let private outpostSuccession life =
-    { haulHome with
-        RoomEnergy = bank 300 300
-    }
+    { haulHome with Bank = bank 300 300 }
     |> withHaulOutpost (Some(reservedRoom true 4000))
     |> withOutpostGarrison life
 
 /// The names of the bodies a tick casts, in the order the colony emits
 /// them — the row a spawn Intent came from, which is the whole of what the
 /// cases below read.
-let private castNames (colony: Snapshot) =
+let private castNames (colony: ColonyView) =
     spawnIntents (decide colony Map.empty Set.empty None).Intents
     |> List.map (fun (_, _, name) -> name)
 
@@ -17340,7 +17335,7 @@ let private switchHome =
         Controller = None
         Refillables = []
         Sources = [ source "src-home" ]
-        RoomEnergy = bank 300 300
+        Bank = bank 300 300
         Spatial =
             { SpatialInfo.empty with
                 RoomName = Some "W1N1"
@@ -18522,7 +18517,7 @@ let private candidateColony (creeps: (CreepInfo * Pos) list) =
 
     { colony with
         RoomControl = colony.RoomControl |> Map.add "W1N2" neutralRoom
-        ColonyHomes = [ SpatialInfo.homeName colony.Spatial; "W1N2" ]
+        Declared = [ SpatialInfo.homeName colony.Spatial; "W1N2" ]
     }
 
 [<Tests>]
@@ -18544,7 +18539,7 @@ let claimTests =
                 // Pairwise on the declaration alone: the same room, the
                 // same controller, the same projection, the same neutral
                 // control entry. Only the human's sentence moves.
-                let pooled (colony: Snapshot) = planTasks colony noThreats
+                let pooled (colony: ColonyView) = planTasks colony noThreats
 
                 let outpost =
                     let colony = reserveColony []
@@ -18768,7 +18763,7 @@ let private leadColony life =
     let room = atLevel 2 (openRoom 6)
 
     { room with
-        RoomEnergy = bank 1300 1300
+        Bank = bank 1300 1300
         Creeps = [ worker "w1" 0 50; reserver "r1" |> withLife life ]
         Spatial =
             room.Spatial
@@ -18830,7 +18825,7 @@ let reserverLeadTests =
 /// whole point of every case below, because an outpost's *container* site
 /// is already feeding-tier work (#157) and a case built on one could not
 /// tell the nursery rule apart from that one.
-let private withNorthSpawnSite (site: Pos) (colony: Snapshot) =
+let private withNorthSpawnSite (site: Pos) (colony: ColonyView) =
     let outpost = SpatialInfo.layerOf colony.Spatial "W1N2"
 
     { colony with
@@ -18851,10 +18846,10 @@ let private withNorthSpawnSite (site: Pos) (colony: Snapshot) =
 /// baseline every nursery case below is read against, because it holds the
 /// human's half of the declaration fixed and leaves only the ownership to
 /// move.
-let private asCandidate (colony: Snapshot) =
+let private asCandidate (colony: ColonyView) =
     { colony with
         RoomControl = Map.add "W1N2" neutralRoom colony.RoomControl
-        ColonyHomes = [ SpatialInfo.homeName colony.Spatial; "W1N2" ]
+        Declared = [ SpatialInfo.homeName colony.Spatial; "W1N2" ]
     }
 
 /// And the tick after: the same declaration, the same room, ours now
@@ -18862,10 +18857,10 @@ let private asCandidate (colony: Snapshot) =
 /// the controller — which is the whole of what turns a candidate into a
 /// **nursery**, there being no spawn of ours in that room in any fixture
 /// here until `withNorthSpawn` puts one there.
-let private asNursery (colony: Snapshot) =
+let private asNursery (colony: ColonyView) =
     { colony with
         RoomControl = Map.add "W1N2" ownedRoom colony.RoomControl
-        ColonyHomes = [ SpatialInfo.homeName colony.Spatial; "W1N2" ]
+        Declared = [ SpatialInfo.homeName colony.Spatial; "W1N2" ]
         // Declared and owned with no spawn of ours standing in it is the
         // whole of the [[stage]] `Nursery` (ADR 0052 decision 3), so the
         // shell would derive exactly this entry for the room; the
@@ -18875,7 +18870,7 @@ let private asNursery (colony: Snapshot) =
     }
 
 /// The same colony with a spawn of ours standing in the north room:
-/// independence, and the end of the nursery (ADR 0047). The Snapshot fact
+/// independence, and the end of the nursery (ADR 0047). The ColonyView fact
 /// the rule actually reads and nothing beside it — a spawn *structure* in
 /// that room's layer, which is the whole of what the tick a spawn is
 /// finished changes for this rule; the human's edit splitting
@@ -18886,10 +18881,10 @@ let private asNursery (colony: Snapshot) =
 /// room is what turns `Nursery` into `Bootstrapping`, the shell derives
 /// the pair off the world together, and the spawn structure stays in the
 /// layer because that is what the mother's pioneers walk up to. Not in
-/// `Snapshot.Spawns`, which is the colony's own spawn list since #191 —
+/// `ColonyView.Spawns`, which is the colony's own spawn list since #191 —
 /// the spawns it casts from and banks for, and a room it does not run is
 /// not a room it casts in.
-let private withNorthSpawn (colony: Snapshot) =
+let private withNorthSpawn (colony: ColonyView) =
     let outpost = SpatialInfo.layerOf colony.Spatial "W1N2"
 
     { colony with
@@ -18908,8 +18903,8 @@ let private withNorthSpawn (colony: Snapshot) =
 
 /// The same colony with the north room out of its scan set altogether:
 /// what the tick a bootstrapped child reaches `Colony.bootstrapLevel` does
-/// to its mother's Snapshot (ADR 0047 decision 4). The level is not a fact
-/// any Snapshot of hers carries — it is read off the world, once, by the
+/// to its mother's ColonyView (ADR 0047 decision 4). The level is not a fact
+/// any ColonyView of hers carries — it is read off the world, once, by the
 /// rule that decides which rooms she projects (`Colony.bootstrapping`) —
 /// so what RCL3 *is*, at this seam, is the whole room leaving: its layer,
 /// its border ring, the ids that layer placed, the sites vision paid for
@@ -18921,7 +18916,7 @@ let private withNorthSpawn (colony: Snapshot) =
 /// the shell does: the scan set is the single gate, and a fixture that
 /// removed only the control entry would be pinning a state the projection
 /// cannot be in.
-let private withoutNorthRoom (colony: Snapshot) =
+let private withoutNorthRoom (colony: ColonyView) =
     let placed = (SpatialInfo.layerOf colony.Spatial "W1N2").TargetPositions
 
     { colony with
@@ -19088,7 +19083,7 @@ let nurseryTests =
                         "one short of sixteen the bootstrapped child's mother casts too, and on the same generalist row"
                 | other -> failtest $"expected exactly one SpawnCreep intent, got %A{other}"
 
-                // And the end of it. RCL3 reaches this Snapshot as the
+                // And the end of it. RCL3 reaches this ColonyView as the
                 // child's [[stage]] and is still not what closes the
                 // window: it takes the whole room out of the mother's scan
                 // set (`withoutNorthRoom`, which turns the stage
@@ -19228,7 +19223,7 @@ let nurseryTests =
                 // or a room claimed for some reason of his own. Ownership
                 // and the spawn both answer "nursery" here, and what says
                 // otherwise is that the shell derives a stage for the
-                // declared homes alone (`Snapshot.colonyStages`), so an
+                // declared homes alone (`World.stages`), so an
                 // undeclared room has no entry however plainly it looks
                 // like one — without which every site in that room would be
                 // uncapped feeding-tier work on the strength of a fact no
@@ -19236,7 +19231,7 @@ let nurseryTests =
                 Expect.equal
                     (matchOf
                         { asNursery sited with
-                            ColonyHomes = [ SpatialInfo.homeName sited.Spatial ]
+                            Declared = [ SpatialInfo.homeName sited.Spatial ]
                             Stages = Map.remove "W1N2" (asNursery sited).Stages
                         })
                     (Some(taskId (Upgrade "ctrl-1"), MatchFactor.TravelCost))
@@ -19245,9 +19240,9 @@ let nurseryTests =
                 // And the colony's own home, excluded by name (ADR 0047).
                 // `Main.loop` runs `decide` only for a colony whose home
                 // holds a spawn, so a home at the `Nursery` stage is a
-                // Snapshot the shell does not build — which is what makes
+                // ColonyView the shell does not build — which is what makes
                 // this clause a guard rather than a live rule, and why a
-                // test has to lay that Snapshot by hand for it to be read
+                // test has to lay that ColonyView by hand for it to be read
                 // at all. Read without it, #157's "home Build is untouched
                 // and stays Surplus" would grow a condition.
                 let homeSited =
@@ -19258,7 +19253,7 @@ let nurseryTests =
 
                     { colony with
                         ConstructionSites = colony.ConstructionSites @ [ { Id = "site-home" } ]
-                        ColonyHomes = [ SpatialInfo.homeName colony.Spatial ]
+                        Declared = [ SpatialInfo.homeName colony.Spatial ]
                         Stages = Map.ofList [ SpatialInfo.homeName colony.Spatial, Nursery ]
                         Spatial =
                             { colony.Spatial with
@@ -19301,7 +19296,7 @@ let nurseryTests =
                 // room is ours yet. The west site is the near one, so the
                 // budget it carries is read off how many of the four
                 // workers stop there before the rest walk on.
-                let twoOutposts (colony: Snapshot) =
+                let twoOutposts (colony: ColonyView) =
                     let west =
                         { RoomLayer.empty with
                             Terrain = Map.ofList [ for x in 45..49 -> { X = x; Y = 2 }, Plain ]
@@ -19438,7 +19433,7 @@ let private raisedPair =
     ]
 
 /// What each colony projects, the way the shell derives it before it
-/// builds anything (`Snapshot.projectedRooms`): the home, the outposts
+/// builds anything (`World.roomsProjected`): the home, the outposts
 /// that survive the stand-down gate (ADR 0043) and the rooms it bootstraps
 /// for a child of its own (ADR 0047 decision 4). Adoption is decided over
 /// this table and not over the declaration, so a room the gate withheld
@@ -19459,7 +19454,7 @@ let private projectionsOf (stages: Map<string, ColonyStage>) (colonies: Colony l
 
 /// The mother of the pair, carrying exactly the creeps the membership rule
 /// gave her, each standing on its own tile in her home layer — which is
-/// what `Snapshot.build` does with the set it is handed (#191): a colony's
+/// what `ColonyView.ofWorld` does with the set it is handed (#191): a colony's
 /// `Creeps` and its layers' `CreepPositions` are cut by one set, so a
 /// creep another colony holds is in neither.
 let private motherColony (creeps: (string * Pos) list) =
@@ -19478,7 +19473,7 @@ let private motherColony (creeps: (string * Pos) list) =
 /// The child: the north room run as a home of its own, with its own rock
 /// and its own corridor and nothing of the mother's in it. Built beside
 /// `northBorderColony` rather than out of it, because the two colonies'
-/// Snapshots are two projections and a shared one would prove nothing
+/// views are two projections and a shared one would prove nothing
 /// about which of them a Task came from.
 let private childColony (creeps: (string * Pos) list) =
     { bareRespawn with
@@ -19502,10 +19497,10 @@ let private childColony (creeps: (string * Pos) list) =
     }
 
 /// Which Task one named creep was matched to this tick, or none at all —
-/// which is the answer for a creep this colony's Snapshot does not carry:
+/// which is the answer for a creep this colony's ColonyView does not carry:
 /// it is not in the fold that writes a status Verdict per living creep, so
 /// the colony decides nothing about it and holds nothing of it.
-let private matchedTask name (colony: Snapshot) =
+let private matchedTask name (colony: ColonyView) =
     (decide colony Map.empty Set.empty None).Verdicts
     |> List.tryPick (function
         | Verdict.Matched(creep, task, _) when creep = name -> Some task
@@ -19515,9 +19510,9 @@ let private matchedTask name (colony: Snapshot) =
 /// own: the child colony's, the one target its mother borrows workers for
 /// while she is still raising it (ADR 0047 decision 4). Laid into the
 /// layer she projects the room under, because that is where every fact she
-/// has about that room lives — her own controller is `Snapshot.Controller`
+/// has about that room lives — her own controller is `ColonyView.Controller`
 /// and is somewhere else entirely.
-let private withNorthController (pos: Pos) (colony: Snapshot) =
+let private withNorthController (pos: Pos) (colony: ColonyView) =
     let north = SpatialInfo.layerOf colony.Spatial "W1N2"
 
     { colony with
@@ -19532,7 +19527,7 @@ let private withNorthController (pos: Pos) (colony: Snapshot) =
                 }
     }
 
-/// The mother's Snapshot while she raises a child that has already stood
+/// The mother's ColonyView while she raises a child that has already stood
 /// its own spawn: the north room declared a home of ours, owned, holding a
 /// spawn of ours and a controller of ours, with the human's spawn site
 /// still standing in it. Every fact but the last is the [[nursery]]
@@ -19556,7 +19551,7 @@ let private raisingMother = withNorthSpawn claimedChild
 /// The one worker moved out of the home corridor into the child's room —
 /// where a [[pioneer]] that has crossed the [[seam]] actually stands, and
 /// the only place from which the child's Upgrade is the near one.
-let private standingNorth (pos: Pos) (colony: Snapshot) =
+let private standingNorth (pos: Pos) (colony: ColonyView) =
     let north = SpatialInfo.layerOf colony.Spatial "W1N2"
 
     { colony with
@@ -19575,7 +19570,7 @@ let private standingNorth (pos: Pos) (colony: Snapshot) =
 
 /// The child running its own tick over the same room: its own home, its
 /// own rock, its own controller under the same id the mother sees it by —
-/// two colonies, two Snapshots, one target (ADR 0047 decision 1).
+/// two colonies, two views, one target (ADR 0047 decision 1).
 let private childRunningItself =
     let colony = childColony [ "c", { X = 10; Y = 44 } ]
 
@@ -19629,7 +19624,7 @@ let bootstrapTests =
                     "and her own Upgrade is still hers: the borrowing adds a second, it does not replace the first"
 
                 // Pairwise on the tick the child outgrows her: what RCL3
-                // does to this Snapshot is take the whole room out of her
+                // does to this ColonyView is take the whole room out of her
                 // scan set (`withoutNorthRoom`), and both Tasks leave with
                 // it, from one subtraction rather than two gates — the
                 // child's [[stage]] turning `Independent` beside it closes
@@ -19668,7 +19663,7 @@ let bootstrapTests =
             test "the child pools the same Upgrade in its own tick" {
                 // Both colonies hold it, and neither is the other's: the
                 // mother reads the controller off a layer she projects, the
-                // child off its own `Snapshot.Controller`, and the one
+                // child off its own `ColonyView.Controller`, and the one
                 // target carries one Task id in both pools. Which of them
                 // actually upgrades is travel cost's, tick by tick — each
                 // Matcher counts only its own holders, exactly as the two
@@ -19769,7 +19764,7 @@ let bootstrapTests =
                 // while it stands: the loaded body takes the site by rank.
                 // Pairwise on the site alone — without it the Upgrade is
                 // the feeding-tier Task again (the test above).
-                let withNorthSite id kind pos (colony: Snapshot) =
+                let withNorthSite id kind pos (colony: ColonyView) =
                     let north = SpatialInfo.layerOf colony.Spatial "W1N2"
 
                     { colony with
@@ -19885,7 +19880,7 @@ let bootstrapTests =
 
             test "the downgrade deadline lifts the colony's own controller and not the child's" {
                 // ADR 0007's escalation, narrowed by ADR 0047 decision 4.
-                // The deadline is read off `Snapshot.Controller`, which is
+                // The deadline is read off `ColonyView.Controller`, which is
                 // this colony's alone, and since the pool can hold a second
                 // Upgrade the arm that lifts one has to say *which*: lifting
                 // the child's on the mother's timer would send her whole
@@ -19913,7 +19908,7 @@ let bootstrapTests =
                 // Level 2's full timer is 10,000 and the deadline is half of
                 // it, so 4,000 is inside and 20,000 — `controllerAt`'s own —
                 // is the case above, outside.
-                let pressed (colony: Snapshot) =
+                let pressed (colony: ColonyView) =
                     { colony with
                         Controller =
                             colony.Controller
@@ -20007,7 +20002,7 @@ let twoColonyTests =
             test "a mother goes on projecting the child that names her, until it is independent" {
                 // ADR 0047 decision 4's window, at the seam that decides
                 // how long it lasts. A child's [[stage]] is not a fact any
-                // colony's Snapshot holds for a room it does not own — and
+                // colony's ColonyView holds for a room it does not own — and
                 // it is what decides whether that room is projected at all
                 // — so it is derived off the world once (ADR 0052 decision
                 // 3, `Colony.stageOf`) and everything downstream follows
@@ -20065,7 +20060,7 @@ let twoColonyTests =
                 // we do not own has no stage either, where a level map
                 // carried any seen controller and read a 0 that was under
                 // the line. Derived here rather than written down, so the
-                // case is the one `Snapshot.colonyStages` would actually
+                // case is the one `World.stages` would actually
                 // hand her — a candidate colony that names a mother, or a
                 // child that stops being ours, is projected by nobody, so
                 // nothing pools a Claim to take such a room and the route
@@ -20170,7 +20165,7 @@ let twoColonyTests =
             test
                 "a creep is its caster's, and its adopter's while it stands in that colony's room alone" {
                 // ADR 0047 decision 2 at the two seams it decides at: the
-                // membership rule the shell cuts a Snapshot with, and what
+                // membership rule the shell cuts a ColonyView with, and what
                 // `decide` then makes of the creep. One creep, one fact
                 // moved — the room it stands in — and the whole of its
                 // working life moves with it.
@@ -20193,16 +20188,16 @@ let twoColonyTests =
 
                 // What that decides. The colony the rule gave the creep to
                 // matches it to a Task of its own rooms; the other one is
-                // handed a Snapshot without it and says nothing about it at
+                // handed a ColonyView without it and says nothing about it at
                 // all — no Verdict, no assignment, no Move.
                 //
                 // Each half is asked of a colony with a fleet of its **own**
                 // standing in it, so the Matcher has actually run and a pool
                 // has actually been matched when the silence is read: asked
-                // of an empty Snapshot the same `isNone` would hold for a
+                // of an empty ColonyView the same `isNone` would hold for a
                 // creep nobody had ever heard of, and would still hold with
                 // the membership cut deleted. What stays out of reach here
-                // is the other half of that cut — that `Snapshot.build`
+                // is the other half of that cut — that `ColonyView.ofWorld`
                 // keeps an adopted body out of every layer's
                 // `CreepPositions` as well — which is App-side and has no
                 // seam to test through (#137).
@@ -20293,7 +20288,7 @@ let twoColonyTests =
                 // perfectly readable and the spawn it names stands in a
                 // room no living colony declares — a slip in the constant,
                 // or a home lost since the spawn was built. Filed under
-                // that home the creep would be in no Snapshot at all, which
+                // that home the creep would be in no ColonyView at all, which
                 // is the drop this rule refuses, so it goes where the
                 // unreadable names go.
                 Expect.equal
@@ -20343,7 +20338,7 @@ let twoColonyTests =
             test "each colony pools its own rooms' work and never the other's" {
                 // The whole of "one Atlas, one Layout, one pool per colony"
                 // (ADR 0047 decision 1) as it is visible from outside: two
-                // Snapshots, two pools, and no Task of one in the other.
+                // views, two pools, and no Task of one in the other.
                 // `decide` reads the projection it is handed and never the
                 // declaration, which is what makes this a property of the
                 // seam rather than of the fixtures.
@@ -20376,7 +20371,7 @@ let twoColonyTests =
 /// on one of those Seats: the switch that makes the rock a Post and
 /// admits the room to the economy (#129). Ids carry the room's name, so
 /// two outposts stand in one projection without colliding.
-let private withOutpostRoom room (rock: Pos) posted (colony: Snapshot) =
+let private withOutpostRoom room (rock: Pos) posted (colony: ColonyView) =
     let container =
         if posted then
             [ $"can-{room}", { rock with X = rock.X - 1 }, Structure BuiltKind.Container ]
@@ -20405,7 +20400,7 @@ let private withOutpostRoom room (rock: Pos) posted (colony: Snapshot) =
 let private reserverColony outposts creeps control =
     let colony =
         ({ incomeColony with
-            RoomEnergy = bank 8000 1800
+            Bank = bank 8000 1800
             Creeps = creeps
          },
          outposts)
@@ -20516,7 +20511,7 @@ let reserverRowTests =
                             [ "W1N2", reservedRoom true 1000 ]
 
                     { colony with
-                        ColonyHomes =
+                        Declared =
                             if declared then
                                 [ SpatialInfo.homeName colony.Spatial; "W1N2" ]
                             else
@@ -20567,7 +20562,7 @@ let reserverRowTests =
                     let colony = reserverColony outposts (surplusFleet 2) control
 
                     { colony with
-                        ColonyHomes = [ SpatialInfo.homeName colony.Spatial; "W1N2" ]
+                        Declared = [ SpatialInfo.homeName colony.Spatial; "W1N2" ]
                     }
                     |> fun colony -> decide colony Map.empty Set.empty None
                     |> fun result -> reserverCasts result.Intents
@@ -20595,7 +20590,7 @@ let reserverRowTests =
                             [ "W1N2", reservedRoom true 5000; "W2N2", neutralRoom ]
 
                     { colony with
-                        ColonyHomes = [ SpatialInfo.homeName colony.Spatial; "W1N2" ]
+                        Declared = [ SpatialInfo.homeName colony.Spatial; "W1N2" ]
                     }
 
                 Expect.equal
@@ -20652,7 +20647,7 @@ let reserverRowTests =
                             [ "W1N2", neutralRoom ]
 
                     { colony with
-                        RoomEnergy = bank capacity capacity
+                        Bank = bank capacity capacity
                     }
                     |> fun colony -> decide colony Map.empty Set.empty None
                     |> fun result -> result.Intents
@@ -20789,7 +20784,7 @@ let reserverRowTests =
                             [ "W1N2", reservedRoom true held ]
 
                     { colony with
-                        RoomEnergy = bank 8000 capacity
+                        Bank = bank 8000 capacity
                     }
                     |> fun colony -> decide colony Map.empty Set.empty None
                     |> fun result -> reserverCasts result.Intents
@@ -20825,9 +20820,7 @@ let reserverRowTests =
                 let castWith control =
                     let colony = reserverColony [ northOutpost true ] (surplusFleet 3) control
 
-                    { colony with
-                        RoomEnergy = bank 8000 8000
-                    }
+                    { colony with Bank = bank 8000 8000 }
                     |> fun colony -> decide colony Map.empty Set.empty None
                     |> fun result -> reserverCasts result.Intents
 
@@ -20869,13 +20862,7 @@ let reserverRowTests =
 
                 Expect.equal
                     (reserverCasts
-                        (decide
-                            { colony with
-                                RoomEnergy = bank 8000 8000
-                            }
-                            Map.empty
-                            Set.empty
-                            None)
+                        (decide { colony with Bank = bank 8000 8000 } Map.empty Set.empty None)
                             .Intents)
                     [ fiveBlocks; fiveBlocks ]
                     "the room standing at its cap is cast the five blocks the slipped room asked for"
@@ -20921,13 +20908,7 @@ let reserverRowTests =
                             (fleetOf workers)
                             [ "W1N2", neutralRoom ]
 
-                    decide
-                        { colony with
-                            RoomEnergy = bank 40000 8000
-                        }
-                        Map.empty
-                        Set.empty
-                        None
+                    decide { colony with Bank = bank 40000 8000 } Map.empty Set.empty None
 
                 Expect.equal
                     (atFleet 1).Memo.HaulerQuota
@@ -20967,9 +20948,7 @@ let reserverRowTests =
                     let colony =
                         reserverColony [ northOutpost false ] (surplusFleet 2) [ "W1N2", control ]
 
-                    { colony with
-                        RoomEnergy = bank 8000 8000
-                    }
+                    { colony with Bank = bank 8000 8000 }
                     |> fun colony -> decide colony Map.empty Set.empty None
                     |> fun result -> reserverCasts result.Intents
 
@@ -21011,7 +20990,7 @@ let private deadlockColony =
           [ northOutpost false; westOutpost false ]
           [ liveAnchor "a1"; liveAnchor "a2" ]
           [] with
-        RoomEnergy = bank 361 1800
+        Bank = bank 361 1800
     }
 
 [<Tests>]
@@ -21079,7 +21058,7 @@ let supplyFloorTests =
                 // reserver casts took 2,600 back out of it inside 64 ticks.
                 let full =
                     { deadlockColony with
-                        RoomEnergy = bank 1800 1800
+                        Bank = bank 1800 1800
                     }
 
                 match spawnIntents (decide full Map.empty Set.empty None).Intents with
@@ -21107,7 +21086,7 @@ let supplyFloorTests =
                 let withHauler =
                     { deadlockColony with
                         Creeps = hauler "h1" 0 100 :: deadlockColony.Creeps
-                        RoomEnergy = bank 1800 1800
+                        Bank = bank 1800 1800
                     }
 
                 match spawnIntents (decide withHauler Map.empty Set.empty None).Intents with
@@ -21159,7 +21138,7 @@ let supplyFloorTests =
                     spawnIntents
                         (decide
                             { colony with
-                                RoomEnergy = bank available 1800
+                                Bank = bank available 1800
                             }
                             Map.empty
                             Set.empty
@@ -21210,7 +21189,7 @@ let private gatedOutpost (room, rock: Pos, _posted) : Outpost =
     }
 
 /// The colony the shell assembles for a given declaration under a given
-/// shut set (ADR 0043), built the way `Snapshot.build` builds one: the
+/// shut set (ADR 0043), built the way `ColonyView.ofWorld` builds one: the
 /// declarations less what the gate withholds (`Outpost.worked`), and then
 /// every fact of a worked room — its layer, its rock in the pool, its
 /// standing container, who holds it — and *none* of a withheld one.
@@ -21258,7 +21237,7 @@ let private westGated = gatedOutpost (westOutpost true)
 /// stood-down room's tiles go unread and the creep on them is unplaced —
 /// unpriceable geometry, which is ADR 0004's own answer and not a state of
 /// its own.
-let private standingIn room (name, pos) (colony: Snapshot) =
+let private standingIn room (name, pos) (colony: ColonyView) =
     match Map.tryFind room colony.Spatial.Rooms with
     | None -> colony
     | Some layer ->
@@ -21326,7 +21305,7 @@ let standDownGateTests =
                 // Everything else besides, and this one holds by
                 // construction rather than by observation: `gatedColony`
                 // subtracts the shut set before it assembles anything, so
-                // the two Snapshots below are the same value and the
+                // the two views below are the same value and the
                 // equality can only fail if `Outpost.worked` filters by
                 // something other than the room's name. That is worth one
                 // line and is not the criterion's quota half — a row still
@@ -21611,7 +21590,7 @@ let private bufferLane =
 /// 1,800, which is the capacity both bodies below are cast at.
 let private bufferLaneColony furniture sites creep =
     { bareRespawn with
-        RoomEnergy = bank 1800 1800
+        Bank = bank 1800 1800
         Sources = []
         Refillables = []
         Controller = Some(controllerAt 2)
@@ -21723,7 +21702,7 @@ let standingBodyTests =
                 // reads exactly as the Build one does.
                 let road = [ "road-1", { X = 15; Y = 10 }, Structure BuiltKind.Road ]
 
-                let dented (colony: Snapshot) =
+                let dented (colony: ColonyView) =
                     { colony with
                         Spatial =
                             { colony.Spatial with
@@ -21897,7 +21876,7 @@ let standingBodyTests =
 
                 let colony sites targets =
                     { bareRespawn with
-                        RoomEnergy = bank 1800 1800
+                        Bank = bank 1800 1800
                         Sources = [ source "src-a" ]
                         Refillables = []
                         Controller = None
@@ -21932,7 +21911,7 @@ let standingBodyTests =
 /// assignment map means the gate and nothing else.
 let private deliveryLaneColony creep =
     { bareRespawn with
-        RoomEnergy = bank 1800 1800
+        Bank = bank 1800 1800
         Sources = []
         Controller = None
         Refillables = [ refillable "spawn-1" 300 BuiltKind.Spawn ]
@@ -22041,7 +22020,7 @@ let private upgraderLeadColony body life =
     let room = atLevel 2 (openRoom 6)
 
     { room with
-        RoomEnergy = bank 1800 1800
+        Bank = bank 1800 1800
         Creeps = [ worker "w1" 0 50; creepWith "u1" 0 50 body |> withLife life ]
         Spatial =
             room.Spatial
@@ -22207,7 +22186,7 @@ let private withBuffer kind =
 
 let private upgraderColony room =
     { bareRespawn with
-        RoomEnergy = bank 1800 1800
+        Bank = bank 1800 1800
         Refillables = []
         Sources = [ source "src-a"; source "src-b" ]
         Controller = Some(controllerAt 5)
@@ -22239,7 +22218,7 @@ let private upgraderFleet upgraders workers =
 /// A construction site standing on the corridor's top row, out of the way
 /// of the trunk the haulers walk: what puts a Build in the pool, which is
 /// the only thing the worker row's floor reads (ADR 0046).
-let private withBuildSite (colony: Snapshot) =
+let private withBuildSite (colony: ColonyView) =
     { colony with
         ConstructionSites = [ { Id = "site-1" } ]
         Spatial =
@@ -22251,7 +22230,7 @@ let private withBuildSite (colony: Snapshot) =
 /// neither owns nor holds, which is the whole of what the reserver row's
 /// quota is derived from (ADR 0042). No source and no container, so it
 /// adds a reserver place and nothing else to the target.
-let private withDeclaredOutpost (colony: Snapshot) =
+let private withDeclaredOutpost (colony: ColonyView) =
     { colony with
         Spatial =
             { colony.Spatial with
@@ -22271,7 +22250,7 @@ let private withDeclaredOutpost (colony: Snapshot) =
 /// and with it a third ten a tick of income. The one knob #195's pairwise
 /// turns: two posted sources are a surplus of one and a half standing
 /// bodies, three are two and a half.
-let private thirdSource (colony: Snapshot) =
+let private thirdSource (colony: ColonyView) =
     { colony with
         Sources = colony.Sources @ [ source "src-c" ]
         Spatial =
@@ -22291,7 +22270,7 @@ let private thirdSource (colony: Snapshot) =
 /// container out of the projection and out of the Sources beside it. The
 /// other side of the same pairwise: half the income is a surplus that does
 /// not reach one whole standing body.
-let private oneSource (colony: Snapshot) =
+let private oneSource (colony: ColonyView) =
     { colony with
         Sources = colony.Sources |> List.filter (fun s -> s.Id <> "src-b")
         Spatial =
@@ -22656,7 +22635,7 @@ let upgraderQuotaTests =
             // room one extension short of them, 550 RCL2's five.
             let atBank capacity level =
                 { upgraderColony (withBuffer (Structure BuiltKind.Container)) with
-                    RoomEnergy = bank capacity capacity
+                    Bank = bank capacity capacity
                 }
                 |> withLevel level
 
@@ -22945,7 +22924,7 @@ let postSiteTests =
                 // Pairwise on the site and nothing else.
                 let count kind =
                     Atlas.postCount (
-                        Atlas.ofSnapshot (raisingColony kind (postBody "w" 0 50) { X = 10; Y = 45 })
+                        Atlas.ofView (raisingColony kind (postBody "w" 0 50) { X = 10; Y = 45 })
                     )
 
                 Expect.equal (count BuiltKind.Container) 1 "the container site is a Post"
@@ -23048,7 +23027,7 @@ let postSiteTests =
                 let atlasOf kinds =
                     let colony = raisingColony kinds (postBody "w" 0 50) { X = 10; Y = 45 }
 
-                    Atlas.ofSnapshot colony
+                    Atlas.ofView colony
 
                 let pending = atlasOf BuiltKind.Container
 
@@ -23199,12 +23178,12 @@ let postSiteTests =
 
 /// One colony's [[stage]] forced to an answer, with its controller level
 /// left exactly where the fixture put it (ADR 0052 decision 3). The shell
-/// can never build such a Snapshot — it derives the one from the other
-/// (`Snapshot.colonyStages`) — and that is what makes it the instrument
+/// can never build such a ColonyView — it derives the one from the other
+/// (`World.stages`) — and that is what makes it the instrument
 /// here: a rule that had gone on reading `Controller.Level` would answer
 /// the same either way and every case below would stay green with the
 /// migration undone.
-let private atStage stage (colony: Snapshot) =
+let private atStage stage (colony: ColonyView) =
     { colony with
         Stages = Map.add (SpatialInfo.homeName colony.Spatial) stage colony.Stages
     }
@@ -23427,7 +23406,7 @@ let colonyStageTests =
             test
                 "the mother reads the child's stage, and her scan set and not the stage closes her window" {
                 // ADR 0047's Consequences, pinned against the stage that
-                // now carries the level into her Snapshot: while a human
+                // now carries the level into her ColonyView: while a human
                 // still declares the child's room one of her `Outposts`
                 // the room is in her scan set through the outpost reading,
                 // which asks no stage — so the borrowing and the addend run

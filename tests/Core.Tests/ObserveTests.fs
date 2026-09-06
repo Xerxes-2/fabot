@@ -324,7 +324,7 @@ let pruneTests =
         ]
 
 /// The room the raid fixtures project — the colony's own, and the only
-/// room `Snapshot.Hostiles` swept until #201 widened it to every room the
+/// room `ColonyView.Hostiles` swept until #201 widened it to every room the
 /// colony works and can see. Named rather than left to
 /// `SpatialInfo.homeName`'s empty string, because the closest approach
 /// joins a hostile's room to the projection's layer (ADR 0041) and a
@@ -339,11 +339,11 @@ let outpostRoom = "W12S27"
 
 /// A colony nobody is raiding: the Raid fold reads hostiles, our creeps
 /// and the tiles of what is ours, so everything else stays empty.
-let quiet: Snapshot =
+let quiet: ColonyView =
     {
         Time = 100
         Spawns = []
-        RoomEnergy = Map.empty
+        Bank = { Available = 0; Capacity = 0 }
         Refillables = []
         Sources = []
         Controller = None
@@ -366,10 +366,17 @@ let quiet: Snapshot =
         // The Raid fold reads no declaration: which rooms a human means to
         // own decides Tasks and quotas (ADR 0047), and the log records what
         // happened in a room rather than what is planned for one.
-        ColonyHomes = []
+        Declared = []
         // Nor a [[stage]], for the same reason: what a colony is old
         // enough to do (ADR 0052 decision 3) is not what happened to it.
         Stages = Map.empty
+        // Another colony's bodies are in no raid of this one's: the log
+        // counts the creeps this colony lost (ADR 0028), and a body it
+        // does not hold is not one of them (ADR 0052 decision 1).
+        Foreign = Map.empty
+        // And nothing is borrowed: what one colony may take of a child's
+        // room decides Tasks, and the log records what happened.
+        Borrowed = { Rooms = [] }
     }
 
 /// A hostile creep of the given owner and body standing on a tile of the
@@ -403,7 +410,7 @@ let spent name = { ours name with TicksToLive = 1 }
 let squad = [ raider "TWX" "giaco" { X = 38; Y = 47 } [ Tough; Attack; Move ] ]
 
 /// The same body on the same tile, a room away: the raider #201's widened
-/// sweep reaches (`Snapshot.Hostiles` covers every room the colony works
+/// sweep reaches (`ColonyView.Hostiles` covers every room the colony works
 /// and can see). The room is the only difference from `squad`, which is
 /// what makes the pair able to ask which of the fold's answers are the
 /// colony's and which are one room's.
@@ -450,16 +457,16 @@ let placed =
 ///
 /// The world holds exactly this colony's creeps, which is the one-colony
 /// world every test but `adoptionTests` below is written in: there is
-/// nobody else to have adopted a name that left the Snapshot, so a name
+/// nobody else to have adopted a name that left the ColonyView, so a name
 /// that leaves it left the world.
-let raidTick t (colony: Snapshot) state =
+let raidTick t (colony: ColonyView) state =
     let alive = colony.Creeps |> List.map (fun creep -> creep.Name) |> Set.ofList
     foldRaids 3 5 alive { colony with Time = t } state
 
 /// The same fold with the world said separately from the colony: what the
-/// shell hands in since #191, where a Snapshot carries one colony's fleet
+/// shell hands in since #191, where a ColonyView carries one colony's fleet
 /// and `Game.creeps` carries everyone's (ADR 0047).
-let raidTickIn alive t (colony: Snapshot) state =
+let raidTickIn alive t (colony: ColonyView) state =
     foldRaids 3 5 (Set.ofList alive) { colony with Time = t } state
 
 /// The recorded episodes as (opened, last-seen) windows, oldest first.
@@ -816,7 +823,7 @@ let lossTests =
             test "a creep whose own clock ran out is not a loss" {
                 // Ordinary old age lands inside a raid window often enough to
                 // pad it: a creep on 1,500-tick life, a raid over 200. The
-                // Snapshot's TicksToLive tells the two apart before the fact.
+                // ColonyView's TicksToLive tells the two apart before the fact.
                 let state =
                     RaidState.empty
                     |> raidTick
@@ -882,14 +889,14 @@ let lossTests =
 
             test "a creep another colony adopted is not a loss: it left the fleet, not the world" {
                 // ADR 0047 decision 2 through this channel. Since #191 a
-                // Snapshot carries one colony's creeps, so a name can leave
+                // ColonyView carries one colony's creeps, so a name can leave
                 // it two ways — its creep died, or the colony next door
                 // adopted the body for the tick it stands in a room only
                 // that colony projects. Only the first is what the raid
                 // cost, and the world's own list is what tells them apart.
                 //
                 // Pairwise against the loss above it, one fact moved: the
-                // same name gone from the same Snapshot at t11, once still
+                // same name gone from the same ColonyView at t11, once still
                 // in `Game.creeps` and once not.
                 let crossed =
                     RaidState.empty
@@ -972,7 +979,7 @@ let lossTests =
 /// The colony with one structure of the given kind standing at the given
 /// hits — what the damage fold reads: the kind decides whether it is
 /// charged, the number is what moves tick over tick.
-let withHits id kind hits (colony: Snapshot) =
+let withHits id kind hits (colony: ColonyView) =
     { colony with
         Spatial =
             { colony.Spatial with
@@ -1191,7 +1198,7 @@ let seen cores = { quiet with InvaderCores = cores }
 /// stands on its controller. `RoomControl` carries an entry only for a
 /// room the colony can see (ADR 0004), so putting one there is how a
 /// fixture says the colony is looking.
-let visible room reservation (colony: Snapshot) =
+let visible room reservation (colony: ColonyView) =
     { colony with
         RoomControl =
             colony.RoomControl
@@ -1212,7 +1219,7 @@ let heldBy holder ticks =
 /// The room as vision answers for it when another player owns the
 /// controller outright — the other half of ADR 0043's clockless
 /// withdrawal, beside a rival's reservation.
-let ownedByRival room (colony: Snapshot) =
+let ownedByRival room (colony: ColonyView) =
     { colony with
         RoomControl =
             colony.RoomControl
@@ -1537,7 +1544,7 @@ let outpostTests =
                 // next door as without one. Compared as whole states rather
                 // than through the projections, so a field no list here
                 // reads is covered too.
-                let sequence colony =
+                let sequence (colony: ColonyView) =
                     (RaidState.empty, [ 10..14 ])
                     ||> List.fold (fun state t ->
                         { colony with
@@ -1630,7 +1637,7 @@ let clocklessTests =
 
             test "the conclusion is held through every tick nobody is looking" {
                 // The load-bearing half, and the reason this is persisted
-                // at all rather than read off each tick's Snapshot: the
+                // at all rather than read off each tick's ColonyView: the
                 // gate's own effect is to withdraw the creeps that paid for
                 // the vision that judged it. A rule re-read from nothing
                 // would reopen the room the tick after it shut it, and the
@@ -1893,7 +1900,7 @@ let cpuTests =
             test "the readings are differenced into phases, the entry alone" {
                 // The shape of a live tick the day the split was built: an
                 // engine prelude already spent before `loop` runs, then the
-                // Snapshot, `decide`, the Memory writes and the Executor's
+                // ColonyView, `decide`, the Memory writes and the Executor's
                 // intents (#170). The engine's counter is cumulative and
                 // every phase is a difference — except the entry, which is
                 // the prelude itself and is carried as it was read.
@@ -1986,7 +1993,7 @@ let cpuTests =
                 // The old row keeps its total — the window the trigger is
                 // read over never shortens — and its phases stay absent
                 // rather than being filled with zeros, which would say the
-                // Snapshot cost nothing rather than that nobody measured it.
+                // ColonyView cost nothing rather than that nobody measured it.
                 let unsplit =
                     {
                         Ticks = [ { Tick = 99; Ms = 6.1; Phases = None } ]

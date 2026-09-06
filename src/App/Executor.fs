@@ -22,7 +22,7 @@ let private structureName = builtKindOfPlaceable >> builtKindName
 let private outcomeOf code = if code = 0 then Ok else Failed code
 
 // The null-guard written once. Actors and targets come from this tick's
-// Snapshot, so a missing one is an upstream bug worth reporting, never a
+// colony view, so a missing one is an upstream bug worth reporting, never a
 // routine skip.
 let private withActor (actor: 'a) (act: 'a -> int) : Outcome =
     if isNull (box actor) then
@@ -72,7 +72,7 @@ let private execute (intent: Intent) : Outcome =
         withCreepTarget creepName controllerId (fun c t -> c.reserveController t)
     // The claim (ADR 0047), the one act with a precondition the decision
     // layer has no model of: a controller the account has no GCL level
-    // left for answers ERR_GCL_NOT_ENOUGH, and the Snapshot carries no GCL
+    // left for answers ERR_GCL_NOT_ENOUGH, and the view carries no GCL
     // fact for Core to have planned around it. The code is logged here and
     // read nowhere else, as every result code is (`Outcome` above) — the
     // room stays unowned, so the Task is pooled again next tick and the

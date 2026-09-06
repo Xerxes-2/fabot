@@ -448,7 +448,7 @@ if (command === "console") {
   // ADR 0043's dated observation, and the one number here the colony can
   // never read for itself: W15S24 is four rooms out, the bot has no
   // scouting (ADR 0041) and never has vision there, so this cannot arrive
-  // on a Snapshot the way an outpost's expiry does. It is printed beside
+  // on a [[colony view]] the way an outpost's expiry does. It is printed beside
   // the rows because it changes how every one of them reads — when it
   // passes, this sector's invasion switch is off until another stronghold
   // spawns, so a stand-down opened after it is a core that was already
@@ -460,7 +460,7 @@ if (command === "console") {
   // stands. Refreshing it the obvious way, off the runtime, would write a
   // *relative* count here: `RoomObject.effects[].ticksRemaining`, the
   // number `InvaderCoreInfo.CollapseTick` is built from, is "how many
-  // ticks the effect still lasts" and Snapshot.fs adds `Game.time` to it
+  // ticks the effect still lasts" and World.fs adds `Game.time` to it
   // for exactly this reason. Substituted here it would date the sector
   // clock a hundred thousand ticks wrong and print the switch as already
   // off — the one date ADR 0043 says changes every other conclusion.

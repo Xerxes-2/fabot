@@ -5,7 +5,7 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="Bindings.fs" />
-    <Compile Include="Snapshot.fs" />
+    <Compile Include="World.fs" />
     <Compile Include="Executor.fs" />
     <Compile Include="ObserveMemory.fs" />
     <Compile Include="Main.fs" />

@@ -31,7 +31,7 @@ let private saveAssignments (assignments: Assignments) =
     Memory?fabot?assignments <- hash
 
 // The one aliveness rule for pruning: present in Game.creeps — unlike the
-// Snapshot, that includes gestating creeps, whose memory and timeline must
+// World, that includes gestating creeps, whose memory and timeline must
 // survive the spawn.
 let private livingCreeps () =
     objectEntries Game.creeps |> Array.map fst |> Set.ofArray
@@ -80,40 +80,27 @@ let loop () =
     // switches itself off is one whose absences a reader has to explain.
     let atEntry = Game.cpu.getUsed ()
 
-    // Our spawns, for the two facts the *loop* reads off them: which
-    // colonies are living, and which colony cast a given creep (ADR 0047).
-    // Not the colonies' own casting lists — `Snapshot.build` sweeps
-    // `Game.spawns` itself and filters to its home room, so a two-colony
-    // tick enumerates the spawns three times and not once. Handing this
-    // array down instead would be a fourth argument to a function whose
-    // whole shape is three handed-in facts it decides none of, and the
-    // sweep is a `Game` object walk over a colony's handful of spawns.
-    let spawns = objectValues<ISpawn> Game.spawns
+    // The tick's World: every room we declared or can see and every creep
+    // we own, read out of the engine once (ADR 0052 decision 1). Every
+    // other line in this loop works off this record or off Memory — the
+    // shell asks the engine one question a tick, and Core answers the rest.
+    //
+    // The declaration is handed in rather than read inside, the rule every
+    // declared fact travels under (`Outpost.place`, ADR 0041): it decides
+    // which rooms are read at all, so the sentence a human wrote stays in
+    // one place and a harness can hand the world a different one.
+    let world = World.ofGame Colony.declared
 
     // The colonies that run this tick: a declared home that is ours and
-    // holds a spawn of ours (`Colony.living`, ADR 0047 decision 1). Both
-    // facts come off the spawns — a home with no spawn in it fails the
-    // second whatever the first says, so a controller read for a room no
-    // spawn stands in would be an engine call whose answer changes
-    // nothing.
-    let ourRooms =
-        spawns
-        |> Array.filter (fun s ->
-            let c = s.room.controller
-            not (isNull (box c)) && not (isNull (box c.my)) && c.my)
-        |> Array.map (fun s -> s.room.name)
-        |> Set.ofArray
+    // holds a spawn of ours (`Colony.living`, ADR 0047 decision 1), both
+    // facts read off the world's rooms rather than off a second sweep of
+    // `Game.spawns`.
+    let colonies = World.living Colony.declared world
 
-    let colonies =
-        Colony.living
-            ourRooms
-            (spawns |> Array.map (fun s -> s.room.name) |> Array.distinct |> Array.toList)
-            Colony.declared
-
-    // Each colony's Raid log is read *before* any Snapshot is built, alone
-    // among the observe channels, because ADR 0043's gate is a condition on
-    // which rooms the shell scans at all: a stood-down outpost never enters
-    // the projection, so the log has to be in hand before there is one. The
+    // Each colony's Raid log is read *before* any view is cut, alone among
+    // the observe channels, because ADR 0043's gate is a condition on which
+    // rooms a colony works at all: a stood-down outpost never enters its
+    // projection, so the log has to be in hand before there is one. The
     // tick it is read at is this one and the conclusion is the previous
     // tick's — the last one that had the vision to read a deadline with,
     // which is the whole mechanism, since the gate's own effect is to
@@ -134,100 +121,60 @@ let loop () =
         |> Map.ofList
 
     // The gate's answer for each colony, derived once from that colony's
-    // log: three readers ask for it — the scan set, the furniture and the
-    // pooled rocks all narrow through it, inside `Snapshot.build` and
-    // `Snapshot.projectedRooms` alike — and a second derivation is a second
-    // answer free to disagree.
-    let shut = raids |> Map.map (fun _ log -> Observe.standDown Game.time log)
+    // log: the scan set, the furniture and the pooled rocks all narrow
+    // through it inside `ColonyView.ofWorld`, and a second derivation is a
+    // second answer free to disagree.
+    let shut = raids |> Map.map (fun _ log -> Observe.standDown world.Time log)
 
     let shutOf home =
         shut |> Map.tryFind home |> Option.defaultValue Set.empty
 
-    // Which rooms each colony is still **bootstrapping** for a child of its
-    // own (ADR 0047 decision 4), derived once for the tick like the gate
-    // above and for the same reason: three readers take this answer — the
-    // scan set, the narrowed layer those rooms are projected under, and the
-    // sources a colony pools — and a second derivation is a second answer
-    // free to disagree.
-    //
-    // The [[stage]]s are derived off the world here rather than out of a
-    // Snapshot, because whether a child has outgrown its mother decides
-    // whether the mother projects that room at all: the fact is needed
-    // before the scan set it would have to come out of exists (ADR 0052
-    // decision 3). The one answer every Snapshot below carries, so the
-    // rules that read a stage and the rule that cuts the scan set by one
-    // cannot disagree.
-    //
-    // Asked of the declared homes and of every **living** colony's home,
-    // which is a handful of names and no sweep. The declared ones because
-    // that is what the raising rule asks about — a child a mother projects
-    // is one she may not be able to see the inside of otherwise — and the
-    // living ones because a spawn room no declaration names is a colony of
-    // its own (`Colony.living`'s fallback, ADR 0047), and a colony with no
-    // stage would place no road and keep no rampart however old it is.
-    let stages =
-        Colony.homes Colony.declared
-        @ (colonies |> List.map (fun colony -> colony.Home))
-        |> List.distinct
-        |> Snapshot.colonyStages
-
-    let bootstrapOf colony =
-        Colony.bootstrapping stages Colony.declared colony
-
-    // Which rooms each colony projects, before any of them is built:
-    // adoption is decided over the whole table at once (ADR 0047 decision
-    // 2), so a creep's colony cannot be known from inside one Snapshot.
-    let projections =
-        colonies
-        |> List.map (fun colony ->
-            colony.Home, Snapshot.projectedRooms colony (bootstrapOf colony) (shutOf colony.Home))
-
     // Every creep this bot owns, filed under the colony that holds it this
-    // tick: the one it was cast by, or the one that has adopted it. Cut
-    // once here and handed to each Snapshot, so the same creep cannot be
-    // two colonies' business — two decisions over one body would write two
-    // Tasks into the one flat `assignments` leaf and move it twice.
-    let membership =
-        Colony.creepColonies
-            projections
-            (spawns |> Array.map (fun s -> s.name, s.room.name) |> Array.toList)
-            (objectValues<ICreep> Game.creeps
-             |> Array.map (fun c -> c.name, Some c.room.name)
-             |> Array.toList)
+    // tick: the one it was cast by, or the one that has adopted it (ADR
+    // 0047 decision 2). Cut once here, over every living colony's scan set
+    // at once, and handed to each view — a creep cannot be two colonies'
+    // business, or two decisions would write two Tasks into the one flat
+    // `assignments` leaf and move one body twice.
+    //
+    // It is an argument to the view and not a field of the World for one
+    // reason: the rule needs the stand-down gate above, which is Memory's
+    // answer and not the world's, so a World carrying it would be a world
+    // that is only valid after a second pass.
+    let holders = World.creepColonies Colony.declared colonies shut world
 
-    let snapshots =
+    // One view per living colony (ADR 0052 decision 1), each cut from the
+    // one world by a pure function in Core: the rooms this colony works,
+    // the bodies it holds, its own bank and controller, and the explicit
+    // little it may borrow of a child's. Nothing here decides any of that
+    // — `ColonyView.ofWorld` owns every rule, and that half of the shell
+    // boundary is under test (`ViewTests`, ADR 0052 decision 8's first
+    // half). The other half is the read above: `World.ofGame` and its
+    // terrain, structure and ownership classification are still compiled
+    // by no test project, which is #137's own gap and stays open.
+    let views =
         colonies
         |> List.map (fun colony ->
-            let mine =
-                membership
-                |> Map.toList
-                |> List.choose (fun (creep, home) ->
-                    if home = colony.Home then Some creep else None)
-                |> Set.ofList
+            colony, ColonyView.ofWorld Colony.declared (shutOf colony.Home) holders world colony)
 
-            colony, Snapshot.build colony (shutOf colony.Home) (bootstrapOf colony) mine stages)
-
-    // The Snapshot boundary, and the Raid logs' reads ride in this phase
+    // The projection boundary, and the Raid logs' reads ride in this phase
     // rather than in the prelude: the two are one act — the gate decides
-    // which rooms are swept — and splitting them would price a `find` sweep
-    // against a Memory read. Every colony's sweep is in this one phase, so
-    // the column is the tick's whole projection cost and not one colony's
-    // (ADR 0047).
+    // which rooms a colony works — and splitting them would price a `find`
+    // sweep against a Memory read. The world's one sweep and every colony's
+    // cut of it are both inside this column, so it is the tick's whole
+    // projection cost and not one colony's (ADR 0047).
     let atSnapshot = Game.cpu.getUsed ()
     // The verbose list and the assignments are read once and handed to
     // every colony: both are flat, keyed by creep name, and a creep is one
     // colony's business for the tick — so what a colony is handed for a
     // creep it does not hold is dropped by the Matcher's own fold, which
-    // keeps an assignment only for a creep in its Snapshot.
+    // keeps an assignment only for a creep in its own view.
     let assignments = loadAssignments ()
     let verbose = ObserveMemory.loadVerbose ()
 
     let decisions =
-        snapshots
-        |> List.map (fun (colony, snapshot) ->
-            colony,
-            snapshot,
-            decide snapshot assignments verbose (Map.tryFind colony.Home planMemos))
+        views
+        |> List.map (fun (colony, view) ->
+            colony, view, decide view assignments verbose (Map.tryFind colony.Home planMemos))
 
     // The decision boundary, and every colony's `decide` is inside it: the
     // column is what the tick spent deciding and not what one colony did
@@ -248,7 +195,7 @@ let loop () =
     // a creep is one colony's business for the tick, so the colonies'
     // answers are disjoint and the union is the whole map. Union and not
     // the last colony's answer, because each colony's Matcher drops what
-    // it was handed for creeps outside its own Snapshot — writing one
+    // it was handed for creeps outside its own view — writing one
     // colony's map alone would release every other colony's fleet.
     saveAssignments (
         (Map.empty, decisions)
@@ -278,7 +225,7 @@ let loop () =
         (decisions |> List.collect (fun (_, _, decision) -> decision.Verdicts))
     |> ObserveMemory.save
 
-    for colony, snapshot, decision in decisions do
+    for colony, view, decision in decisions do
         // The Raid log's own channel (ADR 0028): colony-level and episodic,
         // because the fold above prunes a creep's whole timeline the tick
         // it dies — the one event a raid record has to keep. Written every
@@ -294,13 +241,13 @@ let loop () =
         // rooms a colony can see are the rooms it works, so an episode is
         // one colony's record and the gate that reads it back is that
         // colony's (ADR 0047). The losses are read against the world's
-        // living names and not this colony's Snapshot, so a creep another
+        // living names and not this colony's view, so a creep another
         // colony adopted this tick is not written down as this raid's
         // casualty.
         raids
         |> Map.tryFind colony.Home
         |> Option.defaultValue Observe.RaidState.empty
-        |> Observe.foldRaids Observe.capEpisodes Observe.quietGap living snapshot
+        |> Observe.foldRaids Observe.capEpisodes Observe.quietGap living view
         |> ObserveMemory.saveRaids colony.Home
 
         // The Layout's own channel (ADR 0035): the footing targets this
@@ -336,7 +283,7 @@ let loop () =
     // Failures are already logged by the Executor; what is read off the
     // outcomes here is how many intents the engine took (#170). The engine
     // charges 0.2 CPU per intent it *executes*, so a call it answered with
-    // an error code, and one whose actor the Snapshot promised but the
+    // an error code, and one whose actor the view promised but the
     // engine does not hold, are both counted out: this number times 0.2 is
     // an estimate a reader can subtract, and only the accepted calls belong
     // in it.

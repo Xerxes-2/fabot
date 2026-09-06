@@ -477,7 +477,7 @@ let taskId =
 /// the rule that *decides* a stage, off three facts of the world, and the
 /// doc comments below cite it by name a few lines from every call of
 /// this one.
-let private roomStage (snapshot: Snapshot) room = Map.tryFind room snapshot.Stages
+let private roomStage (view: ColonyView) room = Map.tryFind room view.Stages
 
 /// This colony's own stage: its home room's entry. Always present for a
 /// living colony — `Main.loop` runs `decide` only for a home that is ours
@@ -485,14 +485,14 @@ let private roomStage (snapshot: Snapshot) room = Map.tryFind room snapshot.Stag
 /// construction — so `None` is the projection that cannot place its own
 /// controller, and every reader gives that colony the answer it gives one
 /// standing under the line.
-let private homeStage (snapshot: Snapshot) =
-    roomStage snapshot (SpatialInfo.homeName snapshot.Spatial)
+let private homeStage (view: ColonyView) =
+    roomStage view (SpatialInfo.homeName view.Spatial)
 
 /// Whether this colony has outgrown its bootstrap window: `Independent`,
 /// at `Colony.bootstrapLevel` or past it (ADR 0052 decision 3). The one
 /// question the Layout's two gates and the Repair pool's rampart line ask
 /// — a colony below it is still buying the economy those spends serve.
-let private isIndependent (snapshot: Snapshot) = homeStage snapshot = Some Independent
+let private isIndependent (view: ColonyView) = homeStage view = Some Independent
 
 /// The Repair trigger of the decaying kinds: a road or a container enters
 /// the pool when its hits sink strictly below this fraction of max, and
@@ -530,7 +530,7 @@ let private rampartFloor = 100_000
 ///
 /// A colony with no stage keeps none, which is the same answer the
 /// covering rule gives a room it cannot orient itself in.
-let private keepsRamparts (snapshot: Snapshot) = isIndependent snapshot
+let private keepsRamparts (view: ColonyView) = isIndependent view
 
 /// Whether a structure of this kind, carrying these hits, is hungry: its
 /// own whole line, read off the kind (ADR 0034). The decaying kinds sit
@@ -554,13 +554,13 @@ let private isHungry kind (hits: HitsInfo) =
 /// projection carries hits on repairable kinds only, but the kind gate is
 /// judged here — the decision layer owns what it reads, off the same table
 /// the projection filtered by.
-let private hungryStructures (snapshot: Snapshot) : (string * BuiltKind) list =
-    let ramparts = keepsRamparts snapshot
+let private hungryStructures (view: ColonyView) : (string * BuiltKind) list =
+    let ramparts = keepsRamparts view
 
-    snapshot.Spatial.Hits
+    view.Spatial.Hits
     |> Map.toList
     |> List.choose (fun (id, hits) ->
-        match Map.tryFind id snapshot.Spatial.TargetKinds with
+        match Map.tryFind id view.Spatial.TargetKinds with
         // A rampart below the line the colony keeps them from is not
         // hungry: it is decaying away (#214, `keepsRamparts`).
         | Some(Structure BuiltKind.Rampart) when not ramparts -> None
@@ -684,7 +684,7 @@ module Threats =
     let safeIn (threats: Threats) (room: string) : Set<Pos> =
         Map.tryFind room threats.Safe |> Option.defaultValue Set.empty
 
-/// This tick's Threats, off the Snapshot's hostiles and the rampart
+/// This tick's Threats, off the view's hostiles and the rampart
 /// census, room by room. Each Threat reaches its weapon range plus the
 /// margin, in the Chebyshev tiles every range in the colony is measured
 /// in — less every tile under one of our standing ramparts in that same
@@ -695,7 +695,7 @@ module Threats =
 /// so a quiet tick pays for no walk over any room, and a raid in one room
 /// walks that room alone. Derived once here and handed down; the layering
 /// does not make it once per creep.
-let threatsOf (snapshot: Snapshot) atlas : Threats =
+let threatsOf (view: ColonyView) atlas : Threats =
     // Under safe mode a hostile in a room of ours can hurt nothing — the
     // engine refuses every harmful act there for the whole window — so it
     // is no Threat and has no Reach, and our creeps stand and work beside
@@ -707,7 +707,7 @@ let threatsOf (snapshot: Snapshot) atlas : Threats =
     // protects the rival, and a raider in an outpost is as dangerous as
     // ever.
     let shielded room =
-        match Map.tryFind room snapshot.RoomControl with
+        match Map.tryFind room view.RoomControl with
         | Some control -> control.Owner = Ownership.Ours && control.SafeMode
         | None -> false
 
@@ -715,7 +715,7 @@ let threatsOf (snapshot: Snapshot) atlas : Threats =
     // neither the rampart census nor any room's own tiles are read on a
     // tick with nothing in it to run from.
     match
-        snapshot.Hostiles
+        view.Hostiles
         |> List.filter (fun hostile -> not (shielded hostile.RoomName))
         |> List.choose (fun hostile ->
             weaponRange hostile |> Option.map (fun r -> hostile.RoomName, hostile.Pos, r))
@@ -777,7 +777,7 @@ let private servesSource (sourcePos: Pos) (tile: Pos) = range tile sourcePos <= 
 /// a room's reservation decides whether the rock under a container is
 /// worth ten a tick or five, and a tile alone cannot say which rock it is.
 /// Of several sources within range 1 — geometry this colony has none of,
-/// two rocks would have to stand two tiles apart — the first in Snapshot
+/// two rocks would have to stand two tiles apart — the first in view
 /// order answers, deterministically.
 ///
 /// The room is matched before the range, and it has to be (ADR 0041): a
@@ -788,10 +788,10 @@ let private servesSource (sourcePos: Pos) (tile: Pos) = range tile sourcePos <= 
 /// as a source's, and drops out of the Refill pool as one — so the two
 /// rules below hand in the room the tile came out of rather than the tile
 /// alone.
-let private sourceContainerServes (snapshot: Snapshot) (room: string) (pos: Pos) : string option =
-    snapshot.Sources
+let private sourceContainerServes (view: ColonyView) (room: string) (pos: Pos) : string option =
+    view.Sources
     |> List.tryFind (fun s ->
-        match SpatialInfo.placementOf snapshot.Spatial s.Id with
+        match SpatialInfo.placementOf view.Spatial s.Id with
         | Some(sourceRoom, sourcePos) -> sourceRoom = room && servesSource sourcePos pos
         | None -> false)
     |> Option.map (fun s -> s.Id)
@@ -799,8 +799,8 @@ let private sourceContainerServes (snapshot: Snapshot) (room: string) (pos: Pos)
 /// Whether a tile of the named room is a source container's at all — the
 /// half of the rule above that the Refill pool asks, which needs to know
 /// that the tile is spoken for and never which rock spoke for it.
-let private isSourceContainerTile (snapshot: Snapshot) (room: string) (pos: Pos) =
-    sourceContainerServes snapshot room pos |> Option.isSome
+let private isSourceContainerTile (view: ColonyView) (room: string) (pos: Pos) =
+    sourceContainerServes view room pos |> Option.isSome
 
 /// Whether this colony owns the named room — one spelling for the two
 /// rules of the reserver's that read it (#181). `reserveController`
@@ -810,8 +810,8 @@ let private isSourceContainerTile (snapshot: Snapshot) (room: string) (pos: Pos)
 /// one sentence rather than two gates free to disagree. A room with no
 /// control entry is one the colony cannot see this tick, and an unseen
 /// room is not one it owns — absence classifies nothing (ADR 0004).
-let private colonyOwns (snapshot: Snapshot) room =
-    snapshot.RoomControl
+let private colonyOwns (view: ColonyView) room =
+    view.RoomControl
     |> Map.tryFind room
     |> Option.exists (fun control -> control.Owner = Ownership.Ours)
 
@@ -823,7 +823,7 @@ let private colonyOwns (snapshot: Snapshot) room =
 /// which rooms are being taken (ADR 0006).
 ///
 /// A **candidate colony** is a declared home this colony does not own yet
-/// (`Snapshot.ColonyHomes`), and both halves are needed: the declaration,
+/// (`ColonyView.Declared`), and both halves are needed: the declaration,
 /// because claiming a room is a human's decision and no projected fact
 /// distinguishes a room we mean to own from a neighbour we merely mine;
 /// and the ownership, because the tick the claim lands the room stops
@@ -856,9 +856,9 @@ let private colonyOwns (snapshot: Snapshot) room =
 /// colony cannot see this tick, and an unseen room is not one it can
 /// claim — absence classifies nothing (ADR 0004), and the vision the claim
 /// waits on is bought by the outpost crews already working the room.
-let private claimTargets (snapshot: Snapshot) : (string * string) list =
+let private claimTargets (view: ColonyView) : (string * string) list =
     let takeable room =
-        match Map.tryFind room snapshot.RoomControl with
+        match Map.tryFind room view.RoomControl with
         | Some control ->
             control.Owner = Ownership.Unowned
             && control.Reservation
@@ -866,13 +866,13 @@ let private claimTargets (snapshot: Snapshot) : (string * string) list =
         | None -> false
 
     let candidate room =
-        List.contains room snapshot.ColonyHomes && takeable room
+        List.contains room view.Declared && takeable room
 
-    snapshot.Spatial.TargetKinds
+    view.Spatial.TargetKinds
     |> Map.toList
     |> List.choose (fun (id, kind) ->
         if kind = Controller then
-            match SpatialInfo.placementOf snapshot.Spatial id with
+            match SpatialInfo.placementOf view.Spatial id with
             | Some(room, _) when candidate room -> Some(id, room)
             | _ -> None
         else
@@ -909,10 +909,10 @@ let private claimTargets (snapshot: Snapshot) : (string * string) list =
 /// it.
 ///
 /// The declaration is carried by the stage and no longer by a
-/// `ColonyHomes` conjunct here, and the one room that can hold a stage
+/// `Declared` conjunct here, and the one room that can hold a stage
 /// without one is harmless by the exclusion below: the shell derives
 /// stages for the declared homes and for every **living** colony's home
-/// (`Snapshot.colonyStages`), and the only living home no declaration
+/// (`World.stages`), and the only living home no declaration
 /// names is `Colony.living`'s fallback, which fires solely when nothing
 /// declared is living — so that room is the colony doing the reading, and
 /// `room <> home` answers it first.
@@ -932,10 +932,10 @@ let private claimTargets (snapshot: Snapshot) : (string * string) list =
 /// this rule is ever asked about; and leaving it in would put a condition
 /// on #157's "home Build is untouched and stays Surplus", which is a
 /// sentence rather than a sentence with an exception.
-let private isNurseryRoom (snapshot: Snapshot) room =
-    room <> SpatialInfo.homeName snapshot.Spatial
-    && colonyOwns snapshot room
-    && roomStage snapshot room = Some Nursery
+let private isNurseryRoom (view: ColonyView) room =
+    room <> SpatialInfo.homeName view.Spatial
+    && colonyOwns view room
+    && roomStage view room = Some Nursery
 
 /// Whether the named room is a child colony this one is still
 /// **bootstrapping** (ADR 0047 decision 4): a declared colony of ours that
@@ -975,28 +975,28 @@ let private isNurseryRoom (snapshot: Snapshot) room =
 /// `Bootstrapping` alone would close it instead, and drop the mother's
 /// fleet by three on a tick no human touched, against the flat addend ADR
 /// 0047 chose.
-let private isBootstrapRoom (snapshot: Snapshot) room =
-    room <> SpatialInfo.homeName snapshot.Spatial
-    && colonyOwns snapshot room
-    && (match roomStage snapshot room with
+let private isBootstrapRoom (view: ColonyView) room =
+    room <> SpatialInfo.homeName view.Spatial
+    && colonyOwns view room
+    && (match roomStage view room with
         | Some Bootstrapping
         | Some Independent -> true
         | Some Nursery
         | None -> false)
 
 /// Whether an Upgrade in this pool is **borrowed**: its controller is not
-/// this colony's own (`Snapshot.Controller`), so it is a bootstrapped
+/// this colony's own (`ColonyView.Controller`), so it is a bootstrapped
 /// child's, pooled by `planTasks` for the pioneers (ADR 0047 decision 4
 /// as #213 amends it). Three readers ask it and must agree on which
 /// Upgrade they mean: the tier that lifts it, the capacity that bounds
 /// the lift at `pioneerCount`, and the body gate that keeps a standing
 /// body off it.
-let private isBorrowedUpgrade (snapshot: Snapshot) controllerId =
-    snapshot.Controller |> Option.exists (fun c -> c.Id = controllerId) |> not
+let private isBorrowedUpgrade (view: ColonyView) controllerId =
+    view.Controller |> Option.exists (fun c -> c.Id = controllerId) |> not
 
-/// Planner: rebuild this tick's full Task pool from the Snapshot. Pure and
+/// Planner: rebuild this tick's full Task pool from the colony view. Pure and
 /// from scratch every tick — Tasks are never persisted.
-let planTasks (snapshot: Snapshot) (threats: Threats) : Task list =
+let planTasks (view: ColonyView) (threats: Threats) : Task list =
     // Flee exists while a Reach does (ADR 0033): one Task for the whole
     // colony, at the head of the pool as its Safety tier is at the head of
     // the ranking. No Reach, no Flee — a quiet tick's pool is the pool it
@@ -1008,24 +1008,24 @@ let planTasks (snapshot: Snapshot) (threats: Threats) : Task list =
     // because whether a dry rock is worth walking to depends on the
     // walker's body and position — the Matcher's knowledge, not the
     // creep-blind Planner's.
-    let harvests = snapshot.Sources |> List.map (fun s -> Harvest s.Id)
+    let harvests = view.Sources |> List.map (fun s -> Harvest s.Id)
 
     let refills =
-        snapshot.Refillables
+        view.Refillables
         |> List.filter (fun r -> r.FreeCapacity > 0)
         |> List.map (fun r -> Refill r.Id)
 
-    let builds = snapshot.ConstructionSites |> List.map (fun site -> Build site.Id)
+    let builds = view.ConstructionSites |> List.map (fun site -> Build site.Id)
 
     // A Repair per repairable structure below its kind's whole line, in id
     // order (ADR 0010, ADR 0034).
-    let repairs = hungryStructures snapshot |> List.map (fst >> Repair)
+    let repairs = hungryStructures view |> List.map (fst >> Repair)
 
     // The ids of one projected kind, in id order. The containers, the
     // Storage and the controllers are all pooled by the projection's kind
     // — never by position, never by name — so the rule is written once.
     let idsOfKind kind =
-        snapshot.Spatial.TargetKinds
+        view.Spatial.TargetKinds
         |> Map.toList
         |> List.choose (fun (id, k) -> if k = kind then Some id else None)
 
@@ -1040,30 +1040,30 @@ let planTasks (snapshot: Snapshot) (threats: Threats) : Task list =
     // separates the two Upgrades — which is what leaves the child's to the
     // bodies already standing in its room, the [[pioneer]]s, and the home
     // one to everybody else. The child pools the very same Upgrade in its
-    // own tick, off its own `Snapshot.Controller`, and the two pools are
+    // own tick, off its own `ColonyView.Controller`, and the two pools are
     // two colonies' business over one target: each Matcher counts only its
     // own holders, exactly as the [[nursery]] window's two pools do.
     //
     // Read off the projection's kind census in the rooms the predicate
-    // names, never off `Snapshot.Controller`, which is this colony's own
+    // names, never off `ColonyView.Controller`, which is this colony's own
     // and nothing else (ADR 0047 decision 1) — the child's controller is
     // a target in a layer she projects, like every other fact she has
     // about that room.
     let upgrades =
-        let own = snapshot.Controller |> Option.toList |> List.map (fun c -> c.Id)
+        let own = view.Controller |> Option.toList |> List.map (fun c -> c.Id)
 
         let children =
             idsOfKind Controller
             |> List.filter (fun id ->
-                SpatialInfo.placementOf snapshot.Spatial id
+                SpatialInfo.placementOf view.Spatial id
                 |> Option.map fst
-                |> Option.exists (isBootstrapRoom snapshot))
+                |> Option.exists (isBootstrapRoom view))
 
         own @ children |> List.map Upgrade
 
     // One Claim per candidate colony's controller (ADR 0047), read off
     // the one rule that says which those are (`claimTargets`).
-    let claims = claimTargets snapshot |> List.map (fst >> Claim)
+    let claims = claimTargets view |> List.map (fst >> Claim)
 
     // One Reserve per projected controller that is not the colony's own
     // (ADR 0042): a neutral controller held by CLAIM parts pays its room's
@@ -1107,13 +1107,13 @@ let planTasks (snapshot: Snapshot) (threats: Threats) : Task list =
     // knows nothing about the difference — so the colony would hold the
     // reservation of a room it is trying to own and never take it.
     let reserves =
-        let home = snapshot.Controller |> Option.map (fun c -> c.Id)
-        let claimed = claimTargets snapshot |> List.map fst |> Set.ofList
+        let home = view.Controller |> Option.map (fun c -> c.Id)
+        let claimed = claimTargets view |> List.map fst |> Set.ofList
 
         let inRoomWeOwn id =
-            SpatialInfo.placementOf snapshot.Spatial id
+            SpatialInfo.placementOf view.Spatial id
             |> Option.map fst
-            |> Option.exists (colonyOwns snapshot)
+            |> Option.exists (colonyOwns view)
 
         idsOfKind Controller
         |> List.filter (fun id ->
@@ -1125,7 +1125,7 @@ let planTasks (snapshot: Snapshot) (threats: Threats) : Task list =
     // Withdraw, at feeding tier beside Harvest — whether to dig or to
     // collect is travel cost's call, never a rule's.
     let stored id =
-        snapshot.Spatial.Stores |> Map.tryFind id |> Option.defaultValue 0
+        view.Spatial.Stores |> Map.tryFind id |> Option.defaultValue 0
 
     let containers = idsOfKind (Structure BuiltKind.Container)
     let storages = idsOfKind (Structure BuiltKind.Storage)
@@ -1188,17 +1188,17 @@ let planTasks (snapshot: Snapshot) (threats: Threats) : Task list =
     // the controller's room does not place drops out, exactly as an
     // unplaced one always has (ADR 0004).
     let containerRefills =
-        snapshot.Controller
-        |> Option.bind (fun c -> SpatialInfo.placementOf snapshot.Spatial c.Id)
+        view.Controller
+        |> Option.bind (fun c -> SpatialInfo.placementOf view.Spatial c.Id)
         |> Option.map (fun (controllerRoom, controllerPos) ->
-            let placed = (SpatialInfo.layerOf snapshot.Spatial controllerRoom).TargetPositions
+            let placed = (SpatialInfo.layerOf view.Spatial controllerRoom).TargetPositions
 
             containers
             |> List.filter (fun id ->
                 match Map.tryFind id placed with
                 | Some pos ->
                     range pos controllerPos <= 3
-                    && not (isSourceContainerTile snapshot controllerRoom pos)
+                    && not (isSourceContainerTile view controllerRoom pos)
                     && stored id < containerCapacity
                 | None -> false)
             |> List.map Refill)
@@ -1340,9 +1340,9 @@ let private heldRateOf (control: RoomControlInfo) =
 /// that places its id (ADR 0041), never the outpost declaration: the quota
 /// is derived from the projection, and a source the projection does not
 /// place counts nothing wherever it was declared.
-let private sourceRateOf (snapshot: Snapshot) atlas (sourceId: string) : int option =
+let private sourceRateOf (view: ColonyView) atlas (sourceId: string) : int option =
     Atlas.targetRoom atlas sourceId
-    |> Option.bind (fun room -> Map.tryFind room snapshot.RoomControl)
+    |> Option.bind (fun room -> Map.tryFind room view.RoomControl)
     |> Option.map heldRateOf
 
 /// Whether a source is posted: whether a container stands on one of its
@@ -1437,34 +1437,13 @@ let private isPosted atlas (s: SourceInfo) =
 /// the home room's replacement off an outpost's neutral rock and loses the
 /// four energy a tick this fold exists to protect, and the amortization
 /// below has to charge per Post rather than one ceiling times the quota.
-let private anchorWorkCapOf (snapshot: Snapshot) atlas : int =
-    snapshot.Sources
+let private anchorWorkCapOf (view: ColonyView) atlas : int =
+    view.Sources
     |> List.filter (isPosted atlas)
-    |> List.choose (fun s -> sourceRateOf snapshot atlas s.Id)
+    |> List.choose (fun s -> sourceRateOf view atlas s.Id)
     |> function
         | [] -> heldWorkCap
         | rates -> List.max rates |> workCapOf
-
-/// The richest bank the colony could fill this tick: every projected
-/// room's capacity, and the largest of them. Four readers who must not
-/// disagree — `workforceTarget` prices every row's replacement as the
-/// richest bank would cast it, the reserver row's quota refuses to hire at
-/// all where that bank cannot buy the row's floor body, a Withdraw's cap
-/// divides its store's stock by the body this bank would cast for the row
-/// that draws there (#161), and the hauler row's own quota divides the
-/// colony's summed haul by that same hauler's carry capacity (ADR 0049) —
-/// so the fold is written once here rather than four times. The third is
-/// the one whose failure is a store admitting the wrong number of drawers
-/// rather than a mis-sized body, so narrowing the fold — to the spawn
-/// rooms a caster can draw from, say, or to `Available` — moves every
-/// Withdraw cap in the colony with it.
-let private richestCapacity (snapshot: Snapshot) =
-    snapshot.RoomEnergy
-    |> Map.toList
-    |> List.map (fun (_, bank) -> bank.Capacity)
-    |> function
-        | [] -> 0
-        | caps -> List.max caps
 
 /// What one source is **worth to the quotas that read a store** (ADR 0042
 /// as #208 amends it): what the Anchor row's cast digs there, capped at
@@ -1502,17 +1481,17 @@ let private richestCapacity (snapshot: Snapshot) =
 /// Unpriceable stays unpriceable: the cap is applied to a rate that is
 /// there, so a source in a room the colony cannot see is still None and
 /// still enters no quota (ADR 0004).
-let private sourceOutputOf (snapshot: Snapshot) atlas (sourceId: string) : int option =
+let private sourceOutputOf (view: ColonyView) atlas (sourceId: string) : int option =
     // The Work the row would cast this tick times HARVEST_POWER — the same
-    // `anchorBodyFor anchorWorkCapOf richestCapacity` triple the
+    // `anchorBodyFor anchorWorkCapOf view.Bank.Capacity` triple the
     // amortization is priced by, so the two readings cannot drift apart.
     let dug =
-        anchorBodyFor (anchorWorkCapOf snapshot atlas) (richestCapacity snapshot)
+        anchorBodyFor (anchorWorkCapOf view atlas) (view.Bank.Capacity)
         |> List.filter ((=) Work)
         |> List.length
         |> (*) harvestPerWork
 
-    sourceRateOf snapshot atlas sourceId |> Option.map (min dug)
+    sourceRateOf view atlas sourceId |> Option.map (min dug)
 
 /// The hauler row's quota rule (ADR 0012) — the row's colony fact, per
 /// ADR 0006's law that a row arrives with its quota or not at all:
@@ -1595,29 +1574,29 @@ let private sourceOutputOf (snapshot: Snapshot) atlas (sourceId: string) : int o
 /// signature had to widen for, and did (`censusSignature`): every
 /// projected room's held rate is signed, because any of them can hold the
 /// container this fold prices next tick.
-let private haulerQuota (snapshot: Snapshot) atlas : int =
+let private haulerQuota (view: ColonyView) atlas : int =
     // Each source container beside the room it stands in and the output of
     // the rock it serves: the tile alone cannot be priced, so a container
     // the projection places in no room, or one the fold cannot resolve to
     // a source, or to a source whose room it cannot price, leaves the list
     // here rather than entering the sum at some default rate.
     let sourceContainers =
-        snapshot.Spatial.TargetKinds
+        view.Spatial.TargetKinds
         |> Map.toList
         |> List.choose (fun (id, kind) ->
             if kind = Structure BuiltKind.Container then
-                SpatialInfo.placementOf snapshot.Spatial id
+                SpatialInfo.placementOf view.Spatial id
             else
                 None)
         |> List.choose (fun (room, tile) ->
-            sourceContainerServes snapshot room tile
-            |> Option.bind (sourceOutputOf snapshot atlas)
+            sourceContainerServes view room tile
+            |> Option.bind (sourceOutputOf view atlas)
             |> Option.map (fun output -> room, tile, output))
 
     // One load, for the whole colony, and the row's own body cast at the
     // richest bank: rounding once (ADR 0049) sums demands before it
     // divides, so every term has to be a fraction of the *same* body or
-    // the integer at the end counts nothing. `richestCapacity` is the load
+    // the integer at the end counts nothing. The bank's capacity is the load
     // the rest of the pipeline already means — `workforceTarget` charges
     // this row's amortization at it and a Withdraw's cap divides its
     // store's stock by it (#161) — so denominating the sum anywhere else
@@ -1625,7 +1604,7 @@ let private haulerQuota (snapshot: Snapshot) atlas : int =
     // the quota, the charge and the cap disagree with each other. Never
     // zero: the row's sizing casts one whole block at any bank
     // (`wholeBlockBodyFor`), so the divisor is a hundred at worst.
-    let body = bodyFor haulerPattern (richestCapacity snapshot)
+    let body = bodyFor haulerPattern (view.Bank.Capacity)
 
     let capacity = carryCapacityOf body
 
@@ -1633,8 +1612,7 @@ let private haulerQuota (snapshot: Snapshot) atlas : int =
     // the two agree on the live colony and a fixture that names one and
     // files the other would flood an empty grid (ADR 0041).
     let sinks =
-        snapshot.Spawns
-        |> List.choose (fun s -> SpatialInfo.placementOf snapshot.Spatial s.Id)
+        view.Spawns |> List.choose (fun s -> SpatialInfo.placementOf view.Spatial s.Id)
 
     // Each container's own round trip at its own cheapest sink, priced at
     // its own source's output — the fraction of a hauler it asks for, and
@@ -1790,7 +1768,7 @@ let private reserverBodyWithin claims capacity =
 /// never buy is an addend of the Workforce target and of its amortization
 /// that no cast will ever pay off.
 ///
-/// **`richestCapacity` and never `bank.Available`**, which is the reading
+/// **The bank's `Capacity` and never its `Available`**, which is the reading
 /// #203's report proposed and the one this quota may not take. A row's
 /// quota is a colony fact (ADR 0006), and Available is the energy standing
 /// in the extensions this tick — a number this colony's own spawning moves.
@@ -1800,8 +1778,9 @@ let private reserverBodyWithin claims capacity =
 /// amortization, and handing it all back when the extensions refill. The
 /// cast's own affordability is checked where it belongs, at the cast
 /// (`planSpawns`); this is the question of whether the row exists at all.
-/// `richestCapacity` is also one fold with four readers that must not
-/// disagree — its own doc says so — so narrowing it here would be a second
+/// The capacity is also one field with four readers that must not
+/// disagree — `ColonyView.Bank`'s own doc says so — so narrowing it here
+/// would be a second
 /// reading of the colony's bank beside the one every Withdraw cap uses.
 ///
 /// A reservation another player holds counts as no hold at all, exactly as
@@ -1835,11 +1814,11 @@ let private reserverBodyWithin claims capacity =
 /// tick between first sight and the withdrawal is priced here as a room
 /// nobody holds. That window is bounded, pre-dates this clause, and is
 /// left where the ticket left it.
-let private reserverClaimsOf (snapshot: Snapshot) atlas : int list =
-    let home = snapshot.Controller |> Option.map (fun c -> c.Id)
+let private reserverClaimsOf (view: ColonyView) atlas : int list =
+    let home = view.Controller |> Option.map (fun c -> c.Id)
 
     let heldTicks room =
-        snapshot.RoomControl
+        view.RoomControl
         |> Map.tryFind room
         |> Option.bind (fun control -> control.Reservation)
         |> Option.filter (fun held -> held.Holder = ReservationHolder.Ours)
@@ -1884,20 +1863,20 @@ let private reserverClaimsOf (snapshot: Snapshot) atlas : int list =
     //
     // That bound holds while the account can *pay* for the claim, and
     // nothing here can check that it can: `claimController` answers
-    // ERR_GCL_NOT_ENOUGH when there is no GCL level to spare, the Snapshot
+    // ERR_GCL_NOT_ENOUGH when there is no GCL level to spare, the view
     // carries no GCL fact at all, and a room that stays unowned stays a
     // candidate — so a colony declared before the level is there loses the
     // reservation for good and reads five a tick until a human sees the
     // Executor's log. The declaration is the human's sentence, and this is
     // the part of it the bot cannot check for them.
-    let claims = claimTargets snapshot
+    let claims = claimTargets view
     let claimed = claims |> List.map snd |> Set.ofList
 
-    if richestCapacity snapshot < bodyCost reserverPattern.Block then
+    if view.Bank.Capacity < bodyCost reserverPattern.Block then
         []
     else
         let reserved =
-            snapshot.Spatial.TargetKinds
+            view.Spatial.TargetKinds
             |> Map.toList
             |> List.choose (fun (id, kind) ->
                 if kind = Controller && Some id <> home then
@@ -1905,7 +1884,7 @@ let private reserverClaimsOf (snapshot: Snapshot) atlas : int list =
                 else
                     None)
             |> List.distinct
-            |> List.filter (colonyOwns snapshot >> not)
+            |> List.filter (colonyOwns view >> not)
             |> List.filter (fun room -> not (Set.contains room claimed))
             |> List.map (fun room ->
                 ceilDiv (reservationCap - heldTicks room) claimLifetime |> max 1)
@@ -1952,14 +1931,14 @@ let private reserverClaimsOf (snapshot: Snapshot) atlas : int list =
 /// and both readers below floor their own row rather than clamping here,
 /// where a zero would hide which row the shortfall fell on.
 let private surplusOverLifetime
-    (snapshot: Snapshot)
+    (view: ColonyView)
     atlas
     reserverClaims
     anchorWorkCap
     anchorQuota
     haulerQuota
     =
-    let capacity = richestCapacity snapshot
+    let capacity = view.Bank.Capacity
 
     // The row's own body, once, times the places it hires: every reserver
     // cast this tick carries the largest outstanding demand, so the charge
@@ -1996,9 +1975,9 @@ let private surplusOverLifetime
     // rock's own ceiling (#208), which is the body the amortization above
     // is priced at — one cast, read once as a cost and once as income.
     let income =
-        snapshot.Sources
+        view.Sources
         |> List.filter (isPosted atlas)
-        |> List.sumBy (fun s -> sourceOutputOf snapshot atlas s.Id |> Option.defaultValue 0)
+        |> List.sumBy (fun s -> sourceOutputOf view atlas s.Id |> Option.defaultValue 0)
 
     income * creepLifetime - amortization
 
@@ -2130,8 +2109,8 @@ let private upgraderDrain capacity =
 /// promise, and a row hired against it would stand beside a hole with
 /// nothing to withdraw from (ADR 0019 shuts it out of every other store's
 /// draw by distance, not by rule).
-let private upgraderQuota (snapshot: Snapshot) atlas surplus =
-    let capacity = richestCapacity snapshot
+let private upgraderQuota (view: ColonyView) atlas surplus =
+    let capacity = view.Bank.Capacity
 
     if
         Set.isEmpty (Atlas.controllerContainers atlas)
@@ -2166,7 +2145,7 @@ let private upgraderQuota (snapshot: Snapshot) atlas surplus =
 /// second against no pool at all would be hiring for a job that does not
 /// exist — the same objection ADR 0012 retired the seat base for.
 ///
-/// Read off the **pool** and never off the Snapshot's site list: the pool
+/// Read off the **pool** and never off the view's site list: the pool
 /// is what the Matcher will actually offer, so work the Planner has
 /// already withheld — out of a stood-down outpost (ADR 0043), behind a
 /// Threat's reach (ADR 0033) — hires nobody to walk to it.
@@ -2273,7 +2252,7 @@ let private pioneerCount = 3
 /// derived from. Both readings hire the same bodies and only one of them
 /// terminates.
 let private workforceTarget
-    (snapshot: Snapshot)
+    (view: ColonyView)
     atlas
     (tasks: Task list)
     reserverClaims
@@ -2282,15 +2261,15 @@ let private workforceTarget
     upgraderQuota
     surplus
     =
-    let home = SpatialInfo.homeName snapshot.Spatial
+    let home = SpatialInfo.homeName view.Spatial
 
     let unpostedSeats =
-        snapshot.Sources
+        view.Sources
         |> List.filter (isPosted atlas >> not)
         |> List.filter (fun s -> Atlas.targetRoom atlas s.Id = Some home)
         |> List.sumBy (fun s -> Atlas.seats atlas s.Id |> Option.defaultValue 0)
 
-    let capacity = richestCapacity snapshot
+    let capacity = view.Bank.Capacity
 
     let workerDrain = upgradeDrainOf (bodyFor workerPattern capacity)
 
@@ -2369,9 +2348,9 @@ let private workforceTarget
     // answers neither.
     let pioneers =
         let raising room =
-            isNurseryRoom snapshot room || isBootstrapRoom snapshot room
+            isNurseryRoom view room || isBootstrapRoom view room
 
-        if snapshot.Stages |> Map.exists (fun room _ -> raising room) then
+        if view.Stages |> Map.exists (fun room _ -> raising room) then
             pioneerCount
         else
             0
@@ -2514,24 +2493,24 @@ let private patternOf atlas (creep: CreepInfo) =
 /// The totality above gains one more absence and no new rule: a creep
 /// whose room shares no priceable crossing with home answers 0 too, exactly
 /// as a tile no spawn can reach does (ADR 0004).
-let private leadOf (snapshot: Snapshot) atlas (creep: CreepInfo) : int =
+let private leadOf (view: ColonyView) atlas (creep: CreepInfo) : int =
     let pattern = patternOf atlas creep
 
     match Atlas.creepRoom atlas creep.Name, Atlas.creepTile atlas creep.Name with
     | None, _
     | _, None -> 0
     | Some room, Some tile ->
-        snapshot.Spawns
+        view.Spawns
         |> List.choose (fun s ->
             match Atlas.positionOf atlas s.Id with
             | None -> None
             | Some spawnPos ->
-                let bank =
-                    snapshot.RoomEnergy
-                    |> Map.tryFind s.RoomName
-                    |> Option.defaultValue { Available = 0; Capacity = 0 }
-
-                let body = bodyFor pattern bank.Capacity
+                // The colony's one bank, whatever room the spawn is
+                // filed under: every spawn a colony casts from stands in
+                // its home room (ADR 0052 decision 1), so the capacity a
+                // replacement would be cast at is the same number for all
+                // of them.
+                let body = bodyFor pattern view.Bank.Capacity
 
                 Atlas.castWalkTicks atlas body spawnPos room tile
                 |> Option.map (fun walk -> spawnTicksPerPart * List.length body + walk))
@@ -2546,8 +2525,8 @@ let private leadOf (snapshot: Snapshot) atlas (creep: CreepInfo) : int =
 /// is never released for it — anti-thrash keeps it on its Task to the last
 /// tick, and the Post the two share for the lead's duration is the
 /// succession, not an oversell.
-let private expiring (snapshot: Snapshot) atlas (creep: CreepInfo) =
-    creep.TicksToLive <= leadOf snapshot atlas creep
+let private expiring (view: ColonyView) atlas (creep: CreepInfo) =
+    creep.TicksToLive <= leadOf view atlas creep
 
 /// The spawn Intents the Workforce target's rows are owed. The target is
 /// the quota the *generalist* row is hired against; every other row is
@@ -2564,7 +2543,7 @@ let private expiring (snapshot: Snapshot) atlas (creep: CreepInfo) =
 /// before the Matcher and the order of the two in `decide` is the pool's
 /// alone.
 let private planSpawns
-    (snapshot: Snapshot)
+    (view: ColonyView)
     atlas
     (threats: Threats)
     (tasks: Task list)
@@ -2592,7 +2571,7 @@ let private planSpawns
     // Asked before anything is priced, the way the reflexes ask their
     // hostiles first: a held tick derives no Workforce target and floods
     // no lead.
-    if snapshot.Spawns |> List.exists doorstepInReach then
+    if view.Spawns |> List.exists doorstepInReach then
         []
     else
 
@@ -2631,30 +2610,30 @@ let private planSpawns
         // quotas because it is an addend of the same target — the row's
         // bodies are creeps, and a fleet counting them as generalists would
         // hire an upgrade mouth fewer for every reserver in the room.
-        let reserverClaims = reserverClaimsOf snapshot atlas
+        let reserverClaims = reserverClaimsOf view atlas
 
         // The anchor row's ceiling this tick, read once beside the quotas
         // and for the same reason the reserver's demand list is (ADR
         // 0042): the row's body is what the amortization is charged and
         // what the cast below buys, and the two must be the same body.
-        let anchorWorkCap = anchorWorkCapOf snapshot atlas
+        let anchorWorkCap = anchorWorkCapOf view atlas
 
         // The income the two upgrade rows are hired out of, once (ADR
         // 0046): the standing row's quota is derived from it and the
         // commuting row's is derived from what that quota leaves, so the
         // two must read one number and not two spellings of it.
         let surplus =
-            surplusOverLifetime snapshot atlas reserverClaims anchorWorkCap anchorQuota haulerQuota
+            surplusOverLifetime view atlas reserverClaims anchorWorkCap anchorQuota haulerQuota
 
         // The upgrader row's quota (ADR 0046), read here beside the other
         // rows' for the same reason: it is an addend of the target below
         // and a gap of its own in the cascade, and a body hired for one
         // and not counted in the other would be an oversell every tick.
-        let upgraderQuota = upgraderQuota snapshot atlas surplus
+        let upgraderQuota = upgraderQuota view atlas surplus
 
         let target =
             workforceTarget
-                snapshot
+                view
                 atlas
                 tasks
                 reserverClaims
@@ -2670,8 +2649,7 @@ let private planSpawns
         // still reads the creep list itself — an expiring creep can refill an
         // extension, and a colony holding one is not the empty one.
         let living =
-            snapshot.Creeps
-            |> List.filter (fun creep -> not (expiring snapshot atlas creep))
+            view.Creeps |> List.filter (fun creep -> not (expiring view atlas creep))
 
         let deficit = target - List.length living
 
@@ -2695,7 +2673,7 @@ let private planSpawns
         // from, so the casting step takes an already-decided sizing instead
         // and each caller supplies the rule its row is written in.
         //
-        // The whole `RoomEnergy` and not its capacity, because which of the
+        // The whole bank and not its capacity, because which of the
         // two numbers a row prices at is part of that row's rule and was
         // the invisible half of #203's deadlock: every row here but the
         // supply floor sizes at `Capacity` and is therefore unbuyable until
@@ -2704,7 +2682,7 @@ let private planSpawns
         // call site now says which number it reads, in the one place the
         // reader is asking.
         let castFromBank pattern (sizing: RoomEnergy -> BodyPart list) (bank: RoomEnergy) =
-            if List.isEmpty snapshot.Creeps then
+            if List.isEmpty view.Creeps then
                 if bank.Available >= bodyCost workerPattern.Block then
                     Some(workerPattern, workerPattern.Block)
                 else
@@ -2808,7 +2786,7 @@ let private planSpawns
         // 1,800 capacity, two Anchors on full containers, 246,818 energy in
         // the storage and 1,235 ticks without a single cast.
         //
-        // Read off `snapshot.Creeps` and never `living` for the same reason
+        // Read off `view.Creeps` and never `living` for the same reason
         // the fallback is: an expiring hauler can still refill an extension,
         // and a colony holding one is not the stranded one.
         //
@@ -2816,7 +2794,7 @@ let private planSpawns
         // an Anchor has one, and answering the gate with it is how the
         // deadlock reproduces itself with this row in place.
         let supplyFloor =
-            if snapshot.Creeps |> List.exists (canRefill atlas) then
+            if view.Creeps |> List.exists (canRefill atlas) then
                 0
             else
                 1
@@ -2896,23 +2874,24 @@ let private planSpawns
                  |> max 0)
                 (castFromBank workerPattern (fun bank -> bodyFor workerPattern bank.Capacity))
 
-        // Idle spawns draw from their room's one bank in list order — each
+        // Idle spawns draw from the colony's one bank in list order — each
         // body debits the budget the next spawn sees, so the same energy is
         // never committed twice.
+        //
+        // One bank and no longer a map keyed by the spawn's room (ADR 0052
+        // decision 1): every spawn a colony casts from stands in its home
+        // room, so the map had one entry and the lookup could only ever
+        // answer with it — or, for a spawn the projection filed under
+        // another room, with a zero bank that silently cast nothing.
         let intents, _, _ =
-            snapshot.Spawns
+            view.Spawns
             |> List.filter (fun s -> not s.IsSpawning)
             |> List.fold
                 (fun
                     (intents,
-                     banks: Map<string, RoomEnergy>,
+                     bank: RoomEnergy,
                      unfilled: (RoomEnergy -> (BodyPattern * BodyPart list) option) list)
                     s ->
-                    let bank =
-                        banks
-                        |> Map.tryFind s.RoomName
-                        |> Option.defaultValue { Available = 0; Capacity = 0 }
-
                     // The first seat this bank can pay for, and the rest of
                     // the list with exactly that seat taken out of it.
                     let rec take passed remaining =
@@ -2925,17 +2904,13 @@ let private planSpawns
 
                     match take [] unfilled with
                     | Some((pattern, body), left) ->
-                        SpawnCreep(s.Name, body, $"{pattern.Name}-{snapshot.Time}-{s.Name}")
-                        :: intents,
-                        banks
-                        |> Map.add
-                            s.RoomName
-                            { bank with
-                                Available = bank.Available - bodyCost body
-                            },
+                        SpawnCreep(s.Name, body, $"{pattern.Name}-{view.Time}-{s.Name}") :: intents,
+                        { bank with
+                            Available = bank.Available - bodyCost body
+                        },
                         left
-                    | None -> intents, banks, unfilled)
-                ([], snapshot.RoomEnergy, seats)
+                    | None -> intents, bank, unfilled)
+                ([], view.Bank, seats)
 
         List.rev intents
 
@@ -2947,7 +2922,7 @@ let private planSpawns
 let private safeModeDeadline = 3
 
 /// The hostiles standing in the colony's own room, which is the whole of
-/// what the two reflexes below may read (#201). Since `Snapshot.Hostiles`
+/// what the two reflexes below may read (#201). Since `ColonyView.Hostiles`
 /// stopped being the spawn rooms' alone, "a hostile" and "a hostile here"
 /// are two different questions, and both reflexes ask the second one: safe
 /// mode protects a controller of ours and an outpost has none to protect
@@ -2962,9 +2937,9 @@ let private safeModeDeadline = 3
 /// arms need an answer on a tick the projection places neither: ADR 0004's
 /// absence would otherwise widen the reflex back to every room at exactly
 /// the moment there is least to read.
-let private hostilesAtHome (snapshot: Snapshot) : HostileInfo list =
-    let home = SpatialInfo.homeName snapshot.Spatial
-    snapshot.Hostiles |> List.filter (fun hostile -> hostile.RoomName = home)
+let private hostilesAtHome (view: ColonyView) : HostileInfo list =
+    let home = SpatialInfo.homeName view.Spatial
+    view.Hostiles |> List.filter (fun hostile -> hostile.RoomName = home)
 
 /// Colony reflex beside the pipeline, two arms and one pair of gates —
 /// stock remaining, safe mode not already running.
@@ -2993,14 +2968,14 @@ let private hostilesAtHome (snapshot: Snapshot) : HostileInfo list =
 /// A hostile that neither claims nor damages spends nothing: at RCL2 safe
 /// mode outlasts any invader raid 13×, so the stock keeps for when the
 /// room is actually being taken (ADR 0007).
-let private planSafeMode (snapshot: Snapshot) atlas : Intent list =
-    match snapshot.Controller with
+let private planSafeMode (view: ColonyView) atlas : Intent list =
+    match view.Controller with
     | Some controller when controller.SafeModeAvailable > 0 && not controller.SafeModeActive ->
         // The colony's own room and no other (`hostilesAtHome`, #201): a
         // claimer in an outpost is tapping a controller safe mode does not
         // cover, and the Keep it could be denting is not in that room at
         // all.
-        let here = hostilesAtHome snapshot
+        let here = hostilesAtHome view
 
         let withinReach (h: HostileInfo) =
             List.contains BodyPart.Claim h.Body
@@ -3017,8 +2992,7 @@ let private planSafeMode (snapshot: Snapshot) atlas : Intent list =
         // a container's hits nor a rampart's ever spend the stock. The
         // hostiles are asked first, so a quiet room walks nothing.
         let keepDamaged =
-            not (List.isEmpty here)
-            && hungryStructures snapshot |> List.exists (snd >> isKeep)
+            not (List.isEmpty here) && hungryStructures view |> List.exists (snd >> isKeep)
 
         // The undefended arm (#217, ADR 0034 as it amends it): a colony
         // with no tower standing fires on the first armed hostile in its
@@ -3060,8 +3034,8 @@ let private planSafeMode (snapshot: Snapshot) atlas : Intent list =
 /// raider is nearest *by coordinate* in any projected room, and a `Pos`
 /// carries no room, so a raider fifty tiles and a border away would read
 /// as the nearest target and take the shot the one in the room deserved.
-let private planFire (snapshot: Snapshot) atlas : Intent list =
-    match hostilesAtHome snapshot with
+let private planFire (view: ColonyView) atlas : Intent list =
+    match hostilesAtHome view with
     | [] -> []
     | hostiles ->
         Atlas.placedTowers atlas
@@ -3149,7 +3123,7 @@ let private storageLevel = 4
 /// whole every tick regardless of stage (ADR 0011's "computed whole"), so
 /// they still route around tomorrow's reserved tiles and a Link footing
 /// still dodges them.
-let private placesRoads (snapshot: Snapshot) = isIndependent snapshot
+let private placesRoads (view: ColonyView) = isIndependent view
 
 /// The Layout horizon (ADR 0011, moved to RCL5 by ADR 0039): the whole
 /// plan is computed up to this level regardless of the current one, so
@@ -3200,7 +3174,7 @@ let private horizonLevel = 5
 /// has, and what the plan wanted instead is a colony fact no other channel
 /// carries — nothing demolishes the orphan, so the difference is permanent.
 let private planLayout
-    (snapshot: Snapshot)
+    (view: ColonyView)
     atlas
     : Intent list *
       ServedFooting list *
@@ -3208,16 +3182,16 @@ let private planLayout
       UnroutedTrunk list *
       DeferredContainer list
     =
-    let anchor = snapshot.Spawns |> List.tryPick (fun s -> Atlas.positionOf atlas s.Id)
+    let anchor = view.Spawns |> List.tryPick (fun s -> Atlas.positionOf atlas s.Id)
 
-    match Atlas.homeRoom atlas, anchor, snapshot.Controller with
+    match Atlas.homeRoom atlas, anchor, view.Controller with
     | Some room, Some spawnPos, Some controller ->
         // Same checkerboard colour as the spawn: clustered structures sit on
         // the spawn's colour, leaving the other colour free for movement.
         let parity = (spawnPos.X + spawnPos.Y) % 2
 
         // The sources this plan is for: the home room's alone (ADR 0041).
-        // `snapshot.Sources` is every scanned room's since #124 — the
+        // `view.Sources` is every scanned room's since #124 — the
         // Harvest pool is one pool — while every use of a source below
         // joins a bare `Pos` to the *home* grid: a footing slot widens a
         // home reservation, a trunk is a home flood started from the
@@ -3229,8 +3203,7 @@ let private planLayout
         // Layout"). The room is resolved through the Atlas's own id join
         // (ADR 0041), as every other reader holding one resolves it.
         let homeSources =
-            snapshot.Sources
-            |> List.filter (fun s -> Atlas.targetRoom atlas s.Id = Some room)
+            view.Sources |> List.filter (fun s -> Atlas.targetRoom atlas s.Id = Some room)
 
         // The working ground — every source's Seats and the controller's
         // Upgrade Work Area — is off-limits (ADR 0022): a clustered
@@ -3305,7 +3278,7 @@ let private planLayout
         // therefore the order a loss reads in.
         let trunkGoals =
             (TrunkGoal.UpgradeArea, upgradeArea)
-            :: (snapshot.Spawns
+            :: (view.Spawns
                 |> List.choose (fun s ->
                     Atlas.positionOf atlas s.Id
                     |> Option.map (fun spawn ->
@@ -3392,7 +3365,7 @@ let private planLayout
         // the container finished. One construction site per tile is one
         // rule, and both kinds have to read it.
         let placedRoads =
-            if placesRoads snapshot then
+            if placesRoads view then
                 Set.difference roadGap (Atlas.pendingContainerTiles atlas)
             else
                 Set.empty
@@ -3647,7 +3620,7 @@ let private planLayout
         // Post it covers (ADR 0022 as ADR 0034 revises it) — which is why
         // these tiles are read off the census and not off the ordering.
         let covered =
-            if keepsRamparts snapshot then
+            if keepsRamparts view then
                 Set.union (Atlas.keepTiles atlas) (Atlas.postContainerTiles atlas)
             else
                 Set.empty
@@ -3718,7 +3691,7 @@ let private planLayout
 /// and would hand the Executor an Intent it can only report as
 /// `ActorMissing`, the outcome it reserves for an upstream bug, once a
 /// tick per rock for ever. The gate is the room's `RoomControl` entry,
-/// which is exactly the Snapshot's per-room vision fact and what
+/// which is exactly the view's per-room vision fact and what
 /// `sourceOutputOf` reads for the same reason. Nothing is lost by
 /// waiting: a Harvest names an outpost rock with no vision at all (ADR
 /// 0041), so a creep walks there on its own, and the tick it arrives is
@@ -3763,7 +3736,7 @@ let private planLayout
 ///
 /// What finishes what this rule starts, named here because the two halves
 /// are read apart: the site placed here becomes a Build Task like any
-/// other, because `Snapshot.ConstructionSites` is every room the colony
+/// other, because `ColonyView.ConstructionSites` is every room the colony
 /// can see and no longer the spawn rooms' alone (#150). The Task, its Work
 /// Area and its price stay outpost-blind — it names a site by id, the area
 /// is that site's room's (ADR 0041) and the price crosses the Seam like
@@ -3793,17 +3766,17 @@ let private planLayout
 /// There is still no outpost builder row and this rule invents none.
 /// Until the pool widened, the site was named by no Task at all and the
 /// switch could not close however near a creep stood.
-let private planOutpostContainers (snapshot: Snapshot) atlas : Intent list =
-    let home = SpatialInfo.homeName snapshot.Spatial
+let private planOutpostContainers (view: ColonyView) atlas : Intent list =
+    let home = SpatialInfo.homeName view.Spatial
 
     // Every rock the projection places in a room that is not home and that
     // the colony is looking into this tick — `RoomControl` carries one
     // entry per seen room, and vision is what both the census below and
     // the Executor's own `Game.rooms` lookup are paid for with.
-    snapshot.Sources
+    view.Sources
     |> List.choose (fun s ->
         match Atlas.targetRoom atlas s.Id, Atlas.positionOf atlas s.Id with
-        | Some room, Some pos when room <> home && Map.containsKey room snapshot.RoomControl ->
+        | Some room, Some pos when room <> home && Map.containsKey room view.RoomControl ->
             Some(s.Id, room, pos)
         | _ -> None)
     |> List.choose (fun (sourceId, room, sourcePos) ->
@@ -3857,9 +3830,9 @@ let private planOutpostContainers (snapshot: Snapshot) atlas : Intent list =
 /// that overflow into a pile that no later withdrawal takes back. The
 /// hauler then stands *on* the pile — range 0 — and, while both sides
 /// answered home, walked away from it.
-let private planPickups (snapshot: Snapshot) atlas : Intent list =
+let private planPickups (view: ColonyView) atlas : Intent list =
     let hungry =
-        snapshot.Creeps
+        view.Creeps
         |> List.filter (fun c -> c.FreeCapacity > 0)
         |> List.map (fun c -> c.Name)
         |> Set.ofList
@@ -3882,10 +3855,10 @@ let private planPickups (snapshot: Snapshot) atlas : Intent list =
                     []))
 
 /// Ticks until a source restocks (ADR 0025), 0 while it holds energy —
-/// and 0 for a source the Snapshot does not carry at all, so a source
+/// and 0 for a source the view does not carry at all, so a source
 /// nothing projects never holds a decision up.
-let private ticksToRestock (snapshot: Snapshot) sourceId =
-    snapshot.Sources
+let private ticksToRestock (view: ColonyView) sourceId =
+    view.Sources
     |> List.tryFind (fun s -> s.Id = sourceId)
     |> Option.map (fun s -> s.TicksToRestock)
     |> Option.defaultValue 0
@@ -3984,7 +3957,7 @@ let private keepsThroughEmptyWindow atlas (creep: CreepInfo) sourceId =
 /// rejection and the release carry is exactly what was compared here
 /// (#88): read off the gate, never re-derived by a caller from a price
 /// that no longer converts to ticks.
-let private tooEarly (snapshot: Snapshot) atlas (creep: CreepInfo) task (walk: Lazy<int option>) =
+let private tooEarly (view: ColonyView) atlas (creep: CreepInfo) task (walk: Lazy<int option>) =
     match task with
     | Harvest sourceId ->
         match walk.Value with
@@ -3993,7 +3966,7 @@ let private tooEarly (snapshot: Snapshot) atlas (creep: CreepInfo) task (walk: L
         // and names that rejection itself (ADR 0002, ADR 0029).
         | None -> None
         | Some ticks ->
-            let wait = ticksToRestock snapshot sourceId
+            let wait = ticksToRestock view sourceId
 
             // `wait = 0` became load-bearing when the heavy arm below
             // stopped reading the walk: a stocked source is a wait of zero
@@ -4140,10 +4113,10 @@ let private threatened (threats: Threats) atlas (creep: CreepInfo) task =
 ///
 /// Total (ADR 0004): a site the projection does not place names no room,
 /// answers false, and is the ordinary surplus Build it has always been.
-let private isOutpostContainerSite (snapshot: Snapshot) atlas siteId =
-    Map.tryFind siteId snapshot.Spatial.TargetKinds = Some(Site BuiltKind.Container)
+let private isOutpostContainerSite (view: ColonyView) atlas siteId =
+    Map.tryFind siteId view.Spatial.TargetKinds = Some(Site BuiltKind.Container)
     && Atlas.targetRoom atlas siteId
-       |> Option.exists (fun room -> room <> SpatialInfo.homeName snapshot.Spatial)
+       |> Option.exists (fun room -> room <> SpatialInfo.homeName view.Spatial)
 
 /// Whether a construction site stands in a **nursery** — a room this
 /// colony has claimed and not yet stood a spawn in (`isNurseryRoom`, ADR
@@ -4164,8 +4137,8 @@ let private isOutpostContainerSite (snapshot: Snapshot) atlas siteId =
 /// the layer that places its id. Total (ADR 0004): a site the projection
 /// does not place names no room, answers false, and is the ordinary
 /// surplus Build every site outside a nursery is.
-let private isNurserySite (snapshot: Snapshot) atlas siteId =
-    Atlas.targetRoom atlas siteId |> Option.exists (isNurseryRoom snapshot)
+let private isNurserySite (view: ColonyView) atlas siteId =
+    Atlas.targetRoom atlas siteId |> Option.exists (isNurseryRoom view)
 
 /// Whether a room is **bootstrapping** as seen from this colony's tick: a
 /// child of ours running its own spawn (`isBootstrapRoom`, the mother's
@@ -4181,10 +4154,9 @@ let private isNurserySite (snapshot: Snapshot) atlas siteId =
 /// spell out. The mother's half is deliberately the wider one, at any RCL
 /// while she still projects the room — see `isBootstrapRoom` — because
 /// what closes her window is her scan set.
-let private isBootstrappingRoom (snapshot: Snapshot) room =
-    isBootstrapRoom snapshot room
-    || (room = SpatialInfo.homeName snapshot.Spatial
-        && homeStage snapshot = Some Bootstrapping)
+let private isBootstrappingRoom (view: ColonyView) room =
+    isBootstrapRoom view room
+    || (room = SpatialInfo.homeName view.Spatial && homeStage view = Some Bootstrapping)
 
 /// A site standing in a bootstrapping room: feeding-tier in both pools
 /// (user, 2026-09-06: "pioneer 都在升级没人建 extension … 房间里很多小
@@ -4195,17 +4167,17 @@ let private isBootstrappingRoom (snapshot: Snapshot) room =
 /// child's own workers and for the pioneers alike. The borrowed Upgrade
 /// drops back to surplus while such a site stands (`tierOf`), so a
 /// pioneer builds first and upgrades after.
-let private isBootstrappingSite (snapshot: Snapshot) atlas siteId =
-    Atlas.targetRoom atlas siteId |> Option.exists (isBootstrappingRoom snapshot)
+let private isBootstrappingSite (view: ColonyView) atlas siteId =
+    Atlas.targetRoom atlas siteId |> Option.exists (isBootstrappingRoom view)
 
 /// Whether any site stands in the room of the named controller — the
 /// borrowed Upgrade's other half: while the child has sites, its
 /// controller waits.
-let private sitesPendingBeside (snapshot: Snapshot) atlas controllerId =
+let private sitesPendingBeside (view: ColonyView) atlas controllerId =
     match Atlas.targetRoom atlas controllerId with
     | None -> false
     | Some room ->
-        snapshot.ConstructionSites
+        view.ConstructionSites
         |> List.exists (fun site -> Atlas.targetRoom atlas site.Id = Some room)
 
 /// Whether this Build is on the feeding tier rather than in the surplus
@@ -4220,10 +4192,10 @@ let private sitesPendingBeside (snapshot: Snapshot) atlas controllerId =
 /// 0047). One question deeper each time, and the same shape of answer: a
 /// Build the colony's reproduction is waiting on is not work it does with
 /// energy it already has.
-let private isFeedingSite (snapshot: Snapshot) atlas siteId =
-    isOutpostContainerSite snapshot atlas siteId
-    || isNurserySite snapshot atlas siteId
-    || isBootstrappingSite snapshot atlas siteId
+let private isFeedingSite (view: ColonyView) atlas siteId =
+    isOutpostContainerSite view atlas siteId
+    || isNurserySite view atlas siteId
+    || isBootstrappingSite view atlas siteId
 
 /// Whether a creep can usefully work this Task right now. The body must
 /// physically be able to do it — Work-part tasks need a Work part, energy
@@ -4288,7 +4260,7 @@ let private isFeedingSite (snapshot: Snapshot) atlas siteId =
 /// walk here — the body digs the source beside it and spends what it dug
 /// into the progress it is standing on, which is how an outpost's
 /// container was raised before either rule existed; the arm carries why.
-let private applicable (snapshot: Snapshot) (threats: Threats) atlas (creep: CreepInfo) task =
+let private applicable (view: ColonyView) (threats: Threats) atlas (creep: CreepInfo) task =
     let has part =
         creep.Body |> Map.tryFind part |> Option.exists (fun n -> n > 0)
 
@@ -4440,7 +4412,7 @@ let private applicable (snapshot: Snapshot) (threats: Threats) atlas (creep: Cre
         && creep.Energy > 0
         && (Atlas.standsOnPostSite atlas creep.Name siteId
             || (not (isStandingBody creep)
-                && not (isFeedingSite snapshot atlas siteId && Atlas.workHeavy atlas creep.Name)))
+                && not (isFeedingSite view atlas siteId && Atlas.workHeavy atlas creep.Name)))
     // Repair leaves Upgrade's arm with ADR 0046's gate (a delivery, and a
     // standing body's Carry is one trip's worth), and the two stay
     // otherwise identical: a Work part and something to spend.
@@ -4475,7 +4447,7 @@ let private applicable (snapshot: Snapshot) (threats: Threats) atlas (creep: Cre
         // that sends the pioneers must not send the home upgraders after
         // them. Their own controller stays the one Task the row exists
         // for, ungated.
-        && not (isBorrowedUpgrade snapshot controllerId && isStandingBody creep)
+        && not (isBorrowedUpgrade view controllerId && isStandingBody creep)
     // Part arithmetic and nothing else (ADR 0006): a reservation is pushed
     // up by CLAIM parts, so a body without one can no more reserve than a
     // Work-less one can dig, and a body with one asks for no energy state
@@ -4662,7 +4634,7 @@ let private rankOfTier =
 ///
 /// Reads the Atlas because that room is a question only the projection's
 /// id-to-room join answers.
-let private tierOf (snapshot: Snapshot) atlas task =
+let private tierOf (view: ColonyView) atlas task =
     match task with
     | Flee -> Safety
     | Harvest _ -> Feeding
@@ -4693,7 +4665,7 @@ let private tierOf (snapshot: Snapshot) atlas task =
     // stays takeable while nobody else has taken it.
     | Claim _ -> Feeding
     | Withdraw storeId ->
-        let kind = Map.tryFind storeId snapshot.Spatial.TargetKinds
+        let kind = Map.tryFind storeId view.Spatial.TargetKinds
 
         if kind = Some(Structure BuiltKind.Storage) then
             StockDraw
@@ -4711,10 +4683,10 @@ let private tierOf (snapshot: Snapshot) atlas task =
     | Pickup _ -> Feeding
     | Refill structureId ->
         let isTower =
-            snapshot.Refillables
+            view.Refillables
             |> List.exists (fun r -> r.Id = structureId && r.Kind = BuiltKind.Tower)
 
-        let kind = Map.tryFind structureId snapshot.Spatial.TargetKinds
+        let kind = Map.tryFind structureId view.Spatial.TargetKinds
 
         if kind = Some(Structure BuiltKind.Storage) then
             Stock
@@ -4790,7 +4762,7 @@ let private tierOf (snapshot: Snapshot) atlas task =
     // the mother's own surplus work stops while the child is raised — and
     // it is bounded in *time* by the site being finished and by nothing
     // else.
-    | Build siteId when isFeedingSite snapshot atlas siteId -> Feeding
+    | Build siteId when isFeedingSite view atlas siteId -> Feeding
     // A bootstrapped child's Upgrade, in the mother's pool (#213): the
     // tier the pioneers were hired for. Left in the surplus beside the
     // home Upgrade, travel cost — a Seam and fifty tiles against five —
@@ -4801,8 +4773,8 @@ let private tierOf (snapshot: Snapshot) atlas task =
     // The child's own tick pools the same target as its own controller,
     // where this arm does not fire.
     | Upgrade controllerId when
-        isBorrowedUpgrade snapshot controllerId
-        && not (sitesPendingBeside snapshot atlas controllerId)
+        isBorrowedUpgrade view controllerId
+        && not (sitesPendingBeside view atlas controllerId)
         ->
         Feeding
     | Build _
@@ -4810,8 +4782,8 @@ let private tierOf (snapshot: Snapshot) atlas task =
     | Upgrade _ -> Surplus
 
 /// Whether the controller stands inside its downgrade deadline (ADR 0007).
-let private insideDowngradeDeadline (snapshot: Snapshot) =
-    snapshot.Controller
+let private insideDowngradeDeadline (view: ColonyView) =
+    view.Controller
     |> Option.exists (fun c -> c.TicksToDowngrade <= downgradeDeadline c.Level)
 
 /// One rank above the shallowest tier: where the downgrade deadline puts
@@ -4825,7 +4797,7 @@ let private deadlineRank = -1
 /// feeding tier (ADR 0007).
 ///
 /// **The colony's own controller and no other.** The deadline is read off
-/// `Snapshot.Controller`, which is this colony's alone, and since ADR 0047
+/// `ColonyView.Controller`, which is this colony's alone, and since ADR 0047
 /// decision 4 the pool can hold a second Upgrade — a bootstrapped child's
 /// (`planTasks`). Lifting that one on the mother's timer would send her
 /// whole loaded fleet across the Seam on the tick her *own* controller was
@@ -4836,14 +4808,14 @@ let private deadlineRank = -1
 /// The id test sits inside the Upgrade arm rather than above the match:
 /// this runs once per candidate pair the Matcher prices, and every other
 /// Task would be paying for a read it never uses.
-let private rank (snapshot: Snapshot) atlas task =
+let private rank (view: ColonyView) atlas task =
     match task with
     | Upgrade id when
-        insideDowngradeDeadline snapshot
-        && snapshot.Controller |> Option.exists (fun c -> c.Id = id)
+        insideDowngradeDeadline view
+        && view.Controller |> Option.exists (fun c -> c.Id = id)
         ->
         deadlineRank
-    | _ -> tierOf snapshot atlas task |> rankOfTier
+    | _ -> tierOf view atlas task |> rankOfTier
 
 /// How many creeps the colony will have building outpost container sites
 /// at once (#157) — a budget over all of them together and never a
@@ -4963,7 +4935,7 @@ let private outpostContainerBuilders = 2
 /// two-row store divides by is a question this ticket does not carry, and
 /// it goes back to the tracker with the reading above rather than being
 /// settled in passing. `haulerQuota` divides this very load — the same
-/// `richestCapacity` body, on purpose (ADR 0049) — into the same source
+/// bank-capacity body, on purpose (ADR 0049) — into the same source
 /// containers' flow, taking the minimum over the spawns to find each
 /// container's cheapest sink; the two must agree, because a row sized
 /// against one load and dispatched against another would hire bodies the
@@ -4982,9 +4954,9 @@ let private outpostContainerBuilders = 2
 /// at zero and not at unbounded; `planTasks` pools only stocked stores, so
 /// the pool never asks, but a cap table that answered "no limit" to an
 /// empty store would be the one reading of the formula that inverts it.
-let private taskCapacities (snapshot: Snapshot) atlas (tasks: Task list) : Map<string, int> =
+let private taskCapacities (view: ColonyView) atlas (tasks: Task list) : Map<string, int> =
     let seats =
-        snapshot.Sources
+        view.Sources
         |> List.choose (fun s ->
             Atlas.seats atlas s.Id |> Option.map (fun count -> taskId (Harvest s.Id), count))
 
@@ -5005,7 +4977,7 @@ let private taskCapacities (snapshot: Snapshot) atlas (tasks: Task list) : Map<s
             | _ -> None)
 
     let draws =
-        let capacity = richestCapacity snapshot
+        let capacity = view.Bank.Capacity
         let haulerLoad = carryCapacityOf (bodyFor haulerPattern capacity)
         let workerLoad = carryCapacityOf (workerBodyFor capacity)
         let buffers = Atlas.controllerContainers atlas
@@ -5013,7 +4985,7 @@ let private taskCapacities (snapshot: Snapshot) atlas (tasks: Task list) : Map<s
         tasks
         |> List.choose (function
             | Withdraw storeId as task ->
-                let stock = snapshot.Spatial.Stores |> Map.tryFind storeId |> Option.defaultValue 0
+                let stock = view.Spatial.Stores |> Map.tryFind storeId |> Option.defaultValue 0
 
                 let load =
                     if Set.contains storeId buffers then
@@ -5030,7 +5002,7 @@ let private taskCapacities (snapshot: Snapshot) atlas (tasks: Task list) : Map<s
             // and a pile is not one, so the reading that picks a row by
             // store has one answer here.
             | Pickup pileId as task ->
-                let amount = snapshot.Spatial.Stores |> Map.tryFind pileId |> Option.defaultValue 0
+                let amount = view.Spatial.Stores |> Map.tryFind pileId |> Option.defaultValue 0
 
                 Some(taskId task, ceilDiv amount haulerLoad)
             | _ -> None)
@@ -5039,8 +5011,8 @@ let private taskCapacities (snapshot: Snapshot) atlas (tasks: Task list) : Map<s
         match
             tasks
             |> List.choose (function
-                | Build siteId as task when isOutpostContainerSite snapshot atlas siteId ->
-                    Some(taskId task, isNurserySite snapshot atlas siteId)
+                | Build siteId as task when isOutpostContainerSite view atlas siteId ->
+                    Some(taskId task, isNurserySite view atlas siteId)
                 | _ -> None)
         with
         | [] -> []
@@ -5086,7 +5058,7 @@ let private taskCapacities (snapshot: Snapshot) atlas (tasks: Task list) : Map<s
     let borrowed =
         tasks
         |> List.choose (function
-            | Upgrade controllerId as task when isBorrowedUpgrade snapshot controllerId ->
+            | Upgrade controllerId as task when isBorrowedUpgrade view controllerId ->
                 Some(taskId task, pioneerCount)
             // A bootstrapped child's site in the mother's pool, per site:
             // the same bodies that were hired for the room, on the site
@@ -5094,7 +5066,7 @@ let private taskCapacities (snapshot: Snapshot) atlas (tasks: Task list) : Map<s
             // child's own room reads no cap here — its own sites are its
             // own workers' to crowd.
             | Build siteId as task when
-                isBootstrapRoom snapshot (Atlas.targetRoom atlas siteId |> Option.defaultValue "")
+                isBootstrapRoom view (Atlas.targetRoom atlas siteId |> Option.defaultValue "")
                 ->
                 Some(taskId task, pioneerCount)
             | _ -> None)
@@ -5116,8 +5088,8 @@ let private taskCapacities (snapshot: Snapshot) atlas (tasks: Task list) : Map<s
 /// the rock, and it is consulted first: the cascade below asks capacity
 /// before reachability. Rides beside the Seat cap rather than replacing it
 /// — a Post is a capacity unit of its own, and both must hold.
-let private postCapacities (snapshot: Snapshot) atlas : Map<string, int> =
-    snapshot.Sources
+let private postCapacities (view: ColonyView) atlas : Map<string, int> =
+    view.Sources
     |> List.choose (fun s ->
         match Atlas.postsOf atlas s.Id |> Set.count with
         | 0 -> None
@@ -5136,7 +5108,7 @@ let private postCapacities (snapshot: Snapshot) atlas : Map<string, int> =
 /// less this tick's Reach (ADR 0033) — so a creep no more works from a
 /// tile a Threat took than it walks to one.
 let private actionIntents
-    (snapshot: Snapshot)
+    (view: ColonyView)
     atlas
     (threats: Threats)
     (creep: CreepInfo)
@@ -5144,7 +5116,7 @@ let private actionIntents
     : Intent list =
     let drained =
         match task with
-        | Harvest sourceId -> ticksToRestock snapshot sourceId > 0
+        | Harvest sourceId -> ticksToRestock view sourceId > 0
         | Withdraw _
         | Pickup _
         | Refill _
@@ -5164,21 +5136,21 @@ let private actionIntents
         []
 
 /// Emitter: each assigned creep's action Intent, then every assigned
-/// creep's chat bubble, both in Snapshot creep order. Judges actions from
+/// creep's chat bubble, both in view creep order. Judges actions from
 /// tick-start geometry — it must run against the same Atlas the Matcher
 /// used, never against resolved positions.
-let emit (snapshot: Snapshot) atlas (threats: Threats) (assigned: Map<string, Task>) : Intent list =
+let emit (view: ColonyView) atlas (threats: Threats) (assigned: Map<string, Task>) : Intent list =
     let actions =
-        snapshot.Creeps
+        view.Creeps
         |> List.collect (fun creep ->
             match Map.tryFind creep.Name assigned with
-            | Some task -> actionIntents snapshot atlas threats creep task
+            | Some task -> actionIntents view atlas threats creep task
             | None -> [])
 
     // Every assigned creep says its Task's glyph every tick; unassigned
     // creeps say nothing.
     let says =
-        snapshot.Creeps
+        view.Creeps
         |> List.choose (fun creep ->
             Map.tryFind creep.Name assigned
             |> Option.map (fun task -> SayCreep(creep.Name, glyphFor task)))
@@ -5417,13 +5389,13 @@ type private RoomPass =
 
 /// Resolver: every rested creep the Atlas places registers a Move Intent,
 /// arbitration settles them into at most one single-step move per creep,
-/// and the settled standing tiles become move Intents in Snapshot creep
+/// and the settled standing tiles become move Intents in view creep
 /// order. Takes the tick's assigned Task per creep as data; a creep absent
 /// from the map is idle. A fatigued creep sits arbitration out — the
 /// engine would answer its move with ERR_TIRED — and its tile is blocked
 /// for the tick, so nobody plans a step through it.
 ///
-/// Beside the moves ride the movement Verdicts (ADR 0009), in Snapshot
+/// Beside the moves ride the movement Verdicts (ADR 0009), in view
 /// creep order: grounded for each creep whose tile is blocked by fatigue;
 /// rerouted for a traveller whose step differs from its traffic-blind one
 /// (the occupancy surcharge is the only pricing the two floods do not
@@ -5468,7 +5440,7 @@ type private RoomPass =
 /// far side was deferred and the creep stood where it landed for the rest
 /// of its life; that gap was what #126 waited on.
 let resolve
-    (snapshot: Snapshot)
+    (view: ColonyView)
     atlas
     (threats: Threats)
     (assigned: Map<string, Task>)
@@ -5477,7 +5449,7 @@ let resolve
     let byRoom = Atlas.placedCreepsByRoom atlas
 
     let tired =
-        snapshot.Creeps
+        view.Creeps
         |> List.choose (fun c -> if c.Fatigue > 0 then Some c.Name else None)
         |> Set.ofList
 
@@ -5487,7 +5459,7 @@ let resolve
             |> List.filter (fun (name, _) -> not (Set.contains name tired))
             |> List.map (fun (name, pos) ->
                 moveIntentFor
-                    (rank snapshot atlas)
+                    (rank view atlas)
                     threats
                     atlas
                     room
@@ -5510,15 +5482,14 @@ let resolve
             Occupants = occupants
         }
 
-    // Every placed creep beside its room's pass, in Snapshot creep order
+    // Every placed creep beside its room's pass, in view creep order
     // across the rooms: the order the Intents and Verdicts leave in.
     let placed =
         byRoom
         |> List.map (fun (room, placed) -> room, placed, settleRoom room placed)
         |> List.collect (fun (_, placed, pass) ->
             placed |> List.map (fun (name, pos) -> name, pos, pass))
-        |> List.sortBy (fun (name, _, _) ->
-            snapshot.Creeps |> List.findIndex (fun c -> c.Name = name))
+        |> List.sortBy (fun (name, _, _) -> view.Creeps |> List.findIndex (fun c -> c.Name = name))
 
     let intents =
         placed
@@ -5580,12 +5551,12 @@ let resolve
 /// Matcher: keep still-valid assignments (anti-thrash) and greedily assign
 /// the rest. Assignments in, Assignments and the Verdicts explaining them
 /// out (ADR 0009): releases first in memory order, then one status Verdict
-/// per living creep in Snapshot order — each preceded, for a creep on the
+/// per living creep in view order — each preceded, for a creep on the
 /// verbose list, by its Scoring Verdict: the whole pool judged against the
 /// same state its status was decided from. Emission belongs to the
 /// Emitter, movement to the Resolver.
 let matchCreeps
-    (snapshot: Snapshot)
+    (view: ColonyView)
     atlas
     (threats: Threats)
     (tasks: Task list)
@@ -5593,14 +5564,13 @@ let matchCreeps
     (verbose: Set<string>)
     : Assignments * Verdict list =
     let byId = tasks |> List.map (fun t -> taskId t, t) |> Map.ofList
-    let capacities = taskCapacities snapshot atlas tasks
-    let postCaps = postCapacities snapshot atlas
+    let capacities = taskCapacities view atlas tasks
+    let postCaps = postCapacities view atlas
 
     // Each living creep's remaining life, hoisted for the tick as the two
     // cap tables are: the capacity gate asks it once per holder per judged
-    // pair, and the answer is a Snapshot fact.
-    let lives =
-        snapshot.Creeps |> List.map (fun c -> c.Name, c.TicksToLive) |> Map.ofList
+    // pair, and the answer is a view fact.
+    let lives = view.Creeps |> List.map (fun c -> c.Name, c.TicksToLive) |> Map.ofList
 
     // The crowding component of the matching key (ADR 0002): every holder,
     // counted at this tick. Arrival discounts what a Task's cap counts
@@ -5670,7 +5640,7 @@ let matchCreeps
     // exactly as it was. The candidate never counts against itself: a body
     // already on its own Post is what the cap is *for*.
     let postSiteGarrisons (candidate: CreepInfo) task arrival sourceId =
-        snapshot.Creeps
+        view.Creeps
         |> List.filter (fun c ->
             c.Name <> candidate.Name
             && Atlas.workHeavy atlas c.Name
@@ -5785,7 +5755,7 @@ let matchCreeps
             let release reason =
                 acc, Verdict.Released(name, tid, reason) :: released
 
-            match snapshot.Creeps |> List.tryFind (fun c -> c.Name = name) with
+            match view.Creeps |> List.tryFind (fun c -> c.Name = name) with
             | None -> acc, released
             | Some creep ->
                 match Map.tryFind tid byId with
@@ -5795,7 +5765,7 @@ let matchCreeps
                 // creep however well its body fits (ADR 0033).
                 | Some task when threatened threats atlas creep task ->
                     release ReleaseReason.Threatened
-                | Some task when not (applicable snapshot threats atlas creep task) ->
+                | Some task when not (applicable view threats atlas creep task) ->
                     release ReleaseReason.Inapplicable
                 | Some task ->
                     // The walk is bound one gate before it is spent, exactly
@@ -5810,15 +5780,14 @@ let matchCreeps
                     let arrival = lazy (Atlas.walkTicks atlas creep.Name task)
 
                     if
-                        not (hasCapacity creep acc task arrival)
-                        && not (expiring snapshot atlas creep)
+                        not (hasCapacity creep acc task arrival) && not (expiring view atlas creep)
                     then
                         release ReleaseReason.OverCapacity
                     else
                         match cost with
                         | None -> release ReleaseReason.Unreachable
                         | Some _ ->
-                            match tooEarly snapshot atlas creep task arrival with
+                            match tooEarly view atlas creep task arrival with
                             | Some(walk, wait) -> release (ReleaseReason.TooEarly(walk, wait))
                             | None -> Map.add name tid acc, released)
 
@@ -5842,7 +5811,7 @@ let matchCreeps
 
         if threatened threats atlas creep task then
             Candidate.Rejected(tid, RejectReason.Threatened)
-        elif not (applicable snapshot threats atlas creep task) then
+        elif not (applicable view threats atlas creep task) then
             Candidate.Rejected(tid, RejectReason.Inapplicable)
         else
             let cost = travelCostOf threats atlas creep.Name task
@@ -5854,9 +5823,9 @@ let matchCreeps
                 match cost with
                 | None -> Candidate.Rejected(tid, RejectReason.Unreachable)
                 | Some cost ->
-                    match tooEarly snapshot atlas creep task arrival with
+                    match tooEarly view atlas creep task arrival with
                     | Some(walk, wait) -> Candidate.Rejected(tid, RejectReason.TooEarly(walk, wait))
-                    | None -> Candidate.Scored(tid, rank snapshot atlas task, cost, load acc tid)
+                    | None -> Candidate.Scored(tid, rank view atlas task, cost, load acc tid)
 
     let assignOne (acc, verdicts) (creep: CreepInfo) =
         let verdicts =
@@ -5936,7 +5905,7 @@ let matchCreeps
                 Map.add creep.Name (taskId task) acc,
                 Verdict.Matched(creep.Name, taskId task, factor) :: verdicts
 
-    let next, statuses = snapshot.Creeps |> List.fold assignOne (kept, [])
+    let next, statuses = view.Creeps |> List.fold assignOne (kept, [])
     next, List.rev released @ List.rev statuses
 
 /// Join the Matcher's Assignments back onto the Planner's pool: the tick's
@@ -5954,13 +5923,13 @@ let private assignedTasks (tasks: Task list) (assignments: Assignments) : Map<st
 /// structures, the (kind, position) census of pending sites, the
 /// controller level, the home room's name, and who holds each room the
 /// projection carries. Any one input moving moves the signature;
-/// everything else a Snapshot carries —
+/// everything else a view carries —
 /// creeps, stores, hits, dropped piles, hostiles, banked energy, the
 /// tick — is invisible to it.
 ///
 /// The hauler quota rides the same signature on two load-bearing
 /// derivations, and both are covered here rather than assumed. The
-/// RoomEnergy Capacity it sizes bodies from is the engine's
+/// bank Capacity it sizes bodies from is the engine's
 /// energyCapacityAvailable — a function of the standing spawn/extension
 /// census and the controller level, both signed above. Since ADR 0042 it
 /// also prices each container at its source's own output, which is read
@@ -5988,7 +5957,7 @@ let private assignedTasks (tasks: Task list) (assignments: Assignments) : Map<st
 ///   quota it hires moved. Every *kind* and not the containers alone,
 ///   because the quota reads more of an outpost than its containers: the
 ///   round trip it prices them by floods that room's step-weight grid,
-///   and `Snapshot.projectVisible` lays `Roads` and `Obstacles` out of
+///   and `World.ofGame` lays `Roads` and `Obstacles` out of
 ///   the same every-owner `findStructures` array the kind census comes
 ///   from. A road paved along the haul lane makes the trip cheaper and
 ///   an invader core standing on it makes it dearer or impossible, so a
@@ -6004,7 +5973,7 @@ let private assignedTasks (tasks: Task list) (assignments: Assignments) : Map<st
 ///   is anchored at home, and the outpost's own container plan is derived
 ///   fresh every tick and rides no memo entry at all (ADR 0042). The
 ///   walk table's far leg reads one: it floods the *goal* room's grid,
-///   and `Snapshot.projectVisible` closes a tile under an obstacle-kind
+///   and `World.ofGame` closes a tile under an obstacle-kind
 ///   construction site in whatever room it stands in — the engine refuses
 ///   a creep its own site everywhere — so a site outside home moves a
 ///   grid the memo holds an answer off. Left unsigned it would be ADR
@@ -6027,8 +5996,8 @@ let private assignedTasks (tasks: Task list) (assignments: Assignments) : Map<st
 /// anchored in and which grid the spawn walks flood (ADR 0032) — a
 /// projection that renamed its home room while carrying the same geometry
 /// moves both, and the entries alone would not say so.
-let censusSignature (snapshot: Snapshot) : string =
-    let spatial = snapshot.Spatial
+let censusSignature (view: ColonyView) : string =
+    let spatial = view.Spatial
     let home = SpatialInfo.homeName spatial
 
     // One join for both halves since #169: a target is read wherever the
@@ -6056,7 +6025,7 @@ let censusSignature (snapshot: Snapshot) : string =
             | _ -> None)
 
     let level =
-        snapshot.Controller
+        view.Controller
         |> Option.map (fun c -> string c.Level)
         |> Option.defaultValue ""
 
@@ -6071,7 +6040,7 @@ let censusSignature (snapshot: Snapshot) : string =
         |> Map.toList
         |> List.map (fun (room, _) ->
             let rate =
-                Map.tryFind room snapshot.RoomControl
+                Map.tryFind room view.RoomControl
                 |> Option.map (heldRateOf >> string)
                 |> Option.defaultValue ""
 
@@ -6080,7 +6049,7 @@ let censusSignature (snapshot: Snapshot) : string =
 
     $"{home}|{level}|{held}|{standing}|{pending}"
 
-/// The decision seam: Snapshot in — with the verbose list of creep names
+/// The decision seam: a colony view in — with the verbose list of creep names
 /// owed the manufactured-evidence Verdicts (full candidate scoring, reroute
 /// attribution) and the previous tick's plan memo — Decision out. The tick's pipeline is visible here — plan, match, emit, resolve —
 /// beside the colony steps (spawns, sites), with geometry consulted
@@ -6092,12 +6061,12 @@ let censusSignature (snapshot: Snapshot) : string =
 /// under an unchanged signature and dropped whole under a moved one
 /// (ADR 0032).
 let decide
-    (snapshot: Snapshot)
+    (view: ColonyView)
     (assignments: Assignments)
     (verbose: Set<string>)
     (memo: PlanMemo option)
     : Decision =
-    let signature = censusSignature snapshot
+    let signature = censusSignature view
     // The signature is read before the Atlas is built, because the Atlas
     // is one of the things it decides: a memo whose census still stands
     // hands over its spawn walk table, and a memo that has gone stale —
@@ -6109,14 +6078,14 @@ let decide
         | Some m -> m.Walks
         | None -> WalkTable()
 
-    let atlas = Atlas.ofSnapshotRecalling walks snapshot
+    let atlas = Atlas.ofViewRecalling walks view
 
     let plan =
         match recalled with
         | Some m -> m
         | None ->
             let siteIntents, servedFootings, unservedFootings, unroutedTrunks, deferredContainers =
-                planLayout snapshot atlas
+                planLayout view atlas
 
             {
                 Signature = signature
@@ -6125,32 +6094,32 @@ let decide
                 ServedFootings = servedFootings
                 UnroutedTrunks = unroutedTrunks
                 DeferredContainers = deferredContainers
-                HaulerQuota = haulerQuota snapshot atlas
+                HaulerQuota = haulerQuota view atlas
                 Walks = walks
             }
 
-    // The tick's Threats, derived once off the Snapshot's hostiles and the
+    // The tick's Threats, derived once off the view's hostiles and the
     // rampart census, and shared by every reader of them (ADR 0033).
-    let threats = threatsOf snapshot atlas
+    let threats = threatsOf view atlas
 
     // The colony's other placement step, beside the memoised Layout and
     // never inside it (ADR 0042): the outpost's source containers, derived
     // fresh every tick for the reason written on the rule itself.
-    let outpostSiteIntents = planOutpostContainers snapshot atlas
+    let outpostSiteIntents = planOutpostContainers view atlas
 
-    let defenseIntents = planSafeMode snapshot atlas @ planFire snapshot atlas
+    let defenseIntents = planSafeMode view atlas @ planFire view atlas
 
     // The pool is derived before the spawns since #187, and the dependency
     // runs one way only: the worker row's floor asks the pool whether
     // anything is standing in Build or Repair (ADR 0046, `workerFloor`),
     // and nothing in the pool reads a spawn Intent. The Matcher still runs
     // after both.
-    let tasks = planTasks snapshot threats
-    let spawnIntents = planSpawns snapshot atlas threats tasks plan.HaulerQuota
-    let next, verdicts = matchCreeps snapshot atlas threats tasks assignments verbose
+    let tasks = planTasks view threats
+    let spawnIntents = planSpawns view atlas threats tasks plan.HaulerQuota
+    let next, verdicts = matchCreeps view atlas threats tasks assignments verbose
     let assigned = assignedTasks tasks next
-    let moveIntents, moveVerdicts = resolve snapshot atlas threats assigned verbose
-    let taskIntents = emit snapshot atlas threats assigned
+    let moveIntents, moveVerdicts = resolve view atlas threats assigned verbose
+    let taskIntents = emit view atlas threats assigned
 
     // The reflex, less what a Task already asked for (#167). The Pickup
     // Task's own act is a strict subset of the reflex's: both want a Carry
@@ -6170,7 +6139,7 @@ let decide
     // one pile leaves that case alone: those are two Intents, not one
     // spelt twice.
     let pickupIntents =
-        planPickups snapshot atlas
+        planPickups view atlas
         |> List.filter (fun intent -> not (List.contains intent taskIntents))
 
     {

@@ -92,7 +92,7 @@ type Atlas =
             /// crossing two rooms would invent a Dual Seat out of one
             /// coordinate standing in both.
             Home: string
-            /// Placed creeps in Snapshot order — the canonical iteration
+            /// Placed creeps in view order — the canonical iteration
             /// order for everything derived per creep — each beside the
             /// room the projection files it under, because the flood it
             /// seeds is that room's.
@@ -255,7 +255,7 @@ type Atlas =
             SeamWalks: System.Collections.Generic.Dictionary<string * string, int[]>
             /// Memoised traffic-blind cast walk out of a spawner's tile,
             /// per (spawner tile, fatigue factor, goal's room), for bodies
-            /// the Snapshot does not carry: a lead prices a replacement
+            /// the view does not carry: a lead prices a replacement
             /// that has not been cast yet (ADR 0026), so its factor is in
             /// no creep's entry and the Floods memo cannot be laid for it
             /// in advance. One entry per row per spawn per room a lead is
@@ -281,7 +281,7 @@ type Atlas =
             Walks: WalkTable
             /// Work Area per Task, built at most once per tick and shared
             /// by every query that stands a creep in one — the Floods memo
-            /// on a key set the Snapshot does not carry, so a mutable
+            /// on a key set the view does not carry, so a mutable
             /// table rather than a pre-laid Lazy map. The Atlas is rebuilt
             /// every tick, so the table is per-tick by construction:
             /// "Derived fresh each tick, never persisted" stands.
@@ -525,7 +525,7 @@ let private setHeapAt (index: int) (heap: ResizeArray<int>) (value: int) : unit 
 /// compared down a tree three times over — structural comparison the
 /// profile put at about a fifth of the tick across the readers below,
 /// none of it algorithm. The rules are the grid's, spelled where it
-/// is laid (`ofSnapshotRecalling`), so the tile query and the flood answer
+/// is laid (`ofViewRecalling`), so the tile query and the flood answer
 /// off the same numbers rather than off two copies of one rule.
 ///
 /// The room is the caller's, as it is on every query below (ADR 0041): a
@@ -980,7 +980,7 @@ let private floodPricedInto weights occupied factor pricing (goals: Pos list) : 
     |> drained
     |> fst
 
-/// The Atlas over a Snapshot, recalling a spawn walk table rather than
+/// The Atlas over a view, recalling a spawn walk table rather than
 /// laying an empty one (ADR 0032). The caller hands the table the plan
 /// memo carried when the census signature is unchanged, and a fresh one
 /// when it moved: every entry is a pure function of the census, so a
@@ -988,8 +988,8 @@ let private floodPricedInto weights occupied factor pricing (goals: Pos list) : 
 /// dropped at a signature change leaves nothing stale to reason about.
 /// Every other table here is still laid empty — they key on this tick's
 /// creeps, or on this tick's traffic.
-let ofSnapshotRecalling (walks: WalkTable) (snapshot: Snapshot) : Atlas =
-    let spatial = snapshot.Spatial
+let ofViewRecalling (walks: WalkTable) (view: ColonyView) : Atlas =
+    let spatial = view.Spatial
 
     // The home room, spelled the one way the convention is spelled
     // (`SpatialInfo.homeName`): the projection's name, and the empty name
@@ -1013,13 +1013,13 @@ let ofSnapshotRecalling (walks: WalkTable) (snapshot: Snapshot) : Atlas =
     let targetAt = locate (fun (layer: RoomLayer) -> layer.TargetPositions)
 
     let placed =
-        snapshot.Creeps
+        view.Creeps
         |> List.choose (fun creep ->
             Map.tryFind creep.Name creepAt
             |> Option.map (fun (room, pos) -> creep.Name, room, pos))
 
     let factors =
-        snapshot.Creeps
+        view.Creeps
         |> List.map (fun creep -> creep.Name, fatigueFactorOf creep)
         |> Map.ofList
 
@@ -1121,7 +1121,7 @@ let ofSnapshotRecalling (walks: WalkTable) (snapshot: Snapshot) : Atlas =
         WorkAreas = System.Collections.Generic.Dictionary()
         HeavyAreas = System.Collections.Generic.Dictionary()
         Heavy =
-            snapshot.Creeps
+            view.Creeps
             |> List.filter (fun creep ->
                 let count part =
                     creep.Body |> Map.tryFind part |> Option.defaultValue 0
@@ -1132,12 +1132,11 @@ let ofSnapshotRecalling (walks: WalkTable) (snapshot: Snapshot) : Atlas =
         Buffers = None
     }
 
-/// The Atlas over a Snapshot with nothing recalled: a fresh spawn walk
+/// The Atlas over a view with nothing recalled: a fresh spawn walk
 /// table, filled from scratch as this tick prices its leads. The tick loop
 /// always has a memo to hand over, so this is the shape a reader building
-/// an Atlas over a Snapshot alone — a test, or a one-off — asks for.
-let ofSnapshot (snapshot: Snapshot) : Atlas =
-    ofSnapshotRecalling (WalkTable()) snapshot
+/// an Atlas over a view alone — a test, or a one-off — asks for.
+let ofView (view: ColonyView) : Atlas = ofViewRecalling (WalkTable()) view
 
 /// One room's geometry, read the way ADR 0041 says a layer is read: a room
 /// the projection carries no geometry for has no entry at all, and that is
@@ -1182,7 +1181,7 @@ let private occupiedOf (atlas: Atlas) (room: string) : bool[] =
 /// A copy of one room's step weight per tile index — the grid that room's
 /// floods price from, -1 impassable. Read by the census guard (ADR 0032)
 /// and nothing else: the spawn walks are recalled across ticks on the
-/// census signature alone, so two Snapshots the signature calls equal have
+/// census signature alone, so two views the signature calls equal have
 /// to lay the same grid, and a weights input the signature misses would
 /// price leads off a stale one until a global reset. The room is the
 /// caller's since ADR 0041, because there is now one grid per projected
@@ -1199,11 +1198,11 @@ let stepWeights (atlas: Atlas) (room: string) : int[] = Array.copy (weightsOf at
 /// Move clears it, so the casting pattern is readable off the body itself —
 /// what a creep is is decided from what it is made of; the row name in a
 /// creep's name is observability only, never read back (ADR 0006). A creep
-/// the Snapshot does not carry is not heavy: an unknown body claims no
+/// the view does not carry is not heavy: an unknown body claims no
 /// Post and no exemption.
 let workHeavy (atlas: Atlas) (creep: string) : bool = Set.contains creep atlas.Heavy
 
-/// A creep's fatigue factor; a creep the Snapshot does not carry prices
+/// A creep's fatigue factor; a creep the view does not carry prices
 /// as a bare one-part-one-Move body — terrain weight verbatim.
 let private factorOf (atlas: Atlas) (creep: string) : FatigueFactor =
     Map.tryFind creep atlas.Factors
@@ -1227,7 +1226,7 @@ let private flood (atlas: Atlas) (pricing: Pricing) (room: string) (creep: strin
 
 /// The creeps the projection places, grouped under the room each is filed
 /// in — every room the projection places a creep in, and each room's
-/// creeps in Snapshot creep order, the canonical order for everything
+/// creeps in view creep order, the canonical order for everything
 /// derived per creep. This is the Resolver's list (#145): arbitrated
 /// movement (ADR 0001, ADR 0008) is a room's — ADR 0041's Consequences
 /// keep it single-room, decomposed strictly per room as
@@ -1239,7 +1238,7 @@ let private flood (atlas: Atlas) (pricing: Pricing) (room: string) (creep: strin
 /// one coordinate of two rooms would collapse into one occupant, and a
 /// fatigued outpost creep would pre-claim a home tile. The rooms come in
 /// the order their first creep does, which no reader depends on: the
-/// Resolver emits in Snapshot creep order across the groups. An
+/// Resolver emits in view creep order across the groups. An
 /// unplaceable creep is in no group — the answer ADR 0004 gives for
 /// geometry a query cannot place.
 ///
@@ -1583,7 +1582,7 @@ let adjacentWalkable (atlas: Atlas) (pos: Pos) : Pos list = adjacentWalkableIn a
 /// Every tile of the room a creep may stand on — `adjacentWalkable`'s
 /// answer over the whole room rather than around one tile, and the same
 /// rules because it is the same grid: the terrain, road and obstacle
-/// precedence `ofSnapshotRecalling` spells out, which since #173 is the
+/// precedence `ofViewRecalling` spells out, which since #173 is the
 /// only place that rule is written. The room-wide half nothing wanted
 /// until a Task's Work
 /// Area was the room itself (ADR 0033). The room rides on the API, as
@@ -1722,7 +1721,7 @@ let private buildWorkArea (atlas: Atlas) (task: Task) : Set<Pos> =
                 ]
 
 /// Build-once-per-tick over one of the Atlas's mutable tables: the shape
-/// every key set the Snapshot does not carry is memoised through — Work
+/// every key set the view does not carry is memoised through — Work
 /// Areas, their Work-heavy narrowing, and the lead's walks. No reader can
 /// observe whether the answer was built or recalled, and the Atlas is
 /// rebuilt every tick, so each table is per-tick by construction.
@@ -1833,7 +1832,7 @@ let standsOnDualSeat (atlas: Atlas) (creep: string) : bool =
 /// container half crosses a border (ADR 0042). A Dual Seat is a tile a
 /// creep harvests *and upgrades* from without moving, and the colony
 /// upgrades its own controller (`planTasks` pools an Upgrade for
-/// `snapshot.Controller`, never for a declared outpost's controller,
+/// `view.Controller`, never for a declared outpost's controller,
 /// which it reserves instead). Counted in an outpost the intersection
 /// would name a tile nobody ever upgrades from, and that tile would be a
 /// Post: an Anchor place and an income share for an outpost source with
@@ -1845,7 +1844,7 @@ let standsOnDualSeat (atlas: Atlas) (creep: string) : bool =
 /// bootstrapped child's controller, in a room this colony projects — and
 /// the reading above does not move for it. A bootstrap layer carries the
 /// controller, the sites and the spawn and no rock at all
-/// (`Snapshot.narrowToBootstrap`), so that room's Seat union is empty and
+/// (`ColonyView.borrowed`), so that room's Seat union is empty and
 /// the intersection with it would be empty whichever room this were
 /// answered for. The one shape where a projected room holds both the
 /// child's controller and rocks of the colony's own is the window ADR 0047
@@ -2182,7 +2181,7 @@ let workAreaFor (atlas: Atlas) (creep: string) (task: Task) : Set<Pos> =
 /// inside a controller's Upgrade Work Area and on no source's Seat — the
 /// Layout places one (ADR 0012), and the Withdraw gate reads it (ADR
 /// 0019). The Planner spells the same judgement out again over the
-/// Snapshot for its Refill layering; the two agree on every tile a
+/// view for its Refill layering; the two agree on every tile a
 /// container can stand on and are not the same predicate off it — an
 /// accepted duplication, named in ADR 0019. Total: a room with no
 /// controller, none placed, or no built container answers with the empty
@@ -2471,7 +2470,7 @@ let private nearestReached (reached: Pos -> int) (tiles: Pos list) : int option 
 /// the ring carries no road, so there is no discount to apply, and the
 /// occupancy surcharge is deliberately not charged here even though
 /// the ring can hold a creep — the engine parks one on the far room's ring
-/// tile the tick it crosses, and `Snapshot` files it there. The choice of
+/// tile the tick it crosses, and the world files it there. The choice of
 /// crossing is spent: since #142 the mover aims a cross-room creep at the
 /// near side of whichever exit this minimum won at, so the omission is not
 /// "nobody reads it". It is that the ring is not arbitrated ground — the
@@ -3342,7 +3341,7 @@ let private castAcross
 /// (#169). ADR 0032's condition is that every input of an entry is in the
 /// census signature, and the far leg meets it exactly as the near leg
 /// does: an outpost's ground needs no vision at all
-/// (`Snapshot.projectRoom` reads the engine's terrain for any room in the
+/// (`World.ofGame` reads the engine's terrain for any room in the
 /// world, ADR 0031, ADR 0041), the roads and obstacles vision does pay
 /// for are signed per projected room exactly as the home room's are —
 /// standing structures and obstacle-kind construction sites alike, the

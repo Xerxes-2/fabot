@@ -159,7 +159,7 @@ let fold
     |> Map.ofSeq
 
 /// One row of an episode's roster (ADR 0028): one hostile, who owns it
-/// and what it is made of, counted from the Snapshot's verbatim part
+/// and what it is made of, counted from the view's verbatim part
 /// list. A row, not the roster — the roster is the map of these.
 type RosterRow =
     {
@@ -284,7 +284,7 @@ type OutpostEpisode =
 /// be watched leaving, and are watched by a colony sitting in the room
 /// they came to. Neither half holds here: an invader core has 100,000
 /// hits, spawns nothing at level 0 and never leaves, so its absence from a
-/// Snapshot is never evidence that it is gone; and the stand-down's whole
+/// view is never evidence that it is gone; and the stand-down's whole
 /// effect is to withdraw the creeps whose vision would see it. Under the
 /// gap a stood-down outpost goes quiet because nobody is looking, the
 /// episode closes fifty ticks later, the gate opens, and the creeps walk
@@ -342,7 +342,7 @@ type RaidState =
         /// needs vision (ADR 0004: who holds a room nobody is looking into
         /// is not a fact this tick), and the gate's own effect is to
         /// withdraw the creeps that pay for the vision — so a gate that
-        /// re-read this off the Snapshot alone would reopen the room on
+        /// re-read this off the view alone would reopen the room on
         /// the tick after it shut it, and the creeps would walk back into
         /// a room somebody else owns, for ever. That is the same
         /// oscillation `standingDown` refuses for the clocked family,
@@ -368,7 +368,7 @@ type RaidState =
         /// and recorded nowhere.
         ///
         /// This colony's names since #191 and no longer the world's, since
-        /// a Snapshot carries one colony's creeps (ADR 0047) — which is
+        /// a view carries one colony's creeps (ADR 0047) — which is
         /// why the difference `foldRaids` takes is against the world's
         /// living names and not against this list's successor: a creep
         /// another colony adopted leaves the baseline without dying.
@@ -415,8 +415,8 @@ let capEpisodes = 20
 /// room, a longer one is a decision to leave.
 let quietGap = 50
 
-/// The tiles of everything of ours a hostile can close on, as the
-/// Snapshot can approximate the owned set: our creeps, and the owned
+/// The tiles of everything of ours a hostile can close on, as far as a
+/// view can approximate the owned set: our creeps, and the owned
 /// structures it already places — the Refillables (spawn, extensions,
 /// tower) and the controller. Roads and containers cannot be owned in the
 /// engine; the Storage can, and is left out, because ADR 0022 puts it on
@@ -436,12 +436,12 @@ let quietGap = 50
 /// creep of theirs ever standing beside a creep of ours. A room the
 /// projection holds no layer for places nothing of ours, which is the same
 /// answer as a room holding nothing (ADR 0004).
-let private ourTilesIn (snapshot: Snapshot) (room: string) =
-    let layer = SpatialInfo.layerOf snapshot.Spatial room
+let private ourTilesIn (view: ColonyView) (room: string) =
+    let layer = SpatialInfo.layerOf view.Spatial room
 
     let structures =
-        (snapshot.Refillables |> List.map (fun r -> r.Id))
-        @ (snapshot.Controller |> Option.toList |> List.map (fun c -> c.Id))
+        (view.Refillables |> List.map (fun r -> r.Id))
+        @ (view.Controller |> Option.toList |> List.map (fun c -> c.Id))
         |> List.choose (fun id -> Map.tryFind id layer.TargetPositions)
 
     (layer.CreepPositions |> Map.toList |> List.map snd) @ structures
@@ -456,19 +456,19 @@ let private ourTilesIn (snapshot: Snapshot) (room: string) =
 /// once per hostile: one room in the single-spawn colony ADR 0005 assumes,
 /// and the right shape already for the tick a hostile stands somewhere
 /// else (#117).
-let private approachAt (snapshot: Snapshot) : Approach option =
-    if List.isEmpty snapshot.Hostiles then
+let private approachAt (view: ColonyView) : Approach option =
+    if List.isEmpty view.Hostiles then
         None
     else
         let ours =
-            snapshot.Hostiles
+            view.Hostiles
             |> List.map (fun hostile -> hostile.RoomName)
             |> List.distinct
-            |> List.map (fun room -> room, ourTilesIn snapshot room)
+            |> List.map (fun room -> room, ourTilesIn view room)
             |> Map.ofList
 
         let measured =
-            snapshot.Hostiles
+            view.Hostiles
             |> List.collect (fun hostile ->
                 Map.tryFind hostile.RoomName ours
                 |> Option.defaultValue []
@@ -483,7 +483,7 @@ let private approachAt (snapshot: Snapshot) : Approach option =
                 {
                     Range = closest
                     Pos = pos
-                    Tick = snapshot.Time
+                    Tick = view.Time
                 }
 
 /// Keep the nearer of the two, and on a tie the one already recorded: the
@@ -542,17 +542,17 @@ let private enrol roster (hostile: HostileInfo) =
 /// the fallback the read is not a deadline at all and the clock is the one
 /// the colony chose, which the basis then says out loud. Errs long, the
 /// one direction the gate may be wrong in.
-let private deadlineOf (snapshot: Snapshot) (core: InvaderCoreInfo) =
+let private deadlineOf (view: ColonyView) (core: InvaderCoreInfo) =
     match core.CollapseTick with
     | Some tick -> tick, StandDownBasis.CollapseTimer
     | None ->
-        snapshot.RoomControl
+        view.RoomControl
         |> Map.tryFind core.RoomName
         |> Option.bind (fun control -> control.Reservation)
         |> Option.filter (fun held -> held.Holder = ReservationHolder.Invader)
         |> Option.filter (fun held -> held.TicksToEnd >= standDownFallback)
-        |> Option.map (fun held -> snapshot.Time + held.TicksToEnd, StandDownBasis.Reservation)
-        |> Option.defaultValue (snapshot.Time + standDownFallback, StandDownBasis.Fallback)
+        |> Option.map (fun held -> view.Time + held.TicksToEnd, StandDownBasis.Reservation)
+        |> Option.defaultValue (view.Time + standDownFallback, StandDownBasis.Fallback)
 
 /// This tick's deadline for each room a core was seen in — the sighting
 /// the fold below folds, and the only tick on which a stand-down's clock
@@ -565,9 +565,9 @@ let private deadlineOf (snapshot: Snapshot) (core: InvaderCoreInfo) =
 /// two cores in one room are one stand-down, and the later of their
 /// deadlines is the one kept — the direction ADR 0043 allows the gate to
 /// be wrong in.
-let private deadlines (snapshot: Snapshot) =
-    snapshot.InvaderCores
-    |> List.map (fun core -> core.RoomName, deadlineOf snapshot core)
+let private deadlines (view: ColonyView) =
+    view.InvaderCores
+    |> List.map (fun core -> core.RoomName, deadlineOf view core)
     |> List.groupBy fst
     |> List.map (fun (room, seen) -> room, seen |> List.map snd |> List.maxBy fst)
 
@@ -667,7 +667,7 @@ let private rivalHeld (control: RoomControlInfo) =
 ///
 /// This is the one reader that *acts* on the Raid log, and ADR 0028's "a
 /// record to be read, never a signal sent" is narrowed here and exactly
-/// once. Everything else still reads the Snapshot.
+/// once. Everything else still reads the view.
 ///
 /// A set of room names and not a decision: what the shell does with it is
 /// drop those rooms from the declarations it works (`Outpost.worked`), so
@@ -684,7 +684,7 @@ let standDown (tick: int) (state: RaidState) : Set<string> =
     |> Set.ofList
     |> Set.union (state.RivalHeld |> Map.toList |> List.map fst |> Set.ofList)
 
-/// The Raid-log fold (ADR 0028): this tick's Snapshot plus the previous
+/// The Raid-log fold (ADR 0028): this tick's view plus the previous
 /// Raid log produce the new one. An episode opens on the first tick a room
 /// the colony works and can see holds a hostile — the spawn rooms alone
 /// until #201, which is what left an outpost's raiders unrecorded — stays
@@ -715,7 +715,7 @@ let standDown (tick: int) (state: RaidState) : Set<string> =
 ///
 /// `alive` is every creep name the *world* still holds — `Game.creeps`,
 /// the same set `fold` prunes timelines against — and not this colony's
-/// fleet, because since #191 a Snapshot carries one colony's creeps and a
+/// fleet, because since #191 a view carries one colony's creeps and a
 /// name can leave that list without anything dying: a creep standing in a
 /// room only another colony projects is **adopted** by it for the tick
 /// (ADR 0047 decision 2). Read against the colony's own list, adoption
@@ -727,7 +727,7 @@ let foldRaids
     (cap: int)
     (gap: int)
     (alive: Set<string>)
-    (snapshot: Snapshot)
+    (view: ColonyView)
     (prior: RaidState)
     : RaidState =
     // The baseline the next tick reads its losses against: this tick's
@@ -736,13 +736,13 @@ let foldRaids
     // record answers what a raid cost — TicksToLive says which is which
     // before the fact, so the difference never has to guess after it.
     let surviving =
-        snapshot.Creeps
+        view.Creeps
         |> List.filter (fun creep -> creep.TicksToLive > 1)
         |> List.map (fun creep -> creep.Name)
         |> Set.ofList
 
     // The hostiles standing in the room the defences are in. Since #201
-    // the sweep behind `Snapshot.Hostiles` covers every room the colony
+    // the sweep behind `ColonyView.Hostiles` covers every room the colony
     // works and can see, so "a hostile" and "a hostile where the Keep is"
     // are two different questions, and the damage below asks the second —
     // through the baseline it differences against, which is carried on
@@ -754,17 +754,17 @@ let foldRaids
     // colony's and opens on any of them, which is the whole point of the
     // widening; it is the *measure* that is one room's.
     let atHome =
-        let home = SpatialInfo.homeName snapshot.Spatial
-        snapshot.Hostiles |> List.filter (fun hostile -> hostile.RoomName = home)
+        let home = SpatialInfo.homeName view.Spatial
+        view.Hostiles |> List.filter (fun hostile -> hostile.RoomName = home)
 
     // This tick's hits across the Keep and the ramparts, the next tick's
     // baseline. The kinds are the rule's, never a list of ids: a rampart
     // raised mid-episode joins it the tick it stands.
     let defended =
-        snapshot.Spatial.Hits
+        view.Spatial.Hits
         |> Map.toList
         |> List.choose (fun (id, hits) ->
-            match Map.tryFind id snapshot.Spatial.TargetKinds with
+            match Map.tryFind id view.Spatial.TargetKinds with
             | Some(Structure kind) when isDefence kind -> Some(id, hits.Hits)
             | _ -> None)
         |> Map.ofList
@@ -786,7 +786,7 @@ let foldRaids
     // quiet gap measured from its last sighting — never a stored flag.
     let earlier, current =
         match List.rev prior.Episodes with
-        | last :: rest when snapshot.Time - last.LastSeen <= gap -> List.rev rest, Some last
+        | last :: rest when view.Time - last.LastSeen <= gap -> List.rev rest, Some last
         | _ -> prior.Episodes, None
 
     // The tick's losses: names the previous tick projected that the world
@@ -799,11 +799,11 @@ let foldRaids
     // no baseline of its own: a creep it has not seen yet is not its loss.
     //
     // Differenced against `alive` and never against this colony's own
-    // names: a body that left this Snapshot because another colony adopted
+    // names: a body that left this view because another colony adopted
     // it is still standing (ADR 0047 decision 2), and a raid is not charged
     // for a creep that merely changed hands.
     let lostSince (episode: RaidEpisode) =
-        if snapshot.Time - episode.LastSeen > 1 then
+        if view.Time - episode.LastSeen > 1 then
             []
         else
             Set.difference prior.Living alive
@@ -815,7 +815,7 @@ let foldRaids
                 })
 
     let episode =
-        match current, snapshot.Hostiles with
+        match current, view.Hostiles with
         | None, [] -> None
         | current, hostiles ->
             let lost = current |> Option.map lostSince |> Option.defaultValue []
@@ -840,8 +840,8 @@ let foldRaids
                 current
                 |> Option.defaultValue
                     {
-                        Opened = snapshot.Time
-                        LastSeen = snapshot.Time
+                        Opened = view.Time
+                        LastSeen = view.Time
                         Roster = Map.empty
                         Closest = None
                         Losses = []
@@ -854,9 +854,9 @@ let foldRaids
                         if List.isEmpty hostiles then
                             episode.LastSeen
                         else
-                            snapshot.Time
+                            view.Time
                     Roster = (episode.Roster, hostiles) ||> List.fold enrol
-                    Closest = nearer episode.Closest (approachAt snapshot)
+                    Closest = nearer episode.Closest (approachAt view)
                     Losses = episode.Losses @ lost
                     Damage = episode.Damage + damage
                 }
@@ -871,9 +871,9 @@ let foldRaids
         // vision and a room that is clear — leaves every stand-down
         // exactly as it found it, clock included.
         Outposts =
-            (prior.Outposts, deadlines snapshot)
-            ||> List.fold (fun episodes seen -> sight snapshot.Time seen episodes)
-            |> trimOutposts cap snapshot.Time
+            (prior.Outposts, deadlines view)
+            ||> List.fold (fun episodes seen -> sight view.Time seen episodes)
+            |> trimOutposts cap view.Time
         // The clockless withdrawal's memory, moved by the ticks with
         // vision alone: a room the colony can see this tick answers for
         // itself either way — it joins the set or it leaves it — and a
@@ -895,13 +895,13 @@ let foldRaids
         // withdrawal has no clock — so a stale one costs nothing and a
         // moved one would cost the only date there is.
         RivalHeld =
-            (prior.RivalHeld, snapshot.RoomControl)
+            (prior.RivalHeld, view.RoomControl)
             ||> Map.fold (fun rooms room control ->
                 if rivalHeld control then
                     if Map.containsKey room rooms then
                         rooms
                     else
-                        Map.add room snapshot.Time rooms
+                        Map.add room view.Time rooms
                 else
                     Map.remove room rooms)
         Living = if Option.isSome episode then surviving else Set.empty

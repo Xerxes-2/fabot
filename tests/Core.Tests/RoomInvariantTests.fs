@@ -31,7 +31,7 @@ let loaderTests =
             }
 
             test "terrain is trimmed to the window the shell projects" {
-                // `Snapshot.terrainOf` projects x,y in 1..48 and leaves the
+                // `World.terrainOf` projects x,y in 1..48 and leaves the
                 // exit rows out — an absent tile is impassable, so no path
                 // or Work Area ever uses one. The capture holds all 50 rows
                 // verbatim; the trim is the loader's, and it is the one
@@ -121,13 +121,13 @@ let loaderTests =
                 // is declared in the *engine's* ids, because a live
                 // projection keys every target by the id the server hands
                 // back — `TargetKinds`, `Hits`, `Stores` and
-                // `Snapshot.Sources` all do. A declaration written in the
+                // `ColonyView.Sources` all do. A declaration written in the
                 // readable names above would match nothing online, and
                 // would do it in silence: an id the projection does not
                 // place is unpriceable geometry, so the outpost would never
                 // enter a Task rather than fail (ADR 0004). These are what
                 // ADR 0042's declaration of this very room is written from,
-                // and what a Snapshot built to meet it has to carry — so
+                // and what a ColonyView built to meet it has to carry — so
                 // they are pinned here, with the furniture, against the
                 // committed capture.
                 let room = load "W12S27"
@@ -151,7 +151,7 @@ let loaderTests =
                 // 0042's declaration of W13S28 pairs `…362` with (16,7) and
                 // `…361` with (18,4), the reverse of the order its prose
                 // reads in — and a reorder here would have a declaration
-                // and the Snapshot built beside it name two different
+                // and the ColonyView built beside it name two different
                 // rocks.
                 Expect.equal
                     (load "W13S28").RealSources
@@ -301,7 +301,7 @@ let private colonyOf (room: LoadedRoom) level =
                     IsSpawning = false
                 }
             ]
-        RoomEnergy = Map.ofList [ name, { Available = 300; Capacity = 300 } ]
+        Bank = { Available = 300; Capacity = 300 }
         Refillables =
             [
                 {
@@ -344,7 +344,7 @@ let private colonyOf (room: LoadedRoom) level =
         // The sweep is over one owned room, so it declares none: a
         // candidate colony is a declared home nobody owns yet (ADR 0047),
         // and this room has a spawn standing in it.
-        ColonyHomes = []
+        Declared = []
         // The [[stage]] this colony stands at, derived from the same level
         // the controller above carries (ADR 0052 decision 3) rather than
         // written down beside it: the two cannot disagree, and every rule
@@ -360,6 +360,11 @@ let private colonyOf (room: LoadedRoom) level =
             with
             | Some stage -> Map.ofList [ name, stage ]
             | None -> Map.empty
+        // The sweep is one colony over one room: every body in it is this
+        // colony's (ADR 0052 decision 1), and it raises no child, so there
+        // is nothing borrowed to carry.
+        Foreign = Map.empty
+        Borrowed = { Rooms = [] }
     }
 
 let private placementsOf intents =
@@ -443,7 +448,7 @@ let private sweep =
                 for spawn in spawnTiles room capture do
                     let loaded = project capture spawn room.FallbackController
                     let colony = colonyOf loaded 4
-                    let atlas = ofSnapshot colony
+                    let atlas = ofView colony
                     let first = decide colony Map.empty Set.empty None
                     let placed = placementsOf first.Intents
                     let recalled = decide colony Map.empty Set.empty (Some first.Memo)
@@ -925,7 +930,7 @@ let private acrossFrom (near: RoomCapture) (far: RoomCapture) =
         Borders = Map.ofList [ near.RoomName, near.Border; far.RoomName, far.Border ]
     }
     |> AtlasTests.snapshotWith []
-    |> ofSnapshot
+    |> ofView
 
 [<Tests>]
 let seamTests =
@@ -1092,7 +1097,7 @@ let private walkingAcross (near: RoomCapture) (far: RoomCapture) (stand: Pos) =
         TargetKinds = far.Sources |> List.map (fun (id, _) -> id, Source) |> Map.ofList
     }
     |> AtlasTests.snapshotWith [ AtlasTests.worker "w" ]
-    |> ofSnapshot
+    |> ofView
 
 /// How far apart the cross-room sweep's stands are, and the file's second
 /// sampling knob beside `stride` above. Deliberately not that number and
@@ -1207,7 +1212,7 @@ let private leadingAcross
             |> Map.ofList
     }
     |> AtlasTests.snapshotWith [ AtlasTests.worker "w" ]
-    |> ofSnapshot
+    |> ofView
 
 /// A source laid beside one goal tile, and the obstacles that leave it no
 /// other Seat: a Harvest of it has a Work Area of exactly that tile, so
@@ -1522,8 +1527,8 @@ let private declaredOutposts = Outpost.adr0042
 /// the whole of what `Game.map.getRoomTerrain` answers without vision —
 /// with the declaration laid in by the production rule that lays it in
 /// (`Outpost.place`, ADR 0041). That is the shape the shell hands Core for
-/// a room it has never had a creep in (`Snapshot.projectRoom`, then the
-/// one splice in `Snapshot.build`), and the Atlas is what prices it
+/// a room it has never had a creep in (`World.factsOf`, then the
+/// one splice in `ColonyView.ofWorld`), and the Atlas is what prices it
 /// (CONTEXT.md keeps the two apart: the projection is the data, the Atlas
 /// the query interface over it) — so a declaration that named a tile the
 /// room walls, or an id nothing places, is priced here the way the live
@@ -1557,7 +1562,7 @@ let private declaredAtlas (outpost: Outpost) =
     }
     |> Outpost.place [ outpost ]
     |> AtlasTests.snapshotWith []
-    |> ofSnapshot
+    |> ofView
 
 [<Tests>]
 let outpostDeclarationTests =
@@ -1781,7 +1786,7 @@ let outpostContainerTests =
                 // and a three-Seat rock of nothing but swamp (`16,45`), and
                 // no expected value below comes from any of them.
                 let colony = declaredColony 5
-                let atlas = ofSnapshot colony
+                let atlas = ofView colony
                 let home = SpatialInfo.homeName colony.Spatial
                 let { Intents = intents } = decide colony Map.empty Set.empty None
 
@@ -1869,7 +1874,7 @@ let outpostContainerTests =
                 // which controller and never the order a Map's keys came
                 // out in.
                 let pooled homes =
-                    planTasks { colony with ColonyHomes = homes } noThreats
+                    planTasks { colony with Declared = homes } noThreats
                     |> List.filter (function
                         | Reserve _
                         | Claim _ -> true
@@ -1906,7 +1911,7 @@ let private standingIn (capture: RoomCapture) (spawn: Pos) (creep: CreepInfo) (s
             CreepPositions = Map.ofList [ creep.Name, stand ]
         })
     |> AtlasTests.snapshotWith [ creep ]
-    |> ofSnapshot
+    |> ofView
 
 /// The room's own ground, nearest the creep first. This is the order a
 /// tick actually reads a flood in — a Task is usually a dozen tiles off —
@@ -2378,7 +2383,7 @@ let private haulingAcross (near: RoomCapture) (far: RoomCapture) (stand: Pos) =
         TargetKinds = far.Sources |> List.map (fun (id, _) -> id, Source) |> Map.ofList
     }
     |> AtlasTests.snapshotWith [ AtlasTests.creepWith "w" 0 haulBody ]
-    |> ofSnapshot
+    |> ofView
 
 [<Tests>]
 let boundedBandTests =

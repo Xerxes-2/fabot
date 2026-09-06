@@ -126,8 +126,8 @@ Four scenarios:
 - **`pair`** is the tick the live bot actually runs (ADR 0047, ADR 0052):
   **two colonies**, the mother W12S28 at RCL5 with her one declared
   outpost W12S27, and the child W13S28 bootstrapping beside her with its
-  own Spawn2 standing at `16,12`. `Main.loop` builds a Snapshot per living
-  colony and runs `decide` once over each; while the child is under
+  own Spawn2 standing at `16,12`. `Main.loop` reads one `World` and cuts a
+  colony view per living colony, running `decide` once over each; while the child is under
   `Colony.bootstrapLevel` the mother projects its room as a bootstrap
   layer and her worker row stands `pioneerCount` bodies at the child's
   controller (#192, #213). Every report prints a **`decide by colony`**
@@ -345,9 +345,11 @@ read. Pass `--force` to overwrite an existing fixture deliberately.
 ## Layout
 
 - `src/Core` — pure decision layer (no JS/Fable deps). Single seam:
-  `decide : Snapshot -> Assignments -> Intent list * Assignments`.
-- `src/App` — Fable entry point: bindings, Snapshot construction, Executor
-  (the only code calling the game API).
+  `decide : ColonyView -> Assignments -> Intent list * Assignments`; the
+  view itself is cut from the tick's `World` by `ColonyView.ofWorld`, which
+  is pure and tested (ADR 0052).
+- `src/App` — Fable entry point: bindings, `World.ofGame` (the one reader
+  of the game's objects), Executor (the only code calling the game API).
 - `tests/Core.Tests` — Expecto tests driving the `decide` seam; `rooms/`
   holds the committed room captures the Layout's invariant sweep runs on.
 

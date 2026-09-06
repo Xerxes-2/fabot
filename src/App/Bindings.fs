@@ -82,7 +82,7 @@ let structureInvaderCore = "invaderCore"
 /// that user holds — an invader core, an `smallMelee` raider, and the
 /// reservation a level-0 core takes with `attackController` (ADR 0043).
 /// Lives here beside the other engine spellings and not in Core for the
-/// reason the room's own owner name does (`Snapshot`'s `colonyOwner`):
+/// reason the room's own owner name does (`World.ofGame`'s `ours`):
 /// Core is told *which of three holders*, never a username.
 let invaderUsername = "Invader"
 

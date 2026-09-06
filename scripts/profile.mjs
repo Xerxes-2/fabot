@@ -240,7 +240,7 @@ function store({ used = 0, capacity = 0 } = {}) {
 const ok = () => 0;
 
 // The username this colony holds its rooms under. One name for the whole
-// harness, because `Snapshot` reads it once off the spawn room's
+// harness, because `World.ofGame` reads it once off a spawn room's
 // controller and then decides whose every reservation is by comparing
 // against it (ADR 0042): a scenario that spelled the owner and the
 // reserver's username differently would hand the bundle two outposts held
@@ -312,7 +312,7 @@ function buildGame({ terrains, rooms, spawns, creeps, byId, unmodelled }) {
 
 // A stub room, with the find tables the projection sweeps and the creeps
 // standing in it wired to it. Every creep carries the `room` back-reference
-// the engine gives it: `Game.creeps` is world-wide and `Snapshot.fs` scopes
+// the engine gives it: `Game.creeps` is world-wide and `World.fs` scopes
 // it to the room being projected by reading `creep.room.name` (ADR 0041).
 function stubRoom({ name, controller, findTables, energy = { available: 0, capacity: 0 } }) {
   return {
@@ -741,8 +741,8 @@ function buildStubWorld() {
   const controller = register({
     id: "ctrl",
     my: true,
-    // The name the engine spells this colony, which `Snapshot` reads off
-    // the spawn room's controller and off nothing else: it is the name
+    // The name the engine spells this colony, which `World.ofGame` reads
+    // off a spawn room's controller and off nothing else: it is the name
     // every reservation is compared against (ADR 0042), so a home
     // controller with no owner leaves the colony nameless and a
     // reservation of our own reading as a rival's. Nothing in this
@@ -861,7 +861,7 @@ function buildStubWorld() {
     terrains: new Map([[ROOM, grid.terrain]]),
     // A room this scenario does not model, answered as solid rock. The
     // scan set is the spawn room plus every declared outpost (ADR 0041),
-    // and `Snapshot.projectRoom` reads terrain for all of them whether or
+    // and `World.factsOf` reads terrain for all of them whether or
     // not there is vision — so the tick the colony's declared outposts
     // (`Colony.declared`) stop being empty (ADR 0042, #126) is the tick a
     // one-room stub is asked for a room it never built. Throwing there would rot this harness the way
@@ -2061,7 +2061,7 @@ function buildYoungWorld() {
 // W13S28's spawn stood (ADR 0047, #191): the mother W12S28 with her one
 // declared outpost, and the child W13S28 bootstrapping beside her. What
 // this scenario measures that no other does is the shape of that tick —
-// `Main.loop` builds one Snapshot per living colony and runs `decide` once
+// `Main.loop` cuts one colony view per living colony and runs `decide` once
 // over each, the mother projecting the child's room as a bootstrap layer
 // while it is under `Colony.bootstrapLevel` (#192), and the report prices
 // each colony's `decide` on its own row.
@@ -2455,7 +2455,7 @@ function printDecideByColony(classes, decideMs, ticks, stages) {
       .padStart(9);
   for (const home of homes) {
     // The colony's [[stage]] beside its row (ADR 0052 decision 3), read
-    // off the Snapshot the bundle was handed: which of the rules that turn
+    // off the colony view the bundle was handed: which of the rules that turn
     // on it — the road gate, the rampart gate, the tier a young room's
     // sites are built on — this row's ms were paid under.
     const stage = stages.get(home);
@@ -2602,13 +2602,13 @@ function printReport(classes, pooled, world, allTicks) {
 // rather than only the two-colony one, so the four scenarios stay
 // comparable with each other.
 //
-// The row's label is the colony's home room, read off the Snapshot the
-// call was handed (`SpatialInfo.RoomName`, which `Snapshot.build` sets to
-// the colony's home): the same name `Colony.living` files the colony
+// The row's label is the colony's home room, read off the colony view
+// the call was handed (`SpatialInfo.RoomName`, which `ColonyView.ofWorld`
+// sets to the colony's home): the same name `Colony.living` files the colony
 // under, so the table and the declaration cannot drift apart.
 //
 // Beside it the colony's [[stage]] (ADR 0052 decision 3), read off the
-// same Snapshot's `Stages` under that same home name — the bundle's own
+// same view's `Stages` under that same home name — the bundle's own
 // answer and never this harness's arithmetic off `--level`, which is the
 // whole point of printing it: `young --level 3` and `pair` are worlds
 // whose rules turn on the stage, and a scenario that furnished one colony
@@ -2966,7 +2966,7 @@ if (unprojected.length) {
   );
 
   // And the creeps standing in those rooms are worse than unmeasured, so
-  // the number above says how many. `Snapshot.Creeps` is taken from
+  // the number above says how many. `ColonyView.Creeps` is taken from
   // `Game.creeps` world-wide while `CreepPositions` is filtered per
   // projected room (ADR 0041), so a creep in an unprojected room joins the
   // Task pool with no tile anywhere in the projection — and the Matcher

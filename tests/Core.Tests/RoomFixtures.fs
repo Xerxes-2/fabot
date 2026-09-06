@@ -22,7 +22,7 @@ type RoomCapture =
         Shard: string
         Tick: int
         /// Terrain per tile over x,y in 1..48 — the same window
-        /// `Snapshot.terrainOf` projects as ground, with the exit rows
+        /// `World.terrainOf` projects as ground, with the exit rows
         /// dropped.
         Terrain: Map<Pos, Terrain>
         /// Terrain on the border ring, x or y of 0 or 49 — the rows the
@@ -45,7 +45,7 @@ type RoomCapture =
         /// and a test that has to match an outpost declaration has no
         /// choice at all. An outpost is declared in the engine's ids
         /// (`Outpost`), because that is what a live projection keys every
-        /// target by, so these are the ids a Snapshot built to meet one
+        /// target by, so these are the ids a ColonyView built to meet one
         /// has to carry (ADR 0041, ADR 0042).
         RealSources: (string * Pos) list
         /// The controller under the engine's own id, as `RealSources` is.
@@ -69,7 +69,7 @@ let private roomSide = 50
 let private roomsDirectory = Path.Combine(AppContext.BaseDirectory, "rooms")
 
 /// The engine's own terrain mask, classified into the Core's three states
-/// exactly as `Snapshot.terrainAt` classifies it — wall bit first, then
+/// exactly as `World.terrainAt` classifies it — wall bit first, then
 /// swamp. These two must agree or the fixture describes a room the bot
 /// never sees, which is #75's argument one level up.
 let private terrainOfMask mask =
@@ -438,7 +438,7 @@ let private castCreep name (body: BodyPart list) fill : CreepInfo =
         Body = body |> List.countBy id |> Map.ofList
     }
 
-/// A whole colony's Snapshot, built on a captured room at one rung of its
+/// A whole colony's ColonyView, built on a captured room at one rung of its
 /// life: the room furnished as its Layout would have left it by `level`,
 /// the bank that level's extensions add up to, and a fleet cast from
 /// `Decide`'s own body rules at that bank. The three rungs the suite runs
@@ -465,8 +465,8 @@ let private castCreep name (body: BodyPart list) fill : CreepInfo =
 /// source of expected values.
 ///
 /// Two things it is deliberately **not**. It is the colony's **home room
-/// alone**: a declared outpost's terrain layer, which `Snapshot.build`
-/// projects with or without vision (ADR 0041, ADR 0042), is not here, so
+/// alone**: a declared outpost's terrain layer, which `World.ofGame`
+/// reads with or without vision (ADR 0041, ADR 0042), is not here, so
 /// the RCL5 rung prices W12S28 as the one-room colony it is not — a test
 /// that needs the outpost has to add it. And the fleet pins **body
 /// sizing** at this bank and never row counts: the bodies are
@@ -476,7 +476,7 @@ let private castCreep name (body: BodyPart list) fill : CreepInfo =
 /// `bank` is checked against the level rather than believed: extensions
 /// stand full here, so a bank that is not what this level's extensions
 /// add up to describes a room the engine cannot report.
-let colonyAt (capture: RoomCapture) (level: int) (bank: int) : Snapshot =
+let colonyAt (capture: RoomCapture) (level: int) (bank: int) : ColonyView =
     let levelBank = spawnCapacity + extensionAllowance[level] * extensionCapacity
 
     if bank <> levelBank then
@@ -686,7 +686,7 @@ let colonyAt (capture: RoomCapture) (level: int) (bank: int) : Snapshot =
                     IsSpawning = false
                 }
             ]
-        RoomEnergy = Map.ofList [ capture.RoomName, { Available = bank; Capacity = bank } ]
+        Bank = { Available = bank; Capacity = bank }
         Refillables =
             [
                 yield
@@ -780,7 +780,7 @@ let colonyAt (capture: RoomCapture) (level: int) (bank: int) : Snapshot =
                     ]
                     |> Map.ofList
             }
-        ColonyHomes = [ capture.RoomName ]
+        Declared = [ capture.RoomName ]
         // The rung as a [[stage]] (ADR 0052 decision 3): owned, a spawn
         // standing, and the level above — so RCL1 and RCL3 are one stage
         // apart and the road, the rampart and the feeding-tier rules read
@@ -791,4 +791,9 @@ let colonyAt (capture: RoomCapture) (level: int) (bank: int) : Snapshot =
             match Colony.stageOf true true (Some level) with
             | Some stage -> Map.ofList [ capture.RoomName, stage ]
             | None -> Map.empty
+        // One colony over one captured room: every body in it is this
+        // colony's, so there is nobody else's to carry (ADR 0052 decision
+        // 1), and it raises no child, so it borrows nothing.
+        Foreign = Map.empty
+        Borrowed = { Rooms = [] }
     }
