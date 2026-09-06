@@ -74,20 +74,20 @@ let reserverPattern =
 /// buffer at its feet (ADR 0019 keeps that draw open to it: Work ≤ Move,
 /// so ADR 0016's gate is not in its way).
 ///
-/// **The one row in this table that is ahead of its quota**, and it is a
-/// two-ticket split and not a repeal of ADR 0006's law: #186 lands the
-/// row, the sizing rule, the applicability gate and this ADR, and #187
-/// lands `upgraderQuota` in `workforceTarget` and the casting cascade. So
-/// `planSpawns` mints no upgrader today — the row's gap is not computed at
-/// all — and the table's promise below still holds in the direction that
-/// matters, every body the colony casts being a row here. The converse is
-/// what is briefly untrue, and the tick #187 lands it is true again.
+/// The row arrives with its own colony fact, as ADR 0006's law asks:
+/// `upgraderQuota` is the surplus divided by one such body's drain, and it
+/// is non-zero only while a built controller container stands in the room
+/// — the buffer is this row's working ground, so a colony with none hires
+/// none and the generalist row commutes as it always did (ADR 0046, #187).
+/// The row that arrived a ticket ahead of that fact (#186) is level with
+/// it again.
 ///
 /// It is the row a *living* **standing body** is read back to
 /// (`patternOf`) from the moment it is declared, which is what prices such
 /// a body's succession off its own row (ADR 0026) rather than off the
-/// generalist's — a body the colony will only cast next ticket, but one it
-/// can meet the tick a Screeps player hands it one.
+/// generalist's — the row the colony casts beside the buffer, and the row
+/// it reads a body of that shape back to whether it cast it, inherited it
+/// or was handed one by a Screeps player.
 ///
 /// Read back by the ratio and not by this row's own name, so the row and
 /// the read meet only from an 800 bank up: `upgraderBodyFor` buys one Carry
@@ -97,8 +97,12 @@ let reserverPattern =
 /// no standing body, keeps all three deliveries and is read back to the
 /// generalist. That is the ratio saying what it was written to say (three
 /// Work against a fifty-energy load is not yet a commute), not a hole in
-/// it, and whether the quota hires under that bank at all is #187's
-/// (ADR 0046's Consequences carries the floor).
+/// it, and it is where the quota stops (#187): `upgraderQuota` hires none
+/// at a bank whose cast this ratio would read back to the generalist,
+/// because the row is counted by the same ratio and a body it cannot count
+/// pays off no gap. The band loses nothing the row was for — the same body
+/// at the same price is what the generalist row buys out of the same
+/// surplus there.
 let upgraderPattern =
     {
         Name = "upgrader"
@@ -111,10 +115,10 @@ let upgraderPattern =
 /// cast — never a new code path (ADR 0006).
 ///
 /// Declaration order and not casting order: the rows cast reserver,
-/// Anchor, hauler, worker (`planSpawns`), and no rule in this module reads
-/// this list for a sequence. What it is is the enumeration — every body the colony
-/// casts is here, so a row cast from outside it would be a body no reader
-/// of the table could account for.
+/// Anchor, hauler, upgrader, worker (`planSpawns`), and no rule in this
+/// module reads this list for a sequence. What it is is the enumeration —
+/// every body the colony casts is here, so a row cast from outside it
+/// would be a body no reader of the table could account for.
 let patternTable =
     [
         workerPattern
@@ -423,8 +427,9 @@ let private upgraderBodyFor capacity =
 /// here, and it is deferred, not decided here. The casting step reads the
 /// narrower rule — `anchorBodyFor` under `anchorWorkCapOf`,
 /// `reserverBodyWithin` under the deficit — so a body bought from either
-/// of *those two* rows is never sized from here; the hauler and worker
-/// rows are sized and cast from this entry point (`planSpawns`).
+/// of *those two* rows is never sized from here; the hauler, upgrader and
+/// worker rows are sized and cast from this entry point (`planSpawns`),
+/// each of them the bank's answer alone.
 let bodyFor pattern capacity =
     if pattern.Name = anchorPattern.Name then
         anchorBodyFor heldWorkCap capacity
@@ -1213,6 +1218,21 @@ let private spawnTicksPerPart = 3
 /// drains per upgrade tick — the rate an upgrade mouth eats income at.
 let private upgradeDrainPerWork = 1
 
+/// What one body of this shape drinks a tick standing at a controller: its
+/// Work parts at the rate above. Two rows are hired out of the same
+/// surplus by dividing it by this — the standing row first
+/// (`upgraderDrain`) and the commuting row by what is left
+/// (`workforceTarget`) — so the arithmetic is written once, as
+/// `carryCapacityOf` above is: the quota and the remainder it leaves are
+/// two halves of one division, and a second per-part rule would let them
+/// be computed against two different drains, with the difference landing
+/// silently on the worker row.
+let private upgradeDrainOf body =
+    body
+    |> List.sumBy (function
+        | Work -> upgradeDrainPerWork
+        | _ -> 0)
+
 /// Screeps CONTROLLER_RESERVE_MAX: the ticks a reservation caps at. The
 /// deficit the reserver row sizes off is measured from here down (ADR
 /// 0042), so a reservation standing at the cap asks for the smallest body
@@ -1381,12 +1401,248 @@ let private reserverClaimsOf (snapshot: Snapshot) atlas : int list =
         |> List.filter (colonyOwns snapshot >> not)
         |> List.map (fun room -> ceilDiv (reservationCap - heldTicks room) claimLifetime |> max 1)
 
-/// Workforce target (ADR 0012): four addends, each a pattern row's own
-/// colony fact — reservers one per declared outpost, Anchors one per Post,
-/// haulers the throughput quota, workers the income arithmetic — floored
-/// at minWorkforce and derived fresh each tick. A source whose Post is
-/// provided for retires its other Seats: one heavy body drains it alone,
-/// so counting seats after that is hiring for jobs that no longer exist.
+/// The colony's surplus over one creep's lifetime: the income the two
+/// upgrade rows are hired out of, written once here because both of them
+/// read it and a paraphrase in either place would let them hire against
+/// different money (ADR 0012, ADR 0046).
+///
+/// Income is counted per source at that source's own output and never at
+/// a colony-wide ten (ADR 0042): an unreserved source is worth half a held
+/// one, and a posted source whose room the colony cannot see this tick is
+/// worth nothing at all rather than half (ADR 0004). This is the reader
+/// #116 and ADR 0042 both leave out of their enumeration of the two —
+/// their own prose is what puts it in, "posted ones enter the income base
+/// at the source's output".
+///
+/// From that income the reserver, anchor and hauler rows' replacement
+/// amortization (body cost spread over a creep's lifetime) is deducted.
+/// Those three are hired off facts about the *ground* — a declared
+/// outpost, a Post, a round trip — so their price is settled before the
+/// surplus has a number, while the two rows hired out of the surplus
+/// itself (ADR 0046's upgrader row, ADR 0012's worker row) are charged
+/// against this number inside `workforceTarget`. That split is what keeps
+/// the arithmetic acyclic: the upgrader quota is a function of the
+/// surplus, so its own amortization cannot also be a term of it — it is
+/// deducted where it is spent, from what the worker row is left. The
+/// arithmetic runs scaled by the lifetime so the amortization never rounds
+/// away. The **worker** row's own replacement cost is still not deducted —
+/// a pre-existing home-room defect ADR 0042 names and deliberately does not
+/// pay off here.
+///
+/// Negative is an answer and not an error: an amortization above income is
+/// a colony whose specialists already cost more than its rocks bring in,
+/// and both readers below floor their own row rather than clamping here,
+/// where a zero would hide which row the shortfall fell on.
+let private surplusOverLifetime
+    (snapshot: Snapshot)
+    atlas
+    reserverClaims
+    anchorWorkCap
+    anchorQuota
+    haulerQuota
+    =
+    let capacity = richestCapacity snapshot
+
+    // The row's own body, once, times the places it hires: every reserver
+    // cast this tick carries the largest outstanding demand, so the charge
+    // is priced off that same body and never off a per-room one the
+    // casting step would not have cast.
+    //
+    // Scaled from a CLAIM body's own 600-tick life onto the 1,500 the rest
+    // of this sum is written in (ADR 0042's 2.17 energy a tick): a reserver
+    // is replaced two and a half times over one worker's life, and charging
+    // it once would leave the income base hiring an upgrade mouth the
+    // reservation is really paying for.
+    let reserverCost =
+        if List.isEmpty reserverClaims then
+            0
+        else
+            List.length reserverClaims
+            * bodyCost (reserverBodyWithin (List.max reserverClaims) capacity)
+
+    // The anchor row charged at the body the casting step would actually
+    // cast, under this tick's ceiling and not the held one (ADR 0042): a
+    // row whose bodies shrank with a lapsed reservation while its
+    // amortization went on deducting the six-Work price would hire an
+    // upgrade mouth fewer than the income really feeds. The same rule the
+    // reserver term beside it is written under.
+    let amortization =
+        anchorQuota * bodyCost (anchorBodyFor anchorWorkCap capacity)
+        + haulerQuota * bodyCost (bodyFor haulerPattern capacity)
+        + reserverCost * creepLifetime / claimLifetime
+
+    // Summed over the posted sources at each one's own output, never a
+    // count times a constant (ADR 0042): a source the colony cannot price
+    // contributes nothing, which is the same zero it would contribute by
+    // not being posted.
+    let income =
+        snapshot.Sources
+        |> List.filter (isPosted atlas)
+        |> List.sumBy (fun s -> sourceOutputOf snapshot atlas s.Id |> Option.defaultValue 0)
+
+    income * creepLifetime - amortization
+
+/// The standing body's line (ADR 0046): four is the ratio at which a
+/// delivery stops being work and becomes a commute. A body under it carries
+/// fifty energy a trip against eleven Work, so a Build or a Refill it walks
+/// to spends one tick delivering for every tick of the walk out and the
+/// walk back, and the Work it left standing beside the buffer earns nothing
+/// meanwhile.
+///
+/// A tunable, and named here for that reason: the shape of the rule is not
+/// one. A hauler is `Carry * n < 0`, false whatever `n` is, so the row whose
+/// whole life is delivery is outside the gate by construction rather than
+/// by this number; and the worker row is outside it by its own parity (ADR
+/// 0003), which buys one Carry per Work where this line is one per four,
+/// four times clear at every bank. What retuning it moves is the band
+/// between those two — and, with it, the bank at which the upgrader row's
+/// own cast becomes a standing body (five pairs at four, `upgraderBodyFor`).
+let private standingCarryPerWork = 4
+
+/// ADR 0046's ratio itself, over two part counts, written once because two
+/// readers ask it of two different shapes: `isStandingBody` below of a
+/// living creep's part map, and `isStandingCast` of a body this module has
+/// just sized. They have to answer alike — a row whose quota and whose
+/// living count disagreed about what a standing body is would be hired
+/// against a gap it could never close.
+let private standingRatio carryParts workParts =
+    carryParts * standingCarryPerWork < workParts
+
+/// Whether a body this module has sized is a standing body: the same ratio
+/// over a part list rather than over a living creep's part map. The reader
+/// is the upgrader row's quota, which asks it of the row's *own cast* at
+/// this bank (`upgraderQuota`): below the 800 bank the sizing rule buys
+/// `3W/1C/3M`, which is no standing body, so a body cast from that row
+/// there is read back to the generalist by `patternOf` and the row's own
+/// gap could never be paid off.
+let private isStandingCast body =
+    let count part =
+        body |> List.filter ((=) part) |> List.length
+
+    standingRatio (count Carry) (count Work)
+
+
+/// Whether a living body is a **standing body** (ADR 0046): it carries
+/// fewer than one Carry part per four Work — `Carry * 4 < Work`. Part
+/// arithmetic and nothing else, like every other row-reading predicate
+/// here (ADR 0006), and it is a fact about a *body* rather than about a
+/// row: the upgrader row's `11W/1C/11M` is one, and so is the anchor row's
+/// `6W/1C/1M`, and so would be anything else the colony ever casts with
+/// the same shape.
+///
+/// The gate that reads it is `applicable` below, on Build, Repair and
+/// Refill. Every other Task is left exactly as its own gates already had
+/// it: Upgrade, Withdraw and Harvest, which are the working life the
+/// upgrader row was shaped for — it draws from the buffer at its feet (ADR
+/// 0019, through ADR 0016's gate, which `Work ≤ Move` keeps it inside) and
+/// spends into the controller in place, or it digs from its Post — and
+/// Pickup too, which stays open to a standing body because a pile is an
+/// intake and not a delivery. Untouched is not applicable, either:
+/// Withdraw stays shut to a Work-heavy body by ADR 0016's own gate, so of
+/// the two standing bodies the colony casts only the upgrader draws.
+let private isStandingBody (creep: CreepInfo) =
+    let count part =
+        creep.Body |> Map.tryFind part |> Option.defaultValue 0
+
+    standingRatio (count Carry) (count Work)
+
+/// What one body of the upgrader row eats per tick: every Work part of the
+/// row's cast at the richest bank, at the controller's own per-Work rate
+/// (ADR 0046). Never below one — the row's sizing rule floors at a pair —
+/// so the quota below always has a divisor.
+let private upgraderDrain capacity =
+    upgradeDrainOf (bodyFor upgraderPattern capacity)
+
+/// The upgrader row's quota (ADR 0046): the surplus divided by one
+/// standing body's drain, rounded up as the worker row's is (ADR 0037) —
+/// the granularity a floor drops is a whole body's Work, and here that is
+/// eleven of them at the live RCL5 bank.
+///
+/// **Non-zero only while a built controller container stands in the
+/// room.** The buffer is this row's working ground — the Work Area of one
+/// Task, and never a Post (ADR 0046 against ADR 0012's generalization) —
+/// so a room with no buffer standing hires none and the worker row
+/// commutes as it always did. The container plan places the buffer under
+/// no level gate of its own, so "no buffer yet" is a fact about the room
+/// rather than about RCL.
+///
+/// **And only while the row's own cast at this bank is a standing body**,
+/// which is the bank floor ADR 0046's Consequences leave to #187 and the
+/// half of the gate that makes the row *countable*. `planSpawns` reads the
+/// row's living count through `patternOf`, off the parts and never off a
+/// name (ADR 0006), so a bank whose cast the ratio reads back to the
+/// generalist is a bank where the row's gap is the whole quota every tick:
+/// under 800 the sizing rule buys `3W/1C/3M`, `isStandingCast` is false of
+/// it, and a quota hired there would cast a body it could never count —
+/// one every tick, forever, ahead of the whole-fleet deficit that gates
+/// the generalist row. The gate is written as the predicate and not as the
+/// number 800 so that it stays true *by* the sizing rule (`upgraderBodyFor`)
+/// and the ratio (`standingCarryPerWork`) rather than against them.
+///
+/// What the colony loses in that band is nothing the row was for: three
+/// Work against a fifty-energy load is not yet a commute, so the body the
+/// generalist row hires out of the same surplus there is the same body at
+/// the same price — which is the ratio saying what it was written to say.
+///
+/// A negative surplus hires none: `max 0` is this row's floor, and the
+/// worker row's floor below is what keeps a body in the colony at all.
+///
+/// Built and not pending, because `Atlas.controllerContainers` folds the
+/// standing census alone — a container *site* at the controller is a
+/// promise, and a row hired against it would stand beside a hole with
+/// nothing to withdraw from (ADR 0019 shuts it out of every other store's
+/// draw by distance, not by rule).
+let private upgraderQuota (snapshot: Snapshot) atlas surplus =
+    let capacity = richestCapacity snapshot
+
+    if
+        Set.isEmpty (Atlas.controllerContainers atlas)
+        || not (isStandingCast (bodyFor upgraderPattern capacity))
+    then
+        0
+    else
+        ceilDiv surplus (upgraderDrain capacity * creepLifetime) |> max 0
+
+/// The worker row's floor (ADR 0046): the row's income term is whatever
+/// the upgrader row has not eaten, and beside a buffer that is often
+/// nothing at all — the quota above rounds *up*, so one standing body can
+/// be hired against the whole surplus and leave the generalist row asking
+/// for zero. A colony with no generalist in it builds nothing and repairs
+/// nothing: a standing body is shut out of all three deliveries (ADR
+/// 0046), and the hauler row carries no Work part, so a container site or
+/// a decaying road would stand while the controller ticked up beside it.
+///
+/// Two while anything stands in the Build or Repair pool, one otherwise.
+/// Both numbers are tunables and the shape of the rule is not: two,
+/// because since ADR 0042 a builder crosses a Seam to raise an outpost's
+/// container and the home room's own sites are unattended for the fifty
+/// ticks of that walk; one, because a colony with nothing to build still
+/// wants a body that can start when something appears, and hiring the
+/// second against no pool at all would be hiring for a job that does not
+/// exist — the same objection ADR 0012 retired the seat base for.
+///
+/// Read off the **pool** and never off the Snapshot's site list: the pool
+/// is what the Matcher will actually offer, so work the Planner has
+/// already withheld — out of a stood-down outpost (ADR 0043), behind a
+/// Threat's reach (ADR 0033) — hires nobody to walk to it.
+let private workerFloor (tasks: Task list) =
+    let building =
+        tasks
+        |> List.exists (function
+            | Build _
+            | Repair _ -> true
+            | _ -> false)
+
+    if building then 2 else 1
+
+/// Workforce target (ADR 0012, ADR 0046): five addends, each a pattern
+/// row's own colony fact — reservers one per declared outpost, Anchors one
+/// per Post, haulers the throughput quota, upgraders the surplus divided
+/// by a standing body's drain, workers the income arithmetic that is left
+/// — floored at minWorkforce and derived fresh each tick. A source whose
+/// Post is provided for retires its other Seats: one heavy body drains it
+/// alone, so counting seats after that is hiring for jobs that no longer
+/// exist.
 /// An unposted source of the home room still contributes its Seat count
 /// — its output is spoken for by the seat crews that walk it — so only the
 /// posted sources' output is income.
@@ -1419,102 +1675,95 @@ let private reserverClaimsOf (snapshot: Snapshot) atlas : int list =
 ///
 /// Being posted is `isPosted`'s one spelling above, room-joined for the
 /// reason recorded there: a phantom Post read off a bare coordinate
-/// collision would put ten energy a tick into the income base below.
+/// collision would put ten energy a tick into the income base.
 ///
-/// Income is counted per source at that source's own output and never at
-/// a colony-wide ten (ADR 0042): an unreserved source is worth half a held
-/// one, and a posted source whose room the colony cannot see this tick is
-/// worth nothing at all rather than half (ADR 0004). This is the reader
-/// #116 and ADR 0042 both leave out of their enumeration of the two —
-/// their own prose is what puts it in, "posted ones enter the income base
-/// at the source's output".
-///
-/// From that income the reserver, anchor and hauler rows' replacement
-/// amortization (body cost spread over a creep's lifetime) is deducted;
-/// every energy per tick left feeds upgrade mouths at one worker body's
+/// The income and the three ground-hired rows' amortization arrive
+/// together as `surplus`, one number derived beside the quotas in
+/// `planSpawns` and read here and by `upgraderQuota` alike. What is left
+/// of it once the upgrader row has been charged — the energy those bodies
+/// will drink, and their own replacement cost beside it, the term ADR 0046
+/// adds to the amortization — feeds worker mouths at one worker body's
 /// Work drain, rounded up so the mouths cover the surplus rather than fall
 /// a body short of it (ADR 0037), bodies priced as the richest bank would
-/// cast them. The arithmetic runs scaled by the lifetime so the
-/// amortization never rounds away. The **worker** row's own replacement
-/// cost is still not deducted — a pre-existing home-room defect ADR 0042
-/// names and deliberately does not pay off here.
+/// cast them. The **worker** row's own replacement cost is still not
+/// deducted — a pre-existing home-room defect ADR 0042 names and
+/// deliberately does not pay off here.
+///
+/// The upgrader row is charged where it is spent rather than in the
+/// surplus itself, because its quota is a function of that surplus: a term
+/// deducted before the division would be an input to the number it is
+/// derived from. Both readings hire the same bodies and only one of them
+/// terminates.
 let private workforceTarget
     (snapshot: Snapshot)
     atlas
+    (tasks: Task list)
     reserverClaims
-    anchorWorkCap
     anchorQuota
     haulerQuota
+    upgraderQuota
+    surplus
     =
     let home = SpatialInfo.homeName snapshot.Spatial
 
-    let posted, unposted = snapshot.Sources |> List.partition (isPosted atlas)
-
     let unpostedSeats =
-        unposted
+        snapshot.Sources
+        |> List.filter (isPosted atlas >> not)
         |> List.filter (fun s -> Atlas.targetRoom atlas s.Id = Some home)
         |> List.sumBy (fun s -> Atlas.seats atlas s.Id |> Option.defaultValue 0)
 
     let capacity = richestCapacity snapshot
 
-    // The row's own body, once, times the places it hires: every reserver
-    // cast this tick carries the largest outstanding demand, so the charge
-    // is priced off that same body and never off a per-room one the
-    // casting step would not have cast.
+    let workerDrain = upgradeDrainOf (bodyFor workerPattern capacity)
+
+    // What the standing row takes out of the surplus before the commuting
+    // one is hired against the rest (ADR 0046): the energy its Work drinks
+    // over a lifetime, and the row's replacement cost over the same
+    // lifetime — the amortization term this row adds, charged on the same
+    // terms as the three rows charged inside `surplus` and priced at the
+    // body the casting step below would actually cast.
     //
-    // Scaled from a CLAIM body's own 600-tick life onto the 1,500 the rest
-    // of this sum is written in (ADR 0042's 2.17 energy a tick): a reserver
-    // is replaced two and a half times over one worker's life, and charging
-    // it once would leave the income base hiring an upgrade mouth the
-    // reservation is really paying for.
-    let reserverCost =
-        if List.isEmpty reserverClaims then
-            0
-        else
-            List.length reserverClaims
-            * bodyCost (reserverBodyWithin (List.max reserverClaims) capacity)
-
-    // The anchor row charged at the body the casting step below would
-    // actually cast, under this tick's ceiling and not the held one (ADR
-    // 0042): a row whose bodies shrank with a lapsed reservation while its
-    // amortization went on deducting the six-Work price would hire an
-    // upgrade mouth fewer than the income really feeds. The same rule the
-    // reserver term beside it is written under.
-    let amortization =
-        anchorQuota * bodyCost (anchorBodyFor anchorWorkCap capacity)
-        + haulerQuota * bodyCost (bodyFor haulerPattern capacity)
-        + reserverCost * creepLifetime / claimLifetime
-
-    let workerDrain =
-        bodyFor workerPattern capacity
-        |> List.sumBy (function
-            | Work -> upgradeDrainPerWork
-            | _ -> 0)
+    // The second term cannot move the target while the quota above rounds
+    // *up*: a row hired at `ceil(surplus / drain)` drinks at least the
+    // whole surplus, so the remainder is already at or under zero before
+    // its bodies are charged, and the worker row is at its floor either
+    // way. It is written all the same, because what the sum says is the
+    // rule and not the arithmetic that happens to be redundant at this
+    // rounding — a quota with a cap or a ceiling on it (ADR 0046's option
+    // ③, or a bank too poor for the row) leaves a remainder for this to
+    // bite into, and a term missing then would hire an upgrade mouth the
+    // standing row's own replacement is paying for.
+    let upgraderCost =
+        upgraderQuota * upgraderDrain capacity * creepLifetime
+        + upgraderQuota * bodyCost (bodyFor upgraderPattern capacity)
 
     // Rounded up through the same ceilDiv as the hauler row (ADR 0037):
     // the granularity a floor would drop is a whole worker body's Work,
     // which grows with RCL, and the income it drops leaks every tick
-    // while the body it oversells is paid for out of stock. An
-    // amortization above income leaves the surplus negative, and max 0 is
-    // the row's floor for it.
+    // while the body it oversells is paid for out of stock. A surplus the
+    // upgrader row has eaten whole — or an amortization above income —
+    // leaves the quotient at or under zero, and max 0 is where the term
+    // stops.
     let incomeWorkers =
-        // Summed over the posted sources at each one's own output, never a
-        // count times a constant (ADR 0042): a source the colony cannot
-        // price contributes nothing, which is the same zero it would
-        // contribute by not being posted.
-        let income =
-            posted
-            |> List.sumBy (fun s -> sourceOutputOf snapshot atlas s.Id |> Option.defaultValue 0)
+        ceilDiv (surplus - upgraderCost) (workerDrain * creepLifetime) |> max 0
 
-        let surplusOverLifetime = income * creepLifetime - amortization
-
-        ceilDiv surplusOverLifetime (workerDrain * creepLifetime) |> max 0
+    // The generalist row's whole share of the target, and the floor sits
+    // here rather than on the income term beside it (ADR 0046): both
+    // addends hire the same body from the same row — a seat crew is a
+    // worker unit, cast out of the same remainder the income term is —
+    // so a colony already running three of them has three bodies that can
+    // build, and a floor read off the income term alone would hire a
+    // fourth against a job that does not exist. What the floor is for is
+    // the colony where this sum is *zero*: every source posted, the
+    // surplus eaten whole by the standing row, and nothing left in the
+    // fleet that may take a delivery.
+    let workerRow = unpostedSeats + incomeWorkers |> max (workerFloor tasks)
 
     List.length reserverClaims
     + anchorQuota
     + haulerQuota
-    + unpostedSeats
-    + incomeWorkers
+    + upgraderQuota
+    + workerRow
     |> max minWorkforce
 
 /// Whether a living body was cast from the hauler row: Carry parts but no
@@ -1536,47 +1785,6 @@ let private isHaulerBody (creep: CreepInfo) =
 /// hauler on the strength of a part the reserver merely happens to have.
 let private isReserverBody (creep: CreepInfo) =
     creep.Body |> Map.tryFind Claim |> Option.exists (fun n -> n > 0)
-
-/// The standing body's line (ADR 0046): four is the ratio at which a
-/// delivery stops being work and becomes a commute. A body under it carries
-/// fifty energy a trip against eleven Work, so a Build or a Refill it walks
-/// to spends one tick delivering for every tick of the walk out and the
-/// walk back, and the Work it left standing beside the buffer earns nothing
-/// meanwhile.
-///
-/// A tunable, and named here for that reason: the shape of the rule is not
-/// one. A hauler is `Carry * n < 0`, false whatever `n` is, so the row whose
-/// whole life is delivery is outside the gate by construction rather than
-/// by this number; and the worker row is outside it by its own parity (ADR
-/// 0003), which buys one Carry per Work where this line is one per four,
-/// four times clear at every bank. What retuning it moves is the band
-/// between those two — and, with it, the bank at which the upgrader row's
-/// own cast becomes a standing body (five pairs at four, `upgraderBodyFor`).
-let private standingCarryPerWork = 4
-
-/// Whether a living body is a **standing body** (ADR 0046): it carries
-/// fewer than one Carry part per four Work — `Carry * 4 < Work`. Part
-/// arithmetic and nothing else, like every other row-reading predicate
-/// here (ADR 0006), and it is a fact about a *body* rather than about a
-/// row: the upgrader row's `11W/1C/11M` is one, and so is the anchor row's
-/// `6W/1C/1M`, and so would be anything else the colony ever casts with
-/// the same shape.
-///
-/// The gate that reads it is `applicable` below, on Build, Repair and
-/// Refill. Every other Task is left exactly as its own gates already had
-/// it: Upgrade, Withdraw and Harvest, which are the working life the
-/// upgrader row was shaped for — it draws from the buffer at its feet (ADR
-/// 0019, through ADR 0016's gate, which `Work ≤ Move` keeps it inside) and
-/// spends into the controller in place, or it digs from its Post — and
-/// Pickup too, which stays open to a standing body because a pile is an
-/// intake and not a delivery. Untouched is not applicable, either:
-/// Withdraw stays shut to a Work-heavy body by ADR 0016's own gate, so of
-/// the two standing bodies the colony casts only the upgrader draws.
-let private isStandingBody (creep: CreepInfo) =
-    let count part =
-        creep.Body |> Map.tryFind part |> Option.defaultValue 0
-
-    count Carry * standingCarryPerWork < count Work
 
 /// The pattern row a living body was cast from, read off the parts alone
 /// (ADR 0006): a CLAIM part is the reserver row, more Work than Move is
@@ -1685,16 +1893,25 @@ let private leadOf (snapshot: Snapshot) atlas (creep: CreepInfo) : int =
 let private expiring (snapshot: Snapshot) atlas (creep: CreepInfo) =
     creep.TicksToLive <= leadOf snapshot atlas creep
 
-/// Pre-Task bootstrap step: the spawn Intents the Workforce target's rows
-/// are owed. The target is the quota the *generalist* row is hired
-/// against; every other row is hired against its own unfilled quota and
-/// can carry the fleet past the target (#154). Spawning is a colony-level
-/// need, not a Task creeps get matched to, so it sits beside the
-/// Planner/Matcher pipeline rather than inside it.
+/// The spawn Intents the Workforce target's rows are owed. The target is
+/// the quota the *generalist* row is hired against; every other row is
+/// hired against its own unfilled quota and can carry the fleet past the
+/// target (#154). Spawning is a colony-level need, not a Task creeps get
+/// matched to, so it sits beside the Planner/Matcher pipeline rather than
+/// inside it.
+///
+/// It reads the tick's Task pool all the same, for one number: the worker
+/// row's floor is "two while anything stands in the Build or Repair pool"
+/// (ADR 0046, `workerFloor`), and the pool is the only honest reading of
+/// that — a site the Planner withheld is work no body it hired could take.
+/// The step is derived from the pool and never feeds it, so it still runs
+/// before the Matcher and the order of the two in `decide` is the pool's
+/// alone.
 let private planSpawns
     (snapshot: Snapshot)
     atlas
     (threats: Threats)
+    (tasks: Task list)
     (haulerQuota: int)
     : Intent list =
     // The spawn holds while its doorstep is hot (ADR 0033): a creep born
@@ -1762,8 +1979,29 @@ let private planSpawns
         // what the cast below buys, and the two must be the same body.
         let anchorWorkCap = anchorWorkCapOf snapshot atlas
 
+        // The income the two upgrade rows are hired out of, once (ADR
+        // 0046): the standing row's quota is derived from it and the
+        // commuting row's is derived from what that quota leaves, so the
+        // two must read one number and not two spellings of it.
+        let surplus =
+            surplusOverLifetime snapshot atlas reserverClaims anchorWorkCap anchorQuota haulerQuota
+
+        // The upgrader row's quota (ADR 0046), read here beside the other
+        // rows' for the same reason: it is an addend of the target below
+        // and a gap of its own in the cascade, and a body hired for one
+        // and not counted in the other would be an oversell every tick.
+        let upgraderQuota = upgraderQuota snapshot atlas surplus
+
         let target =
-            workforceTarget snapshot atlas reserverClaims anchorWorkCap anchorQuota haulerQuota
+            workforceTarget
+                snapshot
+                atlas
+                tasks
+                reserverClaims
+                anchorQuota
+                haulerQuota
+                upgraderQuota
+                surplus
 
         // The deficit and every row gap count the creeps that will still be
         // alive when a replacement could arrive: an expiring creep is already
@@ -1812,11 +2050,12 @@ let private planSpawns
                     None
 
         // Reserver gaps are filled before Anchor gaps, Anchor gaps before
-        // hauler gaps, hauler gaps before generalist gaps — the casting
-        // order runs reserver, Anchor, hauler, worker — and the worker
-        // row's quota is whatever the target has left.
+        // hauler gaps, hauler gaps before upgrader gaps and those before
+        // generalist gaps — the casting order runs reserver, Anchor,
+        // hauler, upgrader, worker (ADR 0046) — and the worker row's quota
+        // is whatever the target has left.
         //
-        // The reserver goes in front of all three (ADR 0042): the other
+        // The reserver goes in front of all four (ADR 0042): the other
         // rows spend income, and this one decides whether the income is
         // five a tick or ten across every source of an outpost at once.
         // Being first, it holds the cascade the tick the bank cannot pay
@@ -1866,6 +2105,28 @@ let private planSpawns
         let haulerGap =
             haulerQuota - (living |> List.filter isHaulerBody |> List.length) |> max 0
 
+        // Bodies and not names (ADR 0006): the row's living count is what
+        // `patternOf` reads back off the parts — a standing body at or
+        // under ADR 0016's line — so a `11W/1C/11M` the colony inherited,
+        // resized or was handed fills this quota exactly as one it cast
+        // does. Asking `patternOf` rather than `isStandingBody` alone is
+        // what keeps the Anchor row out of it: `6W/1C/1M` answers to both
+        // descriptions and it is the anchor arm that claims it, so an
+        // Anchor standing at its Post never pays off an upgrader's gap.
+        //
+        // A count read this way can only close a gap the quota hires at a
+        // bank whose cast the same ratio reads back to this row, which is
+        // why `upgraderQuota` is gated on exactly that (`isStandingCast`):
+        // the two readings are one rule seen from either end, and where
+        // they part the row would hire against a gap no body it cast could
+        // ever pay off.
+        let upgraderGap =
+            upgraderQuota
+            - (living
+               |> List.filter (fun creep -> patternOf atlas creep = upgraderPattern)
+               |> List.length)
+            |> max 0
+
         // Idle spawns draw from their room's one bank in list order — each
         // body debits the budget the next spawn sees, so the same energy is
         // never committed twice.
@@ -1886,7 +2147,7 @@ let private planSpawns
                     // stands in for that row's own gap rather than being
                     // it: ADR 0012 hires the row against whatever the
                     // target has left over once the specialist rows are
-                    // counted, and the whole-fleet gap less the three gaps
+                    // counted, and the whole-fleet gap less the four gaps
                     // above is exactly that remainder while every
                     // specialist row is at or under quota. A row
                     // standing over its quota holds the worker row down by
@@ -1919,6 +2180,16 @@ let private planSpawns
                             castFromBank anchorPattern (anchorBodyFor anchorWorkCap) bank
                         elif planned < reserverGap + anchorGap + haulerGap then
                             castFromBank haulerPattern (bodyFor haulerPattern) bank
+                        elif planned < reserverGap + anchorGap + haulerGap + upgraderGap then
+                            // Ahead of the generalist and behind the three
+                            // rows hired off the ground (ADR 0046): the
+                            // upgrader spends the surplus those three
+                            // produce, so it is cast once they stand, and
+                            // it spends it at eleven Work against the
+                            // generalist's nine for the same bank — the
+                            // gain the row exists for is lost every tick a
+                            // worker is cast into the surplus instead.
+                            castFromBank upgraderPattern (bodyFor upgraderPattern) bank
                         elif planned < deficit then
                             castFromBank workerPattern (bodyFor workerPattern) bank
                         else
@@ -3431,12 +3702,19 @@ let private outpostContainerBuilders = 2
 /// the cast hauler carries 1,200 and the cast worker 450, so 900 standing
 /// in the buffer — two worker bodies' worth — would admit one and send the
 /// other back to the rock, a cap 2.67x tighter than the store it claims
-/// to describe. Two *worker* bodies and not two upgraders, now that the
-/// upgrader is a row of its own (ADR 0046): its fifty-energy Carry divides
-/// that same 900 eighteen ways, and carrying the divisor over to it is
-/// #187's, with the quota that first hires one — until then the row that
-/// draws from the buffer is still the generalist and this is still its
-/// load. `haulerQuota` divides that same hauler load into the same
+/// to describe. Two *worker* bodies and not two upgraders, and the
+/// divisor is still the generalist's now that #187 has hired the first
+/// standing body beside it — which is not what ADR 0046's Consequences
+/// hand this ticket, and is written down rather than done quietly. Both
+/// rows draw here: the upgrader row lives at this store and the worker
+/// row's floor keeps one or two generalists in the colony (ADR 0046),
+/// which ADR 0019's gate admits exactly as it always did. Divided by the
+/// upgrader's fifty-energy Carry the same 900 admits eighteen drawers,
+/// which is no cap at all — and the crowd a vanished cap lets pile on is
+/// the generalists', the defect #161 put the cap here for. Which body a
+/// two-row store divides by is a question this ticket does not carry, and
+/// it goes back to the tracker with the reading above rather than being
+/// settled in passing. `haulerQuota` divides that same hauler load into the same
 /// source containers' flow one *spawn* at a time and takes the minimum;
 /// there is one number here instead, because a Task has one capacity and
 /// not one per spawn.
@@ -4469,8 +4747,14 @@ let decide
     let outpostSiteIntents = planOutpostContainers snapshot atlas
 
     let defenseIntents = planSafeMode snapshot atlas @ planFire snapshot atlas
-    let spawnIntents = planSpawns snapshot atlas threats plan.HaulerQuota
+
+    // The pool is derived before the spawns since #187, and the dependency
+    // runs one way only: the worker row's floor asks the pool whether
+    // anything is standing in Build or Repair (ADR 0046, `workerFloor`),
+    // and nothing in the pool reads a spawn Intent. The Matcher still runs
+    // after both.
     let tasks = planTasks snapshot threats
+    let spawnIntents = planSpawns snapshot atlas threats tasks plan.HaulerQuota
     let next, verdicts = matchCreeps snapshot atlas threats tasks assignments verbose
     let assigned = assignedTasks tasks next
     let moveIntents, moveVerdicts = resolve snapshot atlas threats assigned verbose

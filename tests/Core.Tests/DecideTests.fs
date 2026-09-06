@@ -438,15 +438,17 @@ let patternTableTests =
                 // says when it is cast, and `reserverClaimsOf` is that
                 // fact. The order here is the declaration's and not the
                 // casting order — which runs reserver, Anchor, hauler,
-                // worker — because nothing reads this list for a sequence.
+                // upgrader, worker — because nothing reads this list for a
+                // sequence.
                 //
-                // The upgrader is the one row ahead of its quota (ADR
-                // 0046), and deliberately: #186 lands the row and its
-                // sizing rule, #187 the quota and the casting cascade. Its
-                // block is the worker unit's three parts and its rule is
-                // not — one Carry and Work/Move pairs for the rest — which
-                // is the table saying that a row is a name and a sizing
-                // rule before it is a block.
+                // The upgrader row spent one ticket ahead of its quota (ADR
+                // 0046, #186) and is level with it again: #187 landed
+                // `upgraderQuota` and the cascade rung, so every row here
+                // is a row the colony casts off a colony fact. Its block is
+                // the worker unit's three parts and its rule is not — one
+                // Carry and Work/Move pairs for the rest — which is the
+                // table saying that a row is a name and a sizing rule
+                // before it is a block.
                 Expect.equal
                     patternTable
                     [
@@ -627,8 +629,11 @@ let patternTableTests =
                 // casts `3W/1C/3M` — this row's body, and outside the gate
                 // the row exists for. Deliberate and not a hole: three Work
                 // against a fifty-energy load is not yet the commute the
-                // ratio prices. Whether the quota hires under that bank at
-                // all is #187's (ADR 0046, Consequences).
+                // ratio prices. It is also where the quota stops: a row
+                // read back to the generalist is a row nothing could count,
+                // so `upgraderQuota` hires none at this bank (#187, ADR
+                // 0046's amended Consequences; pinned at the seam by "a
+                // bank whose cast is no standing body hires none").
                 Expect.equal
                     (bodyFor upgraderPattern 550)
                     [ Work; Work; Work; Carry; Move; Move; Move ]
@@ -17612,7 +17617,7 @@ let private bufferLaneField =
 
 let private bufferLane =
     { spatial [] bufferLaneField with
-        Stores = Map.ofList [ "can-buf", 900 ]
+        Stores = Map.ofList [ "can-buf", 400 ]
     }
     |> withTargets
         [
@@ -17912,8 +17917,10 @@ let standingRefillTests =
                 // back to. The band under an 800 bank pinned at the seam
                 // rather than only in the arithmetic above, because it is
                 // the gate and not the sizing rule that the band is
-                // interesting for (ADR 0046, Consequences; #187 owns
-                // whether the quota hires into it).
+                // interesting for (ADR 0046, Consequences; #187 settled it
+                // the other way, the quota hiring none at a bank whose cast
+                // this gate reads back to the generalist — a body the row
+                // could never count).
                 Expect.equal
                     (deliveryAssignment (creepWith "upgrader" 50 0 (bodyFor upgraderPattern 550)))
                     (Some(taskId (Refill "spawn-1")))
@@ -18005,18 +18012,21 @@ let upgraderLeadTests =
             }
 
             test "the row that replaces a standing body is not the upgrader row" {
-                // The half of ADR 0046 that is #187's and not this
-                // ticket's: the row is in the table and `planSpawns`
-                // computes no gap for it, so the body the colony is one
-                // short of is hired from the generalist row's remainder as
-                // it always was. A `SpawnCreep` named "upgrader-" here
-                // would mean the quota arrived a ticket early.
+                // The lead is priced off the row and the *replacement* is
+                // hired off the quota, and the two are separate readings
+                // (ADR 0026 beside ADR 0046). This colony has no controller
+                // container, so the upgrader row's quota is zero however
+                // many standing bodies stand in it (#187, `upgraderQuota`),
+                // and the body the colony is one short of is hired from the
+                // generalist row's remainder. A `SpawnCreep` named
+                // "upgrader-" here would mean the quota had stopped reading
+                // the buffer.
                 match leadCasts (bodyFor upgraderPattern 1800) 72 with
                 | [ (_, body, creepName) ] ->
                     Expect.stringStarts
                         creepName
                         "worker-"
-                        "the upgrader row has no quota until #187, so the deficit hires the generalist"
+                        "with no buffer standing the upgrader row's quota is zero, so the deficit hires the generalist"
 
                     Expect.equal
                         body
@@ -18045,5 +18055,403 @@ let upgraderLeadTests =
                     (leadCasts (bodyFor anchorPattern 1800) 42)
                     1
                     "and at 42 it is inside it"
+            }
+        ]
+
+/// The buffer colony at the live RCL5 bank (ADR 0046): the W12S28
+/// corridor — a 3-wide plain field y = 9..11 from x = 8 to 32, the two
+/// sources embedded in wall at (10,10) and (30,10) with their built
+/// containers standing on the Seats (11,10) and (29,10), so two Posts and
+/// no Dual Seat — with the controller at (20,11) and the spawn at (20,10)
+/// beside it. One spawn and not four, so a tick casts at most one body and
+/// the list a case reads names the row whose gap was answered first.
+///
+/// The bank is 1,800 against 1,800: the row under test is the one whose
+/// whole argument is what that bank buys (`11W/1C/11M` against the
+/// generalist's `9W/9C/9M`), so a poorer fixture would pin the cascade and
+/// not the row.
+let private upgraderRoom =
+    { SpatialInfo.empty with
+        RoomName = Some "W1N1"
+        TargetKinds =
+            Map.ofList
+                [
+                    "spawn-1", Structure BuiltKind.Spawn
+                    "src-a", Source
+                    "src-b", Source
+                    "can-a", Structure BuiltKind.Container
+                    "can-b", Structure BuiltKind.Container
+                    "ctrl-1", Controller
+                ]
+    }
+    |> withHome (fun layer ->
+        { layer with
+            Terrain =
+                Map.ofList
+                    [
+                        for x in 8..32 do
+                            for y in 9..11 ->
+                                { X = x; Y = y },
+                                (if (x = 10 || x = 30) && y = 10 then Wall else Plain)
+                    ]
+            TargetPositions =
+                Map.ofList
+                    [
+                        "spawn-1", { X = 20; Y = 10 }
+                        "src-a", { X = 10; Y = 10 }
+                        "src-b", { X = 30; Y = 10 }
+                        "can-a", { X = 11; Y = 10 }
+                        "can-b", { X = 29; Y = 10 }
+                        "ctrl-1", { X = 20; Y = 11 }
+                    ]
+            Obstacles = Set.ofList [ { X = 20; Y = 10 }; { X = 20; Y = 11 } ]
+        })
+
+/// The same room with the upgrade buffer at (18,11) — two tiles inside the
+/// controller's Upgrade Work Area, on no source's Seat and within range 1
+/// of neither rock, so it is the controller's container and not a source's
+/// (ADR 0012, ADR 0019). Built or pending is the whole of what the
+/// pairwise below varies.
+let private withBuffer kind =
+    upgraderRoom |> withTargets [ "can-buf", { X = 18; Y = 11 }, kind ]
+
+let private upgraderColony room =
+    { bareRespawn with
+        RoomEnergy = bank 1800 1800
+        Refillables = []
+        Sources = [ source "src-a"; source "src-b" ]
+        Controller = Some(controllerAt 5)
+        Spatial = room
+    }
+
+/// The two rows the ground hires, and as many of the two surplus rows as
+/// the case wants: two Anchors for the two Posts, two haulers for the two
+/// round trips, then upgraders and generalists.
+let private upgraderFleet upgraders workers =
+    [ anchor "a1" 0 50; anchor "a2" 0 50; hauler "h1" 0 100; hauler "h2" 0 100 ]
+    @ [
+        for i in 1..upgraders -> creepWith $"u{i}" 0 50 (bodyFor upgraderPattern 1800)
+    ]
+    @ [ for i in 1..workers -> worker $"w{i}" 0 50 ]
+
+/// A construction site standing on the corridor's top row, out of the way
+/// of the trunk the haulers walk: what puts a Build in the pool, which is
+/// the only thing the worker row's floor reads (ADR 0046).
+let private withBuildSite (colony: Snapshot) =
+    { colony with
+        ConstructionSites = [ { Id = "site-1" } ]
+        Spatial =
+            colony.Spatial
+            |> withTargets [ "site-1", { X = 16; Y = 9 }, Site BuiltKind.Extension ]
+    }
+
+/// A declared outpost one room north: a controller in a room the colony
+/// neither owns nor holds, which is the whole of what the reserver row's
+/// quota is derived from (ADR 0042). No source and no container, so it
+/// adds a reserver place and nothing else to the target.
+let private withDeclaredOutpost (colony: Snapshot) =
+    { colony with
+        Spatial =
+            { colony.Spatial with
+                Borders = Map.ofList [ "W1N1", plainRing; "W1N2", plainRing ]
+                TargetKinds = colony.Spatial.TargetKinds |> Map.add "ctrl-out" Controller
+            }
+            |> withNeighbour
+                "W1N2"
+                { RoomLayer.empty with
+                    Terrain = Map.ofList (corridor 25 41 48)
+                    TargetPositions = Map.ofList [ "ctrl-out", { X = 25; Y = 45 } ]
+                }
+    }
+
+/// One tick's casts off the one idle spawn: empty, or the one row whose
+/// gap came first.
+let private buffered upgraders workers =
+    spawnIntents
+        (decide
+            { upgraderColony (withBuffer (Structure BuiltKind.Container)) with
+                Creeps = upgraderFleet upgraders workers
+            }
+            Map.empty
+            Set.empty
+            None)
+            .Intents
+
+let private castName casts =
+    match casts with
+    | [ (_, _, name: string) ] -> name
+    | other -> failtest $"expected exactly one SpawnCreep intent, got %A{other}"
+
+[<Tests>]
+let upgraderQuotaTests =
+    testList
+        "the upgrader row's quota"
+        [
+            let casts colony fleet =
+                spawnIntents
+                    (decide { colony with Creeps = fleet } Map.empty Set.empty None).Intents
+
+            test "a built buffer hires the standing row out of the surplus" {
+                // ADR 0046's whole arithmetic at the live bank, and the
+                // numbers are the ADR's own. Twenty a tick from two posted
+                // sources over a 1,500-tick life is 30,000; the two rows
+                // hired off the ground cost 2 × 700 of Anchor and 2 × 1,800
+                // of hauler, so the surplus is 25,000 and one standing
+                // body's eleven Work drinks 16,500 of it — a quota of two,
+                // rounded up as the worker row's is (ADR 0037).
+                //
+                // The body is the row's sizing rule and not the
+                // generalist's: eleven Work, one Carry, eleven Move for
+                // 1,700 of the 1,800, where `9W/9C/9M` buys nine Work out
+                // of the same bank.
+                match buffered 0 0 with
+                | [ (_, body, name) ] ->
+                    Expect.stringStarts name "upgrader-" "the surplus hires the standing row"
+
+                    Expect.equal
+                        body
+                        (List.replicate 11 Work @ [ Carry ] @ List.replicate 11 Move)
+                        "11W/1C/11M, the row's own cast at the RCL5 bank"
+                | other -> failtest $"expected exactly one SpawnCreep intent, got %A{other}"
+            }
+
+            test "a buffer still under construction hires none, and the worker row is unmoved" {
+                // The gate, pairwise: the same room, the same bank, the
+                // same two Posts, and the buffer a site instead of a
+                // structure. A row hired against a promise would stand
+                // beside a hole with nothing to withdraw from, so the
+                // quota is zero and the surplus goes back to the
+                // generalist row — ceil((25,000 − 0) / (9 × 1,500)) = 2
+                // workers, which is the count this colony hired before the
+                // row existed.
+                let pending = upgraderColony (withBuffer (Site BuiltKind.Container))
+
+                Expect.stringStarts
+                    (castName (casts pending (upgraderFleet 0 0)))
+                    "worker-"
+                    "a container site is no buffer, and the row it does not hire is the standing one"
+
+                Expect.isEmpty
+                    (casts pending (upgraderFleet 0 2))
+                    "and two generalists are the whole of what the surplus feeds"
+
+                Expect.stringStarts
+                    (castName (casts pending (upgraderFleet 0 1)))
+                    "worker-"
+                    "one short of those two, the gap is a worker's"
+
+                // The third reading of the same tile, and the one the
+                // fixture existed as before this ticket: no container at
+                // the controller at all. The worker count is the site
+                // case's, which is what "the buffer is the switch" means
+                // — a pending container is not half a buffer.
+                Expect.isEmpty
+                    (casts (upgraderColony upgraderRoom) (upgraderFleet 0 2))
+                    "with no container at the controller the same two generalists are the target"
+            }
+
+            test "the standing row is cast after the hauler row and before the generalist" {
+                // The cascade's new rung (ADR 0046, #154's shape): the
+                // three rows hired off the ground produce the surplus this
+                // one spends, so they are cast first; the generalist
+                // spends the same surplus at nine Work against eleven, so
+                // it is cast last. Pairwise, one rival at a time — the
+                // fleets below differ from the fleet above in one body
+                // each.
+                Expect.stringStarts
+                    (castName (buffered 0 0))
+                    "upgrader-"
+                    "the premise: with every ground row manned the standing row is next"
+
+                let noAnchor = upgraderFleet 0 0 |> List.filter (fun creep -> creep.Name <> "a2")
+
+                Expect.stringStarts
+                    (castName (
+                        casts (upgraderColony (withBuffer (Structure BuiltKind.Container))) noAnchor
+                    ))
+                    "anchor-"
+                    "an empty Post is filled before the buffer is manned"
+
+                let noHauler = upgraderFleet 0 0 |> List.filter (fun creep -> creep.Name <> "h2")
+
+                Expect.stringStarts
+                    (castName (
+                        casts (upgraderColony (withBuffer (Structure BuiltKind.Container))) noHauler
+                    ))
+                    "hauler-"
+                    "and so is an unshipped round trip"
+
+                Expect.stringStarts
+                    (castName (buffered 2 0))
+                    "worker-"
+                    "with the quota's two standing, what is left of the target is the generalist's"
+            }
+
+            test "a declared outpost's reserver is cast before the standing row" {
+                // The head of the cascade keeps its place (ADR 0042): the
+                // reserver decides whether an outpost's sources are worth
+                // five a tick or ten, and the upgrader spends what they
+                // bring in. Pairwise on the one body — the same colony
+                // with the reserver alive casts the standing row.
+                let declared =
+                    withDeclaredOutpost (
+                        upgraderColony (withBuffer (Structure BuiltKind.Container))
+                    )
+
+                Expect.stringStarts
+                    (castName (casts declared (upgraderFleet 0 0)))
+                    "reserver-"
+                    "the row that doubles the income is cast before the row that spends it"
+
+                let withReserver =
+                    upgraderFleet 0 0 @ [ creepWith "r1" 0 50 [ Claim; Claim; Move; Move ] ]
+
+                Expect.stringStarts
+                    (castName (casts declared withReserver))
+                    "upgrader-"
+                    "and with it standing the next gap is the buffer's"
+            }
+
+            test "the worker row's floor is two while a Build stands in the pool and one otherwise" {
+                // ADR 0046's floor, pairwise on the pool alone. The
+                // upgrader row eats this colony's surplus whole — two
+                // bodies drinking eleven a tick against twenty of income —
+                // so the generalist row's income term is nothing and the
+                // floor is the only thing hiring it. Without the floor a
+                // colony beside a rich buffer would run no body that may
+                // build or repair at all: a standing body is shut out of
+                // all three deliveries (ADR 0046) and the hauler row has no
+                // Work part.
+                Expect.stringStarts
+                    (castName (buffered 2 0))
+                    "worker-"
+                    "the floor hires the first generalist with nothing left to feed it"
+
+                Expect.isEmpty (buffered 2 1) "and with a quiet pool it stops at one"
+
+                let building =
+                    withBuildSite (upgraderColony (withBuffer (Structure BuiltKind.Container)))
+
+                Expect.stringStarts
+                    (castName (casts building (upgraderFleet 2 1)))
+                    "worker-"
+                    "a site in the pool raises the same floor to two"
+
+                Expect.isEmpty
+                    (casts building (upgraderFleet 2 2))
+                    "and stops there: the floor is two, not a body per site"
+            }
+
+            test "no surplus hires no standing body, buffer or no buffer" {
+                // ADR 0046's trap: the surplus is what the posted sources
+                // bring in less the ground rows' amortization, so a colony
+                // with no posted source has none to divide. The buffer
+                // stands, the controller is there, and the row is still
+                // not hired — the container is a *precondition* of the
+                // quota and never its cause.
+                //
+                // A colony with no Post has no amortization either, so the
+                // surplus here is exactly zero rather than negative and it
+                // is `ceilDiv`'s own answer that is being read: the quota's
+                // `|> max 0` is the floor under the case this fixture
+                // cannot reach, an amortization above income by more than
+                // one whole body's lifetime drain (`ceilDiv` divides toward
+                // zero, so a smaller shortfall answers 0 unaided).
+                let unposted =
+                    { upgraderColony (withBuffer (Structure BuiltKind.Container)) with
+                        Sources = []
+                        Spatial =
+                            withBuffer (Structure BuiltKind.Container)
+                            |> fun room ->
+                                { room with
+                                    TargetKinds =
+                                        room.TargetKinds |> Map.remove "src-a" |> Map.remove "src-b"
+                                }
+                    }
+
+                Expect.stringStarts
+                    (castName (buffered 0 0))
+                    "upgrader-"
+                    "the premise: this buffer hires the row when there is income to hire it out of"
+
+                // One living body and not none, so the cast is read
+                // through the cascade rather than through the disaster
+                // fallback, which answers the generalist row whatever
+                // asked (`castFromBank`).
+                Expect.stringStarts
+                    (castName (casts unposted [ worker "w1" 0 50 ]))
+                    "worker-"
+                    "with the same buffer standing and nothing coming in, the gap is the floor's"
+
+                Expect.isEmpty
+                    (casts unposted [ worker "w1" 0 50; worker "w2" 0 50 ])
+                    "and the colony floor is where it stops, with no surplus to hire a standing body"
+            }
+
+            // The same room and the same standing buffer at a poorer bank,
+            // which is the one knob that moves what the row's own cast is
+            // (`bodyFor upgraderPattern`). The levels are the banks' real
+            // ones: 800 is RCL3's ten extensions, 750 the same room one
+            // extension short of them, 550 RCL2's five.
+            let atBank capacity level =
+                { upgraderColony (withBuffer (Structure BuiltKind.Container)) with
+                    RoomEnergy = bank capacity capacity
+                    Controller = Some(controllerAt level)
+                }
+
+            test "a bank whose own cast is no standing body hires none of the row" {
+                // The gate's other half (#187, ADR 0046's amended
+                // Consequences): the row is *counted* by `patternOf`, off
+                // the parts, so at a bank where the sizing rule's own cast
+                // is read back to the generalist the quota hires nobody.
+                // Pairwise on the bank alone — 800 against 750 at the same
+                // RCL3 — because 800 is where one Carry against
+                // `floor((capacity - 50) / 150)` Work reaches four Work to
+                // the Carry.
+                Expect.stringStarts
+                    (castName (casts (atBank 800 3) (upgraderFleet 0 0)))
+                    "upgrader-"
+                    "at the 800 bank the row's own cast is a standing body, so the surplus hires it"
+
+                Expect.stringStarts
+                    (castName (casts (atBank 750 3) (upgraderFleet 0 0)))
+                    "worker-"
+                    "fifty energy poorer the same cast is `4W/1C/4M` and the row is not hired"
+
+                Expect.stringStarts
+                    (castName (casts (atBank 550 2) (upgraderFleet 0 0)))
+                    "worker-"
+                    "and at the RCL2 bank, where the cast is `3W/1C/3M`, the surplus is the generalist's"
+            }
+
+            test "the poor band's hire is bounded: a row it cannot count is a row it does not hire" {
+                // The failure the gate above exists to prevent, pinned as
+                // the trace that would have caught it: hiring at a bank
+                // whose cast `patternOf` reads back to the generalist
+                // leaves `upgraderGap` at the full quota every tick,
+                // however many of that very body are alive — a fresh
+                // `3W/1C/3M` cast for ever, ahead of the whole-fleet
+                // deficit that is the only gate on the generalist row.
+                //
+                // So the count of casts must stop growing with the living
+                // count. Both Posts are manned and both round trips
+                // shipped, so what is left is the two surplus rows.
+                let living n =
+                    [ anchor "a1" 0 50; anchor "a2" 0 50; hauler "h1" 0 100; hauler "h2" 0 100 ]
+                    @ [ for i in 1..n -> creepWith $"u{i}" 0 50 (bodyFor upgraderPattern 550) ]
+
+                for n in [ 0; 1; 3; 10 ] do
+                    Expect.isFalse
+                        (casts (atBank 550 2) (living n)
+                         |> List.exists (fun (_, _, name: string) -> name.StartsWith "upgrader-"))
+                        $"no upgrader is cast at the RCL2 bank with {n} of that body alive"
+
+                // And the colony settles: those bodies are generalists by
+                // the ratio and the whole-fleet deficit counts them, so the
+                // spawn goes quiet instead of casting into a gap that never
+                // closes.
+                Expect.isEmpty
+                    (casts (atBank 550 2) (living 10))
+                    "ten of them fill the target, and nothing is cast at all"
             }
         ]
