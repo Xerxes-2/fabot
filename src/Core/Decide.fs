@@ -848,13 +848,13 @@ let private claimTargets (view: ColonyView) : (string * string) list =
 /// projected as this colony's [[outpost]], and three rules read that
 /// state — every site in it is feeding-tier work (`isNurserySite`, which
 /// `isFeedingSite` carries to the tier and to the body gate together), the
-/// concurrent-builder budget does not reach those sites
-/// (`taskCapacities`), and the worker row hires `Tuning.PioneerCount` more bodies
+/// concurrent-builder budget does not reach those sites (`planPool`'s
+/// Capacity), and the worker row hires `Tuning.PioneerCount` more bodies
 /// (`workforceTarget`) — so it is one spelling and not three gates free to
 /// disagree, the sentence `colonyOwns` and `claimTargets` above are both
 /// written under. The budget is the one of the three that does not read it
 /// through `isFeedingSite`, because what it asks is narrower than the tier
-/// (`taskCapacities`), so a change to what a nursery *is* has to be
+/// (`planPool`'s Capacity), so a change to what a nursery *is* has to be
 /// followed to all three from here.
 ///
 /// Two facts, each doing its own work. The room's **stage** is `Nursery`
@@ -957,6 +957,57 @@ let private isBootstrapRoom (view: ColonyView) room =
 /// body off it.
 let private isBorrowedUpgrade (view: ColonyView) controllerId =
     view.Controller |> Option.exists (fun c -> c.Id = controllerId) |> not
+
+/// The [[ferry]]'s sinks (#222, ADR 0052 decision 7): the upgrade buffers
+/// of the children this colony is **bootstrapping**. Three readers, and
+/// they must name the same store or the colony hires a body for a Task
+/// nobody pooled: the [[hauler unit]] quota's ferry term prices a round
+/// trip to it, `planTasks` pools its Refill, and `planPool` bounds that
+/// Refill at `Tuning.FerryLoads`.
+///
+/// **Read off what the view carries, not off the geometry again.** The one
+/// store of a child's a mother's view holds at all is this one
+/// (`ColonyView.ferrySink`), so "a store standing in a borrowed room" names
+/// it exactly, and the range-3 join that picked it out is spelled once,
+/// where it can be. It cannot be spelled here: the join subtracts the
+/// tiles beside the child's **sources**, and the same narrowing that
+/// carries the buffer drops those sources — so a copy of the rule written
+/// over the view would be the weaker half of it, and would call a source
+/// container of the child's a sink the mother may fill and never empty.
+///
+/// `Bootstrapping` alone of the raised stages, as the quota's own term is:
+/// a [[nursery]] has no buffer to fill and no [[upgrader]] to drink it —
+/// what it needs is the spawn its [[pioneer]]s are already hired to build
+/// — and an `Independent` child feeds itself, which is what the stage
+/// means. A room the colony carries for the [[claim]] (#221) is at no
+/// stage at all and is filtered out here with them. `ferrySink` narrows by
+/// the same stage at the seam, so the two cannot disagree; asked again
+/// here because this is the reader's own sentence and a view handed in by
+/// hand is not one `ofWorld` cut.
+///
+/// Total (ADR 0004): a child whose room the projection places no store in
+/// has no buffer here, and no ferry is hired for it.
+let private ferryBuffers (view: ColonyView) : Set<string> =
+    let rooms =
+        view.Borrowed.Rooms
+        |> List.filter (fun room -> roomStage view room = Some Bootstrapping)
+        |> Set.ofList
+
+    if Set.isEmpty rooms then
+        Set.empty
+    else
+        view.Spatial.Stores
+        |> Map.toList
+        |> List.map fst
+        // A container and not merely a store: a buffer is one, and the
+        // kind is the one half of the join that survives the narrowing, so
+        // asking it costs nothing and keeps a tombstone or a pile lying in
+        // that room out of a Refill it could never be filled through.
+        |> List.filter (fun id ->
+            Map.tryFind id view.Spatial.TargetKinds = Some(Structure BuiltKind.Container)
+            && (SpatialInfo.placementOf view.Spatial id
+                |> Option.exists (fun tile -> Set.contains tile.Room rooms)))
+        |> Set.ofList
 
 /// Planner: rebuild this tick's full Task pool from the colony view. Pure and
 /// from scratch every tick — Tasks are never persisted.
@@ -1113,9 +1164,35 @@ let planTasks (view: ColonyView) (threats: Threats) : Task list =
     // colony dug.
     let tombstones = idsOfKind Tombstone
 
+    // The [[ferry]]'s sink is the one store in this pool a body of this
+    // colony's may fill and may never draw (#222): it is a child's, and the
+    // whole of the lend is energy going one way. Left in, the mother's
+    // hauler would take the load she just carried across the Seam straight
+    // back out again — the ADR 0019 cycle over a border — and the child's
+    // own upgraders would be drinking against her.
+    let ferrySinks = ferryBuffers view
+
+    // **No store of a child's is hers to draw, at any [[stage]]** (ADR
+    // 0047 decision 1): what one colony may take of another is the
+    // explicit list `BorrowedWork` carries, and no store is on it. Spelled
+    // over the borrowed rooms rather than over `ferrySinks`, because the
+    // two sets are not the same set — the ferry lends to a `Bootstrapping`
+    // child alone, while `Borrowed.Rooms` also holds the [[nursery]] she is
+    // raising and the child she has lost (`Colony.reclaiming`, #221) — and
+    // a Withdraw denied only where a Refill is pooled would make a lost
+    // child's upgrade buffer a Feeding-tier intake of hers, her haulers
+    // crossing the Seam to bring that room's energy home to her Storage.
+    // That is the drain the whole narrowing exists to refuse, and it is the
+    // *inverse* of the lend: this room is the one she pays into.
+    let borrowedRooms = Set.ofList view.Borrowed.Rooms
+
+    let inABorrowedRoom id =
+        SpatialInfo.placementOf view.Spatial id
+        |> Option.exists (fun tile -> Set.contains tile.Room borrowedRooms)
+
     let withdraws =
         containers @ tombstones
-        |> List.filter (fun id -> stored id > 0)
+        |> List.filter (fun id -> stored id > 0 && not (inABorrowedRoom id))
         |> List.map Withdraw
 
     // The piles worth walking to (#167): a dropped pile at or over
@@ -1181,6 +1258,23 @@ let planTasks (view: ColonyView) (threats: Threats) : Task list =
         |> List.filter (fun id -> stored id < Engine.storageCapacity)
         |> List.map Refill
 
+    // The [[ferry]]'s other half (#222, ADR 0052 decision 7): a
+    // bootstrapping child's upgrade buffer is a Refill target of the
+    // mother's, on the same tier her own buffer sits on (ADR 0012) — the
+    // deepest but the stock's, so nothing she feeds at home waits on it and
+    // the load crosses the Seam only when there is nowhere nearer to put
+    // it. What bounds the lend is the [[capacity]] `planPool` gives it and
+    // the one body `Tuning.FerryLoads` hires, never the tier.
+    //
+    // The user's target is "RCL3 不用几小时": a child earns eight a tick
+    // on its own, and a mother's 1,800-bank hauler carries five hundred a
+    // trip out of a stock her own rows are not hired against (ADR 0023).
+    let ferryRefills =
+        ferrySinks
+        |> Set.toList
+        |> List.filter (fun id -> stored id < Engine.containerCapacity)
+        |> List.map Refill
+
     // The stock's other half (ADR 0023): a stocked Storage is a Withdraw
     // source too, but only while the pool holds a Refill whose target is
     // not the stock itself — some sink other than it has room. Its own
@@ -1198,8 +1292,26 @@ let planTasks (view: ColonyView) (threats: Threats) : Task list =
     // load away instead of putting it back, the draw shallower than every
     // sink but the flow's own and the stock's Refill deeper than all of
     // them.
+    //
+    // **The [[ferry]]'s sink counts as one of those sinks** (#222): ADR
+    // 0023's condition is "some Refill target other than the Storage", and
+    // a bootstrapping child's buffer is exactly that. Left out, the two
+    // conditions were close to mutually exclusive — the ferry's Refill sits
+    // on the buffer's own deep tier, so a load reaches it only once the
+    // spawn, the extensions and the home buffer are full, which is
+    // precisely the state that used to leave this list empty — and the body
+    // `haulerQuota` hires for the lend, priced on the round trip from this
+    // very Storage to that very buffer, had a sink and no intake at all.
+    // The stock is what makes the lend a lend (ADR 0023), so a stock that
+    // cannot be drawn for it is no lend. It reopens nothing: the child's
+    // buffer is a Refill of hers and never a Withdraw (`withdraws` above),
+    // so there is no cycle here for the gate to close.
     let storageWithdraws =
-        if List.isEmpty refills && List.isEmpty containerRefills then
+        if
+            List.isEmpty refills
+            && List.isEmpty containerRefills
+            && List.isEmpty ferryRefills
+        then
             []
         else
             storages |> List.filter (fun id -> stored id > 0) |> List.map Withdraw
@@ -1215,6 +1327,7 @@ let planTasks (view: ColonyView) (threats: Threats) : Task list =
     @ reserves
     @ claims
     @ containerRefills
+    @ ferryRefills
     @ storageRefills
     @ storageWithdraws
 
@@ -1691,40 +1804,35 @@ let private haulerQuota (view: ColonyView) atlas : int =
     // reach hires nobody, the answer every other unpriceable haul gets
     // here (ADR 0004).
     //
-    // The child's **controller** tile and not its buffer, because her view
-    // does not carry the child's stores at all: what a mother may see of a
-    // child is its controller, its sites and its spawn
-    // (`ColonyView.borrowed`), and the buffer stands inside that
-    // controller's own Upgrade area — a tile or two from what is priced
-    // here. The Refill that spends the load is R5's half of #222; this is
-    // the quota's.
+    // The child's **buffer** and not its controller (#216 R5): the store
+    // this body is hired to fill is the one `planTasks` pools the Refill
+    // for, so the two halves of the lend are priced and spent at one tile
+    // (`ferryBuffers`). Until R5 the mother's view carried none of a
+    // child's stores and this term priced the crossing to the controller
+    // instead — a tile or two out, and, worse, hired against a Task that
+    // was not in the pool, which is why the lend shipped at zero.
     //
-    // `Bootstrapping` alone of the two raised stages. A [[nursery]] has no
-    // buffer to fill and no upgrader to drink it — what it needs is the
-    // spawn its [[pioneer]]s are already hired to build — and an
-    // `Independent` child feeds itself, which is what the stage means.
+    // What the trip has to be is *priceable* — a crossing her hauler can
+    // pay for, from the stock to that buffer — and a child whose room she
+    // cannot reach, or that has no buffer standing yet, hires nobody: the
+    // answer every other unpriceable haul gets here (ADR 0004), and the
+    // half of the split feature that keeps the row and the pool in step.
     let ferry =
         if List.isEmpty storages then
             0
         else
-            let controllerIn room =
-                view.Spatial.TargetKinds
-                |> Map.toList
-                |> List.tryPick (fun (id, kind) ->
-                    if kind = Controller then
-                        SpatialInfo.placementOf view.Spatial id
-                        |> Option.filter (fun tile -> tile.Room = room)
-                    else
-                        None)
-
-            view.Borrowed.Rooms
-            |> List.filter (fun room -> roomStage view room = Some Bootstrapping)
-            |> List.filter (fun room ->
-                controllerIn room
-                |> Option.exists (fun tile ->
-                    storages
-                    |> List.exists (fun stock ->
-                        Atlas.haulRoundTripTicks atlas body stock tile |> Option.isSome)))
+            ferryBuffers view
+            |> Set.toList
+            |> List.choose (SpatialInfo.placementOf view.Spatial)
+            |> List.filter (fun tile ->
+                storages
+                |> List.exists (fun stock ->
+                    Atlas.haulRoundTripTicks atlas body stock tile |> Option.isSome))
+            // Per **child** and not per store: the lend is a sentence about
+            // a colony, and a room the Layout ever planned two buffers in
+            // would otherwise buy two ferries off one declaration.
+            |> List.map (fun tile -> tile.Room)
+            |> List.distinct
             |> List.length
             |> (*) view.Tuning.FerryLoads
 
@@ -4007,7 +4115,7 @@ let private planLayout
 /// nursery — where the budget lets go of the site this rule places along
 /// with every other one in that room (ADR 0047) — and a
 /// loaded home worker with no Refill left to do walks the Seam for it
-/// (`tierOf`, `taskCapacities`). Read on the surplus tier it lost to the
+/// (`planPool`'s Priority and Capacity). Read on the surplus tier it lost to the
 /// home Upgrade every tick, and the answer #150 wrote down here — that
 /// the builder would be a creep which walked out for this source's own
 /// Harvest and filled up there — never happened on the deployed colony:
@@ -4440,10 +4548,12 @@ let private sitesPendingBeside (view: ColonyView) atlas controllerId =
         |> List.exists (fun site -> Atlas.targetRoom atlas site.Id = Some room)
 
 /// Whether this Build is on the feeding tier rather than in the surplus
-/// the colony's other sites are spent out of — the two rules that lift one
-/// there, said once, because the tier and the body gate that exists
-/// *because* of the tier must never be able to disagree about which sites
-/// they are talking about.
+/// the colony's other sites are spent out of — the three rules that lift
+/// one there, said once. Since ADR 0052 decision 6 the body gate that
+/// exists *because* of that tier no longer asks this at all: it reads the
+/// [[priority]] the Planner set off this very predicate, so the two cannot
+/// disagree about which sites they mean because there is only one reading
+/// left.
 ///
 /// An outpost's container site, the switch on whether that room is in the
 /// economy at all (ADR 0042, #157); and every site in a nursery, the
@@ -4455,6 +4565,633 @@ let private isFeedingSite (view: ColonyView) atlas siteId =
     isOutpostContainerSite view atlas siteId
     || isNurserySite view atlas siteId
     || isBootstrappingSite view atlas siteId
+
+/// The full downgrade timer per controller level (Screeps
+/// CONTROLLER_DOWNGRADE).
+let private fullDowngradeTimer level =
+    match level with
+    | 1 -> 20000
+    | 2 -> 10000
+    | 3 -> 20000
+    | 4 -> 40000
+    | 5 -> 80000
+    | 6 -> 120000
+    | 7 -> 150000
+    | _ -> 200000
+
+/// The hard deadline on the controller's downgrade timer: half the
+/// level's full timer. The engine refuses activateSafeMode once the
+/// timer sinks below half minus 5,000 (its
+/// CONTROLLER_DOWNGRADE_SAFEMODE_THRESHOLD grace), so escalating at half
+/// keeps the safe-mode reflex fireable with the whole grace still banked
+/// — a downgrade costs a level and zeroes the stock, so neither line is
+/// ever approached (ADR 0007).
+let private downgradeDeadline level = fullDowngradeTimer level / 2
+
+/// Whether the controller stands inside its downgrade deadline (ADR 0007).
+let private insideDowngradeDeadline (view: ColonyView) =
+    view.Controller
+    |> Option.exists (fun c -> c.TicksToDowngrade <= downgradeDeadline c.Level)
+
+/// The tier of work a Task belongs to, once its target is taken into
+/// account (ADR 0010, ADR 0012, ADR 0023) — the ladder `planPool` sets
+/// each entry's [[priority]] off. A **Planner** vocabulary since ADR 0052
+/// decision 6: the Matcher compares the number and has no name for any of
+/// these, so a tier is a thing the pool is built with and never a thing a
+/// match is decided by.
+type private Tier =
+    /// Getting out of a Reach (ADR 0033): the one Task in it is Flee, and
+    /// it sits above every other tier and above the downgrade deadline
+    /// too, because no other work matters while a creep is being killed.
+    | Safety
+    /// Feeding the economy: Harvest, a container's Withdraw, the Refill of
+    /// a spawn or an extension, Reserve, an **outpost** container site's
+    /// Build (#157) and every site in a **nursery** (ADR 0047) — the flow
+    /// the colony's reproduction runs on, and beside it ADR 0042's two
+    /// switches on a third of that flow: the Reserve that decides how fast
+    /// an outpost's rock gives, and the Build that decides whether the room
+    /// is in the economy at all. The nursery's sites are the third switch
+    /// and the deepest of them: the colony's reproduction is a spawn, and
+    /// those are the sites a second one is waiting on.
+    | Feeding
+    /// The Storage's Withdraw (ADR 0023): the colony's stock as an
+    /// intake, one tier below the source containers the flow fills. An
+    /// empty creep empties those first and draws on the stock only when
+    /// they are dry, so a stock standing beside the spawn never wins the
+    /// travel-cost tie the containers have to win. Below the whole
+    /// feeding tier, not just its Withdraws: there is no rank between a
+    /// container's Withdraw and the spawn Refill it feeds, so a hungry
+    /// spawn outbids a stock underfoot too and a part-loaded hauler
+    /// delivers what it has rather than topping up first — the price of
+    /// ordering the stock under the flow it must never outbid.
+    | StockDraw
+    /// Surplus work: a tower Refill (ADR 0010), Build, Repair and
+    /// Upgrade. The colony feeds its own reproduction before its guns,
+    /// and everything it merely spends energy on waits behind the flow.
+    /// Build with the switches excepted — an outpost container's site and
+    /// a nursery's, which decide whether income exists rather than
+    /// spending it (`isFeedingSite`, #157, ADR 0047); every other site the
+    /// colony ever has, its own container sites included, is surplus here.
+    | Surplus
+    /// The controller container's Refill (ADR 0012): a full creep beside
+    /// the buffer sinks its load into the controller rather than dumping
+    /// it back into the container it just drew from and orbiting in
+    /// place, so the buffer is filled by bodies with no surplus work of
+    /// their own.
+    | UpgradeBuffer
+    /// The Storage's Refill (ADR 0023): the colony's stock, deeper than
+    /// every sink that spends. A load reaches it only when there is
+    /// nowhere else at all to put it, the upgrade buffer included, so the
+    /// stock never outbids the flow, however close beside the spawn it
+    /// stands (ADR 0023's own motivating case).
+    | Stock
+
+/// How far apart two tiers stand on the [[priority]] ladder. Ten and not
+/// one, so that a Task can be ordered against another **inside** its tier
+/// (`priorityStep`) without ever reaching the tier above or below it. The
+/// number itself means nothing to anybody: `weightOfRank` divides it back
+/// out and the Matcher only ever compares two of these.
+let private tierRungs = 10
+
+/// The whole tier order, shallowest first — the one place the ordering
+/// lives (ADR 0010, ADR 0012, ADR 0023): the flow is fed, then the stock
+/// is drawn on, then surplus is spent, then whatever is left sinks into
+/// the upgrade buffer, and what even the buffer cannot hold is stocked.
+/// The stock's two roles sit on either side of the surplus work the colony
+/// does between them. Exhaustive over Tier on purpose — a tier this match
+/// forgets is a build error, not a Task that silently ranks below every
+/// other. The downgrade deadline (ADR 0007) is the one thing above the
+/// sequence rather than in it; `planPool` carries it.
+///
+/// The numbers are a **ladder with one rung of slack between tiers**
+/// (ADR 0052 decision 6): a [[priority]] is an integer the Planner is free
+/// to move a single Task one step off its tier by, which is how a
+/// [[pickup]] outbids the [[withdraw]] standing on the same tile without a
+/// tier of its own (`planPool`). Nothing reads the gaps but
+/// `weightOfRank`, which divides them back out.
+let private priorityOfTier =
+    function
+    // One tier beneath `deadlineRank`'s, which is itself one beneath the
+    // shallowest tier of work: a fleeing creep outbids even a controller
+    // about to downgrade (ADR 0033).
+    | Safety -> -2 * tierRungs
+    | Feeding -> 0
+    | StockDraw -> tierRungs
+    | Surplus -> 2 * tierRungs
+    | UpgradeBuffer -> 3 * tierRungs
+    | Stock -> 4 * tierRungs
+
+/// One tier above the shallowest tier of work: where the downgrade
+/// deadline puts Upgrade (ADR 0007). Not a tier of its own — "never let it
+/// downgrade" is an ordering imposed on the sequence, not a tier of work.
+let private deadlineRank = -tierRungs
+
+/// The step a Task is moved by when it is ordered against another inside
+/// one tier. One rung of ten, so it never crosses a tier and the tier
+/// order is what it always was.
+let private priorityStep = 1
+
+/// Which of the four shapes a body is, as far as a [[capacity]] is
+/// concerned (ADR 0052 decision 6, ADR 0006): part arithmetic, asked in
+/// the order the existing gates ask it in, because Heavy and Standing
+/// overlap on the [[anchor]]'s `6W/1C/1M` and every rule that reads both
+/// reads the heavy one first (ADR 0016 before ADR 0046).
+let private bodyClassOf (tuning: Tuning) atlas (creep: CreepInfo) : BodyClass =
+    let count part =
+        creep.Body |> Map.tryFind part |> Option.defaultValue 0
+
+    if Atlas.workHeavy atlas creep.Name then Heavy
+    elif isStandingBody tuning creep then Standing
+    elif count Work = 0 then Carrier
+    else Light
+
+/// Planner, second half: this tick's pool with each entry's [[priority]]
+/// and [[capacity]] on it (ADR 0052 decision 6). `planTasks` above says
+/// **what** is pooled; this says where each entry ranks and how many
+/// bodies it admits, and between them they are everything the Matcher
+/// knows about a Task — which is why the Matcher can be, and now is,
+/// blind to Task kinds.
+///
+/// Every exception the colony has learned about ordering and crowding
+/// lands here and nowhere else: the tier ladder above, the [[downgrade
+/// deadline]]'s lift (ADR 0007), a source's [[seat]]s and [[post]]s
+/// (ADR 0024, ADR 0051), a store's stock divided by the load of the row
+/// that draws it (#161, #167, #196), one holder per controller (ADR 0042,
+/// ADR 0047), the outpost container builders' budget (#157), the
+/// [[pioneer]]s' ceiling on borrowed work (#213) and the garrison's own
+/// tile (#205). Each of them used to be spelled twice — once where the
+/// pool was built and once where it was scored — and the two spellings
+/// were free to disagree about which Task they meant.
+///
+/// Reads the [[atlas]], which `planTasks` does not: a Seat count, a Post,
+/// a site's room and a buffer's id are all geometry, and geometry is what
+/// the Atlas answers.
+let planPool (view: ColonyView) atlas (tasks: Task list) : PooledTask list =
+    let bank = view.Bank.Capacity
+
+    // The three loads a store is divided by, each the row's own cast at
+    // the richest bank and never a candidate's own carry: a capacity is a
+    // fact about the Task, so one store must not answer two numbers
+    // depending on which creep asked. *Which* row is a fact about the
+    // store — and, since #196, a fact about the class of body asking, which
+    // is the one place a store answers two numbers on purpose.
+    let haulerLoad = carryCapacityOf (bodyFor haulerPattern bank)
+    let workerLoad = carryCapacityOf (workerBodyFor bank)
+    let standingLoad = carryCapacityOf (bodyFor upgraderPattern bank)
+
+    let buffers = Atlas.controllerContainers atlas
+
+    // The [[ferry]]'s sinks, named by the one rule three readers share
+    // (`ferryBuffers`): what a mother lends a bootstrapping child is
+    // written down and bounded, so the Refill `planTasks` pooled for the
+    // child's buffer carries that bound here.
+    let ferrySinks = ferryBuffers view
+
+    let stored id =
+        view.Spatial.Stores |> Map.tryFind id |> Option.defaultValue 0
+
+    // The outpost container sites the pool holds, and whether each stands
+    // in a nursery — read once, because the builders' budget below is a
+    // colony-wide number spread over them.
+    let outpostContainerSites =
+        tasks
+        |> List.choose (function
+            | Build siteId when isOutpostContainerSite view atlas siteId ->
+                Some(siteId, isNurserySite view atlas siteId)
+            | _ -> None)
+
+    // **A budget and not a per-site number** (#157): a reservation is one
+    // per controller and two of them are two separate jobs, but
+    // `planOutpostContainers` places a site for *every* unserved outpost
+    // source and places them on the same tick — the declaration carries
+    // three sources, so a per-site two is a colony-wide six, which is the
+    // whole worker row and exactly what the cap exists to prevent. So the
+    // budget is spread over the sites the pool actually holds, floored at
+    // one apiece: one site takes two, and three sites take one each.
+    // Nothing waits on another's completion — every switch is being closed
+    // — and as each site completes the divisor falls and the survivors get
+    // the bodies back, so the last one standing is built by the full two.
+    //
+    // **Two is a tunable, and this is the reason for that number**: one is
+    // the smallest crowd that builds, and two is the smallest that
+    // survives losing a body. A container is 5,000 progress and a
+    // generalist carries 50, so the site is many round trips deep whatever
+    // the crowd; a lone holder that dies, expires or is released by a Reach
+    // (ADR 0033) leaves the switch open for a whole cast-and-walk cycle,
+    // and the room stays outside every quota for all of it.
+    //
+    // A **nursery**'s sites carry no cap at all (ADR 0047 decision 4), and
+    // the exclusion is by room, so it takes the container site the outpost
+    // rule places in that room with it: once the colony has claimed a room,
+    // everything standing in it is the switch on whether there is a second
+    // colony, and the budget is an argument about how much of the home
+    // room's surplus a *third of the income* is worth — a different
+    // question, asked about a room the colony merely mines. Excluded from
+    // the **entries** and not from the divisor: a nursery's site is still
+    // standing and still drawing builders, so dropping it from the count
+    // would hand a sibling outpost's site two builders where it had one, on
+    // the strength of a third room being claimed.
+    let builderShare =
+        match outpostContainerSites with
+        | [] -> 0
+        | sites -> view.Tuning.OutpostContainerBuilders / List.length sites |> max 1
+
+    let cappedContainerSites =
+        outpostContainerSites
+        |> List.choose (fun (siteId, nursery) -> if nursery then None else Some siteId)
+        |> Set.ofList
+
+    // The tier a Task sits in. Refill, Withdraw and Build are the three
+    // Tasks whose tier layers by target (ADR 0010, ADR 0023, ADR 0042). Two
+    // of the three read the layer off the projection's kind and nothing
+    // else — the stock is recognised for what it is, never for where it
+    // stands; the third, Build, is the one that asks where as well. On
+    // Refill: the Storage and the container are each one projected kind,
+    // and the projection holds one kind per id, so those two answers
+    // exclude each other by construction; a tower is read off the
+    // Refillables census instead, which can overlap either. So the kind is
+    // asked first — deepest answer first — and the census only of what the
+    // kind leaves. Any container answers UpgradeBuffer, not the
+    // controller's alone; it is `planTasks` that pools only the
+    // controller's (range 3 of the controller, never a source container's
+    // tile), so no other container reaches here. Everything the three tests
+    // miss is a spawn or an extension: the flow. On Withdraw the layering
+    // is the one line: the stock is drawn on a tier below every container,
+    // source and controller alike. On Build the layering is by target too,
+    // and by the site's room: `isFeedingSite`, which is the room *and* the
+    // kind for an outpost's container (`isOutpostContainerSite`) and the
+    // room alone for every site in a nursery (`isNurserySite`), where the
+    // kind is never asked.
+    let tierOf task =
+        match task with
+        | Flee -> Safety
+        | Harvest _ -> Feeding
+        // **A decision made here, because nothing else made it.** ADR 0042
+        // and #116 both fix the reserver row's *casting* order — in front
+        // of the Anchor, hauler and worker rows — and neither says a word
+        // about its *matching* order, and `priorityOfTier` is exhaustive on
+        // purpose, so a tier had to be chosen. Reserve joins the feeding
+        // tier on the casting order's own argument: every other row spends
+        // the colony's income, this one decides whether that income is five
+        // a tick or ten, so it ranks with the flow reproduction runs on and
+        // above everything that merely spends it.
+        //
+        // The choice is nearly free today — the only body Reserve applies
+        // to is a CLAIM body, and a CLAIM body applies to no other Task but
+        // Flee — so what it really settles is two comparisons. Below
+        // Safety, so a reserver being shot at runs (ADR 0033) instead of
+        // standing at a controller to die; and above Surplus, so the day a
+        // body carries CLAIM beside Work it holds the reservation before it
+        // spends on anything.
+        | Reserve _ -> Feeding
+        // Beside the Reserve it replaces, and for a stronger form of the
+        // same argument (ADR 0047): a reservation decides whether one
+        // room's income is five a tick or ten, and a claim decides whether
+        // there is going to be a second colony at all. Nothing the colony
+        // merely spends energy on may outrank it, and Safety still does — a
+        // claimer being shot at runs, and comes back to a Task that is
+        // still pooled, because a room stays takeable while nobody else has
+        // taken it.
+        | Claim _ -> Feeding
+        | Withdraw storeId ->
+            if Map.tryFind storeId view.Spatial.TargetKinds = Some(Structure BuiltKind.Storage) then
+                StockDraw
+            else
+                Feeding
+        // A pile is flow and not stock (#167): it is the haul cycle's
+        // energy lying where it fell — an Anchor's overflow, a death drop —
+        // so it feeds the colony on the tier the containers do, and which
+        // of the two an empty carrier goes for is travel cost's call.
+        // Deliberately not a tier of its own: a rank between a pile and a
+        // container would decide that before the price was ever asked. It
+        // is not the stock's tier either — a pile decays, so the one store
+        // the colony must never leave standing is this one.
+        | Pickup _ -> Feeding
+        | Refill structureId ->
+            let isTower =
+                view.Refillables
+                |> List.exists (fun r -> r.Id = structureId && r.Kind = BuiltKind.Tower)
+
+            let kind = Map.tryFind structureId view.Spatial.TargetKinds
+
+            if kind = Some(Structure BuiltKind.Storage) then
+                Stock
+            elif kind = Some(Structure BuiltKind.Container) then
+                UpgradeBuffer
+            elif isTower then
+                Surplus
+            else
+                Feeding
+        // The switch ADR 0042 hangs a whole room on, ranked where a switch
+        // belongs (#157). A standing container is what admits an outpost
+        // into the economy; until one stands the room is in no quota, so
+        // building it is not surplus work the colony does with spare energy
+        // — it decides whether a third of the colony's income exists at
+        // all, exactly as the Reserve above decides whether that income is
+        // five a tick or ten.
+        //
+        // What the surplus reading actually cost, deployed: Build and
+        // Upgrade share the surplus tier, so only travel cost separated
+        // them, and the home controller is a few tiles from a loaded home
+        // worker while the site is a Seam and fifty tiles away. Every
+        // worker upgraded, every tick.
+        //
+        // Home Build is untouched and stays Surplus: a home site is placed
+        // by the Layout out of a surplus the colony already has, and admits
+        // nothing.
+        //
+        // And the same argument one question deeper for a **nursery**'s
+        // sites (ADR 0047 decision 4): a container decides whether a room
+        // is in the economy, and the spawn a human has placed in a room
+        // this colony has already claimed decides whether there is going to
+        // be a second colony at all. So the tier lifts there too — and
+        // lifts *every* site in that room, not the container alone, because
+        // the site the whole nursery exists for is one no rule of this
+        // colony's places (`isNurserySite`).
+        //
+        // What this costs the mother is **not** bounded, and the bound is
+        // named here because it is the thing a reader will look for. The
+        // pioneers are what the mother *hired* for the job
+        // (`Tuning.PioneerCount`, `workforceTarget`); they are not a ceiling
+        // on who takes it, because nothing in the Matcher hires a body to a
+        // Task by the row it was cast for.
+        | Build siteId when isFeedingSite view atlas siteId -> Feeding
+        // A bootstrapped child's Upgrade, in the mother's pool (#213): the
+        // tier the pioneers were hired for. Left in the surplus beside the
+        // home Upgrade, travel cost — a Seam and fifty tiles against five —
+        // kept every one of them at home, and the addend was three more
+        // home upgraders. Feeding lifts it over the mother's own surplus
+        // work for exactly `Tuning.PioneerCount` bodies (the capacity
+        // below), which is the hire taking the job it was hired for and not
+        // the loaded fleet crossing. The child's own tick pools the same
+        // target as its own controller, where this arm does not fire.
+        | Upgrade controllerId when
+            isBorrowedUpgrade view controllerId
+            && not (sitesPendingBeside view atlas controllerId)
+            ->
+            Feeding
+        | Build _
+        | Repair _
+        | Upgrade _ -> Surplus
+
+    // The Task's place on the ladder: its tier, with the two orderings
+    // that are not tiers laid over it.
+    //
+    // **The colony's own controller and no other.** The deadline is read
+    // off `ColonyView.Controller`, which is this colony's alone, and since
+    // ADR 0047 decision 4 the pool can hold a second Upgrade — a
+    // bootstrapped child's. Lifting that one on the mother's timer would
+    // send her whole loaded fleet across the Seam on the tick her *own*
+    // controller was closest to downgrading, which is the exact opposite of
+    // what ADR 0007's escalation is for. The child's own colony escalates
+    // its own controller on its own timer, in its own tick, off the same
+    // rule.
+    //
+    // Where the pool's Feeding-tier stores stand, so a [[pickup]] can be
+    // asked whether one of them is under its own pile. Read off the pool
+    // and not off the projection's whole container census: a store the pool
+    // holds no Withdraw for — an empty one, or the [[ferry]]'s sink — is
+    // not an alternative to anything, and the Storage's is a tier away and
+    // already outranked by every pile there is (ADR 0023).
+    let drawableTiles =
+        tasks
+        |> List.choose (fun task ->
+            match task with
+            | Withdraw storeId when tierOf task = Feeding ->
+                SpatialInfo.placementOf view.Spatial storeId
+            | _ -> None)
+        |> Set.ofList
+
+    // **A [[pickup]] outbids the [[withdraw]] standing on its own tile**
+    // (#216 R5, user 2026-09-07: a hauler beside a full container ignored
+    // the pile on it). The two share the feeding tier and the tile, so
+    // travel cost is equal and pool order decided — and the pool order had
+    // the container first. What separates them is decay: a pile loses
+    // `ceil(amount / 1000)` a tick and a container loses nothing, so the
+    // energy that has to be taken first is the energy that is going away.
+    //
+    // Written as the **Pickup** stepping up a rung, and conditioned on the
+    // store under it, so that it stays a claim about that one tile. A
+    // [[priority]] is a scalar the whole tier is ordered by, so whichever
+    // of the pair moves moves against every other Feeding Task in the
+    // colony as well; what decides which one may move is how much rides on
+    // it. Stepping the *Withdraw* down was tried first and is the bug it
+    // was meant to cure, inverted: a hundred-energy overflow on a full
+    // container demoted that container behind every other store at any
+    // distance, so the rest of the hauler row walked past two thousand
+    // energy three tiles from its feet — and the engine drops that overflow
+    // only once the container is full, so the demotion switched on exactly
+    // when the store most needed emptying. The lift moves the Pickup
+    // instead, whose [[capacity]] is its own amount over one load — one
+    // body, usually — and whose energy is the copy that is going away.
+    // Unconditional it would be the claim about every pile in the colony
+    // that the demotion was chosen to avoid; conditioned on a drawable
+    // store's tile it says only "of these two copies, take the decaying
+    // one". One rung is inside the tier (`priorityStep`), so nothing
+    // crosses a tier boundary, the Storage's own draw keeps its place under
+    // the flow, and `weightOfRank` divides the rung back out either way.
+    let priorityOf task =
+        let step =
+            match task with
+            | Pickup pileId ->
+                match SpatialInfo.placementOf view.Spatial pileId with
+                | Some tile when Set.contains tile drawableTiles -> -priorityStep
+                | _ -> 0
+            | _ -> 0
+
+        match task with
+        | Upgrade id when
+            insideDowngradeDeadline view
+            && view.Controller |> Option.exists (fun c -> c.Id = id)
+            ->
+            deadlineRank
+        | _ -> priorityOfTier (tierOf task) + step
+
+    // How many bodies the Task admits, and of which shapes.
+    //
+    // **Harvest is three numbers over one source** (ADR 0024, ADR 0051): the
+    // Seat count every harvester shares, the Post count only the garrisons
+    // compete for, and the Seats beyond the Posts the light bodies are left
+    // — which sum back to the Seat count exactly, so the three say one
+    // thing in the shape the Matcher can count. A source with no Post
+    // derives neither of the last two, and the two rooms mean different
+    // things by that: at home nothing narrows a heavy body's area (ADR
+    // 0020's pre-container fallback), so the Seat cap is the only one; in
+    // an outpost that area is *empty* (#159), so the reachability gate
+    // rejects the pair for every heavy body. A source the projection does
+    // not place derives no cap at all (ADR 0004).
+    //
+    // Beside the numbers, the **tile** (#205): the Post whose container is
+    // still a site is held by the body *standing* on it whatever Task that
+    // body holds this tick. On a standing container the two counts are the
+    // same set — the overflow reprieve keeps the garrison's Harvest
+    // applicable through a full store, so it never lets the slot go — but
+    // on a site there is no overflow, the pair alternates dig and build,
+    // and a cap counting assignments alone reads the tile as free on every
+    // build tick. What that admits is a second heavy body onto the one tile
+    // the first is standing on.
+    //
+    // **A Withdraw is capped by its store's stock** (#161), **and a Pickup
+    // by its pile's** (#167): `ceil(stored / one drawer's load)`, the number
+    // of bodies that store can actually fill. Nothing else in the pipeline
+    // says it — the matching key puts cost ahead of crowding (ADR 0002), so
+    // every hauler with a free slot picks the *nearest* stocked container
+    // whatever is in it, and a container holding 400 draws five haulers
+    // while a full one on the far side of the room stands unvisited.
+    //
+    // **The [[buffer]] divides twice, and that is #196's whole change.**
+    // ADR 0019 shuts every body with no Work part out of the controller's
+    // container, so its drawers are the two Work rows: the generalists,
+    // whose cast at this bank carries 450, and the [[upgrader]]s, whose
+    // `11W/1C/11M` carries fifty. Divided by the generalist's load alone a
+    // 900-energy buffer admits two drawers *in total*, and the row that
+    // lives at that store — the row #187 hired to stand there — took at
+    // most two of the seats and the rest walked ten tiles to a rock they
+    // are the worst body in the colony at digging. Divided by the
+    // upgrader's alone it admits eighteen, which is no cap at all and
+    // re-opens for the generalists the pile-on #161 put the cap here for.
+    // So the store answers both numbers and each class is counted against
+    // its own: two generalists and as many standing bodies as fifty divides
+    // into. There is deliberately no `Total` over them — a `Total` is what
+    // made the two rows compete for one number, which is the defect.
+    //
+    // Every other store keeps the one number and the hauler row's load,
+    // with no branch: ADR 0019's buffer is a container the Layout placed at
+    // the controller, a pile is not one, and the Storage's stock divides
+    // into hundreds of trips whatever the divisor.
+    //
+    // Stock and never flow (ADR 0023): the ten a tick an Anchor drops into
+    // the container while the hauler walks is counted on the tick it lands
+    // and never anticipated here — so a store holding less than a load can
+    // leave a hired hauler idle for the ticks it takes to fill, which is
+    // the honest state ADR 0019 already chose over cycling a container. A
+    // stock of zero caps at zero and not at unbounded; `planTasks` pools
+    // only stocked stores, so the pool never asks, but a cap table that
+    // answered "no limit" to an empty store would be the one reading of the
+    // formula that inverts it.
+    // Whether a site stands in a room this colony is bootstrapping — a
+    // child's [[build]], borrowed work of hers (ADR 0047 decision 4). Two
+    // readers ask it of the same site, the per-site ceiling below and the
+    // `Borrowed` flag at the foot of this function, so it is spelled once:
+    // a Task is one or the other for both of them or for neither.
+    let isBorrowedSite siteId =
+        isBootstrapRoom view (Atlas.targetRoom atlas siteId |> Option.defaultValue "")
+
+    let capacityOf task =
+        match task with
+        | Harvest sourceId ->
+            let seats = Atlas.seats atlas sourceId
+            let posts = Atlas.postsOf atlas sourceId |> Set.count
+
+            { Capacity.unbounded with
+                Total = seats
+                Garrisons = (if posts = 0 then None else Some posts)
+                Commuters =
+                    seats
+                    |> Option.filter (fun _ -> posts > 0)
+                    |> Option.map (fun n -> max 0 (n - posts))
+                Garrison = Atlas.sitePostsOf atlas sourceId
+            }
+        // One holder per controller (ADR 0042, ADR 0047). The ADR casts one
+        // reserver per posted outpost — "two reservers at 4.33 energy a
+        // tick buy three sources their second five" — and a reservation is
+        // a single capped number one body's CLAIM parts are sized to hold,
+        // so a second body there buys nothing while the other outpost stays
+        // at five a tick. For the Claim beside it the second body buys even
+        // less: a room is claimed by one touch of one CLAIM part. The cap
+        // is what sends the second claimer — the successor cast while the
+        // incumbent still walks (ADR 0026) — to the *other* candidate
+        // colony, since travel cost alone would send both to the nearest.
+        | Reserve _
+        | Claim _ -> Capacity.total 1
+        | Withdraw storeId ->
+            let stock = stored storeId
+
+            if Set.contains storeId buffers then
+                { Capacity.unbounded with
+                    Standing = Some(ceilDiv stock standingLoad)
+                    Generalists = Some(ceilDiv stock workerLoad)
+                }
+            else
+                Capacity.total (ceilDiv stock haulerLoad)
+        | Pickup pileId -> Capacity.total (ceilDiv (stored pileId) haulerLoad)
+        // The lend, bounded (#222, ADR 0052 decision 7): `Tuning.FerryLoads`
+        // bodies at the child's buffer and no more, the same number the
+        // hauler row was raised by, so a human retuning the lend retunes
+        // the hire with it and the quota and the pool cannot disagree about
+        // how many bodies are crossing.
+        //
+        // A `Total` and not the hauler class's share alone: what makes this
+        // a lend rather than a second economy is that it is *bounded*, and
+        // a cap on the carriers would leave every generalist in the colony
+        // free to cross for the same store. The row hired for it is the
+        // hauler row all the same — the tier puts this Refill below every
+        // sink at home, so a loaded worker reaches it only when there is
+        // nothing nearer, which is the case the bound is for.
+        | Refill structureId when Set.contains structureId ferrySinks ->
+            Capacity.total view.Tuning.FerryLoads
+        // A borrowed Upgrade takes the bodies hired for it and no more
+        // (#213): `Tuning.PioneerCount`, the same constant the worker row is
+        // raised by, so a human retuning the hire retunes the lift with it.
+        // Without the cap the feeding tier would send every loaded body
+        // across the Seam and the mother's own surplus would stop — the
+        // nursery's accepted price for a 15,000-progress spawn, and not one
+        // for an open-ended window.
+        | Upgrade controllerId when isBorrowedUpgrade view controllerId ->
+            Capacity.total view.Tuning.PioneerCount
+        | Build siteId ->
+            // The body standing on the site is outside the builders' budget
+            // (#205): every word of that number's argument is about a
+            // commute — "the whole worker row walks out together and the
+            // home room's surplus work stops for the fifty ticks each of
+            // them spends crossing" — and this body costs the home room
+            // neither a walk nor a surplus tick. Counted inside it, a worker
+            // still crossing the Seam holds the slot for the whole fifty and
+            // the garrison stands full on the progress with Harvest shut
+            // behind it and no Task at all.
+            let exempt = Atlas.postSiteTile atlas siteId |> Option.toList |> Set.ofList
+
+            // A bootstrapped child's site in the mother's pool, per site:
+            // the same bodies that were hired for the room, on the site that
+            // ends its window sooner than its controller does. The child's
+            // own room reads no cap here — its own sites are its own
+            // workers' to crowd.
+            let total =
+                if isBorrowedSite siteId then
+                    Some view.Tuning.PioneerCount
+                elif Set.contains siteId cappedContainerSites then
+                    Some builderShare
+                else
+                    None
+
+            { Capacity.unbounded with
+                Total = total
+                Exempt = exempt
+            }
+        | _ -> Capacity.unbounded
+
+    tasks
+    |> List.map (fun task ->
+        {
+            Task = task
+            Priority = priorityOf task
+            Capacity = capacityOf task
+            // Work in a room another colony of ours runs (ADR 0047
+            // decision 4, #213). One gate reads it, and only on the
+            // Upgrade: a [[standing body]] holds no commuting work (ADR
+            // 0046), and a Seam crossing is the longest commute the colony
+            // has, so the lift that sends the pioneers must not send the
+            // home upgraders after them. The child's sites answer it too,
+            // off the same `isBorrowedSite` their ceiling is read from,
+            // because the field says what the Task *is* and not what its
+            // reader asked — the Build arm of `applicable` already refuses
+            // a standing body every site it is not standing on.
+            Borrowed =
+                match task with
+                | Upgrade controllerId -> isBorrowedUpgrade view controllerId
+                | Build siteId -> isBorrowedSite siteId
+                | _ -> false
+        })
 
 /// Whether a creep can usefully work this Task right now. The body must
 /// physically be able to do it — Work-part tasks need a Work part, energy
@@ -4519,7 +5256,15 @@ let private isFeedingSite (view: ColonyView) atlas siteId =
 /// walk here — the body digs the source beside it and spends what it dug
 /// into the progress it is standing on, which is how an outpost's
 /// container was raised before either rule existed; the arm carries why.
-let private applicable (view: ColonyView) (threats: Threats) atlas (creep: CreepInfo) task =
+let private applicable
+    (view: ColonyView)
+    (threats: Threats)
+    atlas
+    (creep: CreepInfo)
+    (pooled: PooledTask)
+    =
+    let task = pooled.Task
+
     let has part =
         creep.Body |> Map.tryFind part |> Option.exists (fun n -> n > 0)
 
@@ -4624,8 +5369,9 @@ let private applicable (view: ColonyView) (threats: Threats) atlas (creep: Creep
     // exception below leaves it building where it stands.
     //
     // The gate follows the *tier* and not the container, which is why it
-    // asks `isFeedingSite` and not the container rule alone: ADR 0047's
-    // nursery lifts every site in a claimed room onto the same tier, so
+    // reads this Task's own [[priority]] and not the container rule: ADR
+    // 0047's nursery lifts every site in a claimed room onto the same tier,
+    // and a bootstrapping child's sites with it, so
     // the same Anchor that was walked off its Post by a container site is
     // walked off it by a spawn site, and the reason it may not go is the
     // one above word for word: a heavy body's cross-room work is a Post
@@ -4671,7 +5417,9 @@ let private applicable (view: ColonyView) (threats: Threats) atlas (creep: Creep
         && creep.Energy > 0
         && (Atlas.standsOnPostSite atlas creep.Name siteId
             || (not (isStandingBody view.Tuning creep)
-                && not (isFeedingSite view atlas siteId && Atlas.workHeavy atlas creep.Name)))
+                && not (
+                    pooled.Priority <= priorityOfTier Feeding && Atlas.workHeavy atlas creep.Name
+                )))
     // Repair leaves Upgrade's arm with ADR 0046's gate (a delivery, and a
     // standing body's Carry is one trip's worth), and the two stay
     // otherwise identical: a Work part and something to spend.
@@ -4696,7 +5444,7 @@ let private applicable (view: ColonyView) (threats: Threats) atlas (creep: Creep
     // Emitter acts from, so a body it admits is one that acts this tick
     // rather than one that would have to move first — the Reach included
     // (ADR 0033), because a tile a Threat has taken is not standing room.
-    | Upgrade controllerId ->
+    | Upgrade _ ->
         has Work
         && creep.Energy > 0
         && (not (Atlas.workHeavy atlas creep.Name)
@@ -4706,7 +5454,7 @@ let private applicable (view: ColonyView) (threats: Threats) atlas (creep: Creep
         // that sends the pioneers must not send the home upgraders after
         // them. Their own controller stays the one Task the row exists
         // for, ungated.
-        && not (isBorrowedUpgrade view controllerId && isStandingBody view.Tuning creep)
+        && not (pooled.Borrowed && isStandingBody view.Tuning creep)
     // Part arithmetic and nothing else (ADR 0006): a reservation is pushed
     // up by CLAIM parts, so a body without one can no more reserve than a
     // Work-less one can dig, and a body with one asks for no energy state
@@ -4777,575 +5525,6 @@ let private glyphFor =
     | Reserve _ -> "🚩"
     | Claim _ -> "🏴"
     | Flee -> "🏃"
-
-/// The full downgrade timer per controller level (Screeps
-/// CONTROLLER_DOWNGRADE).
-let private fullDowngradeTimer level =
-    match level with
-    | 1 -> 20000
-    | 2 -> 10000
-    | 3 -> 20000
-    | 4 -> 40000
-    | 5 -> 80000
-    | 6 -> 120000
-    | 7 -> 150000
-    | _ -> 200000
-
-/// The hard deadline on the controller's downgrade timer: half the
-/// level's full timer. The engine refuses activateSafeMode once the
-/// timer sinks below half minus 5,000 (its
-/// CONTROLLER_DOWNGRADE_SAFEMODE_THRESHOLD grace), so escalating at half
-/// keeps the safe-mode reflex fireable with the whole grace still banked
-/// — a downgrade costs a level and zeroes the stock, so neither line is
-/// ever approached (ADR 0007).
-let private downgradeDeadline level = fullDowngradeTimer level / 2
-
-/// The tier of work a Task belongs to, once its target is taken into
-/// account (ADR 0010, ADR 0012, ADR 0023) — what the matcher ranks by.
-type private Tier =
-    /// Getting out of a Reach (ADR 0033): the one Task in it is Flee, and
-    /// it sits above every other tier and above the downgrade deadline
-    /// too, because no other work matters while a creep is being killed.
-    | Safety
-    /// Feeding the economy: Harvest, a container's Withdraw, the Refill of
-    /// a spawn or an extension, Reserve, an **outpost** container site's
-    /// Build (#157) and every site in a **nursery** (ADR 0047) — the flow
-    /// the colony's reproduction runs on, and beside it ADR 0042's two
-    /// switches on a third of that flow: the Reserve that decides how fast
-    /// an outpost's rock gives, and the Build that decides whether the room
-    /// is in the economy at all. The nursery's sites are the third switch
-    /// and the deepest of them: the colony's reproduction is a spawn, and
-    /// those are the sites a second one is waiting on.
-    | Feeding
-    /// The Storage's Withdraw (ADR 0023): the colony's stock as an
-    /// intake, one tier below the source containers the flow fills. An
-    /// empty creep empties those first and draws on the stock only when
-    /// they are dry, so a stock standing beside the spawn never wins the
-    /// travel-cost tie the containers have to win. Below the whole
-    /// feeding tier, not just its Withdraws: there is no rank between a
-    /// container's Withdraw and the spawn Refill it feeds, so a hungry
-    /// spawn outbids a stock underfoot too and a part-loaded hauler
-    /// delivers what it has rather than topping up first — the price of
-    /// ordering the stock under the flow it must never outbid.
-    | StockDraw
-    /// Surplus work: a tower Refill (ADR 0010), Build, Repair and
-    /// Upgrade. The colony feeds its own reproduction before its guns,
-    /// and everything it merely spends energy on waits behind the flow.
-    /// Build with the switches excepted — an outpost container's site and
-    /// a nursery's, which decide whether income exists rather than
-    /// spending it (`isFeedingSite`, #157, ADR 0047); every other site the
-    /// colony ever has, its own container sites included, is surplus here.
-    | Surplus
-    /// The controller container's Refill (ADR 0012): a full creep beside
-    /// the buffer sinks its load into the controller rather than dumping
-    /// it back into the container it just drew from and orbiting in
-    /// place, so the buffer is filled by bodies with no surplus work of
-    /// their own.
-    | UpgradeBuffer
-    /// The Storage's Refill (ADR 0023): the colony's stock, deeper than
-    /// every sink that spends. A load reaches it only when there is
-    /// nowhere else at all to put it, the upgrade buffer included, so the
-    /// stock never outbids the flow, however close beside the spawn it
-    /// stands (ADR 0023's own motivating case).
-    | Stock
-
-/// The matcher's whole tier order, shallowest first — the one place the
-/// ordering lives (ADR 0010, ADR 0012, ADR 0023): the flow is fed, then
-/// the stock is drawn on, then surplus is spent, then whatever is left
-/// sinks into the upgrade buffer, and what even the buffer cannot hold is
-/// stocked. The stock's two roles sit on either side of the surplus work
-/// the colony does between them. Exhaustive over Tier on purpose — a tier
-/// this sequence forgets is a build error, not a Task that silently ranks
-/// below every other. The downgrade deadline (ADR 0007) is the one thing
-/// above the sequence rather than in it; `rank` carries it.
-let private rankOfTier =
-    function
-    // One rank beneath `deadlineRank`'s -1, which is itself one beneath the
-    // shallowest tier of work: a fleeing creep outbids even a controller
-    // about to downgrade (ADR 0033).
-    | Safety -> -2
-    | Feeding -> 0
-    | StockDraw -> 1
-    | Surplus -> 2
-    | UpgradeBuffer -> 3
-    | Stock -> 4
-
-/// The tier a Task sits in. Refill, Withdraw and Build are the three
-/// Tasks whose tier layers by target (ADR 0010, ADR 0023, ADR 0042). Two
-/// of the three read the layer off the projection's kind and nothing else
-/// — the stock is recognised for what it is, never for where it stands;
-/// the third, Build, is the one that asks where as well. On Refill: the Storage and the container are each
-/// one projected kind, and the projection holds one kind per id, so those
-/// two answers exclude each other by construction; a tower is read off the
-/// Refillables census instead, which can overlap either. So the kind is
-/// asked first — deepest answer first — and the census only of what the
-/// kind leaves. Any container answers UpgradeBuffer, not the controller's
-/// alone; it is the Planner that pools only the controller's (range 3 of
-/// the controller, never a source container's tile), so no other container
-/// reaches here. Everything the three tests miss is a spawn or an
-/// extension: the flow. On Withdraw the layering is the one line: the
-/// stock is drawn on a tier below every container, source and controller
-/// alike. On Build the layering is by target too, and by the site's room:
-/// `isFeedingSite` above, which is the room *and* the kind for an
-/// outpost's container (`isOutpostContainerSite`) and the room alone for
-/// every site in a nursery (`isNurserySite`), where the kind is never
-/// asked.
-///
-/// Reads the Atlas because that room is a question only the projection's
-/// id-to-room join answers.
-let private tierOf (view: ColonyView) atlas task =
-    match task with
-    | Flee -> Safety
-    | Harvest _ -> Feeding
-    // **A decision made here, because nothing else made it.** ADR 0042 and
-    // #116 both fix the reserver row's *casting* order — in front of the
-    // Anchor, hauler and worker rows — and neither says a word about its
-    // *matching* order, and `rankOfTier` is exhaustive on purpose, so a
-    // tier had to be chosen. Reserve joins the feeding tier on the casting
-    // order's own argument: every other row spends the colony's income,
-    // this one decides whether that income is five a tick or ten, so it
-    // ranks with the flow reproduction runs on and above everything that
-    // merely spends it.
-    //
-    // The choice is nearly free today — the only body Reserve applies to
-    // is a CLAIM body, and a CLAIM body applies to no other Task but Flee
-    // — so what it really settles is two comparisons. Below Safety, so a
-    // reserver being shot at runs (ADR 0033) instead of standing at a
-    // controller to die; and above Surplus, so the day a body carries
-    // CLAIM beside Work it holds the reservation before it spends on
-    // anything.
-    | Reserve _ -> Feeding
-    // Beside the Reserve it replaces, and for a stronger form of the same
-    // argument (ADR 0047): a reservation decides whether one room's income
-    // is five a tick or ten, and a claim decides whether there is going to
-    // be a second colony at all. Nothing the colony merely spends energy
-    // on may outrank it, and Safety still does — a claimer being shot at
-    // runs, and comes back to a Task that is still pooled, because a room
-    // stays takeable while nobody else has taken it.
-    | Claim _ -> Feeding
-    | Withdraw storeId ->
-        let kind = Map.tryFind storeId view.Spatial.TargetKinds
-
-        if kind = Some(Structure BuiltKind.Storage) then
-            StockDraw
-        else
-            Feeding
-    // A pile is flow and not stock (#167): it is the haul cycle's energy
-    // lying where it fell — an Anchor's overflow, a death drop — so it
-    // feeds the colony on the tier the containers do, and which of the two
-    // an empty carrier goes for is travel cost's call. Deliberately not a
-    // tier of its own: a rank between a pile and a container would decide
-    // that before the price was ever asked, and there is no rule saying
-    // which of them should win. It is not the stock's tier either — a pile
-    // decays at a thousandth a tick, so the one store the colony must
-    // never leave standing is this one.
-    | Pickup _ -> Feeding
-    | Refill structureId ->
-        let isTower =
-            view.Refillables
-            |> List.exists (fun r -> r.Id = structureId && r.Kind = BuiltKind.Tower)
-
-        let kind = Map.tryFind structureId view.Spatial.TargetKinds
-
-        if kind = Some(Structure BuiltKind.Storage) then
-            Stock
-        elif kind = Some(Structure BuiltKind.Container) then
-            UpgradeBuffer
-        elif isTower then
-            Surplus
-        else
-            Feeding
-    // The switch ADR 0042 hangs a whole room on, ranked where a switch
-    // belongs (#157). A standing container is what admits an outpost into
-    // the economy; until one stands the room is in no quota, so building
-    // it is not surplus work the colony does with spare energy — it
-    // decides whether a third of the colony's income exists at all,
-    // exactly as the Reserve above decides whether that income is five a
-    // tick or ten. So it ranks with the flow and not with the spending.
-    //
-    // What the surplus reading actually cost, deployed: Build and Upgrade
-    // share the surplus tier, so only travel cost separated them, and the
-    // home controller is a few tiles from a loaded home worker while the
-    // site is a Seam and fifty tiles away. Every worker upgraded, every
-    // tick. The answer #150 wrote down — that the builder would be the
-    // creep which walked out for the outpost's own Harvest and filled up
-    // there — never happened either: the Storage's Withdraw is feeding
-    // tier and underfoot, so a cross-Seam Harvest never won a creep, and
-    // the reserver (#131) is a CLAIM body with no Work. The switch was
-    // laid down and nothing could ever close it.
-    //
-    // Home Build is untouched and stays Surplus: a home site is placed by
-    // the Layout out of a surplus the colony already has, and admits
-    // nothing.
-    //
-    // ADR 0010's Refill layering is untouched, but the tier it is untouched
-    // beside has grown, and the two consequences of that are written here
-    // rather than assumed away — the ticket's prose claimed neither
-    // happened, and both do. A spawn- or extension-feeding Refill shares
-    // this tier, so nothing but cost separates the two: the nearer target
-    // wins, which is the home one for a creep standing at home and the
-    // site for one the cap has already parked in the outpost. The home
-    // room feeds itself first through the creeps that are standing in it,
-    // and not by any rule. A **tower** Refill is surplus and not feeding
-    // (ADR 0010, the Refill arm above), and Repair is surplus too (ADR
-    // 0034), so both now rank strictly below this one site rather than
-    // race it on distance. That is ADR 0010's own sentence and not an
-    // exception to it — a colony feeds its own reproduction before its
-    // guns, and this Build is what a third of that reproduction's income
-    // is waiting on — but it is a real change of behaviour under a raid on
-    // the home room, and the answer for a raid is the stand-down (ADR
-    // 0043, #136) and not a rank.
-    //
-    // And the same argument one question deeper for a **nursery**'s sites
-    // (ADR 0047 decision 4): a container decides whether a room is in the
-    // economy, and the spawn a human has placed in a room this colony has
-    // already claimed decides whether there is going to be a second colony
-    // at all. So the tier lifts there too — and lifts *every* site in that
-    // room, not the container alone, because the site the whole nursery
-    // exists for is one no rule of this colony's places (`isNurserySite`).
-    //
-    // The builder cap the ordinary outpost site rides does *not* ride here
-    // (`taskCapacities`) — the argument for it is that a tenth body buys
-    // nothing on a 5,000-progress container, and a nursery's spawn is
-    // three times that with a whole colony waiting on it.
-    //
-    // So what this costs the mother is **not** bounded, and the bound is
-    // named here because it is the thing a reader will look for. The
-    // pioneers are what the mother *hired* for the job (`Tuning.PioneerCount`,
-    // `workforceTarget`); they are not a ceiling on who takes it, because
-    // nothing in the Matcher hires a body to a Task by the row it was cast
-    // for. While a site stands in the nursery every loaded Work-part body
-    // in the colony outranks the home Upgrade for it and may cross, and
-    // the home room's surplus Build and Repair go unheld for as long as
-    // that lasts. That is the price ADR 0047 decision 4 was chosen at —
-    // the mother's own surplus work stops while the child is raised — and
-    // it is bounded in *time* by the site being finished and by nothing
-    // else.
-    | Build siteId when isFeedingSite view atlas siteId -> Feeding
-    // A bootstrapped child's Upgrade, in the mother's pool (#213): the
-    // tier the pioneers were hired for. Left in the surplus beside the
-    // home Upgrade, travel cost — a Seam and fifty tiles against five —
-    // kept every one of them at home, and the addend was three more home
-    // upgraders. Feeding lifts it over the mother's own surplus work for
-    // exactly `Tuning.PioneerCount` bodies (`taskCapacities`), which is the hire
-    // taking the job it was hired for and not the loaded fleet crossing.
-    // The child's own tick pools the same target as its own controller,
-    // where this arm does not fire.
-    | Upgrade controllerId when
-        isBorrowedUpgrade view controllerId
-        && not (sitesPendingBeside view atlas controllerId)
-        ->
-        Feeding
-    | Build _
-    | Repair _
-    | Upgrade _ -> Surplus
-
-/// Whether the controller stands inside its downgrade deadline (ADR 0007).
-let private insideDowngradeDeadline (view: ColonyView) =
-    view.Controller
-    |> Option.exists (fun c -> c.TicksToDowngrade <= downgradeDeadline c.Level)
-
-/// One rank above the shallowest tier: where the downgrade deadline puts
-/// Upgrade (ADR 0007). Not a tier of its own — "never let it downgrade"
-/// is an ordering imposed on the sequence, not a tier of work.
-let private deadlineRank = -1
-
-/// Matching tier between applicable tasks (lower wins): the rank of the
-/// Task's tier. One exception: a controller inside the downgrade deadline
-/// makes Upgrade the colony's most urgent work, outranking even the
-/// feeding tier (ADR 0007).
-///
-/// **The colony's own controller and no other.** The deadline is read off
-/// `ColonyView.Controller`, which is this colony's alone, and since ADR 0047
-/// decision 4 the pool can hold a second Upgrade — a bootstrapped child's
-/// (`planTasks`). Lifting that one on the mother's timer would send her
-/// whole loaded fleet across the Seam on the tick her *own* controller was
-/// closest to downgrading, which is the exact opposite of what ADR 0007's
-/// escalation is for. The child's own colony escalates its own controller
-/// on its own timer, in its own tick, off the same rule.
-///
-/// The id test sits inside the Upgrade arm rather than above the match:
-/// this runs once per candidate pair the Matcher prices, and every other
-/// Task would be paying for a read it never uses.
-let private rank (view: ColonyView) atlas task =
-    match task with
-    | Upgrade id when
-        insideDowngradeDeadline view
-        && view.Controller |> Option.exists (fun c -> c.Id = id)
-        ->
-        deadlineRank
-    | _ -> tierOf view atlas task |> rankOfTier
-
-/// Concurrent-worker cap per task id; tasks absent from the map are
-/// unbounded. Harvest is capped by its source's Seat count — a source the
-/// projection does not place derives no cap, so behaviour without terrain
-/// data is unchanged.
-///
-/// Reserve is capped at **one holder per controller** (ADR 0042): the ADR
-/// casts one reserver per posted outpost — "two reservers at 4.33 energy a
-/// tick buy three sources their second five" — and a reservation is a
-/// single capped number one body's CLAIM parts are sized to hold, so a
-/// second body on a controller the first already holds buys nothing while
-/// the other outpost stays at five a tick. Nothing else in the pipeline
-/// produces that: the quota (#131) counts bodies and not assignments, and
-/// the matching key puts cost ahead of `load`, so two reservers standing
-/// together are matched to the same nearest controller and the collapse is
-/// silent — both report Matched. The cap is read off the pool rather than
-/// re-deriving it, so which controllers are reserved is still said once,
-/// in `planTasks`; and it counts holders at arrival like every other cap
-/// (ADR 0026), so a reserver's successor is cast and matched while the
-/// incumbent still holds the reservation.
-///
-/// The outpost container sites carry **`Tuning.OutpostContainerBuilders` between
-/// them** (#157), the same mechanism the Reserve cap uses and for the
-/// opposite reason: not that a second body buys nothing, but that a tenth
-/// does. Now that these sites sit on the feeding tier they outbid the home
-/// Upgrade for every loaded worker in the colony, and travel cost cannot
-/// thin the crowd — every worker in one room is about equally far from a
-/// site a Seam away, so without a cap the whole worker row walks out
-/// together and the home room's surplus work stops for the fifty ticks
-/// each of them spends crossing.
-///
-/// **A budget and not a per-site number**, which is the one place this cap
-/// is not the Reserve cap's shape: a reservation is one per controller and
-/// two of them are two separate jobs, but `planOutpostContainers` places a
-/// site for *every* unserved outpost source and places them on the same
-/// tick — the declaration carries three sources, so a per-site two is a
-/// colony-wide six, which is the whole worker row and exactly what the
-/// paragraph above says the cap exists to prevent. So the budget is spread
-/// over the sites the pool actually holds, floored at one apiece: one site
-/// takes two, and three sites take one each. Nothing waits on another's
-/// completion — every switch is being closed — and as each site completes
-/// the divisor falls and the survivors get the bodies back, so the last
-/// one standing is built by the full two.
-///
-/// **Two is a tunable, and this is the reason for that number**: one is
-/// the smallest crowd that builds, and two is the smallest that survives
-/// losing a body. A container is 5,000 progress and a generalist carries
-/// 50, so the site is many round trips deep whatever the crowd; a lone
-/// holder that dies, expires or is released by a Reach (ADR 0033) leaves
-/// the switch open for a whole cast-and-walk cycle, and the room stays
-/// outside every quota for all of it — which is the loss the floor of one
-/// accepts while several switches are open at once, and the reason the
-/// budget is spread rather than spent on one site at a time. Beyond two
-/// the marginal body buys the same fraction of a long build at the same
-/// fifty-tile price, which is why the number is small rather than the Work
-/// Area's own room. Raising it is a decision about how much of the home
-/// room's surplus the colony will spend to close the switches sooner, and
-/// nothing here breaks if it moves.
-///
-/// Read off the pool like the Reserve cap, so which site this is stays
-/// said once (`isOutpostContainerSite`), and counted at arrival like every
-/// other cap (ADR 0026).
-///
-/// **A Withdraw is capped by its store's stock** (#161), **and a Pickup by
-/// its pile's** (#167): `ceil(stored / one drawer's load)`, the number of
-/// bodies that store can actually fill. Nothing else in the pipeline says
-/// it. The matching key puts cost
-/// ahead of `load` (ADR 0002), so every hauler with a free slot picks the
-/// *nearest* stocked container whatever is in it: a container holding 400
-/// draws five haulers, four come home empty, and a full one on the far
-/// side of the room stands unvisited. Crowding only decides ties, and
-/// these are not ties.
-///
-/// ADR 0023 rejected *container stock as a matching weight* — an
-/// amount-aware third dimension beside rank and travel cost — and this is
-/// not that option: the key keeps its two dimensions and the stock enters
-/// as a capacity, which is the counterweight ADR 0002's own Consequences
-/// named for exactly this pile-on ("Seat caps (and future per-target
-/// capacities) are the intended counterweight"). What the live room
-/// refutes is only that ADR's reason for the rejection — that two tiers
-/// already solve the crowding — and a tier cannot: both containers sit in
-/// one, and inside a tier only cost speaks.
-///
-/// The load is the **row's** body and never the candidate's own carry: a
-/// capacity is a fact about the Task, so one store must not answer two
-/// numbers depending on which creep asked it. *Which* row is a fact about
-/// the store, and so is read here too: ADR 0019 shuts every body with no
-/// Work part out of the controller container, so the buffer's drawers are
-/// the worker row and its stock divides by `workerBodyFor`'s carry, while
-/// every other store belongs to the haul cycle and divides by the hauler
-/// row's. Both are the body the colony would cast now — the richest bank,
-/// the same reading `workforceTarget` prices every row's replacement at,
-/// and so the largest body of that row the fleet holds and the tightest
-/// cap the formula gives for it. Pricing the buffer by a hauler instead
-/// would cap it on a body that can never draw from it: at an 1,800 bank
-/// the cast hauler carries 1,200 and the cast worker 450, so 900 standing
-/// in the buffer — two worker bodies' worth — would admit one and send the
-/// other back to the rock, a cap 2.67x tighter than the store it claims
-/// to describe. Two *worker* bodies and not two upgraders, and the
-/// divisor is still the generalist's now that #187 has hired the first
-/// standing body beside it — which is not what ADR 0046's Consequences
-/// hand this ticket, and is written down rather than done quietly. Both
-/// rows draw here: the upgrader row lives at this store and the worker
-/// row's floor keeps one or two generalists in the colony (ADR 0046),
-/// which ADR 0019's gate admits exactly as it always did. Divided by the
-/// upgrader's fifty-energy Carry the same 900 admits eighteen drawers,
-/// which is no cap at all — and the crowd a vanished cap lets pile on is
-/// the generalists', the defect #161 put the cap here for. Which body a
-/// two-row store divides by is a question this ticket does not carry, and
-/// it goes back to the tracker with the reading above rather than being
-/// settled in passing. `haulerQuota` divides this very load — the same
-/// bank-capacity body, on purpose (ADR 0049) — into the same source
-/// containers' flow, taking the minimum over the spawns to find each
-/// container's cheapest sink; the two must agree, because a row sized
-/// against one load and dispatched against another would hire bodies the
-/// caps never admit.
-///
-/// Stock and never flow (ADR 0023): the ten a tick an Anchor drops into
-/// the container while the hauler walks is counted on the tick it lands
-/// and never anticipated here — so a store holding less than a load can
-/// leave a hired hauler idle for the ticks it takes to fill, which is the
-/// honest state ADR 0019 already chose over cycling a container, and the
-/// stock climbs until the cap admits the second body. The Storage is
-/// deliberately not special-cased — the same formula over a 130,000 stock
-/// is a cap of hundreds, which is no cap at all — and neither is the
-/// controller container: it is capped like every other store, only
-/// divided by the row that actually draws from it. A stock of zero caps
-/// at zero and not at unbounded; `planTasks` pools only stocked stores, so
-/// the pool never asks, but a cap table that answered "no limit" to an
-/// empty store would be the one reading of the formula that inverts it.
-let private taskCapacities (view: ColonyView) atlas (tasks: Task list) : Map<string, int> =
-    let seats =
-        view.Sources
-        |> List.choose (fun s ->
-            Atlas.seats atlas s.Id |> Option.map (fun count -> taskId (Harvest s.Id), count))
-
-    let reserves =
-        tasks
-        |> List.choose (function
-            | Reserve _
-            // One holder per controller for the Claim beside it (ADR
-            // 0047), and here the second body buys even less than a second
-            // reserver does: a room is claimed by one touch of one CLAIM
-            // part, so a crowd at the controller is a crowd of bodies with
-            // nothing to do the tick the first of them acts. The cap is
-            // what sends the second claimer — the successor cast while the
-            // incumbent still walks (ADR 0026) — to the *other* candidate
-            // colony, since travel cost alone would send both to the
-            // nearest.
-            | Claim _ as task -> Some(taskId task, 1)
-            | _ -> None)
-
-    let draws =
-        let capacity = view.Bank.Capacity
-        let haulerLoad = carryCapacityOf (bodyFor haulerPattern capacity)
-        let workerLoad = carryCapacityOf (workerBodyFor capacity)
-        let buffers = Atlas.controllerContainers atlas
-
-        tasks
-        |> List.choose (function
-            | Withdraw storeId as task ->
-                let stock = view.Spatial.Stores |> Map.tryFind storeId |> Option.defaultValue 0
-
-                let load =
-                    if Set.contains storeId buffers then
-                        workerLoad
-                    else
-                        haulerLoad
-
-                Some(taskId task, ceilDiv stock load)
-            // A pile is capped by the same arithmetic over the same table
-            // (#167): as many bodies as the energy on the ground can
-            // actually fill, and never the whole row onto one heap. The
-            // divisor is the hauler row's with no branch — ADR 0019's
-            // buffer is a container the Layout placed at the controller,
-            // and a pile is not one, so the reading that picks a row by
-            // store has one answer here.
-            | Pickup pileId as task ->
-                let amount = view.Spatial.Stores |> Map.tryFind pileId |> Option.defaultValue 0
-
-                Some(taskId task, ceilDiv amount haulerLoad)
-            | _ -> None)
-
-    let outpostContainers =
-        match
-            tasks
-            |> List.choose (function
-                | Build siteId as task when isOutpostContainerSite view atlas siteId ->
-                    Some(taskId task, isNurserySite view atlas siteId)
-                | _ -> None)
-        with
-        | [] -> []
-        | sites ->
-            // A nursery's sites carry no cap at all (ADR 0047 decision 4),
-            // and the exclusion is by **room**, so it takes the container
-            // site the outpost rule places in that room with it. The
-            // reason is the room's and not the spawn's 15,000 progress:
-            // once the colony has claimed a room, everything standing in
-            // it is the switch on whether there is a second colony, and
-            // the budget is an argument about how much of the home room's
-            // surplus work a *third of the income* is worth (#157) — a
-            // different question, asked about a room the colony merely
-            // mines.
-            //
-            // What the exclusion costs is written at `tierOf`: nothing
-            // bounds the crowd that crosses for a nursery's site while it
-            // stands. That is the decision, not an oversight, and the
-            // pioneers are the bodies hired for the job rather than a
-            // ceiling on who takes it.
-            //
-            // Excluded from the **entries** and not from the divisor. The
-            // budget is spread over the outpost container sites the pool
-            // holds, and it falls to the survivors only as sites are
-            // *finished* (above); a nursery's site is still standing and
-            // still drawing builders — more of them than ever — so
-            // dropping it from the count would hand a sibling outpost's
-            // site two builders where it had one, on the strength of a
-            // third room being claimed. Which site this is stays said once
-            // (`isOutpostContainerSite`); the nursery decides only which
-            // of those sites an entry is emitted for.
-            let each = view.Tuning.OutpostContainerBuilders / List.length sites |> max 1
-
-            sites
-            |> List.choose (fun (tid, nursery) -> if nursery then None else Some(tid, each))
-
-    // A borrowed Upgrade takes the bodies hired for it and no more (#213):
-    // `Tuning.PioneerCount`, the same constant the worker row is raised by, so a
-    // human retuning the hire retunes the lift with it. Without the cap
-    // the feeding tier would send every loaded body across the Seam and
-    // the mother's own surplus would stop — the nursery's accepted price
-    // for a 15,000-progress spawn, and not one for an open-ended window.
-    let borrowed =
-        tasks
-        |> List.choose (function
-            | Upgrade controllerId as task when isBorrowedUpgrade view controllerId ->
-                Some(taskId task, view.Tuning.PioneerCount)
-            // A bootstrapped child's site in the mother's pool, per site:
-            // the same bodies that were hired for the room, on the site
-            // that ends its window sooner than its controller does. The
-            // child's own room reads no cap here — its own sites are its
-            // own workers' to crowd.
-            | Build siteId as task when
-                isBootstrapRoom view (Atlas.targetRoom atlas siteId |> Option.defaultValue "")
-                ->
-                Some(taskId task, view.Tuning.PioneerCount)
-            | _ -> None)
-
-    seats @ reserves @ draws @ outpostContainers @ borrowed |> Map.ofList
-
-/// Concurrent Work-heavy-harvester cap per Harvest task id (ADR 0024): the
-/// source's Post count, the standing room a heavy body actually has — its
-/// Harvest Work Area is that source's Posts alone (ADR 0020), so the Seat
-/// cap would admit garrisons to tiles they may not work from and pile two
-/// Anchors onto one Post. A source with no Post derives no cap, and the
-/// two rooms mean different things by that: at home nothing narrows a
-/// heavy body's area (ADR 0020's pre-container fallback), so the Seat cap
-/// is the only one; in an outpost that area is *empty* (#159), so the
-/// reachability gate rejects the pair for every heavy body — `Unreachable`
-/// and not `Inapplicable`, that area being read as a price and not as a
-/// body — and a cap of zero would only be a second way to say so. The Seat
-/// cap still rides there, as it does for the light bodies that may work
-/// the rock, and it is consulted first: the cascade below asks capacity
-/// before reachability. Rides beside the Seat cap rather than replacing it
-/// — a Post is a capacity unit of its own, and both must hold.
-let private postCapacities (view: ColonyView) atlas : Map<string, int> =
-    view.Sources
-    |> List.choose (fun s ->
-        match Atlas.postsOf atlas s.Id |> Set.count with
-        | 0 -> None
-        | count -> Some(taskId (Harvest s.Id), count))
-    |> Map.ofList
 
 /// Action Intent for one assigned creep: emitted when the Atlas judges the
 /// action reachable from the tick-start position, and — for Harvest alone
@@ -5573,15 +5752,27 @@ let private moveIntentFor
 /// outweigh one body pushed off its own.
 ///
 /// Positive and never rising with rank, so the ladder's own order carries
-/// over (`rankOfTier`), and `idleRank` lands on the smallest weight there
-/// is rather than on none: a body with no Task pushes with something, or a
-/// crowd of idle bodies would be a wall no traveller could walk into.
+/// over (`priorityOfTier`), and `idleRank` lands on the smallest weight
+/// there is rather than on none: a body with no Task pushes with something,
+/// or a crowd of idle bodies would be a wall no traveller could walk into.
 ///
 /// The ceiling is the ladder's deepest tier and the `+ 2` is what keeps
 /// that tier off the floor: `Stock` weighs two and the floor of one is
 /// reserved for the bodies carrying no Task at all, so every Task outpushes
 /// every idle body whatever tier it sits in.
-let private weightOfRank (rank: int) : int = max 1 (rankOfTier Stock + 2 - rank)
+///
+/// The ladder's rungs are divided back out, **rounding to the tier** (ADR
+/// 0052 decision 6): a [[priority]] the Planner stepped one rung inside its
+/// tier — a [[pickup]] lifted over the [[withdraw]] under it — is a claim
+/// about which of two Tasks a creep should take and never about how hard
+/// that creep should push through a corridor, so it pushes with its tier's
+/// weight exactly as its untouched neighbours do. The subtracted
+/// `priorityStep` is what makes that true in **both** directions: it slides
+/// the ceiling's window down one rung, so a tier and either of its two
+/// stepped neighbours land on one weight, and every tier keeps the weight
+/// it had before there were steps to take.
+let private weightOfRank (rank: int) : int =
+    max 1 (ceilDiv (priorityOfTier Stock - rank - priorityStep) tierRungs + 2)
 
 /// The room's matching while the arbitration runs: a tile's holder and a
 /// holder's tile, one relation written both ways because the search reads
@@ -5851,9 +6042,21 @@ let movementOf
     (view: ColonyView)
     atlas
     (threats: Threats)
+    (pool: PooledTask list)
     (assigned: Map<string, Task>)
     (verbose: Set<string>)
     : Movement =
+    // The push each assigned Task carries into arbitration is its own
+    // pooled [[priority]] (ADR 0052 decision 6), read off the pool rather
+    // than re-derived: the mover and the Matcher order the colony's work
+    // by one number or they order it by two. A Task the pool does not hold
+    // is one nothing can be assigned to, so the fallback is the idle rank
+    // the parked bodies carry.
+    let priorities = pool |> List.map (fun p -> taskId p.Task, p.Priority) |> Map.ofList
+
+    let priorityOf task =
+        Map.tryFind (taskId task) priorities |> Option.defaultValue idleRank
+
     let tired =
         view.Creeps
         |> List.choose (fun c -> if c.Fatigue > 0 then Some c.Name else None)
@@ -5880,7 +6083,7 @@ let movementOf
             placed
             |> List.filter (fun (name, _) -> not (Set.contains name tired))
             |> List.map (fun (name, at) ->
-                moveIntentFor (rank view atlas) threats atlas name at (Map.tryFind name assigned))
+                moveIntentFor priorityOf threats atlas name at (Map.tryFind name assigned))
         Rerouted =
             placed
             |> List.choose (fun (name, _) ->
@@ -6055,10 +6258,11 @@ let resolve
     (view: ColonyView)
     atlas
     (threats: Threats)
+    (pool: PooledTask list)
     (assigned: Map<string, Task>)
     (verbose: Set<string>)
     : Intent list * Verdict list =
-    resolveRooms [ movementOf view atlas threats assigned verbose ]
+    resolveRooms [ movementOf view atlas threats pool assigned verbose ]
 
 /// Matcher: keep still-valid assignments (anti-thrash) and greedily assign
 /// the rest. Assignments in, Assignments and the Verdicts explaining them
@@ -6067,33 +6271,56 @@ let resolve
 /// verbose list, by its Scoring Verdict: the whole pool judged against the
 /// same state its status was decided from. Emission belongs to the
 /// Emitter, movement to the Resolver.
+///
+/// **It knows no Task kinds** (ADR 0052 decision 6). What it compares is
+/// each pooled entry's [[priority]] and its [[travel cost]], and what it
+/// counts is holders against that entry's [[capacity]] — the tier ladder,
+/// the Seat and Post counts, the store's stock over its drawers' load, the
+/// builders' budget and the pioneers' ceiling are all `planPool`'s, set
+/// once where the pool is built. Before this the same distinctions were
+/// spelled a second time here, in three tables the Matcher consulted by
+/// matching on the Task, and every exception the colony learned had to be
+/// kept in step across the two spellings by hand.
 let matchCreeps
     (view: ColonyView)
     atlas
     (sizing: RowSizing)
     (threats: Threats)
-    (tasks: Task list)
+    (pool: PooledTask list)
     (assignments: Assignments)
     (verbose: Set<string>)
     : Assignments * Verdict list =
-    let byId = tasks |> List.map (fun t -> taskId t, t) |> Map.ofList
-    let capacities = taskCapacities view atlas tasks
-    let postCaps = postCapacities view atlas
+    let byId = pool |> List.map (fun p -> taskId p.Task, p) |> Map.ofList
 
-    // Each living creep's remaining life, hoisted for the tick as the two
-    // cap tables are: the capacity gate asks it once per holder per judged
-    // pair, and the answer is a view fact.
+    // Each living creep's remaining life and its [[body class]], hoisted
+    // for the tick: the capacity gate asks the first once per holder per
+    // judged pair and the second once per holder and once per candidate,
+    // and both are view facts that cannot move inside a tick.
     let lives = view.Creeps |> List.map (fun c -> c.Name, c.TicksToLive) |> Map.ofList
+
+    let classes =
+        view.Creeps
+        |> List.map (fun c -> c.Name, bodyClassOf view.Tuning atlas c)
+        |> Map.ofList
+
+    let classOf name = Map.tryFind name classes
 
     // The crowding component of the matching key (ADR 0002): every holder,
     // counted at this tick. Arrival discounts what a Task's cap counts
     // (ADR 0026), never what the key does — spreading creeps over Tasks is
-    // a judgement about now, and nothing in 0026 revises the key. The
-    // count is a fold: the question is how many, and a Map built only to
-    // be measured and dropped costs an allocation and a structural insert
-    // per holder, once per scored pair.
-    let load (acc: Assignments) tid =
-        acc |> Map.fold (fun n _ assigned -> if assigned = tid then n + 1 else n) 0
+    // a judgement about now, and nothing in 0026 revises the key.
+    //
+    // **Maintained beside the fold and never rescanned** (#95): the count
+    // is carried in a table that the release fold and `assignOne` update as
+    // they add and drop holders, so the key's third component is one lookup
+    // per scored pair rather than a walk of the whole assignment map. The
+    // table and the assignments are written in the same two places and are
+    // one fact in two shapes; nothing reads a count the map does not agree
+    // with, which is what the invariant test pins.
+    let load (loads: Map<string, int>) tid =
+        Map.tryFind tid loads |> Option.defaultValue 0
+
+    let hold (loads: Map<string, int>) tid = Map.add tid (load loads tid + 1) loads
 
     // The holders a candidate actually competes with, counted at arrival
     // (ADR 0026): two creeps hold the same standing room against each
@@ -6132,120 +6359,87 @@ let matchCreeps
             else
                 None)
 
-    // The garrison of a Post whose container is still a site (#205),
-    // counted against that source's Post cap beside the Harvest holders
-    // above. On a standing container the two counts are the same set: the
+    // The bodies standing on the Task's `Garrison` tiles, whatever Task
+    // they hold this tick (#205) — counted against the Heavy cap beside
+    // its holders. On a standing container the two sets are the same: the
     // overflow reprieve keeps the garrison's Harvest applicable through a
     // full store, so it never lets the slot go. On a site there is no
-    // overflow, so the pair alternates — Harvest until the store is full,
-    // Build until it is empty — and a cap counting assignments alone reads
-    // the tile as free on every build tick. What that admits is a second
-    // heavy body onto the one tile the first is standing on, and the
-    // incumbent is then released from Build with its own Harvest full and
-    // walks a Seam home to another rock: the cross-room theft ADR 0045
-    // records, out of the Post that is supposed to prevent it.
+    // overflow, so the pair alternates — dig until full, build until empty
+    // — and a cap counting assignments alone reads the tile as free on
+    // every build tick, which admits a second heavy body onto the one tile
+    // the first is standing on. Counted at arrival like every other holder
+    // (ADR 0026); the candidate never counts against itself, a body
+    // already on its own Post being what the cap is *for*.
+    let garrisons (candidate: CreepInfo) task arrival (tiles: Set<RoomPos>) =
+        if Set.isEmpty tiles then
+            0
+        else
+            view.Creeps
+            |> List.filter (fun c ->
+                c.Name <> candidate.Name
+                && classOf c.Name = Some Heavy
+                && (Atlas.creepTile atlas c.Name
+                    |> Option.exists (fun tile -> Set.contains tile tiles))
+                && overlaps candidate task arrival c.Name)
+            |> List.length
+
+    // Holders against numbers, and nothing else (ADR 0052 decision 6): the
+    // total the Task admits, the share each scope the candidate falls in
+    // admits, and the tiles whose standing bodies hold a slot without
+    // holding the Task. A candidate standing on an `Exempt` tile is
+    // outside all of it — the one body a budget that prices a commute
+    // never priced (#205).
     //
-    // So the slot is held by the body *standing* on the Post, whatever
-    // Task it holds this tick — "one Anchor per Post" (ADR 0012, ADR 0024)
-    // is a claim about the tile. Counted at arrival like every other
-    // holder (ADR 0026), so a garrison that dies before the candidate
-    // arrives is no longer standing there and its successor is dispatched
-    // exactly as it was. The candidate never counts against itself: a body
-    // already on its own Post is what the cap is *for*.
-    let postSiteGarrisons (candidate: CreepInfo) task arrival sourceId =
-        view.Creeps
-        |> List.filter (fun c ->
-            c.Name <> candidate.Name
-            && Atlas.workHeavy atlas c.Name
-            && Atlas.standsOnSitePost atlas c.Name sourceId
-            && overlaps candidate task arrival c.Name)
-        |> List.length
+    // The scopes overlap because the colony's rules do, and every one the
+    // candidate falls in has to hold: a source says "three Seats, at most
+    // one of them a garrison and at most two of them anybody else" in one
+    // breath, and the buffer says "two generalists and eighteen standing
+    // bodies, counted apart" in another. Holders are folded once and the
+    // counts are read off that fold, so a Task with four caps on it costs
+    // one walk of the assignment map and not four.
+    let hasCapacity (creep: CreepInfo) acc (pooled: PooledTask) (arrival: Lazy<int option>) =
+        let capacity = pooled.Capacity
 
-    // A heavy body is judged against both caps (ADR 0024): the Seat count
-    // it shares with every other harvester, and the Post count only its own
-    // kind competes for. The Post cap is Harvest's alone; Reserve carries
-    // the Seat-shaped one at a count of one (ADR 0042) and no Post cap at
-    // all, since no heavy body ever holds a CLAIM part. Withdraw carries a
-    // Seat-shaped one too, off its store's stock (#161). Holders are
-    // gathered inside the capped arms — the Refills and the surplus work
-    // the pool is mostly made of never walk the assignment map.
-    let hasCapacity (creep: CreepInfo) acc task (arrival: Lazy<int option>) =
-        let tid = taskId task
+        let standing =
+            not (Set.isEmpty capacity.Exempt)
+            && (Atlas.creepTile atlas creep.Name
+                |> Option.exists (fun tile -> Set.contains tile capacity.Exempt))
 
-        // One Task-shaped cap does not reach one body (#205): the outpost
-        // container budget is `Tuning.OutpostContainerBuilders` spread over the
-        // sites, and every word of its argument is about a commute — "the
-        // whole worker row walks out together and the home room's surplus
-        // work stops for the fifty ticks each of them spends crossing"
-        // (`taskCapacities`). The body standing on the site costs the home
-        // room neither a walk nor a surplus tick, so it is outside what
-        // that number prices; counted inside it, a worker still crossing
-        // the Seam holds the slot for the whole fifty and the garrison
-        // stands full on the progress with Harvest shut behind it and no
-        // Task at all — #197's shape in the case this ticket exists to
-        // give an exit to. The budget still bounds the commuters exactly
-        // as #157 wrote it: what leaves is one body that was never a
-        // commuter.
-        let seatCap =
-            match task with
-            | Build siteId when Atlas.standsOnPostSite atlas creep.Name siteId -> None
-            | _ -> Map.tryFind tid capacities
+        if standing || not (Capacity.isBounded capacity) then
+            // Only a capped Task forces the walk: the Refills and the
+            // surplus work the pool is mostly made of neither walk the
+            // assignment map nor pay for an arrival (ADR 0029).
+            true
+        else
+            let holders = holdersAt acc creep pooled.Task arrival.Value
+            let cls = classOf creep.Name
 
-        let heavy = Atlas.workHeavy atlas creep.Name
+            let inClass wanted =
+                holders |> List.filter (fun name -> classOf name = Some wanted)
 
-        let postCap = if heavy then Map.tryFind tid postCaps else None
+            let heavy = inClass Heavy |> List.length
+            let standingRow = inClass Standing |> List.length
+            let all = List.length holders
 
-        // The light body's own cap (ADR 0051): the Seats a posted source
-        // has *beyond* its Posts. The Post cap above keeps the garrisons
-        // to the Posts; this keeps the light crowd off them, so a source
-        // with two Seats and one Post admits one light body and one
-        // heavy, never two light and an Anchor `none-free` in the swamp.
-        // Harvest's alone, as the Post cap is, and read only where a Post
-        // cap exists: an unposted source keeps the Seat cap as its only
-        // one, which is ADR 0045's bare-Seat bootstrap unchanged.
-        let lightCap =
-            match task, seatCap, Map.tryFind tid postCaps with
-            | Harvest _, Some seatCount, Some postCount when not heavy ->
-                Some(max 0 (seatCount - postCount))
-            | _ -> None
+            // A cap the candidate's own class does not fall in is not its
+            // cap: the `None` scope is how a rule says "this number is
+            // about somebody else's crowd".
+            let within scope cap counted =
+                match cap with
+                | Some limit when cls |> Option.exists scope -> counted < limit
+                | _ -> true
 
-        match seatCap, postCap, lightCap with
-        // Only a capped Task forces the walk: the Refills and the surplus
-        // work the pool is mostly made of neither walk the assignment map
-        // nor pay for an arrival (ADR 0029).
-        | None, None, None -> true
-        | _ ->
-            let holders = holdersAt acc creep task arrival.Value
-
-            let withinSeats =
-                match seatCap with
-                | Some cap -> List.length holders < cap
-                | None -> true
-
-            let withinLight =
-                match lightCap with
-                | Some cap ->
-                    let light = holders |> List.filter (Atlas.workHeavy atlas >> not) |> List.length
-
-                    light < cap
-                | None -> true
-
-            let withinPosts =
-                match postCap with
-                | Some cap ->
-                    let heavy = holders |> List.filter (Atlas.workHeavy atlas) |> List.length
-
-                    // The Post cap is Harvest's alone, so no other Task
-                    // has a source to read a garrison off.
-                    let garrison =
-                        match task with
-                        | Harvest sourceId -> postSiteGarrisons creep task arrival.Value sourceId
-                        | _ -> 0
-
-                    heavy + garrison < cap
-                | None -> true
-
-            withinSeats && withinPosts && withinLight
+            within (fun _ -> true) capacity.Total all
+            && within
+                ((=) Heavy)
+                capacity.Garrisons
+                (heavy + garrisons creep pooled.Task arrival.Value capacity.Garrison)
+            && within ((<>) Heavy) capacity.Commuters (all - heavy)
+            && within ((=) Standing) capacity.Standing standingRow
+            && within
+                (fun c -> c <> Heavy && c <> Standing)
+                capacity.Generalists
+                (all - heavy - standingRow)
 
     // Capacity applies to remembered assignments too: memory can carry an
     // oversell from before a cap existed (e.g. across a redeploy). So does
@@ -6262,25 +6456,29 @@ let matchCreeps
     // works, and where the two do overlap on the tile — a lead longer than
     // the successor's walk — the exemption is what keeps the fold's
     // creep-name order from deciding which of them holds the Post.
-    let kept, released =
-        ((Map.empty, []), assignments)
-        ||> Map.fold (fun (acc, released) name tid ->
+    //
+    // The crowding table is built here beside the kept assignments (#95),
+    // out of the same one branch that keeps one: a released holder never
+    // enters it, so the two can only be written together.
+    let kept, keptLoads, released =
+        ((Map.empty, Map.empty, []), assignments)
+        ||> Map.fold (fun (acc, loads, released) name tid ->
             let release reason =
-                acc, Verdict.Released(name, tid, reason) :: released
+                acc, loads, Verdict.Released(name, tid, reason) :: released
 
             match view.Creeps |> List.tryFind (fun c -> c.Name = name) with
-            | None -> acc, released
+            | None -> acc, loads, released
             | Some creep ->
                 match Map.tryFind tid byId with
                 | None -> release ReleaseReason.TaskGone
                 // The raid's release stands ahead of the ordinary one: a
                 // Task whose whole Work Area is in a Reach is gone for this
                 // creep however well its body fits (ADR 0033).
-                | Some task when threatened threats atlas creep task ->
+                | Some pooled when threatened threats atlas creep pooled.Task ->
                     release ReleaseReason.Threatened
-                | Some task when not (applicable view threats atlas creep task) ->
+                | Some pooled when not (applicable view threats atlas creep pooled) ->
                     release ReleaseReason.Inapplicable
-                | Some task ->
+                | Some pooled ->
                     // The walk is bound one gate before it is spent, exactly
                     // as the fresh cascade below binds it: capacity counts
                     // holders at this holder's own arrival (ADR 0026), and
@@ -6289,11 +6487,11 @@ let matchCreeps
                     // Reachability is still travel cost's answer — the two
                     // floods reach the same tiles, and ADR 0002's release
                     // has no other price.
-                    let cost = travelCostOf threats atlas creep.Name task
-                    let arrival = lazy (Atlas.walkTicks atlas creep.Name task)
+                    let cost = travelCostOf threats atlas creep.Name pooled.Task
+                    let arrival = lazy (Atlas.walkTicks atlas creep.Name pooled.Task)
 
                     if
-                        not (hasCapacity creep acc task arrival)
+                        not (hasCapacity creep acc pooled arrival)
                         && not (expiring view atlas sizing creep)
                     then
                         release ReleaseReason.OverCapacity
@@ -6301,9 +6499,9 @@ let matchCreeps
                         match cost with
                         | None -> release ReleaseReason.Unreachable
                         | Some _ ->
-                            match tooEarly view atlas creep task arrival with
+                            match tooEarly view atlas creep pooled.Task arrival with
                             | Some(walk, wait) -> release (ReleaseReason.TooEarly(walk, wait))
-                            | None -> Map.add name tid acc, released)
+                            | None -> Map.add name tid acc, hold loads tid, released)
 
     // One gate cascade judges every (creep, Task) pair — rejected at the
     // first matching gate it fails (applicable, capacity, reachable, in
@@ -6320,42 +6518,48 @@ let matchCreeps
     // the rejection it always did. The Matcher's candidates and a verbose
     // Scoring both read from here, so the narration can never drift from
     // what actually decided the match.
-    let judge acc (creep: CreepInfo) task =
-        let tid = taskId task
+    let judge acc loads (creep: CreepInfo) (pooled: PooledTask) =
+        let tid = taskId pooled.Task
 
-        if threatened threats atlas creep task then
+        if threatened threats atlas creep pooled.Task then
             Candidate.Rejected(tid, RejectReason.Threatened)
-        elif not (applicable view threats atlas creep task) then
+        elif not (applicable view threats atlas creep pooled) then
             Candidate.Rejected(tid, RejectReason.Inapplicable)
         else
-            let cost = travelCostOf threats atlas creep.Name task
-            let arrival = lazy (Atlas.walkTicks atlas creep.Name task)
+            let cost = travelCostOf threats atlas creep.Name pooled.Task
+            let arrival = lazy (Atlas.walkTicks atlas creep.Name pooled.Task)
 
-            if not (hasCapacity creep acc task arrival) then
+            if not (hasCapacity creep acc pooled arrival) then
                 Candidate.Rejected(tid, RejectReason.CapacityFull)
             else
                 match cost with
                 | None -> Candidate.Rejected(tid, RejectReason.Unreachable)
                 | Some cost ->
-                    match tooEarly view atlas creep task arrival with
+                    match tooEarly view atlas creep pooled.Task arrival with
                     | Some(walk, wait) -> Candidate.Rejected(tid, RejectReason.TooEarly(walk, wait))
-                    | None -> Candidate.Scored(tid, rank view atlas task, cost, load acc tid)
+                    | None -> Candidate.Scored(tid, pooled.Priority, cost, load loads tid)
 
-    let assignOne (acc, verdicts) (creep: CreepInfo) =
+    let assignOne (acc, loads, verdicts) (creep: CreepInfo) =
         let verdicts =
             if Set.contains creep.Name verbose then
                 // The creep's own claim is set aside for its scoring: a held
                 // single-Seat Task must read as the winning row, never as
-                // capacity-full against its own holder's seat.
-                let rows = tasks |> List.map (judge (Map.remove creep.Name acc) creep)
+                // capacity-full against its own holder's seat. The crowding
+                // table is set aside with it, the two being one fact (#95).
+                let without =
+                    match Map.tryFind creep.Name acc with
+                    | Some tid -> Map.add tid (max 0 (load loads tid - 1)) loads
+                    | None -> loads
+
+                let rows = pool |> List.map (judge (Map.remove creep.Name acc) without creep)
                 Verdict.Scoring(creep.Name, rows) :: verdicts
             else
                 verdicts
 
         match Map.tryFind creep.Name acc with
-        | Some tid -> acc, Verdict.Kept(creep.Name, tid) :: verdicts
+        | Some tid -> acc, loads, Verdict.Kept(creep.Name, tid) :: verdicts
         | None ->
-            let judged = tasks |> List.map (fun t -> t, judge acc creep t)
+            let judged = pool |> List.map (fun p -> p.Task, judge acc loads creep p)
 
             let keyed =
                 judged
@@ -6386,7 +6590,7 @@ let matchCreeps
                     | _ -> false
 
                 let reason =
-                    if List.isEmpty tasks then
+                    if List.isEmpty pool then
                         IdleReason.NoTasks
                     elif rejectedWith isTooEarly then
                         IdleReason.NoneInTime
@@ -6397,7 +6601,7 @@ let matchCreeps
                     else
                         IdleReason.NoneApplicable
 
-                acc, Verdict.Unassigned(creep.Name, reason) :: verdicts
+                acc, loads, Verdict.Unassigned(creep.Name, reason) :: verdicts
             | keyed ->
                 let bestKey, task = keyed |> List.minBy fst
 
@@ -6417,9 +6621,11 @@ let matchCreeps
                         else MatchFactor.PoolOrder
 
                 Map.add creep.Name (taskId task) acc,
+                hold loads (taskId task),
                 Verdict.Matched(creep.Name, taskId task, factor) :: verdicts
 
-    let next, statuses = view.Creeps |> List.fold assignOne (kept, [])
+    let next, _, statuses = view.Creeps |> List.fold assignOne (kept, keptLoads, [])
+
     next, List.rev released @ List.rev statuses
 
 /// Join the Matcher's Assignments back onto the Planner's pool: the tick's
@@ -6663,8 +6869,13 @@ let decideUnarbitrated
     let sizing = rowSizingOf view atlas
 
     let tasks = planTasks view threats
+
+    // The pool's other half (ADR 0052 decision 6): every entry's priority
+    // and capacity, set once here and read by the Matcher and the mover.
+    let pool = planPool view atlas tasks
+
     let spawnIntents = planSpawns view atlas sizing threats tasks plan.HaulerQuota
-    let next, verdicts = matchCreeps view atlas sizing threats tasks assignments verbose
+    let next, verdicts = matchCreeps view atlas sizing threats pool assignments verbose
     let assigned = assignedTasks tasks next
     let taskIntents = emit view atlas threats assigned
 
@@ -6700,7 +6911,7 @@ let decideUnarbitrated
         Assignments = next
         Memo = plan
         Verdicts = verdicts
-        Movement = movementOf view atlas threats assigned verbose
+        Movement = movementOf view atlas threats pool assigned verbose
     }
 
 /// The decision seam a shell with one colony — and the whole suite — asks

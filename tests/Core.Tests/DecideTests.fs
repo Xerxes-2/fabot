@@ -4693,17 +4693,35 @@ let stepFrom (pos: Pos) direction =
     | Left -> { pos with X = pos.X - 1 }
     | TopLeft -> { X = pos.X - 1; Y = pos.Y - 1 }
 
+/// This tick's pool with its priorities and capacities, over the
+/// snapshot's own Atlas — what the Matcher and the mover are both handed
+/// (ADR 0052 decision 6).
+let poolOn snapshot =
+    planPool snapshot (Atlas.ofView snapshot) (planTasks snapshot noThreats)
+
 /// Run the Resolver at its own seam: assigned Tasks as data over the
 /// snapshot's Atlas; a creep absent from the list is idle. Move Intents
 /// only; the movement Verdicts riding beside them are resolveVerdictsOn.
 let resolveOn snapshot assigned =
-    resolve snapshot (Atlas.ofView snapshot) noThreats (Map.ofList assigned) Set.empty
+    resolve
+        snapshot
+        (Atlas.ofView snapshot)
+        noThreats
+        (poolOn snapshot)
+        (Map.ofList assigned)
+        Set.empty
     |> fst
 
 /// The Resolver's movement Verdicts at the same seam, with the named
 /// creeps on the verbose list (ADR 0018).
 let resolveVerdictsVerboseOn snapshot assigned verbose =
-    resolve snapshot (Atlas.ofView snapshot) noThreats (Map.ofList assigned) (Set.ofList verbose)
+    resolve
+        snapshot
+        (Atlas.ofView snapshot)
+        noThreats
+        (poolOn snapshot)
+        (Map.ofList assigned)
+        (Set.ofList verbose)
     |> snd
 
 /// The same for a quiet colony: nobody on the verbose list.
@@ -5528,7 +5546,13 @@ let arbitrationTests =
                     }
 
                 let movementFor view assigned =
-                    movementOf view (Atlas.ofView view) noThreats (Map.ofList assigned) Set.empty
+                    movementOf
+                        view
+                        (Atlas.ofView view)
+                        noThreats
+                        (poolOn view)
+                        (Map.ofList assigned)
+                        Set.empty
 
                 let together =
                     resolveRooms
@@ -6795,7 +6819,12 @@ let verboseScoringTests =
                                     RejectReason.Inapplicable
                                 )
                                 Candidate.Scored(taskId (Refill "spawn-1"), 0, 0, 0)
-                                Candidate.Scored(taskId (Upgrade "ctrl-1"), 2, 0, 0)
+                                // Two tiers below the flow's zero, ten rungs
+                                // apiece since #216 R5: the ladder gained
+                                // room for a Task to be ordered inside its
+                                // own tier, and `weightOfRank` divides the
+                                // rungs back out (ADR 0052 decision 6).
+                                Candidate.Scored(taskId (Upgrade "ctrl-1"), 20, 0, 0)
                             ]
                         )
                         Verdict.Matched("w1", taskId (Refill "spawn-1"), MatchFactor.Rank)
@@ -10089,6 +10118,44 @@ let postCapacityTests =
                     "with no Post every Seat is a light body's"
             }
 
+            test "the crowd a Post's Seat is kept from is every body but the garrison" {
+                // ADR 0051's cap is over a **group** and not over one row
+                // (ADR 0052 decision 6, `Capacity.Commuters`): the Seats
+                // beyond the Posts are a count of tiles, and any body but a
+                // garrison may stand on one. The two non-garrison classes
+                // the colony casts are the generalist and the [[standing
+                // body]], so they are what this reads — one bare Seat, one
+                // of the two on it, and the other takes the buffer it can
+                // reach instead. Counted per class rather than over the
+                // group, both would be admitted to the one tile.
+                let snapshot =
+                    { haulColony with
+                        Creeps =
+                            [ worker "w1" 0 50; creepWith "u1" 0 50 (bodyFor upgraderPattern 1800) ]
+                        Spatial =
+                            haulRoom
+                            |> withHome (fun layer ->
+                                { layer with
+                                    Obstacles = Set.singleton { X = 20; Y = 10 }
+                                    CreepPositions =
+                                        Map.ofList
+                                            [ "w1", { X = 9; Y = 10 }; "u1", { X = 12; Y = 10 } ]
+                                })
+                    }
+
+                let { Assignments = assignments } = decide snapshot Map.empty Set.empty None
+
+                Expect.equal
+                    (harvesters assignments "src-a")
+                    [ "w1" ]
+                    "two Seats less one Post is one tile, whichever two rows want it"
+
+                Expect.equal
+                    (Map.tryFind "u1" assignments)
+                    (Some(taskId (Withdraw "can-ctrl")))
+                    "and the body the cap turned away drinks at the buffer it was cast for"
+            }
+
             test "an Anchor and a light body share a source on disjoint tiles" {
                 // The live case (#212): the Anchor cast for a Post found the
                 // Seat cap full of light bodies. Now the light body's Work
@@ -11799,6 +11866,45 @@ let withdrawCapacityTests =
                     [ "w1"; "w2"; "w3" ]
                     "three loads keep the whole crowd upgrading standing still, which is what a buffer is for"
             }
+
+            test "the buffer's two rows are capped apart, each by its own load" {
+                // #196, landed as ADR 0052 decision 6's per-[[body class]]
+                // capacity. One store, two rows, two loads: the generalist
+                // the colony casts at this bank carries 450 and the
+                // [[standing body]] beside the buffer carries fifty, so a
+                // 400-energy buffer is one trip for the first and eight for
+                // the second. Divided by the generalist's load alone — the
+                // one number the store used to answer — the row #187 hired
+                // to *live* at that store took one seat between the three
+                // of them and the rest walked to a rock they are the worst
+                // body in the colony at digging.
+                //
+                // Pairwise on the class of the three bodies and nothing
+                // else: the same tiles, the same 400, the same pool.
+                let standingCrowd =
+                    { bufferCrowdColony 400 with
+                        Creeps =
+                            [
+                                for name, _ in bufferCrowd ->
+                                    creepWith name 0 50 (bodyFor upgraderPattern 1800)
+                            ]
+                    }
+
+                let { Assignments = standing } = decide standingCrowd Map.empty Set.empty None
+
+                Expect.equal
+                    (drawersOf standing "can-buf")
+                    [ "w1"; "w2"; "w3" ]
+                    "fifty energy a trip divides 400 into eight seats, so the row that lives there all drinks"
+
+                let { Assignments = generalists } =
+                    decide (bufferCrowdColony 400) Map.empty Set.empty None
+
+                Expect.equal
+                    (drawersOf generalists "can-buf")
+                    [ "w1" ]
+                    "and the generalists' own share is unchanged: one load standing is one of them"
+            }
         ]
 
 /// The names assigned to one pile, in name order — `drawersOf`'s twin for
@@ -11854,11 +11960,124 @@ let tombColony energy (creeps: (string * Pos) list) =
                 })
     }
 
+/// A stocked container at (10,10) with a dropped pile the case places —
+/// on the container's own tile or ten tiles down the lane — and one empty
+/// hauler on the tile beside the container (#216 R5). The bank is 150, so
+/// a trip is 100 energy and both stores are stocked for several of them:
+/// what separates the two Tasks here is neither capacity nor travel cost,
+/// both of which tie, but the pool's own [[priority]].
+let sameTilePileColony pilePos =
+    { bareRespawn with
+        Bank = bank 150 150
+        Sources = []
+        Creeps = [ hauler "h1" 0 100 ]
+        Spatial =
+            { spatial [] crowdField with
+                Stores = Map.ofList [ "can-a", 400; "pile-a", 150 ]
+            }
+            |> withTargets
+                [
+                    "can-a", { X = 10; Y = 10 }, Structure BuiltKind.Container
+                    "pile-a", pilePos, Dropped
+                ]
+            |> withHome (fun layer ->
+                { layer with
+                    CreepPositions = Map.ofList [ "h1", { X = 10; Y = 11 } ]
+                })
+    }
+
 [<Tests>]
 let pickupTaskTests =
     testList
         "the pile and the tombstone"
         [
+            test "a pile on a container's own tile is taken before the container" {
+                // The live shape (user, 2026-09-07): a hauler standing at a
+                // full container ignored the 1,859 energy lying on it. The
+                // two Tasks share the feeding tier, the tile and therefore
+                // the travel cost, so pool order decided — and the pool
+                // order had the container first. What separates them is
+                // decay: the pile loses `ceil(amount / 1000)` a tick and the
+                // container loses nothing, so the copy that is going away is
+                // the one to take (ADR 0052 decision 6, the [[priority]]
+                // ladder's own rung of slack).
+                let { Assignments = together } =
+                    decide (sameTilePileColony { X = 10; Y = 10 }) Map.empty Set.empty None
+
+                Expect.equal
+                    (Map.tryFind "h1" together)
+                    (Some(taskId (Pickup "pile-a")))
+                    "one tile, two stores: the decaying one first"
+
+                // The pairwise control: the same hauler, the same container,
+                // the same pile, ten tiles down the lane. The Withdraw is on
+                // its own tier again — the step is a claim about *this*
+                // store and never about piles in general — and travel cost
+                // says what it always said.
+                let { Assignments = apart } =
+                    decide (sameTilePileColony { X = 20; Y = 10 }) Map.empty Set.empty None
+
+                Expect.equal
+                    (Map.tryFind "h1" apart)
+                    (Some(taskId (Withdraw "can-a")))
+                    "a pile ten tiles off moves nothing: the container underfoot is still the flow"
+            }
+
+            test "the piled container keeps its place against every other store" {
+                // Which of the pair carries the rung is not a matter of
+                // taste (#216 R5 review). A [[priority]] is a scalar the
+                // whole tier is ordered by and travel cost never overturns
+                // it (ADR 0002), so stepping the *Withdraw* down put that
+                // container behind every other store in the colony at any
+                // distance — and the engine drops an [[anchor]]'s overflow
+                // onto a container's tile only once the container is
+                // **full**, so the demotion switched on exactly when the
+                // store most needed emptying. Two haulers, a piled near
+                // container and an unpiled far one: the first takes the
+                // decaying copy, and the second must still take the four
+                // hundred at its feet rather than walk twenty tiles past
+                // it.
+                let colony =
+                    { bareRespawn with
+                        Bank = bank 150 150
+                        Sources = []
+                        Creeps = [ hauler "h1" 0 100; hauler "h2" 0 100 ]
+                        Spatial =
+                            { spatial [] crowdField with
+                                Stores =
+                                    Map.ofList [ "can-near", 400; "can-far", 400; "pile-a", 100 ]
+                            }
+                            |> withTargets
+                                [
+                                    "can-near", { X = 10; Y = 10 }, Structure BuiltKind.Container
+                                    "can-far", { X = 30; Y = 10 }, Structure BuiltKind.Container
+                                    "pile-a", { X = 10; Y = 10 }, Dropped
+                                ]
+                            |> withHome (fun layer ->
+                                { layer with
+                                    CreepPositions =
+                                        Map.ofList
+                                            [ "h1", { X = 10; Y = 11 }; "h2", { X = 14; Y = 10 } ]
+                                })
+                    }
+
+                let { Assignments = assignments } = decide colony Map.empty Set.empty None
+
+                Expect.equal
+                    (Map.tryFind "h1" assignments)
+                    (Some(taskId (Pickup "pile-a")))
+                    "the pile's own hauler still takes the decaying copy first"
+
+                // The pile's capacity is its amount over one load — one
+                // body — so the second hauler is over capacity there and
+                // has the two containers to choose between. Only travel
+                // cost may decide that, which is the whole of the fix.
+                Expect.equal
+                    (Map.tryFind "h2" assignments)
+                    (Some(taskId (Withdraw "can-near")))
+                    "and the rest of the row is not sent past the full store beside it"
+            }
+
             test "a pile past the threshold hires a hauler ten tiles off; one under it hires nobody" {
                 // The live gap's second half (#167): 193 energy of death
                 // drop at W13S28 36,21 with nobody near enough for the
@@ -15897,7 +16116,7 @@ let outpostTests =
             }
 
             test "two builders cross for the site, and the third stays home" {
-                // The cap `taskCapacities` puts on this Build (#157). On
+                // The cap `planPool` puts on this Build (#157). On
                 // the feeding tier the site outbids the home Upgrade for
                 // every loaded worker at once, and travel cost cannot thin
                 // that crowd — a Seam away is a Seam away from every tile
@@ -16149,7 +16368,7 @@ let outpostTests =
             }
 
             test "the two builders are the colony's budget, not each site's" {
-                // `taskCapacities`' cap read at colony scale (#157).
+                // `planPool`'s cap read at colony scale (#157).
                 // `planOutpostContainers` places one site per unserved
                 // outpost source and places them all on the same tick, so
                 // a per-site two over the declaration's three sources is a
@@ -24218,7 +24437,17 @@ let private ferryMother stage =
                 Borders = Map.ofList [ "W1N1", plainRing; "W1N2", plainRing ]
                 TargetKinds =
                     Map.ofList
-                        [ "storage-1", Structure BuiltKind.Storage; "ctrl-child", Controller ]
+                        [
+                            "storage-1", Structure BuiltKind.Storage
+                            "ctrl-child", Controller
+                            // The child's upgrade buffer, beside its
+                            // controller: the tile the [[ferry]] is priced
+                            // to and the store its Refill is pooled for
+                            // (#222) — one store for both halves of the
+                            // lend, so a body hired here has a Task.
+                            "can-child", Structure BuiltKind.Container
+                        ]
+                Stores = Map.ofList [ "can-child", 500 ]
             }
             |> withHome (fun layer ->
                 { layer with
@@ -24239,7 +24468,9 @@ let private ferryMother stage =
                                 for x in 9..11 do
                                     for y in 44..48 -> { X = x; Y = y }, Plain
                             ]
-                    TargetPositions = Map.ofList [ "ctrl-child", { X = 10; Y = 46 } ]
+                    TargetPositions =
+                        Map.ofList
+                            [ "ctrl-child", { X = 10; Y = 46 }; "can-child", { X = 10; Y = 45 } ]
                 }
     }
 
@@ -24538,8 +24769,8 @@ let quotaInputTests =
                 // stage means. Pairwise on the child's stage alone: the
                 // same rooms, the same Storage, the same declaration and
                 // the same borrowing list — each of them at the one load
-                // the rule was derived at, since the shipped default is
-                // zero until the Refill half of #222 lands (below).
+                // the rule was derived at, which is now the shipped default
+                // too (#216 R5 landed the Refill half).
                 let lending stage =
                     ferryMother stage |> tunedBy (fun t -> { t with FerryLoads = 1 })
 
@@ -24555,17 +24786,15 @@ let quotaInputTests =
                     0
                     "nor for a nursery, which has no buffer to fill and no mouth to drink it"
 
-                // The shipped number, and why it is not the derived one:
-                // the Refill that spends a ferried load is R5's half of
-                // #222, so until it stands the mother would hire a body for
-                // a Task that is in nobody's pool — and hire it ahead of
-                // the upgrader and worker rows in the cascade. Half a split
-                // feature ships inert (`docs/agents/orchestration.md`), and
-                // the commit that lands the pool half moves this to one.
+                // The shipped number **is** the derived one since #216 R5:
+                // the Refill that spends a ferried load stands beside this
+                // term now, pooled for the very tile the round trip above
+                // was priced to, so the body hired here has a Task and the
+                // two halves of the split feature ship together.
                 Expect.equal
                     (quotaOf (ferryMother Bootstrapping))
-                    0
-                    "and the shipped default lends nothing at all until there is a Refill to spend it on"
+                    1
+                    "and the shipped default lends the one body the rule was derived at"
 
                 // The cap is what makes the borrowing an exception rather
                 // than a second economy (ADR 0052 decision 7): what a
@@ -24577,6 +24806,118 @@ let quotaInputTests =
                     ))
                     2
                     "and `Tuning.FerryLoads` is the whole of how much she lends"
+            }
+
+            test "the ferry's sink is the mother's to fill and never to draw" {
+                // #222's pool half (ADR 0052 decision 7), pairwise on the
+                // child's [[stage]]. The whole of the lend is energy going
+                // one way: the buffer is a Refill target of hers while the
+                // child is being raised, and the Withdraw the same store
+                // would otherwise carry is denied her — left in, her hauler
+                // would take the load it just carried across the Seam
+                // straight back out again, the ADR 0019 cycle over a
+                // border, with the child's own upgraders drinking against
+                // her.
+                let poolFor stage = planTasks (ferryMother stage) noThreats
+
+                let lending = poolFor Bootstrapping
+
+                Expect.isTrue
+                    (List.contains (Refill "can-child") lending)
+                    "the child's buffer is a sink of hers while she is raising it"
+
+                Expect.isFalse
+                    (List.contains (Withdraw "can-child") lending)
+                    "and never an intake, however much stands in it"
+
+                let grown = poolFor Independent
+
+                Expect.isFalse
+                    (List.contains (Refill "can-child") grown)
+                    "an independent child feeds itself, which is what the stage means"
+
+                // And the denial does **not** ride on the lend. The two
+                // sets are not the same set: the ferry lends to a
+                // `Bootstrapping` child alone, while `Borrowed.Rooms` also
+                // holds the [[nursery]] she is raising and the child she has
+                // lost (#221) — so a Withdraw denied only where a Refill is
+                // pooled would make those rooms' stores plain Feeding-tier
+                // intakes of hers, which is the cross-Seam drain ADR 0047
+                // refuses and the exact inverse of the lend. Pairwise on
+                // the stage, over the same store the case above pools the
+                // Refill for.
+                Expect.isFalse
+                    (List.contains (Withdraw "can-child") (poolFor Nursery))
+                    "a nursery's store is not hers to draw either"
+
+                Expect.isFalse
+                    (List.contains (Withdraw "can-child") grown)
+                    "nor a grown child's: no store of a child's is ever her intake"
+
+                // What bounds the lend is the capacity and never the tier
+                // (ADR 0052 decision 6): the Refill sits on the buffer's own
+                // deep tier like her own, and `Tuning.FerryLoads` is the
+                // whole of how many bodies may cross for it — the same
+                // number the hauler row was raised by, so the quota and the
+                // pool cannot disagree.
+                let bound =
+                    poolOn (ferryMother Bootstrapping)
+                    |> List.tryPick (fun entry ->
+                        if entry.Task = Refill "can-child" then
+                            Some entry.Capacity.Total
+                        else
+                            None)
+
+                Expect.equal
+                    bound
+                    (Some(Some Tuning.defaults.FerryLoads))
+                    "the pool carries the lend's bound, and it is the tuned one"
+            }
+
+            test "a hungry ferry sink opens the mother's stock" {
+                // ADR 0023's gate reads "some Refill target **other than
+                // the Storage** has free capacity", and a bootstrapping
+                // child's buffer is exactly one (#222). Without it counted,
+                // the two conditions were close to mutually exclusive: the
+                // ferry's Refill sits on the buffer's own deep tier, so a
+                // load reaches it only once the spawn, the extensions and
+                // the home buffer are full — which is precisely the state
+                // that leaves `refills` and `containerRefills` empty — and
+                // the body `haulerQuota` hires for the lend, priced on the
+                // round trip from this Storage to that buffer, had a sink
+                // and no intake at all.
+                //
+                // This fixture is that state by construction: no
+                // Refillables, no home buffer, and a stocked Storage.
+                let stocked stage =
+                    let mother = ferryMother stage
+
+                    { mother with
+                        Spatial =
+                            { mother.Spatial with
+                                Stores = Map.add "storage-1" 240000 mother.Spatial.Stores
+                            }
+                    }
+
+                let lending = planTasks (stocked Bootstrapping) noThreats
+
+                Expect.isTrue
+                    (List.contains (Refill "can-child") lending)
+                    "the lend is the one hungry sink she has"
+
+                Expect.isTrue
+                    (List.contains (Withdraw "storage-1") lending)
+                    "so the stock it is priced from is drawable"
+
+                // The pairwise control on the one fact that decides it: the
+                // child's stage. With no lend there is no sink at all, and
+                // the gate shuts exactly as it always did — the stock is
+                // not opened against its own Refill (ADR 0023).
+                Expect.isFalse
+                    (List.contains
+                        (Withdraw "storage-1")
+                        (planTasks (stocked Independent) noThreats))
+                    "and with nothing to feed, the stock stays shut"
             }
 
             test "a mother with no stock ferries nothing" {

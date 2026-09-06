@@ -2052,16 +2052,35 @@ let standingPostsOf (atlas: Atlas) (sourceId: string) : Set<RoomPos> =
 /// Total (ADR 0004): an unplaced creep, an unplaced site and a site of any
 /// other kind each answer false, leaving the gate exactly as ADR 0046 had
 /// it.
-let standsOnPostSite (atlas: Atlas) (creep: string) (siteId: string) : bool =
-    Map.tryFind siteId atlas.Spatial.TargetKinds = Some(Site BuiltKind.Container)
-    && (match Map.tryFind creep atlas.CreepAt, Map.tryFind siteId atlas.TargetAt with
-        | Some(creepRoom, tile), Some(siteRoom, sitePos) when creepRoom = siteRoom && tile = sitePos ->
-            Set.contains tile (containerSitePostsIn atlas creepRoom)
-        | _ -> false)
+/// The tile of a container construction site that is standing on a
+/// [[post]] — the one site a body may build from under its own feet
+/// (#205), as a tile rather than as a question about a creep. `None` for a
+/// site of any other kind, one the projection does not place, and one on a
+/// Seat no source is served from.
+///
+/// The tile is what a [[capacity]] needs (ADR 0052 decision 6): the
+/// outpost builders' budget prices a commute and the body standing on the
+/// site made none, so the Planner hands the Matcher that tile and the
+/// Matcher counts holders without ever asking what kind of Task this is.
+/// `standsOnPostSite` below is the same fact asked of one creep, and is
+/// written in terms of this one so the two can never part.
+let postSiteTile (atlas: Atlas) (siteId: string) : RoomPos option =
+    if Map.tryFind siteId atlas.Spatial.TargetKinds <> Some(Site BuiltKind.Container) then
+        None
+    else
+        match Map.tryFind siteId atlas.TargetAt with
+        | Some(room, tile) when Set.contains tile (containerSitePostsIn atlas room) ->
+            Some(RoomPos.at room tile)
+        | _ -> None
 
-/// Whether a creep is standing on one of the named source's Posts whose
-/// container is still a site (#205) — that Post's garrison, read off where
-/// the body *is* and never off what it holds this tick.
+let standsOnPostSite (atlas: Atlas) (creep: string) (siteId: string) : bool =
+    match postSiteTile atlas siteId with
+    | Some tile -> creepTile atlas creep = Some tile
+    | None -> false
+
+/// The named source's Posts whose container is still a site (#205) — the
+/// tiles whose garrison is read off where a body *is* and never off what
+/// it holds this tick.
 ///
 /// Which is the one place a site Post differs from a standing one, and
 /// Harvest's Post cap is what reads it (ADR 0024). On a standing container
@@ -2077,16 +2096,13 @@ let standsOnPostSite (atlas: Atlas) (creep: string) (siteId: string) : bool =
 /// Room-joined like every other half of the census, because a `Pos`
 /// carries no room (ADR 0041), and the Seat join is the same one
 /// `postsOf` makes: a garrison belongs to the rock it seats. Total (ADR
-/// 0004): an unplaced creep and a source the projection does not place
-/// each answer false, leaving the cap exactly as ADR 0024 had it.
-let standsOnSitePost (atlas: Atlas) (creep: string) (sourceId: string) : bool =
-    match Map.tryFind creep atlas.CreepAt, Map.tryFind sourceId atlas.TargetAt with
-    | Some(creepRoom, tile), Some(sourceRoom, _) when creepRoom = sourceRoom ->
-        (match seatTilesIn atlas sourceId with
-         | Some(_, seats) -> Set.contains tile seats
-         | None -> false)
-        && Set.contains tile (containerSitePostsIn atlas creepRoom)
-    | _ -> false
+/// 0004): a source the projection does not place answers with the empty
+/// set, leaving the cap exactly as ADR 0024 had it.
+let sitePostsOf (atlas: Atlas) (sourceId: string) : Set<RoomPos> =
+    seatTilesIn atlas sourceId
+    |> Option.map (fun (room, seats) ->
+        Set.intersect seats (containerSitePostsIn atlas room) |> RoomPos.setAt room)
+    |> Option.defaultValue Set.empty
 
 /// Whether a creep and a Task's target stand in one room — the question
 /// every join between a creep and a target's geometry has to settle while

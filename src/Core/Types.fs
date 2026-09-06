@@ -199,7 +199,7 @@ type Tuning =
         /// while a [[nursery]] or a bootstrapping child of hers stands (ADR
         /// 0047 decision 4). The addend on the worker row's own share of
         /// the target, the cap on the borrowed Upgrade and the borrowed
-        /// Build (`taskCapacities`, #213), and the whole of what a child
+        /// Build (`planPool`'s Capacity, #213), and the whole of what a child
         /// costs the mother in bodies.
         ///
         /// Three, derived at the mother's `Independent` **1,800 bank**,
@@ -229,17 +229,17 @@ type Tuning =
         /// written down and bounded, never derived from how much the child
         /// could absorb.
         ///
-        /// **Shipped at zero until the Refill half lands.** One is the
-        /// number the rule was derived at and the number this field takes
-        /// the day a mother can pool a Refill on a child's buffer; today
-        /// she cannot — `ColonyView.borrowed` carries a child's controller,
-        /// sites and spawn and none of its stores, and `planTasks` builds
-        /// its Refills off her own room's `Refillables` and her own Storage
-        /// — so a body hired here would be hired for a Task that is not in
-        /// the pool, and hired ahead of the upgrader and worker rows that
-        /// would have spent the energy. Half of a split feature that
-        /// harms the colony alone is deployed at zero and flipped by the
-        /// commit that lands the other half (#222's pool half, R5).
+        /// **The two halves ship together** (#216 R5). Until the Refill
+        /// half landed this field was zero, because a body hired here had
+        /// no Task to be matched to — the mother's view carried none of a
+        /// child's stores, so nothing pooled the buffer she was hiring
+        /// against, and the hire would have come ahead of the upgrader and
+        /// worker rows that would otherwise have spent the energy. Since
+        /// R5 `ColonyView.ofWorld` carries that one store, `planTasks`
+        /// pools its Refill and denies its Withdraw, and the quota's own
+        /// term prices the round trip to the very tile the Refill is on
+        /// (`ferryBuffers`), so the row and the pool cannot disagree about
+        /// how many bodies are crossing or where they are going.
         FerryLoads: int
         /// The claimer range at which safe mode fires (ADR 0015): the
         /// precise deadline is 2 — `attackController` is a range-1 act and
@@ -376,7 +376,7 @@ module Tuning =
             ReachMargin = 2
             StandingCarryPerWork = 4
             PioneerCount = 3
-            FerryLoads = 0
+            FerryLoads = 1
             SafeModeDeadline = 3
             StorageLevel = 4
             HorizonLevel = 5
@@ -2495,7 +2495,9 @@ module ColonyView =
     /// target of hers at all but the tile her [[pioneer]]s walk up to and
     /// the structure that says a colony lives here (ADR 0047 decision 4).
     /// Both halves of `BorrowedWork.Rooms` narrow through this one filter:
-    /// a Claim asks for exactly what an Upgrade does.
+    /// a Claim asks for exactly what an Upgrade does. Beside the kinds, at
+    /// most one store: the [[ferry]]'s sink, picked out by geometry and by
+    /// [[stage]] in `ferrySink` below.
     ///
     /// Everything else the room holds is the child's own business, and a
     /// mother carrying it would pool a Harvest on the child's rock, hire an
@@ -2527,12 +2529,68 @@ module ColonyView =
     /// Seam is read off, and the obstacles and roads that price the
     /// crossing.
     ///
-    /// The room's stores and its structures' hits go, so no Withdraw and no
-    /// Repair of the child's reaches her pool; its sources go with them,
-    /// and the pool below drops the room from the mined set for the same
-    /// one reason.
-    let private borrowed (facts: RoomFacts) : RoomFacts =
-        let kinds = facts.TargetKinds |> Map.filter (fun _ kind -> borrowable kind)
+    /// The room's structures' hits go, so no Repair of the child's reaches
+    /// her pool; its sources go too, and the pool below drops the room from
+    /// the mined set for the same one reason. Of its stores at most one
+    /// survives, and it is the [[ferry]]'s (#222, ADR 0052 decision 7) —
+    /// see `ferrySink`.
+    ///
+    /// **The child's upgrade buffer, and no other store of its** (#222): a
+    /// built container standing inside the child's own controller's Upgrade
+    /// area and on none of its Seats. That store is what a [[ferry]] fills,
+    /// so the mother has to be able to see how much room is left in it —
+    /// and it is the *only* one she may see, because a source container of
+    /// the child's carried here would be a Withdraw in her pool and the
+    /// child's income hauled across the Seam to her Storage, which is the
+    /// single projection over two colonies ADR 0047 rejected.
+    ///
+    /// **`Bootstrapping` alone of the rooms this list holds**, which is
+    /// where the [[ferry]] lends (`Decide.ferryBuffers`, `haulerQuota`'s
+    /// ferry term): `BorrowedWork.Rooms` is the raised children *and* the
+    /// lost ones (`Colony.reclaiming`, #221), and a [[nursery]]'s buffer or
+    /// a lost child's is a store no rule of the mother's fills. Carried
+    /// anyway it is a store of another colony's standing in her projection
+    /// with nothing but a Withdraw to be made of it — the cross-Seam drain
+    /// this whole narrowing exists to refuse. So the one store that reaches
+    /// her is the one store she is hired against, and the reader in Core
+    /// can name it by that fact alone rather than re-deriving the geometry
+    /// (which it cannot: the sources this join subtracts are dropped by the
+    /// very filter it feeds).
+    ///
+    /// Geometry and not a kind, which is why it is spelled here rather than
+    /// in `borrowable` above: the range-3 join is the same one the Planner
+    /// makes over her own room (ADR 0019's accepted duplication), and it is
+    /// read off the **whole** facts — before the kind filter runs — because
+    /// it needs the controller and the sources the filter is about to drop.
+    let private ferrySink (stage: ColonyStage option) (facts: RoomFacts) : Set<string> =
+        let placed = facts.Layer.TargetPositions
+        let tileOf id = Map.tryFind id placed
+
+        let idsOfKind kind =
+            facts.TargetKinds
+            |> Map.toList
+            |> List.choose (fun (id, k) -> if k = kind then Some id else None)
+
+        match stage, idsOfKind Controller |> List.tryPick tileOf with
+        | Some Bootstrapping, Some controller ->
+            let sources = idsOfKind Source |> List.choose tileOf
+
+            idsOfKind (Structure BuiltKind.Container)
+            |> List.filter (fun id ->
+                match tileOf id with
+                | Some pos ->
+                    range pos controller <= 3
+                    && not (sources |> List.exists (fun s -> range pos s <= 1))
+                | None -> false)
+            |> Set.ofList
+        | _ -> Set.empty
+
+    let private borrowed (stage: ColonyStage option) (facts: RoomFacts) : RoomFacts =
+        let sink = ferrySink stage facts
+
+        let kinds =
+            facts.TargetKinds
+            |> Map.filter (fun id kind -> borrowable kind || Set.contains id sink)
 
         { facts with
             Layer =
@@ -2543,7 +2601,7 @@ module ColonyView =
                 }
             TargetKinds = kinds
             Hits = Map.empty
-            Stores = Map.empty
+            Stores = facts.Stores |> Map.filter (fun id _ -> Set.contains id sink)
             Sources = []
         }
 
@@ -2603,7 +2661,7 @@ module ColonyView =
 
                 room,
                 (if List.contains room bootstrap then
-                     borrowed facts
+                     borrowed (Map.tryFind room stages) facts
                  else
                      facts))
 
@@ -2773,6 +2831,158 @@ type Task =
     /// target and no action: its Work Area is the tiles no Threat can
     /// hurt, and the Emitter issues movement for it and nothing else.
     | Flee
+
+/// The four shapes a body takes as far as a [[capacity]] is concerned (ADR
+/// 0052 decision 6) — part arithmetic and never a row's name (ADR 0006),
+/// so the classes are the ones the existing gates already cut the fleet
+/// along and not a second taxonomy beside them.
+///
+/// **Ordered and exhaustive**: the tests are asked in this order, because
+/// two of them overlap on a real body — the [[anchor]]'s `6W/1C/1M` is
+/// Work-heavy *and* carries fewer than one Carry per four Work — and every
+/// rule that reads both today reads the heavy one first (ADR 0016 shuts
+/// Withdraw before ADR 0046 ever asks about the delivery). A body is
+/// exactly one class, so a per-class cap can be counted by folding the
+/// holders once.
+type BodyClass =
+    /// More Work than Move (ADR 0016): the garrison's shape. Its intake is
+    /// digging and its work is a [[post]], so it is the class every cap
+    /// that is about standing room on a tile is written for.
+    | Heavy
+    /// Fewer than one Carry per `Tuning.StandingCarryPerWork` Work and not
+    /// Heavy (ADR 0046): the [[upgrader]] row, which lives beside the
+    /// [[buffer]] and carries one trip's worth. It shares a store with the
+    /// generalists and drinks it fifty energy at a time, which is why a
+    /// store divides into two different numbers of drawers depending on
+    /// which of the two asked (#196).
+    | Standing
+    /// No Work part at all: the [[hauler unit]]'s shape, and the
+    /// [[reserver]]'s beside it — neither can spend anything at a
+    /// controller or into a site, so neither is ever what a Work-shaped
+    /// capacity is dividing for.
+    | Carrier
+    /// Everything else — the [[worker unit]], the generalist the colony's
+    /// surplus work is done by.
+    | Light
+
+/// How many creeps a pooled Task admits at once, set by the Planner and
+/// counted by the Matcher (ADR 0052 decision 6). The Matcher knows no Task
+/// kinds: every seat rule the colony has — a source's [[seat]]s, a
+/// [[post]]'s standing room, a store's stock divided by its drawers' load,
+/// the outpost container builders' budget, one holder per controller, the
+/// [[pioneer]]s' ceiling on borrowed work — arrives here as numbers and
+/// tiles, and `hasCapacity` counts holders against them.
+///
+/// **Five scopes, and each is a set of [[body class]]es a rule already
+/// talks about.** They overlap on purpose, because the colony's own rules
+/// overlap: a source says "three [[seat]]s, at most one of them a garrison
+/// and at most two of them anybody else" in one breath (ADR 0024, ADR
+/// 0051), and the [[buffer]] says "two generalists and eighteen standing
+/// bodies, counted apart" in another (#196). A candidate is judged against
+/// every cap whose scope its own class falls in, and every one of them
+/// must hold; a scope with no number is unbounded and costs nothing.
+type Capacity =
+    {
+        /// Holders of every class together. `None` is unbounded — the
+        /// Refills and the surplus work the pool is mostly made of.
+        Total: int option
+        /// Holders that are `Heavy`: the garrisons, who compete for
+        /// standing room with each other and with nobody else (ADR 0024).
+        Garrisons: int option
+        /// Holders that are **not** `Heavy`: ADR 0051's light crowd, kept
+        /// off the Seats a [[post]] has claimed. One number over the group
+        /// and not one apiece, because "the Seats beyond the Posts" is a
+        /// count of tiles and any body but a garrison may stand on one.
+        Commuters: int option
+        /// Holders that are `Standing`: the row that lives at the
+        /// [[buffer]] and drinks it fifty energy at a time (#196).
+        Standing: int option
+        /// Holders that are neither `Heavy` nor `Standing`: the
+        /// generalists' own share of a store the standing row also drinks
+        /// from, divided by the load *they* carry (#196).
+        Generalists: int option
+        /// Tiles whose standing **heavy** occupant holds a slot against
+        /// `Garrisons` whatever Task it holds this tick (#205): the Post
+        /// whose container is still a site, where the garrison alternates
+        /// Harvest and Build and a cap counting Harvest's holders alone
+        /// would read the tile as free on every build tick. Counted
+        /// against that one cap and not against `Total`, which counts the
+        /// Task's holders exactly as it always did. Empty for every other
+        /// Task, which is all of them but one.
+        Garrison: Set<RoomPos>
+        /// Tiles a candidate standing on is outside every cap above
+        /// (#205): the container site under a garrison's own feet, which
+        /// the outpost builders' budget does not price because that budget
+        /// prices a commute and this body made none. Empty for every other
+        /// Task.
+        Exempt: Set<RoomPos>
+    }
+
+[<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
+module Capacity =
+    /// A Task with no cap at all: the shape most of the pool takes, and the
+    /// one the Matcher answers without ever walking the assignment map.
+    let unbounded =
+        {
+            Total = None
+            Garrisons = None
+            Commuters = None
+            Standing = None
+            Generalists = None
+            Garrison = Set.empty
+            Exempt = Set.empty
+        }
+
+    /// One number over every class: a Seat count, a store's stock divided
+    /// by one load, one holder per controller.
+    let total n = { unbounded with Total = Some n }
+
+    /// Whether any cap at all is set — the question that decides whether
+    /// the Matcher pays for a walk over the holders (ADR 0029).
+    let isBounded (capacity: Capacity) =
+        capacity.Total.IsSome
+        || capacity.Garrisons.IsSome
+        || capacity.Commuters.IsSome
+        || capacity.Standing.IsSome
+        || capacity.Generalists.IsSome
+
+/// One entry of this tick's Task pool: the Task, where it ranks and how
+/// many bodies it admits (ADR 0052 decision 6). The Planner sets all three
+/// and the Matcher reads them — it compares `Priority` and [[travel cost]]
+/// and counts holders against `Capacity`, and knows no Task kinds at all.
+///
+/// Before this the ordering lived in `tierOf`/`rankOfTier` and the caps in
+/// `taskCapacities`/`postCapacities`, three tables the Matcher consulted
+/// by matching on the Task — so every exception the colony learned (an
+/// outpost container site's tier, a [[nursery]]'s, a borrowed Upgrade's
+/// ceiling, a light body's share of the Seats) had to be spelled twice,
+/// once where the pool was built and once where it was scored, and the two
+/// spellings were free to disagree about which Task they meant.
+type PooledTask =
+    {
+        Task: Task
+        /// Where this Task ranks against every other, lower first — the
+        /// ladder that used to be `tierOf` composed with `rankOfTier`, plus
+        /// the [[downgrade deadline]]'s one lift above it (ADR 0007). The
+        /// Matcher's first key component; `MatchFactor.Rank` names it.
+        Priority: int
+        Capacity: Capacity
+        /// Whether this is work in a room another colony of ours runs —
+        /// the borrowed Upgrade a [[mother colony]] pools for her
+        /// [[pioneer]]s, and the child's [[build]]s beside it (ADR 0047
+        /// decision 4, #213). Read by one body gate: a [[standing body]]
+        /// holds no commuting work, and a Seam crossing is the longest
+        /// commute the colony has.
+        ///
+        /// Set on the Builds too, though that gate never asks them: the
+        /// field is a fact about the Task and not an argument to its one
+        /// reader, and the Build arm of `applicable` refuses a standing
+        /// body every borrowed site anyway — unconditionally, unless it is
+        /// standing on that site's own [[post]] (ADR 0046, #205). A reader
+        /// asking "is this the child's work?" gets the same answer for both
+        /// kinds, which is the answer.
+        Borrowed: bool
+    }
 
 /// What kind of structure a placement Intent asks for.
 type StructureKind =

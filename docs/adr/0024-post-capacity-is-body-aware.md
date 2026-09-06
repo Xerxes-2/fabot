@@ -1,5 +1,7 @@
 # Post capacity is body-aware: one garrison per Post, and only a garrison's overflow keeps Harvest
 
+> **Amended by #216 R5** on where the cap is written: a source's Post count is the `Heavy` share of the pooled Harvest's `Capacity` and its Seat count the total, set by the Planner and counted by a Matcher that knows no Task kinds (ADR 0052 decision 6). The garrison read off the tile rather than off the assignment (#205) is a tile set on that same field. What the cap says is unchanged.
+
 > **Joined by ADR 0051**: beside the Post cap over heavy bodies sits its complement, a light cap of `seats − posts` over light ones, and a light body's Work Area excludes the Posts. One garrison per Post, and the Post's Seat is the garrison's (#212).
 
 > **Revised by ADR 0048** on where the full-store reprieve is asked, never on what it says: "a full store keeps Harvest only for a Work-heavy body on a container Seat" is a rule about a body that is *digging*, and a Work-heavy body that has not yet reached the tiles it may dig from is walking. So such a body keeps Harvest while `mayAct` is false and its source has a Post to walk to — it never empties (ADR 0016, ADR 0046, ADR 0048), so full is its ordinary condition and a store gate read as "done here" would strand it a tile off its own Post. On arrival this ADR's condition governs unchanged: the only tile that keeps a full body digging is still the container. The Post cap and the light body's sentence are untouched.

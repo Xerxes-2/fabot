@@ -195,12 +195,13 @@ let private pairWorld: World =
                             "ctrl-W13S28", { X = 8; Y = 8 }, Controller
                             "src-child", { X = 9; Y = 9 }, Source
                             "can-child", { X = 9; Y = 8 }, Structure BuiltKind.Container
+                            "buf-child", { X = 7; Y = 7 }, Structure BuiltKind.Container
                             "site-child", { X = 7; Y = 8 }, Site BuiltKind.Extension
                             "spawn-child", { X = 8; Y = 9 }, Structure BuiltKind.Spawn
                         ]
                     |> ourColony "Spawn2" 2 300
                     |> withSources [ "src-child" ]
-                    |> withStores [ "can-child", 900 ]
+                    |> withStores [ "can-child", 900; "buf-child", 400 ]
                     |> withSites [ "site-child" ]
                     |> withCreeps
                         [ "pioneer-900-Spawn1", pioneerTile; "hauler-950-Spawn2", haulerTile ]
@@ -499,6 +500,37 @@ let colonyViewTests =
                     "her own container still is"
             }
 
+            test "of the child's stores she carries the buffer alone, and its stock with it" {
+                // The [[ferry]]'s sink (#222, ADR 0052 decision 7): what a
+                // mother hauls her stock into is the child's upgrade
+                // buffer, so she has to be able to see how much room is
+                // left in it — and it is the only store of the child's she
+                // may see at all. Pairwise on the two containers standing
+                // in that one room, told apart by geometry alone: "buf-child"
+                // is inside the controller's own Upgrade area and on no
+                // Seat, "can-child" is the source container beside the rock.
+                let spatial = (viewOf pairWorld mother).Spatial
+
+                Expect.isTrue
+                    (Map.containsKey "buf-child" spatial.TargetKinds)
+                    "the buffer stands in her projection, because she fills it"
+
+                Expect.equal
+                    (Map.tryFind "buf-child" spatial.Stores)
+                    (Some 400)
+                    "with its stock, which is the free capacity a Refill is pooled on"
+
+                Expect.isFalse
+                    (Map.containsKey "buf-child" spatial.Hits)
+                    "and still no hits: a child's repairs are the child's"
+
+                // The child's own view is untouched by any of it.
+                Expect.equal
+                    (Map.tryFind "can-child" (viewOf pairWorld child).Spatial.Stores)
+                    (Some 900)
+                    "its own source container is its own to draw"
+            }
+
             test "the mother keeps the child's ground whole" {
                 // The borrowed room is narrowed in what it holds and never
                 // in what it is: her pioneers walk over that terrain.
@@ -705,5 +737,50 @@ let colonyViewTests =
                 Expect.isFalse
                     (Map.containsKey "can-child" taken.Spatial.Stores)
                     "and its container's stock is nobody's to withdraw"
+
+                // The [[ferry]]'s sink is the one store the narrowing lets
+                // through, and it is let through for the lend and for
+                // nothing else (#222): there is no lend to a room we do not
+                // own, so there is no store either. Named here because the
+                // source container above is excluded by the *geometry* —
+                // it stands beside the rock — and would have gone on
+                // passing this test while the buffer beside the controller
+                // walked straight into her pool as a Feeding-tier Withdraw,
+                // her haulers crossing the Seam to bring a lost colony's
+                // upgrade energy home to her Storage.
+                Expect.isFalse
+                    (Map.containsKey "buf-child" taken.Spatial.Stores)
+                    "and neither is the buffer beside its controller"
+
+                Expect.isFalse
+                    (List.contains (Withdraw "buf-child") (planTasks taken noThreats))
+                    "nothing of that room is an intake of hers"
+            }
+
+            test "a nursery's buffer is no store of the mother's either" {
+                // The same sentence at the [[stage]] on the other side of
+                // the lend (#222): the [[ferry]] hires for a
+                // `Bootstrapping` child alone — a nursery has no
+                // [[upgrader]] to drink a buffer and no rule of the
+                // mother's fills one — so a nursery's buffer is a store she
+                // carries for no reader, and a store carried for no reader
+                // is a Withdraw waiting to happen. Pairwise against the
+                // bootstrapping case above, which does carry it.
+                let raising = viewOf spawnlessWorld mother
+
+                Expect.contains raising.Borrowed.Rooms child "the room is still hers to raise"
+
+                Expect.isFalse
+                    (Map.containsKey "buf-child" raising.Spatial.Stores)
+                    "but its buffer is not a store of hers"
+
+                Expect.isFalse
+                    (List.contains (Withdraw "buf-child") (planTasks raising noThreats))
+                    "so nothing pools a draw on it"
+
+                Expect.equal
+                    (Map.tryFind "buf-child" (viewOf pairWorld mother).Spatial.Stores)
+                    (Some 400)
+                    "and the one stage the lend exists at still carries it"
             }
         ]
