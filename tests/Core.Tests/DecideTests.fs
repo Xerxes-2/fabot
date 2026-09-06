@@ -7675,9 +7675,16 @@ let anchorTests =
                 // One living Anchor covers the Dual Seat; the built
                 // container on the other Seat is a second Post, so the
                 // remaining gap is cast from the anchor row, not generalist.
+                //
+                // The generalist beside it is what keeps the supply floor
+                // disarmed (ADR 0050): an Anchor holds a Carry and can
+                // still put nothing into an extension, so a fleet of
+                // Anchors alone is a colony hiring a carrier before every
+                // row and this case would read that row instead of the
+                // Anchor's.
                 let snapshot =
                     { dualSeatColony with
-                        Creeps = [ anchor "a1" 0 50 ]
+                        Creeps = [ anchor "a1" 0 50; worker "w1" 0 50 ]
                         Spatial =
                             { dualSeatRoom with
                                 TargetKinds =
@@ -7700,9 +7707,13 @@ let anchorTests =
             }
 
             test "a living Anchor fills the quota: the remaining gap goes generalist" {
+                // The second body is the supply floor's premise and not
+                // the case's: a fleet of Anchors alone can refill no
+                // extension, and the floor would answer before the Anchor
+                // row (ADR 0050).
                 let snapshot =
                     { dualSeatColony with
-                        Creeps = [ anchor "a1" 0 50 ]
+                        Creeps = [ anchor "a1" 0 50; worker "w1" 0 50 ]
                     }
 
                 let { Intents = intents } = decide snapshot Map.empty Set.empty None
@@ -10202,10 +10213,14 @@ let haulerTests =
                 // 81 ticks, quota 5. The living Anchor fills the Post, so
                 // every remaining specialist gap is a hauler cast, and five
                 // idle spawns on a 1500 bank can pay for the larger quota.
+                //
+                // The generalist standing beside the Anchor is the supply
+                // floor's premise (ADR 0050) and nothing else: it is not a
+                // hauler, so the row this case counts is untouched.
                 let decideAt spawnX =
                     decide
                         { quotaColony spawnX 5 1500 with
-                            Creeps = [ anchor "a1" 0 50 ]
+                            Creeps = [ anchor "a1" 0 50; worker "w1" 0 50 ]
                         }
                         Map.empty
                         Set.empty
@@ -10250,7 +10265,15 @@ let haulerTests =
                         RoomEnergy = bank 1200 300
                         Sources = [ source "src-a"; source "src-b" ]
                         Spatial = shortHaulRoom
-                        Creeps = [ anchor "a1" 0 50; anchor "a2" 0 50 ]
+                        // The generalist beside the two Anchors is the
+                        // supply floor's premise and not this case's (ADR
+                        // 0050): an Anchor holds a Carry and can still put
+                        // nothing into an extension, so a fleet of Anchors
+                        // alone hires a carrier sized from `bank.Available`
+                        // in front of every row, and the cast this case
+                        // counts would be that one instead of the hauler
+                        // row's own capacity-sized body.
+                        Creeps = [ anchor "a1" 0 50; anchor "a2" 0 50; worker "w1" 0 50 ]
                     }
 
                 let atlas = Atlas.ofSnapshot snapshot
@@ -10280,6 +10303,14 @@ let haulerTests =
                     (haulerCasts intents)
                     1
                     "the same one body the halved round trip hired, summed and rounded once"
+
+                Expect.equal
+                    (spawnIntents intents
+                     |> List.filter (fun (_, _, name: string) -> name.StartsWith "hauler-")
+                     |> List.map (fun (_, body, _) -> body))
+                    [ haulerBody ]
+                    "and it is the row's own capacity-sized body, so no carrier sized from what \
+                     happens to be banked can answer this count (ADR 0050)"
             }
 
             test "no source containers hires no haulers" {
@@ -12891,7 +12922,10 @@ let expiringTests =
                 let casts life =
                     let snapshot =
                         { successionColony with
-                            Creeps = [ anchor "a1" 0 50 |> withLife life ]
+                            // The generalist keeps the supply floor
+                            // disarmed (ADR 0050): an Anchor alone can
+                            // refill no extension.
+                            Creeps = [ anchor "a1" 0 50 |> withLife life; worker "w1" 0 50 ]
                             Spatial =
                                 successionRoom
                                 |> withHome (fun layer ->
@@ -12980,6 +13014,10 @@ let expiringTests =
                                         50
                                         [ Work; Work; Work; Work; Work; Carry; Move ]
                                     |> withLife life
+                                    // The supply floor's premise (ADR
+                                    // 0050) and not this case's: a lone
+                                    // Anchor can refill no extension.
+                                    worker "w1" 0 50
                                 ]
                         }
 
@@ -16492,13 +16530,24 @@ let outpostHaulTests =
 /// container — the succession ADR 0026 owes an outpost's Post as much as a
 /// home one (#153). Its ticks to live are the caller's, because that is the
 /// whole of what moves between two calls below.
+///
+/// A generalist stands at home beside it, and it is the supply floor's
+/// premise rather than this fixture's subject (ADR 0050): an Anchor holds
+/// one Carry and is both a standing body and a Work-heavy one, so a fleet
+/// of Anchors alone can put nothing into an extension and the colony hires
+/// a carrier in front of every row — which is the row these cases would
+/// then read instead of the one they are about.
 let private withOutpostGarrison life (colony: Snapshot) =
     let outpost = SpatialInfo.layerOf colony.Spatial "W1N2"
 
     { colony with
-        Creeps = colony.Creeps @ [ anchor "a-out" 0 50 |> withLife life ]
+        Creeps = colony.Creeps @ [ anchor "a-out" 0 50 |> withLife life; worker "w-home" 0 50 ]
         Spatial =
             colony.Spatial
+            |> withHome (fun layer ->
+                { layer with
+                    CreepPositions = Map.add "w-home" { X = 25; Y = 12 } layer.CreepPositions
+                })
             |> withNeighbour
                 "W1N2"
                 { outpost with
@@ -18452,10 +18501,15 @@ let reserverRowTests =
                 // 0049), and a whole-fleet deficit under all of it. Four
                 // idle spawns cast one body each, so the whole order is
                 // readable in one tick.
+                // The generalist in the fleet is the supply floor's
+                // premise and not this case's (ADR 0050): two Anchors are
+                // two Carry parts and still nothing that can refill an
+                // extension, so without it the row cast first would be the
+                // floor's carrier rather than the reservation's.
                 let colony =
                     reserverColony
                         [ northOutpost true ]
-                        ([ anchor "a1" 0 50; anchor "a2" 0 50 ])
+                        [ anchor "a1" 0 50; anchor "a2" 0 50; worker "w1" 0 50 ]
                         [ "W1N2", reservedRoom true 5000 ]
 
                 match spawnIntents (decide colony Map.empty Set.empty None).Intents with
@@ -18704,6 +18758,211 @@ let reserverRowTests =
                 Expect.isEmpty
                     (castsUnder ownedRoom)
                     "the same room, owned by this colony, is no longer a room to reserve"
+            }
+        ]
+
+
+/// The Anchor #203 met, spelled as the colony really held it: `6W/1C/1M`,
+/// standing full on a full container. One Carry and one Move, and yet
+/// nothing that can put a single energy into an extension — a standing
+/// body by ADR 0046's ratio (`1 × 4 < 6`) and a Work-heavy one by ADR
+/// 0016's (`6 > 1`), so Refill, Withdraw, Build and Repair are all shut to
+/// it and Harvest at its Post is the whole of its working life.
+let private liveAnchor name =
+    creepWith name 50 0 [ Work; Work; Work; Work; Work; Work; Carry; Move ]
+
+/// #203's colony at the tick the user found it, in the reserver row's own
+/// RCL5 shape: both outposts declared, neither posted and neither held, so
+/// the row's demand is two bodies at the bank's `[2Claim;2Move]`; the home
+/// room's two Posts garrisoned, so the Anchor row is at quota; and a fleet
+/// of exactly those two Anchors.
+///
+/// The bank is the live reading — 361 against a capacity of 1,800 — and it
+/// is a **fixed point**, not a slope: nothing alive here can refill an
+/// extension, and the engine's spawn regeneration only ticks while the
+/// room holds under 300. Every row but the supply floor prices its body at
+/// that 1,800 capacity, so the colony stood 1,235 ticks without casting
+/// anything at all while 246,818 energy sat in the storage beside it.
+let private deadlockColony =
+    { reserverColony
+          [ northOutpost false; westOutpost false ]
+          [ liveAnchor "a1"; liveAnchor "a2" ]
+          [] with
+        RoomEnergy = bank 361 1800
+    }
+
+[<Tests>]
+let supplyFloorTests =
+    testList
+        "the supply floor, and a row that cannot be afforded"
+        [
+            test "#203: 361 in the bank, two Anchors, and the carrier is cast before every row" {
+                // ADR 0050's floor, at the reading it was written from.
+                // The head of the cascade wants 1,300 and the bank holds
+                // 361; every row under it prices at capacity — hauler
+                // 1,800, upgrader 1,750, worker 1,800 — and the one row
+                // cheap enough to buy with a broken bank is the Anchor's
+                // 700, whose gap is zero because the two bodies that made
+                // the deadlock are Anchors. So falling through the cascade
+                // alone still casts nothing: the floor is the half that
+                // moves.
+                match spawnIntents (decide deadlockColony Map.empty Set.empty None).Intents with
+                | [ (_, body, creepName) ] ->
+                    Expect.stringStarts
+                        creepName
+                        "hauler-"
+                        "the row that can refill an extension is cast before every other"
+
+                    Expect.equal
+                        body
+                        [ Carry; Carry; Carry; Carry; Move; Move ]
+                        "sized from what is banked right now — 361 buys two blocks — and never from \
+                         the 1,800 capacity, which is the price the deadlock is made of"
+                | other -> failtest $"expected exactly one SpawnCreep intent, got %A{other}"
+            }
+
+            test "an Anchor's lone Carry does not answer the gate" {
+                // The counterexample the gate is written against, pairwise
+                // against the case above on the reading and not on the
+                // fleet: same colony, same bank. `6W/1C/1M` holds a Carry
+                // part and a Move part, so a floor gated on "no body with a
+                // Carry that can move" is a floor two Anchors hold down for
+                // ever — and #203 reproduces itself unchanged with the rule
+                // in place. The gate is `Refill`'s own conjunction beside
+                // `Withdraw`'s: a Carry, no standing-body ratio, no more
+                // Work than Move.
+                Expect.isTrue
+                    (deadlockColony.Creeps
+                     |> List.forall (fun creep -> Map.containsKey Carry creep.Body))
+                    "the premise: every body in this fleet carries a Carry part"
+
+                Expect.isNonEmpty
+                    (spawnIntents (decide deadlockColony Map.empty Set.empty None).Intents)
+                    "and the colony still hires a carrier, because none of them can refill one"
+            }
+
+            test "a full bank does not disarm the floor: the carrier is bought first" {
+                // Pairwise with the #203 case on the bank alone — the same
+                // two Anchors, the same two declared outposts, and 1,800 of
+                // 1,800 banked, a bank every row below can pay for. The
+                // floor is armed by the *absence* of a body that can put
+                // energy into an extension and by nothing else (ADR 0050):
+                // firing it only on a short bank was considered and
+                // rejected, because it re-opens the cheapest failure the
+                // incident showed — the reserver row takes 1,300 first and
+                // the carrier is hired out of what is left on the next
+                // tick, which is the losing race the live colony ran when
+                // the manual hauler filled the bank to 1,900 and two
+                // reserver casts took 2,600 back out of it inside 64 ticks.
+                let full =
+                    { deadlockColony with
+                        RoomEnergy = bank 1800 1800
+                    }
+
+                match spawnIntents (decide full Map.empty Set.empty None).Intents with
+                | [ (_, body, creepName) ] ->
+                    Expect.stringStarts
+                        creepName
+                        "hauler-"
+                        "the body the bank depends on is cast before the bodies that depend on the \
+                         bank, however full the bank is"
+
+                    Expect.equal
+                        body
+                        (List.replicate 24 Carry @ List.replicate 12 Move)
+                        "sized from what is banked right now, which at a full bank is the whole \
+                         1,800 the capacity would have bought"
+                | other -> failtest $"expected exactly one SpawnCreep intent, got %A{other}"
+            }
+
+            test "one living hauler switches the floor off and the cascade is unchanged" {
+                // The floor is a floor and not a new head row: with one
+                // body alive that can draw from a store and deliver into
+                // an extension, the bank is fillable again and the head of
+                // the cascade is the reserver row's, exactly as ADR 0042
+                // orders it.
+                let withHauler =
+                    { deadlockColony with
+                        Creeps = hauler "h1" 0 100 :: deadlockColony.Creeps
+                        RoomEnergy = bank 1800 1800
+                    }
+
+                match spawnIntents (decide withHauler Map.empty Set.empty None).Intents with
+                | [ (_, _, creepName) ] ->
+                    Expect.stringStarts
+                        creepName
+                        "reserver-"
+                        "with the bank fillable the declared outposts' row is first again"
+                | other -> failtest $"expected exactly one SpawnCreep intent, got %A{other}"
+            }
+
+            test "the empty colony's disaster fallback is untouched" {
+                // ADR 0006's fallback is the floor's ancestor and not its
+                // casualty: a colony with no creep at all still casts the
+                // minimal worker unit from what is banked, because
+                // time-to-first-creep outranks every row including this
+                // one. Same colony, same 361, and only the fleet moves.
+                match
+                    spawnIntents
+                        (decide { deadlockColony with Creeps = [] } Map.empty Set.empty None)
+                            .Intents
+                with
+                | [ (_, body, creepName) ] ->
+                    Expect.stringStarts
+                        creepName
+                        "worker-"
+                        "time-to-first-creep still outranks the row that asked"
+
+                    Expect.equal body [ Work; Carry; Move ] "and it is still the worker unit"
+                | other -> failtest $"expected exactly one SpawnCreep intent, got %A{other}"
+            }
+
+            test "a row the bank cannot pay for yields the tick to the row below it" {
+                // ADR 0050's other half, read where the floor is disarmed:
+                // the fleet holds four haulers, so nothing here is the
+                // supply floor. One outpost declared and unheld is a
+                // reserver gap of one at `[2Claim;2Move]` = 1,300; one
+                // Anchor against the home room's two Posts is an Anchor gap
+                // of one at `6W/1C/1M` = 700; every other row is over
+                // quota.
+                //
+                // Pairwise on the bank alone, and the second reading is why
+                // this is not "skip the reserver": at 1,300 the head row is
+                // affordable and it is cast, on the very next tick a filled
+                // extension would give it.
+                let castsAt available =
+                    let colony = reserverColony [ northOutpost false ] (surplusFleet 1) []
+
+                    spawnIntents
+                        (decide
+                            { colony with
+                                RoomEnergy = bank available 1800
+                            }
+                            Map.empty
+                            Set.empty
+                            None)
+                            .Intents
+
+                match castsAt 700 with
+                | [ (_, body, creepName) ] ->
+                    Expect.stringStarts
+                        creepName
+                        "anchor-"
+                        "the head row is 600 short, so the empty Post below it is filled instead"
+
+                    Expect.equal
+                        body
+                        [ Work; Work; Work; Work; Work; Work; Carry; Move ]
+                        "and at the Anchor row's own capacity-sized body, unchanged by the fall"
+                | other -> failtest $"expected exactly one SpawnCreep intent, got %A{other}"
+
+                match castsAt 1300 with
+                | [ (_, _, creepName) ] ->
+                    Expect.stringStarts
+                        creepName
+                        "reserver-"
+                        "and the tick the bank affords it, the same head row is first again"
+                | other -> failtest $"expected exactly one SpawnCreep intent, got %A{other}"
             }
         ]
 
@@ -19907,7 +20166,16 @@ let upgraderQuotaTests =
                     "anchor-"
                     "an empty Post is filled before the buffer is manned"
 
-                let noHauler = upgraderFleet 0 0 |> List.filter (fun creep -> creep.Name <> "h1")
+                // One generalist stands in this fleet where the others
+                // have none, and it is the supply floor's premise rather
+                // than this reading's (ADR 0050): with the hauler filtered
+                // out the fleet would be two Anchors, which can refill no
+                // extension, so the cast read below would be the floor's
+                // carrier — and at this bank the floor's body and the
+                // hauler row's are the same body, so the name would not
+                // say which row answered.
+                let noHauler =
+                    upgraderFleetAt 1800 2 0 1 |> List.filter (fun creep -> creep.Name <> "h1")
 
                 Expect.stringStarts
                     (castName (

@@ -1467,11 +1467,32 @@ let private reserverBodyWithin claims capacity =
 ///
 /// **The bank must afford one block**, or the row hires nobody at all.
 /// Its floor body is 650 — larger than every other row's, and larger than
-/// the whole bank below RCL3 — and a gap this row can never fill would
-/// stop the cascade under it forever, the home room's Anchors and haulers
-/// included, since `planSpawns` gives each idle spawn the first unfilled
-/// row and this one would always be it. A colony that cannot buy a
-/// reservation does not hold one.
+/// the whole bank below RCL3. A colony that cannot buy a reservation does
+/// not hold one.
+///
+/// The clause's original reason is gone and the rule is not: it read that
+/// a gap this row can never fill would stop the cascade under it forever,
+/// the home room's Anchors and haulers included, since `planSpawns` gave
+/// each idle spawn the first unfilled row and this one would always be it.
+/// A row that cannot be afforded now yields the tick to the rows below it
+/// (ADR 0050), so nothing stalls behind this one any more; what is left is
+/// the quota being honest — a row hired against a body the colony can
+/// never buy is an addend of the Workforce target and of its amortization
+/// that no cast will ever pay off.
+///
+/// **`richestCapacity` and never `bank.Available`**, which is the reading
+/// #203's report proposed and the one this quota may not take. A row's
+/// quota is a colony fact (ADR 0006), and Available is the energy standing
+/// in the extensions this tick — a number this colony's own spawning moves.
+/// Read that way, casting one 1,300 reserver out of an 1,800 bank would
+/// drop the quota to zero on the very next tick, taking one body per
+/// declared outpost out of the target and the reserver term out of the
+/// amortization, and handing it all back when the extensions refill. The
+/// cast's own affordability is checked where it belongs, at the cast
+/// (`planSpawns`); this is the question of whether the row exists at all.
+/// `richestCapacity` is also one fold with four readers that must not
+/// disagree — its own doc says so — so narrowing it here would be a second
+/// reading of the colony's bank beside the one every Withdraw cap uses.
 ///
 /// A reservation another player holds counts as no hold at all, exactly as
 /// it does for the source rate: the ticks left on it are theirs, and ours
@@ -1990,6 +2011,31 @@ let private isHaulerBody (creep: CreepInfo) =
 let private isReserverBody (creep: CreepInfo) =
     creep.Body |> Map.tryFind BodyPart.Claim |> Option.exists (fun n -> n > 0)
 
+/// Whether a living body can take energy out of a store and put it into an
+/// extension — the one capability the bank's own refilling depends on, and
+/// therefore the one every capacity-sized row depends on (`planSpawns`'s
+/// supply floor, ADR 0050).
+///
+/// Not "has a Carry part". It is the body half of `Refill`'s gate and the
+/// body half of `Withdraw`'s read back together, because a body that can
+/// deliver but never draw cannot reach the storage the energy is standing
+/// in: a Carry part (both gates), no standing-body ratio (ADR 0046 — a
+/// delivery by a body holding eleven Work is a commute) and no more Work
+/// than Move (ADR 0016 — a heavy body's intake is digging). `Refill`'s
+/// third conjunct, `Energy > 0`, is deliberately *not* read: that is a
+/// state a hauler passes through twice a trip, not a fact about the body.
+///
+/// The anchor row's `6W/1C/1M` is exactly why the gate is written this way
+/// (#203): it holds a Carry and a Move and answers neither of the other
+/// two clauses, so a colony of Anchors reads as full of carriers under
+/// "has a Carry part" while no body in it can put a single energy into an
+/// extension. That reading is the deadlock the supply floor exists to
+/// break, so the floor may not be built on it.
+let private canRefill atlas (creep: CreepInfo) =
+    (creep.Body |> Map.tryFind Carry |> Option.exists (fun n -> n > 0))
+    && not (isStandingBody creep)
+    && not (Atlas.workHeavy atlas creep.Name)
+
 /// The pattern row a living body was cast from, read off the parts alone
 /// (ADR 0006): a CLAIM part is the reserver row, more Work than Move is
 /// the anchor row, a standing body at or under that line is the upgrader
@@ -2227,26 +2273,34 @@ let private planSpawns
         // banked right now; time-to-first-creep outranks specialisation, so
         // the anchor gap waits (ADR 0006).
         //
-        // The row's sizing rule arrives as a function of the capacity
-        // rather than being looked up from the pattern, which is the
-        // choice ADR 0042's reserver row forces: two rows are the bank's
-        // answer alone and `bodyFor` is exactly that, but the reserver's
-        // body is `min(reservation deficit, bank)` and the anchor's is
-        // capped by `anchorWorkCapOf`'s reading of the posted set — a fact
-        // about the **room being reserved** and a fact about a **set of
-        // sources**, neither of them about the row. A sizing member on
-        // `BodyPattern` — ADR 0006's other shape — would
-        // have had nowhere to read either from, so the casting step
-        // takes an already-decided sizing instead and each caller supplies
-        // the rule its row is written in.
-        let castFromBank pattern (sizing: int -> BodyPart list) (bank: RoomEnergy) =
+        // The row's sizing rule arrives as a function of the bank rather
+        // than being looked up from the pattern, which is the choice ADR
+        // 0042's reserver row forces: two rows are the bank's answer alone
+        // and `bodyFor` is exactly that, but the reserver's body is
+        // `min(reservation deficit, bank)` and the anchor's is capped by
+        // `anchorWorkCapOf`'s reading of the posted set — a fact about the
+        // **room being reserved** and a fact about a **set of sources**,
+        // neither of them about the row. A sizing member on `BodyPattern`
+        // — ADR 0006's other shape — would have had nowhere to read either
+        // from, so the casting step takes an already-decided sizing instead
+        // and each caller supplies the rule its row is written in.
+        //
+        // The whole `RoomEnergy` and not its capacity, because which of the
+        // two numbers a row prices at is part of that row's rule and was
+        // the invisible half of #203's deadlock: every row here but the
+        // supply floor sizes at `Capacity` and is therefore unbuyable until
+        // the extensions are full, which is precisely the state a colony
+        // with nothing that can refill an extension can never leave. Each
+        // call site now says which number it reads, in the one place the
+        // reader is asking.
+        let castFromBank pattern (sizing: RoomEnergy -> BodyPart list) (bank: RoomEnergy) =
             if List.isEmpty snapshot.Creeps then
                 if bank.Available >= bodyCost workerPattern.Block then
                     Some(workerPattern, workerPattern.Block)
                 else
                     None
             else
-                let body = sizing bank.Capacity
+                let body = sizing bank
 
                 if bank.Available >= bodyCost body then
                     Some(pattern, body)
@@ -2262,16 +2316,13 @@ let private planSpawns
         // The reserver goes in front of all four (ADR 0042): the other
         // rows spend income, and this one decides whether the income is
         // five a tick or ten across every source of an outpost at once.
-        // Being first, it holds the cascade the tick the bank cannot pay
-        // for it, exactly as the Anchor row did while that row was first:
-        // `planned` counts intents, so an uncast head row leaves every
-        // idle spawn asking for the head row again. That is the priority
-        // this ordering *is*, and it is bounded — the row's body never
-        // costs more than the bank's own capacity, so the wait ends the
-        // tick the extensions fill. What is not bounded is a bank whose
-        // capacity cannot buy the row's 650-energy floor at all, and
-        // `reserverClaimsOf` refuses the quota outright there rather than
-        // stalling the colony forever.
+        // Being first it is asked first, and it no longer *holds* the
+        // cascade the tick the bank cannot pay for it: a row the bank
+        // cannot afford yields the tick to the rows below it (ADR 0050,
+        // #203). Priority here is the order the rows are asked in, not a
+        // veto the head row holds over the ones behind it — a distinction
+        // that costs nothing while the head is affordable and was a
+        // 1,235-tick standstill the once it was not.
         //
         // Each specialist gap is that row's own unfilled quota, and it is
         // answered on its own terms rather than out of the deficit (#154):
@@ -2331,76 +2382,139 @@ let private planSpawns
                |> List.length)
             |> max 0
 
+        // The supply floor (ADR 0050, #203), and the one row that is not a
+        // quota: a colony holding no body that can put energy into an
+        // extension hires one hauler in front of every row, sized from what
+        // is banked **right now**.
+        //
+        // It is the disaster fallback's own argument (ADR 0006) carried to
+        // the state that fallback cannot see. Every row below it prices
+        // its body at `bank.Capacity`, so every one of them is unbuyable until
+        // the extensions are full — and the extensions are filled by
+        // creeps. With nothing alive that can refill one, the bank is a
+        // fixed point rather than a slope: the engine's spawn regeneration
+        // only runs while the room holds under 300, so a colony stranded
+        // above that line does not even trickle. #203's was 361 against an
+        // 1,800 capacity, two Anchors on full containers, 246,818 energy in
+        // the storage and 1,235 ticks without a single cast.
+        //
+        // Read off `snapshot.Creeps` and never `living` for the same reason
+        // the fallback is: an expiring hauler can still refill an extension,
+        // and a colony holding one is not the stranded one.
+        //
+        // The gate is `canRefill` and emphatically not "has a Carry part" —
+        // an Anchor has one, and answering the gate with it is how the
+        // deadlock reproduces itself with this row in place.
+        let supplyFloor =
+            if snapshot.Creeps |> List.exists (canRefill atlas) then
+                0
+            else
+                1
+
+        // The rows expanded into the seats they are owed, in casting order:
+        // the supply floor, then reserver, Anchor, hauler, upgrader (ADR
+        // 0042, ADR 0046) and last the generalist, whose seats are whatever
+        // the whole-fleet deficit has left once every row above is counted.
+        //
+        // The deficit gates the *worker* row alone and is spent here rather
+        // than over the whole cascade. It stands in for that row's own gap
+        // rather than being it: ADR 0012 hires the row against whatever the
+        // target has left over once the specialist rows are counted, and the
+        // whole-fleet gap less the rows above is exactly that remainder
+        // while every specialist row is at or under quota. A row standing
+        // over its quota holds the worker row down by the surplus instead —
+        // the half of the old gate #154 keeps, pinned by `rowGapTests`.
+        //
+        // Seats and not an index into the cascade (ADR 0050): a spawn takes
+        // the first seat its bank can pay for and the seat it filled is the
+        // one that leaves the list, so a row the bank cannot afford is
+        // stepped over instead of stopping the tick — and stepping over it
+        // cannot make the next spawn buy that row's neighbour twice. The
+        // counting the old `planned < gap` chain did is the same counting
+        // while every seat in front is affordable, which is every tick that
+        // is not #203's.
+        //
+        // Nothing here is a permanent skip: the seats are rebuilt from the
+        // quotas every tick, so the reserver the extensions could not pay
+        // for this tick is the head of the cascade again the tick they can.
+        let seats =
+            List.replicate
+                supplyFloor
+                // The one row sized from `Available` (with the disaster
+                // fallback inside `castFromBank`, for the same reason).
+                // Sizing it at capacity would buy the 1,800 body that is
+                // exactly what the colony cannot pay for; the hauler row's
+                // own rule floors at one `[Carry;Carry;Move]` block, so
+                // 150 banked is enough and `castFromBank`'s own
+                // affordability check still refuses to cast what is not
+                // there.
+                (castFromBank haulerPattern (fun bank -> bodyFor haulerPattern bank.Available))
+            @ List.replicate
+                reserverGap
+                // Every cast at the largest outstanding demand and never at
+                // the one standing beside it in the list: the Matcher pairs
+                // a finished body to a controller by travel cost, so a body
+                // sized for the room that has slipped furthest can land on
+                // the room that has not (`reserverClaimsOf`).
+                // A positive gap is a non-empty demand list, so the
+                // `List.max` is total inside this sizing and nowhere else —
+                // and it is inside it, because `List.replicate 0` still
+                // evaluates the element it is not replicating.
+                (castFromBank reserverPattern (fun bank ->
+                    reserverBodyWithin (List.max reserverClaims) bank.Capacity))
+            @ List.replicate
+                anchorGap
+                // Sized under this tick's ceiling and never the held
+                // constant (ADR 0042): which Post the finished body lands
+                // on is the Matcher's, so the cast carries the richest
+                // posted source's saturation (`anchorWorkCapOf`).
+                (castFromBank anchorPattern (fun bank -> anchorBodyFor anchorWorkCap bank.Capacity))
+            @ List.replicate
+                haulerGap
+                (castFromBank haulerPattern (fun bank -> bodyFor haulerPattern bank.Capacity))
+            @ List.replicate
+                upgraderGap
+                // Ahead of the generalist and behind the three rows hired
+                // off the ground (ADR 0046): the upgrader spends the surplus
+                // those three produce, so it is cast once they stand, and it
+                // spends it at eleven Work against the generalist's nine for
+                // the same bank — the gain the row exists for is lost every
+                // tick a worker is cast into the surplus instead.
+                (castFromBank upgraderPattern (fun bank -> bodyFor upgraderPattern bank.Capacity))
+            @ List.replicate
+                (deficit - (supplyFloor + reserverGap + anchorGap + haulerGap + upgraderGap)
+                 |> max 0)
+                (castFromBank workerPattern (fun bank -> bodyFor workerPattern bank.Capacity))
+
         // Idle spawns draw from their room's one bank in list order — each
         // body debits the budget the next spawn sees, so the same energy is
         // never committed twice.
-        let intents, _ =
+        let intents, _, _ =
             snapshot.Spawns
             |> List.filter (fun s -> not s.IsSpawning)
             |> List.fold
-                (fun (intents, banks: Map<string, RoomEnergy>) s ->
+                (fun
+                    (intents,
+                     banks: Map<string, RoomEnergy>,
+                     unfilled: (RoomEnergy -> (BodyPattern * BodyPart list) option) list)
+                    s ->
                     let bank =
                         banks
                         |> Map.tryFind s.RoomName
                         |> Option.defaultValue { Available = 0; Capacity = 0 }
 
-                    let planned = List.length intents
+                    // The first seat this bank can pay for, and the rest of
+                    // the list with exactly that seat taken out of it.
+                    let rec take passed remaining =
+                        match remaining with
+                        | [] -> None
+                        | cast :: rest ->
+                            match cast bank with
+                            | Some filled -> Some(filled, List.rev passed @ rest)
+                            | None -> take (cast :: passed) rest
 
-                    // The deficit gates the *worker* row alone, and is
-                    // asked here rather than over the whole cascade. It
-                    // stands in for that row's own gap rather than being
-                    // it: ADR 0012 hires the row against whatever the
-                    // target has left over once the specialist rows are
-                    // counted, and the whole-fleet gap less the four gaps
-                    // above is exactly that remainder while every
-                    // specialist row is at or under quota. A row
-                    // standing over its quota holds the worker row down by
-                    // the surplus instead — the half of the old gate #154
-                    // keeps, pinned by `rowGapTests`. The disaster
-                    // fallback keeps its place inside `castFromBank`: an
-                    // empty colony's first body is a worker unit whichever
-                    // row asked for it.
-                    let cast =
-                        if planned < reserverGap then
-                            // Every cast at the largest outstanding demand
-                            // and never at the one standing beside it in
-                            // the list: the Matcher pairs a finished body
-                            // to a controller by travel cost, so a body
-                            // sized for the room that has slipped furthest
-                            // can land on the room that has not
-                            // (`reserverClaimsOf`).
-                            // A positive gap is a non-empty demand list, so
-                            // the `List.max` is total here and nowhere else.
-                            castFromBank
-                                reserverPattern
-                                (reserverBodyWithin (List.max reserverClaims))
-                                bank
-                        elif planned < reserverGap + anchorGap then
-                            // Sized under this tick's ceiling and never the
-                            // held constant (ADR 0042): which Post the
-                            // finished body lands on is the Matcher's, so
-                            // the cast carries the richest posted source's
-                            // saturation (`anchorWorkCapOf`).
-                            castFromBank anchorPattern (anchorBodyFor anchorWorkCap) bank
-                        elif planned < reserverGap + anchorGap + haulerGap then
-                            castFromBank haulerPattern (bodyFor haulerPattern) bank
-                        elif planned < reserverGap + anchorGap + haulerGap + upgraderGap then
-                            // Ahead of the generalist and behind the three
-                            // rows hired off the ground (ADR 0046): the
-                            // upgrader spends the surplus those three
-                            // produce, so it is cast once they stand, and
-                            // it spends it at eleven Work against the
-                            // generalist's nine for the same bank — the
-                            // gain the row exists for is lost every tick a
-                            // worker is cast into the surplus instead.
-                            castFromBank upgraderPattern (bodyFor upgraderPattern) bank
-                        elif planned < deficit then
-                            castFromBank workerPattern (bodyFor workerPattern) bank
-                        else
-                            None
-
-                    match cast with
-                    | Some(pattern, body) ->
+                    match take [] unfilled with
+                    | Some((pattern, body), left) ->
                         SpawnCreep(s.Name, body, $"{pattern.Name}-{snapshot.Time}-{s.Name}")
                         :: intents,
                         banks
@@ -2408,9 +2522,10 @@ let private planSpawns
                             s.RoomName
                             { bank with
                                 Available = bank.Available - bodyCost body
-                            }
-                    | None -> intents, banks)
-                ([], snapshot.RoomEnergy)
+                            },
+                        left
+                    | None -> intents, banks, unfilled)
+                ([], snapshot.RoomEnergy, seats)
 
         List.rev intents
 
@@ -3616,6 +3731,11 @@ let private applicable (snapshot: Snapshot) (threats: Threats) atlas (creep: Cre
             || (Atlas.workHeavy atlas creep.Name
                 && not (Set.isEmpty (Atlas.postsOf atlas sourceId))
                 && not (Atlas.mayAct atlas creep.Name task (areaFor threats atlas creep.Name task))))
+    // The body half of this gate — a Carry part and ADR 0016's comparative
+    // clause — is read a second time out of line by `canRefill`, the supply
+    // floor's arming condition (ADR 0050): a clause narrowing what a body
+    // may draw with belongs in front of both readers, or a colony whose only
+    // carrier this gate has just shut out still reads as able to refill.
     | Withdraw storeId ->
         has Carry
         && creep.FreeCapacity > 0
@@ -3630,6 +3750,9 @@ let private applicable (snapshot: Snapshot) (threats: Threats) atlas (creep: Cre
     // buffer — it is energy on the floor, and any carrier that can lift it
     // is spending it somewhere the buffer's own drawers cannot.
     | Pickup _ -> has Carry && creep.FreeCapacity > 0 && not (Atlas.workHeavy atlas creep.Name)
+    // Its two body clauses are read a second time out of line by
+    // `canRefill`, beside Withdraw's (ADR 0050) — the Energy clause is not,
+    // being a state and not a fact about the body.
     | Refill _ -> has Carry && creep.Energy > 0 && not (isStandingBody creep)
     // The one Build with a body gate on it (#157), and it is here for the
     // same reason ADR 0016's Withdraw gate is: `tierOf` below lifts this

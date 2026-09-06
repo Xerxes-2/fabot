@@ -1,5 +1,7 @@
 # Body patterns are colony facts; creeps still have no role
 
+> **Revised by ADR 0050**: the cascade of rows gains a second sentence — a row that cannot be afforded yields the tick to the rows below it — and one row that is a floor rather than a quota: a colony holding no body that can put energy into an extension casts a hauler from what is banked right now, in front of every row. "A row arrives with its quota" and the disaster fallback both stand unchanged; the floor is that fallback's argument carried to a colony that is not empty.
+
 > **Revised by ADR 0021**: "every part slot the remaining energy affords on Work" gains a ceiling — six Work, source saturation plus one spare — and a spawn casts a body as soon as its bank holds that body's cost rather than waiting for a full bank. Row shape, quota and the no-role axiom stand unchanged.
 
 > **Revised by ADR 0016**: "gates are body-blind" narrows to "gates read part arithmetic" — Withdraw is inapplicable to a body with more Work than Move, the first comparative applicability gate. The no-role axiom and everything else stand unchanged.
