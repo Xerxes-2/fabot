@@ -21453,6 +21453,72 @@ let standingBodyTests =
                     "the row drinks from the buffer at its feet, which is why it stands there"
             }
 
+            test "a standing body fetches from the buffer alone: dry, it waits for the haulers" {
+                // #206. The buffer empty, a stocked Storage and a pile of
+                // 400 both standing five tiles down the lane: the generalist
+                // walks to one of them, the standing body stands. Its one
+                // Carry is a trip's worth, and the trip is the commute ADR
+                // 0046 refuses — live it was fifty tiles across a Seam for
+                // fifty energy. Pairwise on the body alone.
+                let dryLane =
+                    { bufferLane with
+                        Stores = Map.ofList [ "can-buf", 0; "sto-1", 5000; "pile-1", 400 ]
+                    }
+
+                let colony creep =
+                    { bufferLaneColony [] [] creep with
+                        Spatial =
+                            dryLane
+                            |> withTargets
+                                [
+                                    "sto-1", { X = 18; Y = 10 }, Structure BuiltKind.Storage
+                                    "pile-1", { X = 18; Y = 11 }, Dropped
+                                ]
+                            |> withHome (fun layer ->
+                                { layer with
+                                    CreepPositions =
+                                        Map.ofList [ (creep: CreepInfo).Name, { X = 14; Y = 10 } ]
+                                })
+                    }
+
+                let empty pattern =
+                    let body = bodyFor pattern 1800
+
+                    creepWith
+                        pattern.Name
+                        0
+                        (50 * (body |> List.filter ((=) Carry) |> List.length))
+                        body
+
+                let outcome creep =
+                    let {
+                            Assignments = assignments
+                            Verdicts = verdicts
+                        } =
+                        decide (colony creep) Map.empty Set.empty None
+
+                    Map.tryFind creep.Name assignments, verdicts
+
+                let standingAssigned, standingVerdicts = outcome (empty upgraderPattern)
+
+                Expect.equal
+                    standingAssigned
+                    None
+                    "the standing body takes neither the Storage nor the pile"
+
+                Expect.contains
+                    standingVerdicts
+                    (Verdict.Unassigned("upgrader", IdleReason.NoneApplicable))
+                    "and it is inapplicability, not price: nothing in the pool is its to walk to"
+
+                let workerAssigned, _ = outcome (empty workerPattern)
+
+                Expect.isTrue
+                    (workerAssigned = Some(taskId (Withdraw "sto-1"))
+                     || workerAssigned = Some(taskId (Pickup "pile-1")))
+                    "the generalist, one Carry per Work, walks to whichever intake is cheaper"
+            }
+
             test "an Anchor with a site beside it still only Harvests" {
                 // ADR 0046's claim about the Anchor row, at the seam it is
                 // made about: with Harvest in the pool the rank settles it

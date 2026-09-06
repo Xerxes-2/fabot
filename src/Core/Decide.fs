@@ -2021,15 +2021,16 @@ let private isStandingCast body =
 /// the same shape.
 ///
 /// The gate that reads it is `applicable` below, on Build, Repair and
-/// Refill. Every other Task is left exactly as its own gates already had
-/// it: Upgrade, Withdraw and Harvest, which are the working life the
-/// upgrader row was shaped for — it draws from the buffer at its feet (ADR
-/// 0019, through ADR 0016's gate, which `Work ≤ Move` keeps it inside) and
-/// spends into the controller in place, or it digs from its Post — and
-/// Pickup too, which stays open to a standing body because a pile is an
-/// intake and not a delivery. Untouched is not applicable, either:
-/// Withdraw stays shut to a Work-heavy body by ADR 0016's own gate, so of
-/// the two standing bodies the colony casts only the upgrader draws.
+/// Refill — and since #206 on Pickup and on every Withdraw but the
+/// buffer's. What is left exactly as its own gates already had it is the
+/// working life the upgrader row was shaped for: it draws from the buffer
+/// at its feet (ADR 0019, through ADR 0016's gate, which `Work ≤ Move`
+/// keeps it inside) and spends into the controller in place, or it digs
+/// from its Post. A pile and the Storage are intakes too, but not ones at
+/// its feet, and the walk to either is the commute ADR 0046 exists to
+/// refuse. Untouched is not applicable, either: Withdraw stays shut to a
+/// Work-heavy body by ADR 0016's own gate, so of the two standing bodies
+/// the colony casts only the upgrader draws.
 let private isStandingBody (creep: CreepInfo) =
     let count part =
         creep.Body |> Map.tryFind part |> Option.defaultValue 0
@@ -4239,10 +4240,20 @@ let private applicable (snapshot: Snapshot) (threats: Threats) atlas (creep: Cre
     // may draw with belongs in front of both readers, or a colony whose only
     // carrier this gate has just shut out still reads as able to refill.
     | Withdraw storeId ->
+        let buffer = Set.contains storeId (Atlas.controllerContainers atlas)
+
         has Carry
         && creep.FreeCapacity > 0
         && not (Atlas.workHeavy atlas creep.Name)
-        && (has Work || not (Set.contains storeId (Atlas.controllerContainers atlas)))
+        && (has Work || not buffer)
+        // A standing body fetches from the buffer at its feet and from
+        // nowhere else (#206, ADR 0046): its one Carry is one trip's worth,
+        // and a trip to the Storage — or across a Seam to a pile — is the
+        // commute the row was shaped to never make. Live, an `11W/1C/11M`
+        // upgrader walked fifty tiles into the child's room for fifty
+        // energy the tick its buffer ran dry. Dry, it waits
+        // (`NoneApplicable`); the buffer's own Refill is the haulers'.
+        && (buffer || not (isStandingBody creep))
     // The Withdraw gate without its one target-shaped clause (#167): a
     // Carry part, room to put the energy, and ADR 0016's comparative gate
     // — a Work-heavy body's intake is digging, and picking a pile up off
@@ -4250,8 +4261,15 @@ let private applicable (snapshot: Snapshot) (threats: Threats) atlas (creep: Cre
     // buffer clause has no counterpart here: ADR 0019 shuts a Work-less
     // body out of the *controller's* container, and a pile is nobody's
     // buffer — it is energy on the floor, and any carrier that can lift it
-    // is spending it somewhere the buffer's own drawers cannot.
-    | Pickup _ -> has Carry && creep.FreeCapacity > 0 && not (Atlas.workHeavy atlas creep.Name)
+    // is spending it somewhere the buffer's own drawers cannot. What does
+    // have a counterpart is the standing-body clause (#206): a pile is an
+    // intake, but never one at a standing body's feet — the reflex takes
+    // the pile a creep stands beside (#166), and this Task is the walk.
+    | Pickup _ ->
+        has Carry
+        && creep.FreeCapacity > 0
+        && not (Atlas.workHeavy atlas creep.Name)
+        && not (isStandingBody creep)
     // Its two body clauses are read a second time out of line by
     // `canRefill`, beside Withdraw's (ADR 0050) — the Energy clause is not,
     // being a state and not a fact about the body.
