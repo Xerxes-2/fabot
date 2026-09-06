@@ -177,15 +177,23 @@ type Approach = { Range: int; Pos: Pos; Tick: int }
 /// Transition log's fold has already pruned it.
 type Loss = { Creep: string; Tick: int }
 
-/// One raid: opened on the first tick a spawn room held a hostile, kept
-/// open while hostiles keep appearing, closed by a quiet gap.
+/// One raid: opened on the first tick a room the colony works and can see
+/// held a hostile — the spawn rooms alone until #201 — kept open while
+/// hostiles keep appearing, closed by a quiet gap.
+///
+/// Colony-level as ADR 0028 made it, and so it names no room: a raid that
+/// crosses a border is one episode, and `Closest` records the tile without
+/// the room it is a tile of. That is a gap and not a decision — an
+/// operator reading `observe.mjs raids` cannot tell an [[outpost]] raid
+/// from a home one — left to its own issue rather than widened into #201's
+/// emergency fix.
 type RaidEpisode =
     {
         /// The tick the episode opened.
         Opened: int
-        /// The last tick a hostile actually stood in a spawn room. The
-        /// episode stays open while `tick - LastSeen` is inside the quiet
-        /// gap — openness is derived, never stored.
+        /// The last tick a hostile actually stood in one of those rooms.
+        /// The episode stays open while `tick - LastSeen` is inside the
+        /// quiet gap — openness is derived, never stored.
         LastSeen: int
         /// Hostile id -> its row, unioned over the whole window: a squad
         /// reads as five rows however often it steps back in.
@@ -203,14 +211,25 @@ type RaidEpisode =
         /// as a Loss is — so the decay of a long quiet gap is charged to
         /// nobody. Decay inside the raid's own ticks does ride along, at
         /// 3 hits a tick per rampart against the hundreds a raid takes.
+        ///
+        /// The one field of the episode that is **one room's** (#201).
+        /// Every other reads whatever room the hostile stood in, but the
+        /// Keep and its ramparts stand at home and nowhere else, so the
+        /// ticks charged are the ticks a hostile stood *there* — a window
+        /// held open from an outpost adds nothing here. Without that the
+        /// ride-along above would be the whole number rather than a
+        /// rounding error: an outpost-only episode takes zero hits at home
+        /// and would still record this room's decay as its cost.
         Damage: int
     }
 
 /// One [[outpost]]'s threat episode: the Raid log's second family (ADR
 /// 0043), opened by an invader core standing in a room the colony works
-/// rather than by a hostile creep in a spawn room, and carrying the one
-/// field a raid never needed — the tick the [[stand-down]] it drives
-/// expires.
+/// rather than by a hostile creep, and carrying the one field a raid never
+/// needed — the tick the [[stand-down]] it drives expires. Since #201 the
+/// two families cover the same rooms and the difference is only what opens
+/// them: a creep the engine's creep sweep answers with, or a structure it
+/// never can.
 ///
 /// A record of its own beside `RaidEpisode` rather than a widening of it,
 /// for two reasons pointing the same way. The four things a raid episode
@@ -350,8 +369,13 @@ type RaidState =
         Living: Set<string>
         /// The previous tick's hits per structure id across the Keep and
         /// the ramparts: the baseline this tick's damage is read against,
-        /// carried exactly as `Living` is — only while an episode is open,
-        /// so hits lost in peacetime are charged to nobody.
+        /// carried as `Living` is — only while an episode is open, so hits
+        /// lost in peacetime are charged to nobody — and, since #201, only
+        /// on a tick a hostile stood in the [[home room]]. The Keep and its
+        /// ramparts stand in one room (ADR 0034) and the episode above them
+        /// now spans every room the colony works, so the baseline is what
+        /// keeps the two the same room's: a tick with the raid a border
+        /// away leaves none, and the next tick differences against nothing.
         Hits: Map<string, int>
     }
 
@@ -655,13 +679,16 @@ let standDown (tick: int) (state: RaidState) : Set<string> =
     |> Set.union (state.RivalHeld |> Map.toList |> List.map fst |> Set.ofList)
 
 /// The Raid-log fold (ADR 0028): this tick's Snapshot plus the previous
-/// Raid log produce the new one. An episode opens on the first tick a
-/// spawn room holds a hostile, stays open while hostiles keep appearing,
-/// and closes after `gap` quiet ticks; the ring keeps the newest `cap`
-/// episodes. A tick with no hostile and no open episode records nothing.
-/// Two baselines are carried across ticks while an episode is open and
-/// dropped with it: the names this tick's losses are read against, and the
-/// hits this tick's damage is (ADR 0034).
+/// Raid log produce the new one. An episode opens on the first tick a room
+/// the colony works and can see holds a hostile — the spawn rooms alone
+/// until #201, which is what left an outpost's raiders unrecorded — stays
+/// open while hostiles keep appearing, and closes after `gap` quiet ticks;
+/// the ring keeps the newest `cap` episodes. A tick with no hostile and no
+/// open episode records nothing. Two baselines are carried across ticks
+/// while an episode is open and dropped with it: the names this tick's
+/// losses are read against, and the hits this tick's damage is (ADR 0034)
+/// — and that second one is carried only on the ticks a hostile stands in
+/// the [[home room]], because the Keep it measures stands there alone.
 ///
 /// Beside all of that, and sharing nothing with it but the leaf they are
 /// written to, the outpost family (ADR 0043): an invader core seen in a
@@ -690,6 +717,22 @@ let foldRaids (cap: int) (gap: int) (snapshot: Snapshot) (prior: RaidState) : Ra
         |> List.filter (fun creep -> creep.TicksToLive > 1)
         |> List.map (fun creep -> creep.Name)
         |> Set.ofList
+
+    // The hostiles standing in the room the defences are in. Since #201
+    // the sweep behind `Snapshot.Hostiles` covers every room the colony
+    // works and can see, so "a hostile" and "a hostile where the Keep is"
+    // are two different questions, and the damage below asks the second —
+    // through the baseline it differences against, which is carried on
+    // this list and not on the episode's. A rampart cannot stand in an
+    // outpost and the Keep is home's by
+    // definition (ADR 0034), so a window opened by a raider a border away
+    // would charge this room's ordinary decay — 3 hits a tick per rampart
+    // — to a raid that never touched it. The episode itself is still the
+    // colony's and opens on any of them, which is the whole point of the
+    // widening; it is the *measure* that is one room's.
+    let atHome =
+        let home = SpatialInfo.homeName snapshot.Spatial
+        snapshot.Hostiles |> List.filter (fun hostile -> hostile.RoomName = home)
 
     // This tick's hits across the Keep and the ramparts, the next tick's
     // baseline. The kinds are the rule's, never a list of ids: a rampart
@@ -754,18 +797,18 @@ let foldRaids (cap: int) (gap: int) (snapshot: Snapshot) (prior: RaidState) : Ra
             // Damage is charged against the previous tick's baseline, and
             // only an episode that was already open has one: a freshly
             // opened episode is charged nothing on its opening tick, so
-            // nothing crosses the seam between two episodes. The window is
-            // the same one the losses are read over — a hostile standing
-            // there now, or a sighting on the previous tick, the reading
-            // that lags its cause by a tick — so the decay ticking away
-            // through a fifty-tick quiet gap is charged to no raid.
-            let damage =
-                match current with
-                | Some episode when
-                    not (List.isEmpty hostiles) || snapshot.Time - episode.LastSeen <= 1
-                    ->
-                    lostHits
-                | _ -> 0
+            // nothing crosses the seam between two episodes.
+            //
+            // Which ticks are inside the window is the *baseline's*
+            // question and is answered once, where it is carried (#201): a
+            // tick that carries none leaves this difference nothing to
+            // subtract, so the window is exactly the ticks a hostile stood
+            // in the room the Keep is in, plus the one after — the reading
+            // that lags its cause by a tick, the shape a Loss is read over
+            // too. That is what keeps the decay of a fifty-tick quiet gap,
+            // and the decay under a raid a border away, charged to no
+            // raid.
+            let damage = if Option.isSome current then lostHits else 0
 
             let episode =
                 current
@@ -836,7 +879,19 @@ let foldRaids (cap: int) (gap: int) (snapshot: Snapshot) (prior: RaidState) : Ra
                 else
                     Map.remove room rooms)
         Living = if Option.isSome episode then surviving else Set.empty
-        Hits = if Option.isSome episode then defended else Map.empty
+        // The damage baseline, carried on the same condition the damage is
+        // charged on (#201): an open episode *and* a hostile in the room
+        // the Keep stands in. A tick that carries none leaves the next one
+        // nothing to difference against, so an episode held open from an
+        // outpost charges zero rather than this room's decay — and the one
+        // tick after a raider leaves *this* room still finds the baseline
+        // it needs, which is the lag reading the damage arm above owes the
+        // last blow. Dropped with the episode either way, as `Living` is.
+        Hits =
+            if Option.isSome episode && not (List.isEmpty atHome) then
+                defended
+            else
+                Map.empty
     }
 
 /// What `Game.cpu.getUsed()` answered at each of the loop's phase

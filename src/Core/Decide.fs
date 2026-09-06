@@ -592,8 +592,10 @@ let private weaponRange (hostile: HostileInfo) : int option =
 /// a room with no entry answers the empty set, which is ADR 0004's
 /// absence: it blocks no action and pools no Flee. So the single-room
 /// colony's answers are unchanged, and an outpost this tick projects no
-/// hostile in — `Snapshot.Hostiles` still sweeps the spawn rooms alone —
-/// is quiet by absence rather than by a second rule.
+/// hostile in is quiet by absence rather than by a second rule. Since
+/// #201 that absence is the honest one: the sweep behind `Hostiles`
+/// covers every room the colony can see, so a Reach missing from a room
+/// means nothing is standing in it rather than that nobody looked.
 type Threats =
     {
         /// Per room, the tiles a Threat standing in it can hurt. Never an
@@ -2419,6 +2421,26 @@ let private planSpawns
 /// margin for a skipped tick.
 let private safeModeDeadline = 3
 
+/// The hostiles standing in the colony's own room, which is the whole of
+/// what the two reflexes below may read (#201). Since `Snapshot.Hostiles`
+/// stopped being the spawn rooms' alone, "a hostile" and "a hostile here"
+/// are two different questions, and both reflexes ask the second one: safe
+/// mode protects a controller of ours and an outpost has none to protect
+/// (ADR 0007), and a tower's shot is a range act inside its own room, so
+/// aiming one across a border is an Intent the engine can only refuse (ADR
+/// 0014). Everything above them — Reach, Flee, the spawn hold — reads the
+/// list whole and files each hostile under its own room instead (ADR
+/// 0033, #138); this is the narrowing, stated once, for the two rules that
+/// are about a room we own rather than about a creep of ours being shot.
+///
+/// The home name and not the controller's or a tower's room, because both
+/// arms need an answer on a tick the projection places neither: ADR 0004's
+/// absence would otherwise widen the reflex back to every room at exactly
+/// the moment there is least to read.
+let private hostilesAtHome (snapshot: Snapshot) : HostileInfo list =
+    let home = SpatialInfo.homeName snapshot.Spatial
+    snapshot.Hostiles |> List.filter (fun hostile -> hostile.RoomName = home)
+
 /// Colony reflex beside the pipeline, two arms and one pair of gates —
 /// stock remaining, safe mode not already running.
 ///
@@ -2431,8 +2453,10 @@ let private safeModeDeadline = 3
 /// no deadline to measure and falls back to firing on sight.
 ///
 /// The Keep arm (ADR 0034): any Keep structure below full hits while any
-/// hostile stands in the spawn room. The same shape — hold until the harm
-/// is certain — over the other half of the exposure. Any hostile, not only
+/// hostile stands in the home room (`hostilesAtHome`, #201 — the ADR wrote
+/// "the spawn room", back when the sweep behind the list could name no
+/// other). The same shape — hold until the harm is certain — over the
+/// other half of the exposure. Any hostile, not only
 /// a Threat: a WORK-only dismantler hurts a structure without ever
 /// qualifying as one, and "the Keep is losing hits with someone here" is
 /// the honest reading whoever is doing it. Stateless on purpose: one
@@ -2447,13 +2471,19 @@ let private safeModeDeadline = 3
 let private planSafeMode (snapshot: Snapshot) atlas : Intent list =
     match snapshot.Controller with
     | Some controller when controller.SafeModeAvailable > 0 && not controller.SafeModeActive ->
+        // The colony's own room and no other (`hostilesAtHome`, #201): a
+        // claimer in an outpost is tapping a controller safe mode does not
+        // cover, and the Keep it could be denting is not in that room at
+        // all.
+        let here = hostilesAtHome snapshot
+
         let withinReach (h: HostileInfo) =
             List.contains BodyPart.Claim h.Body
             && match Atlas.positionOf atlas controller.Id with
                | Some pos -> range h.Pos pos <= safeModeDeadline
                | None -> true
 
-        let claimerInReach = snapshot.Hostiles |> List.exists withinReach
+        let claimerInReach = here |> List.exists withinReach
 
         // Below full hits, off the walk the Repair pool reads: the Keep's
         // whole line is Full, so "hungry" and "damaged" are one fact and
@@ -2462,7 +2492,7 @@ let private planSafeMode (snapshot: Snapshot) atlas : Intent list =
         // a container's hits nor a rampart's ever spend the stock. The
         // hostiles are asked first, so a quiet room walks nothing.
         let keepDamaged =
-            not (List.isEmpty snapshot.Hostiles)
+            not (List.isEmpty here)
             && hungryStructures snapshot |> List.exists (snd >> isKeep)
 
         if claimerInReach || keepDamaged then
@@ -2477,8 +2507,16 @@ let private planSafeMode (snapshot: Snapshot) atlas : Intent list =
 /// or anti-drain gate, and no energy gate: unlike safe mode there is no
 /// stock to protect, so a dry tower's Intent fails harmlessly. Equal
 /// ranges tie-break by hostile id, so the pick is deterministic.
+///
+/// Both halves of the pairing are the colony's own room's: `placedTowers`
+/// has always answered home alone — a tower stands only in a room we own
+/// — and the hostiles are narrowed to match (`hostilesAtHome`, #201).
+/// Without that the widened sweep would aim every tower at whichever
+/// raider is nearest *by coordinate* in any projected room, and a `Pos`
+/// carries no room, so a raider fifty tiles and a border away would read
+/// as the nearest target and take the shot the one in the room deserved.
 let private planFire (snapshot: Snapshot) atlas : Intent list =
-    match snapshot.Hostiles with
+    match hostilesAtHome snapshot with
     | [] -> []
     | hostiles ->
         Atlas.placedTowers atlas

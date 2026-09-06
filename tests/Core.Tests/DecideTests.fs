@@ -17215,6 +17215,172 @@ let layeredThreatTests =
                     (castsWith [ hostileIn "W1N1" { X = 25; Y = 29 } [ Attack; Move ] ])
                     "the same Threat at home holds it"
             }
+
+            test "an outpost Threat takes that room's Harvest out of the pool, and only that room's" {
+                // ADR 0033's applicability gate, read in an outpost now
+                // that the sweep behind `Hostiles` reaches one (#201). A
+                // melee Threat at (10,49) of W1N2 reaches y 46..52, which
+                // covers both walkable tiles beside `src-out` at (10,47)
+                // and neither the outpost worker at (10,45) nor any tile
+                // the home corridor holds. So the Task loses every tile it
+                // could be worked from while its holder is running from
+                // nothing: this is the gate, not Flee, and the release
+                // names the raid rather than a Task that vanished.
+                let held =
+                    Map.ofList
+                        [ "wh", taskId (Harvest "src-home"); "wo", taskId (Harvest "src-out") ]
+
+                let releasesWith hostiles =
+                    let { Verdicts = verdicts } =
+                        decide (twoRoomColony hostiles) held Set.empty None
+
+                    verdicts
+                    |> List.choose (function
+                        | Verdict.Released(creep, task, reason) -> Some(creep, task, reason)
+                        | _ -> None)
+
+                Expect.isEmpty (releasesWith []) "the premise: a quiet tick releases nobody"
+
+                Expect.equal
+                    (releasesWith [ hostileIn "W1N2" { X = 10; Y = 49 } [ Attack; Move ] ])
+                    [ "wo", taskId (Harvest "src-out"), ReleaseReason.Threatened ]
+                    "the outpost's rock loses its Seats; the home room's keeps its holder"
+
+                // Pairwise, the same body on the same coordinate filed at
+                // home: (10,49) is off the home corridor entirely, so its
+                // Reach takes no tile any home Task is worked from — which
+                // is what makes the case above the outpost's own Reach and
+                // not a hostile leaking across the layering.
+                Expect.isEmpty
+                    (releasesWith [ hostileIn "W1N1" { X = 10; Y = 49 } [ Attack; Move ] ])
+                    "the same coordinate at home reaches nothing either room works from"
+            }
+
+            test "the safe-mode reflex reads the home room alone: an outpost claimer spends nothing" {
+                // ADR 0007's stock buys one room's controller a thousand
+                // ticks of immunity, and the room is the one the spawns
+                // stand in — an outpost has no controller of ours for a
+                // claimer to tap. Until #201 the question could not be
+                // asked, the list holding the spawn rooms only; now it can,
+                // and `hostilesAtHome` is the answer.
+                //
+                // Pairwise, the same CLAIM body on the same tile two off
+                // the controller: the room is the only difference between
+                // the two runs, so nothing but the room filter can separate
+                // them.
+                let colony =
+                    atLevel
+                        2
+                        (openRoom 6 |> withTargets [ "ctrl-1", { X = 25; Y = 27 }, Controller ])
+                    |> withOutpost
+                        "W1N2"
+                        []
+                        [
+                            for x in 20..30 do
+                                for y in 20..30 -> { X = x; Y = y }, Plain
+                        ]
+
+                let activationsWith hostiles =
+                    let { Intents = intents } =
+                        decide { colony with Hostiles = hostiles } Map.empty Set.empty None
+
+                    activations intents
+
+                Expect.isEmpty (activationsWith []) "the premise: a quiet colony banks the stock"
+
+                Expect.isEmpty
+                    (activationsWith
+                        [ hostileIn "W1N2" { X = 25; Y = 29 } [ BodyPart.Claim; Move ] ])
+                    "a claimer in the outpost is tapping a controller safe mode does not cover"
+
+                Expect.equal
+                    (activationsWith
+                        [ hostileIn "W1N1" { X = 25; Y = 29 } [ BodyPart.Claim; Move ] ])
+                    [ "ctrl-1" ]
+                    "the same claimer at home is inside the deadline and fires it"
+            }
+
+            test "the Keep arm reads it too: an outpost dismantler spends nothing" {
+                // The reflex's *other* arm (ADR 0034), narrowed by the same
+                // `hostilesAtHome` and pinned separately, because either
+                // one left wide spends the stock on its own. It fires on
+                // any hostile — a WORK-only dismantler is the case it
+                // exists for — and what arms it is a dented Keep, which is
+                // the spawn, the tower and the Storage and stands in the
+                // colony's own room. A raider a border away is beside
+                // nothing this arm could be about.
+                let colony =
+                    atLevel
+                        2
+                        (openRoom 6 |> withTargets [ "ctrl-1", { X = 25; Y = 27 }, Controller ])
+                    |> withHits "spawn-1" BuiltKind.Spawn 4999 5000
+                    |> withOutpost
+                        "W1N2"
+                        []
+                        [
+                            for x in 20..30 do
+                                for y in 20..30 -> { X = x; Y = y }, Plain
+                        ]
+
+                let activationsWith hostiles =
+                    let { Intents = intents } =
+                        decide { colony with Hostiles = hostiles } Map.empty Set.empty None
+
+                    activations intents
+
+                Expect.isEmpty
+                    (activationsWith [])
+                    "the premise: a dented Keep with nobody here is harm already over"
+
+                Expect.isEmpty
+                    (activationsWith [ hostileIn "W1N2" { X = 25; Y = 29 } [ Work; Move ] ])
+                    "a dismantler in the outpost is nowhere near the Keep it would have to be denting"
+
+                Expect.equal
+                    (activationsWith [ hostileIn "W1N1" { X = 25; Y = 29 } [ Work; Move ] ])
+                    [ "ctrl-1" ]
+                    "the same body on the same tile at home is exactly the arm's case"
+            }
+
+            test "the fire reflex reads the home room alone: no tower shoots across a border" {
+                // ADR 0014 pairs every tower with the hostile nearest to
+                // it, and both halves are the colony's own room's:
+                // `Atlas.placedTowers` has always answered home alone, and
+                // #201 narrows the other half to match. A `Pos` carries no
+                // room (ADR 0041), so an unnarrowed pairing would measure
+                // an outpost raider by its bare coordinates, hand the
+                // engine a target a border away, and spend the tick on a
+                // shot it can only refuse.
+                let colony =
+                    atLevel
+                        3
+                        (openRoom 6
+                         |> withTargets [ "tower-1", { X = 22; Y = 22 }, Structure BuiltKind.Tower ])
+                    |> withOutpost
+                        "W1N2"
+                        []
+                        [
+                            for x in 20..30 do
+                                for y in 20..30 -> { X = x; Y = y }, Plain
+                        ]
+
+                let shotsWith hostiles =
+                    let { Intents = intents } =
+                        decide { colony with Hostiles = hostiles } Map.empty Set.empty None
+
+                    shots intents
+
+                Expect.isEmpty (shotsWith []) "the premise: a quiet room fires no shot"
+
+                Expect.isEmpty
+                    (shotsWith [ hostileIn "W1N2" { X = 27; Y = 27 } [ Attack; Move ] ])
+                    "a raider in the outpost is nothing this tower can reach"
+
+                Expect.equal
+                    (shotsWith [ hostileIn "W1N1" { X = 27; Y = 27 } [ Attack; Move ] ])
+                    [ "tower-1", "h-1" ]
+                    "the same raider on the same coordinate at home is shot"
+            }
         ]
 
 /// The outpost the Reserve tests hold: one room across the north border,

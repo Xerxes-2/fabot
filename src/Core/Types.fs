@@ -820,13 +820,16 @@ module Colony =
 /// What the decision layer knows about one construction site this tick.
 type ConstructionSiteInfo = { Id: string }
 
-/// What the decision layer knows about one hostile creep in a spawn room
-/// this tick: its id and tile — what the fire reflex aims at (ADR 0014) —
-/// its body parts, verbatim, because what a hostile can do is decided
-/// from what it is made of, its owner, which the Raid log's roster reads
-/// (ADR 0028), and the room it stands in, which the Raid log's closest
-/// approach reads (ADR 0041). Hostiles stay out of the spatial projection:
-/// they block no tiles, price no paths, gate no tasks.
+/// What the decision layer knows about one hostile creep in a room the
+/// colony is looking into this tick: its id and tile — what the fire
+/// reflex aims at, in the colony's own room (ADR 0014) — its body parts,
+/// verbatim, because what a hostile can do is decided from what it is made
+/// of, its owner, which the Raid log's roster reads (ADR 0028), and the
+/// room it stands in, which the Raid log's closest approach reads (ADR
+/// 0041). Hostiles stay out of the spatial projection: they block no tiles
+/// and price no paths. They do gate Tasks, and have since ADR 0033 — but
+/// through a Threat's Reach, a colony-level fact the pipeline reads, never
+/// a change to the map.
 type HostileInfo =
     {
         Id: string
@@ -842,11 +845,11 @@ type HostileInfo =
         /// gives it a reader: a `Pos` carries no room, so the Raid log's
         /// closest approach measures a hostile against the tiles of *its*
         /// room, and one of ours standing on the same coordinate of
-        /// another room is not at range 0. The sweep behind it is
-        /// unchanged (`Snapshot.Hostiles` is still the spawn rooms
-        /// alone), so today every hostile names the colony's own room; the
-        /// reflexes still read none of this, and their Reach stays the
-        /// home room's until #117.
+        /// another room is not at range 0. Load-bearing for every reader
+        /// since #201 widened the sweep behind the list to every room the
+        /// colony can see: a Threat's Reach is filed under this name (ADR
+        /// 0033, #138), and the two colony reflexes read the home room out
+        /// of the list by it (`Decide.hostilesAtHome`).
         RoomName: string
         Pos: Pos
         Body: BodyPart list
@@ -991,27 +994,29 @@ type Snapshot =
         /// looks into contributes none of them (ADR 0004, ADR 0042).
         ConstructionSites: ConstructionSiteInfo list
         Creeps: CreepInfo list
-        /// Hostile creeps standing in the spawn rooms this tick.
+        /// Hostile creeps standing in any room the colony works and has
+        /// vision in this tick, each under its own room's name — the spawn
+        /// rooms' alone until #201, which is what left an outpost's
+        /// raiders invisible to ADR 0033: no Reach to gate a Task, no Flee
+        /// for the creep being shot, and no episode in the Raid log. A
+        /// hostile is a fact vision pays for, so a room nothing looks into
+        /// contributes none (ADR 0004).
         Hostiles: HostileInfo list
         /// The invader cores standing in the rooms the colony works this
         /// tick and can see (ADR 0043). Its own list and not a widening of
         /// `Hostiles`, for two independent reasons. A core is a structure,
         /// so the `FIND_HOSTILE_CREEPS` sweep behind that list can never
-        /// answer with one. And that list is the spawn rooms' by
-        /// definition: since #138 a Threat's Reach is filed under the room
-        /// it stands in, so an outpost raider no longer carves a hole at
-        /// its coordinates in the home room — but ADR 0043 leaves
-        /// `Snapshot.Hostiles`'s standing in the Task pipeline at exactly
-        /// zero, and opening a front fifty tiles away before a worker
-        /// being shot at home runs is the wrong order (#66). Reach and
-        /// flee read none of this.
+        /// answer with one, whatever set of rooms it is swept over. And
+        /// the two lists answer different questions even now that both are
+        /// swept over every room the colony can see (#201): a raider is
+        /// something a creep runs from this tick (ADR 0033), a core is
+        /// something a whole room is withheld from for thousands (ADR
+        /// 0043). Reach and flee read none of this, and the stand-down
+        /// reads none of `Hostiles`.
         ///
-        /// No reader in Core yet: the fold that opens an outpost's threat
-        /// episode off it (#134) and the gate that reads that episode
-        /// (#136) come after. Projected ahead of them because the fact is
-        /// only readable while the colony still has vision in the room,
-        /// and the whole point of the gate is that the creeps who provide
-        /// that vision are about to leave.
+        /// Read while there is still vision, because that is the only time
+        /// it is readable: the creeps paying for the vision in an outpost
+        /// are exactly the ones a stand-down withdraws.
         InvaderCores: InvaderCoreInfo list
         /// The colony's spatial projection: the home room and every
         /// declared outpost beside it, in one projection (ADR 0041).

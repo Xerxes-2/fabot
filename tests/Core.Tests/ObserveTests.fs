@@ -323,12 +323,19 @@ let pruneTests =
             }
         ]
 
-/// The room the raid fixtures project — the colony's own, which is the
-/// only room `Snapshot.Hostiles` sweeps (ADR 0028). Named rather than left
-/// to `SpatialInfo.homeName`'s empty string, because the closest approach
-/// now joins a hostile's room to the projection's layer (ADR 0041) and a
+/// The room the raid fixtures project — the colony's own, and the only
+/// room `Snapshot.Hostiles` swept until #201 widened it to every room the
+/// colony works and can see. Named rather than left to
+/// `SpatialInfo.homeName`'s empty string, because the closest approach
+/// joins a hostile's room to the projection's layer (ADR 0041) and a
 /// fixture whose two halves agreed by both being blank would prove nothing.
 let raidRoom = "W12S28"
+
+/// A room of the scan set that is not the colony's own: where the
+/// stand-down family's cores stand, and — since #201 — where a raider the
+/// sweep now reaches can stand too. The two families are told apart by the
+/// room a record names and never by both being blank.
+let outpostRoom = "W12S27"
 
 /// A colony nobody is raiding: the Raid fold reads hostiles, our creeps
 /// and the tiles of what is ours, so everything else stays empty.
@@ -391,6 +398,14 @@ let spent name = { ours name with TicksToLive = 1 }
 
 /// The squad of #66, cut to the one creep the lifecycle tests need.
 let squad = [ raider "TWX" "giaco" { X = 38; Y = 47 } [ Tough; Attack; Move ] ]
+
+/// The same body on the same tile, a room away: the raider #201's widened
+/// sweep reaches (`Snapshot.Hostiles` covers every room the colony works
+/// and can see). The room is the only difference from `squad`, which is
+/// what makes the pair able to ask which of the fold's answers are the
+/// colony's and which are one room's.
+let outpostSquad =
+    squad |> List.map (fun hostile -> { hostile with RoomName = outpostRoom })
 
 /// A colony holding just these hostiles.
 let raid hostiles = { quiet with Hostiles = hostiles }
@@ -999,6 +1014,43 @@ let damageTests =
                     "the raid's 1,000 and the 300 read one tick late; the rest of the gap is decay"
             }
 
+            test "a raid a room away opens an episode and is charged none of this room's decay" {
+                // #201 widened the sweep to every room the colony works, so
+                // an outpost's raider opens a colony episode — that is what
+                // the widening is for, and the record the operator reads it
+                // off. Damage is the one field that cannot follow it: the
+                // Keep and its ramparts stand in the colony's own room (ADR
+                // 0034), so a window held open from next door would charge
+                // 3 hits a tick per rampart of ordinary decay as what a
+                // raid that never touched the Keep cost — noise that is the
+                // whole of the number rather than the rounding error the
+                // field's own doc prices it as.
+                let decaying hostiles t =
+                    raid hostiles |> withHits "ram-1" BuiltKind.Rampart (100_000 - 300 * t)
+
+                let over hostiles =
+                    (RaidState.empty, [ 0..2 ])
+                    ||> List.fold (fun state t -> raidTick (10 + t) (decaying hostiles t) state)
+
+                let away = over outpostSquad
+
+                Expect.equal
+                    (windows away)
+                    [ (10, 12) ]
+                    "the premise: the outpost's raider opens an episode and holds it open"
+
+                Expect.equal (damages away) [ 0 ] "and the decay at home is charged to nobody"
+
+                // Pairwise, the same body on the same tile filed at home:
+                // the room is the only difference between the two runs, so
+                // nothing but the room the damage is measured in separates
+                // them.
+                Expect.equal
+                    (damages (over squad))
+                    [ 600 ]
+                    "the same raider here is charged every hit the window covers"
+            }
+
             test "the baseline is dropped in peacetime" {
                 // Carried exactly as `Living` is: hits lost while no episode
                 // is open are charged to nobody, and the next raid opens
@@ -1019,11 +1071,6 @@ let damageTests =
                     "an open episode carries this tick's hits into the next"
             }
         ]
-
-/// The outpost the threat fixtures stand in: a room of the scan set that
-/// is not the spawn room, so the two families are told apart by the room
-/// a record names and never by both being blank.
-let outpostRoom = "W12S27"
 
 /// An invader core standing in a room, with or without a collapse timer to
 /// read a deadline off. A level-0 core — the measured case on this

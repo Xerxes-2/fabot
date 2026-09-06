@@ -574,12 +574,13 @@ let build (shut: Set<string>) : Snapshot =
         //
         // The lists beside it stay home-only on purpose. `Refillables`,
         // `Controller` and `RoomEnergy` are about rooms we own, and an
-        // outpost is by definition one we do not; `Hostiles` says so in
-        // its own comment below. `ConstructionSites` was one of them until
-        // #150 and is not any more — a site of ours in an outpost is one
-        // nobody would ever build, which is where ADR 0042's switch stuck;
-        // it reads `seen` now, and its own comment below says why that set
-        // and not this one's.
+        // outpost is by definition one we do not. Two lists have left that
+        // family since: `ConstructionSites` until #150 — a site of ours in
+        // an outpost is one nobody would ever build, which is where ADR
+        // 0042's switch stuck — and `Hostiles` until #201, a raider in an
+        // outpost being exactly the thing ADR 0033's rules were written
+        // for. Both read `seen` now, and each says below why that set and
+        // not this one's.
         Sources =
             seen
             |> List.collect (fun room -> room.find findSources |> Array.toList)
@@ -734,15 +735,39 @@ let build (shut: Set<string>) : Snapshot =
                     Body = c.body |> Array.countBy (fun p -> bodyPartOf p.``type``) |> Map.ofArray
                 })
             |> Array.toList
-        // The spawn rooms and no others, unchanged by ADR 0041: what the
-        // layering adds is that each hostile now says which of them it
-        // stands in, so the Raid log measures it against that room's
-        // tiles rather than against every room's unioned (ADR 0028).
+        // Every room the colony is looking into, and no longer the spawn
+        // rooms alone (#201). ADR 0033 was written before there was a
+        // second room to write it about, and its three rules read this
+        // list: a Threat's Reach gates the Tasks whose Work Area lies in
+        // it, a creep standing in one is matched to Flee, and a spawn
+        // whose doorstep is in one holds. Swept over the spawn rooms, a
+        // hostile in an outpost was not merely unhandled but *absent* —
+        // no Reach, so a freshly cast reserver walked into one; no Flee,
+        // so a creep already there stood on its Seat and was killed; and
+        // no episode in the Raid log, which reads this same list. All
+        // three came true at once in W13S28 at t161,9xx.
+        //
+        // Gated on `seen` and not on `scanned`, the rule `RoomControl`
+        // and `ConstructionSites` already follow: a hostile is a thing
+        // vision pays for and no declaration carries, so a room nothing
+        // is looking into contributes none of them rather than a guess
+        // (ADR 0004) — and a room the colony has no creep in is one no
+        // Reach could gate anything of ours in anyway. `seen` names each
+        // room once (`Outpost.roomsProjected` filtered by vision), so no
+        // room's hostiles are collected twice, and the home room is in it
+        // by construction: a spawn cannot stand in a room with no vision.
+        //
+        // What the reflexes make of the widened list is Core's business
+        // and stated there: safe mode and the towers read the colony's
+        // own room out of it (ADR 0007, ADR 0014), because an outpost has
+        // no controller of ours to protect and a tower shoots nothing
+        // across a border.
         Hostiles =
-            spawnRooms
-            |> Array.collect (fun r ->
+            seen
+            |> List.collect (fun r ->
                 r.find findHostileCreeps
-                |> Array.map (fun o ->
+                |> Array.toList
+                |> List.map (fun o ->
                     let c = o :?> ICreep
 
                     {
@@ -754,22 +779,22 @@ let build (shut: Set<string>) : Snapshot =
                             c.body |> Array.map (fun p -> bodyPartOf p.``type``) |> Array.toList
                     }
                     : HostileInfo))
-            |> Array.toList
-        // Every room the colony is looking into, and not the spawn rooms
-        // alone — which is the whole difference between this list and the
-        // one above it (ADR 0043). An invader core is what an outpost is
-        // stood down from, and an outpost is by definition a room with no
-        // spawn in it, so the sweep that answers for one has to reach the
-        // rooms the sweep above never visits.
+        // Every room the colony is looking into, the same set the list
+        // above it is swept over since #201 (ADR 0043). An invader core is
+        // what an outpost is stood down from, and an outpost is by
+        // definition a room with no spawn in it, so the sweep that answers
+        // for one always had to reach past the home room.
         //
-        // Deliberately not folded into `Hostiles`. A core is a structure,
-        // so `FIND_HOSTILE_CREEPS` cannot answer with one whatever set it
-        // is swept over; and going the other way — letting an outpost's
-        // hostiles into that list — would put them in front of the reach
-        // and flee rules, which ADR 0043 leaves untouched down to the
-        // line. `FIND_HOSTILE_STRUCTURES` answers with every structure a
-        // rival owns, so the kind is checked here: this is the only
-        // question the shell asks of that spelling.
+        // Deliberately not folded into `Hostiles`, and the room set is no
+        // longer any part of why. A core is a *structure*, so
+        // `FIND_HOSTILE_CREEPS` cannot answer with one whatever set it is
+        // swept over; and the two lists answer different questions — a
+        // raider is something a creep runs from this tick (ADR 0033), a
+        // core is something a whole room is withheld from for thousands
+        // (ADR 0043), so one drives Reach and Flee and the other a clock.
+        // `FIND_HOSTILE_STRUCTURES` answers with every structure a rival
+        // owns, so the kind is checked here: this is the only question the
+        // shell asks of that spelling.
         //
         // Gated on `seen`, the rule every fact vision pays for follows: a
         // room nothing is looking into contributes no entry at all rather
