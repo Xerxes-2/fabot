@@ -373,7 +373,7 @@ let quiet: ColonyView =
         // Another colony's bodies are in no raid of this one's: the log
         // counts the creeps this colony lost (ADR 0028), and a body it
         // does not hold is not one of them (ADR 0052 decision 1).
-        Foreign = Map.empty
+        Foreign = Set.empty
         // And nothing is borrowed: what one colony may take of a child's
         // room decides Tasks, and the log records what happened.
         Borrowed = { Rooms = [] }
@@ -385,8 +385,7 @@ let raider id owner pos body : HostileInfo =
     {
         Id = id
         Owner = owner
-        RoomName = raidRoom
-        Pos = pos
+        Pos = RoomPos.at raidRoom pos
         Body = body
     }
 
@@ -415,7 +414,11 @@ let squad = [ raider "TWX" "giaco" { X = 38; Y = 47 } [ Tough; Attack; Move ] ]
 /// what makes the pair able to ask which of the fold's answers are the
 /// colony's and which are one room's.
 let outpostSquad =
-    squad |> List.map (fun hostile -> { hostile with RoomName = outpostRoom })
+    squad
+    |> List.map (fun hostile ->
+        { hostile with
+            Pos = RoomPos.at outpostRoom (RoomPos.pos hostile.Pos)
+        })
 
 /// A colony holding just these hostiles.
 let raid hostiles = { quiet with Hostiles = hostiles }
@@ -634,7 +637,7 @@ let approachTests =
                         Some
                             {
                                 Range = 2
-                                Pos = { X = 12; Y = 42 }
+                                Pos = RoomPos.at raidRoom { X = 12; Y = 42 }
                                 Tick = 11
                             }
                     ]
@@ -659,7 +662,7 @@ let approachTests =
                         Some
                             {
                                 Range = 2
-                                Pos = { X = 12; Y = 42 }
+                                Pos = RoomPos.at raidRoom { X = 12; Y = 42 }
                                 Tick = 10
                             }
                     ]
@@ -681,7 +684,7 @@ let approachTests =
                         Some
                             {
                                 Range = 2
-                                Pos = { X = 9; Y = 46 }
+                                Pos = RoomPos.at raidRoom { X = 9; Y = 46 }
                                 Tick = 10
                             }
                     ]
@@ -728,7 +731,7 @@ let approachTests =
                         Some
                             {
                                 Range = 28
-                                Pos = { X = 38; Y = 47 }
+                                Pos = RoomPos.at raidRoom { X = 38; Y = 47 }
                                 Tick = 10
                             }
                     ]
@@ -743,7 +746,7 @@ let approachTests =
                 // ADR 0004's absence, not a zero range.
                 let elsewhere =
                     { raider "TWX" "giaco" { X = 9; Y = 46 } [ Attack; Move ] with
-                        RoomName = "W12S27"
+                        Pos = RoomPos.at "W12S27" { X = 9; Y = 46 }
                     }
 
                 let state = RaidState.empty |> raidTick 10 { placed with Hostiles = [ elsewhere ] }

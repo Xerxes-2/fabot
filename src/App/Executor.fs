@@ -50,9 +50,9 @@ let private execute (intent: Intent) : Outcome =
     | SpawnCreep(spawnName, body, creepName) ->
         withActor (Game.spawns?(spawnName): ISpawn) (fun spawn ->
             spawn.spawnCreep (body |> List.map partName |> List.toArray, creepName))
-    | PlaceConstructionSite(roomName, pos, kind) ->
-        withActor (Game.rooms?(roomName): IRoom) (fun room ->
-            room.createConstructionSite (pos.X, pos.Y, structureName kind))
+    | PlaceConstructionSite(tile, kind) ->
+        withActor (Game.rooms?(tile.Room): IRoom) (fun room ->
+            room.createConstructionSite (tile.X, tile.Y, structureName kind))
     | HarvestSource(creepName, sourceId) ->
         withCreepTarget creepName sourceId (fun c t -> c.harvest t)
     | TransferEnergyToStructure(creepName, structureId) ->

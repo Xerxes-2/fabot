@@ -263,8 +263,9 @@ let private seenFacts
                 // 0001) and a tile the Raid log measures a raider's
                 // closest approach to. A creep the projection cannot place
                 // is ADR 0004's absence, which is the answer
-                // `Atlas.placedCreepsByRoom` already gives it: it is in no
-                // group, so no room's geometry is measured against it.
+                // `Atlas.placedCreeps` already gives it: it is in that
+                // list under no room, so no room's geometry is measured
+                // against it.
                 // Load-bearing rather than defensive since #142: the mover
                 // aims a creep matched across a border at an exit tile, and
                 // the engine puts it down on the neighbour's border row for
@@ -500,8 +501,7 @@ let private seenFacts
                 {
                     Id = c.id
                     Owner = c.owner.username
-                    RoomName = room.name
-                    Pos = posOf c.pos
+                    Pos = RoomPos.at room.name (posOf c.pos)
                     Body = c.body |> Array.map (fun p -> bodyPartOf p.``type``) |> Array.toList
                 }
                 : HostileInfo)

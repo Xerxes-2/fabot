@@ -249,13 +249,19 @@ if (command === "console") {
 
   // The wire shape written by ObserveMemory.fs:
   //   { episodes: [{ opened, last, roster: [{ id, owner, body: { part: n } }],
-  //                  closest?: { range, x, y, t }, losses: [{ creep, t }],
+  //                  closest?: { range, room, x, y, t },
+  //                  losses: [{ creep, t }],
   //                  damage }],
   //     outposts: [{ room, opened, last, expiry, basis }],
   //     rivalHeld: { <room>: tick },
   //     living: [creep], hits: { <structure id>: hits } }
   // Stored oldest first like the Transition log's ring, printed newest
-  // first. `closest` is simply absent when nothing of ours could be placed.
+  // first. `closest` is simply absent when nothing of ours could be placed,
+  // and since #216 R3 it names the room the approach was measured in
+  // (#204): the episode is the colony's and names no room of its own (ADR
+  // 0028), so a bare coordinate read as home's could not tell an
+  // [[outpost]]'s raid from one at the door. An episode written before that
+  // carries no room and prints the coordinate alone.
   // The bot writes this leaf every tick, raid or no raid, so an absent leaf
   // is a missing channel and never an empty one — a missing leaf comes back
   // with no data, a missing intermediate (fresh respawn, no Memory.fabot at
@@ -292,7 +298,8 @@ if (command === "console") {
       console.log(
         e.closest
           ? `  closest approach: range ${e.closest.range} ` +
-              `at (${e.closest.x},${e.closest.y}) on t${e.closest.t}`
+              `at ${e.closest.room ? `${e.closest.room} ` : ""}` +
+              `(${e.closest.x},${e.closest.y}) on t${e.closest.t}`
           : "  closest approach: nothing of ours could be placed",
       );
       const losses = e.losses ?? [];

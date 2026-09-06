@@ -234,6 +234,11 @@ let private encodeEpisode (episode: RaidEpisode) =
     | Some approach ->
         let c = createEmpty<obj>
         c?range <- approach.Range
+        // The room the approach was measured in (#204): the episode is
+        // the colony's and names none of its own (ADR 0028), so without
+        // this the tile read as home's coordinates whichever room the
+        // raider stood in.
+        c?room <- approach.Pos.Room
         c?x <- approach.Pos.X
         c?y <- approach.Pos.Y
         c?t <- approach.Tick
@@ -281,6 +286,17 @@ let private decodeEpisode (raw: obj) : RaidEpisode =
                         Range = unbox<int> raw?closest?range
                         Pos =
                             {
+                                // An approach written before #204 carries
+                                // no room; the empty name is what it
+                                // reads as, exactly as a projection that
+                                // names no room does
+                                // (`SpatialInfo.homeName`), rather than
+                                // costing the whole episode its row.
+                                Room =
+                                    if isNull raw?closest?room then
+                                        ""
+                                    else
+                                        string raw?closest?room
                                 X = unbox<int> raw?closest?x
                                 Y = unbox<int> raw?closest?y
                             }
@@ -599,7 +615,13 @@ let saveRaids (home: string) (state: RaidState) =
 /// record is this tick's plan, so the next tick writes the whole of it.
 /// One tile as a wire object. The deferral rows carry two of them and a
 /// tile named `x`/`y` twice over would say which is which nowhere.
-let private tileObject (tile: Pos) =
+///
+/// The room is not written: every row of this leaf is the Layout's, the
+/// Layout plans one room (ADR 0011), and the leaf is already filed under
+/// that colony's home name. The tile carries its room in Core since #216
+/// R3 (ADR 0052 decision 2); on the wire the room is the leaf's key, and
+/// two spellings of one fact is what the record is written to avoid.
+let private tileObject (tile: RoomPos) =
     let o = createEmpty<obj>
     o?x <- tile.X
     o?y <- tile.Y

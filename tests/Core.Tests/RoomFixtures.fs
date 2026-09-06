@@ -794,6 +794,6 @@ let colonyAt (capture: RoomCapture) (level: int) (bank: int) : ColonyView =
         // One colony over one captured room: every body in it is this
         // colony's, so there is nobody else's to carry (ADR 0052 decision
         // 1), and it raises no child, so it borrows nothing.
-        Foreign = Map.empty
+        Foreign = Set.empty
         Borrowed = { Rooms = [] }
     }

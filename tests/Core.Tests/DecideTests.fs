@@ -177,7 +177,7 @@ let bareRespawn =
         // its own: another colony's creeps are the ones this one cannot
         // move and does not price (ADR 0052 decision 1), and the fixtures
         // that need one put it here by name.
-        Foreign = Map.empty
+        Foreign = Set.empty
         // And nothing borrowed: this colony raises no child, so no room's
         // Upgrade and Build are hers to take (ADR 0047 decision 4).
         Borrowed = { Rooms = [] }
@@ -988,7 +988,7 @@ let withTargets targets (room: SpatialInfo) =
 let placementIntents intents =
     intents
     |> List.choose (function
-        | PlaceConstructionSite(room, pos, kind) -> Some(room, pos, kind)
+        | PlaceConstructionSite(tile, kind) -> Some(tile.Room, RoomPos.pos tile, kind)
         | _ -> None)
 
 let placedTiles intents =
@@ -1730,8 +1730,8 @@ let layoutTests =
                     [
                         {
                             Target = ContainerTarget.Source "src-a"
-                            Pick = pick
-                            Serving = orphan
+                            Pick = RoomPos.at (SpatialInfo.homeName colony.Spatial) pick
+                            Serving = RoomPos.at (SpatialInfo.homeName colony.Spatial) orphan
                         }
                     ]
                     "the record names the target, the tile the plan picked and the tile serving it"
@@ -1753,7 +1753,7 @@ let layoutTests =
                     }
 
                 Expect.equal
-                    (Atlas.posts (Atlas.ofView built))
+                    (Atlas.postsIn (Atlas.ofView built) (SpatialInfo.homeName built.Spatial))
                     (Set.singleton orphan)
                     "one Post, on the Seat the container actually stands on"
 
@@ -1786,7 +1786,8 @@ let layoutTests =
                     "the pending site serves the source: its own pick is not placed"
 
                 Expect.equal
-                    (after.Memo.DeferredContainers |> List.map (fun d -> d.Target, d.Serving))
+                    (after.Memo.DeferredContainers
+                     |> List.map (fun d -> d.Target, RoomPos.pos d.Serving))
                     [ ContainerTarget.Source "src-a", orphan ]
                     "the deferral is recorded for a pending site as for a standing container"
             }
@@ -1829,8 +1830,8 @@ let layoutTests =
                     [
                         {
                             Target = ContainerTarget.Controller
-                            Pick = pick
-                            Serving = orphan
+                            Pick = RoomPos.at (SpatialInfo.homeName colony.Spatial) pick
+                            Serving = RoomPos.at (SpatialInfo.homeName colony.Spatial) orphan
                         }
                     ]
                     "the controller's deferral is recorded beside the sources'"
@@ -1861,6 +1862,153 @@ let layoutTests =
                 Expect.isEmpty
                     after.Memo.DeferredContainers
                     "a pick that never moved lost nothing and records nothing"
+            }
+
+            test "a spawn the projection files in another room plans nothing here (#191)" {
+                // The accident ADR 0052 decision 2 is written against, and
+                // the one the Layout was carrying until #216 R3: `Spawns`
+                // is a list, and the second entry's tile used to be read
+                // onto the *home* grid whatever room the projection filed
+                // it under. On the live colony that was Spawn2 standing in
+                // the child room, setting this room's cluster parity, its
+                // ordering distance and a trunk goal out of a coordinate
+                // fifty tiles and a border away.
+                //
+                // Pairwise on the room and on nothing else: the same
+                // spawn, the same id, the same coordinate, filed once in
+                // the neighbour and once at home. The neighbour's changes
+                // no site; home's changes several — which is what says the
+                // fixture could have shown a difference, so the first
+                // assertion is a rule holding rather than a coordinate
+                // that happened not to matter.
+                //
+                // The neighbour half is hand-built and has to be:
+                // `ColonyView.ofWorld` cuts `Spawns` from the home room's
+                // facts alone since R2a, so no view the shell can cut puts
+                // a spawn of this colony's in another room's layer. The
+                // guard closes the shape at the site that reads the tile;
+                // the narrowing that closes the live path is upstream.
+                let colony = trunkColony 4
+                let stray = { X = 12; Y = 34 }
+
+                let secondSpawn =
+                    {
+                        Name = "Spawn2"
+                        Id = "spawn-2"
+                        RoomName = "W1N1"
+                        IsSpawning = false
+                    }
+
+                let casting (view: ColonyView) =
+                    { view with
+                        Spawns = view.Spawns @ [ secondSpawn ]
+                    }
+
+                // The neighbour's layer, laid by hand: `withOutpost` is
+                // defined below this list, and the whole of what this case
+                // needs is the id filed under another room's name.
+                let elsewhere =
+                    { casting colony with
+                        Spatial =
+                            { colony.Spatial with
+                                Rooms =
+                                    Map.add
+                                        "W2N1"
+                                        { RoomLayer.empty with
+                                            TargetPositions = Map.ofList [ "spawn-2", stray ]
+                                        }
+                                        colony.Spatial.Rooms
+                                TargetKinds =
+                                    Map.add
+                                        "spawn-2"
+                                        (Structure BuiltKind.Spawn)
+                                        colony.Spatial.TargetKinds
+                            }
+                    }
+
+                let here =
+                    { casting colony with
+                        Spatial =
+                            colony.Spatial
+                            |> withTargets [ "spawn-2", stray, Structure BuiltKind.Spawn ]
+                    }
+
+                let plan (view: ColonyView) =
+                    placementIntents (decide view Map.empty Set.empty None).Intents
+
+                Expect.equal
+                    (plan elsewhere)
+                    (plan colony)
+                    "a spawn standing in the neighbour draws no trunk and moves no site here"
+
+                Expect.notEqual
+                    (plan here)
+                    (plan colony)
+                    "while the same coordinate in this room does: the room is the whole difference"
+            }
+
+            test "a neighbour's extension site is no charge against this room's allowance (#140)" {
+                // The gap rule is `allowed at RCL - built - pending`, and
+                // the allowance is *this* controller's — so the census
+                // subtracted from it has to be this room's. The six kind
+                // counts read the flat, id-keyed census until #216 R3 and
+                // answered for every room the projection carried, and ADR
+                // 0052 decision 7's borrowing is what made that reachable:
+                // a mother carries a bootstrapping child's construction
+                // sites so her workers may build them
+                // (`ColonyView.borrowed` keeps every `Site _`), so the
+                // child's extension sites came off her own allowance and
+                // she placed that many fewer, for the whole bootstrap
+                // window.
+                //
+                // Pairwise on the room the site is filed under: the same
+                // id at the same coordinate, once in the neighbour's layer
+                // and once in this room's. The neighbour's takes nothing;
+                // this room's takes exactly one slot — which is what says
+                // the fixture could have shown a difference.
+                let colony = atLevel 2 (openRoom 3)
+                let stray = { X = 30; Y = 30 }
+
+                let joined =
+                    { colony with
+                        Spatial =
+                            { colony.Spatial with
+                                Rooms =
+                                    Map.add
+                                        "W1N2"
+                                        { RoomLayer.empty with
+                                            TargetPositions = Map.ofList [ "ext-out", stray ]
+                                        }
+                                        colony.Spatial.Rooms
+                                TargetKinds =
+                                    Map.add
+                                        "ext-out"
+                                        (Site BuiltKind.Extension)
+                                        colony.Spatial.TargetKinds
+                            }
+                    }
+
+                let here =
+                    { colony with
+                        Spatial =
+                            colony.Spatial
+                            |> withTargets [ "ext-out", stray, Site BuiltKind.Extension ]
+                    }
+
+                let extensions (view: ColonyView) =
+                    sitesOfKind Extension (decide view Map.empty Set.empty None).Intents
+
+                Expect.hasLength (extensions colony) 5 "the premise: RCL2's whole allowance"
+
+                Expect.equal
+                    (extensions joined)
+                    (extensions colony)
+                    "a site standing in the neighbour is no charge against this room's five"
+
+                Expect.hasLength
+                    (extensions here)
+                    4
+                    "while the same site in this room is: one slot of the five is taken"
             }
         ]
 
@@ -2240,6 +2388,13 @@ let rampartTests =
             }
         ]
 
+/// A tile of the room the Layout fixtures below plan. `openRoom` names
+/// its projection "W1N1", and every tile the Layout records carries the
+/// room it planned since #216 R3 (ADR 0052 decision 2) — so an
+/// expectation written as a grid coordinate joins it back here, and a
+/// footing recorded in any other room fails it.
+let plannedTile (tile: Pos) : RoomPos = RoomPos.at "W1N1" tile
+
 let footingRoom = openRoom 6 |> withTargets [ "src-a", { X = 25; Y = 22 }, Source ]
 
 /// The two tiles `footingRoom` holds as Link footings: one beside the
@@ -2355,20 +2510,22 @@ let linkFootingTests =
                     memo.ServedFootings
                     [
                         {
-                            Target = { X = 24; Y = 23 }
+                            Target = plannedTile { X = 24; Y = 23 }
                             Kind = FootingKind.SourceContainer
-                            Tile = { X = 23; Y = 23 }
+                            Tile = plannedTile { X = 23; Y = 23 }
                         }
                         {
-                            Target = { X = 24; Y = 24 }
+                            Target = plannedTile { X = 24; Y = 24 }
                             Kind = FootingKind.Storage
-                            Tile = { X = 24; Y = 25 }
+                            Tile = plannedTile { X = 24; Y = 25 }
                         }
                     ]
                     "both targets, each beside the tile held for its link"
 
                 Expect.equal
-                    (memo.ServedFootings |> List.map (fun footing -> footing.Tile) |> Set.ofList)
+                    (memo.ServedFootings
+                     |> List.map (fun footing -> RoomPos.pos footing.Tile)
+                     |> Set.ofList)
                     footingTiles
                     "and the tiles are the room's own footings, which no site may take"
             }
@@ -2410,7 +2567,7 @@ let linkFootingTests =
                     memo.UnservedFootings
                     [
                         {
-                            Target = { X = 21; Y = 30 }
+                            Target = plannedTile { X = 21; Y = 30 }
                             Kind = FootingKind.SourceContainer
                         }
                     ]
@@ -3077,8 +3234,7 @@ let censusSignatureTests =
                                 {
                                     Id = "h1"
                                     Owner = "raider"
-                                    RoomName = "W1N1"
-                                    Pos = { X = 30; Y = 25 }
+                                    Pos = RoomPos.at "W1N1" { X = 30; Y = 25 }
                                     Body = [ Attack; Move ]
                                 }
                             ]
@@ -3135,8 +3291,7 @@ let censusSignatureTests =
                                 {
                                     Id = "h2"
                                     Owner = "raider"
-                                    RoomName = "W1N2"
-                                    Pos = { X = 26; Y = 26 }
+                                    Pos = RoomPos.at "W1N2" { X = 26; Y = 26 }
                                     Body = [ Attack; Move ]
                                 }
                             ]
@@ -3336,7 +3491,7 @@ let staffedColony creeps positions colony =
 let sentinelMemo snapshot =
     {
         Signature = censusSignature snapshot
-        SiteIntents = [ PlaceConstructionSite("W1N1", { X = 1; Y = 1 }, Tower) ]
+        SiteIntents = [ PlaceConstructionSite(RoomPos.at "W1N1" { X = 1; Y = 1 }, Tower) ]
         UnservedFootings = []
         ServedFootings = []
         UnroutedTrunks = []
@@ -3408,7 +3563,7 @@ let planMemoTests =
                 let lost =
                     [
                         {
-                            Target = { X = 21; Y = 30 }
+                            Target = plannedTile { X = 21; Y = 30 }
                             Kind = FootingKind.SourceContainer
                         }
                     ]
@@ -4519,7 +4674,7 @@ let unreachableTests =
         ]
 
 /// The tile one step in `direction` from `pos` — mirrors the engine's move.
-let stepFrom pos direction =
+let stepFrom (pos: Pos) direction =
     match direction with
     | Top -> { pos with Y = pos.Y - 1 }
     | TopRight -> { X = pos.X + 1; Y = pos.Y - 1 }
@@ -4619,9 +4774,9 @@ let laneWith pocket ours foreign =
                 })
         Foreign =
             if foreign then
-                Map.ofList [ "W1N1", Set.singleton { X = 12; Y = 12 } ]
+                Set.singleton (RoomPos.at "W1N1" { X = 12; Y = 12 })
             else
-                Map.empty
+                Set.empty
     }
 
 [<Tests>]
@@ -5301,9 +5456,9 @@ let arbitrationTests =
                         Spatial = bypass
                         Foreign =
                             if foreign then
-                                Map.ofList [ "W1N1", Set.singleton { X = 12; Y = 12 } ]
+                                Set.singleton (RoomPos.at "W1N1" { X = 12; Y = 12 })
                             else
-                                Map.empty
+                                Set.empty
                     }
 
                 let assigned = [ "eb", Harvest "src-e" ]
@@ -5361,7 +5516,7 @@ let arbitrationTests =
                                 { layer with
                                     CreepPositions = Map.ofList [ "an", { X = 12; Y = 12 } ]
                                 })
-                        Foreign = Map.ofList [ "W1N1", Set.singleton { X = 11; Y = 12 } ]
+                        Foreign = Set.singleton (RoomPos.at "W1N1" { X = 11; Y = 12 })
                     }
 
                 let movementFor view assigned =
@@ -7330,8 +7485,7 @@ let hostileAt id pos body : HostileInfo =
     {
         Id = id
         Owner = "raider"
-        RoomName = ""
-        Pos = pos
+        Pos = RoomPos.at "" pos
         Body = body
     }
 
@@ -7352,7 +7506,7 @@ let facing hostiles (snapshot: ColonyView) =
             hostiles
             |> List.map (fun (h: HostileInfo) ->
                 { h with
-                    RoomName = SpatialInfo.homeName snapshot.Spatial
+                    Pos = RoomPos.at (SpatialInfo.homeName snapshot.Spatial) (RoomPos.pos h.Pos)
                 })
     }
 
@@ -11049,7 +11203,11 @@ let haulerTests =
                 let home = SpatialInfo.homeName snapshot.Spatial
 
                 let roundTrip from =
-                    Atlas.haulRoundTripTicks atlas haulerBody home from home { X = 12; Y = 10 }
+                    Atlas.haulRoundTripTicks
+                        atlas
+                        haulerBody
+                        (RoomPos.at home from)
+                        (RoomPos.at home { X = 12; Y = 10 })
 
                 Expect.equal
                     (roundTrip { X = 9; Y = 10 })
@@ -12339,10 +12497,8 @@ let haulRoundingTests =
                     Atlas.haulRoundTripTicks
                         atlas
                         haulRoundingBody
-                        home
-                        from
-                        home
-                        { X = 25; Y = 25 }
+                        (RoomPos.at home from)
+                        (RoomPos.at home { X = 25; Y = 25 })
 
                 Expect.equal
                     (roundTrip { X = 39; Y = 25 })
@@ -12387,10 +12543,8 @@ let haulRoundingTests =
                     (Atlas.haulRoundTripTicks
                         atlas
                         haulRoundingBody
-                        home
-                        { X = 25; Y = 4 }
-                        home
-                        { X = 25; Y = 25 })
+                        (RoomPos.at home { X = 25; Y = 4 })
+                        (RoomPos.at home { X = 25; Y = 25 }))
                     (Some 40)
                     "the premise: twenty paved steps out and back"
 
@@ -12441,10 +12595,8 @@ let haulRoundingTests =
                     (Atlas.haulRoundTripTicks
                         atlas
                         (bodyFor haulerPattern 1300)
-                        home
-                        { X = 39; Y = 25 }
-                        home
-                        { X = 25; Y = 25 })
+                        (RoomPos.at home { X = 39; Y = 25 })
+                        (RoomPos.at home { X = 25; Y = 25 }))
                     (Some 26)
                     "the premise: the sixteen-Carry body pays the same paved tick a tile"
 
@@ -12914,7 +13066,7 @@ let outpostWorkforceTests =
                     )
 
                 Expect.contains
-                    (Atlas.posts (Atlas.ofView atTarget))
+                    (Atlas.postsIn (Atlas.ofView atTarget) (SpatialInfo.homeName atTarget.Spatial))
                     { X = 11; Y = 10 }
                     "the premise: (11,10) really is a Post of the home room"
 
@@ -14220,12 +14372,12 @@ let threatTests =
                 let colony = facingBody { X = 25; Y = 22 } [ Attack; Move ]
 
                 Expect.equal
-                    (colony.Hostiles |> List.map (fun h -> h.RoomName))
+                    (colony.Hostiles |> List.map (fun h -> h.Pos.Room))
                     [ "W1N1" ]
                     "the hostile names the room, not the empty default"
 
                 Expect.equal
-                    (colony.Hostiles |> List.map (fun h -> h.RoomName))
+                    (colony.Hostiles |> List.map (fun h -> h.Pos.Room))
                     [ SpatialInfo.homeName colony.Spatial ]
                     "and it is the room the projection files its own geometry under"
             }
@@ -16400,8 +16552,9 @@ let outpostTests =
                 let north =
                     {
                         RoomName = "W12S27"
-                        Sources = [ "6a8caabadd4872bccd3194a6", { X = 16; Y = 45 } ]
-                        Controller = "6a8caabadd4872bccd3194a5", { X = 37; Y = 43 }
+                        Sources =
+                            [ "6a8caabadd4872bccd3194a6", { Room = "W12S27"; X = 16; Y = 45 } ]
+                        Controller = "6a8caabadd4872bccd3194a5", { Room = "W12S27"; X = 37; Y = 43 }
                     }
 
                 let west =
@@ -16409,10 +16562,10 @@ let outpostTests =
                         RoomName = "W13S28"
                         Sources =
                             [
-                                "6a8caaaddd4872bccd319362", { X = 16; Y = 7 }
-                                "6a8caaaddd4872bccd319361", { X = 18; Y = 4 }
+                                "6a8caaaddd4872bccd319362", { Room = "W13S28"; X = 16; Y = 7 }
+                                "6a8caaaddd4872bccd319361", { Room = "W13S28"; X = 18; Y = 4 }
                             ]
-                        Controller = "6a8caaaddd4872bccd319363", { X = 24; Y = 17 }
+                        Controller = "6a8caaaddd4872bccd319363", { Room = "W13S28"; X = 24; Y = 17 }
                     }
 
                 Expect.equal
@@ -16449,13 +16602,13 @@ let outpostTests =
                 let declaration =
                     {
                         RoomName = "W1N2"
-                        Sources = [ "src-out", { X = 10; Y = 46 } ]
+                        Sources = [ "src-out", { Room = "W1N2"; X = 10; Y = 46 } ]
                         // Off the corridor on purpose: what the controller
                         // is doing to this fixture is standing in
                         // `Obstacles`, and a controller on the corridor
                         // would seal it and make the comparison below about
                         // reachability instead of about distance.
-                        Controller = "ctrl-out", { X = 11; Y = 44 }
+                        Controller = "ctrl-out", { Room = "W1N2"; X = 11; Y = 44 }
                     }
 
                 let blind = northBorderColony { X = 10; Y = 38 } |> withNorthOutpost None
@@ -16532,8 +16685,8 @@ let outpostTests =
                 let declaration =
                     {
                         RoomName = "W1N2"
-                        Sources = [ "src-out", { X = 10; Y = 47 } ]
-                        Controller = "ctrl-out", { X = 11; Y = 44 }
+                        Sources = [ "src-out", { Room = "W1N2"; X = 10; Y = 47 } ]
+                        Controller = "ctrl-out", { Room = "W1N2"; X = 11; Y = 44 }
                     }
 
                 let colony = northBorderColony { X = 10; Y = 38 }
@@ -16594,8 +16747,8 @@ let outpostTests =
                 let declaration =
                     {
                         RoomName = "W1N2"
-                        Sources = [ "src-out", { X = 10; Y = 46 } ]
-                        Controller = "ctrl-out", { X = 11; Y = 44 }
+                        Sources = [ "src-out", { Room = "W1N2"; X = 10; Y = 46 } ]
+                        Controller = "ctrl-out", { Room = "W1N2"; X = 11; Y = 44 }
                     }
 
                 Expect.equal
@@ -16615,8 +16768,8 @@ let outpostTests =
                 let declaration =
                     {
                         RoomName = "W9N9"
-                        Sources = [ "src-gone", { X = 10; Y = 46 } ]
-                        Controller = "ctrl-gone", { X = 11; Y = 44 }
+                        Sources = [ "src-gone", { Room = "W9N9"; X = 10; Y = 46 } ]
+                        Controller = "ctrl-gone", { Room = "W9N9"; X = 11; Y = 44 }
                     }
 
                 let blind = northBorderColony { X = 10; Y = 38 } |> withNorthOutpost None
@@ -16647,6 +16800,54 @@ let outpostTests =
                     "an empty scan set — no spawn, so no home room — pools nothing at all"
             }
 
+            test "a declared rock filed under another room is neither placed nor pooled" {
+                // The declaration's tiles carry their own room since ADR
+                // 0052 decision 2, so "this rock is in this outpost" is a
+                // thing a human can now get *wrong* in the constant — it
+                // used to be true by construction, a bare `Pos` beside
+                // `RoomName` with nothing to disagree with. `Outpost.place`
+                // drops such a tile rather than writing it onto this room's
+                // coordinate (the #191 phantom), and the pool has to drop
+                // it in the same breath: an unplaced target prices at 0
+                // (ADR 0004's escape), so a pooled-but-unplaced rock *wins*
+                // its tier, takes no Seat cap because the Atlas can seat no
+                // tile for it, and holds every applicable worker on a
+                // Harvest the engine cannot resolve.
+                //
+                // Pairwise on the one field that moved: the same id at the
+                // same coordinate, once filed under the outpost's own room
+                // and once under the mother's.
+                let atRoom room =
+                    {
+                        RoomName = "W1N2"
+                        Sources = [ "src-out", { Room = room; X = 10; Y = 46 } ]
+                        Controller = "ctrl-out", { Room = "W1N2"; X = 11; Y = 44 }
+                    }
+
+                let blind = northBorderColony { X = 10; Y = 38 } |> withNorthOutpost None
+
+                let placedIn declaration =
+                    Outpost.place [ declaration ] blind.Spatial
+                    |> fun spatial -> SpatialInfo.placementOf spatial "src-out"
+
+                Expect.equal
+                    (placedIn (atRoom "W1N2"))
+                    (Some { Room = "W1N2"; X = 10; Y = 46 })
+                    "its own room: the declared rock is placed"
+
+                Expect.equal
+                    (Outpost.pooledSources [ "W1N2" ] [ atRoom "W1N2" ] blind.Sources)
+                    (blind.Sources @ [ { Id = "src-out"; TicksToRestock = 0 } ])
+                    "its own room: and pooled beside the seen rocks"
+
+                Expect.equal (placedIn (atRoom "W1N1")) None "the mother's room: nothing places it"
+
+                Expect.equal
+                    (Outpost.pooledSources [ "W1N2" ] [ atRoom "W1N1" ] blind.Sources)
+                    blind.Sources
+                    "the mother's room: and nothing pools it either — the two gates are one"
+            }
+
             test "a declared controller stands in Obstacles, so no Work Area offers its tile" {
                 // The third thing a declaration puts in the projection
                 // beside the tiles and the kinds: the controller's own tile
@@ -16667,8 +16868,8 @@ let outpostTests =
                 let declaration =
                     {
                         RoomName = "W1N2"
-                        Sources = [ "src-out", { X = 10; Y = 46 } ]
-                        Controller = "ctrl-out", { X = 10; Y = 42 }
+                        Sources = [ "src-out", { Room = "W1N2"; X = 10; Y = 46 } ]
+                        Controller = "ctrl-out", { Room = "W1N2"; X = 10; Y = 42 }
                     }
 
                 let blind = northBorderColony { X = 10; Y = 38 } |> withNorthOutpost None
@@ -16686,7 +16887,7 @@ let outpostTests =
                     "the premise: the corridor gives the controller ground to be reserved from"
 
                 Expect.isFalse
-                    (Set.contains { X = 10; Y = 42 } area)
+                    (Set.contains (RoomPos.at "W1N2" { X = 10; Y = 42 }) area)
                     "and the controller's own tile is not part of it, standing in Obstacles"
             }
         ]
@@ -17002,7 +17203,7 @@ let private containerSites (colony: ColonyView) =
 
     intents
     |> List.choose (function
-        | PlaceConstructionSite(room, pos, Container) -> Some(room, pos)
+        | PlaceConstructionSite(tile, Container) -> Some(tile.Room, RoomPos.pos tile)
         | _ -> None)
 
 /// `src-out` sits at (10,44), which no case lays ground on, so its Seats
@@ -17041,7 +17242,7 @@ let outpostContainerTests =
                     |> withOutpostGround "W1N2" detourGround [ "src-out", outpostSource, Source ]
 
                 Expect.equal
-                    (Atlas.seatTilesOf (Atlas.ofView colony) "src-out")
+                    (Atlas.seatTilesOf (Atlas.ofView colony) "src-out" |> RoomPos.inRoom "W1N2")
                     (Set.ofList [ { X = 10; Y = 45 }; { X = 11; Y = 43 } ])
                     "the premise: the rock has two Seats, and the nearer one to the border is (10,45)"
 
@@ -17176,7 +17377,7 @@ let outpostContainerTests =
                     |> withOutpostGround "W1N2" ground [ "src-out", outpostSource, Source ]
 
                 Expect.equal
-                    (Atlas.seatTilesOf (Atlas.ofView colony) "src-out")
+                    (Atlas.seatTilesOf (Atlas.ofView colony) "src-out" |> RoomPos.inRoom "W1N2")
                     (Set.ofList [ { X = 9; Y = 45 }; { X = 11; Y = 45 } ])
                     "the premise: two Seats, one swamp and one plain, over the same apron"
 
@@ -17461,10 +17662,8 @@ let outpostHaulTests =
                     Atlas.haulRoundTripTicks
                         atlas
                         (bodyFor haulerPattern 600)
-                        "W1N2"
-                        from
-                        "W1N1"
-                        { X = 25; Y = 10 }
+                        (RoomPos.at "W1N2" from)
+                        (RoomPos.at "W1N1" { X = 25; Y = 10 })
 
                 Expect.equal
                     (roundTrip { X = 25; Y = 41 })
@@ -18227,7 +18426,7 @@ let private twoRoomColony (hostiles: HostileInfo list) =
 /// put a hostile in either room (ADR 0041).
 let private hostileIn room pos body =
     { hostileAt "h-1" pos body with
-        RoomName = room
+        Pos = RoomPos.at room pos
     }
 
 [<Tests>]
@@ -18260,6 +18459,42 @@ let layeredThreatTests =
                     (outcomeOf raided)
                     (outcomeOf quiet)
                     "a Reach in the home room reaches no tile of the outpost"
+            }
+
+            test "the Reach is filed under the room the hostile's own tile names" {
+                // The join written as the tile's type since #216 R3 (ADR
+                // 0052 decision 2), where it used to be a `RoomName` field
+                // beside a bare `Pos` that nothing made agree with it.
+                // Pairwise on the room and on nothing else: the same body
+                // on the same coordinate, filed once in each room, and the
+                // Reach that comes out is that room's and empty in the
+                // other. The two `decide`-level cases either side of this
+                // one say what that costs a creep; this one says where the
+                // tiles went.
+                let reachIn room hostiles =
+                    Threats.reachIn
+                        (let colony = twoRoomColony hostiles
+                         threatsOf colony (Atlas.ofView colony))
+                        room
+
+                let atHome = [ hostileIn "W1N1" { X = 10; Y = 45 } [ Attack; Move ] ]
+                let inOutpost = [ hostileIn "W1N2" { X = 10; Y = 45 } [ Attack; Move ] ]
+
+                Expect.isTrue
+                    (Set.contains { X = 10; Y = 45 } (reachIn "W1N1" atHome))
+                    "filed at home, the hostile's own tile is in the home room's Reach"
+
+                Expect.isEmpty
+                    (reachIn "W1N2" atHome)
+                    "and the outpost's Reach is empty, though it holds that very coordinate"
+
+                Expect.isTrue
+                    (Set.contains { X = 10; Y = 45 } (reachIn "W1N2" inOutpost))
+                    "filed in the outpost, the same tile is in the outpost's Reach"
+
+                Expect.isEmpty
+                    (reachIn "W1N1" inOutpost)
+                    "and the home room's is empty: one coordinate, two rooms, one Reach"
             }
 
             test "and the mirror: an outpost Threat digs no hole at home" {
@@ -18534,7 +18769,7 @@ let private reserveDeclaration =
         // whether vision found it or a declaration laid it, and one on the
         // corridor would seal the room rather than leave the tiles beside
         // it to stand on.
-        Controller = "ctrl-out", { X = 11; Y = 44 }
+        Controller = "ctrl-out", { Room = "W1N2"; X = 11; Y = 44 }
     }
 
 /// The colony the Reserve tests run in: the home corridor with no Task in
@@ -18570,7 +18805,7 @@ let private westReserveDeclaration =
     {
         RoomName = "W2N1"
         Sources = []
-        Controller = "ctrl-west", { X = 41; Y = 25 }
+        Controller = "ctrl-west", { Room = "W2N1"; X = 41; Y = 25 }
     }
 
 /// The colony with both outposts declared and a west arm of home leading
@@ -19814,8 +20049,8 @@ let private nurseryPair =
                 [
                     {
                         RoomName = "W1N2"
-                        Sources = [ "src-out", { X = 10; Y = 46 } ]
-                        Controller = "ctrl-out", { X = 10; Y = 42 }
+                        Sources = [ "src-out", { Room = "W1N2"; X = 10; Y = 46 } ]
+                        Controller = "ctrl-out", { Room = "W1N2"; X = 10; Y = 42 }
                     }
                 ]
             Mother = None
@@ -20151,7 +20386,7 @@ let bootstrapTests =
                         Hostiles =
                             [
                                 { hostileAt "h-1" { X = 10; Y = 42 } [ Attack; Move ] with
-                                    RoomName = "W1N2"
+                                    Pos = RoomPos.at "W1N2" { X = 10; Y = 42 }
                                 }
                             ]
                     }
@@ -21597,8 +21832,8 @@ let supplyFloorTests =
 let private gatedOutpost (room, rock: Pos, _posted) : Outpost =
     {
         RoomName = room
-        Sources = [ $"src-{room}", rock ]
-        Controller = $"ctrl-{room}", { rock with Y = rock.Y + 2 }
+        Sources = [ $"src-{room}", RoomPos.at room rock ]
+        Controller = $"ctrl-{room}", RoomPos.at room { rock with Y = rock.Y + 2 }
     }
 
 /// The colony the shell assembles for a given declaration under a given
@@ -21632,7 +21867,7 @@ let private gatedColony declarations shut creeps =
     reserverColony
         (worked
          |> List.map (fun (outpost: Outpost) ->
-             outpost.RoomName, outpost.Sources |> List.head |> snd, true))
+             outpost.RoomName, outpost.Sources |> List.head |> snd |> RoomPos.pos, true))
         creeps
         (worked |> List.map (fun outpost -> outpost.RoomName, reservedRoom true 5000))
 
@@ -23445,7 +23680,7 @@ let postSiteTests =
                 let pending = atlasOf BuiltKind.Container
 
                 Expect.equal
-                    (Atlas.postsOf pending "src-out")
+                    (Atlas.postsOf pending "src-out" |> RoomPos.inRoom "W1N2")
                     (Set.singleton { X = 10; Y = 45 })
                     "the site is the rock's Post"
 

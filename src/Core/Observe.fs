@@ -172,7 +172,15 @@ type RosterRow =
 /// The smallest range recorded between any hostile and anything of ours,
 /// with the tile the hostile stood on and the tick it was measured at —
 /// the number that separates a probe at the room edge from a loss.
-type Approach = { Range: int; Pos: Pos; Tick: int }
+///
+/// The tile carries its room since #216 R3 (#204). The episode is
+/// colony-level and names no room of its own (ADR 0028), so before this
+/// the one coordinate it did record was unjoined: an operator reading
+/// `observe.mjs raids` could not tell an [[outpost]]'s raid from a home
+/// one, and the fold that picked the minimum measured every hostile
+/// against every tile of ours whatever room either stood in. Both are the
+/// same missing join, and `RoomPos` is it (ADR 0052 decision 2).
+type Approach = { Range: int; Pos: RoomPos; Tick: int }
 
 /// One owned creep gone while a hostile stood in the room, stamped at the
 /// tick it was last seen alive. Recorded here precisely because the
@@ -184,11 +192,11 @@ type Loss = { Creep: string; Tick: int }
 /// hostiles keep appearing, closed by a quiet gap.
 ///
 /// Colony-level as ADR 0028 made it, and so it names no room: a raid that
-/// crosses a border is one episode, and `Closest` records the tile without
-/// the room it is a tile of. That is a gap and not a decision — an
-/// operator reading `observe.mjs raids` cannot tell an [[outpost]] raid
-/// from a home one — left to its own issue rather than widened into #201's
-/// emergency fix.
+/// crosses a border is one episode. That much is the decision; what used
+/// to make it a gap as well was `Closest` recording a tile with no room to
+/// read it in, so an operator could not tell an [[outpost]] raid from a
+/// home one. That closed with #204 — the approach is a `RoomPos` and
+/// carries the room it was measured in (ADR 0052 decision 2).
 type RaidEpisode =
     {
         /// The tick the episode opened.
@@ -431,14 +439,16 @@ let quietGap = 50
 /// Keep is losing is watched through its hits instead — the damage below.
 /// An id the projection cannot place contributes nothing (ADR 0004).
 ///
-/// Of one room, named by the caller (ADR 0041). Range is Chebyshev over a
-/// bare `Pos`, which carries no room, so a set unioned across the
-/// projection would put one of ours in the outpost on the same coordinate
-/// as a raider at home and record a raid that reached range 0 without a
-/// creep of theirs ever standing beside a creep of ours. A room the
-/// projection holds no layer for places nothing of ours, which is the same
-/// answer as a room holding nothing (ADR 0004).
-let private ourTilesIn (view: ColonyView) (room: string) =
+/// Of one room, named by the caller (ADR 0041), and handed back joined to
+/// it (ADR 0052 decision 2): a set unioned across the projection would put
+/// one of ours in the outpost on the same coordinate as a raider at home
+/// and record a raid that reached range 0 without a creep of theirs ever
+/// standing beside a creep of ours. Since #216 R3 the join is the tiles'
+/// own type and `RoomPos.range` refuses the measure across a border, where
+/// before it was this function's caller remembering to key by room. A room
+/// the projection holds no layer for places nothing of ours, which is the
+/// same answer as a room holding nothing (ADR 0004).
+let private ourTilesIn (view: ColonyView) (room: string) : RoomPos list =
     let layer = SpatialInfo.layerOf view.Spatial room
 
     let structures =
@@ -447,6 +457,7 @@ let private ourTilesIn (view: ColonyView) (room: string) =
         |> List.choose (fun id -> Map.tryFind id layer.TargetPositions)
 
     (layer.CreepPositions |> Map.toList |> List.map snd) @ structures
+    |> List.map (RoomPos.at room)
 
 /// This tick's closest approach, if there is both a hostile and something
 /// of ours to measure it against. The hostile-free tick is the common one
@@ -464,7 +475,7 @@ let private approachAt (view: ColonyView) : Approach option =
     else
         let ours =
             view.Hostiles
-            |> List.map (fun hostile -> hostile.RoomName)
+            |> List.map (fun hostile -> hostile.Pos.Room)
             |> List.distinct
             |> List.map (fun room -> room, ourTilesIn view room)
             |> Map.ofList
@@ -472,9 +483,10 @@ let private approachAt (view: ColonyView) : Approach option =
         let measured =
             view.Hostiles
             |> List.collect (fun hostile ->
-                Map.tryFind hostile.RoomName ours
+                Map.tryFind hostile.Pos.Room ours
                 |> Option.defaultValue []
-                |> List.map (fun tile -> range hostile.Pos tile, hostile.Pos))
+                |> List.choose (fun tile ->
+                    RoomPos.range hostile.Pos tile |> Option.map (fun r -> r, hostile.Pos)))
 
         if List.isEmpty measured then
             None
@@ -757,7 +769,7 @@ let foldRaids
     // widening; it is the *measure* that is one room's.
     let atHome =
         let home = SpatialInfo.homeName view.Spatial
-        view.Hostiles |> List.filter (fun hostile -> hostile.RoomName = home)
+        view.Hostiles |> List.filter (fun hostile -> hostile.Pos.Room = home)
 
     // This tick's hits across the Keep and the ramparts, the next tick's
     // baseline. The kinds are the rule's, never a list of ids: a rampart

@@ -143,8 +143,8 @@ let private declared: Colony list =
                 [
                     {
                         RoomName = outpost
-                        Sources = [ "src-out", { X = 5; Y = 5 } ]
-                        Controller = "ctrl-out", { X = 7; Y = 7 }
+                        Sources = [ "src-out", { Room = outpost; X = 5; Y = 5 } ]
+                        Controller = "ctrl-out", { Room = outpost; X = 7; Y = 7 }
                     }
                 ]
             Mother = None
@@ -260,6 +260,71 @@ let private idsOf (view: ColonyView) =
 
 let private names (view: ColonyView) =
     view.Creeps |> List.map (fun c -> c.Name)
+
+[<Tests>]
+let roomPosTests =
+    testList
+        "a tile that carries its room"
+        [
+            test "range is a measure inside one room, and None across a border" {
+                // ADR 0052 decision 2: two rooms' coordinate systems are
+                // not one metric space, so the answer across a border is
+                // an absence and never a number. Pairwise on the room
+                // alone — the same two coordinates, once in one room and
+                // once in two — because every reader that got this wrong
+                // got it wrong by measuring a distance that does not
+                // exist: a raider in an [[outpost]] at range 0 from home
+                // (#204), a Threat reaching a coordinate of the wrong room
+                // (#138), a container "serving" a source a border away.
+                let here = RoomPos.at mother
+                let there = RoomPos.at child
+
+                Expect.equal
+                    (RoomPos.range (here { X = 10; Y = 10 }) (here { X = 13; Y = 12 }))
+                    (Some 3)
+                    "inside one room it is the Chebyshev distance, as it always was"
+
+                Expect.equal
+                    (RoomPos.range (here { X = 10; Y = 10 }) (there { X = 13; Y = 12 }))
+                    None
+                    "and across a border there is no distance to answer with"
+
+                Expect.equal
+                    (RoomPos.range (here { X = 10; Y = 10 }) (there { X = 10; Y = 10 }))
+                    None
+                    "the shared coordinate least of all: that is the very collision"
+
+                Expect.equal
+                    (RoomPos.range (here { X = 10; Y = 10 }) (here { X = 10; Y = 10 }))
+                    (Some 0)
+                    "while a tile is at range 0 from itself"
+            }
+
+            test "the join and its inverse: a grid tile is one room's, and only that room's" {
+                // The two conversions the Atlas spells at every boundary
+                // (`RoomPos.at`, `RoomPos.pos`), and the set-shaped pair
+                // beside them: `inRoom` is a filter and not a cast, which
+                // is what makes narrowing a mixed set to one room's grid
+                // safe to do at a flood's edge.
+                let tile = { X = 7; Y = 41 }
+
+                Expect.equal (RoomPos.pos (RoomPos.at mother tile)) tile "the room comes off again"
+
+                let mixed = Set.ofList [ RoomPos.at mother tile; RoomPos.at child tile ]
+
+                Expect.equal (Set.count mixed) 2 "one coordinate in two rooms is two tiles"
+
+                Expect.equal
+                    (RoomPos.inRoom mother mixed)
+                    (Set.singleton tile)
+                    "and a room's share of them is that room's grid, the other dropped"
+
+                Expect.equal
+                    (RoomPos.setAt child (Set.singleton tile))
+                    (Set.singleton (RoomPos.at child tile))
+                    "the whole-set join is the tile-at-a-time one"
+            }
+        ]
 
 [<Tests>]
 let worldTests =
@@ -510,22 +575,21 @@ let colonyViewTests =
                     "a body it does not hold stands on no tile of its layers"
 
                 Expect.equal
-                    (Map.tryFind child childView.Foreign)
-                    (Some(Set.singleton pioneerTile))
+                    childView.Foreign
+                    (Set.singleton (RoomPos.at child pioneerTile))
                     "and is carried as another colony's occupant instead (#220)"
             }
 
             test "a colony alone in its rooms carries no foreign body" {
                 let motherView = viewOf pairWorld mother
 
-                Expect.equal
-                    (Map.tryFind mother motherView.Foreign)
-                    None
+                Expect.isFalse
+                    (motherView.Foreign |> Set.exists (fun tile -> tile.Room = mother))
                     "her home room holds only her own"
 
                 Expect.equal
-                    (Map.tryFind child motherView.Foreign)
-                    (Some(Set.singleton haulerTile))
+                    motherView.Foreign
+                    (Set.singleton (RoomPos.at child haulerTile))
                     "the child's own hauler is foreign to her"
             }
 
@@ -567,7 +631,8 @@ let colonyViewTests =
                 Expect.isTrue (List.contains "src-out" (idsOf view)) "the declared rock is pooled"
 
                 Expect.equal
-                    (SpatialInfo.placementOf view.Spatial "ctrl-out" |> Option.map fst)
+                    (SpatialInfo.placementOf view.Spatial "ctrl-out"
+                     |> Option.map (fun tile -> tile.Room))
                     (Some outpost)
                     "and the declared controller is placed"
 

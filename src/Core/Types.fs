@@ -263,13 +263,94 @@ type RoomControlInfo =
         SafeMode: bool
     }
 
-/// A tile coordinate inside a room.
+/// A tile of a **named** room: the coordinate a value carries once it
+/// leaves the grid it indexes (ADR 0052 decision 2). Two rooms hold the
+/// same fifty-by-fifty coordinates, so a bare `Pos` handed between
+/// functions is joined to a room by convention alone — the convention that
+/// produced a phantom [[post]] (#191), a trunk drawn to another room's
+/// spawn, and a hostile in an [[outpost]] measured at range 0 from home
+/// (ADR 0041 kept a `RoomName` beside each such field for exactly this).
+/// A `RoomPos` is that join written as a type, so the compiler asks the
+/// question the convention left to the reader.
+///
+/// The room is a field of the record rather than a `string * Pos` pair
+/// because every reader wants one of the three components and pattern
+/// matching a pair to reach a coordinate is what made the pairs unreadable
+/// (`Outpost.Sources`, `Movement.Placed`).
+///
+/// Declared **before** `Pos` and never after it, which is load-bearing and
+/// not a matter of order: F# resolves a bare `.X` on an un-annotated value
+/// to the *last* record type declaring that field, so a `RoomPos` declared
+/// second would silently retype every grid coordinate in the Atlas's
+/// unannotated arithmetic. `Pos` last means an unannotated `.X` is a grid
+/// tile's, exactly as it was, and a `RoomPos`'s own `.X` resolves off the
+/// type its binding already carries.
+type RoomPos = { Room: string; X: int; Y: int }
+
+/// A tile coordinate inside a room. Kept as the **grid** coordinate (ADR
+/// 0052 decision 2): a key of `RoomLayer.Terrain`, of `Obstacles`, of the
+/// flood arrays and of every Seat, Reach and Work-Area grid the Atlas lays
+/// per room. It is meaningful only beside the name of the room whose grid
+/// it indexes — which is why nothing that crosses a function boundary
+/// carries one any more; that is `RoomPos`.
 type Pos = { X: int; Y: int }
 
-/// Screeps range: Chebyshev distance between two tiles. The one
-/// definition — the Atlas's geometry, the two hostile reflexes and the
-/// Raid log's closest approach all measure with it.
+/// Screeps range: Chebyshev distance between two tiles of **one** room.
+/// The one definition — the Atlas's geometry, the two hostile reflexes and
+/// the Raid log's closest approach all measure with it. Takes grid
+/// coordinates, so every caller has already established the room the two
+/// tiles are in; `RoomPos.range` is the same measure for tiles that carry
+/// their own rooms and may not share one.
 let range (a: Pos) (b: Pos) = max (abs (a.X - b.X)) (abs (a.Y - b.Y))
+
+[<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
+module RoomPos =
+    /// The grid coordinate, for indexing that room's own tables. The one
+    /// direction that is always safe: dropping the room is fine at the
+    /// moment a reader has just decided which room's grid it is reading.
+    let pos (tile: RoomPos) : Pos = { X = tile.X; Y = tile.Y }
+
+    /// A room's grid coordinate joined to that room — the conversion every
+    /// Atlas query spells as it hands a tile out.
+    let at (room: string) (tile: Pos) : RoomPos = { Room = room; X = tile.X; Y = tile.Y }
+
+    /// The whole set of a room's grid tiles, joined to it.
+    let setAt (room: string) (tiles: Set<Pos>) : Set<RoomPos> = tiles |> Set.map (at room)
+
+    /// The tiles of one room out of a mixed set, back as grid
+    /// coordinates: the read at the other end of `setAt`, for a grid or a
+    /// flood that indexes one room.
+    let inRoom (room: string) (tiles: Set<RoomPos>) : Set<Pos> =
+        tiles |> Set.filter (fun tile -> tile.Room = room) |> Set.map pos
+
+    /// The same narrowing as `inRoom`, answered as a **list** and not a
+    /// second set — the shape every flood takes its goals in. Written once
+    /// here because it is the hot one (#216 R3): the price, the first
+    /// step, the far flood's goals and the Layout's trunk all take a room's
+    /// share of an area they were handed, and they take it once per creep
+    /// per candidate Task and once per source per goal on a census tick.
+    /// Building a `Set<Pos>` at each ask would copy the area per ask and
+    /// pay a tree of comparisons for an answer nothing looks anything up
+    /// in — the callers index a grid array with it. The order is the set's
+    /// reversed, which every caller settles with a total key
+    /// (`List.min`/`List.minBy`, or a distance-and-index heap) rather than
+    /// with the order it arrived in.
+    let tilesIn (room: string) (tiles: Set<RoomPos>) : Pos list =
+        ([], tiles)
+        ||> Set.fold (fun acc tile -> if tile.Room = room then pos tile :: acc else acc)
+
+    /// Chebyshev range between two tiles that carry their rooms, and
+    /// **None** across a border (ADR 0052 decision 2). Not a large number
+    /// and not an error: two rooms' coordinate systems are not one metric
+    /// space, so there is no range to answer with — a reader measuring a
+    /// hostile against something of ours has to decide what a hostile in
+    /// another room means, and every reader that decided it by accident
+    /// decided "range 0" (ADR 0041, #204).
+    let range (a: RoomPos) (b: RoomPos) : int option =
+        if a.Room = b.Room then
+            Some(max (abs (a.X - b.X)) (abs (a.Y - b.Y)))
+        else
+            None
 
 /// Current and maximum hit points of a repairable structure — what a
 /// kind's whole line is judged against (ADR 0010, ADR 0034).
@@ -314,7 +395,7 @@ type TargetKind =
 /// vanish on their own within a few hundred ticks, so a census that let
 /// one keep a construction site off its tile would make the Layout's
 /// ordering depend on where a creep happened to die (ADR 0011's
-/// determinism). Read by `Atlas.buildableTiles`, which is the one census
+/// determinism). Read by `Atlas.buildableTilesIn`, which is the one census
 /// that walks every placed target rather than picking a kind.
 let isTransient =
     function
@@ -354,7 +435,7 @@ type RoomLayer =
         /// and the dropped piles the pickup reflex reads. The two
         /// transient kinds are filtered out by kind where standing on a
         /// tile is not the same as holding it (`isTransient`,
-        /// `Atlas.buildableTiles`).
+        /// `Atlas.buildableTilesIn`).
         TargetPositions: Map<string, Pos>
         /// Creep name -> the tile the creep stands on in this room.
         CreepPositions: Map<string, Pos>
@@ -499,10 +580,10 @@ module SpatialInfo =
     ///
     /// Deterministic under a collision that cannot happen: `Map.tryPick`
     /// walks the rooms in name order, and one id stands in one room.
-    let placementOf (spatial: SpatialInfo) (id: string) : (string * Pos) option =
+    let placementOf (spatial: SpatialInfo) (id: string) : RoomPos option =
         spatial.Rooms
         |> Map.tryPick (fun room (layer: RoomLayer) ->
-            Map.tryFind id layer.TargetPositions |> Option.map (fun pos -> room, pos))
+            Map.tryFind id layer.TargetPositions |> Option.map (RoomPos.at room))
 
 /// One outpost: a neighbouring room this colony mines and does not own.
 /// Declared, never discovered (ADR 0041) — a constant a human moves in a
@@ -540,13 +621,20 @@ module SpatialInfo =
 type Outpost =
     {
         RoomName: string
-        /// The room's sources, each under the id the engine knows it by.
-        Sources: (string * Pos) list
+        /// The room's sources, each under the id the engine knows it by,
+        /// and each tile joined to the room it is a tile of (ADR 0052
+        /// decision 2). The join restates `RoomName` and is meant to: a
+        /// declaration is a constant a human edits, and the tiles it lays
+        /// are the ones that reach the projection — a coordinate that
+        /// wandered into the wrong room's layer is the phantom Post #191
+        /// was, and it read as a real one because nothing beside it said
+        /// which room it was for.
+        Sources: (string * RoomPos) list
         /// The room's controller, whose reservation is what doubles those
         /// sources (ADR 0042). Not optional: an unreserved source is worth
         /// half, so a room with no controller to reserve — a sector centre
         /// or a Source Keeper room — is not a candidate outpost at all.
-        Controller: string * Pos
+        Controller: string * RoomPos
     }
 
 [<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
@@ -602,10 +690,23 @@ module Outpost =
     /// sources in their declared order, each id paired with the tile the
     /// declaration names and the kind it is. Position and kind are read off
     /// one list rather than two, so the two folds below cannot place an id
-    /// the kind census then misses or classify one nothing places.
+    /// the kind census then misses or classify one nothing places. The
+    /// Harvest pool reads it too (`pooledSources`), for the same reason
+    /// widened by one reader: a rock this drops is a rock nothing places,
+    /// and a rock nothing places must not be pooled.
+    /// One declaration's tiles are its own room's, and this is where that
+    /// is checked rather than assumed (ADR 0052 decision 2): the layer
+    /// these are laid into is one room's (ADR 0041), so a declared tile
+    /// filed under another room name is dropped here instead of being
+    /// written onto this room's coordinate. That misjoin is exactly the
+    /// phantom #191 stood on, and it used to be unsayable — a bare `Pos`
+    /// beside `RoomName` agreed with the room by construction because
+    /// there was nothing for it to disagree with.
     let private furnitureOf (outpost: Outpost) : (string * Pos * TargetKind) list =
         (fst outpost.Controller, snd outpost.Controller, Controller)
-        :: (outpost.Sources |> List.map (fun (id, pos) -> id, pos, Source))
+        :: (outpost.Sources |> List.map (fun (id, tile) -> id, tile, Source))
+        |> List.filter (fun (_, tile, _) -> tile.Room = outpost.RoomName)
+        |> List.map (fun (id, tile, kind) -> id, RoomPos.pos tile, kind)
 
     /// The declared furniture, laid into the projection: for every scanned
     /// outpost, its sources and its controller at the tiles and under the
@@ -662,7 +763,15 @@ module Outpost =
                                             placed
                                         else
                                             Map.add id pos placed)
-                                Obstacles = Set.add (snd outpost.Controller) layer.Obstacles
+                                // The controller's own tile, from the
+                                // furniture that has already been checked
+                                // against this room: a declaration whose
+                                // controller names another room blocks no
+                                // tile here.
+                                Obstacles =
+                                    (layer.Obstacles, furniture)
+                                    ||> List.fold (fun blocked (_, pos, kind) ->
+                                        if kind = Controller then Set.add pos blocked else blocked)
                             }
                             spatial.Rooms
                     TargetKinds =
@@ -702,6 +811,13 @@ module Outpost =
     /// Harvest at an object `Game.getObjectById` cannot answer for while
     /// anti-thrash holds the creep on it. So the rocks are pooled exactly
     /// where the furniture is laid, and a stand-down narrows both at once.
+    ///
+    /// "Exactly where the furniture is laid" is read off `furnitureOf`
+    /// itself and not restated here (#216 R3): the room check that entry
+    /// carries since ADR 0052 decision 2 is a *second* gate on a declared
+    /// tile, and a pool that read `outpost.Sources` straight would pass a
+    /// mis-roomed rock the projection drops — pooled and unplaced, which is
+    /// the very half-state the paragraph above says cannot arise.
     let pooledSources
         (rooms: string list)
         (outposts: Outpost list)
@@ -711,7 +827,9 @@ module Outpost =
         @ [
             for outpost in outposts do
                 if List.contains outpost.RoomName rooms then
-                    for id, _ in outpost.Sources -> { Id = id; TicksToRestock = 0 }
+                    for id, _, kind in furnitureOf outpost do
+                        if kind = Source then
+                            { Id = id; TicksToRestock = 0 }
         ]
         |> List.distinctBy (fun source -> source.Id)
 
@@ -725,17 +843,17 @@ module Outpost =
         [
             {
                 RoomName = "W12S27"
-                Sources = [ "6a8caabadd4872bccd3194a6", { X = 16; Y = 45 } ]
-                Controller = "6a8caabadd4872bccd3194a5", { X = 37; Y = 43 }
+                Sources = [ "6a8caabadd4872bccd3194a6", { Room = "W12S27"; X = 16; Y = 45 } ]
+                Controller = "6a8caabadd4872bccd3194a5", { Room = "W12S27"; X = 37; Y = 43 }
             }
             {
                 RoomName = "W13S28"
                 Sources =
                     [
-                        "6a8caaaddd4872bccd319362", { X = 16; Y = 7 }
-                        "6a8caaaddd4872bccd319361", { X = 18; Y = 4 }
+                        "6a8caaaddd4872bccd319362", { Room = "W13S28"; X = 16; Y = 7 }
+                        "6a8caaaddd4872bccd319361", { Room = "W13S28"; X = 18; Y = 4 }
                     ]
-                Controller = "6a8caaaddd4872bccd319363", { X = 24; Y = 17 }
+                Controller = "6a8caaaddd4872bccd319363", { Room = "W13S28"; X = 24; Y = 17 }
             }
         ]
 
@@ -1291,19 +1409,23 @@ type HostileInfo =
         /// Raid log's roster is attribution, and attribution is a name.
         /// No reflex reads it.
         Owner: string
-        /// The room this hostile stands in. ADR 0028 left this field out
-        /// in as many words — "a room name on `HostileInfo` is a field no
-        /// decision reads, and there is one spawn" — and ADR 0041 is what
-        /// gives it a reader: a `Pos` carries no room, so the Raid log's
-        /// closest approach measures a hostile against the tiles of *its*
-        /// room, and one of ours standing on the same coordinate of
-        /// another room is not at range 0. Load-bearing for every reader
-        /// since #201 widened the sweep behind the list to every room the
-        /// colony can see: a Threat's Reach is filed under this name (ADR
-        /// 0033, #138), and the two colony reflexes read the home room out
-        /// of the list by it (`Decide.hostilesAtHome`).
-        RoomName: string
-        Pos: Pos
+        /// Where it stands, room and tile in one (ADR 0052 decision 2).
+        /// ADR 0028 left the room out in as many words — "a room name on
+        /// `HostileInfo` is a field no decision reads, and there is one
+        /// spawn" — and ADR 0041 is what gave it a reader: a bare `Pos`
+        /// carries no room, so the Raid log's closest approach measures a
+        /// hostile against the tiles of *its* room, and one of ours
+        /// standing on the same coordinate of another room is not at range
+        /// 0. That was a `RoomName` field beside the tile, kept in step by
+        /// hand at every reader; since #216 R3 it is the tile's own type,
+        /// and `RoomPos.range` answers None across the border rather than
+        /// leaving the join to whoever remembered to test it.
+        /// Load-bearing for every reader since #201 widened the sweep
+        /// behind the list to every room the colony can see: a Threat's
+        /// Reach is filed under this room (ADR 0033, #138), and the two
+        /// colony reflexes read the home room out of the list by it
+        /// (`Decide.hostilesAtHome`).
+        Pos: RoomPos
         Body: BodyPart list
     }
 
@@ -1933,7 +2055,9 @@ type ColonyView =
         /// knows nothing about.
         Stages: Map<string, ColonyStage>
         /// Where **other colonies'** creeps stand in the rooms this colony
-        /// works, by room (ADR 0052 decision 1). The bodies this colony
+        /// works, each tile carrying its room (ADR 0052 decisions 1 and
+        /// 2 — one set since #216 R3, where it was a map keyed by room
+        /// name). The bodies this colony
         /// does not hold and cannot move: they are in no `Creeps` list of
         /// hers, on no tile of her layers, and in nobody's Task pool but
         /// their own colony's.
@@ -1945,7 +2069,7 @@ type ColonyView =
         /// pass per room over every creep of ours, which is R2b's — this
         /// field is the fact it needs, cut where the fleet is cut so the two
         /// cannot disagree about who is standing where.
-        Foreign: Map<string, Set<Pos>>
+        Foreign: Set<RoomPos>
         /// What this colony may take of a neighbour's, explicitly and
         /// bounded (ADR 0052 decision 7): today the Upgrade and the Build
         /// of a child it is still raising (ADR 0047 decision 4).
@@ -2137,21 +2261,19 @@ module ColonyView =
                 |> Outpost.place outposts
             Declared = Colony.homes colonies
             Stages = stages
-            // The bodies in these rooms that are not this colony's: kept
-            // per room and only where there are any, the per-entry absence
-            // every other room-keyed fact is read under (ADR 0004).
+            // The bodies in these rooms that are not this colony's, each
+            // tile joined to the room it stands in (ADR 0052 decision 2):
+            // a room with none of them contributes nothing, which is the
+            // per-entry absence every other room-keyed fact is read under
+            // (ADR 0004) and here is simply an empty set.
             Foreign =
                 worked
-                |> List.choose (fun (room, facts) ->
-                    let others =
-                        facts.Layer.CreepPositions
-                        |> Map.toList
-                        |> List.filter (fun (name, _) -> not (Set.contains name names))
-                        |> List.map snd
-                        |> Set.ofList
-
-                    if Set.isEmpty others then None else Some(room, others))
-                |> Map.ofList
+                |> List.collect (fun (room, facts) ->
+                    facts.Layer.CreepPositions
+                    |> Map.toList
+                    |> List.filter (fun (name, _) -> not (Set.contains name names))
+                    |> List.map (snd >> RoomPos.at room))
+                |> Set.ofList
             Borrowed = { Rooms = bootstrap }
         }
 
@@ -2487,7 +2609,7 @@ let directionCode =
 /// A single described action to perform this tick; data only, never the game API.
 type Intent =
     | SpawnCreep of spawnName: string * body: BodyPart list * creepName: string
-    | PlaceConstructionSite of roomName: string * pos: Pos * kind: StructureKind
+    | PlaceConstructionSite of tile: RoomPos * kind: StructureKind
     | HarvestSource of creepName: string * sourceId: string
     | TransferEnergyToStructure of creepName: string * structureId: string
     | WithdrawEnergyFromStructure of creepName: string * structureId: string
@@ -2563,7 +2685,7 @@ type FootingKind =
 /// or not buildable at all, so nothing was reserved for it. Recorded
 /// rather than dropped — one footing per target is a guarantee, and a
 /// guarantee that can degrade in silence is not one.
-type UnservedFooting = { Target: Pos; Kind: FootingKind }
+type UnservedFooting = { Target: RoomPos; Kind: FootingKind }
 
 /// A footing target the Layout served (#106): the tile it reserved, beside
 /// the target that tile is held for and that target's kind. The served
@@ -2584,9 +2706,9 @@ type UnservedFooting = { Target: Pos; Kind: FootingKind }
 /// it holds — the partition is what the two names say.
 type ServedFooting =
     {
-        Target: Pos
+        Target: RoomPos
         Kind: FootingKind
-        Tile: Pos
+        Tile: RoomPos
     }
 
 /// The two ends a trunk is routed to (ADR 0011): the controller's
@@ -2649,8 +2771,8 @@ type ContainerTarget =
 type DeferredContainer =
     {
         Target: ContainerTarget
-        Pick: Pos
-        Serving: Pos
+        Pick: RoomPos
+        Serving: RoomPos
     }
 
 /// The census-keyed plan memo (ADR 0017): the census signature beside the
@@ -3047,17 +3169,16 @@ let standDownBasisOf =
 /// room's arbitration is one pass over **every** creep of ours standing in
 /// it, and the intents that pass folds together come from as many `decide`
 /// calls as there are colonies working that room (ADR 0052 decision 7).
-/// A `Pos` carries no room (ADR 0052 decision 2 has not landed), so the
-/// name rides beside it and the merge keys on it.
+/// Since #216 R3 that room is the tiles' own (ADR 0052 decision 2) rather
+/// than a `Room` field beside them: the merge keys on `Pos.Room`, and a
+/// candidate list is a list of tiles of that same room (#145) because the
+/// mover only ever offers a creep its own room's ground.
 type MoveIntent =
     {
-        /// The room the creep stands in, and the only room its candidates
-        /// are tiles of (#145).
-        Room: string
         Creep: string
-        Pos: Pos
+        Pos: RoomPos
         Rank: int
-        Candidates: Pos list
+        Candidates: RoomPos list
     }
 
 /// One colony's movement for the tick, before a tile of it is arbitrated
@@ -3085,14 +3206,16 @@ type Movement =
         /// and its movement Verdicts leave in (ADR 0009).
         Order: string list
         /// Where the projection places each of this colony's bodies:
-        /// room, creep and tile (`Atlas.placedCreepsByRoom`). A creep the
-        /// projection cannot place is in no room's pass, exactly as before.
-        Placed: (string * string * Pos) list
+        /// creep and tile, the tile carrying its room
+        /// (`Atlas.placedCreeps`). A creep the projection cannot place is
+        /// in no room's pass, exactly as before.
+        Placed: (string * RoomPos) list
         /// The creeps fatigue takes out of arbitration this tick (ADR 0008
         /// decision 1). Their tiles are the pass's walls.
         Tired: Set<string>
-        /// The tiles held by bodies this colony does not hold, per room
-        /// ([[foreign bodies]], ADR 0052 decision 1). A wall to the pass
+        /// The tiles held by bodies this colony does not hold
+        /// ([[foreign bodies]], ADR 0052 decision 1), each carrying its
+        /// room (decision 2). A wall to the pass
         /// **only while no movement in the fold actually holds the body
         /// standing there**: on the single-colony path — the suite's, and a
         /// tick in which nobody else works this room — a foreign body is a
@@ -3100,9 +3223,9 @@ type Movement =
         /// that raised it the same body is an ordinary occupant its own
         /// colony registered an intent for, so blocking it would freeze the
         /// very creep the fold exists to arbitrate.
-        Foreign: Map<string, Set<Pos>>
-        /// Each rested creep's Move Intent, each naming the room it is a
-        /// tile of.
+        Foreign: Set<RoomPos>
+        /// Each rested creep's Move Intent, each a tile of the room the
+        /// creep stands in.
         Intents: MoveIntent list
         /// The creeps on the [[verbose list]] whose priced step differs
         /// from their traffic-blind one (ADR 0018, ADR 0030) — the one

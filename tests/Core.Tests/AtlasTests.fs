@@ -36,7 +36,7 @@ let snapshotWith creeps spatial =
         // Nor another colony's bodies: the Atlas places the creeps a view
         // holds, and a body it does not hold is on no tile of its layers
         // (ADR 0052 decision 1).
-        Foreign = Map.empty
+        Foreign = Set.empty
         // And nothing is borrowed: what one colony may take of a child's
         // room decides Tasks, and the Atlas decides none (ADR 0047
         // decision 4).
@@ -63,6 +63,55 @@ let creepWith name energy body =
         FreeCapacity = 50
         Body = body |> List.countBy id |> Map.ofList
     }
+
+/// The room a projection calls its own, defaulting the way
+/// `SpatialInfo.homeName` does — the fixtures below leave it empty unless
+/// they name one. The room the Atlas's per-room queries are asked for
+/// here, written once instead of at every call.
+let atlasHome (atlas: Atlas) : string =
+    homeRoom atlas |> Option.defaultValue ""
+
+/// The tiles of that room, back as grid coordinates. Every Atlas query
+/// hands tiles out joined to their room since #216 R3 (ADR 0052 decision
+/// 2), and the expectations below are written as one room's geometry — so
+/// taking the room off here is an assertion and not a cast: a tile
+/// answered in another room is dropped, and the expectation it was meant
+/// for fails.
+let tilesHome (atlas: Atlas) (tiles: Set<RoomPos>) : Set<Pos> =
+    RoomPos.inRoom (atlasHome atlas) tiles
+
+/// The same for a room the caller names — an outpost's, where the query
+/// is about the neighbour's geometry rather than the colony's own.
+let tilesIn (room: string) (tiles: Set<RoomPos>) : Set<Pos> = RoomPos.inRoom room tiles
+
+/// The same for the queries that answer at most one tile.
+let tileHome (atlas: Atlas) (tile: RoomPos option) : Pos option =
+    tile
+    |> Option.filter (fun t -> t.Room = atlasHome atlas)
+    |> Option.map RoomPos.pos
+
+/// A step back as a grid coordinate of the **stepping creep's own room** —
+/// the room a step is always a tile of (ADR 0041), which is what the
+/// filter asserts rather than assumes.
+let stepOf (atlas: Atlas) (creep: string) (step: RoomPos option) : Pos option =
+    step
+    |> Option.filter (fun tile -> creepRoom atlas creep = Some tile.Room)
+    |> Option.map RoomPos.pos
+
+/// `trunkPathHome` over the atlas's own room: the room the Layout plans and
+/// the room these fixtures build in (ADR 0011). Tiles go in and come back
+/// as that room's grid coordinates, which is how the expectations below
+/// are written — the join itself is the query's own and is pinned where
+/// it bites, in the Layout's cross-room test.
+let trunkPathHome (atlas: Atlas) (avoid: Set<Pos>) (origin: Pos) (goals: Set<Pos>) : Pos list =
+    let room = atlasHome atlas
+
+    trunkPath atlas (RoomPos.setAt room avoid) (RoomPos.at room origin) (RoomPos.setAt room goals)
+    |> List.map RoomPos.pos
+
+/// A tile of a named room — the shape every Atlas query hands a tile back
+/// in since #216 R3 (ADR 0052 decision 2).
+let at room (tile: Pos) = RoomPos.at room tile
 
 /// The home room's geometry, read back off a projection: the room
 /// `RoomName` names, and the one the empty name files when it names none
@@ -113,12 +162,13 @@ let mayActFor atlas creep task =
 /// neighbouring room leaves the creep-aware area empty and the step is then
 /// the Seam's near side.
 let firstStepFor atlas creep task =
-    firstStep atlas creep task (workAreaFor atlas creep task)
+    firstStep atlas creep task (workAreaFor atlas creep task) |> stepOf atlas creep
 
 /// The traffic-blind route over the same area — the half the reroute
 /// attribution compares against (ADR 0008, ADR 0018).
 let firstStepBlindFor atlas creep task =
     firstStepIgnoringTraffic atlas creep task (workAreaFor atlas creep task)
+    |> stepOf atlas creep
 
 [<Tests>]
 let workAreaTests =
@@ -141,7 +191,7 @@ let workAreaTests =
                     |> ofView
 
                 Expect.equal
-                    (workArea atlas (Harvest "src-a"))
+                    (workArea atlas (Harvest "src-a") |> tilesHome atlas)
                     (Set.ofList [ { X = 9; Y = 10 }; { X = 11; Y = 10 } ])
                     "plain and swamp tiles in range are standing tiles; wall and absent are not"
             }
@@ -149,7 +199,10 @@ let workAreaTests =
             test "an unplaced target has an empty Work Area" {
                 let atlas = spatial [] [ { X = 9; Y = 10 }, Plain ] |> snapshotWith [] |> ofView
 
-                Expect.equal (workArea atlas (Harvest "ghost")) Set.empty "nowhere to stand"
+                Expect.equal
+                    (workArea atlas (Harvest "ghost") |> tilesHome atlas)
+                    Set.empty
+                    "nowhere to stand"
             }
 
             test "Build and Upgrade Work Areas reach range 3" {
@@ -162,7 +215,7 @@ let workAreaTests =
                 let atlas =
                     spatial [ "ctrl-1", { X = 10; Y = 10 } ] tiles |> snapshotWith [] |> ofView
 
-                let area = workArea atlas (Upgrade "ctrl-1")
+                let area = workArea atlas (Upgrade "ctrl-1") |> tilesHome atlas
                 Expect.hasLength area 49 "the full 7x7 square is passable"
                 Expect.isTrue (Set.contains { X = 7; Y = 7 } area) "the corner at range 3 is in"
             }
@@ -234,22 +287,22 @@ let seatTests =
                     |> ofView
 
                 Expect.equal
-                    (seatTilesOf atlas "src-low")
+                    (seatTilesOf atlas "src-low" |> tilesHome atlas)
                     (Set.singleton { X = 1; Y = 1 })
                     "the low corner Seats its one ground neighbour, and no negative coordinate"
 
                 Expect.equal
-                    (seatTilesOf atlas "src-high")
+                    (seatTilesOf atlas "src-high" |> tilesHome atlas)
                     (Set.singleton { X = 48; Y = 48 })
                     "the high corner Seats its one ground neighbour, and nothing at 50"
 
                 Expect.equal
-                    (seatTilesOf atlas "src-side")
+                    (seatTilesOf atlas "src-side" |> tilesHome atlas)
                     (Set.ofList [ { X = 1; Y = 24 }; { X = 1; Y = 25 }; { X = 1; Y = 26 } ])
                     "a mid-edge tile Seats the three ground tiles inside it"
 
                 Expect.equal
-                    (seatTilesOf atlas "src-in")
+                    (seatTilesOf atlas "src-in" |> tilesHome atlas)
                     (Set.ofList [ { X = 1; Y = 2 }; { X = 2; Y = 1 }; { X = 2; Y = 2 } ])
                     "and a source one tile in Seats no exit tile: the ring is not ground"
             }
@@ -284,7 +337,7 @@ let standingTests =
                     |> ofView
 
                 Expect.equal
-                    (adjacentWalkable atlas { X = 10; Y = 10 })
+                    (adjacentWalkableIn atlas (atlasHome atlas) { X = 10; Y = 10 })
                     [ { X = 9; Y = 10 }; { X = 10; Y = 11 } ]
                     "unlike Seats, standing respects obstacles"
             }
@@ -354,7 +407,7 @@ let standingTests =
                     |> ofView
 
                 Expect.equal
-                    (walkableTiles atlas)
+                    (walkableTilesIn atlas (atlasHome atlas))
                     (Set.ofList [ { X = 9; Y = 10 }; { X = 10; Y = 10 }; { X = 10; Y = 11 } ])
                     "every tile the floods price and no other"
             }
@@ -393,7 +446,11 @@ let standingTests =
                     |> snapshotWith [ worker "amy"; worker "ghost" ]
                     |> ofView
 
-                Expect.equal (creepTile atlas "amy") (Some { X = 5; Y = 5 }) "the tile it stands on"
+                Expect.equal
+                    (creepTile atlas "amy")
+                    (Some(at "" { X = 5; Y = 5 }))
+                    "the tile it stands on, joined to the room it stands in"
+
                 Expect.isNone (creepTile atlas "ghost") "a creep the projection does not place"
             }
         ]
@@ -423,7 +480,7 @@ let placementQueryTests =
 
                 Expect.equal
                     (positionOf atlas "spawn-1")
-                    (Some { X = 25; Y = 25 })
+                    (Some(at "" { X = 25; Y = 25 }))
                     "a projected target has a tile"
 
                 Expect.equal (positionOf atlas "ghost") None "an unprojected target has none"
@@ -457,7 +514,7 @@ let placementQueryTests =
                     |> ofView
 
                 Expect.equal
-                    (buildableTiles atlas)
+                    (buildableTilesIn atlas (atlasHome atlas))
                     [ { X = 10; Y = 10 }; { X = 11; Y = 11 } ]
                     "free plain and swamp tiles only, sorted by (X, Y)"
             }
@@ -478,7 +535,7 @@ let placementQueryTests =
                     |> ofView
 
                 Expect.equal
-                    (buildableTiles atlas)
+                    (buildableTilesIn atlas (atlasHome atlas))
                     [ { X = 10; Y = 12 }; { X = 11; Y = 9 } ]
                     "the lower X comes first though its Y is higher"
             }
@@ -512,7 +569,7 @@ let placementQueryTests =
                     |> ofView
 
                 Expect.equal
-                    (buildableTiles atlas)
+                    (buildableTilesIn atlas (atlasHome atlas))
                     [ { X = 10; Y = 10 }; { X = 10; Y = 11 } ]
                     "home's two tiles, and never the other room's coordinate"
             }
@@ -559,21 +616,21 @@ let placementQueryTests =
                     |> ofView
 
                 Expect.isTrue
-                    (isSwamp atlas { X = 10; Y = 10 })
+                    (isSwampIn atlas (atlasHome atlas) { X = 10; Y = 10 })
                     "swamp terrain is swamp, though the other room calls the coordinate plain"
 
                 Expect.isFalse
-                    (isSwamp atlas { X = 10; Y = 11 })
+                    (isSwampIn atlas (atlasHome atlas) { X = 10; Y = 11 })
                     "plain is not, though the other room calls the coordinate swamp"
 
-                Expect.isFalse (isSwamp atlas { X = 10; Y = 12 }) "wall is not"
+                Expect.isFalse (isSwampIn atlas (atlasHome atlas) { X = 10; Y = 12 }) "wall is not"
 
                 Expect.isFalse
-                    (isSwamp atlas { X = 30; Y = 30 })
+                    (isSwampIn atlas (atlasHome atlas) { X = 30; Y = 30 })
                     "a tile home's layer does not carry is not swamp, whatever the outpost's is"
 
                 Expect.isFalse
-                    (isSwamp atlas { X = -1; Y = 10 })
+                    (isSwampIn atlas (atlasHome atlas) { X = -1; Y = 10 })
                     "nor is a tile off the fifty-by-fifty"
             }
 
@@ -592,7 +649,7 @@ let placementQueryTests =
                     |> ofView
 
                 Expect.isTrue
-                    (isSwamp atlas { X = 10; Y = 10 })
+                    (isSwampIn atlas (atlasHome atlas) { X = 10; Y = 10 })
                     "the road does not pave the ground away"
             }
 
@@ -616,7 +673,7 @@ let placementQueryTests =
 
                 Expect.equal
                     (droppedEnergyIn atlas home)
-                    [ "pile-a", { X = 10; Y = 10 }; "pile-b", { X = 10; Y = 11 } ]
+                    [ "pile-a", at home { X = 10; Y = 10 }; "pile-b", at home { X = 10; Y = 11 } ]
                     "both piles placed, id order"
 
                 Expect.isEmpty
@@ -624,7 +681,7 @@ let placementQueryTests =
                     "a room the projection does not carry places no pile (ADR 0004)"
 
                 Expect.equal
-                    (buildableTiles atlas)
+                    (buildableTilesIn atlas (atlasHome atlas))
                     [ { X = 10; Y = 10 }; { X = 10; Y = 11 } ]
                     "pile tiles stay buildable"
             }
@@ -649,17 +706,17 @@ let placementQueryTests =
                     |> ofView
 
                 Expect.equal
-                    (linkTiles atlas)
+                    (linkTilesIn atlas (atlasHome atlas))
                     (Set.singleton { X = 10; Y = 10 })
                     "the link's tile, and no other kind's"
 
                 Expect.equal
-                    (storageTiles atlas)
+                    (storageTilesIn atlas (atlasHome atlas))
                     (Set.singleton { X = 10; Y = 11 })
                     "the Storage's tile, the anchor its own footing is read from"
 
                 Expect.isEmpty
-                    (buildableTiles atlas)
+                    (buildableTilesIn atlas (atlasHome atlas))
                     "both stand on their tiles: neither takes a site"
             }
 
@@ -699,7 +756,7 @@ let placementQueryTests =
                     "the corner creep already stands inside the Work Area"
 
                 Expect.isFalse
-                    (List.contains { X = 10; Y = 10 } (buildableTiles atlas))
+                    (List.contains { X = 10; Y = 10 } (buildableTilesIn atlas (atlasHome atlas)))
                     "the container's tile takes no construction site"
             }
 
@@ -718,7 +775,10 @@ let placementQueryTests =
                     |> snapshotWith [ worker "w" ]
                     |> ofView
 
-                Expect.equal (workArea atlas (Repair "cont-1")) Set.empty "nowhere to stand"
+                Expect.equal
+                    (workArea atlas (Repair "cont-1") |> tilesHome atlas)
+                    Set.empty
+                    "nowhere to stand"
 
                 Expect.equal
                     (travelCost atlas "w" (Repair "cont-1"))
@@ -733,6 +793,7 @@ let placementQueryTests =
             test "extension censuses count exactly the built and pending extensions" {
                 let atlas =
                     { SpatialInfo.empty with
+                        RoomName = Some "W1N1"
                         TargetKinds =
                             Map.ofList
                                 [
@@ -746,15 +807,113 @@ let placementQueryTests =
                                     "ctrl-1", Controller
                                 ]
                     }
+                    |> withHome (fun layer ->
+                        { layer with
+                            TargetPositions =
+                                Map.ofList
+                                    [
+                                        "spawn-1", { X = 20; Y = 20 }
+                                        "ext-1", { X = 21; Y = 20 }
+                                        "ext-2", { X = 22; Y = 20 }
+                                        "road-1", { X = 23; Y = 20 }
+                                        "site-1", { X = 24; Y = 20 }
+                                        "site-2", { X = 25; Y = 20 }
+                                        "src-a", { X = 26; Y = 20 }
+                                        "ctrl-1", { X = 27; Y = 20 }
+                                    ]
+                        })
                     |> snapshotWith []
                     |> ofView
 
-                Expect.equal (builtExtensions atlas) 2 "only standing extensions are built"
+                Expect.equal (builtExtensionsIn atlas "W1N1") 2 "only standing extensions are built"
 
                 Expect.equal
-                    (pendingExtensions atlas)
+                    (pendingExtensionsIn atlas "W1N1")
                     1
                     "only sites that will become extensions are pending"
+            }
+
+            test "the kind censuses count one room's own structures and not a neighbour's (#140)" {
+                // The Layout's gap rule is `allowed at RCL − built −
+                // pending`, and the allowance is a fact about *this*
+                // room's controller — so the census subtracted from it has
+                // to be this room's. Until #216 R3 the six counts read the
+                // flat, id-keyed kind census and answered for every room
+                // the projection carried, which ADR 0052 decision 7's
+                // borrowing made reachable: a mother carries a
+                // bootstrapping child's construction sites so her workers
+                // may build them (`ColonyView.borrowed` keeps every
+                // `Site _`), and the child's extension sites came off her
+                // own allowance.
+                //
+                // Pairwise on the room the site is filed under, with the
+                // kind census flat and identical either way — that is the
+                // half ADR 0041 leaves unlayered, and the join to a named
+                // room's positions is what separates them.
+                let kinds =
+                    Map.ofList
+                        [
+                            "ext-home", Structure BuiltKind.Extension
+                            "site-home", Site BuiltKind.Extension
+                            "ext-child", Structure BuiltKind.Extension
+                            "site-child", Site BuiltKind.Extension
+                            "tower-child", Structure BuiltKind.Tower
+                            "tower-site-child", Site BuiltKind.Tower
+                            "storage-child", Structure BuiltKind.Storage
+                            "storage-site-child", Site BuiltKind.Storage
+                        ]
+
+                let child =
+                    { RoomLayer.empty with
+                        TargetPositions =
+                            Map.ofList
+                                [
+                                    "ext-child", { X = 30; Y = 30 }
+                                    "site-child", { X = 31; Y = 30 }
+                                    "tower-child", { X = 32; Y = 30 }
+                                    "tower-site-child", { X = 33; Y = 30 }
+                                    "storage-child", { X = 34; Y = 30 }
+                                    "storage-site-child", { X = 35; Y = 30 }
+                                ]
+                    }
+
+                let atlas =
+                    { SpatialInfo.empty with
+                        RoomName = Some "W1N1"
+                        TargetKinds = kinds
+                        Rooms = Map.ofList [ "W2N1", child ]
+                    }
+                    |> withHome (fun layer ->
+                        { layer with
+                            TargetPositions =
+                                Map.ofList
+                                    [
+                                        "ext-home", { X = 20; Y = 20 }
+                                        "site-home", { X = 21; Y = 20 }
+                                    ]
+                        })
+                    |> snapshotWith []
+                    |> ofView
+
+                Expect.equal
+                    (builtExtensionsIn atlas "W1N1", pendingExtensionsIn atlas "W1N1")
+                    (1, 1)
+                    "home counts its own extension and its own site, and neither of the child's"
+
+                Expect.equal
+                    (builtExtensionsIn atlas "W2N1", pendingExtensionsIn atlas "W2N1")
+                    (1, 1)
+                    "and the child's counts are the child's, off the layer they are filed in"
+
+                Expect.equal
+                    (builtTowersIn atlas "W1N1", pendingTowersIn atlas "W1N1")
+                    (0, 0)
+                    "the tower census is the named room's too"
+
+                Expect.equal
+                    (builtStoragesIn atlas "W1N1", pendingStoragesIn atlas "W1N1")
+                    (0, 0)
+                    "and so is the Storage's"
             }
         ]
 
@@ -1402,6 +1561,7 @@ let walkTests =
 
                                     let floor =
                                         workArea atlas task
+                                        |> tilesHome atlas
                                         |> Set.toList
                                         |> List.map (range start)
                                         |> function
@@ -1789,12 +1949,12 @@ let workAreaForTests =
                     posted [ "a", { X = 10; Y = 11 } ] |> snapshotWith [ anchor "a" ] |> ofView
 
                 Expect.equal
-                    (workAreaFor atlas "a" (Harvest "src-a"))
+                    (workAreaFor atlas "a" (Harvest "src-a") |> tilesHome atlas)
                     (Set.ofList [ { X = 9; Y = 10 }; { X = 11; Y = 10 } ])
                     "the container Seat and the Dual Seat, not the plain Seat"
 
                 Expect.equal
-                    (workArea atlas (Harvest "src-a"))
+                    (workArea atlas (Harvest "src-a") |> tilesHome atlas)
                     (Set.ofList [ { X = 9; Y = 10 }; { X = 11; Y = 10 }; { X = 10; Y = 11 } ])
                     "the body-blind area keeps every Seat"
             }
@@ -1807,8 +1967,10 @@ let workAreaForTests =
                     posted [ "w", { X = 10; Y = 11 } ] |> snapshotWith [ worker "w" ] |> ofView
 
                 Expect.equal
-                    (workAreaFor atlas "w" (Harvest "src-a"))
-                    (Set.difference (workArea atlas (Harvest "src-a")) (postsOf atlas "src-a"))
+                    (workAreaFor atlas "w" (Harvest "src-a") |> tilesHome atlas)
+                    (Set.difference
+                        (workArea atlas (Harvest "src-a") |> tilesHome atlas)
+                        (postsOf atlas "src-a" |> tilesHome atlas))
                     "Work <= Move keeps the Seats less the Posts"
 
                 Expect.isFalse
@@ -1837,8 +1999,8 @@ let workAreaForTests =
                     |> ofView
 
                 Expect.equal
-                    (workAreaFor atlas "a" (Harvest "src-a"))
-                    (workArea atlas (Harvest "src-a"))
+                    (workAreaFor atlas "a" (Harvest "src-a") |> tilesHome atlas)
+                    (workArea atlas (Harvest "src-a") |> tilesHome atlas)
                     "the full Seat set is the fallback before the first container"
             }
 
@@ -1847,8 +2009,8 @@ let workAreaForTests =
                     posted [ "a", { X = 10; Y = 11 } ] |> snapshotWith [ anchor "a" ] |> ofView
 
                 Expect.equal
-                    (workAreaFor atlas "a" (Upgrade "ctrl-1"))
-                    (workArea atlas (Upgrade "ctrl-1"))
+                    (workAreaFor atlas "a" (Upgrade "ctrl-1") |> tilesHome atlas)
+                    (workArea atlas (Upgrade "ctrl-1") |> tilesHome atlas)
                     "Upgrade is body-blind (ADR 0020)"
             }
 
@@ -1856,7 +2018,10 @@ let workAreaForTests =
                 let atlas =
                     posted [ "a", { X = 10; Y = 11 } ] |> snapshotWith [ anchor "a" ] |> ofView
 
-                Expect.equal (workAreaFor atlas "a" (Harvest "ghost")) Set.empty "nowhere to stand"
+                Expect.equal
+                    (workAreaFor atlas "a" (Harvest "ghost") |> tilesHome atlas)
+                    Set.empty
+                    "nowhere to stand"
             }
 
             test "a blocked Post empties the area rather than widening back to the Seats" {
@@ -1881,12 +2046,12 @@ let workAreaForTests =
                     |> ofView
 
                 Expect.equal
-                    (postsOf atlas "src-a")
+                    (postsOf atlas "src-a" |> tilesHome atlas)
                     (Set.singleton { X = 9; Y = 10 })
                     "the Seat under the container is a Post by census"
 
                 Expect.equal
-                    (workAreaFor atlas "a" (Harvest "src-a"))
+                    (workAreaFor atlas "a" (Harvest "src-a") |> tilesHome atlas)
                     Set.empty
                     "a Post nothing may stand on leaves nowhere to stand"
 
@@ -2016,7 +2181,7 @@ let mayActTests =
                     |> ofView
 
                 Expect.equal
-                    (workArea atlas (Harvest "src-a"))
+                    (workArea atlas (Harvest "src-a") |> tilesHome atlas)
                     Set.empty
                     "the creep's own tile is not a standing tile"
 
@@ -2057,7 +2222,7 @@ let dualSeatTests =
                     |> ofView
 
                 Expect.equal
-                    (dualSeats atlas)
+                    (dualSeatsIn atlas (atlasHome atlas))
                     (Set.ofList [ { X = 11; Y = 10 }; { X = 11; Y = 11 }; { X = 15; Y = 10 } ])
                     "exactly the Seats within upgrade range; the range-4 Seats are not"
             }
@@ -2079,7 +2244,10 @@ let dualSeatTests =
                     |> snapshotWith []
                     |> ofView
 
-                Expect.equal (dualSeats atlas) Set.empty "an unstandable Seat is no Dual Seat"
+                Expect.equal
+                    (dualSeatsIn atlas (atlasHome atlas))
+                    Set.empty
+                    "an unstandable Seat is no Dual Seat"
             }
 
             test "a room without a controller has no Dual Seats" {
@@ -2090,7 +2258,10 @@ let dualSeatTests =
                     |> snapshotWith []
                     |> ofView
 
-                Expect.equal (dualSeats atlas) Set.empty "no Upgrade Work Area to intersect"
+                Expect.equal
+                    (dualSeatsIn atlas (atlasHome atlas))
+                    Set.empty
+                    "no Upgrade Work Area to intersect"
             }
 
             test "a room without sources has no Dual Seats" {
@@ -2101,7 +2272,7 @@ let dualSeatTests =
                     |> snapshotWith []
                     |> ofView
 
-                Expect.equal (dualSeats atlas) Set.empty "no Seats to intersect"
+                Expect.equal (dualSeatsIn atlas (atlasHome atlas)) Set.empty "no Seats to intersect"
             }
 
             test "a source out of upgrade range yields an empty, harmless answer" {
@@ -2114,7 +2285,10 @@ let dualSeatTests =
                     |> snapshotWith []
                     |> ofView
 
-                Expect.equal (dualSeats atlas) Set.empty "a disjoint intersection is just empty"
+                Expect.equal
+                    (dualSeatsIn atlas (atlasHome atlas))
+                    Set.empty
+                    "a disjoint intersection is just empty"
             }
         ]
 
@@ -2147,12 +2321,12 @@ let postTests =
                     |> ofView
 
                 Expect.equal
-                    (posts atlas)
+                    (postsIn atlas (atlasHome atlas))
                     (Set.ofList [ { X = 9; Y = 10 }; { X = 11; Y = 10 } ])
                     "the Dual Seat and the container Seat are both Posts"
 
                 Expect.equal
-                    (dualSeats atlas)
+                    (dualSeatsIn atlas (atlasHome atlas))
                     (Set.singleton { X = 11; Y = 10 })
                     "dualSeats is untouched by the container"
             }
@@ -2178,17 +2352,17 @@ let postTests =
                     |> ofView
 
                 Expect.equal
-                    (posts atlas)
+                    (postsIn atlas (atlasHome atlas))
                     (Set.singleton { X = 9; Y = 10 })
                     "the Seat carrying the site is a garrison place"
 
                 Expect.equal
-                    (postsOf atlas "src-a")
+                    (postsOf atlas "src-a" |> tilesHome atlas)
                     (Set.singleton { X = 9; Y = 10 })
                     "and it is that source's own, by the Seat it stands on"
 
                 Expect.isEmpty
-                    (standingPostsOf atlas "src-a")
+                    (standingPostsOf atlas "src-a" |> tilesHome atlas)
                     "yet nothing stands there: the source is in no quota until it does"
 
                 Expect.equal (postCount atlas) 1 "so the Anchor row is hired for it"
@@ -2212,10 +2386,12 @@ let postTests =
                     |> ofView
 
                 Expect.isTrue
-                    (Set.contains { X = 11; Y = 10 } (seatTilesOf atlas "src-a"))
+                    (Set.contains { X = 11; Y = 10 } (seatTilesOf atlas "src-a" |> tilesHome atlas))
                     "the premise: the rock's one Seat is the tile between the two"
 
-                Expect.isEmpty (posts atlas) "and the site a step past it garrisons nothing"
+                Expect.isEmpty
+                    (postsIn atlas (atlasHome atlas))
+                    "and the site a step past it garrisons nothing"
             }
 
             test "a built container off any Seat adds no Post" {
@@ -2231,7 +2407,10 @@ let postTests =
                     |> snapshotWith []
                     |> ofView
 
-                Expect.equal (posts atlas) Set.empty "only a Seat under a container is a Post"
+                Expect.equal
+                    (postsIn atlas (atlasHome atlas))
+                    Set.empty
+                    "only a Seat under a container is a Post"
             }
 
             test "a room with no controller still derives container Posts" {
@@ -2248,7 +2427,7 @@ let postTests =
                     |> ofView
 
                 Expect.equal
-                    (posts atlas)
+                    (postsIn atlas (atlasHome atlas))
                     (Set.singleton { X = 9; Y = 10 })
                     "no Dual Seats, one container Post"
             }
@@ -2280,7 +2459,7 @@ let workingGroundTests =
                     |> ofView
 
                 Expect.equal
-                    (workingGround atlas)
+                    (workingGroundIn atlas (atlasHome atlas))
                     (Set.ofList
                         [
                             { X = 9; Y = 10 }
@@ -2300,7 +2479,7 @@ let workingGroundTests =
                     |> ofView
 
                 Expect.equal
-                    (workingGround atlas)
+                    (workingGroundIn atlas (atlasHome atlas))
                     Set.empty
                     "geometry the projection cannot place answers empty, and nothing is off-limits"
             }
@@ -2363,9 +2542,10 @@ let consistencyTests =
 
                     let area = workArea atlas task
                     let cost = travelCost atlas "w" task
-                    let step = firstStep atlas "w" task area
+                    let step = firstStep atlas "w" task area |> tileHome atlas
+                    let tiles = area |> tilesHome atlas
 
-                    if Set.contains pos area then
+                    if Set.contains pos tiles then
                         Expect.equal cost (Some 0) $"inside the Work Area costs 0 at {pos}"
                         Expect.equal step None $"no step inside the Work Area at {pos}"
 
@@ -2378,7 +2558,7 @@ let consistencyTests =
                             Expect.isGreaterThan c 0 $"reachable from outside costs > 0 at {pos}"
 
                             Expect.contains
-                                (adjacentWalkable atlas pos)
+                                (adjacentWalkableIn atlas (atlasHome atlas) pos)
                                 s
                                 $"the step is an adjacent standing tile at {pos}"
                         | None, None -> () // unreachable: inapplicable, stationary
@@ -2404,7 +2584,7 @@ let consistencyTests =
                     |> snapshotWith []
                     |> ofView
 
-                let area = workArea atlas (Harvest "src-a")
+                let area = workArea atlas (Harvest "src-a") |> tilesHome atlas
 
                 Expect.equal
                     area
@@ -2421,7 +2601,7 @@ let consistencyTests =
 [<Tests>]
 let trunkPathTests =
     testList
-        "atlas trunkPath"
+        "atlas trunkPathHome"
         [
             // A 5-wide corridor of plain ground along y = 10, three rows tall,
             // anchored at a wall tile the way a source is embedded in one.
@@ -2450,7 +2630,11 @@ let trunkPathTests =
                     |> ofView
 
                 Expect.equal
-                    (trunkPath atlas Set.empty { X = 10; Y = 10 } (Set.singleton { X = 14; Y = 10 }))
+                    (trunkPathHome
+                        atlas
+                        Set.empty
+                        { X = 10; Y = 10 }
+                        (Set.singleton { X = 14; Y = 10 }))
                     [
                         { X = 11; Y = 10 }
                         { X = 12; Y = 10 }
@@ -2464,7 +2648,7 @@ let trunkPathTests =
                 let atlas = corridor |> snapshotWith [] |> ofView
 
                 let path =
-                    trunkPath
+                    trunkPathHome
                         atlas
                         (Set.singleton { X = 12; Y = 10 })
                         { X = 10; Y = 10 }
@@ -2493,7 +2677,11 @@ let trunkPathTests =
                     |> ofView
 
                 let path =
-                    trunkPath atlas Set.empty { X = 10; Y = 10 } (Set.singleton { X = 14; Y = 10 })
+                    trunkPathHome
+                        atlas
+                        Set.empty
+                        { X = 10; Y = 10 }
+                        (Set.singleton { X = 14; Y = 10 })
 
                 Expect.isFalse
                     (List.contains { X = 12; Y = 10 } path)
@@ -2525,7 +2713,11 @@ let trunkPathTests =
                     |> ofView
 
                 let path =
-                    trunkPath atlas Set.empty { X = 10; Y = 10 } (Set.singleton { X = 14; Y = 10 })
+                    trunkPathHome
+                        atlas
+                        Set.empty
+                        { X = 10; Y = 10 }
+                        (Set.singleton { X = 14; Y = 10 })
 
                 Expect.isFalse
                     (List.contains { X = 12; Y = 9 } path)
@@ -2564,7 +2756,11 @@ let trunkPathTests =
                     |> ofView
 
                 Expect.equal
-                    (trunkPath atlas Set.empty { X = 10; Y = 10 } (Set.singleton { X = 14; Y = 10 }))
+                    (trunkPathHome
+                        atlas
+                        Set.empty
+                        { X = 10; Y = 10 }
+                        (Set.singleton { X = 14; Y = 10 }))
                     [
                         { X = 11; Y = 10 }
                         { X = 12; Y = 10 }
@@ -2582,12 +2778,16 @@ let trunkPathTests =
                 let atlas = corridor |> snapshotWith [] |> ofView
 
                 Expect.equal
-                    (trunkPath
+                    (trunkPathHome
                         atlas
                         (Set.ofList [ { X = -1; Y = 10 }; { X = 50; Y = 10 }; { X = 12; Y = -1 } ])
                         { X = 10; Y = 10 }
                         (Set.singleton { X = 14; Y = 10 }))
-                    (trunkPath atlas Set.empty { X = 10; Y = 10 } (Set.singleton { X = 14; Y = 10 }))
+                    (trunkPathHome
+                        atlas
+                        Set.empty
+                        { X = 10; Y = 10 }
+                        (Set.singleton { X = 14; Y = 10 }))
                     "an off-grid reservation reserves nothing and breaks nothing"
             }
 
@@ -2595,7 +2795,11 @@ let trunkPathTests =
                 let atlas = corridor |> snapshotWith [] |> ofView
 
                 Expect.isEmpty
-                    (trunkPath atlas Set.empty { X = 10; Y = 10 } (Set.singleton { X = 30; Y = 30 }))
+                    (trunkPathHome
+                        atlas
+                        Set.empty
+                        { X = 10; Y = 10 }
+                        (Set.singleton { X = 30; Y = 30 }))
                     "a goal outside the projection is unreachable"
             }
 
@@ -2603,7 +2807,7 @@ let trunkPathTests =
                 let atlas = corridor |> snapshotWith [] |> ofView
 
                 let path =
-                    trunkPath
+                    trunkPathHome
                         atlas
                         Set.empty
                         { X = 10; Y = 10 }
@@ -2640,7 +2844,7 @@ let haulRoundTripTests =
             // none (ADR 0041). Same room in and out, this is the flood the
             // rule always ran.
             let atHome atlas body from sink =
-                haulRoundTripTicks atlas body "" from "" sink
+                haulRoundTripTicks atlas body (at "" from) (at "" sink)
 
             test "the loaded leg out and the empty leg back sum to whole ticks" {
                 // Each leg is a walk (ADR 0029). [Carry;Carry;Move]
@@ -2784,8 +2988,7 @@ let castWalkTicksTests =
                         (corridorWith Set.empty [])
                         anchorBody
                         { X = 20; Y = 10 }
-                        home
-                        { X = 10; Y = 10 })
+                        (at home { X = 10; Y = 10 }))
                     (Some 36)
                     "a slow body earns a long lead"
 
@@ -2794,8 +2997,7 @@ let castWalkTicksTests =
                         (corridorWith Set.empty [])
                         [ Carry; Carry; Move ]
                         { X = 20; Y = 10 }
-                        home
-                        { X = 10; Y = 10 })
+                        (at home { X = 10; Y = 10 }))
                     (Some 9)
                     "a hauler on the same ground earns a short one"
             }
@@ -2812,8 +3014,7 @@ let castWalkTicksTests =
                         (corridorWith Set.empty [])
                         anchorBody
                         { X = 20; Y = 10 }
-                        home
-                        { X = 19; Y = 10 })
+                        (at home { X = 19; Y = 10 }))
                     (Some 0)
                     "a replacement is born beside the spawner, not moved there"
             }
@@ -2828,8 +3029,7 @@ let castWalkTicksTests =
                         (corridorWith (Set.ofList [ for x in 11..19 -> { X = x; Y = 10 } ]) [])
                         anchorBody
                         { X = 20; Y = 10 }
-                        home
-                        { X = 10; Y = 10 })
+                        (at home { X = 10; Y = 10 }))
                     (Some 20)
                     "the trunk shortens a succession"
             }
@@ -2843,8 +3043,7 @@ let castWalkTicksTests =
                         (corridorWith Set.empty [ "w", { X = 15; Y = 10 } ])
                         anchorBody
                         { X = 20; Y = 10 }
-                        home
-                        { X = 10; Y = 10 })
+                        (at home { X = 10; Y = 10 }))
                     (Some 36)
                     "a standing creep is not a detour a replacement will still face"
             }
@@ -2864,8 +3063,7 @@ let castWalkTicksTests =
                             (corridorWith Set.empty [])
                             body
                             { X = 20; Y = 10 }
-                            home
-                            { X = 10; Y = 10 }
+                            (at home { X = 10; Y = 10 })
                     with
                     | Some ticks ->
                         Expect.isGreaterThanOrEqual
@@ -2896,8 +3094,7 @@ let castWalkTicksTests =
                         gapped
                         [ Work; Carry; Move ]
                         { X = 20; Y = 10 }
-                        home
-                        { X = 10; Y = 10 })
+                        (at home { X = 10; Y = 10 }))
                     None
                     "unpriceable geometry leads nobody"
             }
@@ -2922,8 +3119,7 @@ let castWalkTicksTests =
                         walled
                         [ Work; Carry; Move ]
                         { X = 20; Y = 10 }
-                        home
-                        { X = 10; Y = 10 })
+                        (at home { X = 10; Y = 10 }))
                     None
                     "a spawner that can place nothing leads nobody"
             }
@@ -2972,7 +3168,7 @@ let walkRecallTests =
                 let first = corridorSnapshot () |> ofViewRecalling walks
 
                 Expect.equal
-                    (castWalkTicks first hauler spawnTile home goal)
+                    (castWalkTicks first hauler spawnTile (at home goal))
                     (Some 9)
                     "the first Atlas floods to price the lead"
 
@@ -2982,7 +3178,7 @@ let walkRecallTests =
                 let second = corridorSnapshot () |> ofViewRecalling walks
 
                 Expect.equal
-                    (castWalkTicks second hauler spawnTile home goal)
+                    (castWalkTicks second hauler spawnTile (at home goal))
                     (Some 9)
                     "the recalled walk prices the same lead"
 
@@ -3001,14 +3197,14 @@ let walkRecallTests =
                 let atlas = corridorSnapshot () |> ofViewRecalling fresh
 
                 Expect.equal
-                    (castWalkTicks atlas hauler spawnTile home goal)
+                    (castWalkTicks atlas hauler spawnTile (at home goal))
                     (Some 9)
                     "an empty table is flooded into, and prices the lead identically"
 
                 Expect.equal fresh.Count 1 "the flood it ran is left in it"
 
                 Expect.equal
-                    (castWalkTicks (corridorSnapshot () |> ofView) hauler spawnTile home goal)
+                    (castWalkTicks (corridorSnapshot () |> ofView) hauler spawnTile (at home goal))
                     (Some 9)
                     "and the plain entry point, which lays its own table, agrees"
             }
@@ -3320,20 +3516,20 @@ let seamTests =
                     tile.X = 0 || tile.X = 49 || tile.Y = 0 || tile.Y = 49
 
                 Expect.equal
-                    (seatTilesOf corner "src-a")
+                    (seatTilesOf corner "src-a" |> tilesHome corner)
                     (Set.ofList [ { X = 1; Y = 2 }; { X = 2; Y = 1 }; { X = 2; Y = 2 } ])
                     "the corner source seats three interior tiles and no exit"
 
                 Expect.isEmpty
-                    (workArea corner (Harvest "src-a") |> Set.filter onTheBorder)
+                    (workArea corner (Harvest "src-a") |> tilesHome corner |> Set.filter onTheBorder)
                     "no exit in a Work Area"
 
                 Expect.isEmpty
-                    (buildableTiles corner |> List.filter onTheBorder)
+                    (buildableTilesIn corner (atlasHome corner) |> List.filter onTheBorder)
                     "no exit is buildable"
 
                 Expect.isEmpty
-                    (walkableTiles corner |> Set.filter onTheBorder)
+                    (walkableTilesIn corner (atlasHome corner) |> Set.filter onTheBorder)
                     "no exit is walkable"
 
                 // The projection names no room, so its ground is filed
@@ -3534,7 +3730,7 @@ let roomTests =
 
                 Expect.equal
                     (creepTile atlas "w-home", creepTile atlas "w-out")
-                    (Some { X = 10; Y = 10 }, Some { X = 10; Y = 10 })
+                    (Some(at "W1N1" { X = 10; Y = 10 }), Some(at "W2N1" { X = 10; Y = 10 }))
                     "the premise: one coordinate, two rooms, one body between them"
 
                 Expect.equal
@@ -3592,7 +3788,7 @@ let roomTests =
                     home |> withOutpost "W2N1" outpost |> snapshotWith [ worker "w-home" ] |> ofView
 
                 Expect.isNonEmpty
-                    (workArea atlas (Harvest "src-out"))
+                    (workArea atlas (Harvest "src-out") |> tilesIn "W2N1")
                     "the target is placed, and its Work Area is the room it stands in"
 
                 Expect.equal
@@ -3677,7 +3873,7 @@ let roomTests =
 
                 Expect.equal
                     (creepTile atlas "w-out")
-                    (Some { X = 10; Y = 13 })
+                    (Some(at "W2N1" { X = 10; Y = 13 }))
                     "the premise: the other room's creep stands on a coordinate this path crosses"
 
                 Expect.equal
@@ -3780,16 +3976,26 @@ let roomTests =
                     home |> withOutpost "W2N1" outpost |> snapshotWith [ worker "w-home" ] |> ofView
 
                 Expect.isTrue
-                    (Set.contains { X = 10; Y = 10 } (seatTilesOf atlas "src-home"))
+                    (Set.contains
+                        { X = 10; Y = 10 }
+                        (seatTilesOf atlas "src-home" |> tilesHome atlas))
                     "the premise: the home source seats that coordinate"
 
                 Expect.isTrue
-                    (Set.contains { X = 10; Y = 10 } (workArea atlas (Upgrade "ctrl-out")))
+                    (Set.contains
+                        { X = 10; Y = 10 }
+                        (workArea atlas (Upgrade "ctrl-out") |> tilesIn "W2N1"))
                     "and the outpost controller's Upgrade area holds it too"
 
-                Expect.isEmpty (dualSeats atlas) "no Dual Seat is made out of two rooms"
-                Expect.isEmpty (posts atlas) "and no Post"
-                Expect.isEmpty (postsOf atlas "src-home") "the home source has none of its own"
+                Expect.isEmpty
+                    (dualSeatsIn atlas (atlasHome atlas))
+                    "no Dual Seat is made out of two rooms"
+
+                Expect.isEmpty (postsIn atlas (atlasHome atlas)) "and no Post"
+
+                Expect.isEmpty
+                    (postsOf atlas "src-home" |> tilesHome atlas)
+                    "the home source has none of its own"
 
                 Expect.isFalse
                     (catchesOverflow atlas "w-home" "src-home")
@@ -3839,12 +4045,12 @@ let roomTests =
                 let atlas = home |> withOutpost "W2N1" outpost |> snapshotWith [] |> ofView
 
                 Expect.equal
-                    (posts atlas)
+                    (postsIn atlas (atlasHome atlas))
                     (Set.singleton { X = 10; Y = 10 })
                     "the premise: the home room's own Post is that one tile"
 
                 Expect.equal
-                    (postsOf atlas "src-out")
+                    (postsOf atlas "src-out" |> tilesIn "W2N1")
                     (Set.singleton { X = 10; Y = 10 })
                     "and the outpost rock's Post stands on the same coordinate"
 
@@ -3881,15 +4087,17 @@ let roomTests =
                 let atlas = home |> withOutpost "W2N1" outpost |> snapshotWith [] |> ofView
 
                 Expect.isTrue
-                    (Set.contains { X = 10; Y = 11 } (seatTilesOf atlas "src-out"))
+                    (Set.contains { X = 10; Y = 11 } (seatTilesOf atlas "src-out" |> tilesIn "W2N1"))
                     "the premise: (10,11) is a Seat of the outpost rock"
 
                 Expect.isTrue
-                    (Set.contains { X = 10; Y = 11 } (workArea atlas (Upgrade "ctrl-out")))
+                    (Set.contains
+                        { X = 10; Y = 11 }
+                        (workArea atlas (Upgrade "ctrl-out") |> tilesIn "W2N1"))
                     "and the outpost controller's Upgrade area covers it"
 
                 Expect.isEmpty
-                    (postsOf atlas "src-out")
+                    (postsOf atlas "src-out" |> tilesIn "W2N1")
                     "yet the rock has no Post: nothing is built on that Seat"
 
                 Expect.equal (postCount atlas) 0 "so the Anchor row hires nobody for it"
@@ -3925,17 +4133,16 @@ let roomTests =
 
                 Expect.equal
                     (droppedEnergyIn atlas "W1N1")
-                    [ "pile-home", { X = 10; Y = 10 } ]
+                    [ "pile-home", at "W1N1" { X = 10; Y = 10 } ]
                     "the home room's pile and no other, though both share the tile"
 
                 Expect.equal
                     (droppedEnergyIn atlas "W2N1")
-                    [ "pile-out", { X = 10; Y = 10 } ]
+                    [ "pile-out", at "W2N1" { X = 10; Y = 10 } ]
                     "and the outpost's own, off the layer it is filed in"
             }
 
-            test
-                "placedCreepsByRoom files each room's creeps under its own name, in ColonyView order" {
+            test "placedCreeps files each creep under its own room, in ColonyView order" {
                 // The Resolver's list since #145: arbitration runs once per
                 // room, each over that room's creeps and tiles alone (ADR
                 // 0041's Consequences), so the grouping is the seam that
@@ -3969,16 +4176,18 @@ let roomTests =
                         [ worker "b-home"; worker "w-out"; worker "a-home"; worker "ghost" ]
                     |> ofView
 
-                // The order the rooms come in is no promise — no reader
-                // depends on it — so the groups are compared as a map.
+                // One flat list in view creep order since #216 R3, each
+                // tile carrying its own room (ADR 0052 decision 2) where
+                // the answer used to be grouped by room name — the
+                // grouping *was* the join.
                 Expect.equal
-                    (placedCreepsByRoom atlas |> Map.ofList)
-                    (Map.ofList
-                        [
-                            "W1N1", [ "b-home", { X = 10; Y = 12 }; "a-home", { X = 10; Y = 10 } ]
-                            "W2N1", [ "w-out", { X = 10; Y = 10 } ]
-                        ])
-                    "each room's creeps under its name, ColonyView order inside, the unplaced in none"
+                    (placedCreeps atlas)
+                    [
+                        "b-home", at "W1N1" { X = 10; Y = 12 }
+                        "w-out", at "W2N1" { X = 10; Y = 10 }
+                        "a-home", at "W1N1" { X = 10; Y = 10 }
+                    ]
+                    "each creep under its own room, ColonyView order, the unplaced in none"
 
                 Expect.equal
                     (adjacentWalkableIn atlas "W2N1" { X = 10; Y = 10 })
@@ -4073,7 +4282,7 @@ let heavyPinJoinTests =
                     |> ofView
 
                 Expect.isFalse
-                    (Set.contains { X = 11; Y = 10 } (seatTilesOf atlas "src"))
+                    (Set.contains { X = 11; Y = 10 } (seatTilesOf atlas "src" |> tilesHome atlas))
                     "the premise: no ground there, so no Seat there"
 
                 Expect.isTrue
@@ -4116,7 +4325,7 @@ let heavyPinJoinTests =
                     |> ofView
 
                 Expect.isTrue
-                    (Set.contains { X = 10; Y = 11 } (dualSeats atlas))
+                    (Set.contains { X = 10; Y = 11 } (dualSeatsIn atlas (atlasHome atlas)))
                     "the premise: the Seat south of the rock is inside the controller's area"
 
                 Expect.isTrue
@@ -4379,7 +4588,7 @@ let crossRoomTests =
                 Expect.isEmpty (seams atlas "W1N1" "W1N2") "the premise: the exit is walled"
 
                 Expect.isNonEmpty
-                    (workArea atlas (Harvest "src-out"))
+                    (workArea atlas (Harvest "src-out") |> tilesIn "W1N2")
                     "the target is placed and its ground is real"
 
                 Expect.equal (walkTicks atlas "w" (Harvest "src-out")) None "no crossing, no walk"
@@ -4468,7 +4677,7 @@ let crossRoomTests =
                 // everything the creep would do on the far side: nowhere to
                 // stand, and no action reaching over.
                 Expect.equal
-                    (firstStep atlas "w" (Harvest "src-out") handed)
+                    (firstStep atlas "w" (Harvest "src-out") handed |> tileHome atlas)
                     (Some { X = 25; Y = 9 })
                     "but it is walked up its own corridor toward the Seam it was priced at"
             }
@@ -4524,10 +4733,12 @@ let crossRoomTests =
 
                 let posted = across [ "src-out", Source; "cont-out", Structure BuiltKind.Container ]
 
-                Expect.isEmpty (postsOf bare "src-out") "the premise: no container, no Post"
+                Expect.isEmpty
+                    (postsOf bare "src-out" |> tilesIn "W1N2")
+                    "the premise: no container, no Post"
 
                 Expect.equal
-                    (postsOf posted "src-out")
+                    (postsOf posted "src-out" |> tilesIn "W1N2")
                     (Set.ofList [ { X = 24; Y = 39 } ])
                     "and with one standing, the far Seat is the source's Post"
 
@@ -4610,19 +4821,21 @@ let outpostHeavyAreaTests =
                 // when it makes the container the switch.
                 let bare = twoRockRooms [] []
 
-                Expect.isEmpty (postsOf bare "src-out") "the premise: no container, no Post"
+                Expect.isEmpty
+                    (postsOf bare "src-out" |> tilesIn "W1N2")
+                    "the premise: no container, no Post"
 
                 Expect.equal
-                    (workArea bare (Harvest "src-out"))
+                    (workArea bare (Harvest "src-out") |> tilesIn "W1N2")
                     outpostSeats
                     "the body-blind area is still the rock's two Seats"
 
                 Expect.isEmpty
-                    (workAreaFor bare "a-out" (Harvest "src-out"))
+                    (workAreaFor bare "a-out" (Harvest "src-out") |> tilesIn "W1N2")
                     "and a heavy body standing in that room is handed none of them"
 
                 Expect.equal
-                    (workAreaFor bare "w-out" (Harvest "src-out"))
+                    (workAreaFor bare "w-out" (Harvest "src-out") |> tilesIn "W1N2")
                     outpostSeats
                     "while a light body beside it keeps every Seat: the narrowing is the body's"
 
@@ -4645,11 +4858,13 @@ let outpostHeavyAreaTests =
                 // own first container is not built yet.
                 let bare = twoRockRooms [] []
 
-                Expect.isEmpty (postsOf bare "src-home") "the home rock has no container either"
+                Expect.isEmpty
+                    (postsOf bare "src-home" |> tilesHome bare)
+                    "the home rock has no container either"
 
                 Expect.equal
-                    (workAreaFor bare "a" (Harvest "src-home"))
-                    (workArea bare (Harvest "src-home"))
+                    (workAreaFor bare "a" (Harvest "src-home") |> tilesHome bare)
+                    (workArea bare (Harvest "src-home") |> tilesHome bare)
                     "at home the bare Seats are still the fallback (ADR 0020)"
 
                 Expect.isSome
@@ -4668,12 +4883,12 @@ let outpostHeavyAreaTests =
                         [ "cont-out", Structure BuiltKind.Container ]
 
                 Expect.equal
-                    (postsOf posted "src-out")
+                    (postsOf posted "src-out" |> tilesIn "W1N2")
                     (Set.singleton { X = 25; Y = 41 })
                     "the Seat under the container is the rock's Post"
 
                 Expect.equal
-                    (workAreaFor posted "a-out" (Harvest "src-out"))
+                    (workAreaFor posted "a-out" (Harvest "src-out") |> tilesIn "W1N2")
                     (Set.singleton { X = 25; Y = 41 })
                     "and it is the one tile the heavy body may work from"
 
@@ -4746,7 +4961,7 @@ let crossRoomLeadTests =
                         [ creepWith "w" 0 hauler ]
 
                 Expect.equal
-                    (castWalkTicks atlas hauler leadSpawn "W1N2" outpostSeat)
+                    (castWalkTicks atlas hauler leadSpawn (at "W1N2" outpostSeat))
                     (Some 17)
                     "eight near, the exit, and eight in the outpost"
 
@@ -4758,7 +4973,7 @@ let crossRoomLeadTests =
                 // would agree here and drift everywhere else.
                 Expect.equal
                     (walkTicks atlas "w" (Harvest "src-out"))
-                    (castWalkTicks atlas hauler leadSpawn "W1N2" outpostSeat)
+                    (castWalkTicks atlas hauler leadSpawn (at "W1N2" outpostSeat))
                     "the Matcher's walk and the lead's walk price one crossing"
             }
 
@@ -4779,13 +4994,12 @@ let crossRoomLeadTests =
                         (leadAcross homeRing outpostRing [] [])
                         anchorUnit
                         leadSpawn
-                        "W1N2"
-                        outpostSeat)
+                        (at "W1N2" outpostSeat))
                     (Some 34)
                     "sixteen near, two onto a plain exit, sixteen in the outpost"
 
                 Expect.equal
-                    (castWalkTicks (over Swamp) anchorUnit leadSpawn "W1N2" outpostSeat)
+                    (castWalkTicks (over Swamp) anchorUnit leadSpawn (at "W1N2" outpostSeat))
                     (Some 42)
                     "and a swamp exit is charged its own ten"
             }
@@ -4800,7 +5014,7 @@ let crossRoomLeadTests =
                 let atlas = leadAcross homeRing outpostRing [] []
 
                 Expect.equal
-                    (castWalkTicks atlas hauler leadSpawn "W1N1" { X = 25; Y = 20 })
+                    (castWalkTicks atlas hauler leadSpawn (at "W1N1" { X = 25; Y = 20 }))
                     (Some 9)
                     "the home leg alone, priced as it was before the border was crossable"
             }
@@ -4827,17 +5041,17 @@ let crossRoomLeadTests =
                 Expect.isEmpty (seams walled "W1N1" "W1N2") "the premise: the exit is walled"
 
                 Expect.equal
-                    (castWalkTicks walled hauler leadSpawn "W1N2" outpostSeat)
+                    (castWalkTicks walled hauler leadSpawn (at "W1N2" outpostSeat))
                     None
                     "no crossing, no lead"
 
                 Expect.equal
-                    (castWalkTicks open' hauler leadSpawn "W1N2" outpostSeat)
+                    (castWalkTicks open' hauler leadSpawn (at "W1N2" outpostSeat))
                     (Some 17)
                     "open that one tile and the same two rooms lead again"
 
                 Expect.equal
-                    (castWalkTicks open' hauler leadSpawn "W5N5" outpostSeat)
+                    (castWalkTicks open' hauler leadSpawn (at "W5N5" outpostSeat))
                     None
                     "and a room the projection carries no ring for has no band to be led over"
             }
@@ -4855,12 +5069,12 @@ let crossRoomLeadTests =
                 let atlas = leadAcross homeRing outpostRing [] []
 
                 Expect.equal
-                    (castWalkTicks atlas hauler leadSpawn "W1N2" { X = 25; Y = 49 })
+                    (castWalkTicks atlas hauler leadSpawn (at "W1N2" { X = 25; Y = 49 }))
                     None
                     "the landing tile is the outpost's ring, and no ground of it"
 
                 Expect.equal
-                    (castWalkTicks atlas hauler leadSpawn "W1N1" { X = 25; Y = 0 })
+                    (castWalkTicks atlas hauler leadSpawn (at "W1N1" { X = 25; Y = 0 }))
                     None
                     "and the exit tile is the home room's ring, which the flood never enters"
             }
@@ -4887,7 +5101,7 @@ let crossRoomLeadTests =
                 let atlas = leadAcrossSnapshot homeRing outpostRing [] [] |> ofViewRecalling walks
 
                 Expect.equal
-                    (castWalkTicks atlas hauler leadSpawn "W1N2" outpostSeat)
+                    (castWalkTicks atlas hauler leadSpawn (at "W1N2" outpostSeat))
                     (Some 17)
                     "the premise: the lead is priced across the border"
 
@@ -4899,12 +5113,12 @@ let crossRoomLeadTests =
                 let flooded = byRoom ()
 
                 Expect.equal
-                    (castWalkTicks atlas hauler leadSpawn "W1N2" { X = 25; Y = 42 })
+                    (castWalkTicks atlas hauler leadSpawn (at "W1N2" { X = 25; Y = 42 }))
                     (Some 16)
                     "a second tile of the same outpost — one back toward the border, one tick nearer — is read off that same entry"
 
                 Expect.equal
-                    (castWalkTicks atlas hauler leadSpawn "W1N1" { X = 25; Y = 20 })
+                    (castWalkTicks atlas hauler leadSpawn (at "W1N1" { X = 25; Y = 20 }))
                     (Some 9)
                     "and the home lead reads the entry filed under home"
 
@@ -4920,12 +5134,12 @@ let crossRoomLeadTests =
                 let second = leadAcrossSnapshot homeRing outpostRing [] [] |> ofViewRecalling walks
 
                 Expect.equal
-                    (castWalkTicks second hauler leadSpawn "W1N2" outpostSeat)
+                    (castWalkTicks second hauler leadSpawn (at "W1N2" outpostSeat))
                     (Some 17)
                     "the recalled far leg prices the same lead"
 
                 Expect.equal
-                    (castWalkTicks second hauler leadSpawn "W1N1" { X = 25; Y = 20 })
+                    (castWalkTicks second hauler leadSpawn (at "W1N1" { X = 25; Y = 20 }))
                     (Some 9)
                     "and the recalled near leg the same home one"
 
@@ -4937,7 +5151,7 @@ let crossRoomLeadTests =
                         $"the second Atlas read {room}'s flood rather than running its own"
 
                 Expect.equal
-                    (castWalkTicks second hauler leadSpawn "W5N5" outpostSeat)
+                    (castWalkTicks second hauler leadSpawn (at "W5N5" outpostSeat))
                     None
                     "a room the projection carries no ring for is still led over by nobody"
 
@@ -4986,10 +5200,14 @@ let private haulAcross homeRing outpostRing =
         [ creepWith "loaded" 100 haulerBody; creepWith "empty" 0 haulerBody ]
 
 /// The one haul every case below prices: the outpost's container to the
-/// home room's spawn, rooms named on the way in because a `Pos` names none
-/// (ADR 0041).
+/// home room's spawn, each end carrying the room it is a tile of (ADR
+/// 0052 decision 2).
 let private roundTripOf atlas =
-    haulRoundTripTicks atlas haulerBody "W1N2" { X = 25; Y = 41 } "W1N1" { X = 25; Y = 10 }
+    haulRoundTripTicks
+        atlas
+        haulerBody
+        (at "W1N2" { X = 25; Y = 41 })
+        (at "W1N1" { X = 25; Y = 10 })
 
 [<Tests>]
 let crossRoomHaulTests =
@@ -5338,15 +5556,19 @@ let crossRoomStepTests =
                     "standing beside the exit, the step is the exit itself"
 
                 Expect.isFalse
-                    (Set.contains { X = 25; Y = 0 } (walkableTiles atlas))
+                    (Set.contains { X = 25; Y = 0 } (walkableTilesIn atlas (atlasHome atlas)))
                     "and that tile is no walkable ground of this room"
 
                 Expect.isFalse
-                    (List.contains { X = 25; Y = 0 } (adjacentWalkable atlas { X = 25; Y = 1 }))
+                    (List.contains
+                        { X = 25; Y = 0 }
+                        (adjacentWalkableIn atlas (atlasHome atlas) { X = 25; Y = 1 }))
                     "no neighbour a parked creep may be displaced onto"
 
                 Expect.isFalse
-                    (Set.contains { X = 25; Y = 0 } (workArea atlas (Harvest "src-out")))
+                    (Set.contains
+                        { X = 25; Y = 0 }
+                        (workArea atlas (Harvest "src-out") |> tilesIn "W1N2"))
                     "and no tile of any Work Area"
             }
 
@@ -5587,7 +5809,7 @@ let trunkPricingTests =
                     |> ofView
 
                 let path =
-                    trunkPath
+                    trunkPathHome
                         atlas
                         Set.empty
                         { X = 10; Y = 10 }
@@ -5622,7 +5844,7 @@ let trunkPricingTests =
 
                 Expect.equal
                     (List.last (
-                        trunkPath
+                        trunkPathHome
                             shorterPlain
                             Set.empty
                             { X = 10; Y = 10 }

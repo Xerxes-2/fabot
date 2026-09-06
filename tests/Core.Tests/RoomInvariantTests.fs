@@ -363,14 +363,14 @@ let private colonyOf (room: LoadedRoom) level =
         // The sweep is one colony over one room: every body in it is this
         // colony's (ADR 0052 decision 1), and it raises no child, so there
         // is nothing borrowed to carry.
-        Foreign = Map.empty
+        Foreign = Set.empty
         Borrowed = { Rooms = [] }
     }
 
 let private placementsOf intents =
     intents
     |> List.choose (function
-        | PlaceConstructionSite(_, pos, kind) -> Some(pos, kind)
+        | PlaceConstructionSite(tile, kind) -> Some(RoomPos.pos tile, kind)
         | _ -> None)
 
 let private tilesOfKind kind placed =
@@ -479,7 +479,8 @@ let private sweep =
                             Sources =
                                 loaded.SourceIds
                                 |> List.choose (fun id ->
-                                    positionOf atlas id |> Option.map (fun pos -> id, pos))
+                                    positionOf atlas id
+                                    |> Option.map (fun tile -> id, RoomPos.pos tile))
                             SpawnId = (List.head colony.Spawns).Id
                             ControllerId = loaded.ControllerId
                             Atlas = atlas
@@ -534,7 +535,8 @@ let private unroutedByRoads (case: Case) : UnroutedTrunk list =
 
         let goals =
             [
-                TrunkGoal.UpgradeArea, workArea case.Atlas (Upgrade controllerId)
+                TrunkGoal.UpgradeArea,
+                workArea case.Atlas (Upgrade controllerId) |> RoomPos.inRoom case.Room.Name
                 TrunkGoal.Spawn case.SpawnId, Set.singleton case.Spawn
             ]
 
@@ -653,18 +655,18 @@ let invariantTests =
                     let paved = tilesOfKind Road case.Placed |> Set.ofList
 
                     let targets =
-                        (case.Served |> List.map (fun footing -> footing.Target))
-                        @ (case.Unserved |> List.map (fun footing -> footing.Target))
+                        (case.Served |> List.map (fun footing -> RoomPos.pos footing.Target))
+                        @ (case.Unserved |> List.map (fun footing -> RoomPos.pos footing.Target))
                         |> Set.ofList
 
-                    let tiles = case.Served |> List.map (fun footing -> footing.Tile)
+                    let tiles = case.Served |> List.map (fun footing -> RoomPos.pos footing.Tile)
 
                     List.length (List.distinct tiles) <> List.length tiles
                     || case.Served
                        |> List.exists (fun footing ->
-                           range footing.Tile footing.Target <> 1
-                           || Set.contains footing.Tile paved
-                           || Set.contains footing.Tile targets)
+                           RoomPos.range footing.Tile footing.Target <> Some 1
+                           || Set.contains (RoomPos.pos footing.Tile) paved
+                           || Set.contains (RoomPos.pos footing.Tile) targets)
 
                 Expect.isEmpty
                     (violations breaksTheRule)
@@ -703,7 +705,7 @@ let invariantTests =
                 // Upgrade tile eats a tile an Anchor or an upgrader stands
                 // on, and nothing they do is worth that.
                 let onWorkingGround (case: Case) =
-                    let working = workingGround case.Atlas
+                    let working = workingGroundIn case.Atlas case.Room.Name
                     clusteredTiles case.Placed |> Set.exists (fun tile -> Set.contains tile working)
 
                 Expect.isEmpty
@@ -723,7 +725,7 @@ let invariantTests =
                 // A trunk is a paved line, so every tile of it has to be
                 // walkable ground: a road on a wall is not a road.
                 let pavesTheImpassable (case: Case) =
-                    let walkable = walkableTiles case.Atlas
+                    let walkable = walkableTilesIn case.Atlas case.Room.Name
 
                     tilesOfKind Road case.Placed
                     |> List.exists (fun tile -> not (Set.contains tile walkable))
@@ -1299,6 +1301,7 @@ let crossRoomWalkTests =
 
                                     let apart =
                                         workArea atlas task
+                                        |> RoomPos.inRoom into
                                         |> Set.toList
                                         |> List.map (shift >> range stand)
                                         |> List.min
@@ -1346,7 +1349,10 @@ let crossRoomWalkTests =
 
                             for sourceId, _ in far.Sources do
                                 let task = Harvest sourceId
-                                let step = firstStep atlas "w" task (workAreaFor atlas "w" task)
+
+                                let step =
+                                    firstStep atlas "w" task (workAreaFor atlas "w" task)
+                                    |> Option.map RoomPos.pos
 
                                 Expect.equal
                                     (Option.isSome step)
@@ -1420,7 +1426,7 @@ let crossRoomWalkTests =
                             let atlas = leadingAcross near far spawn birth [] Set.empty
 
                             Expect.equal
-                                (adjacentWalkable atlas spawn)
+                                (adjacentWalkableIn atlas from spawn)
                                 [ birth ]
                                 $"the premise: at {spawn.X},{spawn.Y} a body is born on {birth.X},{birth.Y} and nowhere else"
 
@@ -1436,7 +1442,7 @@ let crossRoomWalkTests =
                                 let perTile =
                                     workArea atlas task
                                     |> Set.toList
-                                    |> List.choose (castWalkTicks atlas leadBody spawn into)
+                                    |> List.choose (castWalkTicks atlas leadBody spawn)
 
                                 let leadWalk =
                                     match perTile with
@@ -1458,13 +1464,13 @@ let crossRoomWalkTests =
                             // ever.
                             for wall in wallSample far do
                                 Expect.equal
-                                    (castWalkTicks atlas leadBody spawn into wall)
+                                    (castWalkTicks atlas leadBody spawn (RoomPos.at into wall))
                                     None
                                     $"{from} -> {into}: the wall at {wall.X},{wall.Y} leads nobody"
 
                             for exit in seams atlas into from |> List.map fst do
                                 Expect.equal
-                                    (castWalkTicks atlas leadBody spawn into exit)
+                                    (castWalkTicks atlas leadBody spawn (RoomPos.at into exit))
                                     None
                                     $"{from} -> {into}: the exit at {exit.X},{exit.Y} is the ring, and no room's ground"
 
@@ -1487,11 +1493,13 @@ let crossRoomWalkTests =
                                     leadingAcross near far spawn birth [ "probe", source ] fence
 
                                 Expect.equal
-                                    (workArea atlas (Harvest "probe") |> Set.toList)
+                                    (workArea atlas (Harvest "probe")
+                                     |> RoomPos.inRoom into
+                                     |> Set.toList)
                                     [ goal ]
                                     $"the premise: the probe beside {goal.X},{goal.Y} is worked from that tile and no other"
 
-                                let led = castWalkTicks atlas leadBody spawn into goal
+                                let led = castWalkTicks atlas leadBody spawn (RoomPos.at into goal)
 
                                 if Option.isSome led then
                                     pinned <- pinned + 1
@@ -1596,12 +1604,12 @@ let outpostDeclarationTests =
                         "the capture read is the room the declaration names"
 
                     Expect.equal
-                        outpost.Sources
+                        (outpost.Sources |> List.map (fun (id, tile) -> id, RoomPos.pos tile))
                         capture.RealSources
                         $"{outpost.RoomName}: every source the server answered with, in its order"
 
                     Expect.equal
-                        (Some outpost.Controller)
+                        (Some(fst outpost.Controller, RoomPos.pos (snd outpost.Controller)))
                         capture.RealController
                         $"{outpost.RoomName}: the controller a reserver would hold (ADR 0042)"
             }
@@ -1629,8 +1637,9 @@ let outpostDeclarationTests =
                         | Some terrain -> terrain <> Wall
                         | None -> false
 
-                    for id, pos in outpost.Sources do
-                        let seatTiles = seatTilesOf atlas id
+                    for id, tile in outpost.Sources do
+                        let pos = RoomPos.pos tile
+                        let seatTiles = seatTilesOf atlas id |> RoomPos.inRoom outpost.RoomName
                         let where = $"{outpost.RoomName} source {id}"
 
                         Expect.equal
@@ -1662,8 +1671,12 @@ let outpostDeclarationTests =
                             (postsOf atlas id)
                             $"{where}: no container stands, so the source has no Post"
 
-                    let controllerId, controllerPos = outpost.Controller
-                    let area = workArea atlas (Upgrade controllerId)
+                    let controllerId, controllerTile = outpost.Controller
+                    let controllerPos = RoomPos.pos controllerTile
+
+                    let area =
+                        workArea atlas (Upgrade controllerId) |> RoomPos.inRoom outpost.RoomName
+
                     let where = $"{outpost.RoomName} controller {controllerId}"
 
                     Expect.equal
@@ -1691,7 +1704,8 @@ let outpostDeclarationTests =
                     // the Task stays pooled, `threatened` reads an empty
                     // area as unthreatened, and the reserver matched to it
                     // is rejected as unreachable for its whole life.
-                    let reserveArea = workArea atlas (Reserve controllerId)
+                    let reserveArea =
+                        workArea atlas (Reserve controllerId) |> RoomPos.inRoom outpost.RoomName
 
                     Expect.isNonEmpty
                         reserveArea
@@ -1793,13 +1807,15 @@ let outpostContainerTests =
                 let sites =
                     intents
                     |> List.choose (function
-                        | PlaceConstructionSite(room, pos, Container) -> Some(room, pos)
+                        | PlaceConstructionSite(tile, Container) ->
+                            Some(tile.Room, RoomPos.pos tile)
                         | _ -> None)
 
                 let declaredSources =
                     [
                         for outpost in declaredOutposts do
-                            for id, pos in outpost.Sources -> outpost.RoomName, id, pos
+                            for id, tile in outpost.Sources ->
+                                outpost.RoomName, id, RoomPos.pos tile
                     ]
 
                 // Everything below is derived from the declaration, and an
@@ -1815,7 +1831,7 @@ let outpostContainerTests =
 
                 for room, id, pos in declaredSources do
                     let where = $"{room} source {id}"
-                    let seats = seatTilesOf atlas id
+                    let seats = seatTilesOf atlas id |> RoomPos.inRoom room
 
                     // Attributed by the geometry a source container *is* —
                     // range 1 of the rock (ADR 0012) — so that standing on
@@ -2007,7 +2023,13 @@ let onDemandFloodTests =
                         let atlas = standingIn capture spawn creep stand
 
                         let onDemand = walkTicks atlas creep.Name task
-                        let whole = haulRoundTripTicks atlas body roomName stand roomName spawn
+
+                        let whole =
+                            haulRoundTripTicks
+                                atlas
+                                body
+                                (RoomPos.at roomName stand)
+                                (RoomPos.at roomName spawn)
 
                         match onDemand, whole with
                         | Some one, Some round ->
@@ -2045,7 +2067,10 @@ let onDemandFloodTests =
                         let atlasOf () = standingIn capture spawn creep stand
 
                         let priced atlas tile =
-                            travelCostWithin atlas creep.Name (Set.singleton tile)
+                            travelCostWithin
+                                atlas
+                                creep.Name
+                                (Set.singleton (RoomPos.at roomName tile))
 
                         Expect.isGreaterThan
                             (List.length tiles)
@@ -2163,10 +2188,20 @@ let onDemandFloodTests =
                         [
                             "priced",
                             steps (fun atlas goal ->
-                                firstStep atlas creep.Name task (Set.singleton goal))
+                                firstStep
+                                    atlas
+                                    creep.Name
+                                    task
+                                    (Set.singleton (RoomPos.at roomName goal))
+                                |> Option.map RoomPos.pos)
                             "traffic-blind",
                             steps (fun atlas goal ->
-                                firstStepIgnoringTraffic atlas creep.Name task (Set.singleton goal))
+                                firstStepIgnoringTraffic
+                                    atlas
+                                    creep.Name
+                                    task
+                                    (Set.singleton (RoomPos.at roomName goal))
+                                |> Option.map RoomPos.pos)
                         ]
 
                     for pricing, (onDemand, farEndFirst, cold, wholeFirst) in routes do
@@ -2260,6 +2295,7 @@ let onDemandFloodTests =
                 let creep = AtlasTests.worker "w"
                 let stand = { X = 24; Y = 24 }
                 let atlas = standingIn capture { X = 12; Y = 40 } creep stand
+                let here tile = RoomPos.at capture.RoomName tile
 
                 let walls =
                     capture.Terrain
@@ -2270,16 +2306,16 @@ let onDemandFloodTests =
                 Expect.isNonEmpty walls "a captured room has walls"
 
                 Expect.isNone
-                    (travelCostWithin atlas creep.Name (Set.singleton offTheGround))
+                    (travelCostWithin atlas creep.Name (Set.singleton (here offTheGround)))
                     "the border ring is no tile of the projection's ground"
 
                 Expect.isNone
-                    (travelCostWithin atlas creep.Name (Set.singleton { X = 60; Y = 3 }))
+                    (travelCostWithin atlas creep.Name (Set.singleton (here { X = 60; Y = 3 })))
                     "a tile off the fifty-by-fifty grid is unpriceable, not an exception (ADR 0004)"
 
                 for wall in walls do
                     Expect.isNone
-                        (travelCostWithin atlas creep.Name (Set.singleton wall))
+                        (travelCostWithin atlas creep.Name (Set.singleton (here wall)))
                         $"a wall at {wall} is reachable by nothing"
 
                 // After all of that: an absent answer drains the flood, and
@@ -2293,18 +2329,19 @@ let onDemandFloodTests =
                     nearestFirst stand capture |> List.filter (fun tile -> tile <> stand)
 
                 Expect.equal
-                    (travelCostWithin atlas creep.Name (Set.singleton stand))
+                    (travelCostWithin atlas creep.Name (Set.singleton (here stand)))
                     (Some 0)
                     "the creep's own tile prices at nothing, asked before any flood is"
 
                 Expect.isSome
-                    (travelCostWithin atlas creep.Name (Set.ofList elsewhere))
+                    (travelCostWithin atlas creep.Name (elsewhere |> List.map here |> Set.ofList))
                     "and the room around it is still reachable"
 
                 Expect.isGreaterThan
                     (elsewhere
                      |> List.filter (fun tile ->
-                         travelCostWithin atlas creep.Name (Set.singleton tile) |> Option.isSome)
+                         travelCostWithin atlas creep.Name (Set.singleton (here tile))
+                         |> Option.isSome)
                      |> List.length)
                     1500
                     "and so is each of its tiles, asked one at a time after the drain"
@@ -2415,7 +2452,7 @@ let boundedBandTests =
                     for from, into in [ border.From, border.To; border.To, border.From ] do
                         let near = load from
                         let far = load into
-                        let drain = Set.singleton (drainTile near)
+                        let drain = Set.singleton (RoomPos.at near.RoomName (drainTile near))
 
                         for stand in standsAcross near far from into do
                             let bounded = walkingAcross near far stand
@@ -2494,7 +2531,13 @@ let boundedBandTests =
 
                             for sourceId, source in far.Sources do
                                 let one = walkTicks atlas "w" (Harvest sourceId)
-                                let round = haulRoundTripTicks atlas haulBody from stand into source
+
+                                let round =
+                                    haulRoundTripTicks
+                                        atlas
+                                        haulBody
+                                        (RoomPos.at from stand)
+                                        (RoomPos.at into source)
 
                                 match one, round with
                                 | Some out, Some trip ->

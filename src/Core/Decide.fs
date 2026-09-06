@@ -667,7 +667,17 @@ type Threats =
         /// with a Reach, where every other room's absence stands for "not
         /// derived" rather than "nowhere is safe": nothing reads it there,
         /// because a creep with no Reach around it is matched to no Flee.
-        Safe: Map<string, Set<Pos>>
+        ///
+        /// Joined to its room here and not at the ask, unlike `Reach`
+        /// beside it (#216 R3): this one *leaves* as an area — it is
+        /// handed to the price, the first step and the applicability gate
+        /// as a Work Area is, so it takes the shape those take. The join
+        /// costs one pass over a room the derivation already walks, where
+        /// at the ask it is a `Set.map` over a thousand-odd tiles per
+        /// creep per candidate — the same reason `Atlas.WorkAreas` holds
+        /// both shapes from one write. `Reach` stays a `Set<Pos>` because
+        /// it is only ever membership-tested against a grid coordinate.
+        Safe: Map<string, Set<RoomPos>>
     }
 
 /// The tick with nothing to run from: every Work Area stands whole and no
@@ -680,8 +690,9 @@ module Threats =
     let reachIn (threats: Threats) (room: string) : Set<Pos> =
         Map.tryFind room threats.Reach |> Option.defaultValue Set.empty
 
-    /// One room's safe set; empty for a room no Reach was derived in.
-    let safeIn (threats: Threats) (room: string) : Set<Pos> =
+    /// One room's safe set, already joined to that room; empty for a room
+    /// no Reach was derived in.
+    let safeIn (threats: Threats) (room: string) : Set<RoomPos> =
         Map.tryFind room threats.Safe |> Option.defaultValue Set.empty
 
 /// This tick's Threats, off the view's hostiles and the rampart
@@ -694,7 +705,8 @@ module Threats =
 /// ground less that room's Reach, derived only where something is unsafe,
 /// so a quiet tick pays for no walk over any room, and a raid in one room
 /// walks that room alone. Derived once here and handed down; the layering
-/// does not make it once per creep.
+/// does not make it once per creep, and neither does the room join — the
+/// safe set is built as an area of its room in this one pass (`Threats`).
 let threatsOf (view: ColonyView) atlas : Threats =
     // Under safe mode a hostile in a room of ours can hurt nothing — the
     // engine refuses every harmful act there for the whole window — so it
@@ -716,9 +728,10 @@ let threatsOf (view: ColonyView) atlas : Threats =
     // tick with nothing in it to run from.
     match
         view.Hostiles
-        |> List.filter (fun hostile -> not (shielded hostile.RoomName))
+        |> List.filter (fun hostile -> not (shielded hostile.Pos.Room))
         |> List.choose (fun hostile ->
-            weaponRange hostile |> Option.map (fun r -> hostile.RoomName, hostile.Pos, r))
+            weaponRange hostile
+            |> Option.map (fun r -> hostile.Pos.Room, RoomPos.pos hostile.Pos, r))
     with
     | [] -> noThreats
     | threats ->
@@ -754,7 +767,7 @@ let threatsOf (view: ColonyView) atlas : Threats =
             Safe =
                 reach
                 |> Map.map (fun room tiles ->
-                    Set.difference (Atlas.walkableTilesIn atlas room) tiles)
+                    Set.difference (Atlas.walkableTilesIn atlas room) tiles |> RoomPos.setAt room)
         }
 
 /// The source container geometry (ADR 0012): a tile within range 1 of the
@@ -792,7 +805,7 @@ let private sourceContainerServes (view: ColonyView) (room: string) (pos: Pos) :
     view.Sources
     |> List.tryFind (fun s ->
         match SpatialInfo.placementOf view.Spatial s.Id with
-        | Some(sourceRoom, sourcePos) -> sourceRoom = room && servesSource sourcePos pos
+        | Some source -> source.Room = room && servesSource (RoomPos.pos source) pos
         | None -> false)
     |> Option.map (fun s -> s.Id)
 
@@ -873,7 +886,7 @@ let private claimTargets (view: ColonyView) : (string * string) list =
     |> List.choose (fun (id, kind) ->
         if kind = Controller then
             match SpatialInfo.placementOf view.Spatial id with
-            | Some(room, _) when candidate room -> Some(id, room)
+            | Some tile when candidate tile.Room -> Some(id, tile.Room)
             | _ -> None
         else
             None)
@@ -1056,7 +1069,7 @@ let planTasks (view: ColonyView) (threats: Threats) : Task list =
             idsOfKind Controller
             |> List.filter (fun id ->
                 SpatialInfo.placementOf view.Spatial id
-                |> Option.map fst
+                |> Option.map (fun tile -> tile.Room)
                 |> Option.exists (isBootstrapRoom view))
 
         own @ children |> List.map Upgrade
@@ -1112,7 +1125,7 @@ let planTasks (view: ColonyView) (threats: Threats) : Task list =
 
         let inRoomWeOwn id =
             SpatialInfo.placementOf view.Spatial id
-            |> Option.map fst
+            |> Option.map (fun tile -> tile.Room)
             |> Option.exists (colonyOwns view)
 
         idsOfKind Controller
@@ -1190,7 +1203,9 @@ let planTasks (view: ColonyView) (threats: Threats) : Task list =
     let containerRefills =
         view.Controller
         |> Option.bind (fun c -> SpatialInfo.placementOf view.Spatial c.Id)
-        |> Option.map (fun (controllerRoom, controllerPos) ->
+        |> Option.map (fun controller ->
+            let controllerRoom = controller.Room
+            let controllerPos = RoomPos.pos controller
             let placed = (SpatialInfo.layerOf view.Spatial controllerRoom).TargetPositions
 
             containers
@@ -1588,10 +1603,10 @@ let private haulerQuota (view: ColonyView) atlas : int =
                 SpatialInfo.placementOf view.Spatial id
             else
                 None)
-        |> List.choose (fun (room, tile) ->
-            sourceContainerServes view room tile
+        |> List.choose (fun container ->
+            sourceContainerServes view container.Room (RoomPos.pos container)
             |> Option.bind (sourceOutputOf view atlas)
-            |> Option.map (fun output -> room, tile, output))
+            |> Option.map (fun output -> container, output))
 
     // One load, for the whole colony, and the row's own body cast at the
     // richest bank: rounding once (ADR 0049) sums demands before it
@@ -1621,10 +1636,10 @@ let private haulerQuota (view: ColonyView) atlas : int =
     // "its cheapest spawn" is the near one rather than the rich one.
     let demand =
         sourceContainers
-        |> List.sumBy (fun (room, tile, output) ->
+        |> List.sumBy (fun (container, output) ->
             sinks
-            |> List.choose (fun (spawnRoom, spawnPos) ->
-                Atlas.haulRoundTripTicks atlas body room tile spawnRoom spawnPos
+            |> List.choose (fun sink ->
+                Atlas.haulRoundTripTicks atlas body container sink
                 |> Option.map (fun ticks -> ticks * output))
             |> function
                 | [] -> 0
@@ -2476,9 +2491,9 @@ let private patternOf atlas (creep: CreepInfo) =
 /// place, and a tile no spawn can reach each answer 0, and a lead of 0
 /// leaves every living creep counted.
 ///
-/// Read wherever the creep stands, home or an outpost (#153). The tile and
-/// its room come off the same lookup — `Atlas.creepRoom` beside
-/// `Atlas.creepTile`, never a query that has already picked a room — and
+/// Read wherever the creep stands, home or an outpost (#153). The tile
+/// carries the room it is in (`Atlas.creepTile`, ADR 0052 decision 2) and
+/// is never read out of a query that has already picked a room — and
 /// the walk from `Atlas.castWalkTicks`, which floods home for the near leg
 /// and joins over the Seam band for a goal beyond it. One row, one rule,
 /// both sides of a border: an outpost's Post hires its Anchor off this row
@@ -2496,10 +2511,9 @@ let private patternOf atlas (creep: CreepInfo) =
 let private leadOf (view: ColonyView) atlas (creep: CreepInfo) : int =
     let pattern = patternOf atlas creep
 
-    match Atlas.creepRoom atlas creep.Name, Atlas.creepTile atlas creep.Name with
-    | None, _
-    | _, None -> 0
-    | Some room, Some tile ->
+    match Atlas.creepTile atlas creep.Name with
+    | None -> 0
+    | Some tile ->
         view.Spawns
         |> List.choose (fun s ->
             match Atlas.positionOf atlas s.Id with
@@ -2512,7 +2526,7 @@ let private leadOf (view: ColonyView) atlas (creep: CreepInfo) : int =
                 // of them.
                 let body = bodyFor pattern view.Bank.Capacity
 
-                Atlas.castWalkTicks atlas body spawnPos room tile
+                Atlas.castWalkTicks atlas body (RoomPos.pos spawnPos) tile
                 |> Option.map (fun walk -> spawnTicksPerPart * List.length body + walk))
         |> function
             | [] -> 0
@@ -2939,7 +2953,7 @@ let private safeModeDeadline = 3
 /// the moment there is least to read.
 let private hostilesAtHome (view: ColonyView) : HostileInfo list =
     let home = SpatialInfo.homeName view.Spatial
-    view.Hostiles |> List.filter (fun hostile -> hostile.RoomName = home)
+    view.Hostiles |> List.filter (fun hostile -> hostile.Pos.Room = home)
 
 /// Colony reflex beside the pipeline, two arms and one pair of gates —
 /// stock remaining, safe mode not already running.
@@ -2980,7 +2994,13 @@ let private planSafeMode (view: ColonyView) atlas : Intent list =
         let withinReach (h: HostileInfo) =
             List.contains BodyPart.Claim h.Body
             && match Atlas.positionOf atlas controller.Id with
-               | Some pos -> range h.Pos pos <= safeModeDeadline
+               // Across a border there is no range to measure (ADR 0052
+               // decision 2), and a claimer in another room is tapping a
+               // controller this safe mode does not cover — so None here
+               // is "not in reach", where an unplaced controller below is
+               // still "fire on sight".
+               | Some tile ->
+                   RoomPos.range h.Pos tile |> Option.exists (fun r -> r <= safeModeDeadline)
                | None -> true
 
         let claimerInReach = here |> List.exists withinReach
@@ -3029,19 +3049,27 @@ let private planSafeMode (view: ColonyView) atlas : Intent list =
 ///
 /// Both halves of the pairing are the colony's own room's: `placedTowers`
 /// has always answered home alone — a tower stands only in a room we own
-/// — and the hostiles are narrowed to match (`hostilesAtHome`, #201).
-/// Without that the widened sweep would aim every tower at whichever
-/// raider is nearest *by coordinate* in any projected room, and a `Pos`
-/// carries no room, so a raider fifty tiles and a border away would read
-/// as the nearest target and take the shot the one in the room deserved.
+/// — and the hostiles are narrowed to match (`hostilesAtHome`, #201). That
+/// narrowing is the reflex's own rule and not a repair for a missing join:
+/// a tower shoots inside its own room (ADR 0014), so a raider in an
+/// outpost is not a target it declines to reach but a target it does not
+/// have. Since #216 R3 the join is the type as well — `RoomPos.range`
+/// answers None across a border rather than the coordinate distance that
+/// used to read as nearest — so the narrowing and the measurement now
+/// agree by construction instead of by whoever remembered.
 let private planFire (view: ColonyView) atlas : Intent list =
     match hostilesAtHome view with
     | [] -> []
     | hostiles ->
         Atlas.placedTowers atlas
-        |> List.map (fun (towerId, pos) ->
-            let target = hostiles |> List.minBy (fun h -> range pos h.Pos, h.Id)
-            FireTower(towerId, target.Id))
+        |> List.choose (fun (towerId, tile) ->
+            hostiles
+            |> List.choose (fun h -> RoomPos.range tile h.Pos |> Option.map (fun r -> r, h))
+            |> function
+                | [] -> None
+                | reachable ->
+                    let _, target = reachable |> List.minBy (fun (r, h) -> r, h.Id)
+                    Some(FireTower(towerId, target.Id)))
 
 /// Extensions the controller level allows in the room (Screeps
 /// CONTROLLER_STRUCTURES for "extension").
@@ -3182,10 +3210,28 @@ let private planLayout
       UnroutedTrunk list *
       DeferredContainer list
     =
-    let anchor = view.Spawns |> List.tryPick (fun s -> Atlas.positionOf atlas s.Id)
+    let home = Atlas.homeRoom atlas
 
-    match Atlas.homeRoom atlas, anchor, view.Controller with
-    | Some room, Some spawnPos, Some controller ->
+    // The tile the whole plan is oriented on, and it is a tile of the
+    // room being planned (ADR 0052 decision 2). A colony's spawns stand
+    // in its home room (ADR 0047), but `view.Spawns` is a list and the
+    // first entry's tile used to be read onto the home grid whatever room
+    // the projection filed it under — which is #191 exactly: Spawn2
+    // standing in the child room set the cluster's parity, the ordering's
+    // distance and every trunk goal from a coordinate of another room.
+    // The join is the type now, so the mismatch is a filter rather than an
+    // assumption, and a colony whose only placed spawn is elsewhere plans
+    // nothing, which is what a colony that cannot orient itself has always
+    // done.
+    let inHome (tile: RoomPos) = Some tile.Room = home
+
+    let anchor =
+        view.Spawns
+        |> List.tryPick (fun s -> Atlas.positionOf atlas s.Id |> Option.filter inHome)
+
+    match home, anchor, view.Controller with
+    | Some room, Some anchorTile, Some controller ->
+        let spawnPos = RoomPos.pos anchorTile
         // Same checkerboard colour as the spawn: clustered structures sit on
         // the spawn's colour, leaving the other colour free for movement.
         let parity = (spawnPos.X + spawnPos.Y) % 2
@@ -3210,9 +3256,9 @@ let private planLayout
         // structure there eats a tile an Anchor or an upgrader stands on,
         // so a colony whose nearest same-colour tiles are working ground
         // clusters one ring out instead of eating them.
-        let working = Atlas.workingGround atlas
+        let working = Atlas.workingGroundIn atlas room
 
-        let buildable = Atlas.buildableTiles atlas
+        let buildable = Atlas.buildableTilesIn atlas room
 
         let ordering =
             buildable
@@ -3227,14 +3273,24 @@ let private planLayout
         let gapAt allowanceOf built pending level =
             allowanceOf level - built - pending |> max 0
 
+        // The room being planned, and no other (#140): the allowance is
+        // this controller's, so what is subtracted from it is this room's
+        // census — a neighbour's site counted here is a site this room
+        // never places.
         let storageGap =
-            gapAt storageAllowance (Atlas.builtStorages atlas) (Atlas.pendingStorages atlas)
+            gapAt
+                storageAllowance
+                (Atlas.builtStoragesIn atlas room)
+                (Atlas.pendingStoragesIn atlas room)
 
         let towerGap =
-            gapAt towerAllowance (Atlas.builtTowers atlas) (Atlas.pendingTowers atlas)
+            gapAt towerAllowance (Atlas.builtTowersIn atlas room) (Atlas.pendingTowersIn atlas room)
 
         let extensionGap =
-            gapAt extensionAllowance (Atlas.builtExtensions atlas) (Atlas.pendingExtensions atlas)
+            gapAt
+                extensionAllowance
+                (Atlas.builtExtensionsIn atlas room)
+                (Atlas.pendingExtensionsIn atlas room)
 
         // The still-unclaimed slots, Storage first and tower next: a built
         // or pending structure keeps its tile out of the ordering (it is a
@@ -3270,19 +3326,33 @@ let private planLayout
         // below, once the trunks are known.
         let reserved = Set.ofList clustered
 
-        let upgradeArea = Atlas.workArea atlas (Upgrade controller.Id)
+        // The reservation as the router reads it, joined once: the trunks
+        // ask for it per source per goal, and a room name added to every
+        // tile of it at each of those asks is a census tick's worth of
+        // rebuilding for an answer that does not move (#216 R3).
+        let reservedTiles = RoomPos.setAt room reserved
+
+        // This room's share of the controller's Upgrade Work Area: a
+        // controller the projection files under another room contributes
+        // nothing here, rather than its coordinates (ADR 0052 decision 2).
+        let upgradeArea =
+            Atlas.workArea atlas (Upgrade controller.Id) |> RoomPos.inRoom room
 
         // Each goal beside the name it is recorded under when a source
         // cannot reach it (#107). The Upgrade Work Area first and the
         // spawns after, which is the order the routes are collected in and
         // therefore the order a loss reads in.
         let trunkGoals =
-            (TrunkGoal.UpgradeArea, upgradeArea)
+            (TrunkGoal.UpgradeArea, RoomPos.setAt room upgradeArea)
             :: (view.Spawns
                 |> List.choose (fun s ->
                     Atlas.positionOf atlas s.Id
+                    |> Option.filter inHome
                     |> Option.map (fun spawn ->
-                        TrunkGoal.Spawn s.Id, Atlas.adjacentWalkable atlas spawn |> Set.ofList)))
+                        TrunkGoal.Spawn s.Id,
+                        Atlas.adjacentWalkableIn atlas room (RoomPos.pos spawn)
+                        |> List.map (RoomPos.at room)
+                        |> Set.ofList)))
 
         // Every route the Layout asks for, kept per source and per goal:
         // the union paves the roads and each source's own trunk anchors
@@ -3293,11 +3363,14 @@ let private planLayout
             |> List.sortBy (fun s -> s.Id)
             |> List.choose (fun s ->
                 Atlas.positionOf atlas s.Id
+                |> Option.filter inHome
                 |> Option.map (fun sourcePos ->
                     s.Id,
                     trunkGoals
                     |> List.map (fun (goal, area) ->
-                        goal, Atlas.trunkPath atlas reserved sourcePos area)))
+                        goal,
+                        Atlas.trunkPath atlas reservedTiles sourcePos area
+                        |> List.map RoomPos.pos)))
 
         let sourceTrunks =
             sourceRoutes
@@ -3328,7 +3401,7 @@ let private planLayout
         // the plain ground does not. No reservation can stand here: the
         // Work Area is working ground, which the ordering never offered
         // (ADR 0022).
-        let workAreaSwamps = upgradeArea |> Set.filter (Atlas.isSwamp atlas)
+        let workAreaSwamps = upgradeArea |> Set.filter (Atlas.isSwampIn atlas room)
 
         // Every tile the Layout paves: the trunks plus the Work Area's
         // swamps. The road gap measures this against the projection's road
@@ -3338,8 +3411,8 @@ let private planLayout
         // The road gap reads the projection's road census: a built road or a
         // pending road site already claims its tile (ADR 0010).
         let roadGap =
-            Set.difference roadPlan (Atlas.roadTiles atlas)
-            |> fun wanted -> Set.difference wanted (Atlas.pendingRoadTiles atlas)
+            Set.difference roadPlan (Atlas.roadTilesIn atlas room)
+            |> fun wanted -> Set.difference wanted (Atlas.pendingRoadTilesIn atlas room)
 
         // The road sites this tick: the whole gap once the colony is
         // `Independent`, none before it (#209). The stage gate is a filter
@@ -3366,7 +3439,7 @@ let private planLayout
         // rule, and both kinds have to read it.
         let placedRoads =
             if placesRoads view then
-                Set.difference roadGap (Atlas.pendingContainerTiles atlas)
+                Set.difference roadGap (Atlas.pendingContainerTilesIn atlas room)
             else
                 Set.empty
 
@@ -3387,7 +3460,7 @@ let private planLayout
         let sourceContainerPicks =
             sourceTrunks
             |> List.choose (fun (sourceId, trunk) ->
-                let seats = Atlas.seatTilesOf atlas sourceId
+                let seats = Atlas.seatTilesOf atlas sourceId |> RoomPos.inRoom room
 
                 if Set.isEmpty trunk || Set.isEmpty seats then
                     None
@@ -3408,6 +3481,8 @@ let private planLayout
         // Seat pick, so a standing container recomputes to its own tile.
         let controllerContainerTile =
             Atlas.positionOf atlas controller.Id
+            |> Option.filter inHome
+            |> Option.map RoomPos.pos
             |> Option.bind (fun controllerPos ->
                 upgradeArea
                 |> Set.filter (fun tile ->
@@ -3456,7 +3531,9 @@ let private planLayout
                     tile, FootingKind.ControllerContainer
                 for tile in storagePick -> tile, FootingKind.Storage
                 for tile in
-                    Set.union (Atlas.storageTiles atlas) (Atlas.pendingStorageTiles atlas)
+                    Set.union
+                        (Atlas.storageTilesIn atlas room)
+                        (Atlas.pendingStorageTilesIn atlas room)
                     |> Set.toList -> tile, FootingKind.Storage
             ]
             |> List.distinctBy fst
@@ -3470,7 +3547,8 @@ let private planLayout
         // there (ADR 0022), because a link on a Seat or an Upgrade tile is
         // exactly what buys the Anchor and the upgraders a transfer
         // without leaving their tile.
-        let footingCandidates = Set.union (Set.ofList buildable) (Atlas.linkTiles atlas)
+        let footingCandidates =
+            Set.union (Set.ofList buildable) (Atlas.linkTilesIn atlas room)
 
         // A target with no candidate at all leaves the tiles alone and is
         // recorded (#77): the fold reserves what it can, exactly as
@@ -3494,16 +3572,23 @@ let private planLayout
                     && not (Set.contains tile taken))
                 |> Set.toList
                 |> function
-                    | [] -> taken, served, { Target = target; Kind = kind } :: unserved
+                    | [] ->
+                        taken,
+                        served,
+                        {
+                            Target = RoomPos.at room target
+                            Kind = kind
+                        }
+                        :: unserved
                     | candidates ->
                         candidates
                         |> List.minBy (fun tile -> range tile spawnPos, tile.X, tile.Y)
                         |> fun tile ->
                             Set.add tile taken,
                             {
-                                Target = target
+                                Target = RoomPos.at room target
                                 Kind = kind
-                                Tile = tile
+                                Tile = RoomPos.at room tile
                             }
                             :: served,
                             unserved)
@@ -3529,7 +3614,7 @@ let private planLayout
         // rule asks the same census of its own room (`containerCensusIn`),
         // and there is one spelling of it so that ADR 0040 cannot come to
         // mean two things.
-        let containerCensus = Atlas.containerCensus atlas
+        let containerCensus = Atlas.containerCensusIn atlas room
 
         // The target clause (ADR 0040): a source is served when a
         // container stands or is pending within range 1 of it, the
@@ -3549,7 +3634,9 @@ let private planLayout
         // wanted exactly what stands there.
         let servingSource sourceId =
             Atlas.positionOf atlas sourceId
-            |> Option.map (fun sourcePos -> Set.filter (servesSource sourcePos) containerCensus)
+            |> Option.filter inHome
+            |> Option.map (fun sourcePos ->
+                Set.filter (servesSource (RoomPos.pos sourcePos)) containerCensus)
             |> Option.defaultValue Set.empty
 
         // Every target beside its pick and the containers already serving
@@ -3578,8 +3665,8 @@ let private planLayout
                     Some
                         {
                             Target = target
-                            Pick = pick
-                            Serving = Set.minElement serving
+                            Pick = RoomPos.at room pick
+                            Serving = RoomPos.at room (Set.minElement serving)
                         })
 
         // The tile clause (ADR 0040), and only it: a pick whose tile is
@@ -3599,7 +3686,7 @@ let private planLayout
         // a [[post]] (#205), the one that hires the [[anchor]] whose income
         // the gate exists to protect. Holding it back would spend the gate's
         // own saving.
-        let owedRoad = Set.union (Atlas.pendingRoadTiles atlas) placedRoads
+        let owedRoad = Set.union (Atlas.pendingRoadTilesIn atlas room) placedRoads
 
         let containerGap =
             unservedPicks |> List.filter (fun tile -> not (Set.contains tile owedRoad))
@@ -3621,17 +3708,20 @@ let private planLayout
         // these tiles are read off the census and not off the ordering.
         let covered =
             if keepsRamparts view then
-                Set.union (Atlas.keepTiles atlas) (Atlas.postContainerTiles atlas)
+                Set.union (Atlas.keepTilesIn atlas room) (Atlas.postContainerTilesIn atlas room)
             else
                 Set.empty
 
         let rampartGap =
             Set.difference
                 covered
-                (Set.union (Atlas.rampartTiles atlas) (Atlas.pendingRampartTiles atlas))
+                (Set.union
+                    (Atlas.rampartTilesIn atlas room)
+                    (Atlas.pendingRampartTilesIn atlas room))
 
         let place kind tiles =
-            tiles |> List.map (fun tile -> PlaceConstructionSite(room, tile, kind))
+            tiles
+            |> List.map (fun tile -> PlaceConstructionSite(RoomPos.at room tile, kind))
 
         place Storage (storagePick |> List.truncate (storageGap controller.Level))
         @ place Tower (towerTiles |> List.truncate (towerGap controller.Level))
@@ -3775,13 +3865,16 @@ let private planOutpostContainers (view: ColonyView) atlas : Intent list =
     // the Executor's own `Game.rooms` lookup are paid for with.
     view.Sources
     |> List.choose (fun s ->
-        match Atlas.targetRoom atlas s.Id, Atlas.positionOf atlas s.Id with
-        | Some room, Some pos when room <> home && Map.containsKey room view.RoomControl ->
-            Some(s.Id, room, pos)
+        match Atlas.positionOf atlas s.Id with
+        | Some tile when tile.Room <> home && Map.containsKey tile.Room view.RoomControl ->
+            Some(s.Id, tile)
         | _ -> None)
-    |> List.choose (fun (sourceId, room, sourcePos) ->
+    |> List.choose (fun (sourceId, source) ->
+        let room = source.Room
+
         let served =
-            Atlas.containerCensusIn atlas room |> Set.exists (servesSource sourcePos)
+            Atlas.containerCensusIn atlas room
+            |> Set.exists (servesSource (RoomPos.pos source))
 
         if served then
             None
@@ -3793,6 +3886,7 @@ let private planOutpostContainers (view: ColonyView) atlas : Intent list =
             // answers. A source with one Seat is the same rule with one
             // candidate, not a case of its own.
             Atlas.seatTilesOf atlas sourceId
+            |> RoomPos.inRoom room
             |> Set.toList
             |> List.choose (fun seat ->
                 Atlas.seamWalkTicks atlas room home seat |> Option.map (fun walk -> walk, seat))
@@ -3802,7 +3896,7 @@ let private planOutpostContainers (view: ColonyView) atlas : Intent list =
                     let _, seat =
                         priced |> List.minBy (fun (walk, seat: Pos) -> walk, seat.X, seat.Y)
 
-                    Some(PlaceConstructionSite(room, seat, Container)))
+                    Some(PlaceConstructionSite(RoomPos.at room seat, Container)))
 
 /// Colony reflex beside the pipeline, the second after safe mode: every
 /// creep with free carry capacity standing within pickup range of a
@@ -3813,16 +3907,15 @@ let private planOutpostContainers (view: ColonyView) atlas : Intent list =
 /// pickups on one pile are the engine's to settle.
 ///
 /// Paired once per room the projection places a creep in, and never across
-/// two (#166). Both sides are bare `Pos`es and `range` is Chebyshev over
-/// two coordinates, so a pile in one room and a creep in another on the
-/// same coordinate read as range 0 and would draw a pickup the engine
-/// answers ERR_NOT_IN_RANGE — the room dimension lives on the API and not
-/// on `Pos` (ADR 0041), so the pairing takes it from the group it is
-/// working: `Atlas.placedCreepsByRoom`'s creeps for a room against
-/// `Atlas.droppedEnergyIn` for that same room. Nothing is priced and no
-/// walk is needed for this, which is why it does not wait on a cross-room
-/// reflex: range 1 is the whole of the geometry, and it is only ever asked
-/// inside one layer.
+/// two (#166): a pickup is a range-1 act inside one room, and a pile in
+/// one room and a creep in another on the same coordinate would draw a
+/// pickup the engine answers ERR_NOT_IN_RANGE. The pairing walks
+/// `Atlas.placedCreeps` grouped by `.Room` against `Atlas.droppedEnergyIn`
+/// for that same room, and since #216 R3 both sides carry that room in the
+/// tile, so the range is measured or it is not measured at all. Nothing is
+/// priced and no walk is needed for this, which is why it does not wait on
+/// a cross-room reflex: range 1 is the whole of the geometry, and it is
+/// only ever asked inside one layer.
 ///
 /// The room that made it necessary is the outpost (ADR 0042): its hauler
 /// runs one container (one creep, a long round trip), so the Anchor's
@@ -3837,7 +3930,8 @@ let private planPickups (view: ColonyView) atlas : Intent list =
         |> List.map (fun c -> c.Name)
         |> Set.ofList
 
-    Atlas.placedCreepsByRoom atlas
+    Atlas.placedCreeps atlas
+    |> List.groupBy (fun (_, tile) -> tile.Room)
     |> List.collect (fun (room, placed) ->
         match Atlas.droppedEnergyIn atlas room with
         | [] -> []
@@ -3847,7 +3941,7 @@ let private planPickups (view: ColonyView) atlas : Intent list =
                 if Set.contains name hungry then
                     piles
                     |> List.choose (fun (pile, tile) ->
-                        if range pos tile <= 1 then
+                        if RoomPos.range pos tile |> Option.exists (fun r -> r <= 1) then
                             Some(PickupEnergy(name, pile))
                         else
                             None)
@@ -4031,7 +4125,7 @@ let private roomOfWork atlas task =
 /// Work Areas are never modified; this is a filter at the point of
 /// judgement, and a tick with no Reach anywhere hands the memo back
 /// verbatim.
-let private areaFor (threats: Threats) atlas creep task =
+let private areaFor (threats: Threats) atlas creep task : Set<RoomPos> =
     match task with
     | Flee ->
         Atlas.creepRoom atlas creep
@@ -4039,13 +4133,17 @@ let private areaFor (threats: Threats) atlas creep task =
         |> Option.defaultValue Set.empty
     | _ when Map.isEmpty threats.Reach -> Atlas.workAreaFor atlas creep task
     | _ ->
+        // A Reach is one room's grid (`Threats.Reach`), so the tiles it
+        // takes are matched on that room's coordinates and on no other's
+        // (ADR 0052 decision 2, #138).
+        let room = roomOfWork atlas task
+
         let reach =
-            roomOfWork atlas task
-            |> Option.map (Threats.reachIn threats)
-            |> Option.defaultValue Set.empty
+            room |> Option.map (Threats.reachIn threats) |> Option.defaultValue Set.empty
 
         Atlas.workAreaFor atlas creep task
-        |> Set.filter (fun tile -> not (Set.contains tile reach))
+        |> Set.filter (fun tile ->
+            not (Some tile.Room = room && Set.contains (RoomPos.pos tile) reach))
 
 /// The travel cost of a Task for a creep, priced over the tiles it may
 /// actually work from this tick (ADR 0033): the safe set for Flee, which
@@ -4060,9 +4158,9 @@ let private areaFor (threats: Threats) atlas creep task =
 /// the Task's own price, which carries ADR 0004's escape for a target the
 /// projection cannot place, and, since #123, the Seam join for a target
 /// in another room. The Work Area a creep is handed is empty across a
-/// border by construction (ADR 0041): the tiles are the other room's and a
-/// `Set<Pos>` cannot say so, while the price is a minimum over the Seam
-/// band and knows both rooms. So an outpost's Task reaches the Matcher
+/// border by construction (ADR 0041): standing and acting are in-room
+/// acts, while the price is a minimum over the Seam band and knows both
+/// rooms. So an outpost's Task reaches the Matcher
 /// priced and ranks in the one pool, and it does so through this fallback
 /// rather than through a case of its own.
 let private travelCostOf (threats: Threats) atlas (creep: string) task =
@@ -4475,9 +4573,9 @@ let private applicable (view: ColonyView) (threats: Threats) atlas (creep: Creep
     // is not shooting at it.
     | Flee ->
         not (Atlas.workHeavy atlas creep.Name)
-        && (match Atlas.creepRoom atlas creep.Name, Atlas.creepTile atlas creep.Name with
-            | Some room, Some tile -> Set.contains tile (Threats.reachIn threats room)
-            | _ -> false)
+        && (match Atlas.creepTile atlas creep.Name with
+            | Some tile -> Set.contains (RoomPos.pos tile) (Threats.reachIn threats tile.Room)
+            | None -> false)
 
 /// The action Intent a Task asks of a creep, or None for a Task with no
 /// action: Flee is movement and nothing else (ADR 0033), and the Emitter
@@ -5218,8 +5316,8 @@ let private idleRank = System.Int32.MaxValue
 ///
 /// The Task goes to `Atlas.firstStep` beside the area, and that is what
 /// gives a creep matched across a border somewhere to walk (#142): its
-/// Work Area is empty here by construction — the standing tiles are the
-/// neighbour's and a `Set<Pos>` cannot say so — so without the Task this
+/// Work Area is empty here by construction — standing and acting are
+/// in-room acts (ADR 0041's Consequences) — so without the Task this
 /// creep would park on a Task it was priced for and never move, holding it
 /// against anti-thrash for the rest of its life. The step it gets back is
 /// the near side of the Seam the price won at, which is a tile of this
@@ -5229,11 +5327,16 @@ let private moveIntentFor
     (rankOf: Task -> int)
     (threats: Threats)
     atlas
-    (room: string)
     (creep: string)
-    (pos: Pos)
+    (at: RoomPos)
     (task: Task option)
     : MoveIntent =
+    // The room the creep stands in and the only room its candidates are
+    // tiles of (#145): it rides on the tile now (ADR 0052 decision 2)
+    // rather than beside it as a field of its own.
+    let room = at.Room
+    let pos = RoomPos.pos at
+    let here = RoomPos.at room
     let beside = Atlas.adjacentWalkableIn atlas room pos
     let onSeam = Atlas.standsOnSeam atlas creep && not (List.isEmpty beside)
 
@@ -5243,11 +5346,10 @@ let private moveIntentFor
 
     let parked rank =
         {
-            Room = room
             Creep = creep
-            Pos = pos
+            Pos = at
             Rank = rank
-            Candidates = staying @ beside
+            Candidates = staying @ beside |> List.map here
         }
 
     match task with
@@ -5256,20 +5358,23 @@ let private moveIntentFor
         // The area less this tick's Reach (ADR 0033): a creep works from
         // the safe half of its Work Area rather than abandoning the Task
         // because one corner is hot, and its steps go nowhere else.
+        // Read against the set the Atlas already holds rather than a
+        // narrowed copy of it: this runs once per creep and the tiles are
+        // this room's either way.
         let area = areaFor threats atlas creep task
 
-        if Set.contains pos area then
-            let inside, outside = beside |> List.partition (fun tile -> Set.contains tile area)
+        if Set.contains (here pos) area then
+            let inside, outside =
+                beside |> List.partition (fun tile -> Set.contains (here tile) area)
 
             {
-                Room = room
                 Creep = creep
-                Pos = pos
+                Pos = at
                 Rank = rankOf task
-                Candidates = pos :: (inside @ outside)
+                Candidates = pos :: (inside @ outside) |> List.map here
             }
         else
-            match Atlas.firstStep atlas creep task area with
+            match Atlas.firstStep atlas creep task area |> Option.map RoomPos.pos with
             | Some step ->
                 // The detours: the ground beside this creep that also lies
                 // beside the step it asked for — a way *around* the tile it
@@ -5300,11 +5405,10 @@ let private moveIntentFor
                         beside |> List.filter (fun tile -> Set.contains tile around)
 
                 {
-                    Room = room
                     Creep = creep
-                    Pos = pos
+                    Pos = at
                     Rank = rankOf task
-                    Candidates = step :: tail
+                    Candidates = step :: tail |> List.map here
                 }
             | None -> parked (rankOf task)
 
@@ -5342,8 +5446,8 @@ let private weightOfRank (rank: int) : int = max 1 (rankOfTier Stock + 2 - rank)
 /// and left the engine to fail whichever move contested it (#219).
 type private Matching =
     {
-        Holder: Map<Pos, string>
-        Tile: Map<string, Pos>
+        Holder: Map<RoomPos, string>
+        Tile: Map<string, RoomPos>
     }
 
 /// Resolver core: the room's Move Intents matched onto its tiles by a
@@ -5402,10 +5506,10 @@ type private Matching =
 /// (`RoomInvariantTests`, and the three-deep chain in `DecideTests` that is
 /// the shape it can be lost at).
 let private arbitrate
-    (occupants: Map<Pos, string>)
-    (blocked: Set<Pos>)
+    (occupants: Map<RoomPos, string>)
+    (blocked: Set<RoomPos>)
     (moveIntents: MoveIntent list)
-    : Map<string, Pos> =
+    : Map<string, RoomPos> =
     let byCreep = moveIntents |> List.map (fun i -> i.Creep, i) |> Map.ofList
 
     let headOf (intent: MoveIntent) = List.tryHead intent.Candidates
@@ -5461,7 +5565,7 @@ let private arbitrate
         (visited: Set<string>)
         (score: int)
         (intent: MoveIntent)
-        (candidates: Pos list)
+        (candidates: RoomPos list)
         (m: Matching)
         : Set<string> * (int * Matching) option =
         let visited = Set.add intent.Creep visited
@@ -5564,16 +5668,16 @@ let private directionTo (from: Pos) (dest: Pos) : Direction option =
 type private RoomPass =
     {
         /// Each rested creep's settled standing tile.
-        Standing: Map<string, Pos>
+        Standing: Map<string, RoomPos>
         /// Each rested creep's preferred standing tile: the head of its
         /// candidate list — a Move Intent's candidates are never empty.
-        Preferences: Map<string, Pos>
+        Preferences: Map<string, RoomPos>
         /// The tiles no intent in this pass may be settled onto and no
         /// chain may run through: the fatigued creeps' (ADR 0008) and the
         /// [[foreign bodies]]' that nobody in the fold holds (#220).
-        Blocked: Set<Pos>
+        Blocked: Set<RoomPos>
         /// Who stands where at tick start.
-        Occupants: Map<Pos, string>
+        Occupants: Map<RoomPos, string>
     }
 
 /// Resolver, first half: one colony's Move Intents, unarbitrated. Every
@@ -5602,10 +5706,7 @@ let movementOf
         |> List.choose (fun c -> if c.Fatigue > 0 then Some c.Name else None)
         |> Set.ofList
 
-    let placed =
-        Atlas.placedCreepsByRoom atlas
-        |> List.collect (fun (room, placed) ->
-            placed |> List.map (fun (name, pos) -> room, name, pos))
+    let placed = Atlas.placedCreeps atlas
 
     let rerouted name task =
         let area = areaFor threats atlas name task
@@ -5624,19 +5725,12 @@ let movementOf
         Foreign = view.Foreign
         Intents =
             placed
-            |> List.filter (fun (_, name, _) -> not (Set.contains name tired))
-            |> List.map (fun (room, name, pos) ->
-                moveIntentFor
-                    (rank view atlas)
-                    threats
-                    atlas
-                    room
-                    name
-                    pos
-                    (Map.tryFind name assigned))
+            |> List.filter (fun (name, _) -> not (Set.contains name tired))
+            |> List.map (fun (name, at) ->
+                moveIntentFor (rank view atlas) threats atlas name at (Map.tryFind name assigned))
         Rerouted =
             placed
-            |> List.choose (fun (_, name, _) ->
+            |> List.choose (fun (name, _) ->
                 if Set.contains name verbose then
                     match Map.tryFind name assigned with
                     | Some task when rerouted name task -> Some name
@@ -5657,11 +5751,14 @@ let movementOf
 /// room's (ADR 0001, ADR 0008), and ADR 0041's Consequences keep it so —
 /// geometry crosses the Seam and arbitration does not, decomposed strictly
 /// per room as screeps-cartographer decomposes `reconcileTraffic`. Each
-/// room's `occupants`, `blocked` and Move Intents are that room's alone — a
-/// `Map<Pos, string>` and a `Set<Pos>` carry no room on their key, so a
-/// union across rooms would collapse two creeps standing on one coordinate
-/// of two rooms into one occupant and let a fatigued outpost creep
-/// pre-claim a home tile, deleting a home creep's `MoveCreep` outright.
+/// room's `occupants`, `blocked` and Move Intents are that room's alone,
+/// and the tiles keying them carry the room they are in (ADR 0052 decision
+/// 2) — which is what a union across rooms would otherwise cost: two
+/// creeps standing on one coordinate of two rooms collapsing into one
+/// occupant, and a fatigued outpost creep pre-claiming a home tile,
+/// deleting a home creep's `MoveCreep` outright. The split is still made
+/// by room here and not left to the keys, because the *arbitration* is a
+/// room's whatever its tiles could say.
 /// What is *not* arbitrated is the border tile: two creeps aiming at one
 /// exit from its two sides are never checked against each other, which ADR
 /// 0041 accepts in as many words.
@@ -5698,30 +5795,30 @@ let resolveRooms (movements: Movement list) : Intent list * Verdict list =
 
     let passOf =
         everywhere
-        |> List.map (fun (room, _, _) -> room)
+        |> List.map (fun (_, at) -> at.Room)
         |> List.distinct
         |> List.map (fun room ->
-            let here = everywhere |> List.filter (fun (r, _, _) -> r = room)
-            let occupants = here |> List.map (fun (_, name, pos) -> pos, name) |> Map.ofList
+            let here = everywhere |> List.filter (fun (_, at) -> at.Room = room)
+            let occupants = here |> List.map (fun (name, at) -> at, name) |> Map.ofList
 
             // The bodies no intent in this fold can move: the fatigued, and
             // the foreign tiles nobody standing here answered for.
             let foreign =
                 (Set.empty, movements)
                 ||> List.fold (fun acc m ->
-                    Set.union acc (Map.tryFind room m.Foreign |> Option.defaultValue Set.empty))
+                    Set.union acc (m.Foreign |> Set.filter (fun tile -> tile.Room = room)))
                 |> Set.filter (fun tile -> not (Map.containsKey tile occupants))
 
             let blocked =
                 here
-                |> List.choose (fun (_, name, pos) ->
-                    if Set.contains name tired then Some pos else None)
+                |> List.choose (fun (name, at) ->
+                    if Set.contains name tired then Some at else None)
                 |> Set.ofList
                 |> Set.union foreign
 
             let moveIntents =
                 movements
-                |> List.collect (fun m -> m.Intents |> List.filter (fun i -> i.Room = room))
+                |> List.collect (fun m -> m.Intents |> List.filter (fun i -> i.Pos.Room = room))
 
             room,
             {
@@ -5741,19 +5838,18 @@ let resolveRooms (movements: Movement list) : Intent list * Verdict list =
     let rows =
         movements
         |> List.collect (fun m ->
-            let placed =
-                m.Placed |> List.map (fun (room, name, pos) -> name, (room, pos)) |> Map.ofList
+            let placed = m.Placed |> Map.ofList
 
             m.Order
             |> List.choose (fun name ->
                 Map.tryFind name placed
-                |> Option.map (fun (room, pos) -> m, name, pos, Map.find room passOf)))
+                |> Option.map (fun at -> m, name, at, Map.find at.Room passOf)))
 
     let intents =
         rows
-        |> List.choose (fun (_, name, pos, pass) ->
+        |> List.choose (fun (_, name, at, pass) ->
             Map.tryFind name pass.Standing
-            |> Option.bind (directionTo pos)
+            |> Option.bind (fun settled -> directionTo (RoomPos.pos at) (RoomPos.pos settled))
             |> Option.map (fun direction -> MoveCreep(name, direction)))
 
     // Who holds a tile this creep did not get, in this creep's room: the
@@ -6273,7 +6369,7 @@ let censusSignature (view: ColonyView) : string =
             select kind
             |> Option.bind (fun (built: BuiltKind) ->
                 SpatialInfo.placementOf spatial id
-                |> Option.map (fun (room, pos) -> $"{built}@{room}:{pos.X},{pos.Y}")))
+                |> Option.map (fun tile -> $"{built}@{tile.Room}:{tile.X},{tile.Y}")))
         |> List.sort
         |> String.concat ";"
 

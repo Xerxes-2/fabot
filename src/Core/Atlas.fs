@@ -148,11 +148,11 @@ type Atlas =
             ///
             /// The Layout's three ground readers price off it too (#177):
             /// a construction site's tile is terrain that holds nothing
-            /// (`buildableTiles`), a swamp under a road is still swamp
-            /// (`isSwamp`), and a trunk is priced over the ground before
+            /// (`buildableTilesIn`), a swamp under a road is still swamp
+            /// (`isSwampIn`), and a trunk is priced over the ground before
             /// any road discounts it (`trunkPath`, which lays the obstacle
             /// pass back on for itself). Two of them sweep the whole room
-            /// on a census tick, which is what the grid is for; `isSwamp`
+            /// on a census tick, which is what the grid is for; `isSwampIn`
             /// reads it a tile at a time through `weightAt`, for the
             /// reason every single-tile query does since #173 — an index
             /// rather than a `Pos` compared down a tree.
@@ -285,13 +285,28 @@ type Atlas =
             /// table rather than a pre-laid Lazy map. The Atlas is rebuilt
             /// every tick, so the table is per-tick by construction:
             /// "Derived fresh each tick, never persisted" stands.
-            WorkAreas: System.Collections.Generic.Dictionary<Task, Set<Pos>>
+            /// Each entry holds the area in **both** shapes, from one
+            /// build and one write (ADR 0052 decision 2): the room it is
+            /// in with that room's own grid tiles, and the same tiles
+            /// joined to it. Two shapes because there are two kinds of
+            /// reader — what leaves the Atlas carries its room, and what
+            /// stays inside it (a flood's goal list, the Upgrade-area
+            /// union behind the Post census) indexes one room's grid — and
+            /// one entry because narrowing the joined form per call was a
+            /// fifth of a census tick, while a second table would be a
+            /// second unsynchronised write on a memo the suite shares
+            /// across parallel cases.
+            WorkAreas:
+                System.Collections.Generic.Dictionary<
+                    Task,
+                    (string * Set<Pos>) option * Set<RoomPos>
+                 >
             /// The Work-heavy variant of the same table (ADR 0020): the
             /// narrowed area per Task, built at most once per tick. Only
             /// Harvest narrows, so this holds at most one entry per source,
             /// and deriving `posts` costs one derivation per source per
             /// tick rather than one per creep priced.
-            HeavyAreas: System.Collections.Generic.Dictionary<Task, Set<Pos>>
+            HeavyAreas: System.Collections.Generic.Dictionary<Task, Set<RoomPos>>
             /// The creeps whose bodies carry more Work parts than Move
             /// parts — ADR 0016's predicate, read from the body and never
             /// from a name or a birth row. The Withdraw gate, the Anchor
@@ -1089,8 +1104,7 @@ let ofViewRecalling (walks: WalkTable) (view: ColonyView) : Atlas =
 
     let grids =
         spatial.Rooms
-        |> Map.map (fun room layer ->
-            gridOf (Map.tryFind room view.Foreign |> Option.defaultValue Set.empty) layer)
+        |> Map.map (fun room layer -> gridOf (RoomPos.inRoom room view.Foreign) layer)
 
     let ground = grids |> Map.map (fun _ (bare, _, _) -> bare)
     let weights = grids |> Map.map (fun _ (_, grid, _) -> grid)
@@ -1239,34 +1253,35 @@ let private flood (atlas: Atlas) (pricing: Pricing) (room: string) (creep: strin
     | Some memo -> memo.Value
     | None -> floodPriced (weightsOf atlas room) (occupiedOf atlas room) factor pricing pos
 
-/// The creeps the projection places, grouped under the room each is filed
-/// in — every room the projection places a creep in, and each room's
-/// creeps in view creep order, the canonical order for everything
-/// derived per creep. This is the Resolver's list (#145): arbitrated
-/// movement (ADR 0001, ADR 0008) is a room's — ADR 0041's Consequences
-/// keep it single-room, decomposed strictly per room as
-/// screeps-cartographer decomposes `reconcileTraffic` — so it runs once
-/// per group here, each over that room's tiles and no other's. A group
-/// hands out bare `Pos`es, and they are safe to key a `Set<Pos>` of
-/// blocked tiles or a `Map<Pos, string>` of occupants on precisely because
-/// the group is one room's: unioned across groups, two creeps standing on
-/// one coordinate of two rooms would collapse into one occupant, and a
-/// fatigued outpost creep would pre-claim a home tile. The rooms come in
-/// the order their first creep does, which no reader depends on: the
-/// Resolver emits in view creep order across the groups. An
+/// The creeps the projection places, each beside the tile it stands on
+/// and the room that tile is in, in view creep order — the canonical
+/// order for everything derived per creep. This is the Resolver's list
+/// (#145): arbitrated movement (ADR 0001, ADR 0008) is a room's — ADR
+/// 0041's Consequences keep it single-room, decomposed strictly per room
+/// as screeps-cartographer decomposes `reconcileTraffic` — so the pass
+/// groups these by `.Room` and runs once per group, each over that room's
+/// tiles and no other's. The tiles carry their rooms (ADR 0052 decision
+/// 2), which is what makes a set of blocked tiles or a map of occupants
+/// safe to build across the list at all: keyed on a bare coordinate and
+/// unioned, two creeps standing on one coordinate of two rooms would
+/// collapse into one occupant, and a fatigued outpost creep would
+/// pre-claim a home tile. An
 /// unplaceable creep is in no group — the answer ADR 0004 gives for
 /// geometry a query cannot place.
 ///
-/// The pickup reflex reads the same grouping for the same reason (#166):
-/// it measures a creep's tile against a pile's, and it pairs a group with
-/// `droppedEnergyIn` for that group's room, so the two bare `Pos`es it
-/// compares always come out of one layer. There is deliberately no bare
-/// home-only list beside this one any more — it existed for the reflex,
-/// and answering home was exactly the bug.
-let placedCreepsByRoom (atlas: Atlas) : (string * (string * Pos) list) list =
-    atlas.Placed
-    |> List.groupBy (fun (_, room, _) -> room)
-    |> List.map (fun (room, creeps) -> room, creeps |> List.map (fun (name, _, pos) -> name, pos))
+/// The pickup reflex reads the same list for the same reason (#166): it
+/// measures a creep's tile against a pile's, and it pairs a creep with
+/// `droppedEnergyIn` for that creep's own room. There is deliberately no
+/// bare home-only list beside this one any more — it existed for the
+/// reflex, and answering home was exactly the bug.
+///
+/// One flat list since #216 R3, where it used to be grouped by room: the
+/// grouping *was* the room join (ADR 0052 decision 2), and each tile now
+/// carries it, so a reader that wants a room's own creeps filters on
+/// `.Room` and a reader that wants them all — the Resolver's fold, which
+/// groups again per room — no longer has to flatten and re-tag first.
+let placedCreeps (atlas: Atlas) : (string * RoomPos) list =
+    atlas.Placed |> List.map (fun (name, room, pos) -> name, RoomPos.at room pos)
 
 /// Name of the colony's own room — the entry of the layer that is home
 /// (ADR 0041), which the Layout gates on and stamps onto every site it
@@ -1277,11 +1292,13 @@ let homeRoom (atlas: Atlas) : string option = atlas.Spatial.RoomName
 
 /// Tile of a projected target (source, structure, site, controller) — in
 /// whichever room the projection files that id under, since an id is
-/// unique across the world. The `Pos` is bare (ADR 0041), so a caller
-/// joining it to other geometry must already know the room; every such
-/// join inside the Atlas goes through the same resolution this reads.
-let positionOf (atlas: Atlas) (targetId: string) : Pos option =
-    Map.tryFind targetId atlas.TargetAt |> Option.map snd
+/// unique across the world. Room and tile in one since #216 R3 (ADR 0052
+/// decision 2): the answer used to be a bare `Pos` beside a `targetRoom`
+/// the caller had to remember to ask for, and every join that forgot read
+/// one room's coordinates as another's.
+let positionOf (atlas: Atlas) (targetId: string) : RoomPos option =
+    Map.tryFind targetId atlas.TargetAt
+    |> Option.map (fun (room, pos) -> RoomPos.at room pos)
 
 /// Tiles a construction site may occupy in the colony's own room: non-Wall
 /// terrain holding no projected target — anything standing (or being
@@ -1290,10 +1307,10 @@ let positionOf (atlas: Atlas) (targetId: string) : Pos option =
 /// the ordering would break the Layout's determinism (ADR 0011), and a
 /// tombstone stands wherever a creep happened to die, which is exactly
 /// the kind of accident a plan must not be a function of (#167).
-/// Deterministic (X, Y) order. The home
-/// room and no other (ADR 0041): the Layout builds in the room it is
-/// anchored in, and a second room's tiles unioned in would offer the
-/// Layout a coordinate it does not own.
+/// Deterministic (X, Y) order. One room and no other (ADR 0041), named by
+/// the caller: the Layout builds in the room it is anchored in, and a
+/// second room's tiles unioned in would offer the Layout a coordinate it
+/// does not own.
 ///
 /// Scanned off the raw ground grid rather than off the terrain layer a
 /// `Pos` at a time (#177): the Layout asks for this whole list on every
@@ -1304,15 +1321,15 @@ let positionOf (atlas: Atlas) (targetId: string) : Pos option =
 /// so the list comes out tile for tile as it did and ADR 0011's
 /// determinism is untouched. Built by consing down from the last index so
 /// the result is a list and never a Fable sequence.
-let buildableTiles (atlas: Atlas) : Pos list =
-    let ground = groundOf atlas atlas.Home
+let buildableTilesIn (atlas: Atlas) (room: string) : Pos list =
+    let ground = groundOf atlas room
 
     // A grid rather than a `Set<Pos>` for the same reason the scan is one:
     // it is asked about every tile of the room. Which targets stand on a
     // tile and which do not is the rule above, unchanged.
     let taken = Array.create tileCount false
 
-    (layerOf atlas atlas.Home).TargetPositions
+    (layerOf atlas room).TargetPositions
     |> Map.iter (fun id tile ->
         if not (Map.tryFind id atlas.Spatial.TargetKinds |> Option.exists isTransient) then
             taken.[indexOf tile] <- true)
@@ -1336,44 +1353,6 @@ let private targetsOfKind (atlas: Atlas) (kind: TargetKind) : string list =
     |> Map.toList
     |> List.choose (fun (id, k) -> if k = kind then Some id else None)
 
-// The six counts below read the flat kind census and nothing else, so
-// each answers for *every* room the projection carries rather than for the
-// colony's own (ADR 0041 leaves the id-keyed containers unlayered). That
-// is exact today and only today: the shell projects one owned room, and an
-// outpost is an unowned room whose layer carries a container and nothing
-// else (ADR 0042) — no extension, tower or storage can enter the census
-// from one. Their reader is the Layout's gap rule, `allowed at RCL − built
-// − pending`, which is a fact about the home controller: the tick a
-// projected room can hold one of these kinds, these six have to join a
-// named layer the way `placedOfKindIn` does, or the Layout counts a
-// neighbour's structures against its own allowance.
-
-/// Extensions already standing.
-let builtExtensions (atlas: Atlas) : int =
-    targetsOfKind atlas (Structure BuiltKind.Extension) |> List.length
-
-/// Extension construction sites already placed.
-let pendingExtensions (atlas: Atlas) : int =
-    targetsOfKind atlas (Site BuiltKind.Extension) |> List.length
-
-/// Towers already standing.
-let builtTowers (atlas: Atlas) : int =
-    targetsOfKind atlas (Structure BuiltKind.Tower) |> List.length
-
-/// Tower construction sites already placed.
-let pendingTowers (atlas: Atlas) : int =
-    targetsOfKind atlas (Site BuiltKind.Tower) |> List.length
-
-/// Storages already standing — at most one, but counted the way the tower
-/// and the extensions are so one gap rule sizes every kind the ordering
-/// picks for (ADR 0022).
-let builtStorages (atlas: Atlas) : int =
-    targetsOfKind atlas (Structure BuiltKind.Storage) |> List.length
-
-/// Storage construction sites already placed.
-let pendingStorages (atlas: Atlas) : int =
-    targetsOfKind atlas (Site BuiltKind.Storage) |> List.length
-
 /// Placed targets of one kind in one named room: id and tile, in id order.
 /// One of the joins between the flat kind census and the layered positions,
 /// and the room is named rather than searched (ADR 0041, the rule
@@ -1382,19 +1361,66 @@ let pendingStorages (atlas: Atlas) : int =
 /// whichever layer happened to hold the id would aim them at the same
 /// coordinate of another room. A room the projection does not carry places
 /// nothing — ADR 0004's absence, reached here by reading an empty layer.
-let private placedOfKindIn (atlas: Atlas) (room: string) (kind: TargetKind) : (string * Pos) list =
+let private placedOfKindIn
+    (atlas: Atlas)
+    (room: string)
+    (kind: TargetKind)
+    : (string * RoomPos) list =
     let layer = layerOf atlas room
 
     targetsOfKind atlas kind
     |> List.choose (fun id ->
-        Map.tryFind id layer.TargetPositions |> Option.map (fun pos -> id, pos))
+        Map.tryFind id layer.TargetPositions
+        |> Option.map (fun pos -> id, RoomPos.at room pos))
+
+// The six counts below are one half of the Layout's gap rule — `allowed
+// at RCL − built − pending` — and the allowance is a fact about one
+// room's controller, so the census subtracted from it has to be one
+// room's too (#140). Each joins the named layer, which is what makes the
+// count and the position join read the same room fact.
+//
+// They read the flat, id-keyed kind census alone until #216 R3, and so
+// answered for *every* room the projection carried. That was exact only
+// while no projected room but home could hold one of these kinds — an
+// outpost carries a container and nothing else (ADR 0042) — and ADR 0052
+// decision 7's borrowing ended it: a mother carries a bootstrapping
+// child's construction sites so her workers may build them
+// (`ColonyView.borrowed` keeps every `Site _`), so the child's extension
+// sites were subtracted from the mother's own allowance and she placed
+// that many fewer on every tick of the bootstrap window.
+
+/// Extensions already standing in the named room.
+let builtExtensionsIn (atlas: Atlas) (room: string) : int =
+    placedOfKindIn atlas room (Structure BuiltKind.Extension) |> List.length
+
+/// Extension construction sites already placed in the named room.
+let pendingExtensionsIn (atlas: Atlas) (room: string) : int =
+    placedOfKindIn atlas room (Site BuiltKind.Extension) |> List.length
+
+/// Towers already standing in the named room.
+let builtTowersIn (atlas: Atlas) (room: string) : int =
+    placedOfKindIn atlas room (Structure BuiltKind.Tower) |> List.length
+
+/// Tower construction sites already placed in the named room.
+let pendingTowersIn (atlas: Atlas) (room: string) : int =
+    placedOfKindIn atlas room (Site BuiltKind.Tower) |> List.length
+
+/// Storages already standing in the named room — at most one, but counted
+/// the way the tower and the extensions are so one gap rule sizes every
+/// kind the ordering picks for (ADR 0022).
+let builtStoragesIn (atlas: Atlas) (room: string) : int =
+    placedOfKindIn atlas room (Structure BuiltKind.Storage) |> List.length
+
+/// Storage construction sites already placed in the named room.
+let pendingStoragesIn (atlas: Atlas) (room: string) : int =
+    placedOfKindIn atlas room (Site BuiltKind.Storage) |> List.length
 
 /// Towers standing in the colony's own room: id and tile, in id order —
 /// the fire reflex's whole view of a tower (ADR 0014): no store is
 /// projected, a dry tower's shot simply fails at the engine. Home, and
 /// asking for no other room, because a tower stands only in a room we own
 /// and an outpost is one we do not (ADR 0042).
-let placedTowers (atlas: Atlas) : (string * Pos) list =
+let placedTowers (atlas: Atlas) : (string * RoomPos) list =
     placedOfKindIn atlas atlas.Home (Structure BuiltKind.Tower)
 
 /// Dropped energy piles one room's layer places: id and tile, in id order.
@@ -1409,13 +1435,15 @@ let placedTowers (atlas: Atlas) : (string * Pos) list =
 /// the container stands on that same tile, and the two never met — 3,000
 /// energy on the ground across two outposts at t140,810, decaying at a
 /// thousandth a tick.
-let droppedEnergyIn (atlas: Atlas) (room: string) : (string * Pos) list =
+let droppedEnergyIn (atlas: Atlas) (room: string) : (string * RoomPos) list =
     placedOfKindIn atlas room Dropped
 
-/// Tiles holding a built road in the colony's own room — the projection's
-/// road census, one half of what the Layout's road gap subtracts
-/// (ADR 0011). The home room, like every placement census below.
-let roadTiles (atlas: Atlas) : Set<Pos> = (layerOf atlas atlas.Home).Roads
+/// Tiles holding a built road in the named room — the projection's road
+/// census, one half of what the Layout's road gap subtracts (ADR 0011).
+/// The room is the caller's, like every placement census below (ADR 0052
+/// decision 2): a census that read `atlas.Home` off its own hand answered
+/// for a room the caller never named.
+let roadTilesIn (atlas: Atlas) (room: string) : Set<Pos> = (layerOf atlas room).Roads
 
 /// Tiles of one room's placed targets whose kind answers a predicate — the
 /// join between the flat kind census and that room's positions, for the
@@ -1439,17 +1467,10 @@ let private tilesWhereIn (atlas: Atlas) (room: string) (matches: TargetKind -> b
 let private tilesOfKindIn (atlas: Atlas) (room: string) (kind: TargetKind) : Set<Pos> =
     tilesWhereIn atlas room ((=) kind)
 
-/// Tiles of every placed target whose kind answers a predicate, in the
-/// colony's own room — what the Layout's censuses read.
-let private tilesWhere (atlas: Atlas) (matches: TargetKind -> bool) : Set<Pos> =
-    tilesWhereIn atlas atlas.Home matches
-
-/// Tiles of every placed target of one kind, in the colony's own room.
-let private tilesOfKind (atlas: Atlas) (kind: TargetKind) : Set<Pos> = tilesWhere atlas ((=) kind)
-
 /// Tiles holding a road construction site — the census's other half: a
 /// pending road is not yet a road (ADR 0010) but its tile needs no new site.
-let pendingRoadTiles (atlas: Atlas) : Set<Pos> = tilesOfKind atlas (Site BuiltKind.Road)
+let pendingRoadTilesIn (atlas: Atlas) (room: string) : Set<Pos> =
+    tilesOfKindIn atlas room (Site BuiltKind.Road)
 
 /// Tiles of one room holding a built container — the container census's
 /// standing half (ADR 0012): a built container keeps a plan from
@@ -1461,22 +1482,11 @@ let pendingRoadTiles (atlas: Atlas) : Set<Pos> = tilesOfKind atlas (Site BuiltKi
 let containerTilesIn (atlas: Atlas) (room: string) : Set<Pos> =
     tilesOfKindIn atlas room (Structure BuiltKind.Container)
 
-/// The same census in the colony's own room — what the Layout reads.
-let containerTiles (atlas: Atlas) : Set<Pos> = containerTilesIn atlas atlas.Home
-
 /// Tiles of one room holding a container construction site — the census's
 /// pending half: a pending container is not yet a container but its tile
 /// needs no new site.
 let pendingContainerTilesIn (atlas: Atlas) (room: string) : Set<Pos> =
     tilesOfKindIn atlas room (Site BuiltKind.Container)
-
-/// The same census in the colony's own room — what the Layout's road
-/// placement reads. The mirror of `pendingRoadTiles`, and asked for the
-/// same reason: the engine takes one construction site per tile, so a
-/// tile already carrying a container site is a tile no road site may be
-/// asked for (ADR 0040's tile clause, in the direction #209 opened).
-let pendingContainerTiles (atlas: Atlas) : Set<Pos> =
-    pendingContainerTilesIn atlas atlas.Home
 
 /// ADR 0040's container census in one room: the tiles a container stands
 /// on united with the tiles one is pending on — the set every "must
@@ -1494,26 +1504,23 @@ let pendingContainerTiles (atlas: Atlas) : Set<Pos> =
 let containerCensusIn (atlas: Atlas) (room: string) : Set<Pos> =
     Set.union (containerTilesIn atlas room) (pendingContainerTilesIn atlas room)
 
-/// The same census in the colony's own room — what the Layout reads.
-let containerCensus (atlas: Atlas) : Set<Pos> = containerCensusIn atlas atlas.Home
-
 /// Tiles holding a built Storage — the tile a Link footing is anchored on
 /// once the reservation has become a structure (ADR 0022).
-let storageTiles (atlas: Atlas) : Set<Pos> =
-    tilesOfKind atlas (Structure BuiltKind.Storage)
+let storageTilesIn (atlas: Atlas) (room: string) : Set<Pos> =
+    tilesOfKindIn atlas room (Structure BuiltKind.Storage)
 
 /// Tiles holding a Storage construction site — the same anchor while the
 /// site is still being built.
-let pendingStorageTiles (atlas: Atlas) : Set<Pos> =
-    tilesOfKind atlas (Site BuiltKind.Storage)
+let pendingStorageTilesIn (atlas: Atlas) (room: string) : Set<Pos> =
+    tilesOfKindIn atlas room (Site BuiltKind.Storage)
 
 /// Tiles holding a standing rampart — the covering census (ADR 0034): a
 /// tile already ramparted needs no rampart site. Ownership is not asked,
 /// unlike the hits (which are ours alone): a tile takes one rampart
 /// whoever raised it, so a foreign one left over in a room we took is a
 /// tile the engine would refuse a second site on anyway.
-let rampartTiles (atlas: Atlas) : Set<Pos> =
-    tilesOfKind atlas (Structure BuiltKind.Rampart)
+let rampartTilesIn (atlas: Atlas) (room: string) : Set<Pos> =
+    tilesOfKindIn atlas room (Structure BuiltKind.Rampart)
 
 /// Tiles holding a standing rampart of ours — the same census asked with
 /// ownership on (ADR 0033). The projection carries hits for an ownable
@@ -1544,35 +1551,35 @@ let ourRampartTilesIn (atlas: Atlas) (room: string) : Set<Pos> =
 /// Tiles holding a rampart construction site — the census's pending half,
 /// exactly as a road's is: a site standing there is not yet cover, but its
 /// tile needs no second site.
-let pendingRampartTiles (atlas: Atlas) : Set<Pos> =
-    tilesOfKind atlas (Site BuiltKind.Rampart)
+let pendingRampartTilesIn (atlas: Atlas) (room: string) : Set<Pos> =
+    tilesOfKindIn atlas room (Site BuiltKind.Rampart)
 
 /// Tiles holding a standing Keep structure — the spawn, the tower and the
 /// Storage (ADR 0034): what a rampart covers, the tick the structure
 /// stands. A site is not covered until it is a structure.
-let keepTiles (atlas: Atlas) : Set<Pos> =
-    tilesWhere atlas (function
+let keepTilesIn (atlas: Atlas) (room: string) : Set<Pos> =
+    tilesWhereIn atlas room (function
         | Structure built -> isKeep built
         | _ -> false)
 
 /// Tiles holding a standing link. A link is a target, so its tile is no
 /// longer buildable; the Layout adds these back as footing candidates so
 /// a footing does not jump the tick its link goes up (ADR 0022).
-let linkTiles (atlas: Atlas) : Set<Pos> =
-    tilesOfKind atlas (Structure BuiltKind.Link)
+let linkTilesIn (atlas: Atlas) (room: string) : Set<Pos> =
+    tilesOfKindIn atlas room (Structure BuiltKind.Link)
 
 /// Whether a tile's terrain is swamp; a tile outside the projection is
-/// not. Of the colony's own room, because a bare `Pos` names no room
-/// (ADR 0041) and this query's readers — the Layout's road plan — work at
-/// home.
+/// not. The room is the caller's, as every other grid read's is (ADR 0052
+/// decision 2): a `Pos` is a grid coordinate and this reads that room's
+/// ground grid.
 ///
 /// Read off the raw ground grid and not the walking one (#177): swamp is
 /// what the terrain is, so a road laid over it must not answer plain, and
 /// the ground grid is the terrain with neither overriding pass on it. The
 /// Layout asks this once per tile of the Upgrade Work Area on every census
 /// tick, which was that many `Pos` comparisons down a tree (#173).
-let isSwamp (atlas: Atlas) (tile: Pos) : bool =
-    weightAt (groundOf atlas atlas.Home) tile = swampWeight
+let isSwampIn (atlas: Atlas) (room: string) (tile: Pos) : bool =
+    weightAt (groundOf atlas room) tile = swampWeight
 
 /// Walkable tiles adjacent to `pos` read as a tile of `room`, in
 /// deterministic (X, Y) order. Standing respects obstacles, unlike Seat
@@ -1589,12 +1596,7 @@ let adjacentWalkableIn (atlas: Atlas) (room: string) (pos: Pos) : Pos list =
     let weights = weightsOf atlas room
     neighbours pos |> List.filter (walkableAt weights)
 
-/// `adjacentWalkableIn` for the colony's own room: every caller left on
-/// this spelling — the spawner's birth tiles, a sink's approach — is
-/// home-room geometry.
-let adjacentWalkable (atlas: Atlas) (pos: Pos) : Pos list = adjacentWalkableIn atlas atlas.Home pos
-
-/// Every tile of the room a creep may stand on — `adjacentWalkable`'s
+/// Every tile of the room a creep may stand on — `adjacentWalkableIn`'s
 /// answer over the whole room rather than around one tile, and the same
 /// rules because it is the same grid: the terrain, road and obstacle
 /// precedence `ofViewRecalling` spells out, which since #173 is the
@@ -1615,29 +1617,26 @@ let walkableTilesIn (atlas: Atlas) (room: string) : Set<Pos> =
                     posAt index
         ]
 
-/// `walkableTilesIn` for the colony's own room.
-let walkableTiles (atlas: Atlas) : Set<Pos> = walkableTilesIn atlas atlas.Home
-
 /// The tile a creep stands on; None for a creep the projection does not
 /// place. What a judgement about where a creep *is* reads — as
-/// `positionOf` is the same question about a target — and, like it, the
-/// tile in whichever room the projection files that name under, bare of
-/// the room itself (ADR 0041).
-let creepTile (atlas: Atlas) (creep: string) : Pos option =
-    Map.tryFind creep atlas.CreepAt |> Option.map snd
+/// `positionOf` is the same question about a target — and, like it, room
+/// and tile in one since #216 R3 (ADR 0052 decision 2).
+let creepTile (atlas: Atlas) (creep: string) : RoomPos option =
+    Map.tryFind creep atlas.CreepAt
+    |> Option.map (fun (room, pos) -> RoomPos.at room pos)
 
 /// The room a creep stands in; None for a creep the projection does not
-/// place. The other half of `creepTile`, handed out on its own because a
-/// bare `Pos` cannot carry it (ADR 0041): what a reader holding a
-/// room-keyed fact of the colony's — a Reach, a safe set (#138) — picks
-/// its room's share with. An unplaced creep names no room, and so stands
-/// in no Reach and has no ground to run over, which is the answer ADR
-/// 0004 gives for geometry a query cannot place.
+/// place. `creepTile`'s room alone, kept as a query of its own for the
+/// readers that want only it — a reader picking its room's share of a
+/// room-keyed fact of the colony's, a Reach or a safe set (#138), and a
+/// grid or a flood that is indexed by that room. An unplaced creep names
+/// no room, and so stands in no Reach and has no ground to run over, which
+/// is the answer ADR 0004 gives for geometry a query cannot place.
 let creepRoom (atlas: Atlas) (creep: string) : string option =
     Map.tryFind creep atlas.CreepAt |> Option.map fst
 
 /// The room the projection files a target under; None for one it does not
-/// place. `positionOf`'s other half, as `creepRoom` is `creepTile`'s: the
+/// place. `positionOf`'s room alone, as `creepRoom` is `creepTile`'s: the
 /// room a target's Work Area lies in, and so the room whose Reach is taken
 /// out of that area (#138), and the room a spawn's doorstep is read in.
 let targetRoom (atlas: Atlas) (targetId: string) : string option =
@@ -1694,9 +1693,18 @@ let private seatTiles (ground: int[]) (pos: Pos) : Set<Pos> =
 /// source's own room answers, not the colony's: the id resolves the room
 /// (ADR 0041), so an outpost source's Seats are that room's ground and
 /// never a home tile of the same coordinate.
-let seatTilesOf (atlas: Atlas) (sourceId: string) : Set<Pos> =
+/// The room a source stands in beside its Seats as that room's grid tiles
+/// — the Pos-level core every reader inside the Atlas works over, so the
+/// join to `RoomPos` is paid once at the boundary and never inside a
+/// per-creep query (ADR 0041's objection to a room on every tile, which is
+/// why the grids keep `Pos`).
+let private seatTilesIn (atlas: Atlas) (sourceId: string) : (string * Set<Pos>) option =
     Map.tryFind sourceId atlas.TargetAt
-    |> Option.map (fun (room, pos) -> seatTiles (groundOf atlas room) pos)
+    |> Option.map (fun (room, pos) -> room, seatTiles (groundOf atlas room) pos)
+
+let seatTilesOf (atlas: Atlas) (sourceId: string) : Set<RoomPos> =
+    seatTilesIn atlas sourceId
+    |> Option.map (fun (room, tiles) -> RoomPos.setAt room tiles)
     |> Option.defaultValue Set.empty
 
 /// Seats of a source: its Seat tile count. None for a source the
@@ -1712,12 +1720,12 @@ let seats (atlas: Atlas) (sourceId: string) : int option =
 /// the tiles outside every Reach are a colony fact the decision layer
 /// derives and hands its mover, never geometry the projection carries
 /// (ADR 0033).
-let private buildWorkArea (atlas: Atlas) (task: Task) : Set<Pos> =
+let private buildWorkArea (atlas: Atlas) (task: Task) : (string * Set<Pos>) option =
     match actionOn task with
-    | None -> Set.empty
+    | None -> None
     | Some(targetId, r) ->
         match Map.tryFind targetId atlas.TargetAt with
-        | None -> Set.empty
+        | None -> None
         // The target's own room, resolved off its id (ADR 0041): an area is
         // the ground around a target, and which ground that is is settled
         // by where the target stands, never by which room the reader is
@@ -1725,15 +1733,18 @@ let private buildWorkArea (atlas: Atlas) (task: Task) : Set<Pos> =
         | Some(room, target) ->
             let weights = weightsOf atlas room
 
-            Set.ofList
-                [
-                    for x in target.X - r .. target.X + r do
-                        for y in target.Y - r .. target.Y + r do
-                            let tile = { X = x; Y = y }
+            Some(
+                room,
+                Set.ofList
+                    [
+                        for x in target.X - r .. target.X + r do
+                            for y in target.Y - r .. target.Y + r do
+                                let tile = { X = x; Y = y }
 
-                            if walkableAt weights tile then
-                                tile
-                ]
+                                if walkableAt weights tile then
+                                    tile
+                    ]
+            )
 
 /// Build-once-per-tick over one of the Atlas's mutable tables: the shape
 /// every key set the view does not carry is memoised through — Work
@@ -1759,15 +1770,30 @@ let private memoised
 /// for a Work-heavy harvester (ADR 0020). Empty when the
 /// projection cannot place the target. Memoised per Task for the tick: the
 /// same area is asked for once per creep the Matcher prices and again by
-/// the Emitter and Resolver. The tiles are the target's room's (ADR 0041),
-/// and a caller comparing them against a creep's tile has to have checked
-/// that the two are the same room — which is what pricing a path does
-/// before it floods.
-let workArea (atlas: Atlas) (task: Task) : Set<Pos> =
-    memoised atlas.WorkAreas task (fun () -> buildWorkArea atlas task)
+/// the Emitter and Resolver. The tiles are the target's room's and say so
+/// (ADR 0052 decision 2), where before a caller comparing them against a
+/// creep's tile had to have checked that the two were the same room.
+/// The area in both shapes, built and written once per Task per tick.
+let private areaOf (atlas: Atlas) (task: Task) =
+    memoised atlas.WorkAreas task (fun () ->
+        let tiles = buildWorkArea atlas task
+
+        tiles,
+        (match tiles with
+         | Some(room, grid) -> RoomPos.setAt room grid
+         | None -> Set.empty))
+
+/// The area as its room and that room's grid tiles: what every reader
+/// *inside* the Atlas takes, so the join is never paid inside a per-creep
+/// query. None for a Task the projection cannot place a target for, and
+/// for Flee.
+let private areaTilesOf (atlas: Atlas) (task: Task) : (string * Set<Pos>) option =
+    fst (areaOf atlas task)
+
+let workArea (atlas: Atlas) (task: Task) : Set<RoomPos> = snd (areaOf atlas task)
 
 /// Every source of one room's Seat tiles, unioned — the seat half behind
-/// dualSeats and posts. Named room and not every layer (ADR 0041): the
+/// `dualSeatsIn` and posts. Named room and not every layer (ADR 0041): the
 /// union is intersected with an Upgrade area below, and two rooms' Seats
 /// unioned would meet a second room's Upgrade area at a coordinate that is
 /// a Dual Seat in neither — a phantom Post, a phantom Anchor place, and an
@@ -1783,7 +1809,7 @@ let private seatUnionIn (atlas: Atlas) (room: string) : Set<Pos> =
     |> List.fold Set.union Set.empty
 
 /// Every controller of one room's Upgrade Work Area, unioned — the tiles a
-/// creep can upgrade from, behind dualSeats and controllerContainers. One
+/// creep can upgrade from, behind `dualSeatsIn` and controllerContainers. One
 /// room for the same reason the Seat union is one room's.
 let private upgradeAreaIn (atlas: Atlas) (room: string) : Set<Pos> =
     targetsOfKind atlas Controller
@@ -1791,7 +1817,10 @@ let private upgradeAreaIn (atlas: Atlas) (room: string) : Set<Pos> =
         match Map.tryFind id atlas.TargetAt with
         | Some(where, _) -> where = room
         | None -> false)
-    |> List.map (Upgrade >> workArea atlas)
+    |> List.map (fun id ->
+        match areaTilesOf atlas (Upgrade id) with
+        | Some(_, tiles) -> tiles
+        | None -> Set.empty)
     |> List.fold Set.union Set.empty
 
 /// The working ground of the room (ADR 0022): every projected source's
@@ -1800,11 +1829,11 @@ let private upgradeAreaIn (atlas: Atlas) (room: string) : Set<Pos> =
 /// tower or extension there eats a tile an Anchor or an upgrader stands
 /// on. Total: a room with neither kind of geometry answers with the empty
 /// set, which reserves nothing rather than blocking every tile (ADR
-/// 0004). Derived fresh each tick, never persisted. The colony's own room:
-/// what it reserves is what the Layout may not build on, and the Layout
-/// builds at home.
-let workingGround (atlas: Atlas) : Set<Pos> =
-    Set.union (seatUnionIn atlas atlas.Home) (upgradeAreaIn atlas atlas.Home)
+/// 0004). Derived fresh each tick, never persisted. The room is the
+/// caller's: what it reserves is what the Layout may not build on, and the
+/// Layout names the room it builds in (ADR 0052 decision 2).
+let workingGroundIn (atlas: Atlas) (room: string) : Set<Pos> =
+    Set.union (seatUnionIn atlas room) (upgradeAreaIn atlas room)
 
 /// Dual Seats of the room: tiles inside both some projected source's Seats
 /// and a projected controller's Upgrade Work Area — a creep standing on one
@@ -1814,11 +1843,8 @@ let workingGround (atlas: Atlas) : Set<Pos> =
 /// never persisted. Within one room, and the public query answers for the
 /// colony's own: a Dual Seat is a tile a creep works two things from
 /// without moving, which two rooms' geometry can never make between them.
-let private dualSeatsIn (atlas: Atlas) (room: string) : Set<Pos> =
+let dualSeatsIn (atlas: Atlas) (room: string) : Set<Pos> =
     Set.intersect (seatUnionIn atlas room) (upgradeAreaIn atlas room)
-
-/// The Dual Seats of the colony's own room — the doc above governs both.
-let dualSeats (atlas: Atlas) : Set<Pos> = dualSeatsIn atlas atlas.Home
 
 /// Whether a creep stands on a Dual Seat: the one tile where a heavy body
 /// has a second thing to do without moving, which is why ADR 0025 gives
@@ -1831,7 +1857,7 @@ let dualSeats (atlas: Atlas) : Set<Pos> = dualSeatsIn atlas atlas.Home
 /// and does not change). An unplaced creep stands on nothing (ADR 0004).
 let standsOnDualSeat (atlas: Atlas) (creep: string) : bool =
     match Map.tryFind creep atlas.CreepAt with
-    | Some(room, tile) when room = atlas.Home -> Set.contains tile (dualSeats atlas)
+    | Some(room, tile) when room = atlas.Home -> Set.contains tile (dualSeatsIn atlas room)
     | _ -> false
 
 /// The **standing** half of the Post census: the Dual Seats plus every
@@ -1927,11 +1953,8 @@ let private containerSitePostsIn (atlas: Atlas) (room: string) : Set<Pos> =
 /// `standingPostsIn` is *income*, the switch a haul term and an income
 /// share hang off (`Decide.isPosted`). A site is a garrison place and not
 /// yet an economy, so it counts here and not there.
-let private postsIn (atlas: Atlas) (room: string) : Set<Pos> =
+let postsIn (atlas: Atlas) (room: string) : Set<Pos> =
     Set.union (standingPostsIn atlas room) (containerSitePostsIn atlas room)
-
-/// The Posts of the colony's own room — the doc above governs both.
-let posts (atlas: Atlas) : Set<Pos> = postsIn atlas atlas.Home
 
 /// Every projected room's Posts, counted: the Anchor row's quota (ADR
 /// 0012, widened to the outpost layer by ADR 0042). An outpost's Post is
@@ -1964,9 +1987,9 @@ let postCount (atlas: Atlas) : int =
 /// body garrisons and cannot flee from (ADR 0033), ramparted beside the
 /// Keep (ADR 0034). A Post that is a bare Dual Seat is not one of these:
 /// what the rule covers is a structure standing, and there is none there.
-/// The colony's own room, like the ramparts it is raised under.
-let postContainerTiles (atlas: Atlas) : Set<Pos> =
-    Set.intersect (containerTiles atlas) (posts atlas)
+/// The room is the caller's, like the ramparts it is raised under.
+let postContainerTilesIn (atlas: Atlas) (room: string) : Set<Pos> =
+    Set.intersect (containerTilesIn atlas room) (postsIn atlas room)
 
 /// The Posts of one source: its own Seats that are Posts. Empty for a
 /// source the projection does not place, and for one with none of the
@@ -1976,10 +1999,14 @@ let postContainerTiles (atlas: Atlas) : Set<Pos> =
 /// would answer a tile standing in neither — and the Seat join is what
 /// keeps a neighbouring source's site out: a Post belongs to the rock it
 /// seats, not to the rock it is near.
-let postsOf (atlas: Atlas) (sourceId: string) : Set<Pos> =
-    match Map.tryFind sourceId atlas.TargetAt with
-    | None -> Set.empty
-    | Some(room, _) -> Set.intersect (seatTilesOf atlas sourceId) (postsIn atlas room)
+let private postsOfIn (atlas: Atlas) (sourceId: string) : (string * Set<Pos>) option =
+    seatTilesIn atlas sourceId
+    |> Option.map (fun (room, seats) -> room, Set.intersect seats (postsIn atlas room))
+
+let postsOf (atlas: Atlas) (sourceId: string) : Set<RoomPos> =
+    postsOfIn atlas sourceId
+    |> Option.map (fun (room, tiles) -> RoomPos.setAt room tiles)
+    |> Option.defaultValue Set.empty
 
 /// The **standing** Posts of one source: `postsOf` above less the Seats
 /// whose container is still a site — the switch that admits a source into
@@ -1988,10 +2015,11 @@ let postsOf (atlas: Atlas) (sourceId: string) : Set<Pos> =
 /// share: a site produces nothing anybody hauls, so it hires the garrison
 /// that raises it and buys no mouths at home against income that does not
 /// exist yet. The tick the container stands, both answers agree again.
-let standingPostsOf (atlas: Atlas) (sourceId: string) : Set<Pos> =
-    match Map.tryFind sourceId atlas.TargetAt with
-    | None -> Set.empty
-    | Some(room, _) -> Set.intersect (seatTilesOf atlas sourceId) (standingPostsIn atlas room)
+let standingPostsOf (atlas: Atlas) (sourceId: string) : Set<RoomPos> =
+    seatTilesIn atlas sourceId
+    |> Option.map (fun (room, seats) ->
+        Set.intersect seats (standingPostsIn atlas room) |> RoomPos.setAt room)
+    |> Option.defaultValue Set.empty
 
 /// Whether a creep stands on the container construction site named — its
 /// own Post with the container still going up (#205). The one geometry
@@ -2043,7 +2071,9 @@ let standsOnPostSite (atlas: Atlas) (creep: string) (siteId: string) : bool =
 let standsOnSitePost (atlas: Atlas) (creep: string) (sourceId: string) : bool =
     match Map.tryFind creep atlas.CreepAt, Map.tryFind sourceId atlas.TargetAt with
     | Some(creepRoom, tile), Some(sourceRoom, _) when creepRoom = sourceRoom ->
-        Set.contains tile (seatTilesOf atlas sourceId)
+        (match seatTilesIn atlas sourceId with
+         | Some(_, seats) -> Set.contains tile seats
+         | None -> false)
         && Set.contains tile (containerSitePostsIn atlas creepRoom)
     | _ -> false
 
@@ -2117,7 +2147,7 @@ let private sharesRoom (atlas: Atlas) (creep: string) (task: Task) : bool =
 /// out of them without handing a creep anything. Only the body decides
 /// what comes back, which is why the far leg's memo carries the Work-heavy
 /// bit and not a creep.
-let private narrowedArea (atlas: Atlas) (creep: string) (task: Task) : Set<Pos> =
+let private narrowedArea (atlas: Atlas) (creep: string) (task: Task) : Set<RoomPos> =
     match task with
     | Harvest sourceId when workHeavy atlas creep ->
         memoised atlas.HeavyAreas task (fun () ->
@@ -2144,12 +2174,15 @@ let private narrowedArea (atlas: Atlas) (creep: string) (task: Task) : Set<Pos> 
     // the rule's point rather than its edge. Not memoised: the difference
     // is over a handful of tiles and `workArea` beneath it already is.
     | Harvest sourceId ->
-        let postTiles = postsOf atlas sourceId
-
-        if Set.isEmpty postTiles then
+        match postsOfIn atlas sourceId with
+        | Some(room, postTiles) when not (Set.isEmpty postTiles) ->
+            // Over the room's own grid and joined once: this runs per creep
+            // per candidate, and a `Set<RoomPos>` difference would compare
+            // a room name at every node of it.
             workArea atlas task
-        else
-            Set.difference (workArea atlas task) postTiles
+            |> Set.filter (fun tile ->
+                not (tile.Room = room && Set.contains (RoomPos.pos tile) postTiles))
+        | _ -> workArea atlas task
     | _ -> workArea atlas task
 
 /// Work Area of a Task for one creep — the body-aware query every reader
@@ -2158,16 +2191,19 @@ let private narrowedArea (atlas: Atlas) (creep: string) (task: Task) : Set<Pos> 
 ///
 /// Empty for a creep standing in a different room from the Task's target
 /// (ADR 0041). The body-blind `workArea` above stays honest — those tiles
-/// are the target's room's ground and it is really there — but a `Set<Pos>`
-/// carries no room, and this is the query every reader that holds a creep
-/// steps and acts over: the mover's candidates are its own room's tiles,
-/// and a goal read out of the wrong room's grid answers a step nobody may
-/// take. So the creep is told what it is told when the Reach takes its
-/// last standing tile — it has nowhere to work this Task from, which is
-/// what makes the action gate refuse rather than mislead.
+/// are the target's room's ground and it is really there — and since #216
+/// R3 they say which room that is; what this rule does is narrow the
+/// *permission*, not repair a missing join. Standing and acting are
+/// in-room acts (ADR 0041's Consequences), so a creep a border away is
+/// told what it is told when the Reach takes its last standing tile — it
+/// has nowhere to work this Task from, which is what makes the action gate
+/// refuse rather than mislead.
 ///
-/// Neither #123 nor #142 widened this, and that is the decision: the
-/// cross-room *price* is a minimum over the Seam band (`pricedAcross`),
+/// Neither #123 nor #142 widened this, and neither did #216 R3, whose plan
+/// asked for the empty answer to become the target room's tiles: that is
+/// the decision, and ADR 0052's decision-2 entry records it as a deviation
+/// rather than an unfinished item. The cross-room *price* is a minimum
+/// over the Seam band (`pricedAcross`),
 /// joined where the rooms are both in hand, while the *tiles* a creep is
 /// handed stay its own room's. Geometry crosses the border; standing and
 /// acting do not (ADR 0041's Consequences). A caller that wants the far
@@ -2186,7 +2222,7 @@ let private narrowedArea (atlas: Atlas) (creep: string) (task: Task) : Set<Pos> 
 /// Guarded outside the memo, which keys on the Task alone: the room is a
 /// fact about the creep, and two creeps of one Task must not share an
 /// answer that depends on it.
-let workAreaFor (atlas: Atlas) (creep: string) (task: Task) : Set<Pos> =
+let workAreaFor (atlas: Atlas) (creep: string) (task: Task) : Set<RoomPos> =
     if not (sharesRoom atlas creep task) then
         Set.empty
     else
@@ -2243,7 +2279,9 @@ let catchesOverflow (atlas: Atlas) (creep: string) (sourceId: string) : bool =
     match Map.tryFind creep atlas.CreepAt, Map.tryFind sourceId atlas.TargetAt with
     | Some(creepRoom, pos), Some(sourceRoom, _) when creepRoom = sourceRoom ->
         Set.contains pos (tilesOfKindIn atlas creepRoom (Structure BuiltKind.Container))
-        && Set.contains pos (seatTilesOf atlas sourceId)
+        && (match seatTilesIn atlas sourceId with
+            | Some(_, seats) -> Set.contains pos seats
+            | None -> false)
     | _ -> false
 
 /// Whether a creep stands where it could dig a source: in that source's
@@ -2603,7 +2641,7 @@ let private farFlood (atlas: Atlas) (pricing: Pricing) (creep: string) (room: st
             (occupiedOf atlas room)
             factor
             pricing
-            (narrowedArea atlas creep task |> Set.toList))
+            (narrowedArea atlas creep task |> RoomPos.tilesIn room))
 
 /// The near leg of a cross-room join, in the two shapes its two callers
 /// hand it (#174): the tick's own per-creep flood, which the join may
@@ -2873,25 +2911,38 @@ let private pricedAcross
 /// all. Its totality contract is ADR 0004's and is documented on every
 /// wrapper.
 ///
-/// The tiles are read as tiles of the creep's own room, because that is
-/// the room the flood runs in and it stops at that room's border
-/// (ADR 0041). Nothing here joins two rooms: `pricedPath` settles the
-/// rooms before it prices, and sends a border crossing to `pricedAcross`.
+/// The tiles are taken in the creep's own room, because that is the room
+/// the flood runs in and it stops at that room's border (ADR 0041) — a
+/// tile of any other room is dropped here rather than read as this room's
+/// coordinate (ADR 0052 decision 2). Nothing here joins two rooms:
+/// `pricedPath` settles the rooms before it prices, and sends a border
+/// crossing to `pricedAcross`. An area that is *entirely* another room's
+/// therefore prices as an empty one — no walk at all — which is the
+/// answer `workAreaFor` already gave it by handing back nothing.
 let private pricedPathTo
     (atlas: Atlas)
     (pricing: Pricing)
     (creep: string)
-    (area: Set<Pos>)
+    (area: Set<RoomPos>)
     : int option =
     match Map.tryFind creep atlas.CreepAt with
     | None -> Some 0
     | Some(room, pos) ->
-        if Set.isEmpty area then
-            None
-        elif Set.contains pos area then
+        // Read, never rebuilt: this runs once per creep per candidate Task
+        // in the Matcher, so the room filter is `RoomPos.tilesIn`'s fold
+        // into a list rather than a second `Set<RoomPos>` (ADR 0041's own
+        // objection to putting a room on every tile, which is why the grid
+        // keeps `Pos`). The membership test goes the other way for the same
+        // reason — one joined key against the set the caller already holds.
+        if Set.contains (RoomPos.at room pos) area then
             Some 0
         else
-            nearestReached (reachedBy (flood atlas pricing room creep pos)) (Set.toList area)
+            let here = RoomPos.tilesIn room area
+
+            if List.isEmpty here then
+                None
+            else
+                nearestReached (reachedBy (flood atlas pricing room creep pos)) here
 
 /// The border a Task asks its creep to cross, or None when it asks for
 /// none: the creep's room, the tile it stands on, and the target's room,
@@ -2972,9 +3023,10 @@ let travelCost (atlas: Atlas) (creep: string) (task: Task) : int option =
 /// unplaced creep prices at 0 as it does for a Task; there is no target,
 /// so there is no unplaced-target escape — an empty or unreachable set is
 /// unreachable, which is the answer a Task with nowhere to stand gets too.
-/// The tiles are the creep's own room's, the room its flood runs in
-/// (ADR 0041).
-let travelCostWithin (atlas: Atlas) (creep: string) (area: Set<Pos>) : int option =
+/// Only the creep's own room's tiles are priced, the room its flood runs
+/// in (ADR 0041); a tile of another room in the set is dropped rather
+/// than read as this room's coordinate (ADR 0052 decision 2).
+let travelCostWithin (atlas: Atlas) (creep: string) (area: Set<RoomPos>) : int option =
     pricedPathTo atlas TravelCost creep area
 
 /// The creep's walk to a Task's Work Area (ADR 0029): the whole ticks its
@@ -3013,12 +3065,13 @@ let walkTicks (atlas: Atlas) (creep: string) (task: Task) : int option =
 /// tile the Reach took is no more a tile to work from than to walk to.
 /// One case is the Atlas's own and answers before the geometry: a Task
 /// that acts on nothing never acts — Flee is movement and nothing else.
-let mayAct (atlas: Atlas) (creep: string) (task: Task) (area: Set<Pos>) : bool =
+let mayAct (atlas: Atlas) (creep: string) (task: Task) (area: Set<RoomPos>) : bool =
     match actionOn task with
     | None -> false
     // No action reaches across a border: the engine's ranges are measured
-    // inside one room, and `range` over two bare tiles would read two
-    // rooms' coordinates as one (ADR 0041). The area is the caller's, so
+    // inside one room, and `range` takes two tiles of one grid, which is
+    // now what its argument type says (ADR 0052 decision 2). The area is
+    // the caller's, so
     // this is asked here rather than inferred from an empty one — which is
     // also what keeps the gate shut while the mover walks a creep at the
     // Seam (#142): a creep beside an exit tile, or on one, is still a room
@@ -3031,7 +3084,7 @@ let mayAct (atlas: Atlas) (creep: string) (task: Task) (area: Set<Pos>) : bool =
             if not (walkableAt (weightsOf atlas creepRoom) creepPos) then
                 range creepPos targetPos <= actionRange
             else
-                Set.contains creepPos area
+                Set.contains (RoomPos.at creepRoom creepPos) area
         | _ -> true
 
 /// First step toward a set of goal tiles under one pricing: the in-room
@@ -3046,18 +3099,23 @@ let private firstStepVia
     (atlas: Atlas)
     (pricing: Pricing)
     (creep: string)
-    (goals: Set<Pos>)
-    : Pos option =
+    (goalTiles: Set<RoomPos>)
+    : RoomPos option =
     match Map.tryFind creep atlas.CreepAt with
     | None -> None
     | Some(room, pos) ->
-        if Set.isEmpty goals || Set.contains pos goals then
+        // The creep's own room's share, for the reason `pricedPathTo`
+        // narrows there — and read the same way, without building a second
+        // set: a step is a step inside one room, and this room's grid is
+        // what the flood indexes (ADR 0052 decision 2).
+        let goals = RoomPos.tilesIn room goalTiles
+
+        if List.isEmpty goals || Set.contains (RoomPos.at room pos) goalTiles then
             None
         else
             let near = flood atlas pricing room creep pos
 
             goals
-            |> Set.toList
             |> List.choose (fun goal ->
                 let d = reachedBy near goal
                 if d = unreached then None else Some(d, goal))
@@ -3065,7 +3123,7 @@ let private firstStepVia
                 | [] -> None
                 | reachable ->
                     let _, goal = List.min reachable
-                    Some(posAt (firstStepOn near (indexOf pos) (indexOf goal)))
+                    Some(RoomPos.at room (posAt (firstStepOn near (indexOf pos) (indexOf goal))))
 
 /// The step a creep takes toward a Task whose target stands in another
 /// room: toward the near side of the Seam the price was paid at (#142).
@@ -3092,7 +3150,12 @@ let private firstStepVia
 /// it never becomes a Seat, a Work Area member or a standing candidate —
 /// the projection carries no ground there, so no query can offer it.
 /// Total (ADR 0004): no crossing, no step.
-let private stepAcross (atlas: Atlas) (pricing: Pricing) (creep: string) (task: Task) : Pos option =
+let private stepAcross
+    (atlas: Atlas)
+    (pricing: Pricing)
+    (creep: string)
+    (task: Task)
+    : RoomPos option =
     match borderCrossing atlas creep task with
     | None -> None
     | Some(creepRoom, from, targetRoom) ->
@@ -3105,9 +3168,9 @@ let private stepAcross (atlas: Atlas) (pricing: Pricing) (creep: string) (task: 
             let approach = besideExitFrom (weightsOf atlas creepRoom) from exitTile
 
             if List.contains from approach then
-                Some exitTile
+                Some(RoomPos.at creepRoom exitTile)
             else
-                firstStepVia atlas pricing creep (Set.ofList approach))
+                firstStepVia atlas pricing creep (RoomPos.setAt creepRoom (Set.ofList approach)))
 
 /// The first step of a cheapest path from a creep to a set of goal tiles,
 /// priced in the creep's own cost — a slow body may detour differently
@@ -3125,17 +3188,17 @@ let private stepAcross (atlas: Atlas) (pricing: Pricing) (creep: string) (task: 
 /// its start tile regardless of weight, so the answer is the ground tile
 /// beside the ring that the cheapest path leaves by (#145).
 ///
-/// The Task rides beside them for the one case a bare tile set cannot
+/// The Task rides beside them for the one case the goal tiles cannot
 /// carry (#142): a target the projection files under another room name
-/// leaves the creep-aware Work Area empty — the tiles are the neighbour's
-/// and a `Set<Pos>` cannot say so — and the step is then toward the near
-/// side of the winning Seam instead. The same shape travel cost has had
+/// leaves the creep-aware Work Area empty — standing and acting do not
+/// cross a border (ADR 0041's Consequences) — and the step is then toward
+/// the near side of the winning Seam instead. The same shape travel cost has had
 /// since #123, and for the same reason: the tiles a creep is handed stay
 /// its own room's while the *price* crosses, so the Task the Matcher
 /// ranked across a border is a Task the mover can also walk toward. The
 /// goals win whenever they yield a step, so a creep with somewhere to
 /// stand is never pulled toward a border instead.
-let firstStep (atlas: Atlas) (creep: string) (task: Task) (goals: Set<Pos>) : Pos option =
+let firstStep (atlas: Atlas) (creep: string) (task: Task) (goals: Set<RoomPos>) : RoomPos option =
     match firstStepVia atlas TravelCost creep goals with
     | Some step -> Some step
     | None -> stepAcross atlas TravelCost creep task
@@ -3161,8 +3224,8 @@ let firstStepIgnoringTraffic
     (atlas: Atlas)
     (creep: string)
     (task: Task)
-    (goals: Set<Pos>)
-    : Pos option =
+    (goals: Set<RoomPos>)
+    : RoomPos option =
     match firstStepVia atlas Baseline creep goals with
     | Some step -> Some step
     | None -> stepAcross atlas Baseline creep task
@@ -3181,9 +3244,9 @@ let firstStepIgnoringTraffic
 /// None when no goal is reachable — unpriceable geometry hires nobody
 /// (ADR 0004).
 ///
-/// A `Pos` carries no room (ADR 0041), so both rooms ride on the API, and
-/// an outpost's container is priced across the border rather than walked
-/// over home terrain (ADR 0042): each leg is then `joinedAcross`, the same
+/// Both ends carry their rooms (ADR 0052 decision 2), and an outpost's
+/// container is priced across the border rather than walked over home
+/// terrain (ADR 0042): each leg is then `joinedAcross`, the same
 /// minimum over the same Seam band the Matcher's ranking price and the
 /// mover's walk are read off, and never a second cross-room arithmetic of
 /// this rule's own (ADR 0030). Same room, the flood and the tiles are the
@@ -3213,15 +3276,16 @@ let firstStepIgnoringTraffic
 let haulRoundTripTicks
     (atlas: Atlas)
     (body: BodyPart list)
-    (fromRoom: string)
-    (from: Pos)
-    (sinkRoom: string)
-    (sink: Pos)
+    (container: RoomPos)
+    (sink: RoomPos)
     : int option =
     let count part =
         body |> List.filter ((=) part) |> List.length
 
-    let goals = adjacentWalkableIn atlas sinkRoom sink
+    let fromRoom = container.Room
+    let sinkRoom = sink.Room
+    let from = RoomPos.pos container
+    let goals = adjacentWalkableIn atlas sinkRoom (RoomPos.pos sink)
     let weights = weightsOf atlas fromRoom
 
     let legTicks factor =
@@ -3380,14 +3444,22 @@ let private castAcross
 /// (`pricedAcross`'s rule, for `pricedAcross`'s reason) and no answer to
 /// remember either — the memo holds what a band answered, never that one
 /// answered nothing.
+/// The spawner's own tile stays a bare grid coordinate, and deliberately:
+/// it is the walk table's key (`WalkTable`), the near leg is always the
+/// colony's own room's — every spawn a colony casts from stands in its
+/// home room (ADR 0047, ADR 0052 decision 1) — and the room in that key is
+/// the *goal*'s. The goal is the end that moves, so the goal is the end
+/// that carries its room.
 let castWalkTicks
     (atlas: Atlas)
     (body: BodyPart list)
-    (spawn: Pos)
-    (goalRoom: string)
-    (goal: Pos)
+    (spawnTile: Pos)
+    (target: RoomPos)
     : int option =
     let factor = emptyFactorOf body
+    let spawn = spawnTile
+    let goalRoom = target.Room
+    let goal = RoomPos.pos target
 
     let arrival (table: int[]) =
         match table.[indexOf goal] with
@@ -3400,7 +3472,10 @@ let castWalkTicks
     let near () =
         memoised atlas.Walks (spawn, factor, atlas.Home) (fun () ->
             let dist, _ =
-                walkFloodFromAll (weightsOf atlas atlas.Home) factor (adjacentWalkable atlas spawn)
+                walkFloodFromAll
+                    (weightsOf atlas atlas.Home)
+                    factor
+                    (adjacentWalkableIn atlas atlas.Home spawn)
 
             dist)
 
@@ -3431,9 +3506,14 @@ let castWalkTicks
 /// it. Answers the path tiles from the first step beside the origin to the
 /// cheapest reachable goal, or [] when no goal is reachable — unpriceable
 /// geometry paves nothing. Deterministic: the flood's dist-then-index heap
-/// keys and the lowest (cost, tile) goal break every tie. Over the
-/// colony's own room's raw terrain: a trunk is a road the Layout plans,
-/// and the Layout plans at home (ADR 0041).
+/// keys and the lowest (cost, tile) goal break every tie. Over **the
+/// origin's own room's** raw terrain, and every tile in and out carries
+/// that room (ADR 0052 decision 2): a trunk is a road the Layout plans,
+/// the Layout plans one room (ADR 0011), and which room that is is the
+/// caller's to say rather than this query's to assume. A reservation or a
+/// goal filed under another room is no tile of this trunk's grid and is
+/// dropped, where a bare `Pos` would have reserved or aimed at whatever
+/// stands on the same coordinate here (#191's shape).
 /// What a swamp tile costs a *trunk* (ADR 0011 as #211 amends it): three
 /// against plain's two, where the walk prices it at `swampWeight`, ten. A
 /// trunk is a road, and once paved a swamp tile walks at exactly what a
@@ -3453,7 +3533,22 @@ let castWalkTicks
 /// the flood indexes by weight still covers it.
 let private trunkSwampWeight = 3
 
-let trunkPath (atlas: Atlas) (avoid: Set<Pos>) (origin: Pos) (goals: Set<Pos>) : Pos list =
+let trunkPath
+    (atlas: Atlas)
+    (avoidTiles: Set<RoomPos>)
+    (start: RoomPos)
+    (goalTiles: Set<RoomPos>)
+    : RoomPos list =
+    let room = start.Room
+    let origin = RoomPos.pos start
+
+    // Both sets are read and never rebuilt: the Layout asks for a trunk
+    // per source per goal on a census tick, and a room's share taken as a
+    // fresh `Set<Pos>` at each ask is a copy of the reservation per line
+    // (#216 R3, `RoomPos.tilesIn`). Only the room's own tiles are taken —
+    // a reservation or a goal filed elsewhere is no tile of this grid.
+    let avoid = RoomPos.tilesIn room avoidTiles
+    let goals = RoomPos.tilesIn room goalTiles
     // Raw terrain is the *price*, never what blocks: the trunk starts from
     // the ground grid — plain 2, swamp `trunkSwampWeight` (#211: the
     // walking grid's ten is a creep's price for ground the road erases),
@@ -3471,7 +3566,7 @@ let trunkPath (atlas: Atlas) (avoid: Set<Pos>) (origin: Pos) (goals: Set<Pos>) :
     // two `Set<Pos>` membership trees at each, three structural
     // comparisons a tile per trunk, and the Layout plans one trunk per
     // source per goal on every census tick.
-    let weights = Array.copy (groundOf atlas atlas.Home)
+    let weights = Array.copy (groundOf atlas room)
 
     // The swamp repriced for a road (#211) before the obstacle pass, so a
     // swamp under an obstacle still reads -1 after it.
@@ -3479,7 +3574,7 @@ let trunkPath (atlas: Atlas) (avoid: Set<Pos>) (origin: Pos) (goals: Set<Pos>) :
         if weights.[index] = swampWeight then
             weights.[index] <- trunkSwampWeight
 
-    (layerOf atlas atlas.Home).Obstacles
+    (layerOf atlas room).Obstacles
     |> Set.iter (fun tile -> weights.[indexOf tile] <- -1)
 
     // Through the grid's guard, unlike the pass above: `avoid` is the
@@ -3487,7 +3582,7 @@ let trunkPath (atlas: Atlas) (avoid: Set<Pos>) (origin: Pos) (goals: Set<Pos>) :
     // and `indexOf` checks nothing (#173) — so a tile off the
     // fifty-by-fifty reserves nothing instead of indexing off the array.
     avoid
-    |> Set.iter (fun tile ->
+    |> List.iter (fun tile ->
         if inGrid tile then
             weights.[indexOf tile] <- -1)
 
@@ -3495,7 +3590,6 @@ let trunkPath (atlas: Atlas) (avoid: Set<Pos>) (origin: Pos) (goals: Set<Pos>) :
         floodFrom weights noTraffic (stepTable (stepUnits planningFactor)) origin
 
     goals
-    |> Set.toList
     |> List.choose (fun goal ->
         let d = dist.[indexOf goal]
         if d = unreached then None else Some(d, goal))
@@ -3509,6 +3603,6 @@ let trunkPath (atlas: Atlas) (avoid: Set<Pos>) (origin: Pos) (goals: Set<Pos>) :
                 if index = originIndex then
                     acc
                 else
-                    walk parents.[index] (posAt index :: acc)
+                    walk parents.[index] (RoomPos.at room (posAt index) :: acc)
 
             walk (indexOf goal) []
