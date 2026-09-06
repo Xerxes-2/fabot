@@ -41,6 +41,14 @@ let snapshotWith creeps spatial =
         // room decides Tasks, and the Atlas decides none (ADR 0047
         // decision 4).
         Borrowed = { Rooms = [] }
+        // The numbers this bot ships with (ADR 0052 decision 5): a
+        // fixture starts from them and the tests that are *about* a
+        // tunable move the one field they are about.
+        Tuning = Tuning.defaults
+        // Nothing in the oven: a fixture's rows count what is alive, and
+        // the casting cascade's own tests are the ones that put a body
+        // here (#156).
+        Casting = []
     }
 
 let worker name =
@@ -1419,7 +1427,7 @@ let stepPriceTableTests =
             }
 
             test "the weight grid carries no weight the price table has no slot for" {
-                // The table spans 0..`swampWeight`, and the flood reads it
+                // The table spans 0..`Engine.swampWeight`, and the flood reads it
                 // unchecked, so it is in range only while swamp stays the
                 // dearest ground a grid can hold (ADR 0010). A terrain
                 // priced above swamp would index past the end, which under
@@ -5852,5 +5860,79 @@ let trunkPricingTests =
                     ))
                     { X = 10; Y = 13 }
                     "three plain steps (6) beat two swamps and a plain (8): the surcharge is real"
+            }
+
+            test "the swamp surcharge is the colony's tunable, and priced at the walk it detours" {
+                // `Tuning.TrunkSwampWeight` (ADR 0052 decision 5), pairwise
+                // over the one field on one geometry: the same five-step
+                // plain loop and the same three-step swamp line, priced at
+                // the road's three and then at the walking grid's ten.
+                //
+                // Three is what #211 landed and ten is what it replaced, so
+                // this is the regression written as a tunable rather than
+                // as a literal: at ten the swamp line costs 2 + 10 + 10 = 22
+                // against the loop's 10 and the router paves the long way
+                // round, which is the twenty-one-tile detour W13S28 was
+                // carrying.
+                let room =
+                    spatial
+                        []
+                        [
+                            { X = 10; Y = 10 }, Plain
+                            { X = 11; Y = 10 }, Swamp
+                            { X = 12; Y = 10 }, Swamp
+                            { X = 13; Y = 10 }, Plain
+                            { X = 10; Y = 11 }, Plain
+                            { X = 10; Y = 12 }, Plain
+                            { X = 10; Y = 13 }, Plain
+                            { X = 10; Y = 14 }, Plain
+                            { X = 10; Y = 15 }, Plain
+                        ]
+
+                let paved surcharge =
+                    let view = snapshotWith [] room
+
+                    trunkPathHome
+                        (ofView
+                            { view with
+                                Tuning =
+                                    { view.Tuning with
+                                        TrunkSwampWeight = surcharge
+                                    }
+                            })
+                        Set.empty
+                        { X = 10; Y = 10 }
+                        (Set.ofList [ { X = 13; Y = 10 }; { X = 10; Y = 15 } ])
+                    |> List.last
+
+                Expect.equal
+                    (paved 3)
+                    { X = 13; Y = 10 }
+                    "at the road's own surcharge the trunk takes the swamps"
+
+                Expect.equal
+                    (paved Engine.swampWeight)
+                    { X = 10; Y = 15 }
+                    "at a walking creep's weight it pays five plain steps to avoid two swamps"
+
+                // One past the field's stated invariant, which is where a
+                // tunable stops being a number and becomes a crash: the
+                // flood's step table is `Array.init (Engine.swampWeight +
+                // 1)`, so a grid holding eleven indexes off the end of it —
+                // an `IndexOutOfRangeException` here and an `undefined`
+                // price through `at`'s `[<Emit>]` accessor on the deployed
+                // bundle, on a tick `Main.loop` runs under no handler.
+                // `trunkPath` holds the number at the engine's own weight,
+                // so a colony that asks for a costlier swamp than a walking
+                // creep pays gets the walking creep's answer.
+                Expect.equal
+                    (paved (Engine.swampWeight + 1))
+                    (paved Engine.swampWeight)
+                    "and past it the walking weight is what it gets, rather than an index off the step table"
+
+                Expect.equal
+                    (paved 40)
+                    (paved Engine.swampWeight)
+                    "however far past it the field is moved"
             }
         ]

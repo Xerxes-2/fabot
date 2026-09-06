@@ -2,7 +2,7 @@
 
 > **Amended by #211**: a trunk is priced on **paved length**, swamp surcharged for its construction cost — plain 2, swamp 3 (`Atlas.trunkSwampWeight`) — and no longer at the walking ratio of plain 2 / swamp 10. A trunk is a road, and once paved a swamp tile walks at exactly what a paved plain tile walks at (ADR 0010); the only thing swamp costs a road is the one-off 1,500-against-300 construction, and repair is identical. At the walking ratio the router bought W13S28 a permanent twenty-one-tile detour around five swamps to save ~1,200 energy. The two reasons for raw terrain — the line must not shift as its own roads are built, and must not bend around today's traffic — both stand: no road discount, no occupancy. It is the swamp:plain ratio that was a creep's and not a road's. Work-Area swamps are paved by their own rule, unchanged. W12S28's RCL5 trunk set is byte-identical before and after (measured on the capture); W13S28's drops from 68 sites to 30.
 
-> **Amended by #209**: road **sites** are placed from RCL3 up (`roadLevel`, read off `Colony.bootstrapLevel`) and not below it. "Sites place all at once" and the rejection of pacing both stand — what changes is that the road kind now carries a level gate of its own, the same shape the clustered kinds already had (`storageGap level`, `towerGap level`). The reason is in both paragraphs below.
+> **Amended by #209**: road **sites** are placed from RCL3 up (`roadLevel`, read off the [[stage]] `Tuning.BootstrapLevel` cuts) and not below it. "Sites place all at once" and the rejection of pacing both stand — what changes is that the road kind now carries a level gate of its own, the same shape the clustered kinds already had (`storageGap level`, `towerGap level`). The reason is in both paragraphs below.
 
 > **Revised by ADR 0039**: the horizon moves to RCL5, and the title's "truncated at RCL4" is now history. ADR 0022's refusal to move it was weighed against the ordering *before* the working ground left it; re-derived after, the ten further extensions and the second tower cost the trunks nothing — both horizons pave the same 25 tiles.
 
@@ -91,6 +91,6 @@ rooms where they are not — room-specific exemptions don't get encoded.
   the deadline is 20,000 ticks away; they bound nothing for a colony whose
   whole income is 8 a tick and whose Upgrade is the level itself. The
   level is what pacing was reaching for, and RCL3 is the line already
-  drawn: `roadLevel = Colony.bootstrapLevel`, one constant read off the
+  drawn: `roadLevel = Tuning.BootstrapLevel`, one field read off the
   other, because "bootstrapped" is the same question in both places
   (ADR 0047 decision 4).

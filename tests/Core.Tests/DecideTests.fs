@@ -117,7 +117,7 @@ let coreReservedRoom ticksToEnd : RoomControlInfo =
 /// RCL1 one that keeps ramparts — and every rule that used to read the
 /// level reads this.
 let homeStages (spatial: SpatialInfo) level =
-    match Colony.stageOf true true (Some level) with
+    match Colony.stageOf Tuning.defaults true true (Some level) with
     | Some stage -> Map.ofList [ SpatialInfo.homeName spatial, stage ]
     | None -> Map.empty
 
@@ -181,6 +181,14 @@ let bareRespawn =
         // And nothing borrowed: this colony raises no child, so no room's
         // Upgrade and Build are hers to take (ADR 0047 decision 4).
         Borrowed = { Rooms = [] }
+        // The numbers this bot ships with (ADR 0052 decision 5): a
+        // fixture starts from them and the tests that are *about* a
+        // tunable move the one field they are about.
+        Tuning = Tuning.defaults
+        // Nothing in the oven: a fixture's rows count what is alive, and
+        // the casting cascade's own tests are the ones that put a body
+        // here (#156).
+        Casting = []
     }
 
 /// A creep with the given body's part counts, freshly cast: a full
@@ -11971,7 +11979,7 @@ let pickupTaskTests =
 
             test "a pile decaying under the threshold releases the hauler still walking to it" {
                 // The accepted loss, pinned so it stays a decision
-                // (`pickupThreshold`, #167). The threshold gates
+                // (`Tuning.PickupThreshold`, #167). The threshold gates
                 // persistence as well as entry, because the pool is
                 // rebuilt creep-blind every tick: a pile at 100 holds its
                 // holder, and the same pile one energy lighter — a
@@ -17939,8 +17947,8 @@ let outpostSuccessionTests =
 /// the spawn at (25,10), and one home source in the rock beside it at
 /// (24,20) with its container standing on the Seat (25,20). A home Post,
 /// a home hauler term and a home income share, so this colony is already
-/// running an economy well clear of `minWorkforce` before the outpost is
-/// asked to add anything to it — which is what lets the pair below read a
+/// running an economy well clear of `Tuning.MinWorkforce` before the outpost
+/// is asked to add anything to it — which is what lets the pair below read a
 /// *difference* rather than a floor.
 let private switchHome =
     { bareRespawn with
@@ -19550,7 +19558,7 @@ let private withNorthSpawn (colony: ColonyView) =
     }
 
 /// The same colony with the north room out of its scan set altogether:
-/// what the tick a bootstrapped child reaches `Colony.bootstrapLevel` does
+/// what the tick a bootstrapped child reaches `Tuning.BootstrapLevel` does
 /// to its mother's ColonyView (ADR 0047 decision 4). The level is not a fact
 /// any ColonyView of hers carries — it is read off the world, once, by the
 /// rule that decides which rooms she projects (`Colony.bootstrapping`) —
@@ -19709,7 +19717,7 @@ let nurseryTests =
                 // 4's own sentence: the nursery ends the tick a spawn
                 // stands, and the addend runs on while the child is
                 // bootstrapped — its own `decide` running, its controller
-                // still under `Colony.bootstrapLevel` — because what the
+                // still under `Tuning.BootstrapLevel` — because what the
                 // three bodies are for is the child's first Layout as much
                 // as the spawn that ended the nursery. One addend across
                 // both states, so the fleet the colony wants is the same
@@ -19761,7 +19769,7 @@ let nurseryTests =
 
             test "the builders' budget does not reach a nursery: every worker may cross" {
                 // #157 caps the crowd on an outpost's container site at
-                // `outpostContainerBuilders`, a colony-wide two, because on
+                // `Tuning.OutpostContainerBuilders`, a colony-wide two, because on
                 // the feeding tier the site outbids the home Upgrade for
                 // every loaded worker at once and travel cost cannot thin a
                 // crowd that is a Seam away to a tile. A nursery is the
@@ -20065,7 +20073,7 @@ let private nurseryPair =
 /// The declaration a human writes on the day of the split, and the one the
 /// real one carries today: the child is out of its mother's outpost list
 /// and names her instead, so she goes on raising it until it reaches
-/// `Colony.bootstrapLevel` (ADR 0047 decision 4).
+/// `Tuning.BootstrapLevel` (ADR 0047 decision 4).
 let private raisedPair =
     [
         {
@@ -20250,7 +20258,7 @@ let bootstrapTests =
             test "the mother's pool holds a bootstrapped child's Upgrade and its Build" {
                 // ADR 0047 decision 4's second half, at the pool it is
                 // decided in: while the child is under
-                // `Colony.bootstrapLevel` its Upgrade and its Build are
+                // `Tuning.BootstrapLevel` its Upgrade and its Build are
                 // visible to the mother's workers — the one cross-colony
                 // borrowing rule there is.
                 //
@@ -20445,7 +20453,7 @@ let bootstrapTests =
             }
 
             test "the lift takes pioneerCount bodies and the fourth stays on the home controller" {
-                // The cap is the hire (#213): `pioneerCount` is what the
+                // The cap is the hire (#213): `Tuning.PioneerCount` is what the
                 // worker row rose by, so it is what the feeding-tier Upgrade
                 // may hold. A fourth loaded body is over the cap and prices
                 // the home Upgrade like any surplus body — pairwise on the
@@ -20665,7 +20673,7 @@ let twoColonyTests =
                 Expect.equal
                     (raising [ "W1N2", Bootstrapping ] raisedPair mother)
                     [ "W1N2" ]
-                    "under `bootstrapLevel` the mother is still raising the child that names her"
+                    "under `Tuning.BootstrapLevel` the mother is still raising the child that names her"
 
                 Expect.isEmpty
                     (raising [ "W1N2", Independent ] raisedPair mother)
@@ -20714,7 +20722,7 @@ let twoColonyTests =
                 // nothing pools a Claim to take such a room and the route
                 // to one is her `Outposts` list (ADR 0047's user story and
                 // its Consequences).
-                let unowned = Colony.stageOf false false (Some 1)
+                let unowned = Colony.stageOf Tuning.defaults false false (Some 1)
 
                 Expect.isNone
                     unowned
@@ -22057,7 +22065,6 @@ let standDownGateTests =
                     // loss whatever `Game.creeps` holds (#191).
                     |> Observe.foldRaids
                         Observe.capEpisodes
-                        Observe.quietGap
                         Set.empty
                         { incomeColony with
                             Time = 100
@@ -22106,7 +22113,6 @@ let standDownGateTests =
                     // loss whatever `Game.creeps` holds (#191).
                     |> Observe.foldRaids
                         Observe.capEpisodes
-                        Observe.quietGap
                         Set.empty
                         { incomeColony with
                             Time = 100
@@ -22398,7 +22404,7 @@ let standingBodyTests =
             test "under RCL3 the colony's own extension site outranks its Upgrade" {
                 // A bootstrapping room builds its bank before its
                 // controller: the site is feeding-tier while the controller
-                // is under `bootstrapLevel` with a spawn standing, and
+                // is under `Tuning.BootstrapLevel` with a spawn standing, and
                 // surplus like any home site from RCL3 up. Pairwise on the
                 // level alone: the same lane, the same worker, the same
                 // site, and the match factor says which tier decided.
@@ -23729,7 +23735,7 @@ let postSiteTests =
             }
 
             test "the builder budget prices a commute, and the body on the site pays none" {
-                // #157's budget is `outpostContainerBuilders` spread over
+                // #157's budget is `Tuning.OutpostContainerBuilders` spread over
                 // the sites, and every word of its argument is about the
                 // home room's surplus work stopping "for the fifty ticks
                 // each of them spends crossing". A body standing on the
@@ -23842,41 +23848,45 @@ let colonyStageTests =
         "the colony stage"
         [
             test "a stage is ownership, a spawn and a level, and each of the three moves it alone" {
-                // `Colony.stageOf`, the one place `bootstrapLevel` is read
+                // `Colony.stageOf`, the one place `Tuning.BootstrapLevel` is read
                 // (ADR 0052 decision 3). Pairwise on each input in turn,
                 // the other two held.
                 Expect.equal
-                    (Colony.stageOf false false (Some 1))
+                    (Colony.stageOf Tuning.defaults false false (Some 1))
                     None
                     "a room we do not own is no colony of ours: a candidate, whose one rule is the Claim pool"
 
                 Expect.equal
-                    (Colony.stageOf false true (Some 5))
+                    (Colony.stageOf Tuning.defaults false true (Some 5))
                     None
                     "and ownership is asked first: nothing standing in it makes an unowned room a stage"
 
                 Expect.equal
-                    (Colony.stageOf true false (Some 1))
+                    (Colony.stageOf Tuning.defaults true false (Some 1))
                     (Some Nursery)
                     "claimed with no spawn of ours standing in it is a nursery"
 
                 Expect.equal
-                    (Colony.stageOf true false (Some 8))
+                    (Colony.stageOf Tuning.defaults true false (Some 8))
                     (Some Nursery)
                     "and a nursery at any level: what ends it is a spawn, not a controller"
 
                 Expect.equal
-                    (Colony.stageOf true true (Some(Colony.bootstrapLevel - 1)))
+                    (Colony.stageOf
+                        Tuning.defaults
+                        true
+                        true
+                        (Some(Tuning.defaults.BootstrapLevel - 1)))
                     (Some Bootstrapping)
                     "its own spawn standing and one level short of the line is the bootstrap window"
 
                 Expect.equal
-                    (Colony.stageOf true true (Some Colony.bootstrapLevel))
+                    (Colony.stageOf Tuning.defaults true true (Some Tuning.defaults.BootstrapLevel))
                     (Some Independent)
                     "and at the line it is independent — the one comparison this constant is read in"
 
                 Expect.equal
-                    (Colony.stageOf true true None)
+                    (Colony.stageOf Tuning.defaults true true None)
                     None
                     "a colony whose controller nothing can place has no stage, and every reader answers it as it always did"
             }
@@ -24115,5 +24125,927 @@ let colonyStageTests =
                         (taskId (Upgrade "ctrl-child"))
                         (pool (withoutNorthRoom outgrownInPlace)))
                     "and what takes it away is the room leaving her projection, which is the only thing that ever did"
+            }
+        ]
+
+/// The same colony with one tunable moved — the whole of what a pairwise
+/// case on `Tuning` does, and the reason a rule reads its numbers off the
+/// [[colony view]] rather than off a module constant (ADR 0052 decision 5).
+let private tunedBy (change: Tuning -> Tuning) (colony: ColonyView) =
+    { colony with
+        Tuning = change colony.Tuning
+    }
+
+/// A one-room colony whose whole haul is one source container's, with the
+/// colony's controller — and the upgrade [[buffer]] standing one tile off
+/// it — at the given x on the same three-wide lane. The spawn stands at
+/// (25,25) and the source's container at (21,25), so moving the controller
+/// moves the buffer's leg and nothing else about the room.
+///
+/// The controller and its buffer move **together**, which is the one place
+/// this departs from the ticket's wording ("the buffer beside the
+/// controller against the buffer hugging the spawn"). A container is a
+/// buffer because it stands in the controller's own Upgrade Work Area
+/// (`Atlas.controllerContainers`, ADR 0019); a container parked by the
+/// spawn with the controller left across the room is no buffer at all and
+/// would leave the colony with one sink again, which is the state before
+/// the case rather than the other half of it. W13S28's own geometry is the
+/// pair as written: a controller thirty tiles from the Post that feeds it.
+let private sinkLaneColony available controllerX =
+    let spawnPos = { X = 25; Y = 25 }
+
+    { bareRespawn with
+        Controller = Some(controllerAt 4)
+        Refillables = []
+        Sources = [ source "src-a" ]
+        Bank = bank available available
+        Spatial =
+            { SpatialInfo.empty with
+                RoomName = Some "W1N1"
+                TargetKinds =
+                    Map.ofList
+                        [
+                            "spawn-1", Structure BuiltKind.Spawn
+                            "src-a", Source
+                            "can-src", Structure BuiltKind.Container
+                            "ctrl-1", Controller
+                            "can-buf", Structure BuiltKind.Container
+                        ]
+            }
+            |> withHome (fun layer ->
+                { layer with
+                    Terrain =
+                        Map.ofList
+                            [
+                                for x in 18..47 do
+                                    for y in 24..26 ->
+                                        { X = x; Y = y },
+                                        (if x = 21 && y = 25 then Wall else Plain)
+                            ]
+                    TargetPositions =
+                        Map.ofList
+                            [
+                                "spawn-1", spawnPos
+                                "src-a", { X = 21; Y = 25 }
+                                "can-src", { X = 22; Y = 25 }
+                                "ctrl-1", { X = controllerX; Y = 25 }
+                                "can-buf", { X = controllerX - 1; Y = 25 }
+                            ]
+                    Obstacles = Set.ofList [ spawnPos; { X = controllerX; Y = 25 } ]
+                })
+    }
+
+/// A mother one room north of a child of hers, at whichever [[stage]] the
+/// case wants. Her Storage stands on the lane down to the border and the
+/// child's controller a few tiles into W1N2, so the [[ferry]]'s round trip
+/// is priceable — and nothing else in this colony hauls anything: no
+/// spawn, no rock and no container of her own, so the quota this fixture
+/// answers with is the ferry term alone.
+let private ferryMother stage =
+    { bareRespawn with
+        Spawns = []
+        Controller = Some(controllerAt 5)
+        Refillables = []
+        Sources = []
+        Bank = bank 1800 1800
+        RoomControl = Map.ofList [ "W1N1", ownedRoom; "W1N2", ownedRoom ]
+        Declared = [ "W1N1"; "W1N2" ]
+        Stages = Map.ofList [ "W1N1", Independent; "W1N2", stage ]
+        Borrowed = { Rooms = [ "W1N2" ] }
+        Spatial =
+            { SpatialInfo.empty with
+                RoomName = Some "W1N1"
+                Borders = Map.ofList [ "W1N1", plainRing; "W1N2", plainRing ]
+                TargetKinds =
+                    Map.ofList
+                        [ "storage-1", Structure BuiltKind.Storage; "ctrl-child", Controller ]
+            }
+            |> withHome (fun layer ->
+                { layer with
+                    Terrain =
+                        Map.ofList
+                            [
+                                for x in 9..11 do
+                                    for y in 1..10 -> { X = x; Y = y }, Plain
+                            ]
+                    TargetPositions = Map.ofList [ "storage-1", { X = 10; Y = 6 } ]
+                })
+            |> withNeighbour
+                "W1N2"
+                { RoomLayer.empty with
+                    Terrain =
+                        Map.ofList
+                            [
+                                for x in 9..11 do
+                                    for y in 44..48 -> { X = x; Y = y }, Plain
+                            ]
+                    TargetPositions = Map.ofList [ "ctrl-child", { X = 10; Y = 46 } ]
+                }
+    }
+
+/// A colony whose one [[post]] is an outpost's, so the Anchor row's ceiling
+/// is that room's rate and moves with the reservation on it — which is
+/// what makes the row's cast, and therefore its lead, readable at this
+/// seam. One Anchor alive with `life` ticks left standing two tiles from
+/// the spawn, and one hauler beside it so the supply floor is quiet.
+let private outpostPostColony held life =
+    { bareRespawn with
+        Controller = None
+        Refillables = []
+        Sources = [ source "src-out" ]
+        Bank = bank 1800 1800
+        RoomControl =
+            Map.ofList
+                [
+                    "W1N1", ownedRoom
+                    "W1N2", (if held then reservedRoom true 5000 else neutralRoom)
+                ]
+        Creeps = [ anchor "a1" 0 50 |> withLife life; hauler "h1" 0 100 ]
+        Spatial =
+            { SpatialInfo.empty with
+                RoomName = Some "W1N1"
+                Borders = Map.ofList [ "W1N1", plainRing; "W1N2", plainRing ]
+                TargetKinds =
+                    Map.ofList
+                        [
+                            "spawn-1", Structure BuiltKind.Spawn
+                            "src-out", Source
+                            "can-out", Structure BuiltKind.Container
+                        ]
+            }
+            |> withHome (fun layer ->
+                { layer with
+                    Terrain =
+                        Map.ofList
+                            [
+                                for x in 9..11 do
+                                    for y in 1..10 -> { X = x; Y = y }, Plain
+                            ]
+                    TargetPositions = Map.ofList [ "spawn-1", { X = 10; Y = 3 } ]
+                    CreepPositions =
+                        Map.ofList [ "a1", { X = 10; Y = 5 }; "h1", { X = 10; Y = 6 } ]
+                    Obstacles = Set.singleton { X = 10; Y = 3 }
+                })
+            |> withNeighbour
+                "W1N2"
+                { RoomLayer.empty with
+                    Terrain =
+                        Map.ofList
+                            [
+                                for x in 9..11 do
+                                    for y in 44..48 ->
+                                        { X = x; Y = y }, (if x = 10 && y = 45 then Wall else Plain)
+                            ]
+                    TargetPositions =
+                        Map.ofList [ "src-out", { X = 10; Y = 45 }; "can-out", { X = 10; Y = 44 } ]
+                }
+    }
+
+/// The row each of this tick's casts was bought for, in casting order —
+/// the row name the caster writes into the creep's name (ADR 0006:
+/// observability only, and this is the observation).
+let private castRows intents =
+    spawnIntents intents
+    |> List.map (fun (_, _, name: string) -> (name: string).Split('-') |> Array.head)
+
+/// A colony whose surplus lands in the band #200 is about: five Posts of
+/// its own paying ten a tick each, no haul priceable at all — the rocks
+/// and the controller sit in two regions of one room with no ground
+/// between them — and an 1,800 bank. Income 50 a tick over a lifetime is
+/// 75,000; the Anchor row's five 700-energy bodies are the only
+/// amortization, so the surplus is exactly **71,500**.
+///
+/// At that surplus the upgrader row's two divisors part: 71,500 over one
+/// body's lifetime drink (16,500) is four, and over the drink plus the
+/// body it is spent on (18,200) is three. The fleet is the readout.
+let private upgraderBandColony upgraders =
+    let rocks =
+        [
+            { X = 7; Y = 7 }
+            { X = 7; Y = 10 }
+            { X = 7; Y = 13 }
+            { X = 12; Y = 7 }
+            { X = 12; Y = 10 }
+        ]
+
+    let cans = rocks |> List.map (fun rock -> { rock with X = rock.X + 1 })
+
+    { bareRespawn with
+        Controller = Some(controllerAt 5)
+        Refillables = []
+        Bank = bank 1800 1800
+        Sources = [ for i in 1 .. List.length rocks -> source $"src-{i}" ]
+        Creeps =
+            [ for i in 1..5 -> anchor $"a{i}" 0 50 ]
+            @ [ hauler "h1" 0 100 ]
+            @ [
+                for i in 1..upgraders ->
+                    creepWith
+                        $"u{i}"
+                        0
+                        50
+                        (List.replicate 11 Work @ [ Carry ] @ List.replicate 11 Move)
+            ]
+        Spatial =
+            { SpatialInfo.empty with
+                RoomName = Some "W1N1"
+                TargetKinds =
+                    Map.ofList (
+                        [
+                            "spawn-1", Structure BuiltKind.Spawn
+                            "ctrl-1", Controller
+                            "can-buf", Structure BuiltKind.Container
+                        ]
+                        @ [ for i in 1 .. List.length rocks -> $"src-{i}", Source ]
+                        @ [
+                            for i in 1 .. List.length cans ->
+                                $"can-{i}", Structure BuiltKind.Container
+                        ]
+                    )
+            }
+            |> withHome (fun layer ->
+                { layer with
+                    Terrain =
+                        Map.ofList (
+                            [
+                                for x in 5..15 do
+                                    for y in 5..15 ->
+                                        { X = x; Y = y },
+                                        (if List.contains { X = x; Y = y } rocks then
+                                             Wall
+                                         else
+                                             Plain)
+                            ]
+                            @ [
+                                for x in 30..40 do
+                                    for y in 30..40 -> { X = x; Y = y }, Plain
+                            ]
+                        )
+                    TargetPositions =
+                        Map.ofList (
+                            [
+                                "spawn-1", { X = 34; Y = 34 }
+                                "ctrl-1", { X = 35; Y = 35 }
+                                "can-buf", { X = 34; Y = 35 }
+                            ]
+                            @ [ for i, rock in List.indexed rocks -> $"src-{i + 1}", rock ]
+                            @ [ for i, can in List.indexed cans -> $"can-{i + 1}", can ]
+                        )
+                    Obstacles = Set.ofList [ { X = 34; Y = 34 }; { X = 35; Y = 35 } ]
+                })
+    }
+
+[<Tests>]
+let quotaInputTests =
+    testList
+        "the quota inputs read this colony's own cast"
+        [
+            test "the hauler row prices its haul to the buffer as well as to the spawn" {
+                // #216 R4's scope note, on the geometry that cost W13S28 a
+                // thousand ticks: this colony's sinks are the
+                // spawn/extension cluster **and** the controller's
+                // [[buffer]], each priced at its own round trip and the
+                // flow spread over both. Pairwise on the controller's
+                // position alone — the same rock, the same container, the
+                // same spawn, the same bank.
+                //
+                // The third number in each row is the same colony with the
+                // buffer taken out of the census, which is the sink set as
+                // it was before R4: beside the spawn the buffer's own leg
+                // is the cluster's and the answer does not move, and
+                // fifteen tiles further off it is most of the colony's haul
+                // and the row hires for it. That is the live shape — a
+                // buffer at zero, a container overflowing 2,000 with 1,859
+                // on the ground beside it, and seven mini workers walking
+                // fifty tiles for what one hauler was never hired to bring.
+                let withoutBuffer (colony: ColonyView) =
+                    { colony with
+                        Spatial =
+                            { colony.Spatial with
+                                TargetKinds = Map.remove "can-buf" colony.Spatial.TargetKinds
+                            }
+                    }
+
+                Expect.equal
+                    (quotaOf (sinkLaneColony 150 28))
+                    1
+                    "a controller beside the spawn: one hauler covers both sinks"
+
+                Expect.equal
+                    (quotaOf (withoutBuffer (sinkLaneColony 150 28)))
+                    1
+                    "and the spawn alone answers the same, because the two legs are one trip"
+
+                Expect.equal
+                    (quotaOf (sinkLaneColony 150 40))
+                    2
+                    "a controller across the room is a second haul, priced at its own trip"
+
+                Expect.equal
+                    (quotaOf (withoutBuffer (sinkLaneColony 150 40)))
+                    1
+                    "and the spawn alone still answers one, which is the body the buffer never got"
+            }
+
+            test "the same split hires fewer bodies where the buffer is the nearer sink" {
+                // The mirror of the case above, and the honest half of the
+                // even split's doc: the average is a claim about
+                // *proportion*, so against the spawn-only price it reads
+                // high wherever a sink stands further off than the cluster
+                // and low wherever one stands nearer. Here the buffer is
+                // one tile from the source container and the cluster is
+                // across the room, which is the direction the rule can err
+                // in that the live defect never showed.
+                let clusterAcrossTheRoom (colony: ColonyView) =
+                    let away = { X = 45; Y = 25 }
+
+                    { colony with
+                        Spatial =
+                            colony.Spatial
+                            |> withHome (fun layer ->
+                                { layer with
+                                    TargetPositions = Map.add "spawn-1" away layer.TargetPositions
+                                    Obstacles =
+                                        layer.Obstacles
+                                        |> Set.remove { X = 25; Y = 25 }
+                                        |> Set.add away
+                                })
+                    }
+
+                let colony = clusterAcrossTheRoom (sinkLaneColony 150 24)
+
+                let withoutBuffer =
+                    { colony with
+                        Spatial =
+                            { colony.Spatial with
+                                TargetKinds = Map.remove "can-buf" colony.Spatial.TargetKinds
+                            }
+                    }
+
+                Expect.equal
+                    (quotaOf withoutBuffer)
+                    3
+                    "priced to the spawn alone the long haul asks for three bodies"
+
+                Expect.equal
+                    (quotaOf colony)
+                    2
+                    "and averaged with a buffer one tile off the container it asks for two — the direction the split can also err in"
+            }
+
+            test "the capture the scope note was written from hires the hauler it was missing" {
+                // The ticket's own pairwise, on the room it names: W13S28
+                // at RCL3 on an 800 bank, the child whose north container
+                // held 2,000 with 1,859 decaying beside it while one hauler
+                // ran to the spawn. `RoomFixtures.colonyAt` furnishes the
+                // captured room as its Layout would have left it — a
+                // container on each source's Seat and the upgrade buffer
+                // beside the controller — so the legs here are the room's
+                // real terrain and not a lane drawn to make a point.
+                //
+                // Pairwise on the sink set alone, which is the only thing
+                // R4 moved: the same room, the same bank, the same fleet,
+                // with the buffer in the census and then out of it (the
+                // rule as it stood before R4). The numbers are the room's
+                // answer rather than a chosen value — if the fixture's own
+                // furniture moves they move with it, and what must not
+                // move is that the buffer is worth a body here.
+                let colony = RoomFixtures.colonyAt (RoomFixtures.load "W13S28") 3 800
+
+                let spawnOnly =
+                    { colony with
+                        Spatial =
+                            { colony.Spatial with
+                                TargetKinds = Map.remove "cont-ctrl" colony.Spatial.TargetKinds
+                            }
+                    }
+
+                Expect.equal
+                    (quotaOf spawnOnly)
+                    1
+                    "priced to the spawn alone the row hires one, which is what the live colony had"
+
+                Expect.equal
+                    (quotaOf colony)
+                    2
+                    "and priced to the buffer as well it hires the second, which is the whole of the fix"
+            }
+
+            test "the ferry is hired for a bootstrapping child and for no other stage" {
+                // #222's quota half (ADR 0052 decision 7). A mother hauls
+                // her stock into a child that is still being raised and
+                // stops the tick it is `Independent`, which is what the
+                // stage means. Pairwise on the child's stage alone: the
+                // same rooms, the same Storage, the same declaration and
+                // the same borrowing list — each of them at the one load
+                // the rule was derived at, since the shipped default is
+                // zero until the Refill half of #222 lands (below).
+                let lending stage =
+                    ferryMother stage |> tunedBy (fun t -> { t with FerryLoads = 1 })
+
+                Expect.equal (quotaOf (lending Bootstrapping)) 1 "one ferry body for the child"
+
+                Expect.equal
+                    (quotaOf (lending Independent))
+                    0
+                    "and none once the child feeds itself"
+
+                Expect.equal
+                    (quotaOf (lending Nursery))
+                    0
+                    "nor for a nursery, which has no buffer to fill and no mouth to drink it"
+
+                // The shipped number, and why it is not the derived one:
+                // the Refill that spends a ferried load is R5's half of
+                // #222, so until it stands the mother would hire a body for
+                // a Task that is in nobody's pool — and hire it ahead of
+                // the upgrader and worker rows in the cascade. Half a split
+                // feature ships inert (`docs/agents/orchestration.md`), and
+                // the commit that lands the pool half moves this to one.
+                Expect.equal
+                    (quotaOf (ferryMother Bootstrapping))
+                    0
+                    "and the shipped default lends nothing at all until there is a Refill to spend it on"
+
+                // The cap is what makes the borrowing an exception rather
+                // than a second economy (ADR 0052 decision 7): what a
+                // mother lends is written down, never derived from how much
+                // the child could absorb.
+                Expect.equal
+                    (quotaOf (
+                        ferryMother Bootstrapping |> tunedBy (fun t -> { t with FerryLoads = 2 })
+                    ))
+                    2
+                    "and `Tuning.FerryLoads` is the whole of how much she lends"
+            }
+
+            test "a mother with no stock ferries nothing" {
+                // The other half of "priced from her Storage": the stock is
+                // the only energy a mother holds that her own rows are not
+                // already hired against (ADR 0023), so a colony without one
+                // has nothing to send whatever stage its child stands at.
+                let stockless =
+                    let mother =
+                        ferryMother Bootstrapping |> tunedBy (fun t -> { t with FerryLoads = 1 })
+
+                    { mother with
+                        Spatial =
+                            { mother.Spatial with
+                                TargetKinds = Map.remove "storage-1" mother.Spatial.TargetKinds
+                            }
+                    }
+
+                Expect.equal (quotaOf stockless) 0 "no Storage, no ferry"
+            }
+
+            test "the upgrader row's divisor carries the body as well as its drink" {
+                // #200, the ADR 0046 correction, read at the fleet. The
+                // surplus is 71,500 by construction (`upgraderBandColony`),
+                // which the drain alone divides into **four** bodies and
+                // the drain plus the body it is spent on into **three**.
+                //
+                // Read one body at a time, the way the container switch is:
+                // the colony standing at the quota casts nothing of this
+                // row and one body short casts one, so a quota that had
+                // stayed at four would show as a fourth upgrader here.
+                //
+                // What the fourth cost is the double sale #195 fixed, one
+                // order of magnitude smaller: four bodies drink 66,000 and
+                // cost 6,800 to replace, 1,300 over an income of 71,500,
+                // with the difference coming out of the Storage every tick
+                // of both lives.
+                Expect.equal
+                    (castRows (decide (upgraderBandColony 2) Map.empty Set.empty None).Intents)
+                    [ "upgrader" ]
+                    "two upgraders standing and the row is a body short"
+
+                Expect.equal
+                    (castRows (decide (upgraderBandColony 3) Map.empty Set.empty None).Intents)
+                    [ "worker" ]
+                    "three, and the row is full: the surplus pays for three mouths and three bodies"
+
+                Expect.isEmpty
+                    (castRows (decide (upgraderBandColony 4) Map.empty Set.empty None).Intents)
+                    "and four is over every row's quota, so nothing is cast at all"
+            }
+
+            test "a lead is priced at the body its row will cast, not the largest it could" {
+                // #158's second half, at the seam a lead is observable
+                // from: an Anchor is expiring when its life is at or under
+                // the ticks its replacement needs to stand where it stands
+                // (ADR 0026), and an expiring one leaves its row's count so
+                // the successor is cast while it still works.
+                //
+                // Pairwise on the reservation of the room its one Post
+                // stands in, which is the only input that moves. Held, the
+                // row's ceiling is six Work and its cast is `6W/1C/1M` —
+                // eight parts, 24 ticks in the spawner and a slow walk out
+                // — and a twenty-tick-old Anchor is inside that lead. Under
+                // no reservation the rock gives five, the ceiling is three,
+                // the cast is `3W/1C/1M` — five parts and a faster walk —
+                // and the same Anchor is not.
+                //
+                // Before #158 the lead was `bodyFor`'s answer, which is the
+                // held ceiling's six Work whatever the room pays: both
+                // arms answered "expiring", the successor was cast some
+                // nine ticks plus three quarters of a walk early, and ADR
+                // 0024's arrival-priced Post capacity counted the incumbent
+                // as the holder — the fresh Anchor standing beside the
+                // spawn reading its own Post as full, which is the
+                // `IdleReason.NoneFree` ADR 0026 names as the symptom.
+                Expect.equal
+                    (castRows (decide (outpostPostColony true 20) Map.empty Set.empty None).Intents)
+                    [ "anchor" ]
+                    "a held rock: the row casts an eight-part body and twenty ticks is inside its lead"
+
+                Expect.equal
+                    (castRows (decide (outpostPostColony false 20) Map.empty Set.empty None).Intents)
+                    [ "worker" ]
+                    "an unheld one: the row casts five parts, the lead is shorter, and the incumbent still counts"
+            }
+
+            test "a rival's room hires no reserver on the tick it is first seen held" {
+                // #184. The [[stand-down]] withdraws from a room somebody
+                // else has taken (ADR 0043), but the gate reads the
+                // *previous* tick's [[raid log]] — so on the tick the
+                // colony first sees the room held it is still in the scan
+                // set, carries no reservation of ours and reads the whole
+                // 5,000-tick deficit. The row cast the bank's largest
+                // reserver body at it, 1,300 energy for a creep the engine
+                // would refuse at the controller.
+                //
+                // Pairwise on the room's owner alone — the same
+                // declaration, the same rock, the same fleet, the same
+                // bank — and closed with the same-tick fact rather than
+                // with a gate that arrives a tick late.
+                let castsIn control =
+                    reserverColony [ northOutpost false ] (surplusFleet 2) [ "W1N2", control ]
+                    |> fun colony -> decide colony Map.empty Set.empty None
+                    |> fun result -> reserverCasts result.Intents
+
+                Expect.equal
+                    (castsIn neutralRoom)
+                    [ twoBlocks ]
+                    "a room nobody holds is the outpost this row exists for"
+
+                Expect.isEmpty
+                    (castsIn rivalRoom)
+                    "and a room somebody else owns hires nobody: the engine refuses a reservation there"
+            }
+
+            test "a body in the oven fills its row's gap: two idle spawns cast one Anchor" {
+                // #156. A creep still spawning is in no `Creeps` list — it
+                // cannot act, cannot be matched and holds no tile — so
+                // every row's living count read straight past it. With one
+                // spawn that was harmless, because the spawn casting the
+                // body is busy; with two it is not: spawn one casts an
+                // Anchor for the empty Post at tick T, and at T+1 the gap
+                // is still one, spawn one is still busy, and spawn two
+                // casts a second Anchor for the same Post.
+                //
+                // ADR 0026 rejected counting a gestating body and named the
+                // reason that has since expired — "the deficit already
+                // stops double-casting through the spawn's own
+                // `IsSpawning`" — which was true of one spawn and of no
+                // other number of them.
+                //
+                // Pairwise on the oven alone: the same colony, the same
+                // fleet, the same Post, with and without the body already
+                // bought for it.
+                let colony casting =
+                    { quotaColony 15 2 300 with
+                        Creeps = [ worker "w1" 0 50 ]
+                        Casting = casting
+                    }
+
+                Expect.equal
+                    (castRows (decide (colony []) Map.empty Set.empty None).Intents |> List.head)
+                    "anchor"
+                    "an empty Post and nothing bought for it: the Anchor row is a body short"
+
+                Expect.isFalse
+                    (List.contains
+                        "anchor"
+                        (castRows
+                            (decide
+                                (colony [ [ Work; Work; Carry; Move ] ])
+                                Map.empty
+                                Set.empty
+                                None)
+                                .Intents))
+                    "and with one already in an oven the row is full: the second spawn buys something else"
+            }
+
+            test "the oven's body is read back to the row that bought it" {
+                // The counting rule that makes the case above safe: a
+                // gestating body fills the gap of the row `patternOfCast`
+                // reads it into, and of no other. A hauler in the oven
+                // leaves the Anchor row exactly as short as it was — which
+                // is what keeps this from being a blanket "one body in
+                // flight suppresses one cast".
+                let colony casting =
+                    { quotaColony 15 2 300 with
+                        Creeps = [ worker "w1" 0 50 ]
+                        Casting = casting
+                    }
+
+                Expect.equal
+                    (castRows
+                        (decide (colony [ [ Carry; Carry; Move ] ]) Map.empty Set.empty None)
+                            .Intents
+                     |> List.head)
+                    "anchor"
+                    "a hauler in the oven pays off no Anchor gap"
+            }
+        ]
+
+[<Tests>]
+let tuningTests =
+    testList
+        "the tunables"
+        [
+            test "MinWorkforce is the floor no colony plans below" {
+                // A colony with nothing to hire for — no Post, no
+                // container, no site — is at its floor and nothing else, so
+                // the floor is the whole of its target and the fleet reads
+                // it back one body at a time.
+                let colony =
+                    { bareRespawn with
+                        Creeps = [ worker "w1" 0 50; worker "w2" 0 50 ]
+                    }
+
+                Expect.isEmpty
+                    (castRows (decide colony Map.empty Set.empty None).Intents)
+                    "two bodies is the shipped floor, and a colony at its floor casts nothing"
+
+                Expect.equal
+                    (castRows
+                        (decide
+                            (colony |> tunedBy (fun t -> { t with MinWorkforce = 3 }))
+                            Map.empty
+                            Set.empty
+                            None)
+                            .Intents)
+                    [ "worker" ]
+                    "raise the floor by one and the same colony is one body short"
+            }
+
+            test "RepairTrigger is the fraction a decaying kind enters the pool below" {
+                let road = bareRespawn |> withHits "road-1" BuiltKind.Road 3000 5000
+
+                Expect.isEmpty
+                    (repairTasks (planTasks road noThreats))
+                    "three fifths of max is above the shipped half, so the road is left alone"
+
+                Expect.equal
+                    (repairTasks (
+                        planTasks
+                            (road |> tunedBy (fun t -> { t with RepairTrigger = 0.7 }))
+                            noThreats
+                    ))
+                    [ "road-1" ]
+                    "a trigger of seven tenths and the same road is hungry"
+            }
+
+            test "RampartFloor is the hits a rampart is whole at" {
+                // Read at `Independent`, which is the only [[stage]] that
+                // keeps a rampart at all (#214): below it the covering rule
+                // and this floor are both switched off, so the number is
+                // never asked for at a 300 bank rather than answered wrongly
+                // there.
+                let keep =
+                    bareRespawn |> withLevel 5 |> withHits "ram-1" BuiltKind.Rampart 150_000 300_000
+
+                Expect.isEmpty
+                    (repairTasks (planTasks keep noThreats))
+                    "a hundred and fifty thousand is over the shipped floor"
+
+                Expect.equal
+                    (repairTasks (
+                        planTasks
+                            (keep |> tunedBy (fun t -> { t with RampartFloor = 200_000 }))
+                            noThreats
+                    ))
+                    [ "ram-1" ]
+                    "raise the floor past it and the same rampart is hungry"
+
+                Expect.isEmpty
+                    (repairTasks (
+                        planTasks
+                            (bareRespawn
+                             |> withLevel 2
+                             |> withHits "ram-1" BuiltKind.Rampart 1 300_000
+                             |> tunedBy (fun t -> { t with RampartFloor = 200_000 }))
+                            noThreats
+                    ))
+                    "and under `Independent` no floor is read at all: the rampart decays away (#214)"
+            }
+
+            test "PickupThreshold is the pile a Pickup is worth walking for" {
+                let pile = pileTaskColony 80 []
+
+                Expect.isEmpty
+                    (planTasks pile noThreats
+                     |> List.filter (function
+                         | Pickup _ -> true
+                         | _ -> false))
+                    "eighty is under the shipped hundred, so the pile is left to decay"
+
+                Expect.equal
+                    (planTasks
+                        (pile |> tunedBy (fun t -> { t with PickupThreshold = 50 }))
+                        noThreats
+                     |> List.filter (function
+                         | Pickup _ -> true
+                         | _ -> false))
+                    [ Pickup "pile-a" ]
+                    "a threshold of fifty and the same pile is worth the walk"
+            }
+
+            test "ReachMargin is the tiles a weapon's range is widened by" {
+                let melee = facingBody { X = 25; Y = 29 } [ Attack; Move ]
+
+                Expect.isFalse
+                    (Set.contains { X = 25; Y = 25 } (reachIn melee))
+                    "range 1 plus the shipped two is three tiles, and four is clear"
+
+                Expect.isTrue
+                    (Set.contains
+                        { X = 25; Y = 25 }
+                        (reachIn (melee |> tunedBy (fun t -> { t with ReachMargin = 3 }))))
+                    "one more tile of margin and the same tile is inside the Reach"
+            }
+
+            test "StandingCarryPerWork is the line a delivery stops being work at" {
+                // Read through the supply floor (ADR 0050), which is the
+                // rule that asks whether anything the colony holds can put
+                // energy into an extension: a body over the line is a
+                // [[standing body]] and may not, so the colony hires a
+                // hauler in front of every row.
+                let colony =
+                    { bareRespawn with
+                        Creeps = [ creepWith "b1" 0 50 [ Work; Work; Carry; Move; Move ] ]
+                    }
+
+                Expect.equal
+                    (castRows (decide colony Map.empty Set.empty None).Intents)
+                    [ "worker" ]
+                    "one Carry per two Work is under the shipped four, so the body can refill and the floor is quiet"
+
+                Expect.equal
+                    (castRows
+                        (decide
+                            (colony |> tunedBy (fun t -> { t with StandingCarryPerWork = 1 }))
+                            Map.empty
+                            Set.empty
+                            None)
+                            .Intents)
+                    [ "hauler" ]
+                    "move the line under it and the same body is standing: nothing here can fill an extension"
+            }
+
+            test "PioneerCount is the crowd a mother lends a child" {
+                let casts colony fleet =
+                    spawnIntents
+                        (decide { colony with Creeps = fleet } Map.empty Set.empty None).Intents
+
+                let pioneers = [ for i in 1..3 -> worker $"p{i}" 0 50 ]
+                let nursery = asNursery switchHome
+
+                Expect.isEmpty
+                    (casts nursery (switchHomeFleet @ pioneers))
+                    "three is the shipped addend, and thirteen plus three casts nothing"
+
+                Expect.hasLength
+                    (casts
+                        (nursery |> tunedBy (fun t -> { t with PioneerCount = 4 }))
+                        (switchHomeFleet @ pioneers))
+                    1
+                    "raise the crowd by one and the same fleet is a body short"
+            }
+
+            test "SafeModeDeadline is the claimer range the stock is spent at" {
+                let claimer =
+                    { bareRespawn with
+                        Spatial = spatial [ "ctrl-1", { X = 25; Y = 25 } ] []
+                        Hostiles = [ hostileAt "h-1" { X = 25; Y = 29 } [ BodyPart.Claim; Move ] ]
+                    }
+
+                Expect.isEmpty
+                    (activations (decide claimer Map.empty Set.empty None).Intents)
+                    "range four is outside the shipped deadline of three: the towers get their window"
+
+                Expect.equal
+                    (activations
+                        (decide
+                            (claimer |> tunedBy (fun t -> { t with SafeModeDeadline = 4 }))
+                            Map.empty
+                            Set.empty
+                            None)
+                            .Intents)
+                    [ "ctrl-1" ]
+                    "move the deadline out one tile and the same claimer fires it"
+            }
+
+            test "StorageLevel is the level the Storage's tile is reserved from" {
+                let colony = atLevel 5 (openRoom 6)
+
+                Expect.hasLength
+                    (sitesOfKind Storage (decide colony Map.empty Set.empty None).Intents)
+                    1
+                    "the shipped four is at or under RCL5, so the Storage's pick is held and placed"
+
+                Expect.isEmpty
+                    (sitesOfKind
+                        Storage
+                        (decide
+                            (colony |> tunedBy (fun t -> { t with StorageLevel = 3 }))
+                            Map.empty
+                            Set.empty
+                            None)
+                            .Intents)
+                    "read at a level the engine allows none, the reservation is empty and nothing is placed"
+            }
+
+            test "HorizonLevel is the level the clustered kinds are sized at" {
+                let colony = atLevel 5 (openRoom 6)
+
+                let placed tuned =
+                    let { Intents = intents } = decide tuned Map.empty Set.empty None
+
+                    List.length (sitesOfKind Tower intents),
+                    List.length (sitesOfKind Extension intents)
+
+                let towers, extensions = placed colony
+
+                Expect.equal towers 2 "the shipped horizon of five sizes two towers"
+                Expect.equal extensions 30 "and thirty extensions, which RCL5 unlocks in full"
+
+                Expect.equal
+                    (placed (colony |> tunedBy (fun t -> { t with HorizonLevel = 2 })))
+                    (0, 5)
+                    "a horizon of two reserves an RCL2 room's cluster, and the room may place no more than it planned"
+            }
+
+            test "OutpostContainerBuilders is the crowd one switch may take" {
+                let crowd =
+                    let colony =
+                        northBorderColony { X = 10; Y = 38 }
+                        |> withNorthOutpost None
+                        |> withOutpostSite { X = 10; Y = 43 }
+                        |> withHomeController { X = 10; Y = 5 }
+
+                    { colony with
+                        Creeps = [ for name in [ "w1"; "w2"; "w3" ] -> worker name 50 0 ]
+                        Spatial =
+                            colony.Spatial
+                            |> withHome (fun layer ->
+                                { layer with
+                                    CreepPositions =
+                                        Map.ofList
+                                            [
+                                                "w1", { X = 10; Y = 2 }
+                                                "w2", { X = 10; Y = 3 }
+                                                "w3", { X = 10; Y = 4 }
+                                            ]
+                                })
+                    }
+
+                let tally colony =
+                    (decide colony Map.empty Set.empty None).Assignments
+                    |> Map.toList
+                    |> List.map snd
+                    |> List.countBy id
+                    |> List.sort
+
+                Expect.equal
+                    (tally crowd)
+                    [ taskId (Build "site-out"), 2; taskId (Upgrade "ctrl-1"), 1 ]
+                    "two is the shipped budget, and the third worker falls to the Upgrade"
+
+                Expect.equal
+                    (tally (crowd |> tunedBy (fun t -> { t with OutpostContainerBuilders = 1 })))
+                    [ taskId (Build "site-out"), 1; taskId (Upgrade "ctrl-1"), 2 ]
+                    "a budget of one and two of the three stay home"
+            }
+
+            test "BootstrapLevel is the line a stage is cut at, and the one place it is read" {
+                // `Colony.stageOf`'s own pairwise (ADR 0052 decision 3):
+                // the same three facts about a room, read under two lines.
+                Expect.equal
+                    (Colony.stageOf Tuning.defaults true true (Some 3))
+                    (Some Independent)
+                    "at the shipped three, an RCL3 colony has outgrown its mother"
+
+                Expect.equal
+                    (Colony.stageOf
+                        { Tuning.defaults with
+                            BootstrapLevel = 5
+                        }
+                        true
+                        true
+                        (Some 3))
+                    (Some Bootstrapping)
+                    "move the line to five and the same room is still being raised"
             }
         ]

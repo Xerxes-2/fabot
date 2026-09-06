@@ -446,6 +446,19 @@ let private seenFacts
                 Capacity = room.energyCapacityAvailable
             }
         Spawns = spawns
+        // The bodies still gestating in this room's ovens (#156). Swept out
+        // of `Game.creeps` and not off `spawn.spawning`, because that field
+        // answers a name and the row that counts them wants the parts: a
+        // creep marked `spawning` is exactly one of these, and the sweep
+        // that files the standing bodies below drops the same creeps by the
+        // same flag, so the two lists are one partition rather than two
+        // readings.
+        Casting =
+            objectValues<ICreep> Game.creeps
+            |> Array.filter (fun c -> c.spawning && c.room.name = room.name)
+            |> Array.map (fun c ->
+                c.body |> Array.map (fun p -> bodyPartOf p.``type``) |> Array.toList)
+            |> Array.toList
         Refillables =
             mine
             |> Array.filter (fun (_, kind) -> isRefillable kind)

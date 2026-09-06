@@ -304,17 +304,6 @@ type OutpostEpisode =
 /// only the clock does.
 let standingDown (tick: int) (episode: OutpostEpisode) = tick < episode.Expiry
 
-/// The stand-down a threat gave no readable deadline for: 2,500 ticks, the
-/// stronghold expansion period (ADR 0043). The last of the three answers
-/// and the only one the colony chose rather than read, so it is the one
-/// number here that had to be justified: it is the cadence on which the
-/// thing that put the core there puts another one somewhere, and it errs
-/// long by construction, which is the only direction the gate is allowed
-/// to be wrong in — a stale stand-down costs an outpost's income until the
-/// clock runs out, and the failure it prevents costs a creep a cycle for
-/// the life of the core.
-let standDownFallback = 2500
-
 /// The whole persisted Raid log.
 type RaidState =
     {
@@ -415,15 +404,6 @@ module RaidState =
 /// than stays actionable, and it is the number the sibling channel
 /// already keeps.
 let capEpisodes = 20
-
-/// Ticks of silence that close an episode (ADR 0028). It has to outlast a
-/// poke-and-heal cycle: giaco's squad in #66 stepped in for a tick or two
-/// at the tower's minimum damage and back out to heal, over and over
-/// across ~220 ticks, and that is one raid, not forty. Fifty ticks is
-/// also about the round trip a squad retreating off-room makes before it
-/// can be back — a shorter absence is the same squad still working the
-/// room, a longer one is a decision to leave.
-let quietGap = 50
 
 /// The tiles of everything of ours a hostile can close on, as far as a
 /// view can approximate the owned set: our creeps, and the owned
@@ -564,9 +544,9 @@ let private deadlineOf (view: ColonyView) (core: InvaderCoreInfo) =
         |> Map.tryFind core.RoomName
         |> Option.bind (fun control -> control.Reservation)
         |> Option.filter (fun held -> held.Holder = ReservationHolder.Invader)
-        |> Option.filter (fun held -> held.TicksToEnd >= standDownFallback)
+        |> Option.filter (fun held -> held.TicksToEnd >= view.Tuning.StandDownFallback)
         |> Option.map (fun held -> view.Time + held.TicksToEnd, StandDownBasis.Reservation)
-        |> Option.defaultValue (view.Time + standDownFallback, StandDownBasis.Fallback)
+        |> Option.defaultValue (view.Time + view.Tuning.StandDownFallback, StandDownBasis.Fallback)
 
 /// This tick's deadline for each room a core was seen in — the sighting
 /// the fold below folds, and the only tick on which a stand-down's clock
@@ -702,7 +682,8 @@ let standDown (tick: int) (state: RaidState) : Set<string> =
 /// Raid log produce the new one. An episode opens on the first tick a room
 /// the colony works and can see holds a hostile — the spawn rooms alone
 /// until #201, which is what left an outpost's raiders unrecorded — stays
-/// open while hostiles keep appearing, and closes after `gap` quiet ticks;
+/// open while hostiles keep appearing, and closes after
+/// `Tuning.QuietGap` quiet ticks;
 /// the ring keeps the newest `cap` episodes. A tick with no hostile and no
 /// open episode records nothing. Two baselines are carried across ticks
 /// while an episode is open and dropped with it: the names this tick's
@@ -737,13 +718,14 @@ let standDown (tick: int) (state: RaidState) : Set<string> =
 /// confident falsehood this channel is built never to print. The baseline
 /// stays the colony's — it is what the next tick's difference is taken
 /// *from* — and only the subtraction is the world's.
-let foldRaids
-    (cap: int)
-    (gap: int)
-    (alive: Set<string>)
-    (view: ColonyView)
-    (prior: RaidState)
-    : RaidState =
+let foldRaids (cap: int) (alive: Set<string>) (view: ColonyView) (prior: RaidState) : RaidState =
+    // The silence that closes an episode is the colony's own tunable and
+    // arrives on its view (ADR 0052 decision 5), where the ring's depth is
+    // still the caller's: one is a judgement about how long a squad's
+    // absence has to run before it is a departure, and the other is how
+    // much history a Memory leaf may hold.
+    let gap = view.Tuning.QuietGap
+
     // The baseline the next tick reads its losses against: this tick's
     // names, less the creeps whose clock runs out on it. A name gone
     // tomorrow because CREEP_LIFE_TIME ran down is old age, and this

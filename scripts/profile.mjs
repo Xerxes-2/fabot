@@ -18,7 +18,7 @@
 //   young    one colony at the other end of its life (ADR 0052): W13S28's
 //            captured terrain, RCL1, a 300 bank, a container on each of
 //            its two sources and nothing else standing — no road and no
-//            rampart, because a room under `Colony.bootstrapLevel` places
+//            rampart, because a room under `Tuning.BootstrapLevel` places
 //            neither (#209, #214). Every body in it is what
 //            `Decide.bodyFor` casts at 300.
 //   pair     two colonies in one tick (ADR 0047, ADR 0052): the mother
@@ -26,7 +26,7 @@
 //            scenario's shape — and beside her the child W13S28,
 //            bootstrapping with its own Spawn2 standing at 16,12, which
 //            the mother still projects while the child is under
-//            `bootstrapLevel` (#192). `decide` runs once per living
+//            `Tuning.BootstrapLevel` (#192). `decide` runs once per living
 //            colony, exactly as `Main.loop` runs it, and the report
 //            prints one CPU row per colony's `decide` beside the total.
 //
@@ -49,7 +49,7 @@
 //                  `MOTHER_LEVEL`, because "an RCL5 mother" is half of
 //                  what this scenario is. `--level 3` and up is a
 //                  deliberate reading rather than a mistake: at
-//                  `Colony.bootstrapLevel` the bootstrap window closes,
+//                  `Tuning.BootstrapLevel` the bootstrap window closes,
 //                  the mother stops projecting the child's room and the
 //                  two colonies run side by side with nothing shared.
 
@@ -1346,7 +1346,7 @@ function loadCapture(roomName) {
   };
 }
 
-// The level a colony starts paving at: `Colony.bootstrapLevel`, which is
+// The level a colony starts paving at: `Tuning.BootstrapLevel`, which is
 // where ADR 0034's ramparts and #209's road sites both begin. A room under
 // it earns eight energy a tick and its Layout places neither (#209, #214),
 // so a scenario that paved a young room would profile a colony whose
@@ -1949,7 +1949,7 @@ function homeStations(furnished) {
 // furniture and the fleet the bundle hires against a 300 bank. What makes
 // it the `young` scenario and not a small `outpost` one is what is *not*
 // here: no road and no rampart, because a colony under
-// `Colony.bootstrapLevel` places neither (#209, #214); no extension the
+// `Tuning.BootstrapLevel` places neither (#209, #214); no extension the
 // level does not allow; and no upgrade buffer — which is a fact about
 // *this room* and not about its level, the container plan being "RCL-gated
 // by nothing" (`Decide.planLayout`), so the live W13S28 has simply built
@@ -2034,10 +2034,10 @@ function buildYoungWorld() {
         `${plural(home.cluster.sites.length, "site")}, ` +
         `${CHILD_SPAWN_NAME} at ${keyOf(CHILD_SPAWN)}`,
       LEVEL < BOOTSTRAP_LEVEL
-        ? `  no road and no rampart: this room is under Colony.bootstrapLevel, where the Layout ` +
+        ? `  no road and no rampart: this room is under Tuning.BootstrapLevel, where the Layout ` +
           "places neither (#209, #214) — so the Repair pool is the containers' alone and every " +
           "walk is priced on bare ground"
-        : `  at or past Colony.bootstrapLevel, so this room paves and ramparts like any other ` +
+        : `  at or past Tuning.BootstrapLevel, so this room paves and ramparts like any other ` +
           "(#209, #214) — the flag has moved it off the rung the scenario is named for, and " +
           "its Repair pool and walk costs are a paved colony's",
       `  ${plural(stationsOf(creeps, "anchor").length, "anchor")} at ` +
@@ -2063,7 +2063,7 @@ function buildYoungWorld() {
 // this scenario measures that no other does is the shape of that tick —
 // `Main.loop` cuts one colony view per living colony and runs `decide` once
 // over each, the mother projecting the child's room as a bootstrap layer
-// while it is under `Colony.bootstrapLevel` (#192), and the report prices
+// while it is under `Tuning.BootstrapLevel` (#192), and the report prices
 // each colony's `decide` on its own row.
 function buildPairWorld() {
   const byId = new Map();
@@ -2159,7 +2159,7 @@ function buildPairWorld() {
     ),
   ];
   // The pioneers (ADR 0047 decision 4, #213): the mother's worker row
-  // hires `pioneerCount` bodies over its income workers for the child's
+  // hires `Tuning.PioneerCount` bodies over its income workers for the child's
   // Upgrade and Build, and their work is in the child's room. Nothing in
   // the cast tells the two apart — a pioneer is a worker, cast from the
   // worker row and named like one — so the harness stands the row's first
@@ -2171,7 +2171,7 @@ function buildPairWorld() {
   //
   // Only while the window is open, which is the whole of the rule: the
   // mother hires pioneers until the child's controller reaches
-  // `Colony.bootstrapLevel` and none after (ADR 0047 decision 4,
+  // `Tuning.BootstrapLevel` and none after (ADR 0047 decision 4,
   // `Colony.bootstrapping`). Past it she no longer projects the child's
   // room at all, so a body of hers standing there would be adopted by the
   // child for the tick (`Colony.creepColonies`) — and the `decide by
@@ -2274,9 +2274,9 @@ function buildPairWorld() {
         `${plural(child.cluster.sites.length, "site")}, ${CHILD_SPAWN_NAME} at ` +
         `${keyOf(CHILD_SPAWN)}` +
         (LEVEL < BOOTSTRAP_LEVEL
-          ? " — under Colony.bootstrapLevel, so the mother projects this room as a bootstrap " +
+          ? " — under Tuning.BootstrapLevel, so the mother projects this room as a bootstrap " +
             "layer and her workers may cross for its Upgrade and Build (#192, #213)"
-          : " — at or past Colony.bootstrapLevel, so the bootstrap window is shut: the mother " +
+          : " — at or past Tuning.BootstrapLevel, so the bootstrap window is shut: the mother " +
             "no longer projects this room and the two colonies share nothing"),
       `  ${plural(stationsOf(creeps, "worker", "Spawn1").length, "mother's worker")} at ` +
         `${stationsOf(creeps, "worker", "Spawn1").join(", ") || "no station"}` +

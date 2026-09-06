@@ -140,7 +140,12 @@ let loop () =
     // reason: the rule needs the stand-down gate above, which is Memory's
     // answer and not the world's, so a World carrying it would be a world
     // that is only valid after a second pass.
-    let holders = World.creepColonies Colony.declared colonies shut world
+    // The numbers every colony decides under (ADR 0052 decision 5). One
+    // set for the bot today, handed in rather than read off a constant in
+    // Core, so a test can cut a view under any of them and the [[stage]]
+    // line lives in a field rather than in the rule that reads it.
+    let holders =
+        World.creepColonies Tuning.defaults Colony.declared colonies shut world
 
     // One view per living colony (ADR 0052 decision 1), each cut from the
     // one world by a pure function in Core: the rooms this colony works,
@@ -154,7 +159,14 @@ let loop () =
     let views =
         colonies
         |> List.map (fun colony ->
-            colony, ColonyView.ofWorld Colony.declared (shutOf colony.Home) holders world colony)
+            colony,
+            ColonyView.ofWorld
+                Tuning.defaults
+                Colony.declared
+                (shutOf colony.Home)
+                holders
+                world
+                colony)
 
     // The projection boundary, and the Raid logs' reads ride in this phase
     // rather than in the prelude: the two are one act — the gate decides
@@ -266,7 +278,7 @@ let loop () =
         raids
         |> Map.tryFind colony.Home
         |> Option.defaultValue Observe.RaidState.empty
-        |> Observe.foldRaids Observe.capEpisodes Observe.quietGap living view
+        |> Observe.foldRaids Observe.capEpisodes living view
         |> ObserveMemory.saveRaids colony.Home
 
         // The Layout's own channel (ADR 0035): the footing targets this

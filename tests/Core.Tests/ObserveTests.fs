@@ -377,6 +377,14 @@ let quiet: ColonyView =
         // And nothing is borrowed: what one colony may take of a child's
         // room decides Tasks, and the log records what happened.
         Borrowed = { Rooms = [] }
+        // The numbers this bot ships with (ADR 0052 decision 5): a
+        // fixture starts from them and the tests that are *about* a
+        // tunable move the one field they are about.
+        Tuning = Tuning.defaults
+        // Nothing in the oven: a fixture's rows count what is alive, and
+        // the casting cascade's own tests are the ones that put a body
+        // here (#156).
+        Casting = []
     }
 
 /// A hostile creep of the given owner and body standing on a tile of the
@@ -454,6 +462,16 @@ let placed =
             }
     }
 
+/// The colony at the given tick under a five-tick [[quiet gap]], so an
+/// episode's close is exercised in a few ticks rather than in fifty. The
+/// gap is the colony's own tunable since #216 R4 (ADR 0052 decision 5), so
+/// a fixture that wants a short one says so on the view.
+let atShortGap t (colony: ColonyView) =
+    { colony with
+        Time = t
+        Tuning = { colony.Tuning with QuietGap = 5 }
+    }
+
 /// Fold one Raid-log tick over a colony at the given tick, with a small
 /// ring cap and a short quiet gap so both are exercised in a few ticks
 /// rather than a few hundred.
@@ -464,13 +482,13 @@ let placed =
 /// that leaves it left the world.
 let raidTick t (colony: ColonyView) state =
     let alive = colony.Creeps |> List.map (fun creep -> creep.Name) |> Set.ofList
-    foldRaids 3 5 alive { colony with Time = t } state
+    foldRaids 3 alive (atShortGap t colony) state
 
 /// The same fold with the world said separately from the colony: what the
 /// shell hands in since #191, where a ColonyView carries one colony's fleet
 /// and `Game.creeps` carries everyone's (ADR 0047).
 let raidTickIn alive t (colony: ColonyView) state =
-    foldRaids 3 5 (Set.ofList alive) { colony with Time = t } state
+    foldRaids 3 (Set.ofList alive) (atShortGap t colony) state
 
 /// The recorded episodes as (opened, last-seen) windows, oldest first.
 let windows (state: RaidState) =
@@ -537,6 +555,44 @@ let episodeTests =
                     (windows state)
                     [ (10, 10); (16, 16) ]
                     "a gap wider than the quiet gap is a departure, and the next visit is a new raid"
+            }
+
+            test "the quiet gap is the colony's tunable: the same six ticks are one raid or two" {
+                // `Tuning.QuietGap` (ADR 0052 decision 5), pairwise over
+                // the one field on one history: a squad seen at t10 and
+                // again at t16. At a five-tick gap the second sighting is
+                // six ticks of silence later and opens a second episode; at
+                // a seven-tick gap it is the raid that is still open.
+                //
+                // A tunable and not an engine number: what it decides is
+                // whether an absence is a squad healing off-room or a squad
+                // that has left (#66's poke-and-heal, ~220 ticks of one
+                // raid), and the fifty this bot ships with is that
+                // judgement rather than anything the server says.
+                let episodes gap =
+                    (RaidState.empty, [ 10..16 ])
+                    ||> List.fold (fun state t ->
+                        let colony = if t = 10 || t = 16 then raid squad else quiet
+
+                        foldRaids
+                            3
+                            (colony.Creeps |> List.map (fun c -> c.Name) |> Set.ofList)
+                            { colony with
+                                Time = t
+                                Tuning = { colony.Tuning with QuietGap = gap }
+                            }
+                            state)
+                    |> windows
+
+                Expect.equal
+                    (episodes 5)
+                    [ (10, 10); (16, 16) ]
+                    "five ticks of silence is a departure and the return is a second raid"
+
+                Expect.equal
+                    (episodes 7)
+                    [ 10, 16 ]
+                    "seven, and the very same history is one raid the squad never left"
             }
 
             test "the ring keeps the newest episodes and drops the oldest" {
@@ -1314,8 +1370,14 @@ let outpostTests =
                     "and so is a three-hundred-tick one: below the fallback the read never shortens the gate"
 
                 Expect.equal
-                    (heldFor standDownFallback)
-                    [ outpostRoom, 100, 100, 100 + standDownFallback, StandDownBasis.Reservation ]
+                    (heldFor Tuning.defaults.StandDownFallback)
+                    [
+                        outpostRoom,
+                        100,
+                        100,
+                        100 + Tuning.defaults.StandDownFallback,
+                        StandDownBasis.Reservation
+                    ]
                     "at the fallback's own length the hold reads through, and says so"
 
                 // The basis is the operator's half of the amendment: the
@@ -1330,8 +1392,48 @@ let outpostTests =
 
                 Expect.notEqual
                     (basisOf (heldFor 300))
-                    (basisOf (heldFor standDownFallback))
+                    (basisOf (heldFor Tuning.defaults.StandDownFallback))
                     "the two sides of the floor are told apart by the reason, not only by the tick"
+            }
+
+            test
+                "the fallback clock is the colony's tunable, and it is both the floor and the answer" {
+                // `Tuning.StandDownFallback` (ADR 0052 decision 5),
+                // pairwise over the one field: it is read twice in the same
+                // rule — as the deadline a threat gave no readable clock
+                // for, and as the floor under a hold too short to believe —
+                // so moving it has to move both answers together or the
+                // second reading is a literal wearing the first one's name.
+                let shut fallback ticks =
+                    let colony =
+                        seen [ core outpostRoom None ]
+                        |> visible outpostRoom (heldBy ReservationHolder.Invader ticks)
+
+                    RaidState.empty
+                    |> raidTick
+                        100
+                        { colony with
+                            Tuning =
+                                { colony.Tuning with
+                                    StandDownFallback = fallback
+                                }
+                        }
+                    |> standDowns
+
+                Expect.equal
+                    (shut 2500 300)
+                    [ outpostRoom, 100, 100, 2600, StandDownBasis.Fallback ]
+                    "at the shipped 2,500 a three-hundred-tick hold is unreadable and the colony's own clock answers"
+
+                Expect.equal
+                    (shut 200 300)
+                    [ outpostRoom, 100, 100, 400, StandDownBasis.Reservation ]
+                    "at a fallback of 200 the same hold clears the floor and reads through as a reservation"
+
+                Expect.equal
+                    (shut 200 100)
+                    [ outpostRoom, 100, 100, 300, StandDownBasis.Fallback ]
+                    "and the fallback is still the answer under its own floor: 200 ticks from now, said as the colony's choice"
             }
 
             test "with neither deadline readable the clock is the expansion period" {

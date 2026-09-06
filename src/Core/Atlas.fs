@@ -92,6 +92,15 @@ type Atlas =
             /// crossing two rooms would invent a Dual Seat out of one
             /// coordinate standing in both.
             Home: string
+            /// The colony's tunables (ADR 0052 decision 5), carried off
+            /// the view this Atlas was laid from. One reader today — the
+            /// trunk's swamp surcharge (`trunkPath`, #211) — and it is
+            /// here rather than an argument to that query for the reason
+            /// every other colony fact on this record is: the Layout asks
+            /// for a trunk per source per goal on a census tick, and a
+            /// number threaded through each of those asks is a number two
+            /// call sites can disagree about.
+            Tuning: Tuning
             /// Placed creeps in view order — the canonical iteration
             /// order for everything derived per creep — each beside the
             /// room the projection files it under, because the flood it
@@ -321,21 +330,17 @@ type Atlas =
             mutable Buffers: Set<string> option
         }
 
-let private roomSide = 50
-let private tileCount = roomSide * roomSide
-let private indexOf pos = pos.X * roomSide + pos.Y
+let private tileCount = Engine.roomSide * Engine.roomSide
+let private indexOf pos = pos.X * Engine.roomSide + pos.Y
 
 let private posAt index =
     {
-        X = index / roomSide
-        Y = index % roomSide
+        X = index / Engine.roomSide
+        Y = index % Engine.roomSide
     }
 
 /// Unreached marker in a flood's distance array.
 let private unreached = System.Int32.MaxValue
-
-/// Swamp's terrain weight — the dearest passable ground (ADR 0010).
-let private swampWeight = 10
 
 /// Extra cost priced onto a step landing on a tile some creep occupies
 /// this tick — one swamp step by definition (ADR 0008, re-expressed by
@@ -343,7 +348,7 @@ let private swampWeight = 10
 /// detour is preferred over pushing through — yet the tile stays
 /// passable, unlike an obstacle, so traffic never makes a Task
 /// inapplicable.
-let private occupancyPenalty = swampWeight
+let private occupancyPenalty = Engine.swampWeight
 
 /// No tile occupied: the flood baseline the occupancy surcharge is judged
 /// against — the ground the walk is priced over (ADR 0029), and the ground
@@ -370,7 +375,10 @@ let private noGround: int[] = Array.create tileCount -1
 /// edges, so this is the ordinary case and not the exotic one. The rule
 /// once, here, rather than at each of its readers.
 let private inGrid (tile: Pos) =
-    tile.X >= 0 && tile.X < roomSide && tile.Y >= 0 && tile.Y < roomSide
+    tile.X >= 0
+    && tile.X < Engine.roomSide
+    && tile.Y >= 0
+    && tile.Y < Engine.roomSide
 
 /// The eight tiles touching this one, in (X, Y) order — the order every
 /// answer derived from them is listed in. Written out rather than
@@ -403,7 +411,7 @@ let private neighbours pos =
 let private terrainWeight terrain =
     match terrain with
     | Plain -> 2
-    | Swamp -> swampWeight
+    | Swamp -> Engine.swampWeight
     | Wall -> -1
 
 /// A creep's fatigue factor from its body and current load: every part
@@ -450,8 +458,8 @@ let private emptyFactorOf (body: BodyPart list) : FatigueFactor =
 /// Fable compiles it to a call through the structural comparer, and this
 /// was 3.5% of the tick when the flood asked for a price per relaxation
 /// (#168). The table below asks once per weight in the domain instead —
-/// `swampWeight + 1` times a pricing, never once a relaxation — but the
-/// branch is what the arithmetic means anyway.
+/// `Engine.swampWeight + 1` times a pricing, never once a relaxation — but
+/// the branch is what the arithmetic means anyway.
 let private stepUnits (factor: FatigueFactor) weight =
     if factor.MoveParts = 0 then
         None
@@ -492,16 +500,16 @@ let private stepTicks (factor: FatigueFactor) weight =
 /// Filled by `stepUnits`/`stepTicks`, which stay the one place a step's
 /// price is computed (ADR 0010, ADR 0029): the table is nothing but their
 /// answers cached over a domain of three values — road 1, plain 2, swamp
-/// `swampWeight`. Its length follows `swampWeight` rather than a literal,
+/// `Engine.swampWeight`. Its length follows that weight rather than a literal,
 /// so swamp growing dearer carries the table with it; every index in
 /// between is filled by the same arithmetic and simply never read. What
 /// the length does not follow is a *dearer terrain than swamp*, so
-/// `swampWeight` has to stay the dearest weight a grid can hold — a
+/// `Engine.swampWeight` has to stay the dearest weight a grid can hold — a
 /// weight past the table's end reads as a free step under Fable, where
 /// the index is unchecked, while .NET throws. `stepWeights` hands the
 /// whole domain out, and a test pins it there.
 let private stepTable (stepPrice: int -> int option) : int[] =
-    Array.init (swampWeight + 1) (fun weight -> stepPrice weight |> Option.defaultValue -1)
+    Array.init (Engine.swampWeight + 1) (fun weight -> stepPrice weight |> Option.defaultValue -1)
 
 /// The flood's array accessors: checked on .NET (the F# body is the
 /// ordinary index, so `dotnet test` runs the flood bounds-checked) and a
@@ -510,8 +518,8 @@ let private stepTable (stepPrice: int -> int option) : int[] =
 /// the index and carries a throw path, and offers no switch to drop it;
 /// in the flood that helper was ~28% of the tick (#91), re-checking
 /// indices the loop has already proven in range — a neighbour index is
-/// built only after the `0 <= n < roomSide` guard, the heap's come from
-/// its own live size, and a step-price index is a weight the grid holds,
+/// built only after the `0 <= n < Engine.roomSide` guard, the heap's come
+/// from its own live size, and a step-price index is a weight the grid holds,
 /// which `stepTable` is built long enough for by construction. Used where
 /// the caller has already proven the index in range and the read is on the
 /// profile — the flood's inner loop, and the single-tile grid read below,
@@ -754,8 +762,8 @@ let private settleTo (flood: Flood) (goal: int) =
             // A resumed flood meets these exactly as a running one does — the
             // heap it left holds the same duplicates it would have (#174).
             if at index dist = d then
-                let x = index / roomSide
-                let y = index % roomSide
+                let x = index / Engine.roomSide
+                let y = index % Engine.roomSide
 
                 for dx in -1 .. 1 do
                     for dy in -1 .. 1 do
@@ -765,11 +773,11 @@ let private settleTo (flood: Flood) (goal: int) =
                         if
                             (dx <> 0 || dy <> 0)
                             && nx >= 0
-                            && nx < roomSide
+                            && nx < Engine.roomSide
                             && ny >= 0
-                            && ny < roomSide
+                            && ny < Engine.roomSide
                         then
-                            let next = nx * roomSide + ny
+                            let next = nx * Engine.roomSide + ny
                             let weight = at next weights
 
                             if weight >= 0 then
@@ -1011,6 +1019,8 @@ let ofViewRecalling (walks: WalkTable) (view: ColonyView) : Atlas =
     // when it names none.
     let home = SpatialInfo.homeName spatial
 
+    let tuning = view.Tuning
+
     // The two id-to-room joins, resolved once. An id is unique across the
     // world, so the layer that holds it is the room it is in (ADR 0041) —
     // there is nothing to disambiguate and no room to prefer, which is
@@ -1114,6 +1124,7 @@ let ofViewRecalling (walks: WalkTable) (view: ColonyView) : Atlas =
     {
         Spatial = spatial
         Home = home
+        Tuning = tuning
         Placed = placed
         Factors = factors
         CreepAt = creepAt
@@ -1317,7 +1328,7 @@ let positionOf (atlas: Atlas) (targetId: string) : RoomPos option =
 /// census tick, and the layer form compared a `Pos` down a tree once to
 /// read each of two and a half thousand tiles and again to test it against
 /// the taken set. The scan runs the grid's flat index, which is
-/// `x * roomSide + y` — the very (X, Y) order the layer's key order gave,
+/// `x * Engine.roomSide + y` — the very (X, Y) order the layer's key order gave,
 /// so the list comes out tile for tile as it did and ADR 0011's
 /// determinism is untouched. Built by consing down from the last index so
 /// the result is a list and never a Fable sequence.
@@ -1579,7 +1590,7 @@ let linkTilesIn (atlas: Atlas) (room: string) : Set<Pos> =
 /// Layout asks this once per tile of the Upgrade Work Area on every census
 /// tick, which was that many `Pos` comparisons down a tree (#173).
 let isSwampIn (atlas: Atlas) (room: string) (tile: Pos) : bool =
-    weightAt (groundOf atlas room) tile = swampWeight
+    weightAt (groundOf atlas room) tile = Engine.swampWeight
 
 /// Walkable tiles adjacent to `pos` read as a tile of `room`, in
 /// deterministic (X, Y) order. Standing respects obstacles, unlike Seat
@@ -2362,7 +2373,7 @@ let private worldCoordsOf (roomName: string) : (int * int) option =
 
 /// The far exit row and column of a room — index 49, the outer of the two
 /// the projection's ground stops short of (ADR 0036).
-let private exitEdge = roomSide - 1
+let private exitEdge = Engine.roomSide - 1
 
 /// The tile pairs the engine joins across the border two rooms share,
 /// before terrain has a say: this room's exit tile beside the tile a
@@ -3498,41 +3509,30 @@ let castWalkTicks
                 arrival table
 
 /// Cheapest raw-terrain path for a trunk road (ADR 0011): plain 2, swamp
-/// 10 — no road discount and no occupancy surcharge, so the line neither
-/// shifts as its own roads get built nor bends around today's traffic.
-/// Walls, obstacle structures and the `avoid` tiles (the Layout's
-/// reservations) are impassable; the origin prices 0 though it cannot be
-/// stood on — a source sits in wall terrain, yet its trunk starts beside
-/// it. Answers the path tiles from the first step beside the origin to the
-/// cheapest reachable goal, or [] when no goal is reachable — unpriceable
-/// geometry paves nothing. Deterministic: the flood's dist-then-index heap
-/// keys and the lowest (cost, tile) goal break every tie. Over **the
-/// origin's own room's** raw terrain, and every tile in and out carries
-/// that room (ADR 0052 decision 2): a trunk is a road the Layout plans,
-/// the Layout plans one room (ADR 0011), and which room that is is the
-/// caller's to say rather than this query's to assume. A reservation or a
-/// goal filed under another room is no tile of this trunk's grid and is
-/// dropped, where a bare `Pos` would have reserved or aimed at whatever
-/// stands on the same coordinate here (#191's shape).
-/// What a swamp tile costs a *trunk* (ADR 0011 as #211 amends it): three
-/// against plain's two, where the walk prices it at `swampWeight`, ten. A
-/// trunk is a road, and once paved a swamp tile walks at exactly what a
-/// paved plain tile walks at (road 1, ADR 0010); the only thing swamp
-/// costs a road is construction — 1,500 against 300, a one-off 1,200 —
-/// and repair is identical either way. Priced at the walking ratio the
-/// router bought W13S28 a permanent twenty-one-tile detour around five
-/// swamps to save energy worth ~120 ticks of one source's output: from
-/// (10,4) the swamp line was 5 × 10 + 2 × 2 = 54 against a seventeen-step
-/// plain loop at 34. Three is the surcharge that amortizes the
-/// construction — a swamp step is one more than a plain step, so the
-/// router takes swamp when it saves a step and avoids it when a plain
-/// step is free; the line stays shortest-first with construction as the
-/// tie-break, which is the only difference a paved tile has left. Not
-/// equal weights: with a tie the flood's index order picks, and a plain
-/// step really is 1,200 cheaper. Under `swampWeight`, so the step table
-/// the flood indexes by weight still covers it.
-let private trunkSwampWeight = 3
-
+/// `Tuning.TrunkSwampWeight` — no road discount and no occupancy
+/// surcharge, so the line neither shifts as its own roads get built nor
+/// bends around today's traffic. Walls, obstacle structures and the
+/// `avoid` tiles (the Layout's reservations) are impassable; the origin
+/// prices 0 though it cannot be stood on — a source sits in wall terrain,
+/// yet its trunk starts beside it. Answers the path tiles from the first
+/// step beside the origin to the cheapest reachable goal, or [] when no
+/// goal is reachable — unpriceable geometry paves nothing, and that trunk
+/// is *recorded* rather than dropped (#107). Deterministic: the flood's
+/// dist-then-index heap keys and the lowest (cost, tile) goal break every
+/// tie. Over **the origin's own room's** raw terrain, and every tile in
+/// and out carries that room (ADR 0052 decision 2): a trunk is a road the
+/// Layout plans, the Layout plans one room (ADR 0011), and which room that
+/// is is the caller's to say rather than this query's to assume. A
+/// reservation or a goal filed under another room is no tile of this
+/// trunk's grid and is dropped, where a bare `Pos` would have reserved or
+/// aimed at whatever stands on the same coordinate here (#191's shape).
+///
+/// What a swamp tile costs a trunk, and why it is three, is the argument
+/// on `Tuning.TrunkSwampWeight` itself; read past this room's own
+/// `Engine.swampWeight`, the surcharge is that instead — the step table
+/// the flood indexes by weight is sized by the engine's ten, and a tunable
+/// past it would index off the end of it (a throw on .NET, an `undefined`
+/// price under Fable).
 let trunkPath
     (atlas: Atlas)
     (avoidTiles: Set<RoomPos>)
@@ -3550,7 +3550,7 @@ let trunkPath
     let avoid = RoomPos.tilesIn room avoidTiles
     let goals = RoomPos.tilesIn room goalTiles
     // Raw terrain is the *price*, never what blocks: the trunk starts from
-    // the ground grid — plain 2, swamp `trunkSwampWeight` (#211: the
+    // the ground grid — plain 2, swamp `Tuning.TrunkSwampWeight` (#211: the
     // walking grid's ten is a creep's price for ground the road erases),
     // wall -1, and no road discount, which is the walking grid's one
     // disqualifying difference — and then
@@ -3570,9 +3570,22 @@ let trunkPath
 
     // The swamp repriced for a road (#211) before the obstacle pass, so a
     // swamp under an obstacle still reads -1 after it.
+    //
+    // Held at `Engine.swampWeight` where the tunable is read past it: that
+    // is the field's own stated invariant, and it is the flood's as well —
+    // `stepTable` is `Array.init (Engine.swampWeight + 1)`, so a weight the
+    // grid holds past ten is a price index off the end of the table, which
+    // is an `IndexOutOfRangeException` on .NET and an `undefined` price
+    // through `at`'s `[<Emit>]` accessor on the deployed bundle. Clamped
+    // where the number enters the grid rather than where the record is
+    // built, because this is the one read of it and a colony that asks for
+    // a costlier swamp than a walking creep pays is asking for the walking
+    // creep's price.
+    let trunkSwamp = min Engine.swampWeight atlas.Tuning.TrunkSwampWeight
+
     for index in 0 .. weights.Length - 1 do
-        if weights.[index] = swampWeight then
-            weights.[index] <- trunkSwampWeight
+        if weights.[index] = Engine.swampWeight then
+            weights.[index] <- trunkSwamp
 
     (layerOf atlas room).Obstacles
     |> Set.iter (fun tile -> weights.[indexOf tile] <- -1)

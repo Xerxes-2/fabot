@@ -22,6 +22,371 @@ type BodyPart =
     | Claim
     | Tough
 
+/// The engine's own numbers (ADR 0052 decision 5): the constants Screeps
+/// fixes, each named for the server constant it spells so a reader can
+/// check it against the game rather than against this file.
+///
+/// The line between this module and `Tuning` below is the whole point of
+/// having two: a number belongs here when changing it would be a **lie
+/// about the server**, and there when changing it would be a **different
+/// colony**. So nothing here carries a stage or a bank it was derived at,
+/// and nothing here needs a pairwise test — there is nothing to choose.
+/// A number that turned out to be a choice wearing an engine constant's
+/// clothes moves the other way, and the move is visible in the diff.
+module Engine =
+    /// MAX_CREEP_SIZE: the parts a body may hold. A body over it is
+    /// refused outright and the spawn silently does nothing that tick, so
+    /// every row's sizing rule caps here.
+    let maxBodyParts = 50
+
+    /// HARVEST_POWER: the energy one Work part digs out of a source in a
+    /// tick.
+    let harvestPerWork = 2
+
+    /// CARRY_CAPACITY: the energy one Carry part holds.
+    let carryPartCapacity = 50
+
+    /// CREEP_LIFE_TIME: the ticks a spawned creep lives — the horizon a
+    /// body's replacement cost is amortized over.
+    let creepLifetime = 1500
+
+    /// CREEP_SPAWN_TIME: the ticks a spawner spends per body part — the
+    /// half of a lead that is paid before the replacement takes its first
+    /// step.
+    let spawnTicksPerPart = 3
+
+    /// CREEP_CLAIM_LIFE_TIME: the ticks a body carrying a CLAIM part
+    /// lives, well short of the 1,500 every other row gets. The
+    /// reservation deficit's divisor and the reserver row's amortization
+    /// both read it.
+    let claimLifetime = 600
+
+    /// CONTROLLER_RESERVE_MAX: the ticks a reservation caps at, and so the
+    /// top of the deficit the reserver row sizes off (ADR 0042).
+    let reservationCap = 5000
+
+    /// CONTAINER_CAPACITY: what a container's store holds — the line past
+    /// which a buffer needs no Refill.
+    let containerCapacity = 2000
+
+    /// STORAGE_CAPACITY: what the Storage's store holds. Read against
+    /// stored *energy*, because energy is the only resource this colony
+    /// ever holds.
+    let storageCapacity = 1_000_000
+
+    /// ATTACK's range: a melee hostile strikes at one tile.
+    let meleeRange = 1
+
+    /// RANGED_ATTACK's range: three tiles.
+    let rangedRange = 3
+
+    /// The regeneration of a source in a room carrying an owner or a
+    /// reservation: 3,000 energy per 300 ticks. What a continuously
+    /// drained rock yields there, and the ceiling on what any body
+    /// standing over it can take out (ADR 0042).
+    let heldOutputPerTick = 10
+
+    /// The same source in a room nobody holds: 1,500 per 300 ticks, half
+    /// the rate.
+    let neutralOutputPerTick = 5
+
+    /// UPGRADE_CONTROLLER_POWER's energy cost: what one Work part drains
+    /// per upgrade tick — the rate an upgrade mouth eats income at.
+    let upgradeDrainPerWork = 1
+
+    /// What a swamp tile costs a walking creep against plain's two: the
+    /// dearest weight a grid can hold, which the flood's step table is
+    /// sized by.
+    let swampWeight = 10
+
+    /// The side of a Screeps room in tiles, and so the stride of every
+    /// flat `x * 50 + y` grid the Atlas lays.
+    let roomSide = 50
+
+/// The colony's **tunables**, in one record (ADR 0052 decision 5): every
+/// number the bot chose rather than read off the server, carried on the
+/// [[colony view]] so a rule reads its colony's own and a test can hand it
+/// another.
+///
+/// Each field says the [[stage]] and the bank it was derived at, and what
+/// it reads below them — because that is exactly the debt ADR 0052 was
+/// written against: eight tickets in two days, each a constant of the one
+/// RCL5 home spelled as if it were a colony fact. **A number without a
+/// pairwise test is not a tunable; it is a bug that has not happened yet**
+/// (decision 5), so every field below is pinned at two banks or at two
+/// stages in `tuningTests`.
+///
+/// What is *not* here is the engine's own arithmetic (`Engine` above):
+/// retuning HARVEST_POWER does not describe a colony that plays
+/// differently, it describes a server that does not exist.
+type Tuning =
+    {
+        /// The Workforce target's floor: the colony never plans below this
+        /// many living creeps. Two keep the harvest/refill loop running
+        /// while one is in transit or being replaced.
+        ///
+        /// A body count and not a price, so it is the same two at a 300
+        /// bank and at an 1,800 one, and the same two at every stage: what
+        /// changes with the bank is what those two bodies are, which is
+        /// each row's sizing rule and not this floor.
+        MinWorkforce: int
+        /// The Repair trigger of the decaying kinds: a road or a container
+        /// enters the pool when its hits sink strictly below this fraction
+        /// of max, and leaves it once repaired back over the line. A
+        /// tunable, not part of ADR 0010.
+        ///
+        /// A fraction of the structure's own max, so it is bank-blind and
+        /// stage-blind by construction — what it costs to hold the line
+        /// scales with the structure and never with the colony.
+        RepairTrigger: float
+        /// The rampart floor (ADR 0034): a rampart is hungry below this
+        /// many hits and whole at it. A derived tunable — the ticks the
+        /// room must hold times the damage per tick it must hold against.
+        /// Against the squad of #66, 180 hits a tick, 100,000 hits is 555
+        /// ticks, two and a half times the raid that was seen. That costs
+        /// 1,000 energy to raise and, at 300 hits of decay per 100 ticks,
+        /// one Repair visit per rampart every 200 ticks to hold — so no
+        /// hysteresis is needed: one visit at 600 hits a tick puts a
+        /// rampart that just dipped back over the line.
+        ///
+        /// Derived at `Independent` with a tower and a Storage behind it,
+        /// and **read at no other stage**: a colony under the line keeps no
+        /// rampart at all (`keepsRamparts`, #214), so the number is never
+        /// asked for at a 300 bank rather than being asked and answered
+        /// wrongly there.
+        RampartFloor: int
+        /// The pile a Pickup is worth walking for (#167): a dropped pile
+        /// enters the pool at this many energy and never below it. A
+        /// tunable beside `RepairTrigger`, not part of any ADR.
+        ///
+        /// A hundred, derived at the **300 bank**, which is the poorest
+        /// colony that can hire a hauler at all: the row's floor body is
+        /// one `[Carry; Carry; Move]` block, so two Carry parts' worth is
+        /// the smallest load that pays for a walk made for the pile alone.
+        /// A richer bank buys a bigger body and only makes the same walk
+        /// pay sooner, so the line does not move with the bank; under the
+        /// line the pile is left to decay at a thousandth a tick, or to
+        /// the next creep that passes it — the [[pickup reflex]] already
+        /// takes every pile a creep happens to stand beside.
+        PickupThreshold: int
+        /// The Reach margin (ADR 0033): the tiles a Threat's weapon range
+        /// is widened by — one for the hostile's next step, one for our own
+        /// tick of lag. A tunable beside `RepairTrigger`, not a term of the
+        /// decision.
+        ///
+        /// Tiles of lag, so it is the same two at every stage and every
+        /// bank: what a raider covers in a tick is its body's business and
+        /// not the colony's.
+        ReachMargin: int
+        /// The [[standing body]]'s line (ADR 0046): the Carry parts per
+        /// Work at which a delivery stops being work and becomes a commute.
+        /// A body under it carries fifty energy a trip against eleven Work,
+        /// so a Build or a Refill it walks to spends one tick delivering
+        /// for every tick of the walk out and the walk back.
+        ///
+        /// A ratio over one body's own parts, so it is bank-free as
+        /// written; what the bank moves is which casts fall on either side
+        /// of it. The band it governs is between the two rows that are
+        /// outside it by construction — a hauler is `Carry * n < 0`, false
+        /// whatever `n` is, and the worker row's parity buys one Carry per
+        /// Work, four times clear at every bank — and the one live edge is
+        /// the **800 bank**, where the upgrader row's own cast reaches five
+        /// pairs and becomes a standing body (`upgraderBodyFor`,
+        /// `isStandingCast`). Under it the row is not countable and its
+        /// quota is zero.
+        StandingCarryPerWork: int
+        /// The **pioneers**: how many more [[worker unit]]s a mother hires
+        /// while a [[nursery]] or a bootstrapping child of hers stands (ADR
+        /// 0047 decision 4). The addend on the worker row's own share of
+        /// the target, the cap on the borrowed Upgrade and the borrowed
+        /// Build (`taskCapacities`, #213), and the whole of what a child
+        /// costs the mother in bodies.
+        ///
+        /// Three, derived at the mother's `Independent` **1,800 bank**,
+        /// which is the only stage that has bodies to lend: a spawn is
+        /// 15,000 progress against a generalist's fifty energy a trip, so
+        /// the child's first tick is many round trips away whatever the
+        /// crowd, and the crowd decides whether that is this cycle or the
+        /// next. Small because each of these bodies is one the mother's own
+        /// surplus work does without for the length of the walk. A **flat**
+        /// addend and not one per child: two children at once share these
+        /// three, which is a state a human who declared the second can see
+        /// and retune.
+        PioneerCount: int
+        /// The **[[ferry]]**: the hauler bodies a mother hires against a
+        /// bootstrapping child's upgrade buffer, over and above the haul
+        /// her own containers ask for (#222, ADR 0052 decision 7).
+        ///
+        /// One, derived at the mother's `Independent` **1,800 bank** and
+        /// read at no other stage — it is hired for a child at
+        /// `Bootstrapping` and a colony with no child hires none. One body
+        /// because the ferry is a lend and not a second economy: the
+        /// user's target is "RCL3 不用几小时" against a child earning
+        /// eight a tick on its own, and one hauler of the mother's 1,800
+        /// bank carries ten Carry parts — five hundred energy a trip
+        /// against the four hundred and fifty a pioneer walks home for.
+        /// The cap is the point of it (decision 7): what a mother lends is
+        /// written down and bounded, never derived from how much the child
+        /// could absorb.
+        ///
+        /// **Shipped at zero until the Refill half lands.** One is the
+        /// number the rule was derived at and the number this field takes
+        /// the day a mother can pool a Refill on a child's buffer; today
+        /// she cannot — `ColonyView.borrowed` carries a child's controller,
+        /// sites and spawn and none of its stores, and `planTasks` builds
+        /// its Refills off her own room's `Refillables` and her own Storage
+        /// — so a body hired here would be hired for a Task that is not in
+        /// the pool, and hired ahead of the upgrader and worker rows that
+        /// would have spent the energy. Half of a split feature that
+        /// harms the colony alone is deployed at zero and flipped by the
+        /// commit that lands the other half (#222's pool half, R5).
+        FerryLoads: int
+        /// The claimer range at which safe mode fires (ADR 0015): the
+        /// precise deadline is 2 — `attackController` is a range-1 act and
+        /// judged from tick-start position, and a creep steps at most one
+        /// tile a tick, so activating at 2 always lands before the tap —
+        /// plus one tile of margin for a skipped tick.
+        ///
+        /// Tiles, and the same tiles at every stage: what a bootstrapping
+        /// colony has less of is safe modes to spend, which is the
+        /// reflex's own `SafeModeAvailable` gate and not this range.
+        SafeModeDeadline: int
+        /// The level the engine unlocks the Storage at (Screeps
+        /// CONTROLLER_STRUCTURES for "storage"). The Layout reserves the
+        /// Storage's whole allowance here rather than at the horizon (ADR
+        /// 0022): the Storage is not a clustered kind, and its tile never
+        /// comes back once an extension takes it, so the reservation must
+        /// outlive any revisit of the horizon.
+        ///
+        /// A **level** and not a stage, deliberately: it is the engine's
+        /// own unlock read back as a reservation, so it tracks the server's
+        /// table and moves only when that does.
+        StorageLevel: int
+        /// The Layout horizon (ADR 0011, moved to RCL5 by ADR 0039): the
+        /// whole plan is computed up to this level regardless of the
+        /// current one, so today's roads route around tomorrow's
+        /// structures. One level of lookahead is the standing bargain —
+        /// RCL8 would tax today's trunks with detours for structures four
+        /// levels away, and a horizon the room has already passed sizes
+        /// every clustered gap at zero, so the room stops growing without
+        /// saying why.
+        ///
+        /// Declared and not computed from the current level, which is what
+        /// keeps it stepping once, in a commit (ADR 0039) — and so it is
+        /// the one field here a `Bootstrapping` colony reads exactly as an
+        /// `Independent` one does: a child plans the whole RCL5 room from
+        /// its first tick and places only what its level unlocks.
+        HorizonLevel: int
+        /// How many creeps the colony will have building outpost container
+        /// sites at once (#157) — a budget over all of them together and
+        /// never a per-site number, because the Planner places one site per
+        /// unserved outpost source and places them all on the same tick.
+        ///
+        /// Two, derived at the `Independent` **1,800 bank** where an
+        /// outpost exists at all: these sites sit on the feeding tier and
+        /// outbid the home Upgrade for every loaded worker, and travel cost
+        /// cannot thin the crowd, so without the budget the whole worker
+        /// row crosses the Seam together and the home room's surplus work
+        /// stops for the fifty ticks each of them spends walking. A
+        /// bootstrapping colony declares no outposts and never reads it.
+        OutpostContainerBuilders: int
+        /// The controller level a child colony stops being bootstrapped at
+        /// (ADR 0047 decision 4) and so the line `Colony.stageOf` cuts
+        /// `Bootstrapping` from `Independent` on: **the one place this
+        /// number is read** (ADR 0052 decision 3).
+        ///
+        /// Three, because that is the level a colony can defend and feed
+        /// itself at: RCL3 unlocks the first tower and the tenth extension
+        /// — 800 energy of bank, enough to cast a body that is not the
+        /// 300-energy starter. At it the borrowing rule closes, the
+        /// [[pioneer]] addend falls away and the mother stops projecting
+        /// the room; under it roads and ramparts are the wrong spend
+        /// (#209, #214). A level and not a bank, because what it says is
+        /// which rules a colony has grown into, and the bank is one of the
+        /// things that follows from it.
+        BootstrapLevel: int
+        /// What a swamp tile costs a **trunk** (ADR 0011 as #211 amends
+        /// it): three against plain's two, where a walking creep pays
+        /// `Engine.swampWeight`, ten.
+        ///
+        /// A trunk is a road, and once paved a swamp tile walks at exactly
+        /// what a paved plain tile walks at (road 1, ADR 0010); the only
+        /// thing swamp costs a road is construction — 1,500 against 300, a
+        /// one-off 1,200 — and repair is identical either way. Three is the
+        /// surcharge that amortizes that: a swamp step is one more than a
+        /// plain step, so the router takes swamp when it saves a step and
+        /// avoids it when a plain step is free. Not equal weights: with a
+        /// tie the flood's index order picks, and a plain step really is
+        /// 1,200 cheaper. It stays at or under `Engine.swampWeight`,
+        /// which the flood's step table is sized by — `Atlas.trunkPath`
+        /// holds it there rather than trusting the number, because a
+        /// weight past the table's length is a price index off the end of
+        /// it: a throw on .NET and an `undefined` price on the deployed
+        /// bundle, from a field a human may move.
+        ///
+        /// Derived at `Independent`, the only stage that places a road at
+        /// all (`placesRoads`, #209); the trunks are still *routed* at
+        /// every stage (ADR 0011's "computed whole"), so a bootstrapping
+        /// colony pays the number in its container picks and not in
+        /// construction.
+        TrunkSwampWeight: int
+        /// The [[stand-down]] a threat gave no readable deadline for:
+        /// 2,500 ticks, the stronghold expansion period (ADR 0043). The
+        /// last of the three answers and the only one the colony chose
+        /// rather than read, so it is the one number there that had to be
+        /// justified: it is the cadence on which the thing that put the
+        /// core there puts another one somewhere, and it errs long by
+        /// construction, which is the only direction the gate is allowed to
+        /// be wrong in — a stale stand-down costs an outpost's income until
+        /// the clock runs out, and the failure it prevents costs a creep a
+        /// cycle for the life of the core.
+        ///
+        /// Derived at `Independent`, the only stage that declares an
+        /// outpost to stand down from.
+        StandDownFallback: int
+        /// Ticks of silence that close a [[raid]] episode (ADR 0028). It
+        /// has to outlast a poke-and-heal cycle: giaco's squad in #66
+        /// stepped in for a tick or two at the tower's minimum damage and
+        /// back out to heal, over and over across ~220 ticks, and that is
+        /// one raid, not forty. Fifty ticks is also about the round trip a
+        /// squad retreating off-room makes before it can be back — a
+        /// shorter absence is the same squad still working the room, a
+        /// longer one is a decision to leave.
+        ///
+        /// A raider's clock and not a colony's, so it is the same fifty at
+        /// every stage and every bank.
+        QuietGap: int
+    }
+
+[<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
+module Tuning =
+    /// The numbers this bot ships with: what the shell hands every colony
+    /// (`World.ofGame`), and what a test starts from before it moves the
+    /// one field it is about. There is one set and not one per stage —
+    /// each field states the stage it was derived at, and the rules that
+    /// read it branch on the [[stage]] themselves (ADR 0052 decision 3),
+    /// so a second table would be a second place for a stage to be
+    /// decided.
+    let defaults =
+        {
+            MinWorkforce = 2
+            RepairTrigger = 0.5
+            RampartFloor = 100_000
+            PickupThreshold = 100
+            ReachMargin = 2
+            StandingCarryPerWork = 4
+            PioneerCount = 3
+            FerryLoads = 0
+            SafeModeDeadline = 3
+            StorageLevel = 4
+            HorizonLevel = 5
+            OutpostContainerBuilders = 2
+            BootstrapLevel = 3
+            TrunkSwampWeight = 3
+            StandDownFallback = 2500
+            QuietGap = 50
+        }
+
 /// What the decision layer knows about one spawn this tick.
 type SpawnInfo =
     {
@@ -875,10 +1240,10 @@ type ColonyStage =
     /// is what independence *is* (ADR 0047 decision 4).
     | Nursery
     /// Its own spawn standing and its controller still under
-    /// `Colony.bootstrapLevel`: running its own `decide`, casting its own
+    /// `Tuning.BootstrapLevel`: running its own `decide`, casting its own
     /// bodies, and still being raised — the **bootstrap window**.
     | Bootstrapping
-    /// At `Colony.bootstrapLevel` or past it: the first tower and the
+    /// At `Tuning.BootstrapLevel` or past it: the first tower and the
     /// tenth extension, a bank that casts a body which is not the
     /// 300-energy starter. The stage every rule written for the one home
     /// this bot grew up in was written at (ADR 0052).
@@ -913,7 +1278,7 @@ type Colony =
         /// as long as it is still being raised (ADR 0047 decision 4): the
         /// **bootstrap** window, which runs from the day the child leaves
         /// its mother's outpost list to the tick its controller reaches
-        /// `bootstrapLevel`. `None` for a colony that was never anybody's
+        /// `Tuning.BootstrapLevel`. `None` for a colony that was never anybody's
         /// child and for one that has outgrown its mother.
         ///
         /// A field, and the one part of the mother–child relation that has
@@ -929,7 +1294,7 @@ type Colony =
         ///
         /// A human's, like the rest of the declaration, and cleared by a
         /// human: the bot never edits it, and leaving it in past
-        /// `bootstrapLevel` costs nothing, because the rule that reads it
+        /// `Tuning.BootstrapLevel` costs nothing, because the rule that reads it
         /// (`bootstrapping`) asks the world for the child's [[stage]] and
         /// stops on its own.
         Mother: string option
@@ -986,8 +1351,8 @@ module Colony =
             //
             // W12S28 raised it and goes on raising it: the mother's workers
             // may cross the Seam for this room's Upgrade and Build, and her
-            // worker row hires `pioneerCount` bodies for the job, until the
-            // controller here reaches `bootstrapLevel` (ADR 0047 decision
+            // worker row hires `Tuning.PioneerCount` bodies for the job, until
+            // the controller here reaches `Tuning.BootstrapLevel` (ADR 0047 decision
             // 4). The day it does, this room leaves her projection on its
             // own; the name may then be cleared by a human or left standing.
             {
@@ -1101,24 +1466,16 @@ module Colony =
             |> Option.toList
         | living -> living
 
-    /// The controller level a child colony stops being bootstrapped at
-    /// (ADR 0047 decision 4): at RCL3 the borrowing rule closes, the
-    /// [[pioneer]] addend falls away and the mother stops projecting the
-    /// room altogether.
-    ///
-    /// Three, because that is the level a colony can defend and feed
-    /// itself at: RCL3 unlocks the first tower and the tenth extension —
-    /// 800 energy of bank, enough to cast a body that is not the 300-energy
-    /// starter — and it is the level ADR 0047 chose the exception's end at.
-    /// A tunable, and the only number in the rule: everything else about
-    /// the window is read off the world.
-    let bootstrapLevel = 3
-
     /// One colony's [[stage]] this tick, off the three facts that decide
-    /// it (ADR 0052 decision 3). **The one place `bootstrapLevel` is
-    /// read**: every rule that used to compare a controller level of its
-    /// own asks for a stage instead, so the line moves in one constant
+    /// it (ADR 0052 decision 3). **The one place `Tuning.BootstrapLevel`
+    /// is read**: every rule that used to compare a controller level of
+    /// its own asks for a stage instead, so the line moves in one field
     /// and cannot drift between the five readers it had.
+    ///
+    /// The tunables arrive as an argument rather than off a constant of
+    /// this module (ADR 0052 decision 5): the line is a colony's choice
+    /// and not the engine's, so a test moves it by handing another
+    /// `Tuning` and never by editing the rule.
     ///
     /// `None` for a room that is not a colony at all. Not owned by us is
     /// not a stage: a declared home nobody has claimed yet is a
@@ -1134,7 +1491,12 @@ module Colony =
     /// because that is the order the stages are in: a [[nursery]] is a
     /// nursery at any level, and RCL3 is what a colony that runs itself
     /// climbs to.
-    let stageOf (owned: bool) (spawnStanding: bool) (level: int option) : ColonyStage option =
+    let stageOf
+        (tuning: Tuning)
+        (owned: bool)
+        (spawnStanding: bool)
+        (level: int option)
+        : ColonyStage option =
         if not owned then
             None
         elif not spawnStanding then
@@ -1142,7 +1504,7 @@ module Colony =
         else
             level
             |> Option.map (fun level ->
-                if level >= bootstrapLevel then
+                if level >= tuning.BootstrapLevel then
                     Independent
                 else
                     Bootstrapping)
@@ -1179,7 +1541,7 @@ module Colony =
     ///
     /// **That is wider than the level rule it replaces, deliberately and
     /// in one shape.** A nursery is a nursery at any level (`stageOf`),
-    /// where `level < bootstrapLevel` stopped at RCL3 — so a child that
+    /// where `level < Tuning.BootstrapLevel` stopped at RCL3 — so a child that
     /// stood its own spawn, reached RCL3 and then *lost* that spawn is
     /// raised again here where the level rule orphaned it. That is the
     /// right answer for the case and the reason it is one: the room is
@@ -1602,6 +1964,22 @@ type RoomFacts =
         /// that room and not about her — which is exactly what ends the
         /// nursery (`World.stages`).
         Spawns: SpawnInfo list
+        /// The bodies still gestating in this room's spawns: energy the
+        /// colony has **already spent** on a creep that is not alive yet
+        /// (#156).
+        ///
+        /// Bodies and not creeps, and filed under the room rather than
+        /// under the spawn that is building them, because that is exactly
+        /// how far the fact reaches: a colony banks in one room (ADR 0052
+        /// decision 1) and every row's gap is a colony number, so which
+        /// oven a body is in changes nothing any reader asks. A creep still
+        /// spawning is outside `World.Creeps` — it can act, stand and be
+        /// matched to nothing — and it is here instead so the rows can
+        /// count what they bought without the Matcher ever seeing it.
+        ///
+        /// Empty for every room but a home of ours with a busy spawn, and
+        /// empty is the whole of "nothing is being cast here".
+        Casting: BodyPart list list
         /// Our energy-hungry structures standing here (spawn, extension,
         /// tower), whether or not they currently have room.
         Refillables: RefillableInfo list
@@ -1635,6 +2013,7 @@ module RoomFacts =
             Controller = None
             Energy = { Available = 0; Capacity = 0 }
             Spawns = []
+            Casting = []
             Refillables = []
             Sources = []
             ConstructionSites = []
@@ -1770,7 +2149,11 @@ module World =
     /// is: that stays the reader's own question (`isNurseryRoom` carries
     /// `colonyOwns` beside the stage), or two mothers would hire
     /// [[pioneer]]s for one child.
-    let rec stages (colonies: Colony list) (world: World) : Map<string, ColonyStage> =
+    let rec stages
+        (tuning: Tuning)
+        (colonies: Colony list)
+        (world: World)
+        : Map<string, ColonyStage> =
         Colony.homes colonies
         @ (living colonies world |> List.map (fun colony -> colony.Home))
         |> List.distinct
@@ -1781,6 +2164,7 @@ module World =
                 facts.Control |> Option.exists (fun control -> control.Owner = Ownership.Ours)
 
             Colony.stageOf
+                tuning
                 owned
                 (not (List.isEmpty facts.Spawns))
                 (facts.Controller |> Option.map (fun c -> c.Level))
@@ -1845,13 +2229,14 @@ module World =
     /// The rooms one colony projects this tick, off the world: `scanOf`'s
     /// union with the stages and the ownership it needs read for it.
     let roomsProjected
+        (tuning: Tuning)
         (colonies: Colony list)
         (shut: Set<string>)
         (world: World)
         (colony: Colony)
         : string list =
         let _, _, scanned =
-            scanOf (stages colonies world) (unownedHomes colonies world) colonies shut colony
+            scanOf (stages tuning colonies world) (unownedHomes colonies world) colonies shut colony
 
         scanned
 
@@ -1871,6 +2256,7 @@ module World =
     /// room: a room a gate withheld is projected by nobody, so nobody
     /// adopts the creep standing in it (ADR 0043).
     let creepColonies
+        (tuning: Tuning)
         (colonies: Colony list)
         (running: Colony list)
         (shut: Map<string, Set<string>>)
@@ -1881,6 +2267,7 @@ module World =
             |> List.map (fun colony ->
                 colony.Home,
                 roomsProjected
+                    tuning
                     colonies
                     (Map.tryFind colony.Home shut |> Option.defaultValue Set.empty)
                     world
@@ -1920,11 +2307,11 @@ type BorrowedWork =
         /// for its Post, counts none of its Seats into her quotas and hauls
         /// none of its energy home.
         ///
-        /// The **cap** on the borrowing is not here yet: how many bodies
-        /// cross is the worker row's `pioneerCount` (#213), which is a
-        /// quota rather than a fact about the child's room. It moves onto
-        /// this record with the rest of the tunables (ADR 0052 decisions 5
-        /// and 6).
+        /// The **cap** on the borrowing is a field of `Tuning` rather than
+        /// of this list: how many bodies cross is `Tuning.PioneerCount`
+        /// (#213) and how much haul is lent is `Tuning.FerryLoads` (#222),
+        /// each of them a quota rather than a fact about the child's room.
+        /// What stays here is the rooms, which is the fact.
         Rooms: string list
     }
 
@@ -1948,6 +2335,30 @@ type ColonyView =
         /// looked for here — whether one stands in a declared home reaches
         /// this colony as that room's [[stage]].
         Spawns: SpawnInfo list
+        /// The bodies this colony has in its ovens this tick (#156): its
+        /// home room's `RoomFacts.Casting`.
+        ///
+        /// Its home room's alone, for the reason `Bank` is one account: a
+        /// colony casts from the spawns of the room it banks in, so a body
+        /// gestating anywhere else was bought by somebody else. Read by the
+        /// casting cascade and by nothing else — a body in an oven stands
+        /// on no tile, holds no Task and answers no Verdict, so every rule
+        /// but the one deciding what to buy next is right to be blind to it
+        /// (ADR 0026).
+        Casting: BodyPart list list
+        /// The **tunables** this colony decides under (ADR 0052 decision
+        /// 5): every number the bot chose rather than read off the engine,
+        /// arriving on the view like every other fact so that a rule reads
+        /// its colony's own and a test moves one field instead of editing
+        /// the rule.
+        ///
+        /// One record per colony and not one per bot, though the shell
+        /// hands every colony `Tuning.defaults` today: the fields state the
+        /// [[stage]] and the bank they were derived at, and the day a human
+        /// wants a child raised on different numbers than its mother the
+        /// place to say so is here rather than in a second table inside the
+        /// rules.
+        Tuning: Tuning
         /// The colony's bank: its **home room's** shared spawn-energy
         /// account, and no other room's (ADR 0052 decision 1). Every spawn
         /// it casts from stands in that room, so one account is the whole
@@ -2148,7 +2559,11 @@ module ColonyView =
     /// the answer back — the layer that used to be reachable only by
     /// deploying (#137).
     ///
-    /// Four facts are handed in and none is decided here. The
+    /// Five facts are handed in and none is decided here. The **tunables**
+    /// are the colony's own numbers (ADR 0052 decision 5), handed in for
+    /// the reason the declaration is: a view can be cut under any of them
+    /// and not only the ones this bot ships, and the [[stage]] line lives
+    /// in one of their fields (`Colony.stageOf`). The
     /// **declaration** is a human's sentence (`Colony.declared`), and it is
     /// handed in rather than read so a view can be built for any
     /// declaration and not only the one this bot ships. The **shut** set is
@@ -2158,6 +2573,7 @@ module ColonyView =
     /// once over every living colony's scan set because no single colony
     /// can see that table. And the **world** is the tick's facts.
     let ofWorld
+        (tuning: Tuning)
         (colonies: Colony list)
         (shut: Set<string>)
         (holders: Map<string, string>)
@@ -2165,7 +2581,7 @@ module ColonyView =
         (colony: Colony)
         : ColonyView =
         let home = colony.Home
-        let stages = World.stages colonies world
+        let stages = World.stages tuning colonies world
 
         // The declaration's two narrowings and their union, off the one
         // derivation the creep adoption reads too (`World.scanOf`): the
@@ -2215,6 +2631,8 @@ module ColonyView =
         {
             Time = world.Time
             Spawns = homeFacts.Spawns
+            Casting = homeFacts.Casting
+            Tuning = tuning
             Bank = homeFacts.Energy
             Refillables = homeFacts.Refillables
             // Every worked room's sources but a bootstrapped child's, whose
@@ -2301,7 +2719,7 @@ type Task =
     /// overflow on a [[container]] no hauler is due at.
     ///
     /// Pooled on the pile's amount alone, and only from a threshold
-    /// (`pickupThreshold`), because a pile under one is not worth a
+    /// (`Tuning.PickupThreshold`), because a pile under one is not worth a
     /// walk that the reflex would cover for free if anyone ever passed
     /// it. Feeding tier and hauler-shaped applicability, the same as the
     /// Withdraw beside it: which of a pile and a container an empty

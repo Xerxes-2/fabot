@@ -443,12 +443,12 @@ let private castCreep name (body: BodyPart list) fill : CreepInfo =
 /// the bank that level's extensions add up to, and a fleet cast from
 /// `Decide`'s own body rules at that bank. The three rungs the suite runs
 /// are RCL1 with a 300 bank, RCL3 with 800 and RCL5 with 1,800 — a young
-/// colony, one that has just crossed `Colony.bootstrapLevel`, and the
+/// colony, one that has just crossed `Tuning.BootstrapLevel`, and the
 /// mother this bot grew up on (ADR 0052).
 ///
 /// What the level moves, and all it moves: the extension, tower and
 /// Storage counts come off the engine's own allowance table, and the roads
-/// and ramparts appear only from `Colony.bootstrapLevel` up, because a
+/// and ramparts appear only from `Tuning.BootstrapLevel` up, because a
 /// room under it places neither (#209, #214). Containers stand at every
 /// rung — one on each source's Seat, which is what makes it a Post, and
 /// the upgrade buffer beside the controller (ADR 0046). The buffer is a
@@ -542,10 +542,10 @@ let colonyAt (capture: RoomCapture) (level: int) (bank: int) : ColonyView =
     let towerTiles = clustered |> List.skip extensions |> List.truncate towers
     let storageTiles = clustered |> List.skip (extensions + towers)
 
-    // Roads and ramparts from `Colony.bootstrapLevel` up and never below
+    // Roads and ramparts from `Tuning.BootstrapLevel` up and never below
     // it: a room earning eight a tick places no road site (#209) and keeps
     // no rampart (#214).
-    let furnishesDefence = level >= Colony.bootstrapLevel
+    let furnishesDefence = level >= Tuning.defaults.BootstrapLevel
 
     let roadTiles =
         if not furnishesDefence then
@@ -788,7 +788,7 @@ let colonyAt (capture: RoomCapture) (level: int) (bank: int) : ColonyView =
         // the level, so a rung cannot be furnished as one colony and
         // decided as another.
         Stages =
-            match Colony.stageOf true true (Some level) with
+            match Colony.stageOf Tuning.defaults true true (Some level) with
             | Some stage -> Map.ofList [ capture.RoomName, stage ]
             | None -> Map.empty
         // One colony over one captured room: every body in it is this
@@ -796,4 +796,12 @@ let colonyAt (capture: RoomCapture) (level: int) (bank: int) : ColonyView =
         // 1), and it raises no child, so it borrows nothing.
         Foreign = Set.empty
         Borrowed = { Rooms = [] }
+        // The numbers this bot ships with (ADR 0052 decision 5): a
+        // fixture starts from them and the tests that are *about* a
+        // tunable move the one field they are about.
+        Tuning = Tuning.defaults
+        // Nothing in the oven: a fixture's rows count what is alive, and
+        // the casting cascade's own tests are the ones that put a body
+        // here (#156).
+        Casting = []
     }

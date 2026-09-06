@@ -216,12 +216,12 @@ let private pairWorld: World =
 let private noneShut = Map.empty<string, Set<string>>
 
 let private holdersOf world =
-    World.creepColonies declared (World.living declared world) noneShut world
+    World.creepColonies Tuning.defaults declared (World.living declared world) noneShut world
 
 let private viewOf world home =
     let colony = declared |> List.find (fun colony -> colony.Home = home)
 
-    ColonyView.ofWorld declared Set.empty (holdersOf world) world colony
+    ColonyView.ofWorld Tuning.defaults declared Set.empty (holdersOf world) world colony
 
 /// The same world with the child's spawn pulled down: the room is still
 /// ours and still claimed, and it is a [[nursery]] again (ADR 0052
@@ -332,7 +332,7 @@ let worldTests =
         "the world's own answers"
         [
             test "a room we own with a spawn standing is a colony at its level's stage" {
-                let stages = World.stages declared pairWorld
+                let stages = World.stages Tuning.defaults declared pairWorld
 
                 Expect.equal
                     (Map.tryFind mother stages)
@@ -347,14 +347,14 @@ let worldTests =
 
             test "a room we own with no spawn of ours is a nursery" {
                 Expect.equal
-                    (Map.tryFind child (World.stages declared spawnlessWorld))
+                    (Map.tryFind child (World.stages Tuning.defaults declared spawnlessWorld))
                     (Some Nursery)
                     "claimed and unable to cast is the first stage"
             }
 
             test "a room we do not own is no colony at all" {
                 Expect.equal
-                    (Map.tryFind outpost (World.stages declared pairWorld))
+                    (Map.tryFind outpost (World.stages Tuning.defaults declared pairWorld))
                     None
                     "an outpost is a room we mine, not a colony"
             }
@@ -601,6 +601,7 @@ let colonyViewTests =
 
                 let shut =
                     ColonyView.ofWorld
+                        Tuning.defaults
                         declared
                         (Set.singleton outpost)
                         (holdersOf pairWorld)
@@ -651,7 +652,7 @@ let colonyViewTests =
             test "every colony reads the same stages" {
                 Expect.equal
                     (viewOf pairWorld child).Stages
-                    (World.stages declared pairWorld)
+                    (World.stages Tuning.defaults declared pairWorld)
                     "a stage is a fact about a room, not about who is looking"
             }
 

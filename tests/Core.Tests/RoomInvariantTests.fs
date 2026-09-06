@@ -356,7 +356,7 @@ let private colonyOf (room: LoadedRoom) level =
         Stages =
             match
                 room.ControllerId
-                |> Option.bind (fun _ -> Colony.stageOf true true (Some level))
+                |> Option.bind (fun _ -> Colony.stageOf Tuning.defaults true true (Some level))
             with
             | Some stage -> Map.ofList [ name, stage ]
             | None -> Map.empty
@@ -365,6 +365,14 @@ let private colonyOf (room: LoadedRoom) level =
         // is nothing borrowed to carry.
         Foreign = Set.empty
         Borrowed = { Rooms = [] }
+        // The numbers this bot ships with (ADR 0052 decision 5): a
+        // fixture starts from them and the tests that are *about* a
+        // tunable move the one field they are about.
+        Tuning = Tuning.defaults
+        // Nothing in the oven: a fixture's rows count what is alive, and
+        // the casting cascade's own tests are the ones that put a body
+        // here (#156).
+        Casting = []
     }
 
 let private placementsOf intents =
