@@ -3403,6 +3403,23 @@ type DeferredContainer =
         Serving: RoomPos
     }
 
+/// One sink group the hauler quota priced a container's flow to: the
+/// spawn cluster, an upgrade buffer or the Storage, and the round trip in
+/// ticks — None where no place of that group was reachable, which is a
+/// group that carries none of the flow.
+type HaulSink = { Kind: string; Trip: int option }
+
+/// One source container's line in the hauler quota: the output it is
+/// priced at, its sinks, and the demand that line adds to the sum
+/// (output × the mean reachable round trip). Observability only.
+type HaulDemandRow =
+    {
+        Container: RoomPos
+        Output: int
+        Sinks: HaulSink list
+        Demand: int
+    }
+
 /// The census-keyed plan memo (ADR 0017): the census signature beside the
 /// plans derived from exactly that census — the Layout's site Intents,
 /// the footings it placed and the ones it could not, the hauler quota,
@@ -3442,6 +3459,10 @@ type PlanMemo =
         /// `UnservedFootings` does: the App writes it every tick.
         DeferredContainers: DeferredContainer list
         HaulerQuota: int
+        /// The quota's per-container arithmetic, kept beside it for the
+        /// `quotas` view; the same census the quota rides.
+        HaulerDemand: HaulDemandRow list
+        HaulerLoad: int
         /// The walks flooded under this signature, filled through the tick
         /// by the Atlas the table was handed to. Dropped whole when the
         /// signature moves — the Layout's own granularity, never per entry:
@@ -3929,6 +3950,10 @@ type Quotas =
         Living: int
         Casting: int
         Rows: RowQuota list
+        /// One hauler load at this bank, the divisor of the haul sum.
+        HaulerLoad: int
+        /// The hauler quota's own arithmetic, per source container.
+        HaulerDemand: HaulDemandRow list
     }
 
 [<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
@@ -3939,6 +3964,8 @@ module Quotas =
             Living = 0
             Casting = 0
             Rows = []
+            HaulerLoad = 0
+            HaulerDemand = []
         }
 
 /// What one tick of deciding returns: the Intents to execute, the

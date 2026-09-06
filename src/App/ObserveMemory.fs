@@ -648,6 +648,35 @@ let saveQuotas (home: string) (quotas: Quotas) =
             r)
         |> List.toArray
 
+    o?load <- quotas.HaulerLoad
+
+    o?haul <-
+        quotas.HaulerDemand
+        |> List.map (fun row ->
+            let r = createEmpty<obj>
+            r?room <- row.Container.Room
+            r?x <- row.Container.X
+            r?y <- row.Container.Y
+            r?output <- row.Output
+            r?demand <- row.Demand
+
+            r?sinks <-
+                row.Sinks
+                |> List.map (fun sink ->
+                    let k = createEmpty<obj>
+                    k?kind <- sink.Kind
+
+                    k?trip <-
+                        (match sink.Trip with
+                         | Some t -> box t
+                         | None -> null)
+
+                    k)
+                |> List.toArray
+
+            r)
+        |> List.toArray
+
     ensureColony home
     Memory?fabot?observe?colonies?(home)?quotas <- o
 

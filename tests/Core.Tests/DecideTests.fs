@@ -3505,6 +3505,8 @@ let sentinelMemo snapshot =
         UnroutedTrunks = []
         DeferredContainers = []
         HaulerQuota = 0
+        HaulerDemand = []
+        HaulerLoad = 0
         Walks = WalkTable()
     }
 
@@ -3676,6 +3678,8 @@ let planMemoTests =
                 let memo =
                     { sentinelMemo snapshot with
                         HaulerQuota = 3
+                        HaulerDemand = []
+                        HaulerLoad = 0
                     }
 
                 let castNames decision =

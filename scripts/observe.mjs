@@ -631,6 +631,20 @@ if (command === "console") {
             `${String(r.casting).padStart(8)} ${String(gap).padStart(4)}`,
         );
       }
+      if (Array.isArray(stored.haul)) {
+        const sum = stored.haul.reduce((a, r) => a + (r.demand ?? 0), 0);
+        console.log(
+          `  haul: ${sum} demand over a ${stored.load}-energy load = ${
+            stored.load ? Math.ceil(sum / stored.load) : "?"
+          } haulers before the ferry`,
+        );
+        for (const r of stored.haul) {
+          const sinks = (r.sinks ?? [])
+            .map((k) => `${k.kind} ${k.trip == null ? "unreachable" : k.trip + "t"}`)
+            .join(", ");
+          console.log(`    ${r.room} (${r.x},${r.y}) output ${r.output}/t → ${sinks}: demand ${r.demand}`);
+        }
+      }
     }
   }
 } else if (command === "layout") {

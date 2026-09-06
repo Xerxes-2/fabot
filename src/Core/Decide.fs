@@ -1704,7 +1704,7 @@ let private sourceOutputOf (view: ColonyView) atlas (sourceId: string) : int opt
 /// signature had to widen for, and did (`censusSignature`): every
 /// projected room's held rate is signed, because any of them can hold the
 /// container this fold prices next tick.
-let private haulerQuota (view: ColonyView) atlas : int =
+let private haulerDemandOf (view: ColonyView) atlas : int * HaulDemandRow list * int =
     // Each source container beside the room it stands in and the output of
     // the rock it serves: the tile alone cannot be priced, so a container
     // the projection places in no room, or one the fold cannot resolve to
@@ -1769,25 +1769,44 @@ let private haulerQuota (view: ColonyView) atlas : int =
     let storages =
         Atlas.storageTilesIn atlas home |> Set.toList |> List.map (RoomPos.at home)
 
-    let sinks = [ cluster; buffers; storages ] |> List.filter (List.isEmpty >> not)
+    let sinks =
+        [ "cluster", cluster; "buffer", buffers; "storage", storages ]
+        |> List.filter (snd >> List.isEmpty >> not)
 
     // Each container's own haul, spread evenly over the sinks it can
     // price and summed over the colony — the fraction of a hauler it asks
-    // for, and never that fraction rounded.
-    let demand =
+    // for, and never that fraction rounded. Kept line by line for the
+    // `quotas` view (ADR 0009): each sink group's cheapest round trip, or
+    // None where no place of it is reachable, and the demand the line adds.
+    let rows =
         sourceContainers
-        |> List.sumBy (fun (container, output) ->
-            match
+        |> List.map (fun (container, output) ->
+            let priced =
                 sinks
-                |> List.choose (fun places ->
-                    places
-                    |> List.choose (Atlas.haulRoundTripTicks atlas body container)
-                    |> function
-                        | [] -> None
-                        | trips -> Some(List.min trips))
-            with
-            | [] -> 0
-            | trips -> output * List.sum trips / List.length trips)
+                |> List.map (fun (kind, places) ->
+                    {
+                        Kind = kind
+                        Trip =
+                            places
+                            |> List.choose (Atlas.haulRoundTripTicks atlas body container)
+                            |> function
+                                | [] -> None
+                                | trips -> Some(List.min trips)
+                    })
+
+            let trips = priced |> List.choose (fun sink -> sink.Trip)
+
+            {
+                Container = container
+                Output = output
+                Sinks = priced
+                Demand =
+                    match trips with
+                    | [] -> 0
+                    | trips -> output * List.sum trips / List.length trips
+            })
+
+    let demand = rows |> List.sumBy (fun row -> row.Demand)
 
     // The [[ferry]] (#222, ADR 0052 decision 7): the bodies a mother lends
     // a bootstrapping child, over and above the haul her own containers
@@ -1839,7 +1858,13 @@ let private haulerQuota (view: ColonyView) atlas : int =
     // The colony's whole haul, rounded once (ADR 0049), and the ferry's own
     // whole bodies beside it: a lend is counted in bodies rather than in
     // tick-energy, so it is added after the division rather than inside it.
-    ceilDiv demand capacity + ferry
+    ceilDiv demand capacity + ferry, rows, capacity
+
+/// The hauler quota alone; `haulerDemandOf` is the same arithmetic with
+/// its lines kept.
+let private haulerQuota (view: ColonyView) atlas : int =
+    let quota, _, _ = haulerDemandOf view atlas
+    quota
 
 /// What one body of this shape drinks a tick standing at a controller: its
 /// Work parts at the rate above. Two rows are hired out of the same
@@ -3084,6 +3109,8 @@ let private planSpawns
                 Target = target
                 Living = List.length living
                 Casting = List.length casting
+                HaulerLoad = 0
+                HaulerDemand = []
                 Rows =
                     [
                         row
@@ -6872,6 +6899,8 @@ let decideUnarbitrated
             let siteIntents, servedFootings, unservedFootings, unroutedTrunks, deferredContainers =
                 planLayout view atlas
 
+            let quota, demandRows, load = haulerDemandOf view atlas
+
             {
                 Signature = signature
                 SiteIntents = siteIntents
@@ -6879,7 +6908,9 @@ let decideUnarbitrated
                 ServedFootings = servedFootings
                 UnroutedTrunks = unroutedTrunks
                 DeferredContainers = deferredContainers
-                HaulerQuota = haulerQuota view atlas
+                HaulerQuota = quota
+                HaulerDemand = demandRows
+                HaulerLoad = load
                 Walks = walks
             }
 
@@ -6951,7 +6982,11 @@ let decideUnarbitrated
         Memo = plan
         Verdicts = verdicts
         Movement = movementOf view atlas threats pool assigned verbose
-        Quotas = quotas
+        Quotas =
+            { quotas with
+                HaulerLoad = plan.HaulerLoad
+                HaulerDemand = plan.HaulerDemand
+            }
     }
 
 /// The decision seam a shell with one colony — and the whole suite — asks
