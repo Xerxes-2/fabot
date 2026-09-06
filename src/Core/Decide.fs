@@ -4140,6 +4140,41 @@ let private isOutpostContainerSite (snapshot: Snapshot) atlas siteId =
 let private isNurserySite (snapshot: Snapshot) atlas siteId =
     Atlas.targetRoom atlas siteId |> Option.exists (isNurseryRoom snapshot)
 
+/// Whether a room is **bootstrapping** as seen from this colony's tick: a
+/// child of ours running its own spawn (`isBootstrapRoom`, the mother's
+/// reading), or this colony's own home while its controller is under
+/// `Colony.bootstrapLevel` with a spawn standing (the child's own
+/// reading). One predicate for both ticks, because the rule that reads it
+/// is about the room and not about who is looking (ADR 0052 decision 3:
+/// a stage, read wherever a rule differs by stage).
+let private isBootstrappingRoom (snapshot: Snapshot) room =
+    isBootstrapRoom snapshot room
+    || (room = SpatialInfo.homeName snapshot.Spatial
+        && spawnStandsIn snapshot room
+        && snapshot.Controller |> Option.exists (fun c -> c.Level < Colony.bootstrapLevel))
+
+/// A site standing in a bootstrapping room: feeding-tier in both pools
+/// (user, 2026-09-06: "pioneer 都在升级没人建 extension … 房间里很多小
+/// worker 也都在升级，不管 extension"). What a room under RCL3 builds is
+/// its containers and its extensions, and the extensions are the bank —
+/// 300 to 550 doubles the Anchor body and with it the income the whole
+/// window is waiting on — so they come before the controller, for the
+/// child's own workers and for the pioneers alike. The borrowed Upgrade
+/// drops back to surplus while such a site stands (`tierOf`), so a
+/// pioneer builds first and upgrades after.
+let private isBootstrappingSite (snapshot: Snapshot) atlas siteId =
+    Atlas.targetRoom atlas siteId |> Option.exists (isBootstrappingRoom snapshot)
+
+/// Whether any site stands in the room of the named controller — the
+/// borrowed Upgrade's other half: while the child has sites, its
+/// controller waits.
+let private sitesPendingBeside (snapshot: Snapshot) atlas controllerId =
+    match Atlas.targetRoom atlas controllerId with
+    | None -> false
+    | Some room ->
+        snapshot.ConstructionSites
+        |> List.exists (fun site -> Atlas.targetRoom atlas site.Id = Some room)
+
 /// Whether this Build is on the feeding tier rather than in the surplus
 /// the colony's other sites are spent out of — the two rules that lift one
 /// there, said once, because the tier and the body gate that exists
@@ -4155,6 +4190,7 @@ let private isNurserySite (snapshot: Snapshot) atlas siteId =
 let private isFeedingSite (snapshot: Snapshot) atlas siteId =
     isOutpostContainerSite snapshot atlas siteId
     || isNurserySite snapshot atlas siteId
+    || isBootstrappingSite snapshot atlas siteId
 
 /// Whether a creep can usefully work this Task right now. The body must
 /// physically be able to do it — Work-part tasks need a Work part, energy
@@ -4731,7 +4767,11 @@ let private tierOf (snapshot: Snapshot) atlas task =
     // taking the job it was hired for and not the loaded fleet crossing.
     // The child's own tick pools the same target as its own controller,
     // where this arm does not fire.
-    | Upgrade controllerId when isBorrowedUpgrade snapshot controllerId -> Feeding
+    | Upgrade controllerId when
+        isBorrowedUpgrade snapshot controllerId
+        && not (sitesPendingBeside snapshot atlas controllerId)
+        ->
+        Feeding
     | Build _
     | Repair _
     | Upgrade _ -> Surplus
@@ -5014,6 +5054,15 @@ let private taskCapacities (snapshot: Snapshot) atlas (tasks: Task list) : Map<s
         tasks
         |> List.choose (function
             | Upgrade controllerId as task when isBorrowedUpgrade snapshot controllerId ->
+                Some(taskId task, pioneerCount)
+            // A bootstrapped child's site in the mother's pool, per site:
+            // the same bodies that were hired for the room, on the site
+            // that ends its window sooner than its controller does. The
+            // child's own room reads no cap here — its own sites are its
+            // own workers' to crowd.
+            | Build siteId as task when
+                isBootstrapRoom snapshot (Atlas.targetRoom atlas siteId |> Option.defaultValue "")
+                ->
                 Some(taskId task, pioneerCount)
             | _ -> None)
 

@@ -18929,11 +18929,15 @@ let nurseryTests =
                 // closes it: a spawn of ours standing in that room. Nothing
                 // waits on the human's edit to `Colony.declared` — the room
                 // is independent the tick its spawn stands, and this rule
-                // reads that tick and not the commit that follows it.
+                // reads that tick and not the commit that follows it. The
+                // site stays feeding-tier, now by the *bootstrapping*
+                // reading (`isBootstrappingSite`): a room under RCL3 builds
+                // its bank before its controller, and the nursery's lift
+                // hands over to that one without a surplus tick between.
                 Expect.equal
                     (matchOf (asNursery sited |> withNorthSpawn))
-                    (Some(taskId (Upgrade "ctrl-1"), MatchFactor.TravelCost))
-                    "and a spawn standing in it ends the nursery: the site is surplus again"
+                    (Some(taskId (Build "site-spawn"), MatchFactor.Rank))
+                    "and a spawn standing in it ends the nursery: the site is the bootstrapping room's, still feeding-tier"
             }
 
             test "the mother's worker row rises by three while the nursery stands" {
@@ -19629,6 +19633,44 @@ let bootstrapTests =
                     (matchOf (standingNorth { X = 10; Y = 44 } twoUpgrades))
                     (Some(taskId (Upgrade "ctrl-child"), MatchFactor.Rank))
                     "and across the Seam the same body stays on it"
+            }
+
+            test "a pioneer builds the child's site before it upgrades the child's controller" {
+                // The child's extension site is feeding-tier in the
+                // mother's pool and the borrowed Upgrade drops to surplus
+                // while it stands: the loaded body takes the site by rank.
+                // Pairwise on the site alone — without it the Upgrade is
+                // the feeding-tier Task again (the test above).
+                let withNorthSite id kind pos (colony: Snapshot) =
+                    let north = SpatialInfo.layerOf colony.Spatial "W1N2"
+
+                    { colony with
+                        ConstructionSites = colony.ConstructionSites @ [ { Id = id } ]
+                        Spatial =
+                            { colony.Spatial with
+                                TargetKinds = Map.add id (Site kind) colony.Spatial.TargetKinds
+                            }
+                            |> withNeighbour
+                                "W1N2"
+                                { north with
+                                    TargetPositions = Map.add id pos north.TargetPositions
+                                }
+                    }
+
+                let withSite =
+                    northBorderColony { X = 10; Y = 38 }
+                    |> withNorthOutpost None
+                    |> withNorthController { X = 10; Y = 45 }
+                    |> withHomeController { X = 10; Y = 5 }
+                    |> asNursery
+                    |> withNorthSpawn
+                    |> withNorthSite "site-ext" BuiltKind.Extension { X = 12; Y = 44 }
+                    |> loaded
+
+                Expect.equal
+                    (matchOf withSite)
+                    (Some(taskId (Build "site-ext"), MatchFactor.Rank))
+                    "the extension site outranks both Upgrades"
             }
 
             test "the lift takes pioneerCount bodies and the fourth stays on the home controller" {
@@ -21553,6 +21595,47 @@ let standingBodyTests =
                     (laneAssignment [] [] empty)
                     (Some(taskId (Withdraw "can-buf")))
                     "the row drinks from the buffer at its feet, which is why it stands there"
+            }
+
+            test "under RCL3 the colony's own extension site outranks its Upgrade" {
+                // A bootstrapping room builds its bank before its
+                // controller: the site is feeding-tier while the controller
+                // is under `bootstrapLevel` with a spawn standing, and
+                // surplus like any home site from RCL3 up. Pairwise on the
+                // level alone: the same lane, the same worker, the same
+                // site, and the match factor says which tier decided.
+                let lane level =
+                    let colony =
+                        bufferLaneColony
+                            [ "site-1", { X = 15; Y = 10 }, Site BuiltKind.Extension ]
+                            [ { Id = "site-1" } ]
+                            (creepWith "w" 100 0 (bodyFor workerPattern 300))
+
+                    { colony with
+                        Controller = Some(controllerAt level)
+                        Spatial =
+                            colony.Spatial
+                            |> withTargets
+                                [ "spawn-1", { X = 19; Y = 9 }, Structure BuiltKind.Spawn ]
+                    }
+
+                let matched level =
+                    let { Verdicts = verdicts } = decide (lane level) Map.empty Set.empty None
+
+                    verdicts
+                    |> List.tryPick (function
+                        | Verdict.Matched("w", task, factor) -> Some(task, factor)
+                        | _ -> None)
+
+                Expect.equal
+                    (matched 2)
+                    (Some(taskId (Build "site-1"), MatchFactor.Rank))
+                    "at RCL2 the extension site is feeding-tier and wins by rank"
+
+                Expect.equal
+                    (matched 3)
+                    (Some(taskId (Build "site-1"), MatchFactor.TravelCost))
+                    "at RCL3 it is surplus like the Upgrade beside it, and only price separates them"
             }
 
             test "a standing body fetches from the buffer alone: dry, it waits for the haulers" {
