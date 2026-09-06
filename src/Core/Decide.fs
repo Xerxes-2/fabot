@@ -58,6 +58,53 @@ let reserverPattern =
         Block = [ Claim; Move ]
     }
 
+/// The upgrader row (ADR 0046): the body that stands beside the upgrade
+/// buffer and spends the colony's surplus into the controller. Every part
+/// slot past its single Carry goes to a Work/Move pair, so an 1,800 bank
+/// buys eleven Work where the worker row's nine units buy nine — the same
+/// energy, twenty-two per cent more upgrade, because nothing in the body
+/// is paying for a commute it does not make (`upgraderBodyFor`).
+///
+/// The block is the row's minimal cast and not a unit it repeats — the
+/// same shape the anchor row's block is — which is why it reads as the
+/// worker row's three parts and sizes into something else entirely: this
+/// row keeps the Carry at one and buys Work/Move with the rest, where the
+/// generalist buys Carry at fatigue parity. One Carry because a body that
+/// stands still needs exactly enough store to hold a Withdraw from the
+/// buffer at its feet (ADR 0019 keeps that draw open to it: Work ≤ Move,
+/// so ADR 0016's gate is not in its way).
+///
+/// **The one row in this table that is ahead of its quota**, and it is a
+/// two-ticket split and not a repeal of ADR 0006's law: #186 lands the
+/// row, the sizing rule, the applicability gate and this ADR, and #187
+/// lands `upgraderQuota` in `workforceTarget` and the casting cascade. So
+/// `planSpawns` mints no upgrader today — the row's gap is not computed at
+/// all — and the table's promise below still holds in the direction that
+/// matters, every body the colony casts being a row here. The converse is
+/// what is briefly untrue, and the tick #187 lands it is true again.
+///
+/// It is the row a *living* **standing body** is read back to
+/// (`patternOf`) from the moment it is declared, which is what prices such
+/// a body's succession off its own row (ADR 0026) rather than off the
+/// generalist's — a body the colony will only cast next ticket, but one it
+/// can meet the tick a Screeps player hands it one.
+///
+/// Read back by the ratio and not by this row's own name, so the row and
+/// the read meet only from an 800 bank up: `upgraderBodyFor` buys one Carry
+/// against `floor((capacity - 50) / 150)` Work and `isStandingBody` wants
+/// four Work to the Carry, so five pairs is where the two lines cross.
+/// Under it — `3W/1C/3M` at the RCL2 bank of 550 — this row's own cast is
+/// no standing body, keeps all three deliveries and is read back to the
+/// generalist. That is the ratio saying what it was written to say (three
+/// Work against a fifty-energy load is not yet a commute), not a hole in
+/// it, and whether the quota hires under that bank at all is #187's
+/// (ADR 0046's Consequences carries the floor).
+let upgraderPattern =
+    {
+        Name = "upgrader"
+        Block = [ Work; Carry; Move ]
+    }
+
 /// The pattern table: every body the colony casts is a row here, sized by
 /// energy under the row's own sizing rule. A future pattern is one more
 /// data row plus its own quota rule — a colony fact deciding when it is
@@ -68,7 +115,14 @@ let reserverPattern =
 /// this list for a sequence. What it is is the enumeration — every body the colony
 /// casts is here, so a row cast from outside it would be a body no reader
 /// of the table could account for.
-let patternTable = [ workerPattern; anchorPattern; haulerPattern; reserverPattern ]
+let patternTable =
+    [
+        workerPattern
+        anchorPattern
+        haulerPattern
+        reserverPattern
+        upgraderPattern
+    ]
 
 let bodyCost body =
     body
@@ -294,11 +348,58 @@ let private haulerBodyFor capacity =
 let private reserverBodyFor capacity =
     wholeBlockBodyFor reserverPattern.Block capacity
 
+/// The upgrader row's sizing rule (ADR 0046): one Carry, and every part
+/// slot the rest of the capacity affords spent on Work/Move **pairs** —
+/// `W = M = floor((capacity - 50) / 150)`, never below one pair. At the
+/// live RCL5 bank of 1,800 that is `11W/1C/11M` for 1,700, against the
+/// worker row's nine Work at the same bank: the whole gain is the eighteen
+/// parts the generalist spends on carrying energy to work it is not going
+/// to do standing still.
+///
+/// Why the Move parts at all, for a body that stands: ADR 0016's gate is
+/// `Work > Move`, and a body over that line may not Withdraw (ADR 0016) —
+/// which is the buffer this row exists to drink from (ADR 0019). Pairing
+/// each Work with a Move keeps the row at `Work = Move`, inside the gate,
+/// and buys the walk out of the spawn as a side effect; the alternative
+/// (a heavier body with fewer Move) is ADR 0046's option ③ and is
+/// deferred there, not taken here.
+///
+/// Exempt from fatigue parity like every row with a rule of its own (ADR
+/// 0006) — parity is the *generalist* row's invariant and this body is at
+/// it by construction anyway. Parts are grouped Work, Carry, Move, the
+/// order `anchorBodyFor` above sets: damage strips the output first and
+/// the legs last.
+///
+/// Capped at the engine's 50 parts like every other row, and the overshoot
+/// at a rich bank is large: a pair is 150 energy, so an RCL8 bank would ask
+/// for eighty-five of them where the body may hold twenty-four beside its
+/// Carry. Late to bind rather than early, for the same reason — a pair is
+/// dearer per part than a hauler's block or a worker unit, so the cap
+/// starts biting at a 3,800 bank here against 2,550 for the hauler row and
+/// 3,400 for the generalist. A body over the cap is refused outright by the
+/// engine and the spawn silently does nothing that tick, which is the one
+/// failure mode no row may have.
+///
+/// The floor under it is the same one `wholeBlockBodyFor` and
+/// `parityBodyFor` carry: a bank too poor for one pair still casts one
+/// (ADR 0046's "never below one pair"), so the rule answers a body at every
+/// capacity rather than an empty one. No live bank reaches it — an RCL1
+/// spawn holds 300 — and it is pinned below 200 all the same, where the
+/// clamp is the thing under test.
+let private upgraderBodyFor capacity =
+    let pairs =
+        (capacity - bodyCost [ Carry ]) / bodyCost [ Work; Move ]
+        |> max 1
+        |> min ((maxBodyParts - 1) / 2)
+
+    List.replicate pairs Work @ [ Carry ] @ List.replicate pairs Move
+
 /// Body for a pattern at an energy capacity, under the row's own sizing
 /// rule (ADR 0006): the anchor row spends on Work beside its fixed
 /// Carry/Move pair, the hauler row buys whole blocks at its own road
 /// parity, the reserver row buys whole blocks of the one part that holds a
-/// reservation, and every other block-replicating row pads its remainder
+/// reservation, the upgrader row buys Work/Move pairs beside one Carry,
+/// and every other block-replicating row pads its remainder
 /// at plain fatigue parity — or, if its block holds a part that last rule
 /// cannot place, is refused rather than sized into some other body (#155).
 ///
@@ -331,6 +432,8 @@ let bodyFor pattern capacity =
         haulerBodyFor capacity
     elif pattern.Name = reserverPattern.Name then
         reserverBodyFor capacity
+    elif pattern.Name = upgraderPattern.Name then
+        upgraderBodyFor capacity
     else
         parityBodyFor pattern capacity
 
@@ -1434,12 +1537,65 @@ let private isHaulerBody (creep: CreepInfo) =
 let private isReserverBody (creep: CreepInfo) =
     creep.Body |> Map.tryFind Claim |> Option.exists (fun n -> n > 0)
 
+/// The standing body's line (ADR 0046): four is the ratio at which a
+/// delivery stops being work and becomes a commute. A body under it carries
+/// fifty energy a trip against eleven Work, so a Build or a Refill it walks
+/// to spends one tick delivering for every tick of the walk out and the
+/// walk back, and the Work it left standing beside the buffer earns nothing
+/// meanwhile.
+///
+/// A tunable, and named here for that reason: the shape of the rule is not
+/// one. A hauler is `Carry * n < 0`, false whatever `n` is, so the row whose
+/// whole life is delivery is outside the gate by construction rather than
+/// by this number; and the worker row is outside it by its own parity (ADR
+/// 0003), which buys one Carry per Work where this line is one per four,
+/// four times clear at every bank. What retuning it moves is the band
+/// between those two — and, with it, the bank at which the upgrader row's
+/// own cast becomes a standing body (five pairs at four, `upgraderBodyFor`).
+let private standingCarryPerWork = 4
+
+/// Whether a living body is a **standing body** (ADR 0046): it carries
+/// fewer than one Carry part per four Work — `Carry * 4 < Work`. Part
+/// arithmetic and nothing else, like every other row-reading predicate
+/// here (ADR 0006), and it is a fact about a *body* rather than about a
+/// row: the upgrader row's `11W/1C/11M` is one, and so is the anchor row's
+/// `6W/1C/1M`, and so would be anything else the colony ever casts with
+/// the same shape.
+///
+/// The gate that reads it is `applicable` below, on Build, Repair and
+/// Refill. Every other Task is left exactly as its own gates already had
+/// it: Upgrade, Withdraw and Harvest, which are the working life the
+/// upgrader row was shaped for — it draws from the buffer at its feet (ADR
+/// 0019, through ADR 0016's gate, which `Work ≤ Move` keeps it inside) and
+/// spends into the controller in place, or it digs from its Post — and
+/// Pickup too, which stays open to a standing body because a pile is an
+/// intake and not a delivery. Untouched is not applicable, either:
+/// Withdraw stays shut to a Work-heavy body by ADR 0016's own gate, so of
+/// the two standing bodies the colony casts only the upgrader draws.
+let private isStandingBody (creep: CreepInfo) =
+    let count part =
+        creep.Body |> Map.tryFind part |> Option.defaultValue 0
+
+    count Carry * standingCarryPerWork < count Work
+
 /// The pattern row a living body was cast from, read off the parts alone
 /// (ADR 0006): a CLAIM part is the reserver row, more Work than Move is
-/// the anchor row, no Work beside a Carry is the hauler row, and every
-/// other body is the generalist. The row is what sizes the replacement a
-/// lead prices (ADR 0026), so the one rule serves every row and none of
-/// them needs a constant of its own.
+/// the anchor row, a standing body at or under that line is the upgrader
+/// row, no Work beside a Carry is the hauler row, and every other body is
+/// the generalist. The row is what sizes the replacement a lead prices
+/// (ADR 0026), so the one rule serves every row and none of them needs a
+/// constant of its own.
+///
+/// The upgrader arm is written as ADR 0046 states the rule — `Work ≤ Move`
+/// **and** a standing body — and reaches here holding half of it already:
+/// the anchor arm above is exactly `Work > Move` (`Atlas.workHeavy`), so
+/// everything past it is at or under the line and the arm tests only what
+/// is left. Order matters between those two and nowhere else in this
+/// chain: `6W/1C/1M` satisfies both descriptions, and it is the anchor row
+/// that casts it — a body pinned to a Post by ADR 0020's Work Area, which
+/// is a stronger claim on it than standing beside the buffer is. Against
+/// the hauler arm below the two are disjoint whatever the order: a
+/// Work-less body is never standing.
 ///
 /// The reserver arm is what keeps ADR 0026 honest for a CLAIM body (ADR
 /// 0042): `[Claim; Move]` has neither Work nor Carry, so before it existed
@@ -1454,6 +1610,7 @@ let private isReserverBody (creep: CreepInfo) =
 let private patternOf atlas (creep: CreepInfo) =
     if isReserverBody creep then reserverPattern
     elif Atlas.workHeavy atlas creep.Name then anchorPattern
+    elif isStandingBody creep then upgraderPattern
     elif isHaulerBody creep then haulerPattern
     else workerPattern
 
@@ -2815,6 +2972,24 @@ let private isOutpostContainerSite (snapshot: Snapshot) atlas siteId =
 /// travel cost separates it from the work a heavy body should be doing,
 /// so that one Build is inapplicable to a Work-heavy body — the arm
 /// carries why.
+/// A fourth reads the body alone and covers three Tasks at once (ADR
+/// 0046): Build, Repair and Refill are inapplicable to a **standing body**
+/// — one carrying fewer than one Carry per four Work — because every one
+/// of the three is a delivery, and a delivery by a body that holds fifty
+/// energy against eleven Work is a commute the colony pays for in idle
+/// Work at the buffer it walked away from. It is the same kind of gate ADR
+/// 0016's is and for the same reason travel cost could not be it: the
+/// nearest such Task is often underfoot, so cost separates nothing and
+/// only a prohibition moves the body. Every other Task is deliberately
+/// left as its own gates already had it — Upgrade, Withdraw and Harvest,
+/// the working life the upgrader row was shaped for, and Pickup, which
+/// stays open because a pile is an intake and not a delivery — and no new
+/// gate is opened on Withdraw in particular (ADR 0016's stands as written,
+/// and the upgrader row is at `Work = Move`, inside it; an Anchor is not,
+/// so "untouched" leaves that body exactly as shut out as it was). The
+/// hauler row is outside this gate by arithmetic and not by exception:
+/// `Carry * 4 < 0` is false, so a Carry-only body refills as it always
+/// has.
 let private applicable (snapshot: Snapshot) (threats: Threats) atlas (creep: CreepInfo) task =
     let has part =
         creep.Body |> Map.tryFind part |> Option.exists (fun n -> n > 0)
@@ -2835,7 +3010,7 @@ let private applicable (snapshot: Snapshot) (threats: Threats) atlas (creep: Cre
     // buffer — it is energy on the floor, and any carrier that can lift it
     // is spending it somewhere the buffer's own drawers cannot.
     | Pickup _ -> has Carry && creep.FreeCapacity > 0 && not (Atlas.workHeavy atlas creep.Name)
-    | Refill _ -> has Carry && creep.Energy > 0
+    | Refill _ -> has Carry && creep.Energy > 0 && not (isStandingBody creep)
     // The one Build with a body gate on it (#157), and it is here for the
     // same reason ADR 0016's Withdraw gate is: `tierOf` below lifts this
     // site onto the feeding tier, and a rank the whole colony shares is
@@ -2853,8 +3028,15 @@ let private applicable (snapshot: Snapshot) (threats: Threats) atlas (creep: Cre
     | Build siteId ->
         has Work
         && creep.Energy > 0
+        && not (isStandingBody creep)
         && not (isOutpostContainerSite snapshot atlas siteId && Atlas.workHeavy atlas creep.Name)
-    | Repair _
+    // Repair leaves Upgrade's arm with ADR 0046's gate (a delivery, and a
+    // standing body's Carry is one trip's worth), and the two stay
+    // otherwise identical: a Work part and something to spend.
+    | Repair _ -> has Work && creep.Energy > 0 && not (isStandingBody creep)
+    // The one Task the whole row exists for, and so the one place the
+    // gate above must not appear (ADR 0046): a standing body spends its
+    // Work into the controller from where it stands.
     | Upgrade _ -> has Work && creep.Energy > 0
     // Part arithmetic and nothing else (ADR 0006): a reservation is pushed
     // up by CLAIM parts, so a body without one can no more reserve than a
@@ -3247,9 +3429,14 @@ let private outpostContainerBuilders = 2
 /// cap the formula gives for it. Pricing the buffer by a hauler instead
 /// would cap it on a body that can never draw from it: at an 1,800 bank
 /// the cast hauler carries 1,200 and the cast worker 450, so 900 standing
-/// in the buffer — two upgraders' worth — would admit one and send the
+/// in the buffer — two worker bodies' worth — would admit one and send the
 /// other back to the rock, a cap 2.67x tighter than the store it claims
-/// to describe. `haulerQuota` divides that same hauler load into the same
+/// to describe. Two *worker* bodies and not two upgraders, now that the
+/// upgrader is a row of its own (ADR 0046): its fifty-energy Carry divides
+/// that same 900 eighteen ways, and carrying the divisor over to it is
+/// #187's, with the quota that first hires one — until then the row that
+/// draws from the buffer is still the generalist and this is still its
+/// load. `haulerQuota` divides that same hauler load into the same
 /// source containers' flow one *spawn* at a time and takes the minimum;
 /// there is one number here instead, because a Task has one capacity and
 /// not one per spawn.

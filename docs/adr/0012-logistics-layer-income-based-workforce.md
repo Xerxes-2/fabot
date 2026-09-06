@@ -1,5 +1,7 @@
 # The logistics layer: containers, Posts, the hauler row, and an income-based workforce
 
+> **Revised by ADR 0046** on one Considered Option: "a separate miner row beside the Anchor" was rejected because the Post had already generalized the seat, so "heavy-WORK body pinned to a high-value tile by its own travel cost" described both footings. That generalization does not reach the *controller* container this ADR builds. The tile beside the buffer is no Post and never becomes one — what pins a body there is one Task's Work Area — so the [[upgrader]] row is a second row after all: `11W/1C/11M` at RCL5 against the worker row's `9W/9C/9M`, standing where this ADR put the buffer for it. The Post's generalization stands everywhere it was made, over the *source* container and the Dual Seat.
+
 > **Revised by ADR 0037**: the worker row's quota is rounded up, as this ADR's hauler quota always was — a floor drops a whole worker body's Work, and that granularity grows with RCL.
 
 > **Revised by ADR 0022**: Seats are working ground and no longer reservable by the clustered ordering, so the source-container pick never has to dodge a reservation. **Revised by ADR 0023**: the Storage joins Withdraw's sources one tier below the source containers, pooled only while some other sink is hungry.

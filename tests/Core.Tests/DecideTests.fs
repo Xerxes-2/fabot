@@ -431,13 +431,22 @@ let patternTableTests =
     testList
         "pattern table"
         [
-            test "the worker unit, the Anchor, the hauler and the reserver are the table's rows" {
+            test
+                "the worker unit, the Anchor, the hauler, the reserver and the upgrader are the table's rows" {
                 // The reserver joined the table the tick its quota did (ADR
                 // 0006, ADR 0042): a row arrives with the colony fact that
                 // says when it is cast, and `reserverClaimsOf` is that
                 // fact. The order here is the declaration's and not the
                 // casting order — which runs reserver, Anchor, hauler,
                 // worker — because nothing reads this list for a sequence.
+                //
+                // The upgrader is the one row ahead of its quota (ADR
+                // 0046), and deliberately: #186 lands the row and its
+                // sizing rule, #187 the quota and the casting cascade. Its
+                // block is the worker unit's three parts and its rule is
+                // not — one Carry and Work/Move pairs for the rest — which
+                // is the table saying that a row is a name and a sizing
+                // rule before it is a block.
                 Expect.equal
                     patternTable
                     [
@@ -456,6 +465,10 @@ let patternTableTests =
                         {
                             Name = "reserver"
                             Block = [ Claim; Move ]
+                        }
+                        {
+                            Name = "upgrader"
+                            Block = [ Work; Carry; Move ]
                         }
                     ]
                     "every body the colony casts comes from these rows"
@@ -567,6 +580,72 @@ let patternTableTests =
                     (bodyFor reserverPattern 100000)
                     (List.replicate 25 Claim @ List.replicate 25 Move)
                     "twenty-five blocks fill the 50 parts exactly"
+            }
+
+            test "the upgrader row buys Work/Move pairs beside one Carry" {
+                // ADR 0046's own body at the live RCL5 bank of 1,800:
+                // `floor((1800 - 50) / 150)` is eleven pairs for 1,700,
+                // against the worker row's nine Work at the same bank. The
+                // Carry stays at one however rich the bank — a body that
+                // stands beside the buffer needs one Withdraw's worth of
+                // store and nothing more.
+                Expect.equal
+                    (bodyFor upgraderPattern 1800)
+                    (List.replicate 11 Work @ [ Carry ] @ List.replicate 11 Move)
+                    "eleven Work, one Carry, eleven Move — Work first, legs last"
+            }
+
+            test "the upgrader row's minimal cast is one pair beside the Carry" {
+                // The RCL1 bank, where `(300 - 50) / 150` is one before
+                // any clamp: the row's smallest body is a worker unit's
+                // parts under a different rule — and still `Work = Move`,
+                // which is what keeps ADR 0016's gate open to it at every
+                // size.
+                Expect.equal
+                    (bodyFor upgraderPattern 300)
+                    [ Work; Carry; Move ]
+                    "one pair beside the Carry is the row's minimal cast"
+            }
+
+            test "below one pair's price the floor is one pair" {
+                // The clamp itself, which the RCL1 bank above does not
+                // reach: under 200 the arithmetic asks for no pair at all
+                // and the rule would answer with a bare Carry. Same floor
+                // the generalist row carries at 150 — no live bank is ever
+                // this poor, and a sizing rule that can answer an empty
+                // body is the thing being ruled out.
+                Expect.equal
+                    (bodyFor upgraderPattern 150)
+                    [ Work; Carry; Move ]
+                    "never below one pair, however poor the bank"
+            }
+
+            test "under an 800 bank the row's own cast is not a standing body" {
+                // Where the sizing rule and ADR 0046's predicate cross: one
+                // Carry against `floor((capacity - 50) / 150)` Work meets
+                // `Carry * 4 < Work` at five pairs, so the RCL2 bank of 550
+                // casts `3W/1C/3M` — this row's body, and outside the gate
+                // the row exists for. Deliberate and not a hole: three Work
+                // against a fifty-energy load is not yet the commute the
+                // ratio prices. Whether the quota hires under that bank at
+                // all is #187's (ADR 0046, Consequences).
+                Expect.equal
+                    (bodyFor upgraderPattern 550)
+                    [ Work; Work; Work; Carry; Move; Move; Move ]
+                    "three pairs beside the Carry at the RCL2 bank"
+            }
+
+            test "the upgrader body never exceeds the 50-part engine cap" {
+                // A pair is 150 energy, so an RCL8 bank would ask for
+                // eighty-five of them — the largest overshoot of any row,
+                // though the last to start biting (3,800 here against the
+                // hauler row's 2,550). Twenty-four pairs beside the one
+                // Carry is 49 parts, and the fiftieth cannot be a Work
+                // without leaving it unpaired.
+                Expect.equal
+                    (bodyFor upgraderPattern 12900)
+                    (List.replicate 24 Work @ [ Carry ] @ List.replicate 24 Move)
+                    "twenty-four pairs and the Carry fill the body to 49 parts"
             }
 
             test "a row the generalist rule cannot size is refused, not quietly rebuilt" {
@@ -17508,5 +17587,463 @@ let standDownGateTests =
             // that ADR 0043's own gate placement makes unreachable, and it
             // is carried out of this ticket as a finding of its own rather
             // than pinned here as if it were the behaviour.
+            }
+        ]
+
+/// The buffer lane (ADR 0046): a plain corridor three rows deep, the
+/// controller standing at (10,10) — an obstacle, as a projected one is —
+/// and its upgrade buffer "can-buf" at (13,10), the outermost tile of the
+/// controller's Upgrade Work Area and so a container the Planner pools as
+/// the buffer.
+///
+/// A creep beside the buffer at (14,10) stands one step *outside* that
+/// Work Area and *inside* the Work Area of anything at (15,10), which is
+/// where each case below puts its delivery. So Upgrade costs a step and
+/// the delivery costs nothing, the two share the Surplus tier, and travel
+/// cost alone would take every body to the delivery: what separates them
+/// is the gate and nothing else (ADR 0046). Which is the whole reason the
+/// gate is a prohibition rather than a price — the work a standing body
+/// must not walk to is the work standing closest to it.
+let private bufferLaneField =
+    [
+        for x in 5..20 do
+            for y in 9..11 -> { X = x; Y = y }, Plain
+    ]
+
+let private bufferLane =
+    { spatial [] bufferLaneField with
+        Stores = Map.ofList [ "can-buf", 900 ]
+    }
+    |> withTargets
+        [
+            "ctrl-1", { X = 10; Y = 10 }, Controller
+            "can-buf", { X = 13; Y = 10 }, Structure BuiltKind.Container
+        ]
+    |> withHome (fun layer ->
+        { layer with
+            Obstacles = Set.singleton { X = 10; Y = 10 }
+        })
+
+/// The lane with one creep on the buffer's doorstep and the given
+/// furniture at (15,10). No source, no hungry spawn and no Storage, so the
+/// pool is exactly the controller's Upgrade, the buffer's own Withdraw and
+/// Refill, and whatever the case stands beside the creep — the smallest
+/// pool that can hold ADR 0046's question. The bank is the live RCL5
+/// 1,800, which is the capacity both bodies below are cast at.
+let private bufferLaneColony furniture sites creep =
+    { bareRespawn with
+        RoomEnergy = bank 1800 1800
+        Sources = []
+        Refillables = []
+        Controller = Some(controllerAt 2)
+        ConstructionSites = sites
+        Creeps = [ creep ]
+        Spatial =
+            bufferLane
+            |> withTargets furniture
+            |> withHome (fun layer ->
+                { layer with
+                    CreepPositions = Map.ofList [ (creep: CreepInfo).Name, { X = 14; Y = 10 } ]
+                })
+    }
+
+/// A body of the given row at the live RCL5 bank, full: energy on board
+/// and no free capacity, which is the state every delivery Task asks for
+/// and the state that ends a Withdraw. The name is the row's, so a failure
+/// message says which body it was.
+let private castFull pattern =
+    let body = bodyFor pattern 1800
+
+    creepWith pattern.Name (50 * (body |> List.filter ((=) Carry) |> List.length)) 0 body
+
+/// The upgrader row's own body at that bank: `11W/1C/11M`, ADR 0046's.
+let private upgraderBody = castFull upgraderPattern
+
+/// The generalist at the same bank: `9W/9C/9M` — one Carry per Work where
+/// the gate's line is one per four, so it is the row the gate must leave
+/// alone, its whole design being that it walks its energy somewhere.
+let private workerBody = castFull workerPattern
+
+/// The Anchor row's live body: six Work, one Carry, one Move (ADR 0021's
+/// held ceiling). A standing body by the same arithmetic as the upgrader's
+/// — `1 * 4 < 6` — which is ADR 0046 saying the rule is about bodies and
+/// not about rows.
+let private anchorBody = castFull anchorPattern
+
+/// The assignment one body takes in the lane, with the given furniture at
+/// (15,10).
+let private laneAssignment furniture sites creep =
+    let { Assignments = assignments } =
+        decide (bufferLaneColony furniture sites creep) Map.empty Set.empty None
+
+    Map.tryFind (creep: CreepInfo).Name assignments
+
+[<Tests>]
+let standingBodyTests =
+    testList
+        "the standing body"
+        [
+            test "beside the buffer a standing body upgrades where the generalist builds" {
+                // ADR 0046's whole claim, pairwise on the body and nothing
+                // else: the same tile, the same pool, the same tier. The
+                // site is the cheaper of the two Surplus Tasks for anyone
+                // allowed to take it, so the generalist takes it; for the
+                // upgrader row's body Build is inapplicable and Upgrade is
+                // what is left. A standing body's Carry holds fifty energy
+                // against eleven Work, so the trip would spend one tick
+                // delivering for every tick of the walk out and back, with
+                // eleven Work idle beside the buffer meanwhile.
+                let site = [ "site-1", { X = 15; Y = 10 }, Site BuiltKind.Extension ]
+                let sites = [ { Id = "site-1" } ]
+
+                Expect.equal
+                    (laneAssignment site sites upgraderBody)
+                    (Some(taskId (Upgrade "ctrl-1")))
+                    "the standing body spends its load where it stands"
+
+                Expect.equal
+                    (laneAssignment site sites workerBody)
+                    (Some(taskId (Build "site-1")))
+                    "the generalist at the same tile takes the nearer Task, as it always has"
+            }
+
+            test "the Anchor row's body is a standing body too" {
+                // ADR 0046 says the gate covers `6W/1C/1M`, and says the
+                // rule is read off parts and never off a row name (ADR
+                // 0006). Pinned against the generalist one rival at a time
+                // — the same lane, the same site, one body swapped — so it
+                // is the arithmetic `1 * 4 < 6` that is on trial and not
+                // some Anchor-shaped exception.
+                //
+                // What the ADR claims about the *colony* is that this
+                // changes nothing for the Anchor row, because a rank-0
+                // Harvest holds it at its Post long before travel cost gets
+                // a say — which is the next case. This one is what the rule
+                // says when Harvest is not in the pool at all.
+                let site = [ "site-1", { X = 15; Y = 10 }, Site BuiltKind.Extension ]
+
+                Expect.equal
+                    (laneAssignment site [ { Id = "site-1" } ] anchorBody)
+                    (Some(taskId (Upgrade "ctrl-1")))
+                    "one Carry against six Work is a commute, whichever row cast it"
+            }
+
+            test "a standing body does not repair either" {
+                // The third of ADR 0046's three deliveries. A road at half
+                // hits is the ordinary Repair (ADR 0034), one step from the
+                // creep and three from the controller, so the pairwise
+                // reads exactly as the Build one does.
+                let road = [ "road-1", { X = 15; Y = 10 }, Structure BuiltKind.Road ]
+
+                let dented (colony: Snapshot) =
+                    { colony with
+                        Spatial =
+                            { colony.Spatial with
+                                Hits =
+                                    Map.add
+                                        "road-1"
+                                        { Hits = 100; HitsMax = 5000 }
+                                        colony.Spatial.Hits
+                            }
+                    }
+
+                let assignedFor creep =
+                    let { Assignments = assignments } =
+                        decide (dented (bufferLaneColony road [] creep)) Map.empty Set.empty None
+
+                    Map.tryFind (creep: CreepInfo).Name assignments
+
+                Expect.equal
+                    (assignedFor upgraderBody)
+                    (Some(taskId (Upgrade "ctrl-1")))
+                    "a repair is a delivery, and this body delivers fifty at a time"
+
+                Expect.equal
+                    (assignedFor workerBody)
+                    (Some(taskId (Repair "road-1")))
+                    "the generalist at the same tile still repairs the road beside it"
+            }
+
+            test "the buffer's own Withdraw stays open to a standing body" {
+                // ADR 0016's gate is `Work > Move` and ADR 0019's is a Work
+                // part, and ADR 0046 opens no third one (the ticket's own
+                // trap): the upgrader row is at `Work = Move` with a Work
+                // part, so the buffer it stands beside is exactly what it
+                // draws from. Empty, so the two Surplus Tasks are
+                // inapplicable for want of energy and the Withdraw is the
+                // whole of what is left.
+                let empty = creepWith "upgrader" 0 50 (bodyFor upgraderPattern 1800)
+
+                Expect.equal
+                    (laneAssignment [] [] empty)
+                    (Some(taskId (Withdraw "can-buf")))
+                    "the row drinks from the buffer at its feet, which is why it stands there"
+            }
+
+            test "an Anchor with a site beside it still only Harvests" {
+                // ADR 0046's claim about the Anchor row, at the seam it is
+                // made about: with Harvest in the pool the rank settles it
+                // (feeding above surplus) and the gate never gets a say, so
+                // the row's behaviour is unchanged. Pairwise on the pool
+                // rather than on the body — the same Anchor, once with the
+                // site and once without — because it is the site that is on
+                // trial here.
+                let seatRoom =
+                    { spatial
+                          [ "src-a", { X = 10; Y = 10 } ]
+                          (openSeats { X = 10; Y = 10 }
+                           @ [ { X = 12; Y = 10 }, Plain; { X = 13; Y = 10 }, Plain ]) with
+                        TargetKinds = Map.ofList [ "src-a", Source ]
+                    }
+                    |> withHome (fun layer ->
+                        { layer with
+                            CreepPositions = Map.ofList [ "anchor", { X = 11; Y = 10 } ]
+                        })
+
+                let colony sites targets =
+                    { bareRespawn with
+                        RoomEnergy = bank 1800 1800
+                        Sources = [ source "src-a" ]
+                        Refillables = []
+                        Controller = None
+                        ConstructionSites = sites
+                        Creeps = [ creepWith "anchor" 25 25 (bodyFor anchorPattern 1800) ]
+                        Spatial = seatRoom |> withTargets targets
+                    }
+
+                let assignedWith sites targets =
+                    let { Assignments = assignments } =
+                        decide (colony sites targets) Map.empty Set.empty None
+
+                    Map.tryFind "anchor" assignments
+
+                Expect.equal
+                    (assignedWith [] [])
+                    (Some(taskId (Harvest "src-a")))
+                    "with nothing else in the pool the Anchor digs"
+
+                Expect.equal
+                    (assignedWith
+                        [ { Id = "site-1" } ]
+                        [ "site-1", { X = 12; Y = 10 }, Site BuiltKind.Extension ])
+                    (Some(taskId (Harvest "src-a")))
+                    "and a site one step away does not move it — the rule only writes down what the rank already did"
+            }
+        ]
+
+/// The delivery lane: the same corridor with one hungry spawn standing at
+/// (15,10) and nothing else at all — no controller, no source, no site —
+/// so the Refill of that spawn is the only Task in the pool and an empty
+/// assignment map means the gate and nothing else.
+let private deliveryLaneColony creep =
+    { bareRespawn with
+        RoomEnergy = bank 1800 1800
+        Sources = []
+        Controller = None
+        Refillables = [ refillable "spawn-1" 300 BuiltKind.Spawn ]
+        Creeps = [ creep ]
+        Spatial =
+            spatial [] bufferLaneField
+            |> withTargets [ "spawn-1", { X = 15; Y = 10 }, Structure BuiltKind.Spawn ]
+            |> withHome (fun layer ->
+                { layer with
+                    Obstacles = Set.singleton { X = 15; Y = 10 }
+                    CreepPositions = Map.ofList [ (creep: CreepInfo).Name, { X = 14; Y = 10 } ]
+                })
+    }
+
+let private deliveryAssignment creep =
+    let { Assignments = assignments } =
+        decide (deliveryLaneColony creep) Map.empty Set.empty None
+
+    Map.tryFind (creep: CreepInfo).Name assignments
+
+[<Tests>]
+let standingRefillTests =
+    testList
+        "the standing body and the Refill"
+        [
+            test "the hauler row is outside the gate by arithmetic, not by exception" {
+                // The trap ADR 0046's rule is written to walk into and
+                // not be caught by: a hauler has no Work at all, so
+                // `Carry * 4 < Work` reads `8 * 4 < 0` — false — and the
+                // row whose entire life is delivery keeps every delivery
+                // it ever had. Pinned because the gate's arithmetic could
+                // so easily have been written the other way round.
+                Expect.equal
+                    (deliveryAssignment (hauler "hauler" 100 0))
+                    (Some(taskId (Refill "spawn-1")))
+                    "no Work part means no standing body, whatever the Carry"
+            }
+
+            test "a standing body does not refill the spawn beside it" {
+                Expect.equal
+                    (deliveryAssignment upgraderBody)
+                    None
+                    "one Carry against eleven Work delivers fifty energy a round trip"
+            }
+
+            test "a full Anchor off its Post keeps no delivery either" {
+                // The state ADR 0046's Anchor consequence is qualified
+                // for, and the one the Build arm's own #157 comment
+                // records as observed: an Anchor whose Post has no
+                // standing container to catch its overflow fills up, and
+                // with no Harvest left in its pool the rank that used to
+                // settle everything has nothing to settle. Before the gate
+                // this body took the spawn's feeding-tier Refill two steps
+                // away; now it holds no Task at all here, and takes a
+                // pooled Upgrade at any distance where one exists.
+                //
+                // Pinned rather than left to be discovered: it is the
+                // whole live cost of writing the gate as a prohibition,
+                // and the glossary's "the rule only writes down what a
+                // rank-0 Harvest was already doing" is true only where a
+                // Harvest is in the pool.
+                Expect.equal
+                    (deliveryAssignment anchorBody)
+                    None
+                    "one Carry against six Work is the same commute, and the same prohibition"
+            }
+
+            test "the row's own small cast is outside the gate with the rest of the band" {
+                // `3W/1C/3M`, the upgrader row's body at the RCL2 bank of
+                // 550: the row, and not a standing body — `1 * 4 < 3` is
+                // false — so it delivers like the generalist it is read
+                // back to. The band under an 800 bank pinned at the seam
+                // rather than only in the arithmetic above, because it is
+                // the gate and not the sizing rule that the band is
+                // interesting for (ADR 0046, Consequences; #187 owns
+                // whether the quota hires into it).
+                Expect.equal
+                    (deliveryAssignment (creepWith "upgrader" 50 0 (bodyFor upgraderPattern 550)))
+                    (Some(taskId (Refill "spawn-1")))
+                    "three Work against a fifty-energy load is not yet a commute"
+            }
+
+            test "the generalist beside it refills as it always has" {
+                // The near miss, and the reason the ratio is four rather
+                // than something tighter: `9W/9C/9M` is one Carry per
+                // Work where the gate's line is one per four, so the whole
+                // worker row is outside it at every bank (ADR 0003's
+                // parity keeps it there).
+                Expect.equal
+                    (deliveryAssignment workerBody)
+                    (Some(taskId (Refill "spawn-1")))
+                    "the row that carries its energy to work keeps its deliveries"
+            }
+        ]
+
+/// A colony standing exactly at its Workforce target with one body of the
+/// given shape in it: the shape `leadColony` above has, at the live RCL5
+/// bank of 1,800 instead of 1,300 — no Post, no source container and no
+/// placed rock, so the target is the floor of two and the two living
+/// creeps meet it. One body leaving the count is therefore one cast, which
+/// is what makes a lead readable (ADR 0026). The body under test stands at
+/// (25,29), three plain steps from the tile a replacement is born on.
+let private upgraderLeadColony body life =
+    let room = atLevel 2 (openRoom 6)
+
+    { room with
+        RoomEnergy = bank 1800 1800
+        Creeps = [ worker "w1" 0 50; creepWith "u1" 0 50 body |> withLife life ]
+        Spatial =
+            room.Spatial
+            |> withHome (fun layer ->
+                { layer with
+                    CreepPositions =
+                        Map.ofList [ "w1", { X = 25; Y = 27 }; "u1", { X = 25; Y = 29 } ]
+                })
+    }
+
+let private leadCasts body life =
+    spawnIntents (decide (upgraderLeadColony body life) Map.empty Set.empty None).Intents
+
+[<Tests>]
+let upgraderLeadTests =
+    testList
+        "the upgrader row's lead"
+        [
+            test "a standing body's lead is the upgrader row's, not the generalist's" {
+                // `patternOf` reads a living body back to the row it was
+                // cast from (ADR 0006), and the row is what sizes the
+                // replacement a lead prices (ADR 0026). A `11W/1C/11M` body
+                // has Work at Move and a Carry nine times short of parity,
+                // so before ADR 0046's row existed it fell through to the
+                // generalist and was priced as one.
+                //
+                // The two arithmetics at this colony's 1,800 bank: the
+                // upgrader row casts twenty-three parts, 69 ticks in the
+                // spawner, and its eleven Move carry eleven fatigue parts
+                // — an empty Carry rides free — over a plain tile in the
+                // walk's one-tick floor, 3 ticks for the three steps, a
+                // lead of 72. The generalist row at the same bank is nine
+                // whole units, twenty-seven parts: 81 ticks in the spawner
+                // and the same 3 of walking, a lead of 84. Every life
+                // between the two is where the rows disagree.
+                let upgraderShape = bodyFor upgraderPattern 1800
+
+                Expect.isEmpty
+                    (leadCasts upgraderShape 80)
+                    "at 80 ticks the standing body still counts; read off the generalist row it would not"
+
+                Expect.isEmpty
+                    (leadCasts upgraderShape 73)
+                    "one tick outside its own row's lead it still counts"
+
+                Expect.hasLength
+                    (leadCasts upgraderShape 72)
+                    1
+                    "at its own row's lead the colony is one short and casts"
+
+                // The generalist at the same tile, one rival at a time: the
+                // same colony, the same life, a body of the row this one
+                // used to be read as.
+                Expect.hasLength
+                    (leadCasts (workerBodyFor 1800) 80)
+                    1
+                    "the generalist at 80 is inside its own longer lead, which is what 80 was chosen to show"
+            }
+
+            test "the row that replaces a standing body is not the upgrader row" {
+                // The half of ADR 0046 that is #187's and not this
+                // ticket's: the row is in the table and `planSpawns`
+                // computes no gap for it, so the body the colony is one
+                // short of is hired from the generalist row's remainder as
+                // it always was. A `SpawnCreep` named "upgrader-" here
+                // would mean the quota arrived a ticket early.
+                match leadCasts (bodyFor upgraderPattern 1800) 72 with
+                | [ (_, body, creepName) ] ->
+                    Expect.stringStarts
+                        creepName
+                        "worker-"
+                        "the upgrader row has no quota until #187, so the deficit hires the generalist"
+
+                    Expect.equal
+                        body
+                        (workerBodyFor 1800)
+                        "and it is the generalist's own body, sized at the bank"
+                | other -> failtest $"expected exactly one SpawnCreep intent, got %A{other}"
+            }
+
+            test "the Anchor row wins the read over the upgrader row" {
+                // `6W/1C/1M` answers to both descriptions — more Work than
+                // Move *and* a standing body — and it is the Anchor row
+                // that cast it, so that is the row it is read back to and
+                // the lead it is priced at. The arms are ordered and the
+                // order is the rule (ADR 0021 over ADR 0046).
+                //
+                // Eight parts is 24 ticks in the spawner, and six fatigue
+                // parts on one Move is six ticks a plain step: a lead of
+                // 42. Read as an upgrader it would be 72, so a life of 50
+                // sits between the two rows and casts under one of them
+                // only.
+                Expect.isEmpty
+                    (leadCasts (bodyFor anchorPattern 1800) 50)
+                    "at 50 the Anchor is outside its own row's lead; read as an upgrader it would not be"
+
+                Expect.hasLength
+                    (leadCasts (bodyFor anchorPattern 1800) 42)
+                    1
+                    "and at 42 it is inside it"
             }
         ]
