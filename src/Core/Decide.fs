@@ -5054,13 +5054,29 @@ let planPool (view: ColonyView) atlas (tasks: Task list) : PooledTask list =
     // one". One rung is inside the tier (`priorityStep`), so nothing
     // crosses a tier boundary, the Storage's own draw keeps its place under
     // the flow, and `weightOfRank` divides the rung back out either way.
+    //
+    // The second lift, one rung under the Pickup's (live, W13S28
+    // 2026-09-07): a **full source container**. The engine drops a
+    // garrison's overflow on the ground only once its container is full,
+    // so a full container is the one whose income is going away too — and
+    // a hauler row sized to the mean round trip served the near container
+    // every trip and let the far one overflow for hours, the nearest-first
+    // dispatch #198 names. Lifted one rung, a full container outranks a
+    // half-full one at any distance inside the tier; its pile, one rung
+    // above it, is still taken first on the same tile. Source containers
+    // alone (the Feeding-tier Withdraw): the buffer and the Storage are
+    // sinks the haulers fill, and a full one is the flow working.
     let priorityOf task =
         let step =
             match task with
             | Pickup pileId ->
                 match SpatialInfo.placementOf view.Spatial pileId with
-                | Some tile when Set.contains tile drawableTiles -> -priorityStep
+                | Some tile when Set.contains tile drawableTiles -> -2 * priorityStep
                 | _ -> 0
+            | Withdraw storeId when
+                tierOf task = Feeding && stored storeId >= Engine.containerCapacity
+                ->
+                -priorityStep
             | _ -> 0
 
         match task with

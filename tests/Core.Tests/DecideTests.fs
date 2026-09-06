@@ -11701,10 +11701,13 @@ let withdrawCapacityTests =
                 // `load` (ADR 0002), so without a capacity every empty
                 // hauler picks the *nearest* stocked container whatever is
                 // in it — three bodies onto 400 energy, two of them home
-                // empty, while 2,000 stands unvisited seventeen tiles away.
-                // The stock is the cap: `ceil(400 / 400)` is one seat.
+                // empty, while 1,800 stands unvisited seventeen tiles away.
+                // The stock is the cap: `ceil(400 / 400)` is one seat. The
+                // far store is 1,800 and not a full 2,000: a full source
+                // container is lifted a rung of its own (its overflow is
+                // going to the ground), and this test is about the cap.
                 let { Assignments = split } =
-                    decide (crowdColony 400 2000 crowdOfThree) Map.empty Set.empty None
+                    decide (crowdColony 400 1800 crowdOfThree) Map.empty Set.empty None
 
                 Expect.equal
                     (drawersOf split "can-near")
@@ -11739,7 +11742,7 @@ let withdrawCapacityTests =
                 let seatsAt stock =
                     let { Assignments = assignments } =
                         decide
-                            (crowdColony stock 2000 (List.truncate 2 crowdOfThree))
+                            (crowdColony stock 1800 (List.truncate 2 crowdOfThree))
                             Map.empty
                             Set.empty
                             None
@@ -25422,5 +25425,68 @@ let quotasRecordTests =
                     (quotas.Rows |> List.sumBy (fun r -> r.Living))
                     quotas.Living
                     "the rows' living counts partition the fleet"
+            }
+        ]
+
+[<Tests>]
+let fullContainerTests =
+    testList
+        "a full source container"
+        [
+            test "a full source container is drawn before a half-full one nearer to hand" {
+                // One lane, two posted sources: can-a three tiles from the
+                // hauler at 1,000, can-b twelve tiles away at 2,000 (full,
+                // so its garrison's overflow is going to the ground). The
+                // full one wins by rank; pairwise on can-b's stock alone,
+                // at 1,000 the near one wins by travel cost, which is the
+                // nearest-first dispatch that let W13S28's north container
+                // overflow for hours (#198).
+                let lane stockB =
+                    let room =
+                        { spatial
+                              []
+                              [
+                                  for x in 9..28 ->
+                                      { X = x; Y = 10 }, (if x = 10 || x = 27 then Wall else Plain)
+                              ] with
+                            Stores = Map.ofList [ "can-a", 1000; "can-b", stockB ]
+                        }
+                        |> withTargets
+                            [
+                                "src-a", { X = 10; Y = 10 }, Source
+                                "can-a", { X = 11; Y = 10 }, Structure BuiltKind.Container
+                                "src-b", { X = 27; Y = 10 }, Source
+                                "can-b", { X = 26; Y = 10 }, Structure BuiltKind.Container
+                            ]
+                        |> withHome (fun layer ->
+                            { layer with
+                                CreepPositions = Map.ofList [ "h", { X = 14; Y = 10 } ]
+                            })
+
+                    { bareRespawn with
+                        Sources = [ source "src-a"; source "src-b" ]
+                        Refillables = []
+                        Controller = None
+                        Creeps = [ creepWith "h" 0 200 [ Carry; Carry; Carry; Carry; Move; Move ] ]
+                        Spatial = room
+                    }
+
+                let matched stockB =
+                    let { Verdicts = verdicts } = decide (lane stockB) Map.empty Set.empty None
+
+                    verdicts
+                    |> List.tryPick (function
+                        | Verdict.Matched("h", task, factor) -> Some(task, factor)
+                        | _ -> None)
+
+                Expect.equal
+                    (matched 2000)
+                    (Some(taskId (Withdraw "can-b"), MatchFactor.Rank))
+                    "the full container outranks the near one"
+
+                Expect.equal
+                    (matched 1000)
+                    (Some(taskId (Withdraw "can-a"), MatchFactor.TravelCost))
+                    "both half-full: the near one, by travel cost"
             }
         ]
