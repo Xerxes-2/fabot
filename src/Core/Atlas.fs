@@ -3420,10 +3420,31 @@ let castWalkTicks
 /// keys and the lowest (cost, tile) goal break every tie. Over the
 /// colony's own room's raw terrain: a trunk is a road the Layout plans,
 /// and the Layout plans at home (ADR 0041).
+/// What a swamp tile costs a *trunk* (ADR 0011 as #211 amends it): three
+/// against plain's two, where the walk prices it at `swampWeight`, ten. A
+/// trunk is a road, and once paved a swamp tile walks at exactly what a
+/// paved plain tile walks at (road 1, ADR 0010); the only thing swamp
+/// costs a road is construction — 1,500 against 300, a one-off 1,200 —
+/// and repair is identical either way. Priced at the walking ratio the
+/// router bought W13S28 a permanent twenty-one-tile detour around five
+/// swamps to save energy worth ~120 ticks of one source's output: from
+/// (10,4) the swamp line was 5 × 10 + 2 × 2 = 54 against a seventeen-step
+/// plain loop at 34. Three is the surcharge that amortizes the
+/// construction — a swamp step is one more than a plain step, so the
+/// router takes swamp when it saves a step and avoids it when a plain
+/// step is free; the line stays shortest-first with construction as the
+/// tie-break, which is the only difference a paved tile has left. Not
+/// equal weights: with a tie the flood's index order picks, and a plain
+/// step really is 1,200 cheaper. Under `swampWeight`, so the step table
+/// the flood indexes by weight still covers it.
+let private trunkSwampWeight = 3
+
 let trunkPath (atlas: Atlas) (avoid: Set<Pos>) (origin: Pos) (goals: Set<Pos>) : Pos list =
     // Raw terrain is the *price*, never what blocks: the trunk starts from
-    // the ground grid — plain 2, swamp 10, wall -1, and no road discount,
-    // which is the walking grid's one disqualifying difference — and then
+    // the ground grid — plain 2, swamp `trunkSwampWeight` (#211: the
+    // walking grid's ten is a creep's price for ground the road erases),
+    // wall -1, and no road discount, which is the walking grid's one
+    // disqualifying difference — and then
     // takes the obstacle pass back off the layer, because a rampart or a
     // spawn standing in the line is as impassable to a planned road as a
     // wall (ADR 0011). Marked from `Obstacles` rather than inferred from
@@ -3437,6 +3458,12 @@ let trunkPath (atlas: Atlas) (avoid: Set<Pos>) (origin: Pos) (goals: Set<Pos>) :
     // comparisons a tile per trunk, and the Layout plans one trunk per
     // source per goal on every census tick.
     let weights = Array.copy (groundOf atlas atlas.Home)
+
+    // The swamp repriced for a road (#211) before the obstacle pass, so a
+    // swamp under an obstacle still reads -1 after it.
+    for index in 0 .. weights.Length - 1 do
+        if weights.[index] = swampWeight then
+            weights.[index] <- trunkSwampWeight
 
     (layerOf atlas atlas.Home).Obstacles
     |> Set.iter (fun tile -> weights.[indexOf tile] <- -1)

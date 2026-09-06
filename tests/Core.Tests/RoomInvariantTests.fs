@@ -2575,6 +2575,30 @@ let roadLevelTests =
                     "the containers are planned at RCL1, with no road owed under them"
             }
 
+            test "W13S28's trunks cross the swamp field instead of looping the west edge" {
+                // #211: priced at the walk's swamp 10 the router paved a
+                // ~28-tile loop along the room's north and west edges to
+                // reach the spawn from the north source; priced as a road
+                // (swamp 3) it crosses the swamp field between them. Pinned
+                // as "some placed road site stands on swamp, and the whole
+                // set is well under the loop's size" rather than as a tile
+                // list (`RoomFixtures`: real terrain is a counterexample
+                // generator, not a source of expected values). The loop's
+                // set was 68 sites; the crossing's is 30.
+                let capture = load "W13S28"
+                let roads = tilesOfKind Road (placedAt "W13S28" 3)
+
+                Expect.isTrue
+                    (roads
+                     |> List.exists (fun tile -> Map.tryFind tile capture.Terrain = Some Swamp))
+                    "at least one trunk tile is paved over swamp"
+
+                Expect.isLessThan
+                    (List.length roads)
+                    45
+                    "and the trunk set is the crossing's, not the loop's"
+            }
+
             test "the mother is above the line and does not move" {
                 // W12S28 from the tile its colony stands on, at the live
                 // RCL5: the gate is inert from `roadLevel` up, so the road

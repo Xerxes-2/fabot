@@ -5572,3 +5572,80 @@ let crossRoomStepTests =
                     "every step of the drive buys exactly the two units a plain step costs"
             }
         ]
+
+[<Tests>]
+let trunkPricingTests =
+    testList
+        "atlas trunk pricing"
+        [
+            test "a trunk takes two swamps to save two plain steps: paved length, not the walk" {
+                // #211. Two goals off one origin, everything else wall.
+                // Goal A is three steps away across two swamps, goal B five
+                // steps away over plain. Priced as a road (plain 2, swamp 3)
+                // A costs 8 and B 10, so the line goes through the swamp;
+                // priced as a walk (swamp 10) A would cost 22 and the router
+                // would pave the long way round — which is the twenty-one-
+                // tile loop W13S28 got.
+                let atlas =
+                    spatial
+                        []
+                        [
+                            { X = 10; Y = 10 }, Plain
+                            { X = 11; Y = 10 }, Swamp
+                            { X = 12; Y = 10 }, Swamp
+                            { X = 13; Y = 10 }, Plain
+                            { X = 10; Y = 11 }, Plain
+                            { X = 10; Y = 12 }, Plain
+                            { X = 10; Y = 13 }, Plain
+                            { X = 10; Y = 14 }, Plain
+                            { X = 10; Y = 15 }, Plain
+                        ]
+                    |> snapshotWith []
+                    |> ofSnapshot
+
+                let path =
+                    trunkPath
+                        atlas
+                        Set.empty
+                        { X = 10; Y = 10 }
+                        (Set.ofList [ { X = 13; Y = 10 }; { X = 10; Y = 15 } ])
+
+                Expect.equal
+                    (List.last path)
+                    { X = 13; Y = 10 }
+                    "the swamp line is the cheaper road"
+
+                Expect.equal (List.length path) 3 "three tiles, two of them swamp"
+
+                // Pairwise on the surcharge alone: one more plain step on
+                // the long way and the swamp line still wins; one fewer and
+                // the plain way does — the ratio is one step, which is what
+                // a 1,200-energy construction difference is worth against
+                // a permanent detour.
+                let shorterPlain =
+                    spatial
+                        []
+                        [
+                            { X = 10; Y = 10 }, Plain
+                            { X = 11; Y = 10 }, Swamp
+                            { X = 12; Y = 10 }, Swamp
+                            { X = 13; Y = 10 }, Plain
+                            { X = 10; Y = 11 }, Plain
+                            { X = 10; Y = 12 }, Plain
+                            { X = 10; Y = 13 }, Plain
+                        ]
+                    |> snapshotWith []
+                    |> ofSnapshot
+
+                Expect.equal
+                    (List.last (
+                        trunkPath
+                            shorterPlain
+                            Set.empty
+                            { X = 10; Y = 10 }
+                            (Set.ofList [ { X = 13; Y = 10 }; { X = 10; Y = 13 } ])
+                    ))
+                    { X = 10; Y = 13 }
+                    "three plain steps (6) beat two swamps and a plain (8): the surcharge is real"
+            }
+        ]
