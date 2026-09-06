@@ -22,6 +22,7 @@
 //                                  to, the deadline that tick was read off, and
 //                                  the rooms another player took, shut by no clock
 //   observe.mjs layout             what the Layout could not deliver this plan
+//   observe.mjs quotas             the cascade's workforce arithmetic, row by row
 //   observe.mjs cpu                the per-tick CPU line — the tick's total,
 //                                  where it went phase by phase, how many
 //                                  intents the engine took, and ADR 0041's
@@ -52,7 +53,7 @@ const fail = (msg) => {
 const usage =
   "usage: observe.mjs tasks [--json] | timeline <creep> [--json] | " +
   "raids [--colony <home>] [--json] | outposts [--colony <home>] [--json] | " +
-  "layout [--colony <home>] [--json] | cpu [--json] | " +
+  "layout [--colony <home>] [--json] | quotas [--colony <home>] [--json] | cpu [--json] | " +
   "verbose [add <creep> | remove <creep> | clear] [--json] | " +
   "console --seconds N";
 
@@ -80,7 +81,7 @@ const creepArg = rest[0];
 const [action, actionName] = rest;
 
 if (
-  !["tasks", "timeline", "raids", "outposts", "layout", "cpu", "verbose", "console"].includes(
+  !["tasks", "timeline", "raids", "outposts", "layout", "quotas", "cpu", "verbose", "console"].includes(
     command,
   )
 )
@@ -97,7 +98,7 @@ if (command !== "console" && seconds !== undefined) fail(usage);
 // The colony-keyed commands are exactly the two channels that split by home
 // (ADR 0047); anywhere else the flag would name a colony nothing reads.
 if (rawArgs.includes("--colony")) {
-  if (!["raids", "outposts", "layout"].includes(command)) fail(usage);
+  if (!["raids", "outposts", "layout", "quotas"].includes(command)) fail(usage);
   // The flag eats the next argument, so a bare `--colony` at the end, or one
   // in front of `--json`, would silently read the default colony instead of
   // the one the operator asked for.
@@ -596,6 +597,41 @@ if (command === "console") {
       `  read off the read-only API at ${SECTOR.read} and recorded in ADR 0043. A dated ` +
         "observation, never a live read: the colony has no vision there and never will.",
     );
+  }
+} else if (command === "quotas") {
+  // ---- quotas: the cascade's workforce arithmetic ------------------------
+  // Wire shape written by ObserveMemory.saveQuotas:
+  //   { target, living, casting, rows: [{ row, quota, living, casting }] }
+  // One tick's reading, no history. rows: [] with target 0 is the cascade's
+  // silence — a spawn's doorstep stood inside a Reach — and is said as such
+  // rather than as "nothing to hire".
+  const { home, stored } = await colonyLeaf("quotas");
+  if (!Array.isArray(stored.rows)) {
+    fail(
+      `the quotas record at Memory.fabot.observe.colonies.${home}.quotas carries no \`rows\` list — ` +
+        "the leaf was hand-edited, or its wire shape has moved.",
+    );
+  }
+  if (jsonOut) {
+    console.log(JSON.stringify({ home, ...stored }, null, 2));
+  } else {
+    console.log(`colony ${home}`);
+    if (stored.rows.length === 0) {
+      console.log("  cascade silent: a spawn's doorstep is inside a Reach (ADR 0033)");
+    } else {
+      console.log(
+        `  target ${stored.target}  living ${stored.living}  casting ${stored.casting}  ` +
+          `deficit ${Math.max(0, stored.target - stored.living - stored.casting)}`,
+      );
+      console.log("  row        quota  living  casting  gap");
+      for (const r of stored.rows) {
+        const gap = Math.max(0, r.quota - r.living - r.casting);
+        console.log(
+          `  ${String(r.row).padEnd(9)} ${String(r.quota).padStart(6)} ${String(r.living).padStart(7)} ` +
+            `${String(r.casting).padStart(8)} ${String(gap).padStart(4)}`,
+        );
+      }
+    }
   }
 } else if (command === "layout") {
   // ---- layout: what the Layout could not deliver ------------------------

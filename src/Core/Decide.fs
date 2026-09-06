@@ -2813,7 +2813,7 @@ let private planSpawns
     (threats: Threats)
     (tasks: Task list)
     (haulerQuota: int)
-    : Intent list =
+    : Intent list * Quotas =
     // The spawn holds while its doorstep is hot (ADR 0033): a creep born
     // into a Reach is a kill delivered, so no spawn casts anything while
     // any tile beside any spawn lies in one — the disaster fallback below
@@ -2837,7 +2837,7 @@ let private planSpawns
     // hostiles first: a held tick derives no Workforce target and floods
     // no lead.
     if view.Spawns |> List.exists doorstepInReach then
-        []
+        [], Quotas.silent
     else
 
         // The specialist rows' quota rules (ADR 0006, ADR 0012): one Anchor
@@ -3026,25 +3026,21 @@ let private planSpawns
         // capacity. Counting living reservers per room instead would recast
         // for a room every tick of the fifty its first reserver spends
         // walking there.
+        let reserverLiving = living |> List.filter isReserverBody |> List.length
+
         let reserverGap =
-            List.length reserverClaims
-            - (living |> List.filter isReserverBody |> List.length)
-            - castOf reserverPattern
-            |> max 0
+            List.length reserverClaims - reserverLiving - castOf reserverPattern |> max 0
 
-        let anchorGap =
-            anchorQuota
-            - (living
-               |> List.filter (fun creep -> Atlas.workHeavy atlas creep.Name)
-               |> List.length)
-            - castOf anchorPattern
-            |> max 0
+        let anchorLiving =
+            living
+            |> List.filter (fun creep -> Atlas.workHeavy atlas creep.Name)
+            |> List.length
 
-        let haulerGap =
-            haulerQuota
-            - (living |> List.filter isHaulerBody |> List.length)
-            - castOf haulerPattern
-            |> max 0
+        let anchorGap = anchorQuota - anchorLiving - castOf anchorPattern |> max 0
+
+        let haulerLiving = living |> List.filter isHaulerBody |> List.length
+
+        let haulerGap = haulerQuota - haulerLiving - castOf haulerPattern |> max 0
 
         // Bodies and not names (ADR 0006): the row's living count is what
         // `patternOf` reads back off the parts — a standing body at or
@@ -3061,13 +3057,54 @@ let private planSpawns
         // the two readings are one rule seen from either end, and where
         // they part the row would hire against a gap no body it cast could
         // ever pay off.
-        let upgraderGap =
-            upgraderQuota
-            - (living
-               |> List.filter (fun creep -> patternOf view.Tuning atlas creep = upgraderPattern)
-               |> List.length)
-            - castOf upgraderPattern
-            |> max 0
+        let upgraderLiving =
+            living
+            |> List.filter (fun creep -> patternOf view.Tuning atlas creep = upgraderPattern)
+            |> List.length
+
+        let upgraderGap = upgraderQuota - upgraderLiving - castOf upgraderPattern |> max 0
+
+        // The tick's arithmetic, written down for the `quotas` view (ADR
+        // 0009: a record returned, never logged). The worker row is what
+        // the target leaves after the four specialist rows, which is how
+        // the cascade below hires it.
+        let quotas: Quotas =
+            let row name quota living casting =
+                {
+                    Row = name
+                    Quota = quota
+                    Living = living
+                    Casting = casting
+                }
+
+            let specialists =
+                List.length reserverClaims + anchorQuota + haulerQuota + upgraderQuota
+
+            {
+                Target = target
+                Living = List.length living
+                Casting = List.length casting
+                Rows =
+                    [
+                        row
+                            "reserver"
+                            (List.length reserverClaims)
+                            reserverLiving
+                            (castOf reserverPattern)
+                        row "anchor" anchorQuota anchorLiving (castOf anchorPattern)
+                        row "hauler" haulerQuota haulerLiving (castOf haulerPattern)
+                        row "upgrader" upgraderQuota upgraderLiving (castOf upgraderPattern)
+                        row
+                            "worker"
+                            (target - specialists |> max 0)
+                            (List.length living
+                             - reserverLiving
+                             - anchorLiving
+                             - haulerLiving
+                             - upgraderLiving)
+                            (castOf workerPattern)
+                    ]
+            }
 
         // The supply floor (ADR 0050, #203), and the one row that is not a
         // quota: a colony holding no body that can put energy into an
@@ -3219,7 +3256,7 @@ let private planSpawns
                     | None -> intents, bank, unfilled)
                 ([], view.Bank, seats)
 
-        List.rev intents
+        List.rev intents, quotas
 
 /// The hostiles standing in the colony's own room, which is the whole of
 /// what the two reflexes below may read (#201). Since `ColonyView.Hostiles`
@@ -6874,7 +6911,9 @@ let decideUnarbitrated
     // and capacity, set once here and read by the Matcher and the mover.
     let pool = planPool view atlas tasks
 
-    let spawnIntents = planSpawns view atlas sizing threats tasks plan.HaulerQuota
+    let spawnIntents, quotas =
+        planSpawns view atlas sizing threats tasks plan.HaulerQuota
+
     let next, verdicts = matchCreeps view atlas sizing threats pool assignments verbose
     let assigned = assignedTasks tasks next
     let taskIntents = emit view atlas threats assigned
@@ -6912,6 +6951,7 @@ let decideUnarbitrated
         Memo = plan
         Verdicts = verdicts
         Movement = movementOf view atlas threats pool assigned verbose
+        Quotas = quotas
     }
 
 /// The decision seam a shell with one colony — and the whole suite — asks

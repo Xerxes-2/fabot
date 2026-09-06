@@ -627,6 +627,30 @@ let private tileObject (tile: RoomPos) =
     o?y <- tile.Y
     o
 
+/// The cascade's workforce arithmetic this tick, one leaf per colony
+/// beside the Layout record: `{ target, living, casting, rows: [{ row,
+/// quota, living, casting }] }`. Written every tick; `observe.mjs quotas`
+/// reads it. Silence (a doorstep in a Reach) writes rows: [] and target 0.
+let saveQuotas (home: string) (quotas: Quotas) =
+    let o = createEmpty<obj>
+    o?target <- quotas.Target
+    o?living <- quotas.Living
+    o?casting <- quotas.Casting
+
+    o?rows <-
+        quotas.Rows
+        |> List.map (fun row ->
+            let r = createEmpty<obj>
+            r?row <- row.Row
+            r?quota <- row.Quota
+            r?living <- row.Living
+            r?casting <- row.Casting
+            r)
+        |> List.toArray
+
+    ensureColony home
+    Memory?fabot?observe?colonies?(home)?quotas <- o
+
 let saveLayout
     (home: string)
     (unserved: UnservedFooting list)

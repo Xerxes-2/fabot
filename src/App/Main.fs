@@ -297,6 +297,9 @@ let loop () =
             decision.Memo.UnroutedTrunks
             decision.Memo.DeferredContainers
 
+        // The cascade's own numbers, for `observe.mjs quotas` (ADR 0009).
+        ObserveMemory.saveQuotas colony.Home decision.Quotas
+
     pruneDeadCreepMemory living
     // The Memory boundary: the assignments, all three observe channels and
     // the dead creeps' pruning, which is everything this tick persists

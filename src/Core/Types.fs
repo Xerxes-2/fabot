@@ -3906,6 +3906,41 @@ type Verdict =
     /// move, tick after tick, used to emit nothing at all.
     | Stalled of creep: string
 
+/// One casting row's count this tick: what the quota asks for, how many
+/// living bodies the row reads back (`patternOf`), and how many are in
+/// the oven for it. Observability only (ADR 0009): the cascade reads the
+/// same numbers itself, and this is the record the `observe.mjs quotas`
+/// view prints so a human can see why a spawn stands idle at a full bank.
+type RowQuota =
+    {
+        Row: string
+        Quota: int
+        Living: int
+        Casting: int
+    }
+
+/// The tick's workforce arithmetic as the cascade saw it: the whole
+/// target, the living and casting counts it was measured against, and one
+/// `RowQuota` per row. `Rows` empty and `Target` zero is the cascade's
+/// silence — a spawn's doorstep inside a Reach — and the view says so.
+type Quotas =
+    {
+        Target: int
+        Living: int
+        Casting: int
+        Rows: RowQuota list
+    }
+
+[<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
+module Quotas =
+    let silent: Quotas =
+        {
+            Target = 0
+            Living = 0
+            Casting = 0
+            Rows = []
+        }
+
 /// What one tick of deciding returns: the Intents to execute, the
 /// Assignments to remember for next tick, the plan memo to hold in heap
 /// for next tick (ADR 0017), the Verdicts explaining them (ADR 0009), and
@@ -3923,4 +3958,7 @@ type Decision =
         /// instead, arbitrating each room once over every creep of ours in
         /// it (`decideUnarbitrated`).
         Movement: Movement
+        /// The cascade's own reading of the workforce this tick, for the
+        /// `quotas` view; nothing downstream reads it.
+        Quotas: Quotas
     }

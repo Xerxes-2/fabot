@@ -25390,3 +25390,33 @@ let tuningTests =
                     "move the line to five and the same room is still being raised"
             }
         ]
+
+[<Tests>]
+let quotasRecordTests =
+    testList
+        "the quotas record"
+        [
+            test "the cascade writes down its rows, and they sum to the target" {
+                // Observability only (ADR 0009): the record the `observe.mjs
+                // quotas` view prints. Five rows in cascade order; the worker
+                // row is what the target leaves after the specialists, so the
+                // quotas sum to the target; the living counts partition the
+                // fleet.
+                let { Quotas = quotas } = decide bareRespawn Map.empty Set.empty None
+
+                Expect.equal
+                    (quotas.Rows |> List.map (fun r -> r.Row))
+                    [ "reserver"; "anchor"; "hauler"; "upgrader"; "worker" ]
+                    "one row per casting row, in the cascade's order"
+
+                Expect.equal
+                    (quotas.Rows |> List.sumBy (fun r -> r.Quota))
+                    quotas.Target
+                    "the rows' quotas are the target"
+
+                Expect.equal
+                    (quotas.Rows |> List.sumBy (fun r -> r.Living))
+                    quotas.Living
+                    "the rows' living counts partition the fleet"
+            }
+        ]
