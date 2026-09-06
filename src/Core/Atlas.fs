@@ -1463,9 +1463,12 @@ let pendingContainerTilesIn (atlas: Atlas) (room: string) : Set<Pos> =
 /// container being dismantled, say) joins it here, and ADR 0040 cannot
 /// then come to mean two different things in two rooms.
 ///
-/// The asymmetry with `postsIn`, which counts standing containers alone,
-/// is the deliberate one ADR 0040 draws — a site already going up answers
-/// *another one is handled*, and catches no overflow at all.
+/// The asymmetry with `standingPostsIn`, which counts standing containers
+/// alone, is the deliberate one ADR 0040 draws — a site already going up
+/// answers *another one is handled*, and catches no overflow at all. Since
+/// #205 a Seat's site is a Post all the same (`postsIn`), which is a claim
+/// about garrisoning and not about overflow: the body standing there digs
+/// and raises the container it will later dig into.
 let containerCensusIn (atlas: Atlas) (room: string) : Set<Pos> =
     Set.union (containerTilesIn atlas room) (pendingContainerTilesIn atlas room)
 
@@ -1808,16 +1811,14 @@ let standsOnDualSeat (atlas: Atlas) (creep: string) : bool =
     | Some(room, tile) when room = atlas.Home -> Set.contains tile (dualSeats atlas)
     | _ -> false
 
-/// Posts of the room: the tiles worth garrisoning with a heavy-WORK body
-/// (ADR 0012) — the Dual Seats plus every Seat under a built container
-/// (sites don't count: a pending container catches no overflow). A
-/// Seat-standing container is a source container by the Layout's
-/// geometry — a controller container's tile that were also a Seat would
-/// already be a Dual Seat. The
-/// capacity unit of the Anchor quota. Total: a room with neither kind
-/// answers with the empty set (ADR 0004). Derived fresh each tick, never
-/// persisted. Within one room, three room-local censuses intersected: a
-/// Post is one tile carrying a Seat and a container (ADR 0041).
+/// The **standing** half of the Post census: the Dual Seats plus every
+/// Seat under a built container. A Seat-standing container is a source
+/// container by the Layout's geometry — a controller container's tile that
+/// were also a Seat would already be a Dual Seat. Total: a room with
+/// neither kind answers with the empty set (ADR 0004). Derived fresh each
+/// tick, never persisted. Within one room, room-local censuses
+/// intersected: a Post is one tile carrying a Seat and a container (ADR
+/// 0041).
 ///
 /// The Dual Seat half is the colony's own room's alone, and only the
 /// container half crosses a border (ADR 0042). A Dual Seat is a tile a
@@ -1830,7 +1831,14 @@ let standsOnDualSeat (atlas: Atlas) (creep: string) : bool =
 /// no container standing under it — precisely the switch ADR 0042 makes
 /// the container be. So a room the colony does not upgrade in has exactly
 /// the Posts its built containers give it.
-let private postsIn (atlas: Atlas) (room: string) : Set<Pos> =
+///
+/// Separated from `postsIn` below by #205, and the split is the one ADR
+/// 0042 already draws between what a room is *worth* and what it is
+/// *worked* from: this is the switch that admits a source into the quotas
+/// — a haul term, an income share — and it is a standing container that
+/// throws it, because a site produces nothing anybody hauls. The Anchor's
+/// garrison is the other question and it answers it one tick earlier.
+let private standingPostsIn (atlas: Atlas) (room: string) : Set<Pos> =
     let containerPosts =
         Set.intersect
             (seatUnionIn atlas room)
@@ -1840,6 +1848,51 @@ let private postsIn (atlas: Atlas) (room: string) : Set<Pos> =
         Set.union containerPosts (dualSeatsIn atlas room)
     else
         containerPosts
+
+/// Seats carrying a container **construction site** — the Post a heavy
+/// body is hired for before the container it will dig into exists (#205,
+/// amending ADR 0045 and ADR 0046).
+///
+/// The colony used to raise these containers with the body that stands on
+/// them: an Anchor digs twelve a tick and spends it into the site under
+/// its own feet, so a 5,000-progress container goes up in a few hundred
+/// ticks off a source that is otherwise producing nothing. Two later rules
+/// closed that door between them — ADR 0045 emptied the Work Area of an
+/// unposted outpost source, so no heavy body would walk there at all, and
+/// ADR 0046 shut Build to a standing body — and what was left was the
+/// worker row commuting fifty tiles a Seam apart at fifty energy a trip.
+/// An invader that demolishes three outpost containers then costs the
+/// colony thousands of ticks of income rather than hundreds.
+///
+/// So a Seat with a container site on it is a tile worth garrisoning, on
+/// the same terms every other Post is: one Anchor, its Harvest narrowed to
+/// it, and travel cost to walk it there. Read off the Seats and never off
+/// the site's range, which is the trap #205 names: a site a step off this
+/// source's Seats belongs to whatever source seats *it*, and counting it
+/// here would hire a garrison for a rock nobody can dig from that tile.
+///
+/// Room-local like every other half of the census (ADR 0041), and the
+/// home room is inside the rule rather than outside it: an RCL2 colony's
+/// own source container goes up the same way, and a source with no site
+/// and no container keeps ADR 0020's bare-Seat fallback at home exactly as
+/// it had it.
+let private containerSitePostsIn (atlas: Atlas) (room: string) : Set<Pos> =
+    Set.intersect (seatUnionIn atlas room) (pendingContainerTilesIn atlas room)
+
+/// Posts of the room: the tiles worth garrisoning with a heavy-WORK body
+/// (ADR 0012) — the standing census above, plus the Seats carrying a
+/// container site (#205). The capacity unit of the Anchor quota and of
+/// Harvest's own concurrency (ADR 0024), and the only footing a Work-heavy
+/// body harvests from (ADR 0020). Total, room-local and derived fresh each
+/// tick, exactly as its two halves are.
+///
+/// What the two halves are for is what keeps them apart: this one is
+/// *ground* — where a heavy body stands and what it may dig from — and
+/// `standingPostsIn` is *income*, the switch a haul term and an income
+/// share hang off (`Decide.isPosted`). A site is a garrison place and not
+/// yet an economy, so it counts here and not there.
+let private postsIn (atlas: Atlas) (room: string) : Set<Pos> =
+    Set.union (standingPostsIn atlas room) (containerSitePostsIn atlas room)
 
 /// The Posts of the colony's own room — the doc above governs both.
 let posts (atlas: Atlas) : Set<Pos> = postsIn atlas atlas.Home
@@ -1861,12 +1914,12 @@ let posts (atlas: Atlas) : Set<Pos> = postsIn atlas atlas.Home
 /// and all, whether or not the colony can see the room this tick — that is
 /// the half of ADR 0041 vision may not gate, and reading absence onto the
 /// declaration instead is the deadlock #148 broke. What vision gates is
-/// the *container*: a standing structure is a seen entity, absent from the
-/// census entry by entry until vision returns (ADR 0004), so a blind
-/// outpost's Seat has nothing built on it here and hires no Anchor —
-/// including on the tick its own Anchor died and stopped supplying the
-/// vision that counted it. A room leaves this fold altogether only when
-/// the scan set drops it (ADR 0043).
+/// the *container* — and, since #205, the site standing in for it: both
+/// are seen entities, absent from the census entry by entry until vision
+/// returns (ADR 0004), so a blind outpost's Seat has nothing on it here
+/// and hires no Anchor — including on the tick its own Anchor died and
+/// stopped supplying the vision that counted it. A room leaves this fold
+/// altogether only when the scan set drops it (ADR 0043).
 let postCount (atlas: Atlas) : int =
     atlas.Spatial.Rooms
     |> Map.fold (fun total room _ -> total + Set.count (postsIn atlas room)) 0
@@ -1880,14 +1933,83 @@ let postContainerTiles (atlas: Atlas) : Set<Pos> =
     Set.intersect (containerTiles atlas) (posts atlas)
 
 /// The Posts of one source: its own Seats that are Posts. Empty for a
-/// source the projection does not place, and for one with neither a built
-/// container on a Seat nor a Dual Seat. Both halves are read in the
-/// source's own room (ADR 0041) — intersecting an outpost source's Seats
-/// with the home room's Posts would answer a tile standing in neither.
+/// source the projection does not place, and for one with none of the
+/// three — a built container on a Seat, a container site on a Seat (#205),
+/// or a Dual Seat. Every half is read in the source's own room (ADR 0041)
+/// — intersecting an outpost source's Seats with the home room's Posts
+/// would answer a tile standing in neither — and the Seat join is what
+/// keeps a neighbouring source's site out: a Post belongs to the rock it
+/// seats, not to the rock it is near.
 let postsOf (atlas: Atlas) (sourceId: string) : Set<Pos> =
     match Map.tryFind sourceId atlas.TargetAt with
     | None -> Set.empty
     | Some(room, _) -> Set.intersect (seatTilesOf atlas sourceId) (postsIn atlas room)
+
+/// The **standing** Posts of one source: `postsOf` above less the Seats
+/// whose container is still a site — the switch that admits a source into
+/// the quotas (ADR 0042, and #205's split). One reader, `Decide.isPosted`,
+/// which is itself the one spelling the hauler term and the income base
+/// share: a site produces nothing anybody hauls, so it hires the garrison
+/// that raises it and buys no mouths at home against income that does not
+/// exist yet. The tick the container stands, both answers agree again.
+let standingPostsOf (atlas: Atlas) (sourceId: string) : Set<Pos> =
+    match Map.tryFind sourceId atlas.TargetAt with
+    | None -> Set.empty
+    | Some(room, _) -> Set.intersect (seatTilesOf atlas sourceId) (standingPostsIn atlas room)
+
+/// Whether a creep stands on the container construction site named — its
+/// own Post with the container still going up (#205). The one geometry
+/// that reopens Build to a standing, Work-heavy body: the site is under
+/// its feet, so what ADR 0046 forbids — a delivery walked to, one tick of
+/// spending bought with two of commute — is not what this body is being
+/// asked to do, and what ADR 0020 pins it to is the very tile it is
+/// already on.
+///
+/// Three joins, all of them load-bearing. The **kind**, because a Post
+/// carries other sites: ADR 0034 ramparts a Post container, so a rampart
+/// site on this tile would otherwise open the gate on the strength of the
+/// container site beside it. The **Seat**, through `containerSitePostsIn`,
+/// because a container site that seats no source is the controller's
+/// buffer and a delivery like any other. And the **room**, because a `Pos`
+/// carries none (ADR 0041): a creep at home on an outpost site's
+/// coordinates stands on nothing of that room's.
+///
+/// Total (ADR 0004): an unplaced creep, an unplaced site and a site of any
+/// other kind each answer false, leaving the gate exactly as ADR 0046 had
+/// it.
+let standsOnPostSite (atlas: Atlas) (creep: string) (siteId: string) : bool =
+    Map.tryFind siteId atlas.Spatial.TargetKinds = Some(Site BuiltKind.Container)
+    && (match Map.tryFind creep atlas.CreepAt, Map.tryFind siteId atlas.TargetAt with
+        | Some(creepRoom, tile), Some(siteRoom, sitePos) when creepRoom = siteRoom && tile = sitePos ->
+            Set.contains tile (containerSitePostsIn atlas creepRoom)
+        | _ -> false)
+
+/// Whether a creep is standing on one of the named source's Posts whose
+/// container is still a site (#205) — that Post's garrison, read off where
+/// the body *is* and never off what it holds this tick.
+///
+/// Which is the one place a site Post differs from a standing one, and
+/// Harvest's Post cap is what reads it (ADR 0024). On a standing container
+/// the garrison never lets its Post go: a full store is reprieved by the
+/// overflow the engine catches, so it holds the source's one Harvest slot
+/// from arrival to death. On a site there is no overflow to catch — the
+/// store fills, Harvest falls away and Build takes over until it is empty
+/// again — so a cap counting Harvest's holders alone would read the tile
+/// as free on every build tick and admit a second heavy body onto the one
+/// tile the first is standing on. "One Anchor per Post" (ADR 0012) is a
+/// claim about the tile, so the tile is what this answers.
+///
+/// Room-joined like every other half of the census, because a `Pos`
+/// carries no room (ADR 0041), and the Seat join is the same one
+/// `postsOf` makes: a garrison belongs to the rock it seats. Total (ADR
+/// 0004): an unplaced creep and a source the projection does not place
+/// each answer false, leaving the cap exactly as ADR 0024 had it.
+let standsOnSitePost (atlas: Atlas) (creep: string) (sourceId: string) : bool =
+    match Map.tryFind creep atlas.CreepAt, Map.tryFind sourceId atlas.TargetAt with
+    | Some(creepRoom, tile), Some(sourceRoom, _) when creepRoom = sourceRoom ->
+        Set.contains tile (seatTilesOf atlas sourceId)
+        && Set.contains tile (containerSitePostsIn atlas creepRoom)
+    | _ -> false
 
 /// Whether a creep and a Task's target stand in one room — the question
 /// every join between a creep and a target's geometry has to settle while
@@ -1918,6 +2040,15 @@ let private sharesRoom (atlas: Atlas) (creep: string) (task: Task) : bool =
 /// this never re-enters the `posts` derivation that reads the Upgrade
 /// area. Memoised per Task for the tick beside the unnarrowed areas.
 ///
+/// A container **site** on a Seat is a Post since #205, so the tile a
+/// heavy body is narrowed to is sometimes the tile it is about to build:
+/// it digs from the site, fills its one Carry, and spends it into the
+/// progress under its feet (`Decide.applicable`'s Build arm). That is the
+/// amendment to the paragraph below — an outpost source whose container
+/// the invaders demolished has a Work Area again the tick the plan drops
+/// the site back, and the body that stands there is the one that raises
+/// it.
+///
 /// A source with **no** Post narrows nothing at home and narrows to
 /// nothing everywhere else, and the room is the whole of what separates
 /// the two. ADR 0020's fallback to the bare Seats is a *bootstrap* rule —
@@ -1933,8 +2064,11 @@ let private sharesRoom (atlas: Atlas) (creep: string) (task: Task) : bool =
 /// for one outpost's Post spent on another outpost's bare rock. So this is
 /// the geometric dual of ADR 0042's "an unposted outpost source is worth
 /// nothing to the workforce": worth nothing in the quotas, and standable
-/// on by nobody in the geometry. The switch is the same one — a container
-/// standing on a Seat — read here as ground rather than as income.
+/// on by nobody in the geometry. Two switches on one tile since #205, and
+/// this is the ground one: the container **or its site** makes the Post a
+/// heavy body may stand and dig on, where income waits for the container
+/// alone to stand (`standingPostsIn`, `Decide.isPosted`). A rock with
+/// neither is outside both, which is the source this rule is about.
 ///
 /// A source the projection does not place keeps the fallback (ADR 0004):
 /// it has no room to be outside of, and its Work Area is empty in either

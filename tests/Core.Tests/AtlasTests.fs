@@ -2160,7 +2160,16 @@ let postTests =
                     "dualSeats is untouched by the container"
             }
 
-            test "a container construction site is no Post" {
+            test "a container construction site is a Post, and no standing one" {
+                // #205 inverts the rule this test used to pin. A pending
+                // container catches no overflow and pays no haul term, and
+                // that is what `standingPostsOf` still answers; but the
+                // Seat under it is a tile worth garrisoning all the same,
+                // because the body that stands there digs the rock beside
+                // it and spends what it digs into the site under its feet.
+                // The two questions the census used to answer at once —
+                // where a heavy body stands, and what a source is worth to
+                // the quotas — are what the split keeps apart.
                 let atlas =
                     { spatial
                           [ "src-a", { X = 10; Y = 10 }; "cont-1", { X = 9; Y = 10 } ]
@@ -2171,7 +2180,45 @@ let postTests =
                     |> snapshotWith []
                     |> ofSnapshot
 
-                Expect.equal (posts atlas) Set.empty "a pending container garrisons nothing"
+                Expect.equal
+                    (posts atlas)
+                    (Set.singleton { X = 9; Y = 10 })
+                    "the Seat carrying the site is a garrison place"
+
+                Expect.equal
+                    (postsOf atlas "src-a")
+                    (Set.singleton { X = 9; Y = 10 })
+                    "and it is that source's own, by the Seat it stands on"
+
+                Expect.isEmpty
+                    (standingPostsOf atlas "src-a")
+                    "yet nothing stands there: the source is in no quota until it does"
+
+                Expect.equal (postCount atlas) 1 "so the Anchor row is hired for it"
+            }
+
+            test "a container site off any Seat is no Post" {
+                // The trap #205 names, and the reason the site half joins
+                // through the Seats rather than through the site's range:
+                // a container going up two tiles from the rock — the
+                // controller's own buffer, or a neighbouring source's Post
+                // — is nobody's garrison, and counting it would hire an
+                // Anchor for a tile it cannot dig from.
+                let atlas =
+                    { spatial
+                          [ "src-a", { X = 10; Y = 10 }; "cont-1", { X = 12; Y = 10 } ]
+                          [ { X = 11; Y = 10 }, Plain; { X = 12; Y = 10 }, Plain ] with
+                        TargetKinds =
+                            Map.ofList [ "src-a", Source; "cont-1", Site BuiltKind.Container ]
+                    }
+                    |> snapshotWith []
+                    |> ofSnapshot
+
+                Expect.isTrue
+                    (Set.contains { X = 11; Y = 10 } (seatTilesOf atlas "src-a"))
+                    "the premise: the rock's one Seat is the tile between the two"
+
+                Expect.isEmpty (posts atlas) "and the site a step past it garrisons nothing"
             }
 
             test "a built container off any Seat adds no Post" {

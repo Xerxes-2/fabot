@@ -1167,13 +1167,25 @@ let private sourceOutputOf (snapshot: Snapshot) atlas (sourceId: string) : int o
 /// base's own split (`workforceTarget`), so a rule that narrows what
 /// counts as posted cannot narrow it for one of the two alone.
 ///
-/// Judged in the source's own room, by `Atlas.postsOf` and not by testing
-/// its Seats against the home room's Posts: a `Pos` carries no room, so a
-/// home Post standing on an outpost Seat's coordinates would read that
-/// outpost source as posted with no container under it — a phantom ten
-/// energy a tick in the income base, and a phantom Anchor place beside it.
+/// Judged in the source's own room, by `Atlas.standingPostsOf` and not by
+/// testing its Seats against the home room's Posts: a `Pos` carries no
+/// room, so a home Post standing on an outpost Seat's coordinates would
+/// read that outpost source as posted with no container under it — a
+/// phantom ten energy a tick in the income base, and a phantom Anchor
+/// place beside it.
+///
+/// The **standing** census and not `Atlas.postsOf`, since #205 made the
+/// two differ: a container site on a Seat is a Post — a place to garrison
+/// an Anchor that digs and raises it — and it is not yet a container. What
+/// this predicate switches on is what a source is worth to the colony's
+/// quotas, and a rock whose energy goes into 5,000 progress and never into
+/// a store pays no haul term and feeds no mouth at home. The clause of
+/// ADR 0042's sentence this predicate spells is unmoved — the tick the
+/// container stands, the source enters the income base — and the two
+/// beside it, "becomes a Post, gains an Anchor", are the ones #205 moves a
+/// few hundred ticks earlier; that ADR carries the amendment.
 let private isPosted atlas (s: SourceInfo) =
-    Atlas.postsOf atlas s.Id |> Set.isEmpty |> not
+    Atlas.standingPostsOf atlas s.Id |> Set.isEmpty |> not
 
 /// The anchor row's Work ceiling this tick (ADR 0021 as ADR 0042 narrows
 /// it): the saturation of the richest source the row is hiring for, plus
@@ -1954,10 +1966,13 @@ let private pioneerCount = 3
 /// useful half of that exclusion is that a standing container is the
 /// switch admitting an outpost into the economy — until one stands the
 /// room is invisible to every quota *but one*, and the tick it stands the
-/// source becomes a Post: an Anchor place on the one row every Post hires
-/// from (`Atlas.postCount`, in `planSpawns`), a hauler term at its own
-/// round trip across the Seam, and a share of the income base at its own
-/// output. Three existing rows widened, and beside them the one rule an
+/// source enters the two quotas that read a store: a hauler term at its
+/// own round trip across the Seam, and a share of the income base at its
+/// own output. The third of the three rows moved one step earlier with
+/// #205: an Anchor place on the one row every Post hires from
+/// (`Atlas.postCount`, in `planSpawns`) arrives with the container's
+/// *site*, because the body that garrisons a Post is the one that raises
+/// it. Three existing rows widened, and beside them the one rule an
 /// outpost has of its own — and the one quota this switch does *not* gate:
 /// the reserver row's, one per declared outpost, arriving here as
 /// `reserverClaims`, the CLAIM demand of each. Its length is the addend
@@ -2316,9 +2331,13 @@ let private planSpawns
         // hires from the same row rather than from a remote-miner row of
         // its own — the body is sized the same way, and travel cost pins
         // each Anchor on the Post nearest it exactly as it pins the home
-        // ones. Only the container makes the Post, so an outpost with
-        // nothing built in it adds nothing here, and the tick a container
-        // stands the row grows by one (`Atlas.postCount`).
+        // ones. The container **or its site** makes the Post (#205), so
+        // the row grows the tick the plan drops the site back and the body
+        // it hires is the one that raises the container — an outpost with
+        // nothing on any Seat still adds nothing here. What the container
+        // standing changes is the other half of the census: the haul term
+        // and the income share, which wait for it (`Atlas.standingPostsOf`,
+        // `isPosted`).
         let anchorQuota = Atlas.postCount atlas
 
         // The reserver row's quota and its body in one value (ADR 0042):
@@ -3843,6 +3862,13 @@ let private isFeedingSite (snapshot: Snapshot) atlas siteId =
 /// narrower row than the fourth's — the upgrader is at `Work = Move` and
 /// is not Work-heavy, so its own footing beside the buffer is untouched —
 /// and it is the walk it refuses and never the Task; the arm carries why.
+/// One **exception** crosses the third gate and the fourth together (#205,
+/// amending ADR 0045 and ADR 0046): a container construction site standing
+/// on the creep's own Post, under its own feet, is applicable to it
+/// whatever its shape. Both of those gates refuse a walk and there is no
+/// walk here — the body digs the source beside it and spends what it dug
+/// into the progress it is standing on, which is how an outpost's
+/// container was raised before either rule existed; the arm carries why.
 let private applicable (snapshot: Snapshot) (threats: Threats) atlas (creep: CreepInfo) task =
     let has part =
         creep.Body |> Map.tryFind part |> Option.exists (fun n -> n > 0)
@@ -3874,10 +3900,16 @@ let private applicable (snapshot: Snapshot) (threats: Threats) atlas (creep: Cre
     // And the walk is offered only where it ends somewhere: a source with
     // a Post (ADR 0020, ADR 0024). Every Post is a tile the arriving body
     // has something to do on — a container Seat catches its overflow, a
-    // Dual Seat spends its load into the controller in place — so the
-    // reprieve never walks a full body onto a bare Seat it would be
-    // released from with nowhere left to go. A source with no Post is a
-    // light body's rock and the full-store rule there is untouched.
+    // Dual Seat spends its load into the controller in place, and a Seat
+    // carrying a container site spends the load into the progress under
+    // its own feet (#205) — so the reprieve never walks a full body onto a
+    // bare Seat it would be released from with nowhere left to go. The
+    // third kind is the one whose work is a Task rather than a reflex, so
+    // it is the one that has to be kept reachable: the outpost container
+    // budget does not price the body standing on the site (`hasCapacity`),
+    // or the walk offered here would end on a full store, a shut Build and
+    // nothing else. A source with no Post is a light body's rock and the
+    // full-store rule there is untouched.
     | Harvest sourceId ->
         has Work
         && (creep.FreeCapacity > 0
@@ -3919,9 +3951,10 @@ let private applicable (snapshot: Snapshot) (threats: Threats) atlas (creep: Cre
     // was then outranked off its own controller and walked fifty tiles at
     // four to seven ticks a step to spend one Carry into a 5,000-progress
     // site. A heavy body's cross-room work is a Post and never a delivery
-    // (ADR 0020), so the switch is light bodies' work; it costs the colony
-    // nothing, because a Post — and so an Anchor — exists in an outpost
-    // only once that very container stands.
+    // (ADR 0020), so the switch is light bodies' work; what it costs the
+    // colony is one body's walk and never a garrison's Post, because the
+    // Post an Anchor is hired for is this very site (#205) and the
+    // exception below leaves it building where it stands.
     //
     // The gate follows the *tier* and not the container, which is why it
     // asks `isFeedingSite` and not the container rule alone: ADR 0047's
@@ -3940,11 +3973,38 @@ let private applicable (snapshot: Snapshot) (threats: Threats) atlas (creep: Cre
     // hires an Anchor to stand on it. That Anchor is the body this gate is
     // written for, and the trip it refuses is off a Post the colony is
     // already paid for and inside the room it digs in.
+    //
+    // And one exception over both gates, which is #205's whole change: a
+    // container site **under the body's own feet, on its own Post**
+    // (`Atlas.standsOnPostSite`). Both prohibitions above are about a
+    // walk. ADR 0046 refuses a delivery because fifty energy carried by a
+    // body holding six Work is one tick of spending against two of
+    // commute; #157 refuses this site because the feeding tier leaves no
+    // travel cost to pin an Anchor at its Post. Neither reaches a site the
+    // body is standing on: there is no walk, the Post it would be pulled
+    // off is the tile it is already on, and the energy it spends is the
+    // twelve a tick it dug there. What the colony gets back is the way an
+    // outpost container was ever raised in the first place — dig a
+    // shovelful, build a shovelful, a few hundred ticks for 5,000 progress
+    // off a rock that is producing nothing meanwhile — instead of the
+    // worker row commuting a Seam and fifty tiles at fifty energy a trip,
+    // which is thousands of ticks of lost income every time an invader
+    // demolishes one.
+    //
+    // The exception reads geometry and never a row (ADR 0006), so it is
+    // the same rule for the generalist that happens to be standing there,
+    // for whom it changes nothing at all. It closes on its own: a Build
+    // needs carried energy, and the only thing that fills this body is the
+    // Harvest whose Work Area is that same tile (`Atlas.postsOf`, ADR
+    // 0020) — so the pair alternates, Harvest until the store is full and
+    // Build until it is empty, and the tick the container stands the site
+    // is gone and the body is an ordinary garrison on an ordinary Post.
     | Build siteId ->
         has Work
         && creep.Energy > 0
-        && not (isStandingBody creep)
-        && not (isFeedingSite snapshot atlas siteId && Atlas.workHeavy atlas creep.Name)
+        && (Atlas.standsOnPostSite atlas creep.Name siteId
+            || (not (isStandingBody creep)
+                && not (isFeedingSite snapshot atlas siteId && Atlas.workHeavy atlas creep.Name)))
     // Repair leaves Upgrade's arm with ADR 0046's gate (a delivery, and a
     // standing body's Carry is one trip's worth), and the two stay
     // otherwise identical: a Work part and something to spend.
@@ -5070,26 +5130,58 @@ let matchCreeps
     // letting a candidate a whole spawn-and-walk away evict a garrison
     // that is nowhere near its own lead. A walk the Atlas cannot price has
     // no arrival, and counts from now.
+    let overlaps (candidate: CreepInfo) task arrival name =
+        let alive =
+            match arrival with
+            | None -> true
+            | Some ticks -> Map.tryFind name lives |> Option.forall (fun life -> life >= ticks)
+
+        let arrived =
+            match Atlas.walkTicks atlas name task with
+            | None -> true
+            | Some ticks -> ticks <= candidate.TicksToLive
+
+        alive && arrived
+
     let holdersAt (acc: Assignments) (candidate: CreepInfo) task arrival =
         let tid = taskId task
-
-        let overlaps name =
-            let alive =
-                match arrival with
-                | None -> true
-                | Some ticks -> Map.tryFind name lives |> Option.forall (fun life -> life >= ticks)
-
-            let arrived =
-                match Atlas.walkTicks atlas name task with
-                | None -> true
-                | Some ticks -> ticks <= candidate.TicksToLive
-
-            alive && arrived
 
         acc
         |> Map.toList
         |> List.choose (fun (name, assigned) ->
-            if assigned = tid && overlaps name then Some name else None)
+            if assigned = tid && overlaps candidate task arrival name then
+                Some name
+            else
+                None)
+
+    // The garrison of a Post whose container is still a site (#205),
+    // counted against that source's Post cap beside the Harvest holders
+    // above. On a standing container the two counts are the same set: the
+    // overflow reprieve keeps the garrison's Harvest applicable through a
+    // full store, so it never lets the slot go. On a site there is no
+    // overflow, so the pair alternates — Harvest until the store is full,
+    // Build until it is empty — and a cap counting assignments alone reads
+    // the tile as free on every build tick. What that admits is a second
+    // heavy body onto the one tile the first is standing on, and the
+    // incumbent is then released from Build with its own Harvest full and
+    // walks a Seam home to another rock: the cross-room theft ADR 0045
+    // records, out of the Post that is supposed to prevent it.
+    //
+    // So the slot is held by the body *standing* on the Post, whatever
+    // Task it holds this tick — "one Anchor per Post" (ADR 0012, ADR 0024)
+    // is a claim about the tile. Counted at arrival like every other
+    // holder (ADR 0026), so a garrison that dies before the candidate
+    // arrives is no longer standing there and its successor is dispatched
+    // exactly as it was. The candidate never counts against itself: a body
+    // already on its own Post is what the cap is *for*.
+    let postSiteGarrisons (candidate: CreepInfo) task arrival sourceId =
+        snapshot.Creeps
+        |> List.filter (fun c ->
+            c.Name <> candidate.Name
+            && Atlas.workHeavy atlas c.Name
+            && Atlas.standsOnSitePost atlas c.Name sourceId
+            && overlaps candidate task arrival c.Name)
+        |> List.length
 
     // A heavy body is judged against both caps (ADR 0024): the Seat count
     // it shares with every other harvester, and the Post count only its own
@@ -5101,7 +5193,25 @@ let matchCreeps
     // the pool is mostly made of never walk the assignment map.
     let hasCapacity (creep: CreepInfo) acc task (arrival: Lazy<int option>) =
         let tid = taskId task
-        let seatCap = Map.tryFind tid capacities
+
+        // One Task-shaped cap does not reach one body (#205): the outpost
+        // container budget is `outpostContainerBuilders` spread over the
+        // sites, and every word of its argument is about a commute — "the
+        // whole worker row walks out together and the home room's surplus
+        // work stops for the fifty ticks each of them spends crossing"
+        // (`taskCapacities`). The body standing on the site costs the home
+        // room neither a walk nor a surplus tick, so it is outside what
+        // that number prices; counted inside it, a worker still crossing
+        // the Seam holds the slot for the whole fifty and the garrison
+        // stands full on the progress with Harvest shut behind it and no
+        // Task at all — #197's shape in the case this ticket exists to
+        // give an exit to. The budget still bounds the commuters exactly
+        // as #157 wrote it: what leaves is one body that was never a
+        // commuter.
+        let seatCap =
+            match task with
+            | Build siteId when Atlas.standsOnPostSite atlas creep.Name siteId -> None
+            | _ -> Map.tryFind tid capacities
 
         let postCap =
             if Atlas.workHeavy atlas creep.Name then
@@ -5124,7 +5234,17 @@ let matchCreeps
 
             let withinPosts =
                 match postCap with
-                | Some cap -> (holders |> List.filter (Atlas.workHeavy atlas) |> List.length) < cap
+                | Some cap ->
+                    let heavy = holders |> List.filter (Atlas.workHeavy atlas) |> List.length
+
+                    // The Post cap is Harvest's alone, so no other Task
+                    // has a source to read a garrison off.
+                    let garrison =
+                        match task with
+                        | Harvest sourceId -> postSiteGarrisons creep task arrival.Value sourceId
+                        | _ -> 0
+
+                    heavy + garrison < cap
                 | None -> true
 
             withinSeats && withinPosts

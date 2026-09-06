@@ -9230,14 +9230,19 @@ let postCapacityTests =
                 // The pre-container fallback (ADR 0020): with nothing built,
                 // a heavy body harvests from any Seat, so a Post cap of zero
                 // would strand the colony instead of ordering it.
+                //
+                // The source container leaves the census outright since
+                // #205. This fixture used to demote it to a construction
+                // site to reach "no Post", and a Seat carrying a container
+                // site is now a Post of its own — the garrison that raises
+                // it — so nothing pending on a Seat says "unposted" any
+                // more. What does is a rock with neither.
                 let snapshot =
                     { haulColony with
                         Creeps = [ anchor "a1" 0 50; anchor "a2" 0 50 ]
                         Spatial =
                             { haulRoom with
-                                TargetKinds =
-                                    haulRoom.TargetKinds
-                                    |> Map.add "can-src" (Site BuiltKind.Container)
+                                TargetKinds = haulRoom.TargetKinds |> Map.remove "can-src"
                             }
                             |> withHome (fun layer ->
                                 { layer with
@@ -14095,15 +14100,20 @@ let private withNorthOutpost (outpostSource: Pos option) (colony: Snapshot) =
 /// `ConstructionSites` entry vision pays for (#150). Merges into whatever
 /// layer `withNorthOutpost` already laid, so the two compose in either
 /// order.
-let private withOutpostSite (site: Pos) (colony: Snapshot) =
+///
+/// The kind is a parameter because #205's gates read it: a Seat's
+/// *container* site is a Post and reopens Build to the body standing on
+/// it, and a site of any other kind on the same tile is the ordinary
+/// surplus work it always was. Pairwise cases below swap the kind and
+/// nothing else.
+let private withOutpostSiteOf (kind: BuiltKind) (site: Pos) (colony: Snapshot) =
     let outpost = SpatialInfo.layerOf colony.Spatial "W1N2"
 
     { colony with
         ConstructionSites = colony.ConstructionSites @ [ { Id = "site-out" } ]
         Spatial =
             { colony.Spatial with
-                TargetKinds =
-                    Map.add "site-out" (Site BuiltKind.Container) colony.Spatial.TargetKinds
+                TargetKinds = Map.add "site-out" (Site kind) colony.Spatial.TargetKinds
             }
             |> withNeighbour
                 "W1N2"
@@ -14111,6 +14121,11 @@ let private withOutpostSite (site: Pos) (colony: Snapshot) =
                     TargetPositions = Map.add "site-out" site outpost.TargetPositions
                 }
     }
+
+/// The container site the outpost rule really places — the kind every case
+/// but #205's pairwise ones wants.
+let private withOutpostSite (site: Pos) (colony: Snapshot) =
+    withOutpostSiteOf BuiltKind.Container site colony
 
 /// The same worker, carrying a full load: Harvest asks for free capacity
 /// and Build asks for carried energy (`applicable`), so a full worker
@@ -20880,5 +20895,418 @@ let upgraderQuotaTests =
                 Expect.isEmpty
                     (casts (atBank 550 2) (living 10))
                     "ten of them fill the target, and nothing is cast at all"
+            }
+        ]
+
+/// A live Anchor's shape, `6W/1C/1M`: Work-heavy by ADR 0016's ratio
+/// (`6 > 1`) and a standing body by ADR 0046's (`1 × 4 < 6`), so before
+/// #205 every one of Build, Repair, Refill and Withdraw was shut to it and
+/// Harvest at its Post was the whole of its working life.
+let private postBody name energy freeCapacity =
+    creepWith name energy freeCapacity [ Work; Work; Work; Work; Work; Work; Carry; Move ]
+
+/// #205's colony: the outpost rock at (10,46) with its container gone and
+/// the plan's site back on the Seat at (10,45) — the live shape after an
+/// invader demolished three of them (W12S27 15,44 and W13S28 15,8 / 18,3)
+/// — and one body of the caller's shape standing where the caller puts it.
+///
+/// No controller and no refillable, as the fixtures above have it, so the
+/// pool is the two rocks and the site and a Matched factor names one
+/// comparison rather than reporting on some third candidate. The home
+/// creep the base fixture stands at (10,2) is taken out with it: the
+/// caller's bodies are the whole colony, and every Verdict is about one of
+/// them. Two rosters because the cap cases need both ends of the Seam: the
+/// bodies standing in the outpost, and the ones standing at home.
+let private raisingCrowd kind (outpostCreeps: (CreepInfo * Pos) list) homeCreeps =
+    let colony =
+        northBorderColony { X = 10; Y = 38 }
+        |> withNorthOutpost (Some { X = 10; Y = 46 })
+        |> withOutpostSiteOf kind { X = 10; Y = 45 }
+
+    let outpost = SpatialInfo.layerOf colony.Spatial "W1N2"
+
+    let placed (creeps: (CreepInfo * Pos) list) =
+        creeps |> List.map (fun (c, at) -> c.Name, at) |> Map.ofList
+
+    { colony with
+        Creeps = outpostCreeps @ homeCreeps |> List.map fst
+        Spatial =
+            colony.Spatial
+            |> withHome (fun layer ->
+                { layer with
+                    CreepPositions = placed homeCreeps
+                })
+            |> withNeighbour
+                "W1N2"
+                { outpost with
+                    CreepPositions = placed outpostCreeps
+                }
+    }
+
+/// The one-body case the cases below are mostly written on.
+let private raisingColony kind (body: CreepInfo) (at: Pos) = raisingCrowd kind [ body, at ] []
+
+/// The same colony at home: a rock at (10,10) walled in but for its two
+/// Seats, a container site on one of them, and one body standing on it.
+/// #205's rule reads no room — the tick an RCL2 colony's own source
+/// container is planned, the body that will garrison it raises it — and
+/// this is that case with the Seam taken out of the picture.
+let private homeRaisingColony kind (body: CreepInfo) (at: Pos) =
+    { bareRespawn with
+        Spawns = []
+        Controller = None
+        Refillables = []
+        Sources = [ source "src-a" ]
+        ConstructionSites = [ { Id = "can-a" } ]
+        Creeps = [ body ]
+        Spatial =
+            spatial
+                []
+                [
+                    { X = 9; Y = 10 }, Plain
+                    { X = 10; Y = 10 }, Wall
+                    { X = 11; Y = 10 }, Plain
+                ]
+            |> withTargets
+                [ "src-a", { X = 10; Y = 10 }, Source; "can-a", { X = 9; Y = 10 }, Site kind ]
+            |> withHome (fun layer ->
+                { layer with
+                    CreepPositions = Map.ofList [ body.Name, at ]
+                })
+    }
+
+[<Tests>]
+let postSiteTests =
+    testList
+        "the Anchor raises its own Post"
+        [
+            test "empty on its container site the Anchor digs; full it builds" {
+                // #205's whole mechanism, one body and one tile. Two rules
+                // had closed the door between them: ADR 0045 empties an
+                // unposted outpost source's Work Area, so no heavy body
+                // walks there at all, and ADR 0046 shuts Build to a
+                // standing body. What was left was the worker row
+                // commuting a Seam and fifty tiles at fifty energy a trip
+                // against 5,000 progress — thousands of ticks of lost
+                // income every time an invader demolishes a container.
+                //
+                // The site is a Post, so the rock has a Work Area again;
+                // the site is under the body's feet, so Build is not the
+                // commute ADR 0046 forbids. The pair then alternates on
+                // the store alone: `FreeCapacity = 0` ends the dig (a site
+                // catches no overflow, ADR 0024) and carried energy is
+                // what Build asks for.
+                Expect.equal
+                    (matchOf (
+                        raisingColony BuiltKind.Container (postBody "w" 0 50) { X = 10; Y = 45 }
+                    ))
+                    (Some(taskId (Harvest "src-out"), MatchFactor.TravelCost))
+                    "empty, it digs the rock beside it — the home rock is a Seam and thirty tiles away"
+
+                Expect.equal
+                    (matchOf (
+                        raisingColony BuiltKind.Container (postBody "w" 50 0) { X = 10; Y = 45 }
+                    ))
+                    (Some(taskId (Build "site-out"), MatchFactor.OnlyCandidate))
+                    "full, the dig is over and the site under its feet is what is left"
+
+                Expect.equal
+                    (actionIntents
+                        (decide
+                            (raisingColony
+                                BuiltKind.Container
+                                (postBody "w" 50 0)
+                                { X = 10; Y = 45 })
+                            Map.empty
+                            Set.empty
+                            None)
+                            .Intents)
+                    [ BuildSite("w", "site-out") ]
+                    "and it spends what it dug into the progress without moving a tile"
+            }
+
+            test "swap the kind and both doors shut again" {
+                // Pairwise, one rival at a time: the same body on the same
+                // tile in the same colony, with a road site there instead
+                // of a container site. Nothing on that Seat is a Post, so
+                // the outpost rock's Work Area is empty for a heavy body
+                // (ADR 0045) and Harvest is inapplicable; the site is no
+                // Post either, so ADR 0046's gate stands and Build is shut
+                // to a standing body. Which leaves the outpost rock
+                // offering this body nothing at all: empty it is thrown
+                // back on the home room's own bare-Seat fallback thirty
+                // tiles and a Seam away — the theft ADR 0045 records and
+                // leaves standing — and full it holds no Task, which is
+                // #197's shape and stays #197's.
+                let road energy free =
+                    raisingColony BuiltKind.Road (postBody "w" energy free) { X = 10; Y = 45 }
+
+                Expect.equal
+                    (matchOf (road 0 50))
+                    (Some(taskId (Harvest "src-home"), MatchFactor.OnlyCandidate))
+                    "empty, the outpost rock it is standing on offers it no tile to work from"
+
+                Expect.isNone
+                    (matchOf (road 50 0))
+                    "full, the site beneath it is somebody else's work"
+            }
+
+            test "the site hires the garrison that raises it" {
+                // The Anchor quota's own input (`Atlas.postCount`, read by
+                // `planSpawns`): a Post is a garrison place, and the tile a
+                // container is going up on is one — otherwise the body the
+                // rule is written for is never cast and never walks there.
+                // Pairwise on the site and nothing else.
+                let count kind =
+                    Atlas.postCount (
+                        Atlas.ofSnapshot (raisingColony kind (postBody "w" 0 50) { X = 10; Y = 45 })
+                    )
+
+                Expect.equal (count BuiltKind.Container) 1 "the container site is a Post"
+                Expect.equal (count BuiltKind.Road) 0 "and a site of any other kind is none"
+            }
+
+            test "the Work Area is the site tile and not the Seat beside it" {
+                // ADR 0020's narrowing, over the Post #205 adds: the other
+                // Seat of the same rock is standing room for a light body
+                // and not for this one, so a heavy body that lands there is
+                // walked onto the site rather than left digging beside it.
+                // Which is the whole reason the site is a Post and not a
+                // second bare-Seat fallback — a body that dug from (10,47)
+                // would put its twelve a tick on the floor.
+                let {
+                        Intents = intents
+                        Verdicts = verdicts
+                    } =
+                    decide
+                        (raisingColony BuiltKind.Container (postBody "w" 0 50) { X = 10; Y = 47 })
+                        Map.empty
+                        Set.empty
+                        None
+
+                Expect.equal
+                    (verdicts
+                     |> List.tryPick (function
+                         | Verdict.Matched("w", task, _) -> Some task
+                         | _ -> None))
+                    (Some(taskId (Harvest "src-out")))
+                    "the rock is its Task from the Seat next door"
+
+                Expect.isEmpty (digIntentsFor "w" intents) "but it may not dig from where it stands"
+
+                Expect.isNonEmpty
+                    (moveIntentsFor "w" intents)
+                    "so it walks the one tile onto its Post"
+            }
+
+            test "the rule reads the tile and never the row" {
+                // ADR 0006, and #157 unmoved with it: the exception is a
+                // fact about where the body is standing, so the generalist
+                // standing on the same tile takes the same Build it always
+                // took. Pairwise on the body alone.
+                Expect.equal
+                    (matchOf (
+                        raisingColony BuiltKind.Container (worker "w" 50 0) { X = 10; Y = 45 }
+                    ))
+                    (Some(taskId (Build "site-out"), MatchFactor.OnlyCandidate))
+                    "the worker row's own Build across the Seam is untouched"
+            }
+
+            test "a home rock's container site is the same Post" {
+                // #205's rule is not an outpost rule: the Seat under a
+                // container site is a garrison place in every room, so an
+                // RCL2 colony raises its own first source container the
+                // same way. The room is left out of the rule deliberately
+                // — what the two halves of ADR 0045 differ on is the bare
+                // Seat *fallback*, and a rock with a site on a Seat has a
+                // Post and never reaches it.
+                Expect.equal
+                    (matchOf (
+                        homeRaisingColony BuiltKind.Container (postBody "w" 0 50) { X = 9; Y = 10 }
+                    ))
+                    (Some(taskId (Harvest "src-a"), MatchFactor.OnlyCandidate))
+                    "empty, it digs"
+
+                Expect.equal
+                    (matchOf (
+                        homeRaisingColony BuiltKind.Container (postBody "w" 50 0) { X = 9; Y = 10 }
+                    ))
+                    (Some(taskId (Build "can-a"), MatchFactor.OnlyCandidate))
+                    "full, it builds the site under its feet"
+
+                // Pairwise, the same body and tile with a road site there:
+                // at home the bare-Seat fallback is still ADR 0020's, so
+                // the empty body keeps its dig — and the full one is back
+                // inside ADR 0046's gate with nothing to do.
+                Expect.equal
+                    (matchOf (
+                        homeRaisingColony BuiltKind.Road (postBody "w" 0 50) { X = 9; Y = 10 }
+                    ))
+                    (Some(taskId (Harvest "src-a"), MatchFactor.OnlyCandidate))
+                    "the home fallback stands: an empty body digs from any Seat"
+
+                Expect.isNone
+                    (matchOf (
+                        homeRaisingColony BuiltKind.Road (postBody "w" 50 0) { X = 9; Y = 10 }
+                    ))
+                    "and a full standing body has no delivery it may walk to"
+            }
+
+            test "a site is a Post and still no income: the quotas wait for the container" {
+                // The split #205 draws, at the seam ADR 0042 draws it on. A
+                // source whose energy goes into 5,000 progress pays no haul
+                // term and feeds no mouth at home, so `Decide.isPosted`
+                // reads the standing census while the garrison reads the
+                // whole one. Pairwise on the structure: the same Seat,
+                // pending against built.
+                let atlasOf kinds =
+                    let colony = raisingColony kinds (postBody "w" 0 50) { X = 10; Y = 45 }
+
+                    Atlas.ofSnapshot colony
+
+                let pending = atlasOf BuiltKind.Container
+
+                Expect.equal
+                    (Atlas.postsOf pending "src-out")
+                    (Set.singleton { X = 10; Y = 45 })
+                    "the site is the rock's Post"
+
+                Expect.isEmpty
+                    (Atlas.standingPostsOf pending "src-out")
+                    "and nothing stands on it, so the rock is in no quota yet"
+            }
+
+            test "full beside its site, the reprieve walks it on rather than stranding it" {
+                // Criterion 1's own wording — a body *beside* the site,
+                // full — and the case the whole mechanism rests on: the
+                // Build exception asks for the exact tile, so what saves a
+                // full body one step off it is ADR 0048's walk-home
+                // reprieve, which reads `Atlas.postsOf`. Had that call site
+                // been left on the standing census with `isPosted`, this
+                // body would hold no Task at all: Harvest shut by a full
+                // store on a site that catches no overflow, Build shut by
+                // ADR 0046, Withdraw and Repair and Refill shut with it —
+                // #197's shape in the one case this ticket says it has
+                // given an exit to.
+                let {
+                        Intents = intents
+                        Verdicts = verdicts
+                    } =
+                    decide
+                        (raisingColony BuiltKind.Container (postBody "w" 50 0) { X = 10; Y = 47 })
+                        Map.empty
+                        Set.empty
+                        None
+
+                Expect.equal
+                    (verdicts
+                     |> List.tryPick (function
+                         | Verdict.Matched("w", task, _) -> Some task
+                         | _ -> None))
+                    (Some(taskId (Harvest "src-out")))
+                    "full or empty, the rock a step away is what it holds"
+
+                Expect.isEmpty
+                    (actionIntents intents)
+                    "it builds nothing from where it stands — the exception is the tile and not the range"
+
+                Expect.isNonEmpty
+                    (moveIntentsFor "w" intents)
+                    "so the walk onto its Post is the whole of this tick"
+            }
+
+            test "the builder budget prices a commute, and the body on the site pays none" {
+                // #157's budget is `outpostContainerBuilders` spread over
+                // the sites, and every word of its argument is about the
+                // home room's surplus work stopping "for the fifty ticks
+                // each of them spends crossing". A body standing on the
+                // site spends none of those, so it is outside what the
+                // number prices — counted inside it, the two loaded
+                // workers holding the Build through their whole commute
+                // leave the garrison full on the progress with Harvest
+                // shut behind it and no Task at all, which is exactly the
+                // stuck-full-Anchor shape #205 exists to end.
+                let crowd extra =
+                    raisingCrowd
+                        BuiltKind.Container
+                        [ postBody "a" 50 0, { X = 10; Y = 45 } ]
+                        ([
+                            worker "w1" 50 0, { X = 10; Y = 2 }
+                            worker "w2" 50 0, { X = 10; Y = 3 }
+                         ]
+                         @ extra)
+
+                let held =
+                    Map.ofList [ "w1", taskId (Build "site-out"); "w2", taskId (Build "site-out") ]
+
+                let matchedOf name (verdicts: Verdict list) =
+                    verdicts
+                    |> List.tryPick (function
+                        | Verdict.Matched(who, task, _) when who = name -> Some task
+                        | _ -> None)
+
+                let { Verdicts = verdicts } = decide (crowd []) held Set.empty None
+
+                Expect.equal
+                    (matchedOf "a" verdicts)
+                    (Some(taskId (Build "site-out")))
+                    "the garrison builds what is under its feet whoever else is walking to it"
+
+                // Pairwise on the body and nothing else: the row the
+                // budget was written for is capped exactly as #157 had it,
+                // so a third loaded worker still waits at home.
+                let { Verdicts = withThird } =
+                    decide (crowd [ worker "w3" 50 0, { X = 10; Y = 4 } ]) held Set.empty None
+
+                Expect.isNone
+                    (matchedOf "w3" withThird)
+                    "and the third commuter is still refused: #157's number is unmoved"
+            }
+
+            test "the Post is held by the body standing on it, digging or building" {
+                // ADR 0024's Post cap is "one Anchor per Post", and on a
+                // standing container the garrison never lets it go: the
+                // overflow reprieve keeps its Harvest applicable through a
+                // full store. On a site there is no overflow, so the pair
+                // alternates and the slot would read as free on every
+                // build tick — admitting a second heavy body onto the one
+                // tile the first is standing on, and releasing the
+                // incumbent from Build onto a Seam-crossing walk to the
+                // home rock the tick it empties. So the slot is held by
+                // where the body stands and not by what it holds.
+                let pair (aEnergy: int) (aFree: int) =
+                    raisingCrowd
+                        BuiltKind.Container
+                        [
+                            postBody "a" aEnergy aFree, { X = 10; Y = 45 }
+                            postBody "b" 0 50, { X = 10; Y = 47 }
+                        ]
+                        []
+
+                let { Assignments = building } = decide (pair 50 0) Map.empty Set.empty None
+
+                Expect.equal
+                    (Map.tryFind "a" building)
+                    (Some(taskId (Build "site-out")))
+                    "the garrison spends the load it dug"
+
+                Expect.notEqual
+                    (Map.tryFind "b" building)
+                    (Some(taskId (Harvest "src-out")))
+                    "and the Post it is standing on admits no second heavy body while it does"
+
+                // Pairwise on the incumbent's store alone: empty, it holds
+                // the Harvest itself and the cap answers as it always did.
+                let { Assignments = digging } = decide (pair 0 50) Map.empty Set.empty None
+
+                Expect.equal
+                    (Map.tryFind "a" digging)
+                    (Some(taskId (Harvest "src-out")))
+                    "empty, the same body holds the same Post through the dig"
+
+                Expect.notEqual
+                    (Map.tryFind "b" digging)
+                    (Some(taskId (Harvest "src-out")))
+                    "and the second body is refused by the cap it always was"
             }
         ]
