@@ -3028,13 +3028,51 @@ let private ticksToRestock (snapshot: Snapshot) sourceId =
 
 /// Whether a creep garrisons a source's container Post: ADR 0024's
 /// condition — a Work-heavy body standing on that source's built
-/// container. The full-store reprieve and the empty-window reprieve are
-/// one judgement (ADR 0025), so both gates ask it here rather than
-/// spelling the pair out twice: that tile is the garrison's job whatever
-/// its store or the source holds.
+/// container. The **full-store** reprieve and nothing else since ADR 0048
+/// split the pair ADR 0025 had made one: overflow past a full store falls
+/// into the container the creep is standing on, so the tile that catches
+/// it is the only tile that can earn this, and widening it by a step
+/// would keep a full body digging onto the floor (ADR 0012).
 let private garrisons atlas (creep: CreepInfo) sourceId =
     Atlas.workHeavy atlas creep.Name
     && Atlas.catchesOverflow atlas creep.Name sourceId
+
+/// Whether a Work-heavy body holds a source through its empty window: the
+/// **empty-source** reprieve, which ADR 0048 widened off the container to
+/// the source's whole digging range. Named for the reprieve and not for
+/// the Post on purpose: the glossary says "man" of a Post, and the second
+/// option ADR 0048 rejected by name was widening this to the source's
+/// Posts — the tile the Anchor is bumped onto is not one, and that is the
+/// whole bug. ADR 0025 wrote the two reprieves as
+/// one judgement about one tile, and the room proved them different
+/// questions: a hauler drawing the container swaps the Anchor onto the
+/// Seat beside it, and on the container-only condition that one step
+/// released it TooEarly, freed its Post, and left it competing for
+/// somebody else's — the live symptom #193 reports, a full source with
+/// nobody on it and a dry one with two. Overflow is a fact about the tile
+/// underfoot; being in position to dig is a fact about the range, and
+/// range 1 is what the engine asks of a dig. So the widened half asks the
+/// range and the narrow half keeps the container.
+///
+/// Still the body's own reprieve and never a light one's (ADR 0016, ADR
+/// 0024): a worker beside a dry rock has other work in reach and is
+/// released to go and do it, exactly as ADR 0013 released it. What the
+/// window forgives is the body with nowhere else worth being.
+///
+/// Which is also why ADR 0025's Dual Seat exclusion survives the widening
+/// intact: on a Dual Seat the body does have somewhere else worth being,
+/// and it is the tile it is already on. Harvest ranks ahead of Upgrade, so
+/// an exemption there would hold the Anchor on a Task the Emitter will not
+/// let it act on and stand it still for the whole window with a load it
+/// could have spent — the option ADR 0025 considered and rejected by name.
+/// ADR 0024's own condition is not subtracted with it: a container
+/// standing on a Dual Seat catches overflow like any other, and that tile
+/// was exempt before this widening.
+let private keepsThroughEmptyWindow atlas (creep: CreepInfo) sourceId =
+    garrisons atlas creep sourceId
+    || (Atlas.workHeavy atlas creep.Name
+        && Atlas.standsAtSource atlas creep.Name sourceId
+        && not (Atlas.standsOnDualSeat atlas creep.Name))
 
 /// The walk and the wait that hold a Task up for this creep, or None when
 /// its time has come (ADR 0025, repriced by ADR 0029): a drained source's
@@ -3047,11 +3085,25 @@ let private garrisons atlas (creep: CreepInfo) sourceId =
 /// blind to today's traffic, so a bystander in the lane cannot dispatch a
 /// creep this tick and recall it the next. A creep already beside a dry
 /// rock has no walk to cover anything and is released, exactly as ADR 0013
-/// released it. One exemption, on ADR 0024's condition and no other: the
-/// garrison keeps its Post through the empty window. A Dual Seat Anchor
-/// gets none: Upgrade is in place there, so it upgrades through the window
-/// and rematches Harvest once its Carry is spent. Every other Task is
-/// judged at the current tick.
+/// released it. One exemption, ADR 0024's condition as ADR 0048 widened
+/// it: a Work-heavy body already in digging range of the source keeps its
+/// Post through the empty window. A bare Dual Seat is subtracted from that
+/// widening and gets none, as ADR 0025 had it: Upgrade is in place there,
+/// so it upgrades through the window and rematches Harvest once its Carry
+/// is spent.
+/// And the dispatch itself is a light body's rule (ADR 0048, narrowing ADR
+/// 0025): for a Work-heavy body a drained source is early whatever its
+/// walk, unless that exemption holds. "The walk covers the wait, so set
+/// out now" was written for a body that pays a tick a tile; an Anchor pays
+/// four to seven, so its walk covers almost any wait, and the rule
+/// dispatched one across half a room — and, once the projection layered,
+/// across a border — onto a Post another Anchor was still standing on,
+/// leaving a full source unworked behind it (#193). A heavy body would
+/// rather wait the window out where it stands than spend it walking and
+/// pay for the walk home as well; a freshly cast one waits beside the
+/// spawn instead, at most a restock's fifty ticks once in a 1,500-tick
+/// life, which is accepted. Every other Task is judged at the current
+/// tick.
 /// Two consequences worth naming, both ADR 0004's totality. The walk
 /// answers 0 for an unplaced creep or target, and this gate reads that as
 /// an arrival of now — the one place unpriceable geometry holds a Task up,
@@ -3079,7 +3131,18 @@ let private tooEarly (snapshot: Snapshot) atlas (creep: CreepInfo) task (walk: L
         | Some ticks ->
             let wait = ticksToRestock snapshot sourceId
 
-            if ticks < wait && not (garrisons atlas creep sourceId) then
+            // `wait = 0` became load-bearing when the heavy arm below
+            // stopped reading the walk: a stocked source is a wait of zero
+            // and every walk covers it, so without this the arm would
+            // report a heavy body as early against a wait there is not,
+            // and no Anchor would ever be dispatched to any source.
+            if wait = 0 || keepsThroughEmptyWindow atlas creep sourceId then
+                None
+            // The heavy arm reports the same pair every other rejection
+            // does — the walk it would have made against the wait it does
+            // not cover for it — so the transition log reads as one gate
+            // with one reason and never as two (#88).
+            elif Atlas.workHeavy atlas creep.Name || ticks < wait then
                 Some(ticks, wait)
             else
                 None
@@ -3261,12 +3324,54 @@ let private isOutpostContainerSite (snapshot: Snapshot) atlas siteId =
 /// hauler row is outside this gate by arithmetic and not by exception:
 /// `Carry * 4 < 0` is false, so a Carry-only body refills as it always
 /// has.
+/// A fifth reads the geometry beside the body and lands on the one Task
+/// the fourth had to leave open (ADR 0048): Upgrade is applicable to a
+/// **Work-heavy** body only where it may already act on it. That is a
+/// narrower row than the fourth's — the upgrader is at `Work = Move` and
+/// is not Work-heavy, so its own footing beside the buffer is untouched —
+/// and it is the walk it refuses and never the Task; the arm carries why.
 let private applicable (snapshot: Snapshot) (threats: Threats) atlas (creep: CreepInfo) task =
     let has part =
         creep.Body |> Map.tryFind part |> Option.exists (fun n -> n > 0)
 
     match task with
-    | Harvest sourceId -> has Work && (creep.FreeCapacity > 0 || garrisons atlas creep sourceId)
+    // ADR 0024's full-store reprieve, and beside it the clause that keeps
+    // ADR 0048's own Consequence reachable ("stands where it is until it
+    // can dig again"). A Work-heavy body never empties — ADR 0016 shut
+    // Withdraw and Transfer, ADR 0046 shut Refill, Build and Repair, ADR
+    // 0048 shuts the walk to the controller — so once its one Carry is
+    // full it is full for the rest of its life, and a store gate that
+    // reads fullness as "done here" reads a garrison's ordinary condition
+    // as a reason to take its work away. Which it did: a hauler drawing
+    // the container swaps the Anchor onto the Seat beside it, and a full
+    // body one step off its Post had no Task at all and so no walk back
+    // to one (#193's own symptom, re-made by the cure).
+    //
+    // So the gate is not widened by a tile but by a question: ADR 0024
+    // asks whether a body may keep *digging* where it stands, and a body
+    // that is still walking is not digging. `mayAct` over the same tiles
+    // the Emitter acts from is that question — false while the walk is
+    // ahead of it, so the full body keeps Harvest and travel cost walks
+    // it home; true the tick it arrives, where ADR 0024's condition
+    // governs unchanged and the only tile that keeps a full body digging
+    // is still the container whose overflow the engine catches (ADR
+    // 0012). Nothing digs onto the floor that did not before, and the
+    // light body's full store still ends its dig wherever it stands.
+    //
+    // And the walk is offered only where it ends somewhere: a source with
+    // a Post (ADR 0020, ADR 0024). Every Post is a tile the arriving body
+    // has something to do on — a container Seat catches its overflow, a
+    // Dual Seat spends its load into the controller in place — so the
+    // reprieve never walks a full body onto a bare Seat it would be
+    // released from with nowhere left to go. A source with no Post is a
+    // light body's rock and the full-store rule there is untouched.
+    | Harvest sourceId ->
+        has Work
+        && (creep.FreeCapacity > 0
+            || garrisons atlas creep sourceId
+            || (Atlas.workHeavy atlas creep.Name
+                && not (Set.isEmpty (Atlas.postsOf atlas sourceId))
+                && not (Atlas.mayAct atlas creep.Name task (areaFor threats atlas creep.Name task))))
     | Withdraw storeId ->
         has Carry
         && creep.FreeCapacity > 0
@@ -3308,7 +3413,28 @@ let private applicable (snapshot: Snapshot) (threats: Threats) atlas (creep: Cre
     // The one Task the whole row exists for, and so the one place the
     // gate above must not appear (ADR 0046): a standing body spends its
     // Work into the controller from where it stands.
-    | Upgrade _ -> has Work && creep.Energy > 0
+    //
+    // And the fifth gate, which is that sentence's other half (ADR 0048):
+    // a Work-heavy body spends its Work into the controller only from
+    // where it already stands, because it is the walk that is the loss.
+    // ADR 0016 accepted one commute — "a full Anchor off-post matching
+    // Upgrade once empties it and converges" — but there is no *once*:
+    // every release puts the same
+    // body back at this gate, so a hauler bumping it off its container, or
+    // its source running dry, bought the walk out and the walk home again
+    // and again, fifty energy at a time against a body whose Work idles
+    // for the whole trip. The Dual Seat and the buffer-side row are
+    // exactly the shapes this leaves standing (ADR 0020, ADR 0046): both
+    // are already inside the Work Area, so what the gate refuses is the
+    // walk and never the Task. Asked as `mayAct` over the same tiles the
+    // Emitter acts from, so a body it admits is one that acts this tick
+    // rather than one that would have to move first — the Reach included
+    // (ADR 0033), because a tile a Threat has taken is not standing room.
+    | Upgrade _ ->
+        has Work
+        && creep.Energy > 0
+        && (not (Atlas.workHeavy atlas creep.Name)
+            || Atlas.mayAct atlas creep.Name task (areaFor threats atlas creep.Name task))
     // Part arithmetic and nothing else (ADR 0006): a reservation is pushed
     // up by CLAIM parts, so a body without one can no more reserve than a
     // Work-less one can dig, and a body with one asks for no energy state

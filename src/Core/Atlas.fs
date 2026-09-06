@@ -1791,6 +1791,19 @@ let private dualSeatsIn (atlas: Atlas) (room: string) : Set<Pos> =
 /// The Dual Seats of the colony's own room — the doc above governs both.
 let dualSeats (atlas: Atlas) : Set<Pos> = dualSeatsIn atlas atlas.Home
 
+/// Whether a creep stands on a Dual Seat: the one tile where a heavy body
+/// has a second thing to do without moving, which is why ADR 0025 gives
+/// it no reprieve through its source's empty window and ADR 0048 leaves
+/// that exclusion standing. Read in the creep's own room and answered for
+/// the colony's own room alone, for `postsIn`'s reason: the colony
+/// upgrades one controller, so a Seat beside an outpost's is a tile
+/// nobody ever upgrades from (ADR 0042). An unplaced creep stands on
+/// nothing (ADR 0004).
+let standsOnDualSeat (atlas: Atlas) (creep: string) : bool =
+    match Map.tryFind creep atlas.CreepAt with
+    | Some(room, tile) when room = atlas.Home -> Set.contains tile (dualSeats atlas)
+    | _ -> false
+
 /// Posts of the room: the tiles worth garrisoning with a heavy-WORK body
 /// (ADR 0012) — the Dual Seats plus every Seat under a built container
 /// (sites don't count: a pending container catches no overflow). A
@@ -2039,6 +2052,29 @@ let catchesOverflow (atlas: Atlas) (creep: string) (sourceId: string) : bool =
     | Some(creepRoom, pos), Some(sourceRoom, _) when creepRoom = sourceRoom ->
         Set.contains pos (tilesOfKindIn atlas creepRoom (Structure BuiltKind.Container))
         && Set.contains pos (seatTilesOf atlas sourceId)
+    | _ -> false
+
+/// Whether a creep stands where it could dig a source: in that source's
+/// own room and within the engine's harvest range of it (range 1). The
+/// widened half of `catchesOverflow` above and deliberately weaker (ADR
+/// 0048): that one asks whether the tile catches a full store's overflow,
+/// which is a fact about the container underfoot and about nothing else,
+/// while this asks only whether the creep is in position to dig the tick
+/// the energy lands — the question a source's empty window puts, where
+/// the container is beside the point.
+///
+/// Measured by range rather than by Seat membership, for the reason
+/// `mayAct` keeps its own range fallback: the Seats are read off the
+/// projection's terrain grid, and a creep the engine has put on ground
+/// the projection carries none for — a tile outside the terrain it was
+/// handed — is in position all the same, and the engine will let it dig
+/// from there (ADR 0004). Total in the same way, and the room is
+/// load-bearing: a creep at home on the coordinate an outpost source
+/// seats is nowhere near it (ADR 0041).
+let standsAtSource (atlas: Atlas) (creep: string) (sourceId: string) : bool =
+    match Map.tryFind creep atlas.CreepAt, Map.tryFind sourceId atlas.TargetAt with
+    | Some(creepRoom, tile), Some(sourceRoom, source) when creepRoom = sourceRoom ->
+        range tile source <= 1
     | _ -> false
 
 /// A room's place on the world grid, read off its name — `W12S28` is

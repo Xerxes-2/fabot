@@ -3948,6 +3948,152 @@ let roomTests =
             }
         ]
 
+/// The two joins ADR 0048 added, in the geometry that tells them apart: a
+/// room whose source sits at (10,10) and whose controller is four tiles
+/// south, so the Seats on the source's south rank are Dual Seats and the
+/// rest are ordinary, and an outpost carrying the very same coordinates
+/// beside it (ADR 0041, ADR 0042).
+let private pinnedLayer =
+    { RoomLayer.empty with
+        Terrain =
+            Map.ofList
+                [
+                    for x in 8..12 do
+                        for y in 8..15 do
+                            // (11,10) is a Seat by range and no Seat by
+                            // ground: the projection carries no terrain for
+                            // it at all.
+                            if (x, y) <> (11, 10) then
+                                { X = x; Y = y }, Plain
+                ]
+        TargetPositions = Map.ofList [ "src", { X = 10; Y = 10 }; "ctrl", { X = 10; Y = 14 } ]
+    }
+
+let private pinnedTwoRooms homeCreeps outCreeps =
+    { SpatialInfo.empty with
+        RoomName = Some "W1N1"
+        TargetKinds =
+            Map.ofList
+                [ "src", Source; "ctrl", Controller; "src-out", Source; "ctrl-out", Controller ]
+    }
+    |> withHome (fun _ ->
+        { pinnedLayer with
+            CreepPositions = Map.ofList homeCreeps
+        })
+    |> withOutpost
+        "W2N1"
+        { pinnedLayer with
+            TargetPositions =
+                Map.ofList [ "src-out", { X = 10; Y = 10 }; "ctrl-out", { X = 10; Y = 14 } ]
+            CreepPositions = Map.ofList outCreeps
+        }
+
+[<Tests>]
+let heavyPinJoinTests =
+    testList
+        "atlas heavy pin joins"
+        [
+            test "standsAtSource is the engine's harvest range, and it is one tile" {
+                // What the empty-window reprieve asks (ADR 0048): not
+                // whether the tile catches overflow — `catchesOverflow`
+                // answers that — but whether the body could dig the tick
+                // the energy lands, which the engine measures at range 1.
+                let atlas =
+                    pinnedTwoRooms [ "beside", { X = 10; Y = 9 }; "two-out", { X = 10; Y = 8 } ] []
+                    |> snapshotWith [ worker "beside"; worker "two-out"; worker "ghost" ]
+                    |> ofSnapshot
+
+                Expect.isTrue (standsAtSource atlas "beside" "src") "range 1 is in position"
+
+                Expect.isFalse
+                    (standsAtSource atlas "two-out" "src")
+                    "range 2 is a step short, and a step is a walk"
+
+                Expect.isFalse
+                    (standsAtSource atlas "ghost" "src")
+                    "and a creep the projection places nowhere stands nowhere (ADR 0004)"
+
+                Expect.isFalse
+                    (standsAtSource atlas "beside" "no-such-source")
+                    "as does a source it cannot place"
+            }
+
+            test "standsAtSource measures range and never Seat membership" {
+                // Why the range and not `seatTilesOf` (ADR 0048's third
+                // rejected option, and ADR 0004's totality): the Seats are
+                // read off the projection's ground, and a creep the engine
+                // has put on ground the projection carries none for is in
+                // position all the same. (11,10) is such a tile here.
+                let atlas =
+                    pinnedTwoRooms [ "off-grid", { X = 11; Y = 10 } ] []
+                    |> snapshotWith [ worker "off-grid" ]
+                    |> ofSnapshot
+
+                Expect.isFalse
+                    (Set.contains { X = 11; Y = 10 } (seatTilesOf atlas "src"))
+                    "the premise: no ground there, so no Seat there"
+
+                Expect.isTrue
+                    (standsAtSource atlas "off-grid" "src")
+                    "but the engine will let it dig, so the reprieve holds it"
+            }
+
+            test "standsAtSource never joins two rooms on one coordinate" {
+                // ADR 0041, the same guard `catchesOverflow` carries: a
+                // `Pos` names no room, so a creep at home on the
+                // coordinate an outpost source seats is a border away from
+                // it and in position for nothing.
+                let atlas =
+                    pinnedTwoRooms
+                        [ "home-body", { X = 10; Y = 9 } ]
+                        [ "out-body", { X = 10; Y = 9 } ]
+                    |> snapshotWith [ worker "home-body"; worker "out-body" ]
+                    |> ofSnapshot
+
+                Expect.isTrue
+                    (standsAtSource atlas "out-body" "src-out")
+                    "the premise: the outpost body is beside the outpost rock"
+
+                Expect.isFalse
+                    (standsAtSource atlas "home-body" "src-out")
+                    "and the home body on that same coordinate is beside nothing of the sort"
+            }
+
+            test "standsOnDualSeat answers for the colony's own room alone" {
+                // `postsIn`'s reason (ADR 0042): the colony upgrades one
+                // controller, so a Seat beside an outpost's is a tile
+                // nobody ever upgrades from — and reading it as a Dual Seat
+                // would subtract the outpost Anchor from ADR 0048's
+                // reprieve and leave it holding nothing at all.
+                let atlas =
+                    pinnedTwoRooms
+                        [ "home-dual", { X = 10; Y = 11 }; "home-plain", { X = 10; Y = 9 } ]
+                        [ "out-dual", { X = 10; Y = 11 } ]
+                    |> snapshotWith [ worker "home-dual"; worker "home-plain"; worker "out-dual" ]
+                    |> ofSnapshot
+
+                Expect.isTrue
+                    (Set.contains { X = 10; Y = 11 } (dualSeats atlas))
+                    "the premise: the Seat south of the rock is inside the controller's area"
+
+                Expect.isTrue
+                    (standsOnDualSeat atlas "home-dual")
+                    "and the body on it stands on one"
+
+                Expect.isFalse
+                    (standsOnDualSeat atlas "home-plain")
+                    "an ordinary Seat two ranks north is not one"
+
+                Expect.isFalse
+                    (standsOnDualSeat atlas "out-dual")
+                    "and the outpost's own geometry makes none, however it is shaped"
+
+                Expect.isFalse
+                    (standsOnDualSeat atlas "ghost")
+                    "a creep the projection places nowhere stands on nothing (ADR 0004)"
+            }
+        ]
+
 /// A projection carrying the colony's own room and one outpost across its
 /// north border, rings and all. W1N1 is world (-2,-2) and W1N2 (-2,-3), so
 /// stepping onto y=0 at home lands the creep on y=49 there — the pairing

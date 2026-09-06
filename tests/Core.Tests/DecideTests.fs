@@ -7384,6 +7384,15 @@ let moveIntentsFor name intents =
         | MoveCreep(creep, _) -> creep = name
         | _ -> false)
 
+/// The dig Intents a creep is issued this tick — what tells a body the
+/// Matcher kept on Harvest from one the Emitter actually lets dig (ADR
+/// 0020, ADR 0024).
+let digIntentsFor name intents =
+    intents
+    |> List.filter (function
+        | HarvestSource(creep, _) -> creep = name
+        | _ -> false)
+
 [<Tests>]
 let anchorTests =
     testList
@@ -7445,13 +7454,21 @@ let anchorTests =
                     "and stays matched to Harvest the whole walk"
             }
 
-            test "an Anchor that is already full off-Post commutes once, then settles" {
-                // The deployment path ADR 0020 names: a full store off the
-                // Post still catches no overflow, so Harvest is inapplicable
-                // and the body spends its load at the controller one last
-                // time. Nothing pins it until it is empty again — pinned
-                // here so the one-time heal stays a decision, not a
-                // surprise.
+            test "an Anchor that is already full off-Post commutes nowhere: it walks to its Post" {
+                // The deployment path ADR 0020 names, with ADR 0016's
+                // accepted detour closed (ADR 0048). The controller four
+                // tiles away is no longer a candidate: a Work-heavy body
+                // takes Upgrade only where it can already act on it. ADR
+                // 0016 called this one commute; it was one *per release*,
+                // and the room paid the walk out and the walk home every
+                // time a hauler bumped the Anchor or its source ran dry.
+                // What is left is the walk that was always the point — a
+                // full store off the Post catches no overflow, but the
+                // body is not digging there, it is walking, so Harvest
+                // holds it and travel cost puts it back on the tile that
+                // does catch it. A heavy body never empties (ADR 0016, ADR
+                // 0046, ADR 0048): full is its ordinary condition, and it
+                // is the Post and not the store that ends the walk.
                 let room =
                     { spatial
                           [
@@ -7480,25 +7497,53 @@ let anchorTests =
                         Spatial = room
                     }
 
-                let { Verdicts = verdicts } = decide full Map.empty Set.empty None
+                let {
+                        Intents = intents
+                        Verdicts = verdicts
+                    } =
+                    decide full Map.empty Set.empty None
 
                 Expect.contains
                     verdicts
-                    (Verdict.Matched("a1", taskId (Upgrade "ctrl-1"), MatchFactor.OnlyCandidate))
-                    "a full store off the Post catches no overflow: only Upgrade is left"
-
-                // Emptied at the controller, the same body is pulled home.
-                let emptied =
-                    { full with
-                        Creeps = [ anchor "a1" 0 50 ]
-                    }
-
-                let { Intents = intents } = decide emptied Map.empty Set.empty None
+                    (Verdict.Matched("a1", taskId (Harvest "src-a"), MatchFactor.OnlyCandidate))
+                    "the far controller is not a candidate at all; the Post it came off is the only one"
 
                 Expect.equal
                     (moveIntentsFor "a1" intents)
                     [ MoveCreep("a1", TopLeft) ]
-                    "empty again, it walks to the Post and stays there"
+                    "so it walks the one tile back rather than four to spend one Carry"
+
+                Expect.isEmpty
+                    (digIntentsFor "a1" intents)
+                    "and digs nothing on the way: the overflow reprieve is still the container's alone"
+
+                // The tick after the walk, on the Post it was walking to —
+                // the state the step above produces, and the one the empty
+                // window's reprieve is written for (ADR 0024).
+                let arrived =
+                    { full with
+                        Spatial =
+                            full.Spatial
+                            |> withHome (fun layer ->
+                                { layer with
+                                    CreepPositions = Map.ofList [ "a1", { X = 9; Y = 10 } ]
+                                })
+                    }
+
+                let remembered = Map.ofList [ "a1", taskId (Harvest "src-a") ]
+
+                let {
+                        Intents = intents
+                        Verdicts = verdicts
+                    } =
+                    decide arrived remembered Set.empty None
+
+                Expect.contains
+                    verdicts
+                    (Verdict.Kept("a1", taskId (Harvest "src-a")))
+                    "arrived, ADR 0024's own condition holds it there"
+
+                Expect.isEmpty (moveIntentsFor "a1" intents) "and it stays"
             }
 
             test "a Dual Seat and banked capacity plan an Anchor body" {
@@ -8928,9 +8973,18 @@ let containerPostTests =
                     "a light body's full store ends its dig, container or no container"
             }
 
-            test "a full Anchor on a bare Seat still releases Harvest" {
+            test "a full Anchor on a bare Seat digs nothing there" {
                 // (9,10) is a Seat of src-a with no container: harvesting
-                // past a full store there spills onto the ground.
+                // past a full store there spills onto the ground, so the
+                // overflow reprieve does not reach it and the Emitter
+                // issues no dig — which is ADR 0024's claim, and it is
+                // untouched by ADR 0048's walk home.
+                //
+                // The release here is the reachability gate's and not the
+                // store's: this room is a one-tile corridor with the
+                // source walled into it, so the Post at (11,10) is on the
+                // far side of the rock and no walk reaches it. The
+                // neighbouring cases below stand on tiles that can walk.
                 let snapshot =
                     { haulColony with
                         Creeps = [ anchor "a1" 50 0 ]
@@ -8943,17 +8997,30 @@ let containerPostTests =
                     }
 
                 let remembered = Map.ofList [ "a1", taskId (Harvest "src-a") ]
-                let { Verdicts = verdicts } = decide snapshot remembered Set.empty None
+
+                let {
+                        Intents = intents
+                        Verdicts = verdicts
+                    } =
+                    decide snapshot remembered Set.empty None
 
                 Expect.contains
                     verdicts
-                    (Verdict.Released("a1", taskId (Harvest "src-a"), ReleaseReason.Inapplicable))
-                    "no container underfoot: the ordinary full-store rule stands"
+                    (Verdict.Released("a1", taskId (Harvest "src-a"), ReleaseReason.Unreachable))
+                    "no container underfoot and no walk to one either"
+
+                Expect.isEmpty
+                    (digIntentsFor "a1" intents)
+                    "and nothing is dug onto the ground where the overflow would spill"
             }
 
-            test "a full creep beside the built container still releases Harvest" {
+            test "a full creep beside the built container digs nothing: adjacency is not the tile" {
                 // (12,10) touches the container at (11,10) but stands off
                 // it: adjacency catches nothing — only the tile itself.
+                // This is the tile a hauler drawing the container swaps
+                // the Anchor onto (#193), so it is the case ADR 0048's
+                // walk home is written for: the reprieve is still the
+                // container's, and the one step back onto it is the Task's.
                 let snapshot =
                     { haulColony with
                         Creeps = [ anchor "a1" 50 0 ]
@@ -8966,12 +9033,26 @@ let containerPostTests =
                     }
 
                 let remembered = Map.ofList [ "a1", taskId (Harvest "src-a") ]
-                let { Verdicts = verdicts } = decide snapshot remembered Set.empty None
+
+                let {
+                        Intents = intents
+                        Verdicts = verdicts
+                    } =
+                    decide snapshot remembered Set.empty None
 
                 Expect.contains
                     verdicts
-                    (Verdict.Released("a1", taskId (Harvest "src-a"), ReleaseReason.Inapplicable))
+                    (Verdict.Kept("a1", taskId (Harvest "src-a")))
+                    "one tile off the container is one step from it"
+
+                Expect.isEmpty
+                    (digIntentsFor "a1" intents)
                     "the widening reads the creep's own tile, never a neighbour"
+
+                Expect.equal
+                    (moveIntentsFor "a1" intents)
+                    [ MoveCreep("a1", Left) ]
+                    "so the step it takes is back onto the container"
             }
 
             test "a container construction site catches no overflow: Harvest still releases" {
@@ -8999,10 +9080,12 @@ let containerPostTests =
                     "a pending container is not yet a container"
             }
 
-            test "a built container off the Seats widens nothing: Harvest still releases" {
+            test "a built container off the Seats widens nothing: no dig, only the walk" {
                 // The controller container's tile is no Seat of src-a — a
                 // full creep standing on it is nowhere the overflow rule
-                // helps, however built the container underfoot.
+                // helps, however built the container underfoot. Eight
+                // tiles from its Post it is simply a body with a walk
+                // ahead of it (ADR 0048).
                 let snapshot =
                     { haulColony with
                         Creeps = [ anchor "a1" 50 0 ]
@@ -9015,12 +9098,26 @@ let containerPostTests =
                     }
 
                 let remembered = Map.ofList [ "a1", taskId (Harvest "src-a") ]
-                let { Verdicts = verdicts } = decide snapshot remembered Set.empty None
+
+                let {
+                        Intents = intents
+                        Verdicts = verdicts
+                    } =
+                    decide snapshot remembered Set.empty None
 
                 Expect.contains
                     verdicts
-                    (Verdict.Released("a1", taskId (Harvest "src-a"), ReleaseReason.Inapplicable))
+                    (Verdict.Kept("a1", taskId (Harvest "src-a")))
+                    "its Post is still its work, however far the walk"
+
+                Expect.isEmpty
+                    (digIntentsFor "a1" intents)
                     "only that source's own container Seat catches its overflow"
+
+                Expect.equal
+                    (moveIntentsFor "a1" intents)
+                    [ MoveCreep("a1", Left) ]
+                    "and the walk is toward that Seat"
             }
         ]
 
@@ -9618,6 +9715,382 @@ let restockTests =
                     (decides true 9)
                     None
                     "and the crowd no longer buys the phantom five that dispatched it"
+            }
+        ]
+
+/// The heavy-pin fixture (ADR 0048): the source embedded in wall at
+/// (10,10) with its eight neighbours open, the built container "cont-1"
+/// standing on the Seat (11,10) — the source's one Post — and a plain
+/// corridor running east from that Post to the controller at (40,10),
+/// whose Upgrade Work Area is a room's width from the source. No Dual
+/// Seat, so nothing a heavy body does here it can do in two places at
+/// once, and the controller is the only rival Harvest ever has.
+let pinnedRoom =
+    { spatial
+          [
+              "src-a", { X = 10; Y = 10 }
+              "cont-1", { X = 11; Y = 10 }
+              "ctrl-1", { X = 40; Y = 10 }
+          ]
+          (openSeats { X = 10; Y = 10 } @ [ for x in 11..39 -> { X = x; Y = 10 }, Plain ]) with
+        TargetKinds =
+            Map.ofList
+                [
+                    "src-a", Source
+                    "cont-1", Structure BuiltKind.Container
+                    "ctrl-1", Controller
+                ]
+    }
+
+/// The heavy-pin colony: one creep of the test's choosing standing where
+/// the test puts it, the source the given number of ticks from its
+/// restock, and no spawn to cast anything that would crowd the pool.
+let pinnedColony ticks (creep: CreepInfo) pos =
+    { bareRespawn with
+        Spawns = []
+        Refillables = []
+        Sources = [ drained "src-a" ticks ]
+        Controller = Some(controllerAt 2)
+        Creeps = [ creep ]
+        Spatial =
+            pinnedRoom
+            |> withHome (fun layer ->
+                { layer with
+                    CreepPositions = Map.ofList [ creep.Name, pos ]
+                })
+    }
+
+[<Tests>]
+let heavyPinTests =
+    testList
+        "heavy pin"
+        [
+            test "bumped one tile off the Post, a heavy body keeps its drained source" {
+                // ADR 0048's widening of ADR 0025's exemption. A hauler
+                // taking the container's load swaps the Anchor onto the
+                // Seat beside it; on ADR 0024's container-only condition
+                // that one step ended the garrison, released the Anchor
+                // TooEarly, and freed the Post for whatever was released
+                // elsewhere in the colony. The tile is still inside the
+                // source's digging range, which is the whole of what the
+                // window asks of it: it digs the tick the energy lands.
+                let colony = pinnedColony 50 (anchor "a1" 0 50) { X = 11; Y = 11 }
+                let remembered = Map.ofList [ "a1", taskId (Harvest "src-a") ]
+
+                let {
+                        Assignments = assignments
+                        Verdicts = verdicts
+                    } =
+                    decide colony remembered Set.empty None
+
+                Expect.contains
+                    verdicts
+                    (Verdict.Kept("a1", taskId (Harvest "src-a")))
+                    "one tile off the container is still in position to dig"
+
+                Expect.equal
+                    (harvesters assignments "src-a")
+                    [ "a1" ]
+                    "and the Post's capacity is held through the window"
+            }
+
+            test "the same tile releases a light body: the exemption reads the body" {
+                // The pairwise half of the rule (ADR 0016's shape, ADR
+                // 0048's clause): what the window forgives is a body that
+                // has nowhere else worth being. A worker beside a dry rock
+                // is released exactly as ADR 0013 released it and goes and
+                // does something else with the fifty ticks.
+                let colony = pinnedColony 50 (worker "w1" 0 50) { X = 11; Y = 11 }
+                let remembered = Map.ofList [ "w1", taskId (Harvest "src-a") ]
+
+                let {
+                        Assignments = assignments
+                        Verdicts = verdicts
+                    } =
+                    decide colony remembered Set.empty None
+
+                Expect.contains
+                    verdicts
+                    (Verdict.Released("w1", taskId (Harvest "src-a"), ReleaseReason.TooEarly(0, 50)))
+                    "an arrival of now covers no wait at all, whatever tile it is on"
+
+                Expect.equal (Map.tryFind "w1" assignments) None "and the Seat is free again"
+            }
+
+            test "a heavy body two tiles out is no longer in position, and is released" {
+                // Where ADR 0048 draws the line, and it is the engine's own
+                // harvest range and not a distance from the Post: a body
+                // that would have to take a step before it could dig has a
+                // walk, and a walk is what ADR 0025 judges. It waits the
+                // window out where it stands rather than being dispatched
+                // anywhere, which is the arm below.
+                let colony = pinnedColony 50 (anchor "a1" 0 50) { X = 12; Y = 10 }
+                let remembered = Map.ofList [ "a1", taskId (Harvest "src-a") ]
+
+                let {
+                        Intents = intents
+                        Verdicts = verdicts
+                    } =
+                    decide colony remembered Set.empty None
+
+                Expect.contains
+                    verdicts
+                    (Verdict.Released("a1", taskId (Harvest "src-a"), ReleaseReason.TooEarly(4, 50)))
+                    "out of digging range the ordinary arrival gate judges it"
+
+                Expect.contains
+                    verdicts
+                    (Verdict.Unassigned("a1", IdleReason.NoneInTime))
+                    "and nothing else in the pool is a heavy body's work"
+
+                Expect.isEmpty (moveIntentsFor "a1" intents) "so it holds its ground"
+            }
+
+            test "a distant heavy body is not dispatched to a drained source" {
+                // The live report (#193): ADR 0025's "the walk covers the
+                // wait, so set out now" is a light body's rule. An Anchor
+                // pays four ticks a plain step, so the walk covers almost
+                // any wait, and the colony sent one across half a room —
+                // and, with the projection layered, across a border — to
+                // take a Post somebody was still standing on. It waits
+                // instead: twenty ticks beside its own source cost the
+                // colony one restock, where twenty ticks of walking cost
+                // it the walk back too.
+                let colony = pinnedColony 20 (anchor "a1" 0 50) { X = 35; Y = 10 }
+
+                let {
+                        Assignments = assignments
+                        Verdicts = verdicts
+                    } =
+                    decide colony Map.empty Set.empty None
+
+                Expect.equal (Map.tryFind "a1" assignments) None "no dispatch onto a dry rock"
+
+                Expect.contains
+                    verdicts
+                    (Verdict.Unassigned("a1", IdleReason.NoneInTime))
+                    "and the reason is the restock, not its body"
+            }
+
+            test "a distant light body is dispatched exactly as ADR 0025 has it" {
+                // The pairwise rival of the case above, one body apart:
+                // the dispatch rule is untouched for everything that is
+                // not Work-heavy, and a worker whose walk covers the wait
+                // still spends the window on the road.
+                let colony = pinnedColony 20 (worker "w1" 0 50) { X = 35; Y = 10 }
+
+                let {
+                        Assignments = assignments
+                        Intents = intents
+                    } =
+                    decide colony Map.empty Set.empty None
+
+                Expect.equal
+                    (harvesters assignments "src-a")
+                    [ "w1" ]
+                    "twenty-four tiles of walking cover twenty ticks of waiting"
+
+                Expect.isNonEmpty
+                    (moveIntentsFor "w1" intents)
+                    "and the window is spent walking, not standing"
+            }
+
+            test "the bumped body is full, and that is the state the report was filed on" {
+                // The pairwise store half of the case above, and the one
+                // the colony actually reaches: a garrison digs twelve a
+                // tick into a fifty store and the overflow falls into the
+                // container, so a body standing on its Post is full nearly
+                // every tick of its life (ADR 0012, ADR 0024) — and a
+                // hauler drawing that container bumps a *full* body onto
+                // the Seat beside it. The empty-window reprieve has to
+                // reach that body or it reaches nothing the report
+                // describes.
+                let colony = pinnedColony 50 (anchor "a1" 50 0) { X = 11; Y = 11 }
+                let remembered = Map.ofList [ "a1", taskId (Harvest "src-a") ]
+
+                let {
+                        Assignments = assignments
+                        Intents = intents
+                        Verdicts = verdicts
+                    } =
+                    decide colony remembered Set.empty None
+
+                Expect.contains
+                    verdicts
+                    (Verdict.Kept("a1", taskId (Harvest "src-a")))
+                    "a full store off the container is a walk, not a reason to take the Post away"
+
+                Expect.equal
+                    (harvesters assignments "src-a")
+                    [ "a1" ]
+                    "and the Post's capacity is held through the window"
+
+                Expect.equal
+                    (moveIntentsFor "a1" intents)
+                    [ MoveCreep("a1", Top) ]
+                    "the one step it takes is back onto the container"
+
+                Expect.isEmpty
+                    (digIntentsFor "a1" intents)
+                    "and it digs nothing off the container, drained or not"
+            }
+
+            test "a full heavy body off its Post walks back to it, never to the controller" {
+                // ADR 0016's last accepted detour, closed (ADR 0048). It
+                // was written as one commute — a full Anchor spends its
+                // load at the controller once and converges — but every
+                // release put the same body back at the same gate, so the
+                // colony paid the walk out and the walk home every time a
+                // hauler bumped it or its source ran dry. Its Carry is
+                // fifty energy against four Work: there is nothing at the
+                // far end worth the trip.
+                //
+                // And closing that walk leaves the walk that was always
+                // the point. A Work-heavy body never empties — nothing in
+                // the pipeline spends its store any more — so if a full
+                // store also ended its Harvest it would hold no Task, take
+                // no step, and stand there for the rest of its life beside
+                // a stocked rock: #193's own symptom, made by the cure.
+                // ADR 0048's Consequence says it "stands where it is until
+                // it can dig again", and this is the walk that gets it
+                // there.
+                let colony = pinnedColony 0 (anchor "a1" 50 0) { X = 11; Y = 11 }
+
+                let {
+                        Assignments = assignments
+                        Intents = intents
+                    } =
+                    decide colony Map.empty Set.empty None
+
+                Expect.equal
+                    (Map.tryFind "a1" assignments)
+                    (Some(taskId (Harvest "src-a")))
+                    "the far controller is not its work; the Post one tile away is"
+
+                Expect.equal
+                    (moveIntentsFor "a1" intents)
+                    [ MoveCreep("a1", Top) ]
+                    "so it steps onto the Post instead of standing still"
+
+                Expect.isEmpty
+                    (intents
+                     |> List.filter (function
+                         | UpgradeController(creep, _) -> creep = "a1"
+                         | _ -> false))
+                    "and spends nothing into a controller a room away"
+            }
+
+            test "arrived on the Post, the full body stays and digs" {
+                // The tick the step above lands, driven from the state it
+                // produces rather than from a hand-built creep: ADR 0024's
+                // own condition takes over, the overflow falls into the
+                // container underfoot, and the walk home is over.
+                let colony = pinnedColony 0 (anchor "a1" 50 0) { X = 11; Y = 10 }
+                let remembered = Map.ofList [ "a1", taskId (Harvest "src-a") ]
+
+                let {
+                        Intents = intents
+                        Verdicts = verdicts
+                    } =
+                    decide colony remembered Set.empty None
+
+                Expect.contains
+                    verdicts
+                    (Verdict.Kept("a1", taskId (Harvest "src-a")))
+                    "on the container a full store keeps Harvest, as it always did"
+
+                Expect.isEmpty (moveIntentsFor "a1" intents) "the walk is over"
+
+                Expect.contains
+                    intents
+                    (HarvestSource("a1", "src-a"))
+                    "and this is the tile the dig was waiting for"
+            }
+
+            test "with no Harvest in the pool, a heavy body outside the Work Area has nothing" {
+                // The Upgrade gate on its own (ADR 0048's third clause),
+                // with the source taken out of the pool so what is left is
+                // the one comparison: a Work-heavy body one room's width
+                // from the controller is not a candidate for Upgrade at
+                // all, and there is nothing else its body can take.
+                let colony =
+                    { pinnedColony 0 (anchor "a1" 50 0) { X = 11; Y = 11 } with
+                        Sources = []
+                    }
+
+                let {
+                        Assignments = assignments
+                        Intents = intents
+                        Verdicts = verdicts
+                    } =
+                    decide colony Map.empty Set.empty None
+
+                Expect.equal
+                    (Map.tryFind "a1" assignments)
+                    None
+                    "the far controller is not its work"
+
+                Expect.contains
+                    verdicts
+                    (Verdict.Unassigned("a1", IdleReason.NoneApplicable))
+                    "and it is its body that says so, not a restock or a distance"
+
+                Expect.isEmpty
+                    (moveIntentsFor "a1" intents)
+                    "so nothing walks it the width of the room"
+            }
+
+            test "the same body inside the Upgrade Work Area still upgrades in place" {
+                // The half the gate must not take away (ADR 0046, ADR
+                // 0020): a heavy body standing where it can already spend
+                // — a Dual Seat Anchor, an upgrader beside the buffer —
+                // upgrades from the tile it is on. What ADR 0048 refuses
+                // is the walk, so the gate is Work-Area membership and not
+                // a body-shaped ban on the Task. Same colony, same body,
+                // same empty pool as the case above: one tile apart.
+                let colony =
+                    { pinnedColony 0 (anchor "a1" 50 0) { X = 38; Y = 10 } with
+                        Sources = []
+                    }
+
+                let {
+                        Assignments = assignments
+                        Intents = intents
+                    } =
+                    decide colony Map.empty Set.empty None
+
+                Expect.equal
+                    (Map.tryFind "a1" assignments)
+                    (Some(taskId (Upgrade "ctrl-1")))
+                    "two tiles from the controller it is already in place"
+
+                Expect.contains
+                    intents
+                    (UpgradeController("a1", "ctrl-1"))
+                    "and it spends its load without taking a step"
+            }
+
+            test "a light body still walks the whole corridor to Upgrade" {
+                // The pairwise rival again: the gate reads part arithmetic
+                // and nothing else (ADR 0006). On the very tile where the
+                // full Anchor takes the one step back onto its Post, the
+                // generalist — whose full store really does end its dig
+                // (ADR 0024) — takes the far Upgrade and walks the
+                // corridor for it.
+                let colony = pinnedColony 0 (worker "w1" 50 0) { X = 11; Y = 11 }
+
+                let {
+                        Assignments = assignments
+                        Intents = intents
+                    } =
+                    decide colony Map.empty Set.empty None
+
+                Expect.equal
+                    (Map.tryFind "w1" assignments)
+                    (Some(taskId (Upgrade "ctrl-1")))
+                    "a mobile body's Upgrade is unchanged at any distance"
+
+                Expect.isNonEmpty (moveIntentsFor "w1" intents) "and it sets out"
             }
         ]
 
@@ -15032,6 +15505,125 @@ let twoOutpostAnchorTests =
             }
         ]
 
+/// The two-room fixture the live report was filed on (#193): a Post in
+/// each room, both rocks inside their empty window, and one body standing
+/// beside the outpost's Post — the tile a hauler drawing that container
+/// swaps an Anchor onto.
+///
+/// Home's rock is the given ticks from its restock and the outpost's its
+/// own, and the crossing is a corridor, a Seam and thirty-six tiles, which
+/// an Anchor walks at four ticks a step. So ADR 0025 read alone dispatches
+/// it home: released from a Post it is standing beside, to walk a border
+/// for one that another Anchor is standing on — and a full rock is left
+/// with nobody on it while a dry one draws two.
+///
+/// The pool is those two Harvests and nothing else — `northBorderColony`
+/// carries no controller, no spawn and no refillable, and Withdraw and
+/// Flee are inapplicable to a Work-heavy body (ADR 0016, ADR 0033) — so
+/// what decides here is the one comparison the case is about.
+let private twoPostWindowColony ticksHome ticksOut (creep: CreepInfo) =
+    let colony =
+        northBorderColony { X = 10; Y = 38 }
+        |> withNorthOutpost (Some { X = 10; Y = 46 })
+
+    let outpost = SpatialInfo.layerOf colony.Spatial "W1N2"
+
+    { colony with
+        Sources = [ drained "src-home" ticksHome; drained "src-out" ticksOut ]
+        Creeps = [ creep ]
+        Spatial =
+            { colony.Spatial with
+                TargetKinds =
+                    colony.Spatial.TargetKinds
+                    |> Map.add "can-home" (Structure BuiltKind.Container)
+                    |> Map.add "can-out" (Structure BuiltKind.Container)
+            }
+            |> withHome (fun layer ->
+                { layer with
+                    TargetPositions = Map.add "can-home" { X = 10; Y = 37 } layer.TargetPositions
+                    CreepPositions = Map.empty
+                })
+            |> withNeighbour
+                "W1N2"
+                { outpost with
+                    TargetPositions = Map.add "can-out" { X = 10; Y = 45 } outpost.TargetPositions
+                    CreepPositions = Map.ofList [ creep.Name, { X = 10; Y = 47 } ]
+                }
+    }
+
+[<Tests>]
+let heavyPinAcrossTests =
+    testList
+        "heavy pin across a border"
+        [
+            test "an empty window at home does not pull an Anchor out of its outpost" {
+                // The live tick #193 reports, in two rooms: an Anchor
+                // stepped off its container by a hauler, its own rock
+                // fifty ticks from restocking, and a home Post whose rock
+                // is dry too. ADR 0025 dispatched it because an Anchor's
+                // walk covers any wait; ADR 0048 keeps it where it is,
+                // because it is in digging range of the rock it was hired
+                // for and there is nothing at the far end of that crossing
+                // it can do sooner.
+                let colony = twoPostWindowColony 20 30 (anchor "a1" 0 50)
+                let remembered = Map.ofList [ "a1", taskId (Harvest "src-out") ]
+
+                let {
+                        Assignments = assignments
+                        Intents = intents
+                        Verdicts = verdicts
+                    } =
+                    decide colony remembered Set.empty None
+
+                Expect.contains
+                    verdicts
+                    (Verdict.Kept("a1", taskId (Harvest "src-out")))
+                    "the outpost's Post is held through its window, not surrendered"
+
+                Expect.isEmpty
+                    (harvesters assignments "src-home")
+                    "and the home Post is nobody's to cross a border for"
+
+                Expect.equal
+                    (moveIntentsFor "a1" intents)
+                    [ MoveCreep("a1", Top) ]
+                    "and the one step it takes is back onto its own Post, away from the Seam"
+            }
+
+            test "the same geometry really does dispatch a light body home" {
+                // The premise of the case above, and the pairwise half of
+                // ADR 0048: nothing here is unreachable, mis-posted or out
+                // of the pool. A worker on the very tile the Anchor stands
+                // on is released from the outpost rock it is beside and
+                // crosses the Seam for the home one, because thirty-six
+                // tiles at a tick a tile cover twenty ticks of waiting —
+                // which is ADR 0025 exactly as it was written.
+                let colony = twoPostWindowColony 20 30 (worker "w" 0 50)
+                let remembered = Map.ofList [ "w", taskId (Harvest "src-out") ]
+
+                let {
+                        Assignments = assignments
+                        Verdicts = verdicts
+                    } =
+                    decide colony remembered Set.empty None
+
+                Expect.contains
+                    verdicts
+                    (Verdict.Released(
+                        "w",
+                        taskId (Harvest "src-out"),
+                        ReleaseReason.TooEarly(0, 30)
+                    ))
+                    "a light body beside a dry rock is released as it always was"
+
+                Expect.equal
+                    (harvesters assignments "src-home")
+                    [ "w" ]
+                    "and the walk home covers the wait, so it sets out"
+            }
+        ]
+
+
 /// A colony with an outpost beside it whose ground and furniture are the
 /// case's own: the room's whole floor, and everything placed in it, said
 /// here rather than inherited. The container pick is a choice *between*
@@ -17725,12 +18317,21 @@ let standingBodyTests =
                 // Harvest holds it at its Post long before travel cost gets
                 // a say — which is the next case. This one is what the rule
                 // says when Harvest is not in the pool at all.
+                //
+                // And ADR 0046's own "or holds no Task at all" is what it
+                // says here since ADR 0048: this creep stands one step
+                // outside the controller's Upgrade Work Area, and a
+                // Work-heavy body takes Upgrade only where it can already
+                // act on it. The gate on trial is unchanged — Build is
+                // still inapplicable to `6W/1C/1M` by `1 * 4 < 6` — and
+                // the generalist beside it still takes that Build, which
+                // is the pairwise the case above spells out.
                 let site = [ "site-1", { X = 15; Y = 10 }, Site BuiltKind.Extension ]
 
                 Expect.equal
                     (laneAssignment site [ { Id = "site-1" } ] anchorBody)
-                    (Some(taskId (Upgrade "ctrl-1")))
-                    "one Carry against six Work is a commute, whichever row cast it"
+                    None
+                    "one Carry against six Work is a commute, whichever row cast it and whichever way it walks"
             }
 
             test "a standing body does not repair either" {
