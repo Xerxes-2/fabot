@@ -954,6 +954,16 @@ let private isBootstrapRoom (snapshot: Snapshot) room =
     && colonyOwns snapshot room
     && spawnStandsIn snapshot room
 
+/// Whether an Upgrade in this pool is **borrowed**: its controller is not
+/// this colony's own (`Snapshot.Controller`), so it is a bootstrapped
+/// child's, pooled by `planTasks` for the pioneers (ADR 0047 decision 4
+/// as #213 amends it). Three readers ask it and must agree on which
+/// Upgrade they mean: the tier that lifts it, the capacity that bounds
+/// the lift at `pioneerCount`, and the body gate that keeps a standing
+/// body off it.
+let private isBorrowedUpgrade (snapshot: Snapshot) controllerId =
+    snapshot.Controller |> Option.exists (fun c -> c.Id = controllerId) |> not
+
 /// Planner: rebuild this tick's full Task pool from the Snapshot. Pure and
 /// from scratch every tick — Tasks are never persisted.
 let planTasks (snapshot: Snapshot) (threats: Threats) : Task list =
@@ -4335,11 +4345,17 @@ let private applicable (snapshot: Snapshot) (threats: Threats) atlas (creep: Cre
     // Emitter acts from, so a body it admits is one that acts this tick
     // rather than one that would have to move first — the Reach included
     // (ADR 0033), because a tile a Threat has taken is not standing room.
-    | Upgrade _ ->
+    | Upgrade controllerId ->
         has Work
         && creep.Energy > 0
         && (not (Atlas.workHeavy atlas creep.Name)
             || Atlas.mayAct atlas creep.Name task (areaFor threats atlas creep.Name task))
+        // A standing body holds no commuting body (ADR 0046) and the
+        // borrowed Upgrade is a commute across the Seam (#213): the lift
+        // that sends the pioneers must not send the home upgraders after
+        // them. Their own controller stays the one Task the row exists
+        // for, ungated.
+        && not (isBorrowedUpgrade snapshot controllerId && isStandingBody creep)
     // Part arithmetic and nothing else (ADR 0006): a reservation is pushed
     // up by CLAIM parts, so a body without one can no more reserve than a
     // Work-less one can dig, and a body with one asks for no energy state
@@ -4655,6 +4671,16 @@ let private tierOf (snapshot: Snapshot) atlas task =
     // it is bounded in *time* by the site being finished and by nothing
     // else.
     | Build siteId when isFeedingSite snapshot atlas siteId -> Feeding
+    // A bootstrapped child's Upgrade, in the mother's pool (#213): the
+    // tier the pioneers were hired for. Left in the surplus beside the
+    // home Upgrade, travel cost — a Seam and fifty tiles against five —
+    // kept every one of them at home, and the addend was three more home
+    // upgraders. Feeding lifts it over the mother's own surplus work for
+    // exactly `pioneerCount` bodies (`taskCapacities`), which is the hire
+    // taking the job it was hired for and not the loaded fleet crossing.
+    // The child's own tick pools the same target as its own controller,
+    // where this arm does not fire.
+    | Upgrade controllerId when isBorrowedUpgrade snapshot controllerId -> Feeding
     | Build _
     | Repair _
     | Upgrade _ -> Surplus
@@ -4927,7 +4953,20 @@ let private taskCapacities (snapshot: Snapshot) atlas (tasks: Task list) : Map<s
             sites
             |> List.choose (fun (tid, nursery) -> if nursery then None else Some(tid, each))
 
-    seats @ reserves @ draws @ outpostContainers |> Map.ofList
+    // A borrowed Upgrade takes the bodies hired for it and no more (#213):
+    // `pioneerCount`, the same constant the worker row is raised by, so a
+    // human retuning the hire retunes the lift with it. Without the cap
+    // the feeding tier would send every loaded body across the Seam and
+    // the mother's own surplus would stop — the nursery's accepted price
+    // for a 15,000-progress spawn, and not one for an open-ended window.
+    let borrowed =
+        tasks
+        |> List.choose (function
+            | Upgrade controllerId as task when isBorrowedUpgrade snapshot controllerId ->
+                Some(taskId task, pioneerCount)
+            | _ -> None)
+
+    seats @ reserves @ draws @ outpostContainers @ borrowed |> Map.ofList
 
 /// Concurrent Work-heavy-harvester cap per Harvest task id (ADR 0024): the
 /// source's Post count, the standing room a heavy body actually has — its

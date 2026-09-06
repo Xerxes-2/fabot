@@ -19408,14 +19408,14 @@ let bootstrapTests =
                     "and the mother pools the very same Task while she is still raising it"
             }
 
-            test "a loaded body takes the Upgrade of the room it stands in" {
-                // What the borrowing is worth, and the reason it needs no
-                // cap: both Upgrades are surplus-tier (`tierOf`), so
-                // nothing but travel cost separates them, and travel cost
-                // is a Seam and forty tiles. The mother's own room feeds
-                // itself through the creeps standing in it and the child's
-                // through the ones that have crossed — by price and not by
-                // any rule.
+            test "a loaded body is sent to the child's Upgrade by rank, from wherever it stands" {
+                // #213: the child's Upgrade is feeding-tier in the mother's
+                // pool. Left in the surplus beside the home Upgrade, travel
+                // cost — a Seam and forty tiles against five — kept every
+                // pioneer at home and the addend was three more home
+                // upgraders (live, t~170,4xx: five loaded workers, four on
+                // the home controller, none across). The lift is what
+                // makes the hire a hire.
                 //
                 // Read without the site, so the pool holds exactly the two
                 // Upgrades and the Matched factor names that one
@@ -19431,13 +19431,95 @@ let bootstrapTests =
 
                 Expect.equal
                     (matchOf twoUpgrades)
-                    (Some(taskId (Upgrade "ctrl-1"), MatchFactor.TravelCost))
-                    "standing at home, the mother's own controller is the near one"
+                    (Some(taskId (Upgrade "ctrl-child"), MatchFactor.Rank))
+                    "standing at home, the child's controller outranks the mother's own"
 
                 Expect.equal
                     (matchOf (standingNorth { X = 10; Y = 44 } twoUpgrades))
-                    (Some(taskId (Upgrade "ctrl-child"), MatchFactor.TravelCost))
-                    "and the same body across the Seam upgrades the child's, which is what the pioneers are for"
+                    (Some(taskId (Upgrade "ctrl-child"), MatchFactor.Rank))
+                    "and across the Seam the same body stays on it"
+            }
+
+            test "the lift takes pioneerCount bodies and the fourth stays on the home controller" {
+                // The cap is the hire (#213): `pioneerCount` is what the
+                // worker row rose by, so it is what the feeding-tier Upgrade
+                // may hold. A fourth loaded body is over the cap and prices
+                // the home Upgrade like any surplus body — pairwise on the
+                // count alone, same room, same two Upgrades.
+                let names = [ "w"; "w2"; "w3"; "w4" ]
+
+                let crowd =
+                    let colony =
+                        northBorderColony { X = 10; Y = 38 }
+                        |> withNorthOutpost None
+                        |> withNorthController { X = 10; Y = 45 }
+                        |> withHomeController { X = 10; Y = 5 }
+                        |> asNursery
+                        |> withNorthSpawn
+
+                    { colony with
+                        Creeps = names |> List.map (fun name -> worker name 50 0)
+                        Spatial =
+                            colony.Spatial
+                            |> withHome (fun layer ->
+                                { layer with
+                                    CreepPositions =
+                                        // All on the one tile the fixture stands "w" on:
+                                        // the occupancy surcharge prices a shared tile, it
+                                        // does not close it, and this test is about the
+                                        // count and not the geometry.
+                                        (layer.CreepPositions, names)
+                                        ||> List.fold (fun positions name ->
+                                            Map.add name { X = 10; Y = 38 } positions)
+                                })
+                    }
+
+                let { Assignments = assignments } = decide crowd Map.empty Set.empty None
+
+                let on task =
+                    assignments
+                    |> Map.toList
+                    |> List.filter (fun (_, t) -> t = taskId task)
+                    |> List.length
+
+                Expect.equal
+                    (on (Upgrade "ctrl-child"))
+                    3
+                    "three bodies cross for the child's Upgrade — the cap"
+
+                Expect.equal (on (Upgrade "ctrl-1")) 1 "and the fourth upgrades at home"
+            }
+
+            test "a standing body never takes the child's Upgrade" {
+                // The lift must not send the home upgraders after the
+                // pioneers (#213, ADR 0046): a standing body holds no
+                // commuting body, so the borrowed Upgrade is inapplicable to
+                // it and its own controller stays the one Task it exists
+                // for. Same room as above, the body the only thing moved.
+                let standing =
+                    northBorderColony { X = 10; Y = 38 }
+                    |> withNorthOutpost None
+                    |> withNorthController { X = 10; Y = 45 }
+                    |> withHomeController { X = 10; Y = 5 }
+                    |> asNursery
+                    |> withNorthSpawn
+
+                let upgrader =
+                    { standing with
+                        Creeps =
+                            [
+                                creepWith
+                                    "w"
+                                    50
+                                    0
+                                    (List.replicate 11 Work @ [ Carry ] @ List.replicate 11 Move)
+                            ]
+                    }
+
+                Expect.equal
+                    (matchOf upgrader)
+                    (Some(taskId (Upgrade "ctrl-1"), MatchFactor.OnlyCandidate))
+                    "the upgrader stays on its own controller; the child's is not applicable to it, so its own is the only candidate"
             }
 
             test "the downgrade deadline lifts the colony's own controller and not the child's" {
@@ -19486,8 +19568,8 @@ let bootstrapTests =
                 // Upgrades, the deadline the only thing that moved.
                 Expect.equal
                     (matchOf twoUpgrades)
-                    (Some(taskId (Upgrade "ctrl-child"), MatchFactor.TravelCost))
-                    "and outside it nothing is lifted at all: both Upgrades are surplus and travel cost keeps the body where it stands"
+                    (Some(taskId (Upgrade "ctrl-child"), MatchFactor.Rank))
+                    "and outside it the child's Upgrade holds the body by its own feeding-tier rank (#213), not by the deadline's"
             }
         ]
 
