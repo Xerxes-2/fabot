@@ -469,7 +469,18 @@ let build (shut: Set<string>) : Snapshot =
     // furnished, and its rocks are not pooled — three consequences of one
     // subtraction (`Outpost.worked`). Everything downstream sees a room
     // nobody declared, which is the semantics ADR 0004 already paid for.
-    let outposts = Outpost.declared |> Outpost.worked shut
+    //
+    // The constant is the colonies' now and no longer the outposts'
+    // alone (`Colony.declared`, ADR 0047): this colony's own entry is the
+    // one whose home is the room the first spawn stands in, and a home
+    // nobody declared works no outposts at all — the behaviour the empty
+    // declaration shipped with (#124) and the one downstream has a rule
+    // for.
+    let outposts =
+        home
+        |> Option.map (Colony.outpostsOf Colony.declared)
+        |> Option.defaultValue []
+        |> Outpost.worked shut
 
     // The rooms the colony works this tick — the home room and every
     // declared outpost beside it (ADR 0041). Core owns the union
@@ -796,4 +807,11 @@ let build (shut: Set<string>) : Snapshot =
             home
             |> Option.map (fun name -> buildSpatial name scanned |> Outpost.place outposts)
             |> Option.defaultValue SpatialInfo.empty
+        // The declaration's other half, handed over whole (ADR 0047): every
+        // home room a human has declared a colony for, this one's included
+        // and unfiltered. Which of them are **candidate colonies** — the
+        // ones nobody owns yet — is read off `RoomControl` in Core, so the
+        // shell passes on what was declared and judges none of it, exactly
+        // as it does for the scan set above.
+        ColonyHomes = Colony.homes Colony.declared
     }

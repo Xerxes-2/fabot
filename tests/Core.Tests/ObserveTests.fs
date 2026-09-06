@@ -356,6 +356,10 @@ let quiet: Snapshot =
             { SpatialInfo.empty with
                 RoomName = Some raidRoom
             }
+        // The Raid fold reads no declaration: which rooms a human means to
+        // own decides Tasks and quotas (ADR 0047), and the log records what
+        // happened in a room rather than what is planned for one.
+        ColonyHomes = []
     }
 
 /// A hostile creep of the given owner and body standing on a tile of the

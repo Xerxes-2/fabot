@@ -134,6 +134,11 @@ let bareRespawn =
         Hostiles = []
         InvaderCores = []
         Spatial = SpatialInfo.empty
+        // No colony declared but the one this Snapshot is: a **candidate
+        // colony** is a declared home the colony does not own yet (ADR
+        // 0047), so an empty list is every fixture that claims nothing —
+        // which is every fixture but the claim tests' own.
+        ColonyHomes = []
     }
 
 /// A creep with the given body's part counts, freshly cast: a full
@@ -466,7 +471,7 @@ let patternTableTests =
                         }
                         {
                             Name = "reserver"
-                            Block = [ Claim; Move ]
+                            Block = [ BodyPart.Claim; Move ]
                         }
                         {
                             Name = "upgrader"
@@ -563,7 +568,7 @@ let patternTableTests =
                 // reserver row" below.
                 Expect.equal
                     (bodyFor reserverPattern 1800)
-                    [ Claim; Claim; Move; Move ]
+                    [ BodyPart.Claim; BodyPart.Claim; Move; Move ]
                     "capacity buys whole [Claim; Move] blocks; the remainder stays banked"
             }
 
@@ -573,14 +578,14 @@ let patternTableTests =
                 // reserver's succession at zero ticks of cast time.
                 Expect.equal
                     (bodyFor reserverPattern 100)
-                    [ Claim; Move ]
+                    [ BodyPart.Claim; Move ]
                     "the block is the row's minimal cast"
             }
 
             test "the reserver body never exceeds the 50-part engine cap" {
                 Expect.equal
                     (bodyFor reserverPattern 100000)
-                    (List.replicate 25 Claim @ List.replicate 25 Move)
+                    (List.replicate 25 BodyPart.Claim @ List.replicate 25 Move)
                     "twenty-five blocks fill the 50 parts exactly"
             }
 
@@ -6774,7 +6779,7 @@ let safeModeTests =
                 // measure — the reflex keeps the old conservative answer.
                 let snapshot =
                     { bareRespawn with
-                        Hostiles = [ hostile [ Claim; Claim; Move; Move ] ]
+                        Hostiles = [ hostile [ BodyPart.Claim; BodyPart.Claim; Move; Move ] ]
                     }
 
                 let { Intents = intents } = decide snapshot Map.empty Set.empty None
@@ -6788,7 +6793,7 @@ let safeModeTests =
                 let snapshot =
                     { bareRespawn with
                         Spatial = spatial [ "ctrl-1", { X = 25; Y = 25 } ] []
-                        Hostiles = [ hostileAt "h-1" { X = 25; Y = 29 } [ Claim; Move ] ]
+                        Hostiles = [ hostileAt "h-1" { X = 25; Y = 29 } [ BodyPart.Claim; Move ] ]
                     }
 
                 let { Intents = intents } = decide snapshot Map.empty Set.empty None
@@ -6801,7 +6806,7 @@ let safeModeTests =
                 let snapshot =
                     { bareRespawn with
                         Spatial = spatial [ "ctrl-1", { X = 25; Y = 25 } ] []
-                        Hostiles = [ hostileAt "h-1" { X = 28; Y = 25 } [ Claim; Move ] ]
+                        Hostiles = [ hostileAt "h-1" { X = 28; Y = 25 } [ BodyPart.Claim; Move ] ]
                     }
 
                 let { Intents = intents } = decide snapshot Map.empty Set.empty None
@@ -6829,7 +6834,7 @@ let safeModeTests =
                                 { controllerAt 1 with
                                     SafeModeAvailable = 0
                                 }
-                        Hostiles = [ hostile [ Claim; Move ] ]
+                        Hostiles = [ hostile [ BodyPart.Claim; Move ] ]
                     }
 
                 let { Intents = intents } = decide snapshot Map.empty Set.empty None
@@ -6844,7 +6849,7 @@ let safeModeTests =
                                 { controllerAt 1 with
                                     SafeModeActive = true
                                 }
-                        Hostiles = [ hostile [ Claim; Move ] ]
+                        Hostiles = [ hostile [ BodyPart.Claim; Move ] ]
                     }
 
                 let { Intents = intents } = decide snapshot Map.empty Set.empty None
@@ -13218,7 +13223,11 @@ let threatTests =
                     "a RANGED_ATTACK part is a Threat"
 
                 Expect.isEmpty (reachOf [ Heal; Move ]) "a healer reaches nothing"
-                Expect.isEmpty (reachOf [ Claim; Move ]) "a claimer is safe mode's business"
+
+                Expect.isEmpty
+                    (reachOf [ BodyPart.Claim; Move ])
+                    "a claimer is safe mode's business"
+
                 Expect.isEmpty (reachOf [ Work; Work; Move ]) "a dismantler hurts no creep"
                 Expect.isEmpty (reachOf [ Tough; Move ]) "armour is not a weapon"
             }
@@ -15253,18 +15262,38 @@ let outpostTests =
                 // the order a human wrote them, and the scan set the shell
                 // takes from them.
                 //
+                // Read through the colony that declares them (ADR 0047):
+                // the outposts are one colony's now, so the home room is
+                // the key the shell looks them up under (`Snapshot.build`
+                // takes it off the first spawn) and the rooms and the scan
+                // set are what that lookup answers with. A home nobody
+                // declared answers with none, which is the other half of
+                // the same rule and the behaviour the empty declaration
+                // shipped with.
+                //
                 // Which ids and which tiles is a claim about the committed
                 // captures rather than about this list, so it is pinned
                 // where the captures are read (`RoomInvariantTests`) and
                 // never retyped here — two literals of the same ids would
                 // agree with each other and with nothing else.
+                let outposts = Colony.outpostsOf Colony.declared "W12S28"
+
                 Expect.equal
-                    (Outpost.declared |> List.map (fun outpost -> outpost.RoomName))
+                    (Colony.homes Colony.declared)
+                    [ "W12S28" ]
+                    "one colony is declared, and it is the room this bot has always run"
+
+                Expect.equal
+                    (outposts |> List.map (fun outpost -> outpost.RoomName))
                     [ "W12S27"; "W13S28" ]
                     "the north outpost and the west one"
 
+                Expect.isEmpty
+                    (Colony.outpostsOf Colony.declared "W13S28")
+                    "and a room nobody declared a colony for works no outposts at all"
+
                 Expect.equal
-                    (Outpost.roomsProjected Outpost.declared "W12S28")
+                    (Outpost.roomsProjected outposts "W12S28")
                     [ "W12S28"; "W12S27"; "W13S28" ]
                     "so the projection covers the spawn room and both of them"
             }
@@ -15521,7 +15550,7 @@ let outpostTests =
                     "and no rock of it is pooled, so the two readings of the constant agree"
 
                 Expect.isEmpty
-                    (Outpost.pooledSources [] Outpost.declared [])
+                    (Outpost.pooledSources [] (Colony.outpostsOf Colony.declared "W12S28") [])
                     "an empty scan set — no spawn, so no home room — pools nothing at all"
             }
 
@@ -17232,7 +17261,7 @@ let private reserveColony (creeps: (CreepInfo * Pos) list) =
                 }
     }
 
-/// The second outpost, across the *west* border: `Outpost.declared` takes
+/// The second outpost, across the *west* border: the declaration takes
 /// two rooms at once (ADR 0042) and one of them is not enough to tell "one
 /// reserver per outpost" apart from "every reserver on whichever
 /// controller is nearest". Its controller is off its corridor for the same
@@ -17284,7 +17313,7 @@ let private twoOutpostColony (creeps: (CreepInfo * Pos) list) =
 /// Carrying nothing and with nowhere to put anything — a CLAIM body has no
 /// Carry part — so no gate below can be passing on an energy state.
 let private reserver name =
-    creepWith name 0 0 [ Claim; Claim; Move; Move ]
+    creepWith name 0 0 [ BodyPart.Claim; BodyPart.Claim; Move; Move ]
 
 let private reserveTasks tasks =
     tasks
@@ -17573,6 +17602,270 @@ let reserveTests =
             }
         ]
 
+/// The Claim tasks of a pool, by the controller each names — the Reserve
+/// reader's twin beside it, so a case reading both is reading one pool
+/// through two windows of the same shape.
+let private claimTasks tasks =
+    tasks
+    |> List.choose (function
+        | Claim controllerId -> Some controllerId
+        | _ -> None)
+
+/// The colony of the Reserve fixtures with its north outpost declared a
+/// **candidate colony** (ADR 0047): the same room, the same controller and
+/// the same corridor, plus the two facts candidacy is made of — a human's
+/// declaration of that home, and vision saying nobody holds the room.
+///
+/// The candidate is one of this colony's own outposts, and that is the
+/// arrangement ADR 0047 requires rather than a convenience here: the
+/// controller is in the projection because the mother colony declared the
+/// room as an outpost, and it stays there until the day the room stands on
+/// its own. A declared home nobody projects carries no controller and so
+/// offers nothing to claim.
+///
+/// The home room is declared beside it, exactly as `Colony.declared`
+/// carries it: a colony's own home is in that list and is never a
+/// candidate, because the colony owns it.
+let private candidateColony (creeps: (CreepInfo * Pos) list) =
+    let colony = reserveColony creeps
+
+    { colony with
+        RoomControl = colony.RoomControl |> Map.add "W1N2" neutralRoom
+        ColonyHomes = [ SpatialInfo.homeName colony.Spatial; "W1N2" ]
+    }
+
+[<Tests>]
+let claimTests =
+    testList
+        "claim"
+        [
+            test "a candidate colony's controller is a Claim, and the Reserve beside it goes" {
+                // ADR 0047's pool rule and its one-Task-per-controller
+                // trap in a single case. A controller carries exactly one
+                // of the three Tasks that act on one — ours is Upgraded, a
+                // neutral one is Reserved, a candidate colony's is Claimed
+                // — and both pooled at once would be two jobs one CLAIM
+                // body is applicable to, separated by nothing the Matcher
+                // reads: travel cost knows the tile and not the intent, so
+                // the colony would hold the reservation of the room it is
+                // trying to own.
+                //
+                // Pairwise on the declaration alone: the same room, the
+                // same controller, the same projection, the same neutral
+                // control entry. Only the human's sentence moves.
+                let pooled (colony: Snapshot) = planTasks colony noThreats
+
+                let outpost =
+                    let colony = reserveColony []
+
+                    { colony with
+                        RoomControl = colony.RoomControl |> Map.add "W1N2" neutralRoom
+                    }
+                    |> pooled
+
+                let candidate = pooled (candidateColony [])
+
+                Expect.equal
+                    (reserveTasks outpost, claimTasks outpost)
+                    ([ "ctrl-out" ], [])
+                    "undeclared, the neutral controller is the Reserve it always was"
+
+                Expect.equal
+                    (reserveTasks candidate, claimTasks candidate)
+                    ([], [ "ctrl-out" ])
+                    "declared a colony, the same controller is a Claim and no longer a Reserve"
+
+                // The colony's own home is in that declaration beside the
+                // candidate, and it is never claimed: we own it, which the
+                // case below reads as the general rule.
+                Expect.isEmpty
+                    (claimTasks candidate |> List.filter (fun id -> id <> "ctrl-out"))
+                    "and the one Claim is the candidate's: a home we already own is no candidate"
+            }
+
+            test "the room this colony has already claimed is neither claimed nor reserved" {
+                // The tick the claim lands, read at the pool (#181, ADR
+                // 0047): the room stops being a candidate because we own
+                // it, and it does not fall back to being a Reserve —
+                // `reserveController` and `claimController` are both
+                // refused on a room with an owner, so the two exclusions
+                // have to hold at once or the pool offers a Task no body
+                // can execute.
+                //
+                // Pairwise on ownership, the declaration held fixed: the
+                // same candidate colony, seen unowned and seen ours.
+                let pooledUnder control =
+                    let colony = candidateColony []
+
+                    { colony with
+                        RoomControl = colony.RoomControl |> Map.add "W1N2" control
+                    }
+                    |> fun colony -> planTasks colony noThreats
+
+                let unowned = pooledUnder neutralRoom
+                let ours = pooledUnder ownedRoom
+
+                Expect.equal
+                    (claimTasks unowned)
+                    [ "ctrl-out" ]
+                    "the premise: unowned, the declared home is there to be taken"
+
+                Expect.equal
+                    (reserveTasks ours, claimTasks ours)
+                    ([], [])
+                    "and owned, its controller carries neither Task"
+            }
+
+            test "a room this colony cannot see, or one a rival holds, is no claim" {
+                // Both halves of "takeable" (ADR 0047), each against the
+                // Reserve that stays behind it. Vision first: a room with
+                // no control entry is one nothing is looking into, and an
+                // unseen room is not one the colony can claim — absence
+                // classifies nothing (ADR 0004). Then the rival: the
+                // engine answers ERR_INVALID_TARGET on a controller
+                // somebody else reserves, so a Claim pooled there would
+                // walk a body fifty tiles to stand still for its whole
+                // 600-tick life. Which room a rival's hold costs the
+                // colony is ADR 0043's [[stand-down]] to decide, and until
+                // it does the controller is the Reserve it always was.
+                let pooledWith control =
+                    let colony = candidateColony []
+
+                    { colony with
+                        RoomControl =
+                            match control with
+                            | Some control -> colony.RoomControl |> Map.add "W1N2" control
+                            | None -> colony.RoomControl |> Map.remove "W1N2"
+                    }
+                    |> fun colony -> planTasks colony noThreats
+
+                for label, control in
+                    [ "blind", None; "held by a rival", Some(reservedRoom false 3000) ] do
+                    let tasks = pooledWith control
+
+                    Expect.equal
+                        (claimTasks tasks, reserveTasks tasks)
+                        ([], [ "ctrl-out" ])
+                        $"{label}: nothing to claim, and the controller keeps its Reserve"
+
+                // Our own reservation is the ordinary case and not a bar:
+                // the room the colony has been holding at ten a tick is
+                // exactly the room it means to take.
+                let held =
+                    let colony = candidateColony []
+
+                    { colony with
+                        RoomControl = colony.RoomControl |> Map.add "W1N2" (reservedRoom true 4000)
+                    }
+                    |> fun colony -> planTasks colony noThreats
+
+                Expect.equal
+                    (claimTasks held, reserveTasks held)
+                    ([ "ctrl-out" ], [])
+                    "a controller we reserve ourselves is claimable, and stops being reserved"
+            }
+
+            test "a CLAIM body is matched to the Claim and claims the controller" {
+                // The whole path in one tick (ADR 0047): the Task is pooled
+                // off the declaration, the CLAIM body is the one body it
+                // applies to — the same part gate Reserve has, which is why
+                // one row casts for both — the Matcher hands it over, and
+                // the Emitter issues the claim. The creep stands at
+                // (10,44), one tile from the controller at (11,44), so the
+                // act is this tick's and not a walk's.
+                let {
+                        Assignments = assignments
+                        Intents = intents
+                        Verdicts = verdicts
+                    } =
+                    decide
+                        (candidateColony [ reserver "r1", { X = 10; Y = 44 } ])
+                        Map.empty
+                        Set.empty
+                        None
+
+                Expect.equal
+                    (Map.tryFind "r1" assignments)
+                    (Some(taskId (Claim "ctrl-out")))
+                    "the CLAIM body holds the candidate colony's controller"
+
+                Expect.contains
+                    verdicts
+                    (Verdict.Matched("r1", taskId (Claim "ctrl-out"), MatchFactor.OnlyCandidate))
+                    "and it is the only Task in the pool it fits"
+
+                Expect.contains
+                    intents
+                    (ClaimController("r1", "ctrl-out"))
+                    "the Intent is the engine's claim act, aimed at the declared controller"
+
+                Expect.contains
+                    intents
+                    (SayCreep("r1", "🏴"))
+                    "and the bubble carries the Claim glyph"
+
+                Expect.isEmpty
+                    (intents
+                     |> List.filter (function
+                         | ReserveController _ -> true
+                         | _ -> false))
+                    "nothing reserves the room it is taking"
+            }
+
+            test "a body with no CLAIM part is never matched to a Claim" {
+                // Pairwise against the case above: the same colony, the
+                // same tile beside the same controller, one body swapped.
+                // `claimController` is a CLAIM part's act exactly as
+                // `reserveController` is, so a generalist standing on the
+                // doorstep of a room the colony means to own can do nothing
+                // about it.
+                let {
+                        Assignments = assignments
+                        Intents = intents
+                    } =
+                    decide
+                        (candidateColony [ worker "w1" 0 50, { X = 10; Y = 44 } ])
+                        Map.empty
+                        Set.empty
+                        None
+
+                Expect.isEmpty
+                    (Map.toList assignments)
+                    "the one Task in the pool asks for a part this body has none of"
+
+                Expect.isEmpty
+                    (intents
+                     |> List.filter (function
+                         | ClaimController _ -> true
+                         | _ -> false))
+                    "and nothing claims anything"
+            }
+
+            test "one claimer per controller: a second body is left over" {
+                // The Task's capacity (ADR 0047): a room is taken by one
+                // touch of one CLAIM part, so a second body at the same
+                // controller buys nothing at all — and travel cost, which
+                // is all the Matcher reads inside a tier, would send every
+                // claimer in the colony to the nearest one. Two bodies on
+                // one tile, so nothing but the cap can separate them.
+                let { Assignments = assignments } =
+                    decide
+                        (candidateColony
+                            [ reserver "r1", { X = 10; Y = 44 }; reserver "r2", { X = 10; Y = 43 } ])
+                        Map.empty
+                        Set.empty
+                        None
+
+                Expect.equal
+                    (assignments
+                     |> Map.toList
+                     |> List.filter (fun (_, task) -> task = taskId (Claim "ctrl-out"))
+                     |> List.length)
+                    1
+                    "one of the two holds the Claim, and the other is not a second holder"
+            }
+        ]
+
 /// A colony standing exactly at its Workforce target with one reserver in
 /// it: no Post, no source container and no placed rock, so the target is
 /// the floor of two and the two living creeps meet it. One body leaving
@@ -17633,7 +17926,7 @@ let reserverLeadTests =
                         "at its lead the colony is one short — and casts a generalist, this room declaring no outpost for the reserver row to hire against"
 
                     Expect.isFalse
-                        (List.contains Claim body)
+                        (List.contains BodyPart.Claim body)
                         "the row that replaces a reserver is the reserver row's quota, and here it is zero"
                 | other -> failtest $"expected exactly one SpawnCreep intent, got %A{other}"
             }
@@ -17712,11 +18005,11 @@ let private reserverCasts intents =
 /// The one block the row never casts below, and the body a reservation
 /// standing at its 5,000 cap asks for: the deficit is zero and the floor
 /// is one.
-let private oneBlock = [ Claim; Move ]
+let private oneBlock = [ BodyPart.Claim; Move ]
 
 /// ADR 0042's own reserver body, which a deficit of one to 1,200 ticks
 /// buys: 1,300 energy, 2.17 a tick over a CLAIM part's 600-tick life.
-let private twoBlocks = [ Claim; Claim; Move; Move ]
+let private twoBlocks = [ BodyPart.Claim; BodyPart.Claim; Move; Move ]
 
 [<Tests>]
 let reserverRowTests =
@@ -17753,6 +18046,128 @@ let reserverRowTests =
 
                         Expect.equal body oneBlock "and its body holds a CLAIM part"
                     | other -> failtest $"expected exactly one SpawnCreep intent, got %A{other}"
+            }
+
+            test "a candidate colony hires one body, and it is one block" {
+                // ADR 0047's casting clause, and the two things it says at
+                // once. The row is *this* row — a claimer is a
+                // `[Claim; Move]` body like a reserver, so it is cast, led
+                // and amortized where reservers are, and `patternOf` reads
+                // one back as the other. And the room hires **one** body,
+                // not two: its controller carries a Claim and no Reserve,
+                // so a reserver hired for it would arrive at a controller
+                // with no Task on it and stand there for its whole
+                // 600-tick life.
+                //
+                // The block count is where the two *demands* are told
+                // apart. A reservation sitting 4,000 ticks below its cap
+                // asks for seven blocks and takes what the 1,800 bank
+                // affords, which is two; a claim is one act by one CLAIM
+                // part and asks for one block whatever the reservation has
+                // done. Pairwise on the declaration alone — same room, same
+                // rock, same reservation, same fleet, same bank.
+                //
+                // The demand is not the cast: this room's own demand is the
+                // whole list here, so the two coincide. The test below is
+                // where they come apart.
+                let castsWith declared =
+                    let colony =
+                        reserverColony
+                            [ northOutpost false ]
+                            (surplusFleet 2)
+                            [ "W1N2", reservedRoom true 1000 ]
+
+                    { colony with
+                        ColonyHomes =
+                            if declared then
+                                [ SpatialInfo.homeName colony.Spatial; "W1N2" ]
+                            else
+                                []
+                    }
+                    |> fun colony -> decide colony Map.empty Set.empty None
+                    |> fun result -> reserverCasts result.Intents
+
+                Expect.equal
+                    (castsWith false)
+                    [ twoBlocks ]
+                    "undeclared, the room is an outpost and its lapsed reservation buys the bank's body"
+
+                Expect.equal
+                    (castsWith true)
+                    [ oneBlock ]
+                    "declared a colony, the same room hires one body of one block, and no reserver beside it"
+            }
+
+            test "a claimer beside a slipping reservation is cast at the row's largest demand" {
+                // The other half of ADR 0047's casting clause, and the half
+                // a one-outpost fixture cannot show: the claim's *entry* is
+                // one block, but every body this row casts this tick is
+                // sized at the largest demand in the list. Which controller
+                // a finished CLAIM body ends up holding is the Matcher's,
+                // priced by travel cost alone and knowing nothing about
+                // which demand paid for which body, so a claimer cast at
+                // one block could land on the reservation that has slipped
+                // and freeze that room for its whole 600-tick life. The
+                // over-buy is the safe direction, and it is the same one
+                // `reserverClaimsOf` takes for two slipping reservations.
+                //
+                // Pairwise on the second outpost alone: the candidate is
+                // the same room under the same declaration with the same
+                // reservation in both, and what moves is whether an unheld
+                // outpost stands beside it.
+                let castsWith slippingNeighbour =
+                    let outposts =
+                        if slippingNeighbour then
+                            [ northOutpost false; westOutpost false ]
+                        else
+                            [ northOutpost false ]
+
+                    let control =
+                        [ "W1N2", reservedRoom true 5000 ]
+                        @ if slippingNeighbour then [ "W2N2", neutralRoom ] else []
+
+                    let colony = reserverColony outposts (surplusFleet 2) control
+
+                    { colony with
+                        ColonyHomes = [ SpatialInfo.homeName colony.Spatial; "W1N2" ]
+                    }
+                    |> fun colony -> decide colony Map.empty Set.empty None
+                    |> fun result -> reserverCasts result.Intents
+
+                Expect.equal
+                    (castsWith false)
+                    [ oneBlock ]
+                    "the candidate alone: its one block is the whole list, so the claimer is one block"
+
+                Expect.equal
+                    (castsWith true)
+                    [ twoBlocks; twoBlocks ]
+                    "beside an unheld outpost the whole row is cast at that room's deficit, the claimer with it"
+
+                // And those two bodies are one reserver and one claimer
+                // rather than two reservers: the candidate's controller
+                // carries the Claim and no Reserve, so one of the two
+                // over-bought bodies is the one that will touch a
+                // controller once.
+                let declared =
+                    let colony =
+                        reserverColony
+                            [ northOutpost false; westOutpost false ]
+                            (surplusFleet 2)
+                            [ "W1N2", reservedRoom true 5000; "W2N2", neutralRoom ]
+
+                    { colony with
+                        ColonyHomes = [ SpatialInfo.homeName colony.Spatial; "W1N2" ]
+                    }
+
+                Expect.equal
+                    (planTasks declared noThreats
+                     |> List.filter (function
+                         | Reserve _
+                         | Claim _ -> true
+                         | _ -> false))
+                    [ Reserve "ctrl-W2N2"; Claim "ctrl-W1N2" ]
+                    "the row's two demands are the unheld outpost's Reserve and the candidate's Claim"
             }
 
             test "two declared outposts hire two reservers, one apiece" {
@@ -17943,12 +18358,12 @@ let reserverRowTests =
 
                 Expect.equal
                     (castAt 2300 0)
-                    [ List.replicate 3 Claim @ List.replicate 3 Move ]
+                    [ List.replicate 3 BodyPart.Claim @ List.replicate 3 Move ]
                     "a reservation on the floor asks for nine parts and gets the three the bank buys"
 
                 Expect.equal
                     (castAt 8000 0)
-                    [ List.replicate 9 Claim @ List.replicate 9 Move ]
+                    [ List.replicate 9 BodyPart.Claim @ List.replicate 9 Move ]
                     "at a bank that affords them, the deficit's own nine"
             }
 
@@ -17973,7 +18388,7 @@ let reserverRowTests =
                     |> fun colony -> decide colony Map.empty Set.empty None
                     |> fun result -> reserverCasts result.Intents
 
-                let nineBlocks = List.replicate 9 Claim @ List.replicate 9 Move
+                let nineBlocks = List.replicate 9 BodyPart.Claim @ List.replicate 9 Move
 
                 Expect.equal
                     (castWith [ "W1N2", reservedRoom true 4000 ])
@@ -18007,7 +18422,7 @@ let reserverRowTests =
                         (surplusFleet 2)
                         [ "W1N2", reservedRoom true 5000; "W2N2", reservedRoom true 2000 ]
 
-                let fiveBlocks = List.replicate 5 Claim @ List.replicate 5 Move
+                let fiveBlocks = List.replicate 5 BodyPart.Claim @ List.replicate 5 Move
 
                 Expect.equal
                     (reserverCasts
@@ -18117,7 +18532,7 @@ let reserverRowTests =
 
                 Expect.equal
                     (castsUnder neutralRoom)
-                    [ List.replicate 9 Claim @ List.replicate 9 Move ]
+                    [ List.replicate 9 BodyPart.Claim @ List.replicate 9 Move ]
                     "a room nobody holds is the whole 5,000 of deficit: nine parts"
 
                 Expect.isEmpty
@@ -19358,7 +19773,8 @@ let upgraderQuotaTests =
                     "the row that doubles the income is cast before the row that spends it"
 
                 let withReserver =
-                    upgraderFleet 0 0 @ [ creepWith "r1" 0 50 [ Claim; Claim; Move; Move ] ]
+                    upgraderFleet 0 0
+                    @ [ creepWith "r1" 0 50 [ BodyPart.Claim; BodyPart.Claim; Move; Move ] ]
 
                 Expect.stringStarts
                     (castName (casts declared withReserver))

@@ -1631,6 +1631,9 @@ let targetRoom (atlas: Atlas) (targetId: string) : string option =
 /// walkable neighbours and the reserver stands beside the controller and
 /// never on it. At W12S27's `37,43` that area is two tiles, both swamp
 /// (ADR 0042) — a fact about that room's ground, not a special case here.
+/// Claim is the same act on the same kind of target (ADR 0047), so it is
+/// the same pair: a claimer walks to a tile beside the controller of the
+/// candidate colony and takes it from there.
 ///
 /// Pickup is a range-1 act like the other four, and its target is the one
 /// that is not an obstacle: a pile lies on ground a creep may stand on, so
@@ -1642,6 +1645,7 @@ let private actionOn =
     | Harvest id
     | Withdraw id
     | Reserve id
+    | Claim id
     | Pickup id
     | Refill id -> Some(id, 1)
     | Build id

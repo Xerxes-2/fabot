@@ -266,6 +266,10 @@ type ICreep =
     /// part (ADR 0042). Range 1, and refused on a controller anybody owns
     /// — including ours, which is Upgraded instead.
     abstract reserveController: target: obj -> int
+    /// Take a neutral controller's room for this player (ADR 0047). Range
+    /// 1, one CLAIM part, and refused — ERR_GCL_NOT_ENOUGH — while every
+    /// GCL level this account has is already spent on a room.
+    abstract claimController: target: obj -> int
     abstract pickup: target: obj -> int
     /// Single-step move by direction constant (TOP = 1, clockwise). The
     /// only movement API the bot uses — moveTo is forbidden (ADR 0001).

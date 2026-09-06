@@ -3,6 +3,15 @@ module Fabot.Core.Types
 /// A creep body part, the engine's full vocabulary. Our own bodies use
 /// only Work/Carry/Move today; the rest arrive on hostile creeps, whose
 /// parts the Snapshot projects verbatim.
+///
+/// `Claim` is spelled `BodyPart.Claim` wherever it means a part, because
+/// `Task.Claim` (ADR 0047) shares the name and is declared later, so the
+/// bare word resolves to the Task. Both names are the engine's own — the
+/// part is CLAIM and the act is `claimController` — so neither was renamed
+/// to dodge the other, and the qualification is where the two are told
+/// apart. The whole union is not `RequireQualifiedAccess` for the reason
+/// the qualification is bearable: `Work`, `Carry` and `Move` are written
+/// in every body literal in the codebase and collide with nothing.
 type BodyPart =
     | Work
     | Carry
@@ -533,45 +542,6 @@ type Outpost =
 
 [<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
 module Outpost =
-    /// The colony's outposts (ADR 0042): W12S27 across the north edge and
-    /// W13S28 across the west, three sources and two controllers between
-    /// them. Chosen by a human in an ADR and moved by a human in a commit,
-    /// exactly as the Layout's horizon is (ADR 0039) — the type above
-    /// carries why there is no discovery and why the ids are the engine's.
-    ///
-    /// Filling this is half of ADR 0042's first step and never the whole
-    /// of it. The other half is in `Decide.workforceTarget`, which counts
-    /// an unposted source's Seats into the target on the grounds that its
-    /// output is spoken for by the crews that walk it. Filled alone, that
-    /// rule reads these three sources' six Seats — five of them swamp —
-    /// and hires six generalists to commute forty-seven to fifty-six tiles
-    /// to dig them, which is why the narrowing lands in the same commit as
-    /// the declaration and not one after it.
-    ///
-    /// W13S28's sources are paired to their tiles and never to their
-    /// order: they are written `16,7` before `18,4`, the reverse of the
-    /// order ADR 0042's prose reads them in, because that is the order the
-    /// server answered the room in and the order the committed capture
-    /// keeps (`RoomFixtures.RealSources`, pinned in `RoomInvariantTests`).
-    /// `16,7` is the single-Seat far source, not the two-Seat one.
-    let declared: Outpost list =
-        [
-            {
-                RoomName = "W12S27"
-                Sources = [ "6a8caabadd4872bccd3194a6", { X = 16; Y = 45 } ]
-                Controller = "6a8caabadd4872bccd3194a5", { X = 37; Y = 43 }
-            }
-            {
-                RoomName = "W13S28"
-                Sources =
-                    [
-                        "6a8caaaddd4872bccd319362", { X = 16; Y = 7 }
-                        "6a8caaaddd4872bccd319361", { X = 18; Y = 4 }
-                    ]
-                Controller = "6a8caaaddd4872bccd319363", { X = 24; Y = 17 }
-            }
-        ]
-
     /// The declarations the colony works this tick: the declared list,
     /// less every room a [[stand-down]] is withholding (ADR 0043). The
     /// gate, and the one place the set is narrowed.
@@ -735,6 +705,117 @@ module Outpost =
                     for id, _ in outpost.Sources -> { Id = id; TicksToRestock = 0 }
         ]
         |> List.distinctBy (fun source -> source.Id)
+
+/// One colony: a [[home room]] and the [[outpost]]s worked from it (ADR
+/// 0047). The unit the whole decision layer is written in — one Atlas, one
+/// Layout, one set of quotas, one Task pool — and so the unit a
+/// declaration is written in too, replacing the bare outpost list that
+/// said the same thing while there was only ever one home.
+///
+/// The home is a room *name* and never a spawn: a colony outlives every
+/// spawn standing in it, and the room is what the projection files
+/// everything under (ADR 0041). Which colonies actually run is a fact
+/// about the world and not about this constant — a declared home the
+/// colony has not claimed yet is a **candidate colony**, and one with no
+/// spawn of its own is not independent — so nothing here is a promise that
+/// a colony exists, only that a human means it to.
+type Colony =
+    {
+        /// The room the colony is run from: the room its spawns stand in,
+        /// its Layout is planned in, and its quotas are banked in.
+        Home: string
+        /// The rooms it mines but does not own. A **candidate colony**'s
+        /// home appears here as well, in its *mother* colony's list, until
+        /// the day it is independent: the room is projected and worked as
+        /// an outpost while it is being claimed and built up, and one room
+        /// projected by two colonies at once is exactly what the mother's
+        /// outpost declaration already means (ADR 0047).
+        Outposts: Outpost list
+    }
+
+[<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
+module Colony =
+    /// The colonies a human has declared (ADR 0047): today the one home
+    /// room this bot has ever had, W12S28, with ADR 0042's two outposts —
+    /// W12S27 across the north edge and W13S28 across the west, three
+    /// sources and two controllers between them.
+    ///
+    /// Chosen by a human in an ADR and moved by a human in a commit,
+    /// exactly as the Layout's horizon is (ADR 0039) — the types above
+    /// carry why there is no discovery and why the ids are the engine's.
+    /// That is why claiming a second room begins here and not in the bot:
+    /// a second entry `{ Home = "W13S28"; Outposts = [] }` beside this one
+    /// — W13S28 staying in W12S28's outposts until it stands on its own —
+    /// is the whole of "I mean to take that room", and it is a human's
+    /// sentence to write (ADR 0047's user story 1). The bot never edits
+    /// it: independence is an event a person can see, not a constant a
+    /// program rewrites.
+    ///
+    /// The outposts are still ADR 0042's, and the reasons they are those
+    /// rooms have not moved. Filling that list was half of ADR 0042's
+    /// first step and never the whole of it: the other half is in
+    /// `Decide.workforceTarget`, which counts an unposted source's Seats
+    /// into the target on the grounds that its output is spoken for by the
+    /// crews that walk it — a rule that, taken across these three sources'
+    /// six Seats, five of them swamp, hires six generalists to commute
+    /// forty-seven to fifty-six tiles.
+    ///
+    /// W13S28's sources are paired to their tiles and never to their
+    /// order: they are written `16,7` before `18,4`, the reverse of the
+    /// order ADR 0042's prose reads them in, because that is the order the
+    /// server answered the room in and the order the committed capture
+    /// keeps (`RoomFixtures.RealSources`, pinned in `RoomInvariantTests`).
+    /// `16,7` is the single-Seat far source, not the two-Seat one.
+    let declared: Colony list =
+        [
+            {
+                Home = "W12S28"
+                Outposts =
+                    [
+                        {
+                            RoomName = "W12S27"
+                            Sources = [ "6a8caabadd4872bccd3194a6", { X = 16; Y = 45 } ]
+                            Controller = "6a8caabadd4872bccd3194a5", { X = 37; Y = 43 }
+                        }
+                        {
+                            RoomName = "W13S28"
+                            Sources =
+                                [
+                                    "6a8caaaddd4872bccd319362", { X = 16; Y = 7 }
+                                    "6a8caaaddd4872bccd319361", { X = 18; Y = 4 }
+                                ]
+                            Controller = "6a8caaaddd4872bccd319363", { X = 24; Y = 17 }
+                        }
+                    ]
+            }
+        ]
+
+    /// The outposts one home room works: its own declaration's, and none
+    /// at all for a room nobody declared. That last answer is the one that
+    /// matters — a home the constant does not name projects the room it
+    /// stands in and nothing else, which is exactly the behaviour the
+    /// empty declaration shipped with (#124), so a slip in the constant
+    /// costs the colony its outposts rather than putting it in a state
+    /// nothing downstream has a rule for.
+    ///
+    /// The list is handed in rather than read off `declared` straight, for
+    /// the reason `Outpost.roomsProjected` is: the rule is then checkable
+    /// against any declaration a human might write rather than only
+    /// against the one this colony happens to ship.
+    let outpostsOf (colonies: Colony list) (home: string) : Outpost list =
+        colonies
+        |> List.tryFind (fun colony -> colony.Home = home)
+        |> Option.map (fun colony -> colony.Outposts)
+        |> Option.defaultValue []
+
+    /// Every declared colony's home room, in declaration order. What the
+    /// shell hands the decision layer (`Snapshot.ColonyHomes`), because
+    /// which rooms a human means to own is not a thing vision can answer
+    /// and not a thing the projection carries — the ownership half of
+    /// "candidate colony" is read off `RoomControl` in Core, and this is
+    /// the half that can only be declared.
+    let homes (colonies: Colony list) : string list =
+        colonies |> List.map (fun colony -> colony.Home)
 
 /// What the decision layer knows about one construction site this tick.
 type ConstructionSiteInfo = { Id: string }
@@ -937,6 +1018,24 @@ type Snapshot =
         /// Always present, possibly empty — absence is per-entry, never
         /// per-projection (ADR 0004).
         Spatial: SpatialInfo
+        /// Every home room a human has declared a colony for (`Colony.homes`,
+        /// ADR 0047), this colony's own included and in declaration order.
+        /// The **candidate colonies** are the ones this colony does not own
+        /// yet, and that second half is read off `RoomControl` in Core
+        /// (`Decide.claimTargets`) rather than decided here: which rooms a
+        /// human means to own is declared, whether we own one is seen, and
+        /// the shell hands over facts rather than conclusions.
+        ///
+        /// It reaches the decision layer through the Snapshot and never off
+        /// the constant, which is the same rule the declared outpost
+        /// furniture already travels under (`Outpost.place`, ADR 0041):
+        /// Core derives what it decides from the projection it is handed,
+        /// so a colony's decisions can be built — and tested — for any
+        /// declaration rather than only for the one this bot ships.
+        /// Empty is the whole of "no colony is declared": nothing is
+        /// claimed, and every controller in the projection is the [[reserve]]
+        /// it always was.
+        ColonyHomes: string list
     }
 
 /// A unit of work in this tick's Task pool; creeps are interchangeable
@@ -990,6 +1089,29 @@ type Task =
     /// it is the projection's: an outpost withdrawn from is out of the
     /// scan set entirely (ADR 0043).
     | Reserve of controllerId: string
+    /// Taking a **candidate colony**'s controller for our own with CLAIM
+    /// parts (ADR 0047): the act that turns a declared home room into an
+    /// owned one, and so the first tick of a second colony. One per
+    /// candidate colony — a declared home this colony does not own yet —
+    /// and never for a plain [[outpost]], whose controller is [[reserve]]d
+    /// instead: claiming costs a GCL level and asks the colony to run the
+    /// room, which is a human's decision written in `Colony.declared` and
+    /// never a rule the projection can infer.
+    ///
+    /// A controller carries exactly one of the three Tasks that act on
+    /// one, and this is the one that wins: our own is Upgraded, a
+    /// neutral controller is Reserved, and a candidate colony's is
+    /// Claimed. Pooling Reserve beside it would put two Tasks on one
+    /// target for one body to be matched to either, and the reservation is
+    /// the work that becomes pointless the tick the claim lands.
+    ///
+    /// Unlike a reservation, which decays by one a tick, this is work that
+    /// is finished the moment it succeeds: the room is ours, the Task is
+    /// gone from the next tick's pool because the room is no longer a
+    /// candidate, and the body that did it is a `[Claim; Move]` with
+    /// nothing left to do. That is the price of the row sharing the
+    /// [[reserver]]'s body (ADR 0047) and it is paid once per colony.
+    | Claim of controllerId: string
     /// Getting out of a Threat's Reach (ADR 0033). The one Task with no
     /// target and no action: its Work Area is the tiles no Threat can
     /// hurt, and the Emitter issues movement for it and nothing else.
@@ -1025,7 +1147,8 @@ type Direction =
 /// never for reachability, so a dangling `| NewPart -> None` compiles
 /// clean and still leaves the list short. What closes it is `Core.Tests`,
 /// which enumerates the union itself and fails when this list is short.
-let allBodyParts = [ Work; Carry; Move; Attack; RangedAttack; Heal; Claim; Tough ]
+let allBodyParts =
+    [ Work; Carry; Move; Attack; RangedAttack; Heal; BodyPart.Claim; Tough ]
 
 /// Screeps body-part strings as the engine spells them, in `spawnCreep`
 /// bodies and `creep.body` entries alike — the one place the spelling
@@ -1038,7 +1161,7 @@ let partName =
     | Attack -> "attack"
     | RangedAttack -> "ranged_attack"
     | Heal -> "heal"
-    | Claim -> "claim"
+    | BodyPart.Claim -> "claim"
     | Tough -> "tough"
 
 /// Every BuiltKind the engine spells — the modelled set, not the engine's
@@ -1259,6 +1382,16 @@ type Intent =
     /// which is what doubles that room's sources. Range 1, like the
     /// engine's other three touching acts.
     | ReserveController of creepName: string * controllerId: string
+    /// The claim act (ADR 0047): a CLAIM body standing beside a neutral
+    /// controller takes the room for this player. Range 1, like the
+    /// engine's other four touching acts. The engine's own preconditions
+    /// are not restated in Core: a claim needs a GCL level to spare and
+    /// answers ERR_GCL_NOT_ENOUGH without one, and that code is read by
+    /// nobody but the Executor's log — a Task pooled off the declaration
+    /// and a room that stays unowned is the whole of what the decision
+    /// layer sees, and it re-pools the Task next tick as it would after
+    /// any other failure.
+    | ClaimController of creepName: string * controllerId: string
     | PickupEnergy of creepName: string * resourceId: string
     | MoveCreep of creepName: string * direction: Direction
     | SayCreep of creepName: string * message: string

@@ -340,6 +340,10 @@ let private colonyOf (room: LoadedRoom) level =
         // taken off a sector whose cores stand four rooms away (ADR 0043).
         InvaderCores = []
         Spatial = room.Spatial
+        // The sweep is over one owned room, so it declares none: a
+        // candidate colony is a declared home nobody owns yet (ADR 0047),
+        // and this room has a spawn standing in it.
+        ColonyHomes = []
     }
 
 let private placementsOf intents =
@@ -1488,6 +1492,15 @@ let crossRoomWalkTests =
             }
         ]
 
+/// The outposts this colony works: the entry `Colony.declared` files under
+/// W12S28, the home room every capture below is read relative to (ADR
+/// 0047). ADR 0042's two rooms are inside that entry now rather than in a
+/// constant of their own, and this is the one place the tests below join
+/// the colony to its outposts — a second reading could name a home the
+/// declaration does not carry and check an empty list forever, which is
+/// what the non-emptiness guard beside each loop is for.
+let private declaredOutposts = Colony.outpostsOf Colony.declared "W12S28"
+
 /// The Atlas over the projection of one declared outpost on the tick the
 /// colony cannot see it: that room's committed terrain and border ring —
 /// the whole of what `Game.map.getRoomTerrain` answers without vision —
@@ -1551,9 +1564,9 @@ let outpostDeclarationTests =
                 // id with the other rock. Nothing downstream may read a
                 // source by its index — the tile is the identity — and this
                 // is the line that says which tile each id is.
-                Expect.isNonEmpty Outpost.declared "a declaration nobody made is nothing to check"
+                Expect.isNonEmpty declaredOutposts "a declaration nobody made is nothing to check"
 
-                for outpost in Outpost.declared do
+                for outpost in declaredOutposts do
                     let capture = load outpost.RoomName
 
                     Expect.equal
@@ -1586,7 +1599,7 @@ let outpostDeclarationTests =
                 // walkable within the Upgrade range of its controller. The
                 // capture supplies the terrain and the test supplies no
                 // expected value (ADR 0036).
-                for outpost in Outpost.declared do
+                for outpost in declaredOutposts do
                     let capture = load outpost.RoomName
                     let atlas = declaredAtlas outpost
 
@@ -1694,7 +1707,7 @@ let private declaredColony level =
     let loaded = project (load "W12S28") { X = 12; Y = 40 } None
 
     let spatial =
-        (loaded.Spatial, Outpost.declared)
+        (loaded.Spatial, declaredOutposts)
         ||> List.fold (fun spatial outpost ->
             let capture = load outpost.RoomName
 
@@ -1708,14 +1721,14 @@ let private declaredColony level =
                         spatial.Rooms
                 Borders = Map.add outpost.RoomName capture.Border spatial.Borders
             })
-        |> Outpost.place Outpost.declared
+        |> Outpost.place declaredOutposts
 
     let colony = colonyOf loaded level
 
     { colony with
         Spatial = spatial
         RoomControl =
-            (colony.RoomControl, Outpost.declared)
+            (colony.RoomControl, declaredOutposts)
             ||> List.fold (fun control outpost ->
                 Map.add
                     outpost.RoomName
@@ -1727,8 +1740,8 @@ let private declaredColony level =
         Sources =
             colony.Sources
             |> Outpost.pooledSources
-                (Outpost.roomsProjected Outpost.declared (SpatialInfo.homeName spatial))
-                Outpost.declared
+                (Outpost.roomsProjected declaredOutposts (SpatialInfo.homeName spatial))
+                declaredOutposts
     }
 
 [<Tests>]
@@ -1763,7 +1776,7 @@ let outpostContainerTests =
 
                 let declaredSources =
                     [
-                        for outpost in Outpost.declared do
+                        for outpost in declaredOutposts do
                             for id, pos in outpost.Sources -> outpost.RoomName, id, pos
                     ]
 
@@ -1810,6 +1823,54 @@ let outpostContainerTests =
                                     picked
                                     other
                                     $"{where}: no Seat of this rock walks out to the Seam in fewer ticks"
+            }
+
+            test "the candidate colony's controller is the pool's one Claim, on the real rooms" {
+                // ADR 0047's arrangement on the ground the colony actually
+                // stands on: W13S28 declared a colony of its own while it
+                // is still one of W12S28's outposts. The room is projected
+                // because the mother declares it, its controller is in the
+                // kind census under the engine's own id, and the tick a
+                // human writes the second entry that controller stops being
+                // a Reserve and becomes a Claim — while the *other*
+                // outpost, W12S27, is untouched beside it.
+                //
+                // Read off the declaration rather than typed out: the ids
+                // are the engine's and are pinned against the captures
+                // above, so naming one here would be a second literal
+                // agreeing with the first and with nothing the server said.
+                let candidate = "W13S28"
+
+                let controllerOf room =
+                    declaredOutposts
+                    |> List.tryFind (fun outpost -> outpost.RoomName = room)
+                    |> Option.map (fun outpost -> fst outpost.Controller)
+
+                let colony = declaredColony 5
+
+                // Sorted, because what is asserted is which Task stands on
+                // which controller and never the order a Map's keys came
+                // out in.
+                let pooled homes =
+                    planTasks { colony with ColonyHomes = homes } noThreats
+                    |> List.filter (function
+                        | Reserve _
+                        | Claim _ -> true
+                        | _ -> false)
+                    |> List.sort
+
+                match controllerOf candidate, controllerOf "W12S27" with
+                | Some west, Some north ->
+                    Expect.equal
+                        (pooled [])
+                        (List.sort [ Reserve north; Reserve west ])
+                        "undeclared, both outpost controllers are Reserves and neither is claimed"
+
+                    Expect.equal
+                        (pooled [ "W12S28"; candidate ])
+                        (List.sort [ Reserve north; Claim west ])
+                        "declared, the candidate colony's controller is a Claim and the other outpost is unmoved"
+                | _ -> failtest "the declaration names a controller for each of its outposts"
             }
         ]
 

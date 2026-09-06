@@ -769,9 +769,9 @@ function buildStubWorld() {
     // A room this scenario does not model, answered as solid rock. The
     // scan set is the spawn room plus every declared outpost (ADR 0041),
     // and `Snapshot.projectRoom` reads terrain for all of them whether or
-    // not there is vision — so the tick `Outpost.declared` stops being
-    // empty (ADR 0042, #126) is the tick a one-room stub is asked for a
-    // room it never built. Throwing there would rot this harness the way
+    // not there is vision — so the tick the colony's declared outposts
+    // (`Colony.declared`) stop being empty (ADR 0042, #126) is the tick a
+    // one-room stub is asked for a room it never built. Throwing there would rot this harness the way
     // #141 rotted it at #122, and on the default scenario at that. Solid
     // rock is the fiction this world already tells: it walls its own
     // border ring so every Seam band is empty by construction, and a
@@ -1160,7 +1160,7 @@ function loadCapture(roomName) {
   // The capture's own ids are the engine's, and that is the point: a
   // declaration written in RoomFixtures' readable short names would match
   // nothing a live projection keys by (ADR 0041), so the scenario carries
-  // the ids `Outpost.declared` will name.
+  // the ids `Colony.declared` will name.
   const objects = lines
     .slice(objectSection + 2)
     .filter((row) => row.trim() !== "")
@@ -1365,8 +1365,8 @@ function buildOutpostWorld() {
   // --- the fleet ---------------------------------------------------------
   // Hired by the bundle itself (`hireFleet`), so its size is this level's
   // Workforce target and not a number written here — and since
-  // `Outpost.declared` was filled (#126) that target is the three-room
-  // colony's. Three of its rows leave the spawn room: the reserver stands
+  // `Colony.declared`'s outpost list was filled (#126) that target is the
+  // three-room colony's. Three of its rows leave the spawn room: the reserver stands
   // beside each outpost's controller and, because the containers below
   // make those sources Posts, an Anchor stands on each of their containers
   // (ADR 0042 — one Anchor per Post, wherever the Post lies). `hireFleet`
@@ -1486,7 +1486,7 @@ function buildOutpostWorld() {
     // stations carry the room as well as the tile. The reserver's is one
     // per declared outpost, at that outpost's controller — `nearestFree`
     // resolves it to a walkable tile at range 1, which on W12S27 is one of
-    // exactly two, both swamp — and taken in `Outpost.declared`'s own
+    // exactly two, both swamp — and taken in `Colony.declared`'s own
     // order, which `OUTPOST_ROOMS` above spells, so the first body cast
     // holds W12S27 and the second W13S28. The Anchor row's is one station
     // per source, in every room the projection carries and not the spawn
@@ -1571,7 +1571,7 @@ function buildOutpostWorld() {
       ),
       `  ${plural(stationsOf(creeps, "reserver").length, "reserver")} beside the outpost ` +
         `controllers at ${stationsOf(creeps, "reserver").join(", ") || "no station"}, one per ` +
-        "declared outpost in Outpost.declared's own order",
+        "declared outpost in Colony.declared's own order",
       `  ${plural(stationsOf(creeps, "upgrader").length, "upgrader")} at ` +
         `${stationsOf(creeps, "upgrader").join(", ") || "no station"}, around the controller ` +
         `container at ${keyOf(buffer.pos)} — the upgrade buffer, whose Upgrade Work Area is ` +
@@ -2055,8 +2055,8 @@ if (unprojected.length) {
   console.log(
     `projection: the bundle read terrain for ${projected.join(", ") || "no room"} and never for ` +
       `${unprojected.join(", ")} — those rooms are in the world but outside the scan set, which ` +
-      "is `Outpost.declared` less whatever ADR 0043's stand-down is withholding. These ms are " +
-      "the projected rooms' and not the whole world's."
+      "is the colony's declared outposts less whatever ADR 0043's stand-down is withholding. " +
+      "These ms are the projected rooms' and not the whole world's."
   );
 
   // And the creeps standing in those rooms are worse than unmeasured, so

@@ -92,12 +92,13 @@ Two scenarios:
   sources Posts, so two of the bundle's own rows now work a room from the
   spawn that cast them and the harness stations them there: an Anchor on
   each outpost container (one per Post, ADR 0042) and a reserver beside
-  each outpost's controller, one per declared outpost in
-  `Outpost.declared`'s order. A third row stays at home but not at the
-  spawn: the upgrader (ADR 0046) is stood at the home room's own controller
-  container, the upgrade buffer it draws from, inside the Upgrade Work Area
-  it spends from — a row whose whole definition is work done in place, so
-  seating it anywhere else would time a walk instead. On top of them one
+  each outpost's controller, one per declared outpost, in the order
+  `Colony.declared`'s entry for the home room files them. A third row
+  stays at home but not at the spawn: the upgrader (ADR 0046) is stood at
+  the home room's own controller container, the upgrade buffer it draws
+  from, inside the Upgrade Work Area it spends from — a row whose whole
+  definition is work done in place, so seating it anywhere else would time
+  a walk instead. On top of them one
   crew the bundle does not hire — a hauler per outpost container, standing
   the far end of a round trip whose near end is the hired hauler row at the
   home spawn. It is the world ADR 0041's layered projection is sized

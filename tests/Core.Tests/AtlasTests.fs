@@ -25,6 +25,10 @@ let snapshotWith creeps spatial =
         // structure's obstacle or not at all (ADR 0043).
         InvaderCores = []
         Spatial = spatial
+        // A declaration prices nothing here either: the Atlas reads
+        // geometry, and which rooms a human means to own is the Planner's
+        // question (ADR 0047).
+        ColonyHomes = []
     }
 
 let worker name =

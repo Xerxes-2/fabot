@@ -70,6 +70,17 @@ let private execute (intent: Intent) : Outcome =
     // exactly the ActorMissing the shared guard already reports.
     | ReserveController(creepName, controllerId) ->
         withCreepTarget creepName controllerId (fun c t -> c.reserveController t)
+    // The claim (ADR 0047), the one act with a precondition the decision
+    // layer has no model of: a controller the account has no GCL level
+    // left for answers ERR_GCL_NOT_ENOUGH, and the Snapshot carries no GCL
+    // fact for Core to have planned around it. The code is logged here and
+    // read nowhere else, as every result code is (`Outcome` above) — the
+    // room stays unowned, so the Task is pooled again next tick and the
+    // creep walks back to it, which is what every other failed act does
+    // too. The difference is that this one can repeat forever, and the log
+    // line is the only place a human sees it.
+    | ClaimController(creepName, controllerId) ->
+        withCreepTarget creepName controllerId (fun c t -> c.claimController t)
     | PickupEnergy(creepName, resourceId) ->
         withCreepTarget creepName resourceId (fun c t -> c.pickup t)
     | MoveCreep(creepName, direction) ->

@@ -55,7 +55,7 @@ let haulerPattern =
 let reserverPattern =
     {
         Name = "reserver"
-        Block = [ Claim; Move ]
+        Block = [ BodyPart.Claim; Move ]
     }
 
 /// The upgrader row (ADR 0046): the body that stands beside the upgrade
@@ -137,7 +137,7 @@ let bodyCost body =
         | Attack -> 80
         | RangedAttack -> 150
         | Heal -> 250
-        | Claim -> 600
+        | BodyPart.Claim -> 600
         | Tough -> 10)
 
 // Screeps MAX_CREEP_SIZE: the engine rejects bodies over 50 parts.
@@ -456,6 +456,7 @@ let taskId =
     | Repair structureId -> $"repair:{structureId}"
     | Upgrade controllerId -> $"upgrade:{controllerId}"
     | Reserve controllerId -> $"reserve:{controllerId}"
+    | Claim controllerId -> $"claim:{controllerId}"
     | Pickup pileId -> $"pickup:{pileId}"
     // One Flee for the whole colony: it has no target to be identified by,
     // and every creep inside a Reach is running from the same thing.
@@ -737,6 +738,69 @@ let private colonyOwns (snapshot: Snapshot) room =
     |> Map.tryFind room
     |> Option.exists (fun control -> control.Owner = Ownership.Ours)
 
+/// The controllers a Claim is pooled for this tick, each with the room it
+/// stands in (ADR 0047) — one spelling for the two rules that read it, the
+/// way `colonyOwns` above is: the Task pool below offers exactly these,
+/// and the reserver row hires exactly one body for each
+/// (`reserverClaimsOf`), so the row and its Task cannot disagree about
+/// which rooms are being taken (ADR 0006).
+///
+/// A **candidate colony** is a declared home this colony does not own yet
+/// (`Snapshot.ColonyHomes`), and both halves are needed: the declaration,
+/// because claiming a room is a human's decision and no projected fact
+/// distinguishes a room we mean to own from a neighbour we merely mine;
+/// and the ownership, because the tick the claim lands the room stops
+/// being a candidate and this pool empties itself, with no state kept and
+/// nothing to reset (#181 spelled the same rule for Reserve). The
+/// ownership half is `takeable`'s own `Unowned` and not a second gate
+/// beside it: `Ownership` has three cases, so "unowned" is the stronger
+/// read of the same field `colonyOwns` spells for the Reserve side, and a
+/// second conjunct here would be two gates free to disagree about one fact
+/// (the sentence `colonyOwns` itself is written under).
+///
+/// **The controller has to be in the projection already**, and it is there
+/// because the candidate room is *also* one of the mother colony's
+/// outposts until it stands on its own (ADR 0047): that is what puts its
+/// terrain in the scan set, its controller in the kind census under the
+/// engine's own id, and its tile in `Obstacles` for the claimer to stand
+/// beside. A declared home nobody projects offers no controller here and
+/// hires nobody — the same silence ADR 0004 gives every other unplaceable
+/// target, and the reason a human declares the candidate as an outpost of
+/// the mother colony first.
+///
+/// **`RoomControl` has to say the room is takeable**: unowned, and
+/// reserved by nobody but us. The engine answers ERR_INVALID_TARGET on a
+/// controller somebody else owns or reserves, so a Task pooled for one is
+/// a Task no body can execute — a claimer would walk fifty tiles and stand
+/// there for the rest of its 600-tick life. A rival holding the room is
+/// ADR 0043's business and not this pool's: the [[stand-down]] takes that
+/// room out of the projection entirely, and until it does the room is the
+/// [[reserve]] it always was. A room with no control entry is one the
+/// colony cannot see this tick, and an unseen room is not one it can
+/// claim — absence classifies nothing (ADR 0004), and the vision the claim
+/// waits on is bought by the outpost crews already working the room.
+let private claimTargets (snapshot: Snapshot) : (string * string) list =
+    let takeable room =
+        match Map.tryFind room snapshot.RoomControl with
+        | Some control ->
+            control.Owner = Ownership.Unowned
+            && control.Reservation
+               |> Option.forall (fun held -> held.Holder = ReservationHolder.Ours)
+        | None -> false
+
+    let candidate room =
+        List.contains room snapshot.ColonyHomes && takeable room
+
+    snapshot.Spatial.TargetKinds
+    |> Map.toList
+    |> List.choose (fun (id, kind) ->
+        if kind = Controller then
+            match SpatialInfo.placementOf snapshot.Spatial id with
+            | Some(room, _) when candidate room -> Some(id, room)
+            | _ -> None
+        else
+            None)
+
 /// Planner: rebuild this tick's full Task pool from the Snapshot. Pure and
 /// from scratch every tick — Tasks are never persisted.
 let planTasks (snapshot: Snapshot) (threats: Threats) : Task list =
@@ -775,15 +839,19 @@ let planTasks (snapshot: Snapshot) (threats: Threats) : Task list =
         |> Map.toList
         |> List.choose (fun (id, k) -> if k = kind then Some id else None)
 
+    // One Claim per candidate colony's controller (ADR 0047), read off
+    // the one rule that says which those are (`claimTargets`).
+    let claims = claimTargets snapshot |> List.map (fst >> Claim)
+
     // One Reserve per projected controller that is not the colony's own
     // (ADR 0042): a neutral controller held by CLAIM parts pays its room's
     // sources ten a tick instead of five, the hold decays by one a tick,
     // and so the Task stands whatever the reservation has left on it —
     // what the ticks remaining size is the body (#131), not the pool.
     //
-    // Read off the projection's kind census and never off
-    // `Outpost.declared`: the declaration is the shell's input to the
-    // projection and every other rule here derives from what the
+    // Read off the projection's kind census and never off the declared
+    // outposts (`Colony.declared`): the declaration is the shell's input
+    // to the projection and every other rule here derives from what the
     // projection actually carries (ADR 0041), so a room a stand-down keeps
     // out of the scan set (ADR 0043) leaves this pool with it rather than
     // through a second gate free to disagree with the first. The census is
@@ -808,8 +876,17 @@ let planTasks (snapshot: Snapshot) (threats: Threats) : Task list =
     // Atlas the Planner is never handed (ADR 0041). A controller the
     // projection does not place names no room and stays pooled, which
     // classifies nothing and blocks nothing (ADR 0004).
+    //
+    // A controller carries exactly one Task, and Claim is the one that
+    // wins (ADR 0047): a candidate colony's controller is the room we are
+    // taking, and the reservation on it is work that ends the tick the
+    // claim lands. Both Tasks pooled for one target would be two jobs a
+    // CLAIM body is applicable to, matched by travel cost alone — which
+    // knows nothing about the difference — so the colony would hold the
+    // reservation of a room it is trying to own and never take it.
     let reserves =
         let home = snapshot.Controller |> Option.map (fun c -> c.Id)
+        let claimed = claimTargets snapshot |> List.map fst |> Set.ofList
 
         let inRoomWeOwn id =
             SpatialInfo.placementOf snapshot.Spatial id
@@ -817,7 +894,8 @@ let planTasks (snapshot: Snapshot) (threats: Threats) : Task list =
             |> Option.exists (colonyOwns snapshot)
 
         idsOfKind Controller
-        |> List.filter (fun id -> Some id <> home && not (inRoomWeOwn id))
+        |> List.filter (fun id ->
+            Some id <> home && not (inRoomWeOwn id) && not (Set.contains id claimed))
         |> List.map Reserve
 
     // The haul cycle's intake (ADR 0012), shaped over the projection's
@@ -946,6 +1024,7 @@ let planTasks (snapshot: Snapshot) (threats: Threats) : Task list =
     @ repairs
     @ upgrades
     @ reserves
+    @ claims
     @ containerRefills
     @ storageRefills
     @ storageWithdraws
@@ -1335,6 +1414,13 @@ let private reserverBodyWithin claims capacity =
 /// also the whole of what "a dead reserver's room hires a bigger
 /// replacement" needs.
 ///
+/// The row hires for one more thing than reservations (ADR 0047): a
+/// **candidate colony** takes one entry of a single block, and its room
+/// leaves the reservation demands, because a controller carries one Task
+/// and a candidate colony's is the Claim. The body is the same
+/// `[Claim; Move]` block either way, which is why this is one row and not
+/// two; the clause is spelled where the demands are built, below.
+///
 /// **Declared and not posted**, which is where #131's own correction
 /// comment overrides its ticket text and ADR 0042's "one reserver per
 /// posted outpost" clause. Gating this row on a standing container
@@ -1427,19 +1513,71 @@ let private reserverClaimsOf (snapshot: Snapshot) atlas : int list =
         |> Option.map (fun held -> held.TicksToEnd)
         |> Option.defaultValue 0
 
+    // The candidate colonies this tick, each asking for **one** block
+    // (ADR 0047): the Claim row is this row, because both bodies are CLAIM
+    // bodies and a second pattern row would be the same block under a
+    // second name (ADR 0006), so `patternOf` reads a claimer back as a
+    // reserver and the casting order, the gap and the amortization all
+    // count it where they count one.
+    //
+    // One block and never the reservation deficit's nine: a claim is one
+    // act by one CLAIM part, finished the tick it succeeds, so nothing
+    // about it scales with a number of ticks. Sizing it off the deficit
+    // would buy `[9Claim;9Move]`-worth of body — bank-truncated to the
+    // colony's whole reserver budget — for a creep whose whole job is to
+    // touch a controller once.
+    //
+    // The **entry** is one block; the **cast** is still this row's largest
+    // outstanding demand, by the rule two paragraphs above. So a claimer
+    // hired beside an outpost whose reservation has slipped is bought at
+    // that outpost's body and not at one block — deliberately, and for the
+    // same reason: which controller a finished CLAIM body ends up holding
+    // is the Matcher's, priced by travel cost alone, so a body cast at one
+    // block can land on the Reserve instead and freeze that room where it
+    // stands. Over-buying the claimer is the safe direction; the demands
+    // differ only while a reservation is slipping, and the entry is what
+    // keeps the claim from *raising* the size the whole row is cast at.
+    //
+    // Its room is what drops out of the reserve demands beside it, and
+    // that is `planTasks`'s own rule read here rather than restated: a
+    // candidate colony's controller carries a Claim and no Reserve, so a
+    // reserver hired for that room would arrive at a controller with no
+    // Task on it and stand there for its whole 600-tick life. The room's
+    // sources are worth five a tick until the claim lands and ten from the
+    // tick after (`heldRateOf` prices an owned room at the held rate), and
+    // any reservation still standing on it goes on being ours as it
+    // decays — so what the colony gives up by not refreshing it is the
+    // few hundred ticks between the claimer's cast and its arrival.
+    //
+    // That bound holds while the account can *pay* for the claim, and
+    // nothing here can check that it can: `claimController` answers
+    // ERR_GCL_NOT_ENOUGH when there is no GCL level to spare, the Snapshot
+    // carries no GCL fact at all, and a room that stays unowned stays a
+    // candidate — so a colony declared before the level is there loses the
+    // reservation for good and reads five a tick until a human sees the
+    // Executor's log. The declaration is the human's sentence, and this is
+    // the part of it the bot cannot check for them.
+    let claims = claimTargets snapshot
+    let claimed = claims |> List.map snd |> Set.ofList
+
     if richestCapacity snapshot < bodyCost reserverPattern.Block then
         []
     else
-        snapshot.Spatial.TargetKinds
-        |> Map.toList
-        |> List.choose (fun (id, kind) ->
-            if kind = Controller && Some id <> home then
-                Atlas.targetRoom atlas id
-            else
-                None)
-        |> List.distinct
-        |> List.filter (colonyOwns snapshot >> not)
-        |> List.map (fun room -> ceilDiv (reservationCap - heldTicks room) claimLifetime |> max 1)
+        let reserved =
+            snapshot.Spatial.TargetKinds
+            |> Map.toList
+            |> List.choose (fun (id, kind) ->
+                if kind = Controller && Some id <> home then
+                    Atlas.targetRoom atlas id
+                else
+                    None)
+            |> List.distinct
+            |> List.filter (colonyOwns snapshot >> not)
+            |> List.filter (fun room -> not (Set.contains room claimed))
+            |> List.map (fun room ->
+                ceilDiv (reservationCap - heldTicks room) claimLifetime |> max 1)
+
+        reserved @ (claims |> List.map (fun _ -> 1))
 
 /// The colony's surplus over one creep's lifetime: the income the two
 /// upgrade rows are hired out of, written once here because both of them
@@ -1848,7 +1986,7 @@ let private isHaulerBody (creep: CreepInfo) =
 /// two comparative tests below would read a [Claim; Carry; Move] body as a
 /// hauler on the strength of a part the reserver merely happens to have.
 let private isReserverBody (creep: CreepInfo) =
-    creep.Body |> Map.tryFind Claim |> Option.exists (fun n -> n > 0)
+    creep.Body |> Map.tryFind BodyPart.Claim |> Option.exists (fun n -> n > 0)
 
 /// The pattern row a living body was cast from, read off the parts alone
 /// (ADR 0006): a CLAIM part is the reserver row, more Work than Move is
@@ -2310,7 +2448,7 @@ let private planSafeMode (snapshot: Snapshot) atlas : Intent list =
     match snapshot.Controller with
     | Some controller when controller.SafeModeAvailable > 0 && not controller.SafeModeActive ->
         let withinReach (h: HostileInfo) =
-            List.contains Claim h.Body
+            List.contains BodyPart.Claim h.Body
             && match Atlas.positionOf atlas controller.Id with
                | Some pos -> range h.Pos pos <= safeModeDeadline
                | None -> true
@@ -3225,8 +3363,11 @@ let private tooEarly (snapshot: Snapshot) atlas (creep: CreepInfo) task (walk: L
     | Upgrade _
     // A controller is always there to be reserved: a reservation has no
     // restock and no stock, so a reserver that has walked to one is never
-    // early (ADR 0042).
+    // early (ADR 0042). A claim is the same (ADR 0047) — a room is
+    // takeable or it is not, and a room that stops being takeable
+    // mid-walk leaves the pool rather than making its holder early.
     | Reserve _
+    | Claim _
     | Flee -> None
 
 /// The room a Task's Work Area lies in: its target's, since the area is
@@ -3243,7 +3384,8 @@ let private roomOfWork atlas task =
     | Build id
     | Repair id
     | Upgrade id
-    | Reserve id -> Atlas.targetRoom atlas id
+    | Reserve id
+    | Claim id -> Atlas.targetRoom atlas id
     | Flee -> None
 
 /// The tiles a creep may work a Task from this tick (ADR 0033): its Work
@@ -3318,7 +3460,7 @@ let private threatened (threats: Threats) atlas (creep: CreepInfo) task =
 /// because of, and the concurrency cap that keeps the tier from emptying
 /// the home room across the Seam.
 ///
-/// Both halves come off the projection and neither off `Outpost.declared`
+/// Both halves come off the projection and neither off the declaration
 /// (ADR 0041), exactly as the Reserve pool's does: the id-keyed kind
 /// census says a container is going up, and the layer that places the id
 /// says which room it stands in (`Atlas.targetRoom`). So a room a
@@ -3508,7 +3650,15 @@ let private applicable (snapshot: Snapshot) (threats: Threats) atlas (creep: Cre
     // applicable to this Task and to Flee and to no other, and a colony
     // that cast one before this Task existed would have stood it on the
     // spawn for its whole 600-tick life.
-    | Reserve _ -> has Claim
+    | Reserve _ -> has BodyPart.Claim
+    // The same part arithmetic, for the same reason (ADR 0047): the
+    // engine's `claimController` is a CLAIM part's act, and a claimer
+    // carries nothing and spends nothing. The two Tasks are applicable to
+    // exactly the same bodies, which is what lets one row cast for both —
+    // and what makes the one-Task-per-controller rule in `planTasks` load
+    // bearing rather than tidy: with both pooled for one controller,
+    // nothing here could tell the Matcher which of them to hand over.
+    | Claim _ -> has BodyPart.Claim
     // Flee asks for no part and no energy state, only for a creep that is
     // being shot at and can run (ADR 0033). A Work-heavy body is exempt: at
     // four to seven ticks a step an Anchor leaving its Post neither escapes
@@ -3544,6 +3694,7 @@ let private intentFor (creep: CreepInfo) task =
     | Repair structureId -> Some(RepairStructure(creep.Name, structureId))
     | Upgrade controllerId -> Some(UpgradeController(creep.Name, controllerId))
     | Reserve controllerId -> Some(ReserveController(creep.Name, controllerId))
+    | Claim controllerId -> Some(ClaimController(creep.Name, controllerId))
     | Flee -> None
 
 /// Chat-bubble glyph of a Task: the whole colony's current matching is
@@ -3558,6 +3709,7 @@ let private glyphFor =
     | Repair _ -> "🔧"
     | Upgrade _ -> "⚡"
     | Reserve _ -> "🚩"
+    | Claim _ -> "🏴"
     | Flee -> "🏃"
 
 /// The full downgrade timer per controller level (Screeps
@@ -3691,6 +3843,14 @@ let private tierOf (snapshot: Snapshot) atlas task =
     // CLAIM beside Work it holds the reservation before it spends on
     // anything.
     | Reserve _ -> Feeding
+    // Beside the Reserve it replaces, and for a stronger form of the same
+    // argument (ADR 0047): a reservation decides whether one room's income
+    // is five a tick or ten, and a claim decides whether there is going to
+    // be a second colony at all. Nothing the colony merely spends energy
+    // on may outrank it, and Safety still does — a claimer being shot at
+    // runs, and comes back to a Task that is still pooled, because a room
+    // stays takeable while nobody else has taken it.
+    | Claim _ -> Feeding
     | Withdraw storeId ->
         let kind = Map.tryFind storeId snapshot.Spatial.TargetKinds
 
@@ -3933,7 +4093,17 @@ let private taskCapacities (snapshot: Snapshot) atlas (tasks: Task list) : Map<s
     let reserves =
         tasks
         |> List.choose (function
-            | Reserve _ as task -> Some(taskId task, 1)
+            | Reserve _
+            // One holder per controller for the Claim beside it (ADR
+            // 0047), and here the second body buys even less than a second
+            // reserver does: a room is claimed by one touch of one CLAIM
+            // part, so a crowd at the controller is a crowd of bodies with
+            // nothing to do the tick the first of them acts. The cap is
+            // what sends the second claimer — the successor cast while the
+            // incumbent still walks (ADR 0026) — to the *other* candidate
+            // colony, since travel cost alone would send both to the
+            // nearest.
+            | Claim _ as task -> Some(taskId task, 1)
             | _ -> None)
 
     let draws =
@@ -4033,6 +4203,7 @@ let private actionIntents
         | Repair _
         | Upgrade _
         | Reserve _
+        | Claim _
         | Flee -> false
 
     if
