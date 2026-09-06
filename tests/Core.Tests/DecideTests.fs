@@ -43,6 +43,7 @@ let ownedRoom: RoomControlInfo =
     {
         Owner = Ownership.Ours
         Reservation = None
+        SafeMode = false
     }
 
 /// A neutral room nobody holds: seen, and worth half. Not the same fact as
@@ -52,6 +53,7 @@ let neutralRoom: RoomControlInfo =
     {
         Owner = Ownership.Unowned
         Reservation = None
+        SafeMode = false
     }
 
 /// A room another player has taken: seen, owned, and owned by somebody
@@ -61,6 +63,7 @@ let rivalRoom: RoomControlInfo =
     {
         Owner = Ownership.Rival
         Reservation = None
+        SafeMode = false
     }
 
 /// A neutral room under a reservation of the given holder, with the given
@@ -79,6 +82,7 @@ let reservedRoom ours ticksToEnd : RoomControlInfo =
                             ReservationHolder.Rival
                     TicksToEnd = ticksToEnd
                 }
+        SafeMode = false
     }
 
 /// A neutral room whose reservation the NPC Invader holds — what a
@@ -95,6 +99,7 @@ let coreReservedRoom ticksToEnd : RoomControlInfo =
                     Holder = ReservationHolder.Invader
                     TicksToEnd = ticksToEnd
                 }
+        SafeMode = false
     }
 
 /// The control map for a colony holding its own room and nothing else.
@@ -14232,7 +14237,9 @@ let fleeTests =
                 // same hostile. A hostile in another room keeps its Reach:
                 // safe mode is the controller's room's.
                 let facingHostile (active: bool) =
-                    { laneColony [ worker "w1" 50 0 ] [ "w1", { X = 25; Y = 22 } ] with
+                    let colony = laneColony [ worker "w1" 50 0 ] [ "w1", { X = 25; Y = 22 } ]
+
+                    { colony with
                         Refillables = [ refillable "spawn-1" 50 BuiltKind.Spawn ]
                         Controller =
                             Some
@@ -14240,6 +14247,14 @@ let fleeTests =
                                     SafeModeActive = active
                                     SafeModeAvailable = 0
                                 }
+                        // The fact the rule reads is the room's (#218), not
+                        // the colony's own controller's; both are set so the
+                        // fixture describes one consistent tick.
+                        RoomControl =
+                            Map.add
+                                (SpatialInfo.homeName colony.Spatial)
+                                { ownedRoom with SafeMode = active }
+                                colony.RoomControl
                     }
                     |> facing [ hostileAt "h-1" { X = 25; Y = 20 } [ Attack; Move ] ]
 
@@ -19633,6 +19648,50 @@ let bootstrapTests =
                     (matchOf (standingNorth { X = 10; Y = 44 } twoUpgrades))
                     (Some(taskId (Upgrade "ctrl-child"), MatchFactor.Rank))
                     "and across the Seam the same body stays on it"
+            }
+
+            test "a child's room under safe mode shields the mother's pioneers too" {
+                // #218: safe mode shields the room it is in, whoever is
+                // looking. The mother's tick reads the child's room off
+                // `RoomControl`, so a pioneer standing there beside an
+                // armed hostile derives no Reach and keeps its work; pairwise
+                // on the room's flag alone. The mother's own controller is
+                // not under safe mode in either case.
+                let childUnder (safe: bool) =
+                    let colony =
+                        northBorderColony { X = 10; Y = 38 }
+                        |> withNorthOutpost None
+                        |> withNorthController { X = 10; Y = 45 }
+                        |> withHomeController { X = 10; Y = 5 }
+                        |> asNursery
+                        |> withNorthSpawn
+                        |> loaded
+                        |> standingNorth { X = 10; Y = 44 }
+
+                    { colony with
+                        RoomControl =
+                            Map.add "W1N2" { ownedRoom with SafeMode = safe } colony.RoomControl
+                        Hostiles =
+                            [
+                                { hostileAt "h-1" { X = 10; Y = 42 } [ Attack; Move ] with
+                                    RoomName = "W1N2"
+                                }
+                            ]
+                    }
+
+                let assignmentOf colony =
+                    let { Assignments = assignments } = decide colony Map.empty Set.empty None
+                    Map.tryFind "w" assignments
+
+                Expect.equal
+                    (assignmentOf (childUnder false))
+                    (Some(taskId Flee))
+                    "without safe mode in the child's room the pioneer runs"
+
+                Expect.equal
+                    (assignmentOf (childUnder true))
+                    (Some(taskId (Upgrade "ctrl-child")))
+                    "under the child's safe mode it keeps upgrading beside the hostile"
             }
 
             test "a pioneer builds the child's site before it upgrades the child's controller" {

@@ -796,9 +796,14 @@ let build
                         {
                             Owner = Ownership.Unowned
                             Reservation = None
+                            SafeMode = false
                         }
                     else
                         {
+                            // `safeMode` is the tick count remaining and
+                            // undefined otherwise — the same shape the
+                            // colony's own controller reads it in above.
+                            SafeMode = not (isNull (box c.safeMode))
                             // `my` is undefined and not false on a
                             // controller nobody owns, the shape `safeMode`
                             // and `ticksToRegeneration` also arrive in —

@@ -1197,6 +1197,7 @@ let visible room reservation (colony: Snapshot) =
                 {
                     Owner = Ownership.Unowned
                     Reservation = reservation
+                    SafeMode = false
                 }
     }
 
@@ -1217,6 +1218,7 @@ let ownedByRival room (colony: Snapshot) =
                 {
                     Owner = Ownership.Rival
                     Reservation = None
+                    SafeMode = false
                 }
     }
 
@@ -1718,6 +1720,7 @@ let clocklessTests =
                                         {
                                             Owner = Ownership.Ours
                                             Reservation = None
+                                            SafeMode = false
                                         }
                                     ]
                         }

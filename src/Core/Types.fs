@@ -252,6 +252,15 @@ type RoomControlInfo =
         /// arrived as closed three-state answers rather than as usernames
         /// for the reason `ReservationHolder` gives.
         Reservation: ReservationInfo option
+        /// Whether the room's controller is under safe mode this tick
+        /// (the engine's `controller.safeMode`, a tick count while it
+        /// runs). Carried per room and not on the colony's own controller
+        /// alone (#218): safe mode shields the room it is in, whoever is
+        /// looking — a mother's pioneer standing in a child's room under
+        /// safe mode is as safe as the child's own creeps — and only a
+        /// room *we* own shields us; a rival's safe mode protects the
+        /// rival. False where no controller stands.
+        SafeMode: bool
     }
 
 /// A tile coordinate inside a room.

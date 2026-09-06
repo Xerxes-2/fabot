@@ -331,6 +331,7 @@ let private colonyOf (room: LoadedRoom) level =
                     {
                         Owner = Ownership.Ours
                         Reservation = None
+                        SafeMode = false
                     }
                 ]
         ConstructionSites = []
@@ -1735,6 +1736,7 @@ let private declaredColony level =
                     {
                         Owner = Ownership.Unowned
                         Reservation = None
+                        SafeMode = false
                     }
                     control)
         Sources =

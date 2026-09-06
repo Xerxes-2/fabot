@@ -730,6 +730,7 @@ let colonyAt (capture: RoomCapture) (level: int) (bank: int) : Snapshot =
                     {
                         Owner = Ownership.Ours
                         Reservation = None
+                        SafeMode = false
                     }
                 ]
         ConstructionSites = []

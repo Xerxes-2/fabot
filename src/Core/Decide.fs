@@ -667,24 +667,27 @@ module Threats =
 /// walks that room alone. Derived once here and handed down; the layering
 /// does not make it once per creep.
 let threatsOf (snapshot: Snapshot) atlas : Threats =
-    // Under safe mode a hostile in the home room can hurt nothing — the
+    // Under safe mode a hostile in a room of ours can hurt nothing — the
     // engine refuses every harmful act there for the whole window — so it
-    // is no Threat and has no Reach, and the colony's creeps stand and
-    // work beside it (user, 2026-09-06: "safe mode enable 的时候不要
-    // flee"). The home room alone: safe mode is the controller's room's,
-    // and a raider in an outpost is as dangerous as ever.
-    let shielded =
-        match snapshot.Controller with
-        | Some controller when controller.SafeModeActive ->
-            Some(SpatialInfo.homeName snapshot.Spatial)
-        | _ -> None
+    // is no Threat and has no Reach, and our creeps stand and work beside
+    // it (user, 2026-09-06: "safe mode enable 的时候不要 flee"). Read per
+    // room off `RoomControl` and not off this colony's own controller
+    // (#218): safe mode shields the room it is in whoever is looking, so
+    // a mother's pioneer in a child's room under safe mode stands as the
+    // child's own creeps do. A room we own, only — a rival's safe mode
+    // protects the rival, and a raider in an outpost is as dangerous as
+    // ever.
+    let shielded room =
+        match Map.tryFind room snapshot.RoomControl with
+        | Some control -> control.Owner = Ownership.Ours && control.SafeMode
+        | None -> false
 
     // The hostiles are asked first, so a quiet colony walks nothing:
     // neither the rampart census nor any room's own tiles are read on a
     // tick with nothing in it to run from.
     match
         snapshot.Hostiles
-        |> List.filter (fun hostile -> shielded <> Some hostile.RoomName)
+        |> List.filter (fun hostile -> not (shielded hostile.RoomName))
         |> List.choose (fun hostile ->
             weaponRange hostile |> Option.map (fun r -> hostile.RoomName, hostile.Pos, r))
     with
