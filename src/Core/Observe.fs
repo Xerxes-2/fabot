@@ -366,6 +366,12 @@ type RaidState =
         /// are read against. Carried only while an episode is open, so a
         /// creep that dies in peacetime is read against an empty baseline
         /// and recorded nowhere.
+        ///
+        /// This colony's names since #191 and no longer the world's, since
+        /// a Snapshot carries one colony's creeps (ADR 0047) — which is
+        /// why the difference `foldRaids` takes is against the world's
+        /// living names and not against this list's successor: a creep
+        /// another colony adopted leaves the baseline without dying.
         Living: Set<string>
         /// The previous tick's hits per structure id across the Keep and
         /// the ramparts: the baseline this tick's damage is read against,
@@ -706,7 +712,24 @@ let standDown (tick: int) (state: RaidState) : Set<string> =
 /// (`RaidState.RivalHeld`), ADR 0043's withdrawal that carries no clock —
 /// which still dates itself, because the tick a gate shut on is the trace
 /// #117's US-20 asks this channel for.
-let foldRaids (cap: int) (gap: int) (snapshot: Snapshot) (prior: RaidState) : RaidState =
+///
+/// `alive` is every creep name the *world* still holds — `Game.creeps`,
+/// the same set `fold` prunes timelines against — and not this colony's
+/// fleet, because since #191 a Snapshot carries one colony's creeps and a
+/// name can leave that list without anything dying: a creep standing in a
+/// room only another colony projects is **adopted** by it for the tick
+/// (ADR 0047 decision 2). Read against the colony's own list, adoption
+/// would be written into its caster's log as a casualty, which is the one
+/// confident falsehood this channel is built never to print. The baseline
+/// stays the colony's — it is what the next tick's difference is taken
+/// *from* — and only the subtraction is the world's.
+let foldRaids
+    (cap: int)
+    (gap: int)
+    (alive: Set<string>)
+    (snapshot: Snapshot)
+    (prior: RaidState)
+    : RaidState =
     // The baseline the next tick reads its losses against: this tick's
     // names, less the creeps whose clock runs out on it. A name gone
     // tomorrow because CREEP_LIFE_TIME ran down is old age, and this
@@ -766,21 +789,24 @@ let foldRaids (cap: int) (gap: int) (snapshot: Snapshot) (prior: RaidState) : Ra
         | last :: rest when snapshot.Time - last.LastSeen <= gap -> List.rev rest, Some last
         | _ -> prior.Episodes, None
 
-    // The tick's losses: names the previous tick projected and this one
-    // does not. A name is missing the tick *after* its creep died, so the
+    // The tick's losses: names the previous tick projected that the world
+    // no longer holds. A name is missing the tick *after* its creep died, so the
     // loss is stamped at the tick it was last seen alive — which is this
     // episode's last sighting, and only when that sighting was the
     // previous tick. So every Loss falls inside the window the episode
     // records, and a name that vanishes deeper into the quiet gap is
     // attrition the raid is not charged with. A freshly opened episode has
     // no baseline of its own: a creep it has not seen yet is not its loss.
+    //
+    // Differenced against `alive` and never against this colony's own
+    // names: a body that left this Snapshot because another colony adopted
+    // it is still standing (ADR 0047 decision 2), and a raid is not charged
+    // for a creep that merely changed hands.
     let lostSince (episode: RaidEpisode) =
         if snapshot.Time - episode.LastSeen > 1 then
             []
         else
-            let names = snapshot.Creeps |> List.map (fun creep -> creep.Name) |> Set.ofList
-
-            Set.difference prior.Living names
+            Set.difference prior.Living alive
             |> Set.toList
             |> List.map (fun name ->
                 {

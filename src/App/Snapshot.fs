@@ -129,7 +129,16 @@ type private RoomProjection =
 /// below is for and why it is not redundant. Its terrain is handed in
 /// rather than read here, because the half that needs no vision is the
 /// same read either way.
-let private projectVisible (terrain: RoomTerrain) (room: IRoom) : RoomProjection =
+///
+/// The creeps are this **colony's** since #191 and not merely this room's:
+/// the set is the one `Colony.creepColonies` cut, and a body another
+/// colony holds this tick is that colony's to price, match and move (ADR
+/// 0047 decision 2).
+let private projectVisible
+    (creeps: Set<string>)
+    (terrain: RoomTerrain)
+    (room: IRoom)
+    : RoomProjection =
     // Each structure and site is classified once, here, and carried beside
     // its kind: every filter below reads that kind, and the engine string
     // is interpreted in one place (#75).
@@ -232,9 +241,19 @@ let private projectVisible (terrain: RoomTerrain) (room: IRoom) : RoomProjection
             // answers for every other room whether or not the colony has
             // anyone out there this tick — do not simplify it away as a
             // dead branch.
+            //
+            // And this colony's creeps, not the world's, for the second
+            // reason #191 added: a projection is one colony's, and a creep
+            // another colony cast and holds is placed in *its* layers.
+            // Filed here rather than filtered out of `Snapshot.Creeps`
+            // alone, because a body in the geometry the colony does not
+            // hold is an occupant the Resolver would arbitrate against and
+            // a tile the Atlas would count as taken, for a creep whose
+            // Move Intent belongs to somebody else's decision.
             CreepPositions =
                 objectValues<ICreep> Game.creeps
-                |> Array.filter (fun c -> not c.spawning && c.room.name = room.name)
+                |> Array.filter (fun c ->
+                    not c.spawning && c.room.name = room.name && Set.contains c.name creeps)
                 |> Array.map (fun c -> c.name, posOf c.pos)
                 |> Map.ofArray
             // Structures a creep cannot stand on block their tile; the
@@ -393,7 +412,7 @@ let private roomSeen (roomName: string) : IRoom option =
 /// whole assembled projection, once, after this runs (ADR 0041, #148). It
 /// is not laid here because the rule is Core's: this function knows only
 /// what the engine answered for one room name.
-let private projectRoom (roomName: string) : RoomProjection =
+let private projectRoom (creeps: Set<string>) (roomName: string) : RoomProjection =
     let terrain = terrainOf roomName
 
     match roomSeen roomName with
@@ -408,7 +427,7 @@ let private projectRoom (roomName: string) : RoomProjection =
             Hits = Map.empty
             Stores = Map.empty
         }
-    | Some room -> projectVisible terrain room
+    | Some room -> projectVisible creeps terrain room
 
 /// The tick's projection: the rooms the colony works, each under its own
 /// name, in one projection and never two (ADR 0005, layered by ADR 0041).
@@ -423,8 +442,9 @@ let private projectRoom (roomName: string) : RoomProjection =
 /// collision that cannot happen: the fold walks the scan set in order, so
 /// the last room to name an id would win — and one object id stands in one
 /// room, so no id is ever merged twice.
-let private buildSpatial (home: string) (scanned: string list) : SpatialInfo =
-    let projected = scanned |> List.map (fun roomName -> roomName, projectRoom roomName)
+let private buildSpatial (creeps: Set<string>) (home: string) (scanned: string list) : SpatialInfo =
+    let projected =
+        scanned |> List.map (fun roomName -> roomName, projectRoom creeps roomName)
 
     let mergedBy (select: RoomProjection -> Map<string, 'v>) =
         (Map.empty, projected)
@@ -440,58 +460,72 @@ let private buildSpatial (home: string) (scanned: string list) : SpatialInfo =
         Stores = mergedBy (fun room -> room.Stores)
     }
 
-/// The tick's Snapshot, and the one argument it takes: the rooms the
-/// [[stand-down]] gate is withholding (ADR 0043), derived by Core from the
-/// previous tick's [[raid log]] (`Observe.standDown`) and handed in the
-/// way the scan set is — the shell reads which rooms the colony works, it
-/// decides none of it. Empty is the ordinary case and the only one this
-/// colony has ever run in: no outpost has yet held a core.
-let build (shut: Set<string>) : Snapshot =
-    let spawns = objectValues<ISpawn> Game.spawns
+/// The outposts one colony works this tick: its own declaration's, less
+/// the rooms the [[stand-down]] gate is withholding (ADR 0043,
+/// `Outpost.worked`).
+///
+/// The declarations are read once per colony and the three readers take
+/// their answer from here: the scan set, the furniture laid into the
+/// projection and the rocks pooled for Harvest are three readings of one
+/// constant, and a second read is a second constant that can disagree —
+/// which is exactly what the gate would narrow one of and not the others.
+/// So a room being stood down leaves the declaration here, and is then not
+/// scanned, not furnished and its rocks not pooled: three consequences of
+/// one subtraction. Everything downstream sees a room nobody declared,
+/// which is the semantics ADR 0004 already paid for.
+let private worked (colony: Colony) (shut: Set<string>) : Outpost list =
+    Outpost.worked shut colony.Outposts
+
+/// The rooms one colony projects this tick — its home room and every
+/// declared outpost that survived the gate beside it (ADR 0041). Core owns
+/// the union (`Outpost.roomsProjected`) and the shell reads it here,
+/// because the projection is not the only thing built off a room scan: an
+/// outpost's Tasks join the *same* pool as the home room's, so the entity
+/// lists the Planner pools from are scanned over the same set.
+///
+/// Public because `Main.loop` needs every colony's set *before* it builds
+/// any of them: which colony adopts a creep is decided over the whole
+/// table of projections (ADR 0047 decision 2), and a Snapshot cannot be
+/// cut by a membership that is not decided yet.
+let projectedRooms (colony: Colony) (shut: Set<string>) : string list =
+    Outpost.roomsProjected (worked colony shut) colony.Home
+
+/// One colony's Snapshot this tick (ADR 0047 decision 1): the colony
+/// whose declaration this is, the rooms the [[stand-down]] gate is
+/// withholding from it (ADR 0043, derived by Core from the previous tick's
+/// [[raid log]] — `Observe.standDown`), and the creeps that are this
+/// colony's this tick (`Colony.creepColonies`). All three are handed in
+/// and none is decided here: the shell reads which colonies run, which
+/// rooms each works and which creeps each holds, and Core owns every rule
+/// behind those three answers.
+///
+/// One of these is built per **living** colony and `decide` is run once
+/// over each (`Colony.living`), so nothing in this record is the world's:
+/// the spawns are this colony's own, the bank is its home room's, and a
+/// creep another colony holds is in neither its `Creeps` nor any layer's
+/// `CreepPositions`. With one colony declared and running — every tick
+/// this bot has ever run — that is exactly the Snapshot it built before
+/// #191, field for field.
+let build (colony: Colony) (shut: Set<string>) (creeps: Set<string>) : Snapshot =
+    let home = colony.Home
+
+    // This colony's spawns and no others': the ones it casts from, banks
+    // for and anchors its Layout on. A spawn standing in another colony's
+    // home is that colony's to cast from, and one in this colony's
+    // projection — the spawn a [[nursery]] is waiting for — is read off
+    // the projection where every other fact about that room is read
+    // (`Decide.isNurseryRoom`), never off this list.
+    let spawns =
+        objectValues<ISpawn> Game.spawns |> Array.filter (fun s -> s.room.name = home)
 
     let spawnRooms =
         spawns |> Array.map (fun s -> s.room) |> Array.distinctBy (fun r -> r.name)
 
-    // The home room: the first spawn's, the single-colony assumption this
-    // shell has always made and ADR 0041 does not touch.
-    let home = spawns |> Array.tryHead |> Option.map (fun spawn -> spawn.room.name)
+    let outposts = worked colony shut
 
-    // The declarations this tick works from, read once: the scan set, the
-    // furniture laid into the projection and the rocks pooled for Harvest
-    // are three readings of one constant, and a second read is a second
-    // constant that can disagree — which is exactly what the stand-down
-    // gate (ADR 0043) would narrow one of and not the others. The scan
-    // set below is taken from this list and then gates the other two, so
-    // the three narrow together or not at all.
-    //
-    // And this is where the gate lands, on the one read: a room being
-    // stood down leaves the declarations here, so it is not scanned, not
-    // furnished, and its rocks are not pooled — three consequences of one
-    // subtraction (`Outpost.worked`). Everything downstream sees a room
-    // nobody declared, which is the semantics ADR 0004 already paid for.
-    //
-    // The constant is the colonies' now and no longer the outposts'
-    // alone (`Colony.declared`, ADR 0047): this colony's own entry is the
-    // one whose home is the room the first spawn stands in, and a home
-    // nobody declared works no outposts at all — the behaviour the empty
-    // declaration shipped with (#124) and the one downstream has a rule
-    // for.
-    let outposts =
-        home
-        |> Option.map (Colony.outpostsOf Colony.declared)
-        |> Option.defaultValue []
-        |> Outpost.worked shut
-
-    // The rooms the colony works this tick — the home room and every
-    // declared outpost beside it (ADR 0041). Core owns the union
-    // (`Outpost.roomsProjected`) and the shell reads it once here, because
-    // the projection is not the only thing built off a room scan: an
-    // outpost's Tasks join the *same* pool as the home room's, so the
-    // entity lists the Planner pools from are scanned over the same set.
-    // Three rooms since #126 filled the declaration: the home room,
+    // Three rooms for the colony this bot has always run: the home room,
     // W12S27 and W13S28.
-    let scanned =
-        home |> Option.map (Outpost.roomsProjected outposts) |> Option.defaultValue []
+    let scanned = projectedRooms colony shut
 
     // The scanned rooms we can actually see. What vision pays for is read
     // off these and is absent entry by entry where there is none (ADR
@@ -723,10 +757,18 @@ let build (shut: Set<string>) : Snapshot =
             seen
             |> List.collect (fun room -> room.find findMyConstructionSites |> Array.toList)
             |> List.map (fun o -> ({ Id = (o :?> IConstructionSite).id }: ConstructionSiteInfo))
+        // This colony's creeps: the ones it cast, plus the ones it has
+        // adopted, less the ones another colony has adopted from it (ADR
+        // 0047 decision 2). The set is `Colony.creepColonies`' answer, cut
+        // once for the tick and handed in, because adoption is decided over
+        // *every* colony's projection at once and no single colony's
+        // Snapshot can see that table. The layers' `CreepPositions` are cut
+        // by the same set, so a colony's geometry and its fleet cannot
+        // disagree about who is standing where.
         Creeps =
             objectValues<ICreep> Game.creeps
             // A creep still inside the spawn cannot act; keep it out of the pool.
-            |> Array.filter (fun c -> not c.spawning)
+            |> Array.filter (fun c -> not c.spawning && Set.contains c.name creeps)
             |> Array.map (fun c ->
                 {
                     Name = c.name
@@ -817,11 +859,12 @@ let build (shut: Set<string>) : Snapshot =
                         CollapseTick = collapseTickOf st
                     }
                     : InvaderCoreInfo)))
-        // Single-colony assumption, unchanged by ADR 0041: the first
-        // spawn's room is the home room, the one `RoomName` names and the
-        // Layout and the census signature read. What layering adds is the
-        // rooms beside it — the declared outposts — over the same scan set
-        // the Sources above are collected from.
+        // The home room is the declaration's now and no longer the first
+        // spawn's (ADR 0047): it is the room `RoomName` names, the room the
+        // Layout and the census signature read, and the room this colony's
+        // entry is written under. What layering adds is the rooms beside it
+        // — the declared outposts — over the same scan set the Sources
+        // above are collected from.
         //
         // The declared furniture goes in last, over the whole assembled
         // projection rather than room by room inside it (`Outpost.place`,
@@ -830,10 +873,7 @@ let build (shut: Set<string>) : Snapshot =
         // it is this one splice. It lays nothing into a room the scan set
         // left out, and neither does the pool above, so the union stays
         // the single gate on which rooms the colony works.
-        Spatial =
-            home
-            |> Option.map (fun name -> buildSpatial name scanned |> Outpost.place outposts)
-            |> Option.defaultValue SpatialInfo.empty
+        Spatial = buildSpatial creeps home scanned |> Outpost.place outposts
         // The declaration's other half, handed over whole (ADR 0047): every
         // home room a human has declared a colony for, this one's included
         // and unfiltered. Which of them are **candidate colonies** — the

@@ -825,6 +825,164 @@ module Colony =
     let homes (colonies: Colony list) : string list =
         colonies |> List.map (fun colony -> colony.Home)
 
+    /// The **living** colonies: the ones `Main.loop` builds a Snapshot for
+    /// and runs `decide` once for, one whose home room is ours *and* holds
+    /// one of our spawns (ADR 0047 decision 1). Declaration order, so the
+    /// first entry is the one a creep no spawn name claims falls to
+    /// (`creepColonies`).
+    ///
+    /// Two facts and not one, though the engine lets nobody stand a spawn
+    /// in a room another player owns: they are what a declared colony
+    /// passes *through* on its way to running, and each of the two states
+    /// on the way fails exactly one of them. A [[candidate colony]] owns
+    /// nothing and spawns nothing; a [[nursery]] is owned and has no spawn
+    /// of its own, and is run by its [[mother colony]] rather than by
+    /// itself (ADR 0047 decision 4) — so "owned" alone would start a
+    /// colony with no spawn to cast from, no bank to cast out of and no
+    /// Layout anchor, and the mother would keep building a room that was
+    /// already deciding for itself.
+    ///
+    /// Both facts are the shell's to read and neither is this constant's:
+    /// a declaration is a human's intent and ownership is something vision
+    /// pays for (ADR 0004), so what arrives here is the rooms our spawns
+    /// stand in and the rooms we own, and the rule over them is one
+    /// sentence rather than a filter written out in `Main.loop`.
+    ///
+    /// **A spawn room no declaration names is a colony of its own**, and
+    /// only when the declaration answers with nothing at all: `outpostsOf`
+    /// already says that a home nobody declared works no outposts rather
+    /// than entering a state nothing has a rule for (#124), and this is
+    /// that sentence one level up — a slip in a constant a human moves
+    /// costs the colony its outposts, never its whole tick. Without it a
+    /// bot standing in a room the declaration does not mention runs no
+    /// `decide` at all: nothing cast, nothing harvested, nothing moved,
+    /// and no Verdict to say why. That is a state a respawn reaches by
+    /// itself, and it is the world every harness stub is (`npm run
+    /// profile`).
+    ///
+    /// The first such room and not all of them, because that is exactly
+    /// what the shell read before there were colonies to declare — the
+    /// room the first spawn stands in, with no outposts — so a world the
+    /// declaration does not describe decides today what it decided
+    /// yesterday. And *only* when nothing declared is living, so this can
+    /// never add a colony beside a declared one: in a world the
+    /// declaration does describe it is inert, and a room a human left out
+    /// of the constant stays out.
+    let living
+        (owned: Set<string>)
+        (spawnRooms: string list)
+        (colonies: Colony list)
+        : Colony list =
+        let declared =
+            colonies
+            |> List.filter (fun colony ->
+                Set.contains colony.Home owned && List.contains colony.Home spawnRooms)
+
+        match declared with
+        | [] ->
+            spawnRooms
+            |> List.filter (fun room -> Set.contains room owned)
+            |> List.tryHead
+            |> Option.map (fun home -> { Home = home; Outposts = [] })
+            |> Option.toList
+        | living -> living
+
+    /// The colony that cast one creep, read off its own name: creep names
+    /// are `{pattern}-{tick}-{spawn}` (`Decide.planSpawns`), so the spawn
+    /// that made it is spelt in the name and the room that spawn stands in
+    /// is its home (ADR 0047 decision 2). None when no known spawn's name
+    /// is in it — a creep from an older naming scheme, or one a human made
+    /// by hand.
+    ///
+    /// The longest matching spawn name wins, so `Spawn1` cannot claim a
+    /// creep `Spawn11` cast: the names are the engine's own and nothing
+    /// stops one being a prefix of another.
+    let private castBy (spawnHomes: (string * string) list) (creep: string) : string option =
+        spawnHomes
+        |> List.filter (fun (spawn, _) -> creep.Contains spawn)
+        |> List.sortByDescending (fun (spawn, _) -> (spawn: string).Length)
+        |> List.tryHead
+        |> Option.map snd
+
+    /// Which colony each creep belongs to this tick (ADR 0047 decision 2),
+    /// keyed by creep name: a creep belongs to the colony that **cast**
+    /// it, unless it is standing in a room only some *other* colony
+    /// projects, in which case that colony **adopts** it for the tick.
+    /// What a colony's `Snapshot.Creeps`, its layers' `CreepPositions` and
+    /// therefore its census are cut by, so a creep is one colony's
+    /// business and never two's — two colonies matching one creep would
+    /// write two Tasks into one flat `assignments` leaf and move it twice.
+    ///
+    /// Adoption is what answers the creep a colony cannot place: a body
+    /// standing outside every room its own colony projects has no tile
+    /// there, and the colony that *does* project the room it stands in can
+    /// price it, match it and move it (#164's tile-less creep, answered
+    /// for the rooms some colony projects). It is a fact about this tick
+    /// and nothing is kept: the tick the creep walks home its caster has
+    /// it back.
+    ///
+    /// **Only** another colony's, and only when exactly one projects it:
+    /// a room its own colony projects too is its own colony's business —
+    /// the [[mother colony]] goes on working a [[nursery]] it also
+    /// projects — and a room two others project at once names no single
+    /// adopter, so the creep stays where it was cast rather than being
+    /// handed to whichever came first in the declaration. A room *nobody*
+    /// projects — a [[stand-down]]'s withheld outpost (ADR 0043) — adopts
+    /// nobody either, so the creep standing there is still its caster's
+    /// and still has no tile: the gate withdrew the room, and giving it
+    /// away would be a second rule about a room the colony deliberately
+    /// stopped looking at.
+    ///
+    /// A creep no spawn name claims falls to the first living colony,
+    /// which is declaration order: a name the shell cannot read is not a
+    /// creep to drop — dropped, it would be in no colony's Creeps, hold no
+    /// assignment and stand still for the rest of its life.
+    ///
+    /// A creep whose caster **is** readable but whose colony is not living
+    /// this tick falls there too, and for the same reason: the projections
+    /// handed in are the living colonies' (`Colony.living`), so a home
+    /// absent from them runs no `decide`, and a creep filed under it would
+    /// be in no Snapshot at all — the identical fate, reached through a
+    /// spawn standing in a room no living colony declares rather than
+    /// through an unreadable name. The first *living* colony and never the
+    /// first declared: a declared home that is not running would file the
+    /// creep where nothing decides for it, which is the very outcome this
+    /// fallback exists to refuse.
+    let creepColonies
+        (projections: (string * string list) list)
+        (spawnHomes: (string * string) list)
+        (creeps: (string * string option) list)
+        : Map<string, string> =
+        match projections with
+        | [] -> Map.empty
+        | (first, _) :: _ ->
+            let homes = projections |> List.map fst
+
+            creeps
+            |> List.map (fun (name, standing) ->
+                // A caster that is not one of the living colonies is no
+                // answer at all — a spawn standing in a room nothing runs
+                // this tick — and falls to `first` beside the unreadable
+                // names, because a creep filed under a home with no
+                // Snapshot is a creep in nobody's Creeps.
+                let cast =
+                    castBy spawnHomes name
+                    |> Option.filter (fun home -> List.contains home homes)
+                    |> Option.defaultValue first
+
+                let projecting =
+                    match standing with
+                    | None -> []
+                    | Some room ->
+                        projections
+                        |> List.filter (fun (_, rooms) -> List.contains room rooms)
+                        |> List.map fst
+
+                match projecting with
+                | [ adopter ] when adopter <> cast -> name, adopter
+                | _ -> name, cast)
+            |> Map.ofList
+
 /// What the decision layer knows about one construction site this tick.
 type ConstructionSiteInfo = { Id: string }
 

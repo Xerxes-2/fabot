@@ -349,13 +349,60 @@ let private decodeOutpost (raw: obj) : OutpostEpisode =
 
 // The observe subtree is created on demand and replaced whole only when
 // what stands there is not an object. Each writer then assigns its own
-// leaf, so `creeps`, `verbose` and `raids` never clobber one another.
+// leaf, so `creeps`, `verbose`, `cpu` and the `colonies` subtree never
+// clobber one another. Those four are the whole of what is assigned here
+// since ADR 0047: the Raid log and the Layout record are one colony's and
+// live two levels down, under `ensureColony`'s own rule below.
 let private ensureObserve () =
     if isNull Memory?fabot then
         Memory?fabot <- createEmpty<obj>
 
     if jsTypeof Memory?fabot?observe <> "object" || isNull Memory?fabot?observe then
         Memory?fabot?observe <- createEmpty<obj>
+
+// One colony's own subtree, under `Memory.fabot.observe.colonies.<home>`,
+// created on demand exactly as the observe subtree above it is (ADR 0047):
+// the two channels that are a *colony's* record and not the world's — the
+// [[raid log]] and the [[layout record]] — live under one home room's key,
+// because `decide` runs once per colony and each answers for the rooms its
+// own colony works.
+//
+// The three channels beside them stay flat and keyed as they always were:
+// `assignments` and `observe.creeps` by creep name and `observe.cpu` by
+// tick, and no two colonies can collide on either of those keys — a creep
+// is one colony's business for the tick (`Colony.creepColonies`) and the
+// CPU line is the whole loop's.
+//
+// Each colony assigns its own two leaves and nothing above them, so two
+// colonies writing in the same tick never clobber one another, which is
+// the rule `ensureObserve` is written under one level up.
+let private ensureColony (home: string) =
+    ensureObserve ()
+
+    if
+        jsTypeof Memory?fabot?observe?colonies <> "object"
+        || isNull Memory?fabot?observe?colonies
+    then
+        Memory?fabot?observe?colonies <- createEmpty<obj>
+
+    let colonies = Memory?fabot?observe?colonies
+
+    if jsTypeof colonies?(home) <> "object" || isNull colonies?(home) then
+        colonies?(home) <- createEmpty<obj>
+
+// One colony's leaf as it stands in Memory, or null when the subtree, the
+// colony or the leaf is absent: a colony this bundle has not written for
+// yet, and — for one deploy — every colony, since the leaves moved under
+// this key (ADR 0047). Null is what every reader below already degrades
+// from, so a leaf that has moved reads exactly as one that was never
+// written: empty, and rebuilt from this tick on.
+let private colonyLeaf (home: string) (leaf: string) : obj =
+    let fabot = Memory?fabot
+    let observe = if isNull fabot then null else fabot?observe
+    let colonies = if isNull observe then null else observe?colonies
+    let colony = if isNull colonies then null else colonies?(home)
+
+    if isNull colony then null else colony?(leaf)
 
 /// The verbose list from `Memory.fabot.observe.verbose`: creep names owed
 /// full candidate scoring this tick. Written by the CLI through the Memory
@@ -420,17 +467,22 @@ let save (state: ObserveState) =
     ensureObserve ()
     Memory?fabot?observe?creeps <- creeps
 
-/// The prior Raid log, or empty when the subtree is absent, from an older
-/// bundle, or otherwise unreadable — a discarded log costs the episodes it
-/// held and nothing else. An episode that will not decode costs that
-/// episode alone: the ring degrades row by row rather than vanishing, so a
-/// hand-edit through the Memory HTTP API, or a rollback across a
-/// wire-shape change, leaves the rest of the history readable.
-let loadRaids () : RaidState =
+/// The named colony's prior Raid log, or empty when its subtree is absent,
+/// from an older bundle, or otherwise unreadable — a discarded log costs
+/// the episodes it held and nothing else. An episode that will not decode
+/// costs that episode alone: the ring degrades row by row rather than
+/// vanishing, so a hand-edit through the Memory HTTP API, or a rollback
+/// across a wire-shape change, leaves the rest of the history readable.
+///
+/// One log per colony since ADR 0047 (`observe.colonies.<home>.raids`),
+/// because the log answers for the rooms one colony works and the
+/// [[stand-down]] gate reads it back per colony. The flat `observe.raids`
+/// leaf a pre-#191 bundle wrote is not migrated: it reads as absent, which
+/// is the empty log this same function gives a colony on its first tick,
+/// and the ring refills within one window.
+let loadRaids (home: string) : RaidState =
     try
-        let fabot = Memory?fabot
-        let observe = if isNull fabot then null else fabot?observe
-        let raids = if isNull observe then null else observe?raids
+        let raids = colonyLeaf home "raids"
 
         if isNull raids then
             RaidState.empty
@@ -496,11 +548,12 @@ let loadRaids () : RaidState =
     with _ ->
         RaidState.empty
 
-/// Write the Raid log back under `Memory.fabot.observe.raids`, leaving the
-/// rest of the observe subtree — the Transition log, the verbose list, the
-/// Layout record and the CPU line — alone, the same way `save` leaves this
-/// leaf alone.
-let saveRaids (state: RaidState) =
+/// Write one colony's Raid log back under
+/// `Memory.fabot.observe.colonies.<home>.raids`, leaving the rest of the
+/// observe subtree — the Transition log, the verbose list, the CPU line,
+/// this colony's Layout record and every other colony's leaves — alone,
+/// the same way `save` leaves this leaf alone.
+let saveRaids (home: string) (state: RaidState) =
     let raids = createEmpty<obj>
     raids?episodes <- state.Episodes |> List.map encodeEpisode |> List.toArray
     raids?outposts <- state.Outposts |> List.map encodeOutpost |> List.toArray
@@ -522,11 +575,13 @@ let saveRaids (state: RaidState) =
         hits?(id) <- value
 
     raids?hits <- hits
-    ensureObserve ()
-    Memory?fabot?observe?raids <- raids
+    ensureColony home
+    Memory?fabot?observe?colonies?(home)?raids <- raids
 
-/// Write the Layout's own losses under `Memory.fabot.observe.layout`,
-/// leaving the rest of the observe subtree alone the way `saveRaids` does:
+/// Write one colony's Layout losses under
+/// `Memory.fabot.observe.colonies.<home>.layout`, leaving the rest of the
+/// observe subtree — and every other colony's leaves — alone the way
+/// `saveRaids` does:
 /// the footing targets it could not serve (#77), the trunks it could not
 /// route (#107) and the container picks it deferred to a container that
 /// already serves their target (ADR 0040). Three lists in one leaf and not
@@ -536,7 +591,10 @@ let saveRaids (state: RaidState) =
 /// `observe.mjs layout` tell "this bundle records the loss" from "nothing
 /// is lost", ADR 0028's reason applied to a second record. No load and no fold — the record is
 /// the current plan's, so there is no prior state to degrade from and
-/// nothing a bad leaf could cost.
+/// nothing a bad leaf could cost. One record per colony since ADR 0047,
+/// because there is one Layout per colony: the leaf a pre-#191 bundle
+/// wrote under `observe.layout` is not migrated and nothing reads it — the
+/// record is this tick's plan, so the next tick writes the whole of it.
 /// One tile as a wire object. The deferral rows carry two of them and a
 /// tile named `x`/`y` twice over would say which is which nowhere.
 let private tileObject (tile: Pos) =
@@ -546,6 +604,7 @@ let private tileObject (tile: Pos) =
     o
 
 let saveLayout
+    (home: string)
     (unserved: UnservedFooting list)
     (unrouted: UnroutedTrunk list)
     (deferred: DeferredContainer list)
@@ -600,8 +659,8 @@ let saveLayout
             o)
         |> List.toArray
 
-    ensureObserve ()
-    Memory?fabot?observe?layout <- layout
+    ensureColony home
+    Memory?fabot?observe?colonies?(home)?layout <- layout
 
 /// The phase split off one CPU row, field by field, or `None` when the row
 /// carries none (#170). Absent and malformed are the same answer here and

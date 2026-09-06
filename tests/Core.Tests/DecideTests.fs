@@ -18215,23 +18215,30 @@ let private asNursery (colony: Snapshot) =
 
 /// The same colony with a spawn of ours standing in the north room:
 /// independence, and the end of the nursery (ADR 0047). The Snapshot fact
-/// the rule actually reads and nothing beside it — `Snapshot.Spawns` is
-/// every spawn the colony has, so a second entry in it is the whole of
-/// what the tick a spawn is finished changes for this rule, and the
-/// human's edit splitting `Colony.declared` in two follows that tick
-/// rather than causing it.
+/// the rule actually reads and nothing beside it — a spawn *structure* in
+/// that room's layer, which is the whole of what the tick a spawn is
+/// finished changes for this rule; the human's edit splitting
+/// `Colony.declared` in two follows that tick rather than causing it.
+///
+/// Placed in the projection and not in `Snapshot.Spawns`, which is the
+/// colony's own spawn list since #191 — the spawns it casts from and banks
+/// for, and a room it does not run is not a room it casts in. The
+/// mother reads the child's spawn the way she reads everything else about
+/// that room: off the layer she projects it under.
 let private withNorthSpawn (colony: Snapshot) =
+    let outpost = SpatialInfo.layerOf colony.Spatial "W1N2"
+
     { colony with
-        Spawns =
-            colony.Spawns
-            @ [
-                {
-                    Name = "Spawn2"
-                    Id = "spawn-2"
-                    RoomName = "W1N2"
-                    IsSpawning = false
+        Spatial =
+            { colony.Spatial with
+                TargetKinds =
+                    Map.add "spawn-2" (Structure BuiltKind.Spawn) colony.Spatial.TargetKinds
+            }
+            |> withNeighbour
+                "W1N2"
+                { outpost with
+                    TargetPositions = Map.add "spawn-2" { X = 10; Y = 44 } outpost.TargetPositions
                 }
-            ]
     }
 
 [<Tests>]
@@ -18597,6 +18604,416 @@ let nurseryTests =
                     (held (sites asNursery))
                     [ taskId (Build "site-out"), 3; taskId (Build "site-west"), 1 ]
                     "claimed, the north site is uncapped and the west one keeps the one it had"
+            }
+        ]
+
+/// The two spawns of the pair below, each in its own colony's home: what
+/// the shell reads a creep's caster off (`Game.spawns`, ADR 0047 decision
+/// 2). Names the engine's own, and one is not a prefix of the other by
+/// accident — `Spawn1x` below is what pins that it could not be.
+let private pairSpawns = [ "Spawn1", "W1N1"; "Spawn2", "W1N2" ]
+
+/// A creep of each colony's casting, named the way `planSpawns` names one
+/// — `{pattern}-{tick}-{spawn}` — because the caster is read out of the
+/// name and a fixture creep called anything else would be testing the
+/// fallback instead of the rule.
+let private motherCast = "worker-100-Spawn1"
+let private childCast = "worker-100-Spawn2"
+
+/// The declaration after a human has split it in two (ADR 0047): each
+/// colony works its own home and nothing else. The only arrangement in
+/// which a room is projected by *one* colony, and so the only one in which
+/// anybody is adopted.
+let private splitPair =
+    [ { Home = "W1N1"; Outposts = [] }; { Home = "W1N2"; Outposts = [] } ]
+
+/// And the tick before it: the north room is the child's home and the
+/// mother's outpost at once, which is the ordinary arrangement while a
+/// [[nursery]] is being built (ADR 0047) — one room, two projections.
+let private nurseryPair =
+    [
+        {
+            Home = "W1N1"
+            Outposts =
+                [
+                    {
+                        RoomName = "W1N2"
+                        Sources = [ "src-out", { X = 10; Y = 46 } ]
+                        Controller = "ctrl-out", { X = 10; Y = 42 }
+                    }
+                ]
+        }
+        { Home = "W1N2"; Outposts = [] }
+    ]
+
+/// What each colony projects, the way the shell derives it before it
+/// builds anything: the home and the outposts that survive the stand-down
+/// gate (`Outpost.roomsProjected`, ADR 0043). Adoption is decided over
+/// this table and not over the declaration, so a room the gate withheld
+/// adopts nobody.
+let private projectionsOf (colonies: Colony list) =
+    colonies
+    |> List.map (fun colony -> colony.Home, Outpost.roomsProjected colony.Outposts colony.Home)
+
+/// The mother of the pair, carrying exactly the creeps the membership rule
+/// gave her, each standing on its own tile in her home layer — which is
+/// what `Snapshot.build` does with the set it is handed (#191): a colony's
+/// `Creeps` and its layers' `CreepPositions` are cut by one set, so a
+/// creep another colony holds is in neither.
+let private motherColony (creeps: (string * Pos) list) =
+    let colony = northBorderColony { X = 10; Y = 38 }
+
+    { colony with
+        Creeps = creeps |> List.map (fun (name, _) -> worker name 0 50)
+        Spatial =
+            colony.Spatial
+            |> withHome (fun layer ->
+                { layer with
+                    CreepPositions = Map.ofList creeps
+                })
+    }
+
+/// The child: the north room run as a home of its own, with its own rock
+/// and its own corridor and nothing of the mother's in it. Built beside
+/// `northBorderColony` rather than out of it, because the two colonies'
+/// Snapshots are two projections and a shared one would prove nothing
+/// about which of them a Task came from.
+let private childColony (creeps: (string * Pos) list) =
+    { bareRespawn with
+        Spawns = []
+        Controller = None
+        Refillables = []
+        Sources = [ source "src-child" ]
+        Creeps = creeps |> List.map (fun (name, _) -> worker name 0 50)
+        Spatial =
+            { SpatialInfo.empty with
+                RoomName = Some "W1N2"
+                Borders = Map.ofList [ "W1N2", plainRing ]
+                TargetKinds = Map.ofList [ "src-child", Source ]
+            }
+            |> withHome (fun layer ->
+                { layer with
+                    Terrain = Map.ofList (corridor 10 40 48)
+                    TargetPositions = Map.ofList [ "src-child", { X = 10; Y = 46 } ]
+                    CreepPositions = Map.ofList creeps
+                })
+    }
+
+/// Which Task one named creep was matched to this tick, or none at all —
+/// which is the answer for a creep this colony's Snapshot does not carry:
+/// it is not in the fold that writes a status Verdict per living creep, so
+/// the colony decides nothing about it and holds nothing of it.
+let private matchedTask name (colony: Snapshot) =
+    (decide colony Map.empty Set.empty None).Verdicts
+    |> List.tryPick (function
+        | Verdict.Matched(creep, task, _) when creep = name -> Some task
+        | _ -> None)
+
+[<Tests>]
+let twoColonyTests =
+    testList
+        "two colonies"
+        [
+            test "a colony runs when its home is ours and holds a spawn, and not before" {
+                // ADR 0047 decision 1's own sentence, and the two states a
+                // declaration passes through on the way to running are
+                // exactly the two ways of failing half of it. Pairwise, one
+                // fact at a time: the same declaration, owned or not, with
+                // a spawn or without.
+                let living owned spawned =
+                    Colony.living (Set.ofList owned) spawned splitPair
+                    |> List.map (fun colony -> colony.Home)
+
+                Expect.equal
+                    (living [ "W1N1"; "W1N2" ] [ "W1N1"; "W1N2" ])
+                    [ "W1N1"; "W1N2" ]
+                    "two owned homes with a spawn apiece are two colonies, in declaration order"
+
+                Expect.equal
+                    (living [ "W1N1"; "W1N2" ] [ "W1N1" ])
+                    [ "W1N1" ]
+                    "claimed and with no spawn of its own, the child is a nursery its mother runs, not a colony"
+
+                Expect.equal
+                    (living [ "W1N1" ] [ "W1N1"; "W1N2" ])
+                    [ "W1N1" ]
+                    "and a declared home we do not own is a candidate colony, whatever stands in it"
+            }
+
+            test
+                "the child runs the tick its spawn stands, while its mother still declares it an outpost" {
+                // The window ADR 0047's Consequences names: decision 1's
+                // rule is a fact about the world and fires on the tick the
+                // spawn is finished; decision 4's constant is moved by a
+                // human, in a commit, some ticks later. Between the two the
+                // child is living and the mother still projects its room.
+                //
+                // Pinned rather than closed. Gating the child's `decide` on
+                // the human's commit would make a constant nobody has got
+                // to yet cost a colony its whole tick, which is the shape
+                // `outpostsOf` and the undeclared-spawn-room fallback both
+                // refuse.
+                let homes =
+                    Colony.living (Set.ofList [ "W1N1"; "W1N2" ]) [ "W1N1"; "W1N2" ] nurseryPair
+                    |> List.map (fun colony -> colony.Home)
+
+                Expect.equal
+                    homes
+                    [ "W1N1"; "W1N2" ]
+                    "both are living: the mother's declaration of the child as an outpost is not asked about here"
+
+                Expect.equal
+                    (projectionsOf nurseryPair
+                     |> List.filter (fun (_, rooms) -> List.contains "W1N2" rooms)
+                     |> List.map fst)
+                    [ "W1N1"; "W1N2" ]
+                    "and the child's room is in both projections, which is what makes it two pools over one room"
+
+                Expect.equal
+                    (Colony.creepColonies
+                        (projectionsOf nurseryPair)
+                        pairSpawns
+                        [ motherCast, Some "W1N2" ]
+                     |> Map.tryFind motherCast)
+                    (Some "W1N1")
+                    "adoption is inert there — two projectors name no single adopter — so the mother keeps her crews until the human's edit"
+            }
+
+            test
+                "a spawn room no declaration names runs on its own, and only when nothing declared does" {
+                // The colony a slip in the constant leaves behind. A home
+                // nobody declared works no outposts rather than entering a
+                // state nothing downstream has a rule for (#124), and this
+                // is that sentence one level up: without it a bot standing
+                // in a room the declaration does not mention runs no
+                // `decide` at all — nothing cast, nothing harvested,
+                // nothing moved, and no Verdict to say why — which is what
+                // a respawn and every harness stub arrive as.
+                //
+                // Pairwise against the case above it: the same undeclared
+                // spawn room, with and without a declared colony living
+                // beside it.
+                let living owned spawned =
+                    Colony.living (Set.ofList owned) spawned splitPair
+                    |> List.map (fun colony -> colony.Home, colony.Outposts)
+
+                Expect.equal
+                    (living [ "W9N9" ] [ "W9N9" ])
+                    [ "W9N9", [] ]
+                    "the room the first spawn stands in is a colony with no outposts, which is what the shell read before colonies were declared"
+
+                Expect.equal
+                    (living [ "W9N9"; "W9N8" ] [ "W9N9"; "W9N8" ])
+                    [ "W9N9", [] ]
+                    "the first of them and not all of them: one home, exactly as a one-colony shell had"
+
+                Expect.equal
+                    (living [ "W1N1"; "W9N9" ] [ "W9N9"; "W1N1" ])
+                    [ "W1N1", [] ]
+                    "and with a declared colony living, the undeclared room is not one: the fallback is inert in a world the declaration describes"
+
+                Expect.isEmpty
+                    (living [] [ "W9N9" ])
+                    "a spawn room we do not own is no colony either — the ownership half is the same one the declared branch asks for"
+            }
+
+            test
+                "a creep is its caster's, and its adopter's while it stands in that colony's room alone" {
+                // ADR 0047 decision 2 at the two seams it decides at: the
+                // membership rule the shell cuts a Snapshot with, and what
+                // `decide` then makes of the creep. One creep, one fact
+                // moved — the room it stands in — and the whole of its
+                // working life moves with it.
+                let placed standing =
+                    Colony.creepColonies
+                        (projectionsOf splitPair)
+                        pairSpawns
+                        [ motherCast, Some standing ]
+                    |> Map.tryFind motherCast
+
+                Expect.equal
+                    (placed "W1N1")
+                    (Some "W1N1")
+                    "cast by the mother's spawn and standing in her room, it is hers"
+
+                Expect.equal
+                    (placed "W1N2")
+                    (Some "W1N2")
+                    "and standing in a room only the child projects, the child adopts it for the tick"
+
+                // What that decides. The colony the rule gave the creep to
+                // matches it to a Task of its own rooms; the other one is
+                // handed a Snapshot without it and says nothing about it at
+                // all — no Verdict, no assignment, no Move.
+                //
+                // Each half is asked of a colony with a fleet of its **own**
+                // standing in it, so the Matcher has actually run and a pool
+                // has actually been matched when the silence is read: asked
+                // of an empty Snapshot the same `isNone` would hold for a
+                // creep nobody had ever heard of, and would still hold with
+                // the membership cut deleted. What stays out of reach here
+                // is the other half of that cut — that `Snapshot.build`
+                // keeps an adopted body out of every layer's
+                // `CreepPositions` as well — which is App-side and has no
+                // seam to test through (#137).
+                Expect.equal
+                    (matchedTask motherCast (motherColony [ motherCast, { X = 10; Y = 2 } ]))
+                    (Some(taskId (Harvest "src-home")))
+                    "at home it digs the mother's rock"
+
+                // The child, holding its own cast and not the mother's.
+                let childAlone = childColony [ childCast, { X = 10; Y = 44 } ]
+
+                Expect.equal
+                    (matchedTask childCast childAlone)
+                    (Some(taskId (Harvest "src-child")))
+                    "the premise: the child matches the creep it does hold to its own rock"
+
+                Expect.isNone
+                    (matchedTask motherCast childAlone)
+                    "and about the mother's, which is in neither its Creeps nor its layer, it decides nothing"
+
+                Expect.equal
+                    (matchedTask motherCast (childColony [ motherCast, { X = 10; Y = 44 } ]))
+                    (Some(taskId (Harvest "src-child")))
+                    "adopted, the very same creep digs the child's rock instead"
+
+                // And the mother on that same tick: she has lost her own
+                // cast to the child and adopted the child's, which is the
+                // one creep standing in her room — the swap read from the
+                // other side.
+                let motherSwapped = motherColony [ childCast, { X = 10; Y = 2 } ]
+
+                Expect.equal
+                    (matchedTask childCast motherSwapped)
+                    (Some(taskId (Harvest "src-home")))
+                    "the premise: the body she has adopted digs her rock"
+
+                Expect.isNone
+                    (matchedTask motherCast motherSwapped)
+                    "and about her own cast, which she no longer carries, she decides nothing"
+            }
+
+            test "a room its own colony projects too is nobody's to adopt" {
+                // The narrow half of the rule: adoption is for a creep its
+                // own colony cannot place, so a room that colony projects
+                // as well settles nothing. That is the ordinary arrangement
+                // while the child is a nursery — the mother works the room
+                // and the child is declared in it — and a rule that adopted
+                // there would hand the mother's whole outpost crew to a
+                // colony with no spawn to cast their successors from.
+                let placed colonies creep standing =
+                    Colony.creepColonies
+                        (projectionsOf colonies)
+                        pairSpawns
+                        [ creep, Some standing ]
+                    |> Map.tryFind creep
+
+                Expect.equal
+                    (placed nurseryPair motherCast "W1N2")
+                    (Some "W1N1")
+                    "the mother projects the room as her outpost, so her creep standing in it stays hers"
+
+                Expect.equal
+                    (placed splitPair motherCast "W1N2")
+                    (Some "W1N2")
+                    "and the same creep in the same room is adopted the tick she stops projecting it"
+
+                Expect.equal
+                    (placed nurseryPair childCast "W1N2")
+                    (Some "W1N2")
+                    "the child's own creep at home is the child's either way: adoption never takes one from its caster's own room"
+            }
+
+            test
+                "a creep no spawn name claims is the first colony's, and one nobody projects stays with its caster" {
+                let placed creep standing =
+                    Colony.creepColonies (projectionsOf splitPair) pairSpawns [ creep, standing ]
+                    |> Map.tryFind creep
+
+                Expect.equal
+                    (placed "hand-made" (Some "W1N3"))
+                    (Some "W1N1")
+                    "a name carrying no known spawn falls to the first living colony rather than being dropped"
+
+                // The same fallback reached the other way: the name is
+                // perfectly readable and the spawn it names stands in a
+                // room no living colony declares — a slip in the constant,
+                // or a home lost since the spawn was built. Filed under
+                // that home the creep would be in no Snapshot at all, which
+                // is the drop this rule refuses, so it goes where the
+                // unreadable names go.
+                Expect.equal
+                    (Colony.creepColonies
+                        (projectionsOf splitPair)
+                        [ "Spawn1", "W1N1"; "Spawn9", "W9N9" ]
+                        [ "worker-100-Spawn9", Some "W1N3" ]
+                     |> Map.tryFind "worker-100-Spawn9")
+                    (Some "W1N1")
+                    "a caster no living colony runs is no answer either, and falls to the first living colony"
+
+                // And adoption still reaches it: the fallback decides only
+                // where a creep is filed when nothing else does, so a body
+                // standing in a room exactly one living colony projects is
+                // that colony's whatever its caster was.
+                Expect.equal
+                    (Colony.creepColonies
+                        (projectionsOf splitPair)
+                        [ "Spawn1", "W1N1"; "Spawn9", "W9N9" ]
+                        [ "worker-100-Spawn9", Some "W1N2" ]
+                     |> Map.tryFind "worker-100-Spawn9")
+                    (Some "W1N2")
+                    "and standing in the child's room it is adopted, as any other creep there is"
+
+                Expect.equal
+                    (placed motherCast (Some "W1N3"))
+                    (Some "W1N1")
+                    "a room nobody projects — a stood-down outpost (ADR 0043) — adopts nobody, so the creep is still its caster's"
+
+                Expect.equal
+                    (placed motherCast None)
+                    (Some "W1N1")
+                    "and one the shell cannot place at all is its caster's too"
+
+                // The engine's spawn names are free to be prefixes of one
+                // another, and the longest match is what keeps them apart.
+                Expect.equal
+                    (Colony.creepColonies
+                        (projectionsOf splitPair)
+                        [ "Spawn1", "W1N1"; "Spawn1x", "W1N2" ]
+                        [ "worker-100-Spawn1x", Some "W1N3" ]
+                     |> Map.tryFind "worker-100-Spawn1x")
+                    (Some "W1N2")
+                    "a spawn name that is another's prefix does not claim the longer name's creeps"
+            }
+
+            test "each colony pools its own rooms' work and never the other's" {
+                // The whole of "one Atlas, one Layout, one pool per colony"
+                // (ADR 0047 decision 1) as it is visible from outside: two
+                // Snapshots, two pools, and no Task of one in the other.
+                // `decide` reads the projection it is handed and never the
+                // declaration, which is what makes this a property of the
+                // seam rather than of the fixtures.
+                let pool colony =
+                    planTasks colony noThreats |> List.map taskId
+
+                let mother = pool (motherColony [ motherCast, { X = 10; Y = 2 } ])
+                let child = pool (childColony [ childCast, { X = 10; Y = 44 } ])
+
+                Expect.contains
+                    mother
+                    (taskId (Harvest "src-home"))
+                    "the premise: the mother pools her own rock"
+
+                Expect.contains child (taskId (Harvest "src-child")) "and the child pools its own"
+
+                Expect.isFalse
+                    (List.contains (taskId (Harvest "src-child")) mother)
+                    "and the child's rock is in no pool of the mother's"
+
+                Expect.isFalse
+                    (List.contains (taskId (Harvest "src-home")) child)
+                    "nor the mother's in the child's"
             }
         ]
 
@@ -19655,9 +20072,13 @@ let standDownGateTests =
                 // was asked at, one either side of the recorded expiry.
                 let log =
                     Observe.RaidState.empty
+                    // No world roster: one tick folded off an empty log
+                    // has no `Living` baseline, so nothing can be read as a
+                    // loss whatever `Game.creeps` holds (#191).
                     |> Observe.foldRaids
                         Observe.capEpisodes
                         Observe.quietGap
+                        Set.empty
                         { incomeColony with
                             Time = 100
                             InvaderCores =
@@ -19700,9 +20121,13 @@ let standDownGateTests =
                 // of one control entry moves.
                 let logWith holder =
                     Observe.RaidState.empty
+                    // No world roster: one tick folded off an empty log
+                    // has no `Living` baseline, so nothing can be read as a
+                    // loss whatever `Game.creeps` holds (#191).
                     |> Observe.foldRaids
                         Observe.capEpisodes
                         Observe.quietGap
+                        Set.empty
                         { incomeColony with
                             Time = 100
                             RoomControl = Map.ofList [ "W1N2", reservedRoom holder 4000 ]

@@ -444,8 +444,20 @@ let placed =
 /// Fold one Raid-log tick over a colony at the given tick, with a small
 /// ring cap and a short quiet gap so both are exercised in a few ticks
 /// rather than a few hundred.
+///
+/// The world holds exactly this colony's creeps, which is the one-colony
+/// world every test but `adoptionTests` below is written in: there is
+/// nobody else to have adopted a name that left the Snapshot, so a name
+/// that leaves it left the world.
 let raidTick t (colony: Snapshot) state =
-    foldRaids 3 5 { colony with Time = t } state
+    let alive = colony.Creeps |> List.map (fun creep -> creep.Name) |> Set.ofList
+    foldRaids 3 5 alive { colony with Time = t } state
+
+/// The same fold with the world said separately from the colony: what the
+/// shell hands in since #191, where a Snapshot carries one colony's fleet
+/// and `Game.creeps` carries everyone's (ADR 0047).
+let raidTickIn alive t (colony: Snapshot) state =
+    foldRaids 3 5 (Set.ofList alive) { colony with Time = t } state
 
 /// The recorded episodes as (opened, last-seen) windows, oldest first.
 let windows (state: RaidState) =
@@ -863,6 +875,94 @@ let lossTests =
                     state
                     RaidState.empty
                     "peacetime attrition opens no episode and leaves no loss behind"
+            }
+
+            test "a creep another colony adopted is not a loss: it left the fleet, not the world" {
+                // ADR 0047 decision 2 through this channel. Since #191 a
+                // Snapshot carries one colony's creeps, so a name can leave
+                // it two ways — its creep died, or the colony next door
+                // adopted the body for the tick it stands in a room only
+                // that colony projects. Only the first is what the raid
+                // cost, and the world's own list is what tells them apart.
+                //
+                // Pairwise against the loss above it, one fact moved: the
+                // same name gone from the same Snapshot at t11, once still
+                // in `Game.creeps` and once not.
+                let crossed =
+                    RaidState.empty
+                    |> raidTickIn
+                        [ "w1"; "w2" ]
+                        10
+                        { (raid squad) with
+                            Creeps = [ ours "w1"; ours "w2" ]
+                        }
+                    |> raidTickIn
+                        [ "w1"; "w2" ]
+                        11
+                        { (raid squad) with
+                            Creeps = [ ours "w1" ]
+                        }
+
+                Expect.equal
+                    (losses crossed)
+                    []
+                    "the body is standing in the colony next door, and the raid is charged nothing for it"
+
+                let killed =
+                    RaidState.empty
+                    |> raidTickIn
+                        [ "w1"; "w2" ]
+                        10
+                        { (raid squad) with
+                            Creeps = [ ours "w1"; ours "w2" ]
+                        }
+                    |> raidTickIn
+                        [ "w1" ]
+                        11
+                        { (raid squad) with
+                            Creeps = [ ours "w1" ]
+                        }
+
+                Expect.equal
+                    (losses killed)
+                    [ { Creep = "w2"; Tick = 10 } ]
+                    "and the same absence with the name gone from the world is the loss it always was"
+            }
+
+            test
+                "a creep crossing back and forth all raid is charged once for each death, and never for a crossing" {
+                // The shape that made this worth a rule rather than a
+                // sentence: `Losses` appends, so a hauler shuttling across
+                // the [[seam]] during a 200-tick siege would file a fresh
+                // phantom kill on every tick it left the fleet.
+                let shuttle =
+                    RaidState.empty
+                    |> raidTickIn
+                        [ "w1"; "hauler" ]
+                        10
+                        { (raid squad) with
+                            Creeps = [ ours "w1"; ours "hauler" ]
+                        }
+                    |> raidTickIn
+                        [ "w1"; "hauler" ]
+                        11
+                        { (raid squad) with
+                            Creeps = [ ours "w1" ]
+                        }
+                    |> raidTickIn
+                        [ "w1"; "hauler" ]
+                        12
+                        { (raid squad) with
+                            Creeps = [ ours "w1"; ours "hauler" ]
+                        }
+                    |> raidTickIn
+                        [ "w1"; "hauler" ]
+                        13
+                        { (raid squad) with
+                            Creeps = [ ours "w1" ]
+                        }
+
+                Expect.equal (losses shuttle) [] "four ticks, two crossings, nothing owed"
             }
         ]
 

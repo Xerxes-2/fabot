@@ -803,6 +803,23 @@ let private claimTargets (snapshot: Snapshot) : (string * string) list =
         else
             None)
 
+/// Whether a spawn stands in the named room, off the projection's kind
+/// census (ADR 0041): a structure of the spawn kind, placed in that room's
+/// layer. Ours by construction and not by a check — the one caller asks it
+/// only of a room `colonyOwns` has already answered for, and nobody else's
+/// spawn stands in a room we own.
+///
+/// Vision pays for it like every other structure (ADR 0004), and that
+/// costs the caller nothing: a room the colony cannot see has no
+/// `RoomControl` entry either, so it fails the ownership half first and
+/// never reaches this one.
+let private spawnStandsIn (snapshot: Snapshot) room =
+    snapshot.Spatial.TargetKinds
+    |> Map.exists (fun id kind ->
+        kind = Structure BuiltKind.Spawn
+        && (SpatialInfo.placementOf snapshot.Spatial id
+            |> Option.exists (fun (standing, _) -> standing = room)))
+
 /// Whether the named room is this colony's **nursery**: a declared colony
 /// of ours that has been claimed and has no spawn of its own yet, and so
 /// is not independent (ADR 0047 decision 4). Its home goes on being
@@ -829,11 +846,17 @@ let private claimTargets (snapshot: Snapshot) : (string * string) list =
 /// entry is something vision pays for (ADR 0004), and the vision is bought
 /// by the mother projecting the room, so a declared home nobody projects
 /// is no nursery here, the same silence `claimTargets` gives one. And **no
-/// spawn of ours standing in it** (`Snapshot.Spawns`, every spawn the
-/// colony has and not the home room's alone), because a spawn is what
-/// independence *is*: the nursery ends the tick one stands, and the human's
-/// edit splitting the declaration in two follows that tick rather than
-/// causing it.
+/// spawn of ours standing in it**, because a spawn is what independence
+/// *is*: the nursery ends the tick one stands, and the human's edit
+/// splitting the declaration in two follows that tick rather than causing
+/// it. Read off the projection's kind census (`spawnStandsIn`) and no
+/// longer off `Snapshot.Spawns`, which ADR 0047's Consequences named
+/// before there was a Snapshot per colony: since #191 that list is the
+/// colony's **own** spawns — the ones it casts from, banks for and anchors
+/// its Layout on — and the spawn this rule waits for stands in somebody
+/// else's home. The projection is where the other two facts come from
+/// already, so all three are now one room's entry in one colony's
+/// Snapshot.
 ///
 /// The colony's own home is excluded by name and not by luck. `Main.loop`
 /// runs `decide` only for a **living** colony, one whose home holds a spawn
@@ -845,7 +868,7 @@ let private isNurseryRoom (snapshot: Snapshot) room =
     room <> SpatialInfo.homeName snapshot.Spatial
     && List.contains room snapshot.ColonyHomes
     && colonyOwns snapshot room
-    && not (snapshot.Spawns |> List.exists (fun spawn -> spawn.RoomName = room))
+    && not (spawnStandsIn snapshot room)
 
 /// Planner: rebuild this tick's full Task pool from the Snapshot. Pure and
 /// from scratch every tick — Tasks are never persisted.

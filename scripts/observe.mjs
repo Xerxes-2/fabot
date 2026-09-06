@@ -35,6 +35,12 @@
 //                                       the console keeps no history, so a
 //                                       bounded window is the only one-shot read
 // Every read takes --json to emit the raw stored structure for jq.
+//
+// `raids`, `outposts` and `layout` are one colony's record and take
+// `--colony <home>` to say whose (ADR 0047). Without it they read the first
+// colony under `Memory.fabot.observe.colonies` — this script cannot see
+// `Colony.declared`, so "first" is the first home the bot wrote a leaf for,
+// which is declaration order because the loop writes in it.
 import { ScreepsHttpClient } from "screeps-api";
 import { report as cpuReport } from "./cpu-trigger.mjs";
 
@@ -44,21 +50,26 @@ const fail = (msg) => {
 };
 
 const usage =
-  "usage: observe.mjs tasks [--json] | timeline <creep> [--json] | raids [--json] | " +
-  "outposts [--json] | layout [--json] | cpu [--json] | " +
+  "usage: observe.mjs tasks [--json] | timeline <creep> [--json] | " +
+  "raids [--colony <home>] [--json] | outposts [--colony <home>] [--json] | " +
+  "layout [--colony <home>] [--json] | cpu [--json] | " +
   "verbose [add <creep> | remove <creep> | clear] [--json] | " +
   "console --seconds N";
 
 const rawArgs = process.argv.slice(2);
 const json = rawArgs.includes("--json");
 
-// Pull --seconds N out wherever it stands; what remains is positional.
+// Pull --seconds N and --colony <home> out wherever they stand; what
+// remains is positional.
 let seconds;
+let colonyArg;
 const args = [];
 for (let i = 0; i < rawArgs.length; i++) {
   if (rawArgs[i] === "--json") continue;
   if (rawArgs[i] === "--seconds") {
     seconds = Number(rawArgs[++i]);
+  } else if (rawArgs[i] === "--colony") {
+    colonyArg = rawArgs[++i];
   } else {
     args.push(rawArgs[i]);
   }
@@ -83,6 +94,17 @@ if (command === "console" && !(Number.isFinite(seconds) && seconds > 0)) {
   fail("console needs --seconds N (a positive number): the subscription must be bounded");
 }
 if (command !== "console" && seconds !== undefined) fail(usage);
+// The colony-keyed commands are exactly the two channels that split by home
+// (ADR 0047); anywhere else the flag would name a colony nothing reads.
+if (rawArgs.includes("--colony")) {
+  if (!["raids", "outposts", "layout"].includes(command)) fail(usage);
+  // The flag eats the next argument, so a bare `--colony` at the end, or one
+  // in front of `--json`, would silently read the default colony instead of
+  // the one the operator asked for.
+  if (colonyArg === undefined || colonyArg.startsWith("--")) {
+    fail("--colony needs a home room name, e.g. --colony W12S28");
+  }
+}
 
 const token = process.env.SCREEPS_TOKEN;
 if (!token) {
@@ -111,21 +133,57 @@ const memoryGet = async (path) => {
   return res.data;
 };
 
+// One colony's leaf, under `Memory.fabot.observe.colonies.<home>` (ADR
+// 0047): the two channels that are a colony's record rather than the
+// world's — the Raid log and the Layout record — are keyed by home room,
+// because `decide` runs once per colony and each answers for the rooms its
+// own colony works.
+//
+// The whole subtree is read in one call rather than the one path, because
+// the key list is itself an answer: it is what `--colony` is checked
+// against and what the default is taken from. An absent subtree fails
+// loudly the way an absent leaf always has — a bundle predating the split
+// writes the old flat leaves and nothing here, and reading that as "no
+// raids" would be the confident false negative these commands exist to
+// avoid. A missing intermediate (fresh respawn, no Memory.fabot at all)
+// comes back as the string "Incorrect memory path" and fails the same way.
+const colonyLeaf = async (leaf) => {
+  const colonies = await memoryGet("fabot.observe.colonies");
+  if (colonies == null || typeof colonies !== "object" || Array.isArray(colonies)) {
+    fail(
+      "no colony subtree at Memory.fabot.observe.colonies — " +
+        "an old bundle is still running (the Raid log and the Layout record moved under " +
+        "this key when decide began running once per colony, ADR 0047), or the colony " +
+        "respawned and hasn't written one yet.",
+    );
+  }
+  const homes = Object.keys(colonies);
+  if (homes.length === 0) {
+    fail(
+      "Memory.fabot.observe.colonies is empty: no colony wrote a leaf last tick — " +
+        "no declared home is both ours and holding a spawn (ADR 0047).",
+    );
+  }
+  const home = colonyArg ?? homes[0];
+  if (!Object.prototype.hasOwnProperty.call(colonies, home)) {
+    fail(`no colony "${home}" here; the homes with a record are [${homes.join(", ")}].`);
+  }
+  const stored = colonies[home]?.[leaf];
+  if (stored == null || typeof stored !== "object") {
+    fail(
+      `no \`${leaf}\` record at Memory.fabot.observe.colonies.${home} — ` +
+        "the deployed bundle predates it, or that colony has not written one yet.",
+    );
+  }
+  return { home, stored };
+};
+
 // The Raid log's leaf, read the same way for both of its families: the
 // spawn-room raids and the outpost stand-downs (ADR 0043) share one leaf,
 // so they share this read and the one sentence that explains its absence.
 // Each family's own guard — `episodes` for the raids, `outposts` for the
 // stand-downs — stays in its command, because those differ deliberately.
-const raidLeaf = async () => {
-  const stored = await memoryGet("fabot.observe.raids");
-  if (stored == null || typeof stored !== "object") {
-    fail(
-      "no Raid log at Memory.fabot.observe.raids — " +
-        "an old bundle is still running, or the colony respawned and hasn't written one yet.",
-    );
-  }
-  return stored;
-};
+const raidLeaf = () => colonyLeaf("raids");
 
 // ---- console: a bounded subscription, the one non-Memory command --------
 
@@ -213,14 +271,16 @@ if (command === "console") {
   // `rivalHeld` is that same command's other half — the rooms last seen in
   // another player's hands, against the tick the gate shut on, ADR 0043's
   // withdrawal with no clock — and is no more a raid than a stand-down is.
-  const stored = await raidLeaf();
+  const { home, stored } = await raidLeaf();
   const episodes = Array.isArray(stored.episodes) ? [...stored.episodes].reverse() : [];
 
   if (json) {
     console.log(JSON.stringify(episodes, null, 2));
   } else if (episodes.length === 0) {
-    console.log("no raids recorded");
+    console.log(`no raids recorded for ${home}`);
   } else {
+    console.log(`colony ${home}`);
+    console.log("");
     for (const e of episodes) {
       console.log(`t${e.opened}-${e.last}  (${e.last - e.opened + 1} ticks)`);
       for (const r of e.roster ?? []) {
@@ -276,7 +336,7 @@ if (command === "console") {
   // remembered conclusion — the fold writes it on the ticks with vision and
   // holds it through the ticks without, because the gate's own effect is to
   // take that vision away.
-  const stored = await raidLeaf();
+  const { home, stored } = await raidLeaf();
   // The list is guarded in its own right, the way each of the Layout
   // record's three is: a leaf carrying `episodes` and no `outposts` is a
   // bundle predating ADR 0043's family or a wire shape that has moved, and
@@ -287,8 +347,9 @@ if (command === "console") {
   // away is least able to catch.
   if (!Array.isArray(stored.outposts)) {
     fail(
-      "the Raid log at Memory.fabot.observe.raids carries no `outposts` list — " +
-        "the deployed bundle predates ADR 0043's outpost family, the leaf was hand-edited, " +
+      `the Raid log at Memory.fabot.observe.colonies.${home}.raids carries no ` +
+        "`outposts` list — the deployed bundle predates ADR 0043's outpost family, " +
+        "the leaf was hand-edited, " +
         'or its wire shape has moved. Not read as "no outpost is shut".',
     );
   }
@@ -302,16 +363,18 @@ if (command === "console") {
     Array.isArray(stored.rivalHeld)
   ) {
     fail(
-      "the Raid log at Memory.fabot.observe.raids carries no `rivalHeld` map — " +
-        "the deployed bundle predates ADR 0043's clockless withdrawal, the leaf was " +
+      `the Raid log at Memory.fabot.observe.colonies.${home}.raids carries no ` +
+        "`rivalHeld` map — the deployed bundle predates ADR 0043's clockless withdrawal, " +
+        "the leaf was " +
         'hand-edited, or its wire shape has moved. Not read as "no room was taken".',
     );
   }
   const rivalHeld = Object.entries(stored.rivalHeld).map(([room, since]) => {
     if (typeof since !== "number") {
       fail(
-        `the tick at Memory.fabot.observe.raids.rivalHeld.${room} is off the wire shape: ` +
-          `${JSON.stringify(since)} — the leaf was hand-edited, or its wire shape has moved. ` +
+        `the tick at Memory.fabot.observe.colonies.${home}.raids.rivalHeld.${room} is off the ` +
+          `wire shape: ${JSON.stringify(since)} — the leaf was hand-edited, or its wire ` +
+          "shape has moved. " +
           'Not read as "that room is open": the bot is withholding a room this command ' +
           "cannot date.",
       );
@@ -369,7 +432,8 @@ if (command === "console") {
       Object.hasOwn(BASIS, row.basis);
     if (!readable) {
       fail(
-        "a stand-down row at Memory.fabot.observe.raids.outposts is off the wire shape: " +
+        `a stand-down row at Memory.fabot.observe.colonies.${home}.raids.outposts is off the ` +
+          "wire shape: " +
           `${JSON.stringify(row)} — the leaf was hand-edited, or its wire shape has moved. ` +
           'Not read as "that room is open": the bot drops a row it cannot decode, so a room ' +
           "this one names may be standing wide open right now.",
@@ -421,7 +485,7 @@ if (command === "console") {
       ),
     );
   } else {
-    console.log(`now ${tickOf(now)}`);
+    console.log(`colony ${home}, now ${tickOf(now)}`);
     console.log("");
 
     if (rows.length === 0 && rivalHeld.length === 0) {
@@ -452,8 +516,9 @@ if (command === "console") {
         console.log("  nothing the colony does re-opens it: the room is not scanned, so the");
         console.log("  look that would clear it never happens, and re-declaring it is a no-op.");
         console.log(
-          `  clear "${held.room}" from Memory.fabot.observe.raids.rivalHeld once a look ` +
-            "confirms it is free,",
+          `  clear "${held.room}" from ` +
+            `Memory.fabot.observe.colonies.${home}.raids.rivalHeld once a look confirms it ` +
+            "is free,",
         );
         console.log("  or move the declaration in Core to a room somebody else is not working");
         console.log("");
@@ -545,13 +610,7 @@ if (command === "console") {
   // is the guarantee holding, one footing per target, one trunk per
   // (source, goal) and every container target served by the tile the plan
   // picked; a row is something the colony no longer has.
-  const stored = await memoryGet("fabot.observe.layout");
-  if (stored == null || typeof stored !== "object") {
-    fail(
-      "no Layout record at Memory.fabot.observe.layout — " +
-        "the deployed bundle predates it, or the colony respawned and hasn't written one yet.",
-    );
-  }
+  const { home, stored } = await colonyLeaf("layout");
   // A leaf that is there but shapeless is a fourth answer, and it must not
   // collapse into the third: reading a missing list as an empty one would
   // print "every footing target has its footing" off a hand-edit or a moved
@@ -563,8 +622,9 @@ if (command === "console") {
     const list = stored[name];
     if (!Array.isArray(list)) {
       fail(
-        `the Layout record at Memory.fabot.observe.layout carries no \`${name}\` list — ` +
-          'the leaf was hand-edited, or its wire shape has moved. Not read as "nothing lost".',
+        `the Layout record at Memory.fabot.observe.colonies.${home}.layout carries no ` +
+          `\`${name}\` list — the leaf was hand-edited, or its wire shape has moved. ` +
+          'Not read as "nothing lost".',
       );
     }
     return list;
@@ -595,6 +655,8 @@ if (command === "console") {
   if (json) {
     console.log(JSON.stringify({ unserved, unrouted, deferred }, null, 2));
   } else {
+    console.log(`colony ${home}`);
+    console.log("");
     if (unserved.length === 0) {
       console.log("every footing target has its footing");
     } else {
