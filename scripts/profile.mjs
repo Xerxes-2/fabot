@@ -9,20 +9,49 @@
 // which moves the structure census every Nth tick so the census-keyed
 // memos (ADR 0017, ADR 0032) are made to pay their recompute.
 //
-// Two scenarios, chosen with --scenario:
+// Four scenarios, chosen with --scenario:
 //   stub     one synthetic room (the default), the shape this harness has
 //            always measured
 //   outpost  the colony's own room and its declared neighbours, on the
 //            committed real terrain (ADR 0036) — the world ADR 0041's
 //            layered projection is sized against
+//   young    one colony at the other end of its life (ADR 0052): W13S28's
+//            captured terrain, RCL1, a 300 bank, a container on each of
+//            its two sources and nothing else standing — no road and no
+//            rampart, because a room under `Colony.bootstrapLevel` places
+//            neither (#209, #214). Every body in it is what
+//            `Decide.bodyFor` casts at 300.
+//   pair     two colonies in one tick (ADR 0047, ADR 0052): the mother
+//            W12S28 at RCL5 with her W12S27 outpost — the `outpost`
+//            scenario's shape — and beside her the child W13S28,
+//            bootstrapping with its own Spawn2 standing at 16,12, which
+//            the mother still projects while the child is under
+//            `bootstrapLevel` (#192). `decide` runs once per living
+//            colony, exactly as `Main.loop` runs it, and the report
+//            prints one CPU row per colony's `decide` beside the total.
 //
-// Both are built at a controller level, `--level N`, and everything that
-// hangs off the level is derived from it rather than written down twice:
-// the extension, tower and Storage counts off the engine's
-// CONTROLLER_STRUCTURES table, the energy bank off the extensions that
-// table allows, and the fleet off the bundle's own SpawnCreep intents. So
-// moving the colony a level is one number on the command line, and the
-// scenarios follow the live room instead of ageing behind it.
+// Every scenario is built at a controller level, `--level N`, and
+// everything that hangs off the level is derived from it rather than
+// written down twice: the extension, tower and Storage counts off the
+// engine's CONTROLLER_STRUCTURES table, the energy bank off the extensions
+// that table allows, and the fleet off the bundle's own SpawnCreep
+// intents. So moving a colony a level is one number on the command line,
+// and the scenarios follow the live rooms instead of ageing behind them.
+//
+// Which colony `--level` moves is the scenario's own answer, because a
+// scenario with two colonies in it has two levels and only one flag:
+//   stub, outpost  the one colony, default RCL5 — where the live mother
+//                  stands
+//   young          the one young colony, default RCL1 — the level the
+//                  live child was claimed at
+//   pair           the **child** colony, default RCL2 — where the live
+//                  W13S28 stands. The mother is pinned at RCL5 by
+//                  `MOTHER_LEVEL`, because "an RCL5 mother" is half of
+//                  what this scenario is. `--level 3` and up is a
+//                  deliberate reading rather than a mistake: at
+//                  `Colony.bootstrapLevel` the bootstrap window closes,
+//                  the mother stops projecting the child's room and the
+//                  two colonies run side by side with nothing shared.
 
 import { createRequire } from "node:module";
 import { Session } from "node:inspector/promises";
@@ -32,30 +61,42 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { report as cpuReport } from "./cpu-trigger.mjs";
 
-const SCENARIOS = ["stub", "outpost"];
+const SCENARIOS = ["stub", "outpost", "young", "pair"];
 const USAGE =
-  "usage: npm run profile -- [ticks] [top-N] [--census-every N] [--scenario stub|outpost]" +
-  " [--level 1..8]  (positive integers)";
+  "usage: npm run profile -- [ticks] [top-N] [--census-every N]" +
+  " [--scenario stub|outpost|young|pair] [--level 1..8]  (positive integers)";
 
-// The controller level both scenarios are built at, and the one number to
-// move when the colony climbs: every count that follows from it — the
+// The controller level a scenario's colony is built at, and the one number
+// to move when it climbs: every count that follows from it — the
 // extension, tower and Storage allowances, the energy bank they add up to,
 // and through the bank the bodies and the Workforce target the fleet is
 // hired against — is derived below, never written down a second time. The
-// default tracks the live colony (#144: RCL5); `--level N` builds any
+// default tracks the live room the scenario is about (#144: the mother at
+// RCL5; ADR 0052: the child where it stands today); `--level N` builds any
 // other, which is what a comparison against an older run costs now.
-const DEFAULT_LEVEL = 5;
+//
+// Which colony the flag moves is the scenario's, and the header comment
+// spells it: for `pair` it is the child, and the mother stays at
+// MOTHER_LEVEL below.
+const DEFAULT_LEVEL = { stub: 5, outpost: 5, young: 1, pair: 2 };
+
+// The mother's level in the `pair` scenario. Pinned rather than flagged:
+// ADR 0052's scenario is "an RCL5 mother with a bootstrapping child", and
+// a run that moved both ends at once would answer neither question.
+const MOTHER_LEVEL = 5;
 
 // Positional [ticks] [top-N] as before, with --census-every N,
 // --scenario NAME and --level N pulled out from anywhere in the line.
 const positional = [];
 let censusEvery = 0; // absent: the frozen world, and no perturbation report
 let scenario = "stub";
-let level = DEFAULT_LEVEL;
+// Absent until the line says otherwise, because the default is the
+// scenario's and the scenario may be named after the flag.
+let level = null;
 // The raw token beside the parsed number, so a rejection quotes what was
 // typed rather than the `NaN` the conversion made of it — the answer the
 // sibling `--scenario` check already gives.
-let levelArg = String(DEFAULT_LEVEL);
+let levelArg = null;
 for (let i = 2; i < process.argv.length; i++) {
   if (process.argv[i] === "--census-every") censusEvery = Number(process.argv[++i]);
   else if (process.argv[i] === "--scenario") scenario = process.argv[++i];
@@ -69,7 +110,6 @@ for (let i = 2; i < process.argv.length; i++) {
 const TICKS = Number(positional[0] ?? 100);
 const TOP = Number(positional[1] ?? 30);
 const CENSUS_EVERY = censusEvery;
-const LEVEL = level;
 const notPositive = (n) => !Number.isInteger(n) || n < 1;
 if (notPositive(TICKS) || notPositive(TOP) || (CENSUS_EVERY !== 0 && notPositive(CENSUS_EVERY))) {
   console.error(USAGE);
@@ -79,6 +119,11 @@ if (!SCENARIOS.includes(scenario)) {
   console.error(`unknown scenario "${scenario}"; one of: ${SCENARIOS.join(", ")}\n${USAGE}`);
   process.exit(1);
 }
+// The scenario's own default, resolved after the line is read: a young
+// colony's level is not a mother's, and neither is a bootstrapping
+// child's.
+const LEVEL = level ?? DEFAULT_LEVEL[scenario];
+if (levelArg === null) levelArg = String(LEVEL);
 if (notPositive(LEVEL) || LEVEL > 8) {
   console.error(`--level must be a controller level, 1 to 8; got "${levelArg}"\n${USAGE}`);
   process.exit(1);
@@ -150,12 +195,14 @@ const FURNITURE = furnitureFor(LEVEL);
 
 const plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
 
-// The level's furniture in one phrase, printed by both scenarios, so the
-// two rooms are read against the same list and a level that furnished them
+// The level's furniture in one phrase, printed by every scenario, so the
+// rooms are read against the same list and a level that furnished them
 // differently would be visible in the report rather than only in the ms.
-const furnitureLine = () =>
-  `${plural(FURNITURE.extensions, "extension")}, ${plural(FURNITURE.towers, "tower")}, ` +
-  `${FURNITURE.storages} storage, ${FURNITURE.bank} energy bank`;
+// It takes the furniture rather than reading the flag, because since ADR
+// 0052's `pair` scenario one run can furnish two rooms at two levels.
+const furnitureLine = (furniture = FURNITURE) =>
+  `${plural(furniture.extensions, "extension")}, ${plural(furniture.towers, "tower")}, ` +
+  `${furniture.storages} storage, ${furniture.bank} energy bank`;
 
 // ---------------------------------------------------------------------------
 // Stub engine surface shared by every scenario.
@@ -298,6 +345,17 @@ const keyOf = (p) => `${p.x},${p.y}`;
 // Every other row still hands its own room over, and reads the same.
 const stationsIn = (room, grid, positions) => positions.map((pos) => ({ room, grid, pos }));
 
+// The same, for a row that holds a *place* rather than pooling near one:
+// the body stands on the tile itself and is never resolved outward from
+// it. The Anchor row is the whole of it today — Harvest's Work Area for a
+// work-heavy body is its Posts and nothing else (ADR 0020, ADR 0048), so
+// the tile beside a Post is a tile that row cannot work from — and a Post
+// is walkable ground it may stand on, which is what makes standing there
+// expressible at all (ADR 0051). `hireFleet` still refuses to put two
+// bodies on one tile.
+const stationsOn = (room, grid, positions) =>
+  positions.map((pos) => ({ room, grid, pos, onTile: true }));
+
 // The tiles already claimed in one room, by name. One set per room and
 // never one flat set over the world: every room has the same 2,500
 // coordinates, so a reserver beside W12S27's controller at 36,44 and a
@@ -318,6 +376,26 @@ function claimsIn(world, roomName) {
   return claimed;
 }
 
+// The station table one spawn's casts are stood out of. A scenario with
+// one colony in it has one table and hands it over as `stations`; a
+// scenario with two — ADR 0047's world, which is now every live tick —
+// files a table per spawn under `stationsBySpawn`, because "where the
+// worker row stands" is a different tile in the mother's room and in the
+// child's. A spawn the scenario furnished no table for throws rather than
+// falling back to another colony's tiles (ADR 0027).
+function stationsFor(world, spawnName) {
+  if (!world.stationsBySpawn) return world.stations;
+  const table = world.stationsBySpawn[spawnName];
+  if (!table) {
+    throw new Error(
+      `the ${scenario} scenario stations no row for ${spawnName} (it knows: ` +
+        `${Object.keys(world.stationsBySpawn).join(", ")}), so a body cast there would be stood ` +
+        "in another colony's room"
+    );
+  }
+  return table;
+}
+
 // One row of the hired fleet read back as `room x,y` per body — where the
 // row actually ended up, which is `stations` resolved through
 // `nearestFree` and not the tile that was asked for. Both scenarios print
@@ -328,9 +406,14 @@ function claimsIn(world, roomName) {
 // number in every other count the report prints, and an upgrader beside
 // the buffer and one anywhere else are a body that works standing still
 // against a body on a walk it never finishes in a frozen world (ADR 0046).
-const stationsOf = (creeps, row) =>
+// `spawnName` narrows it to one colony's cast, which a two-colony
+// scenario needs: both colonies hire a worker row, and a line that read
+// the row world-wide would report the mother's tiles and the child's as
+// one row of one colony.
+const stationsOf = (creeps, row, spawnName = null) =>
   creeps
     .filter((creep) => creep.name.split("-")[0] === row)
+    .filter((creep) => spawnName === null || creep.name.split("-")[2] === spawnName)
     .map((creep) => `${creep.room.name} ${keyOf(creep.pos)}`);
 
 function* neighbours(p) {
@@ -419,7 +502,7 @@ function nearestFree(grid, origin, taken) {
 // ground, which the ordering steps over rather than builds on (ADR 0022).
 // Throws rather than shrinking the cluster: a room that cannot hold its
 // level's furniture is the harness lying about which level it profiled.
-function clusterTiles(grid, spawnPos, count, taken, reserved) {
+function clusterTiles(grid, spawnPos, count, taken, reserved, rcl) {
   const parity = (spawnPos.x + spawnPos.y) % 2;
   const tiles = [];
   const seen = new Set([keyOf(spawnPos)]);
@@ -443,7 +526,7 @@ function clusterTiles(grid, spawnPos, count, taken, reserved) {
   }
   if (tiles.length < count) {
     throw new Error(
-      `${grid.name}: only ${tiles.length} of the ${count} cluster tiles RCL${LEVEL} needs are ` +
+      `${grid.name}: only ${tiles.length} of the ${count} cluster tiles RCL${rcl} needs are ` +
         `reachable from the spawn at ${keyOf(spawnPos)}`
     );
   }
@@ -504,11 +587,21 @@ function placeCluster({
   taken,
   structure,
   register,
+  // The room's own level, because one run can furnish two rooms at two
+  // levels since ADR 0052's `pair` scenario: the flag's level is the
+  // default and the mother passes her own.
+  rcl = LEVEL,
+  // What every id this cluster registers is prefixed with. One world can
+  // now furnish two rooms, and an object id is unique across the world —
+  // a second room's `ext-0` would land on the first room's in
+  // `getObjectById` and the projection would key one structure twice.
+  prefix = "",
 }) {
-  const { extensions, extensionSites, towers, storages } = FURNITURE;
+  const furniture = furnitureFor(rcl);
+  const { extensions, extensionSites, towers, storages } = furniture;
   const wanted = extensions + towers + storages + extensionSites;
   const reserved = workingGround(grid, sourcePositions, controllerPos);
-  const tiles = clusterTiles(grid, spawnPos, wanted, taken, reserved);
+  const tiles = clusterTiles(grid, spawnPos, wanted, taken, reserved, rcl);
   let at = 0;
   const take = () => {
     const pos = tiles[at++];
@@ -519,17 +612,17 @@ function placeCluster({
   const built = [];
   for (let i = 0; i < extensions; i++) {
     built.push(
-      structure(`ext-${i}`, "extension", take(), {
+      structure(`${prefix}ext-${i}`, "extension", take(), {
         store: store({
-          used: EXTENSION_ENERGY_CAPACITY[LEVEL],
-          capacity: EXTENSION_ENERGY_CAPACITY[LEVEL],
+          used: EXTENSION_ENERGY_CAPACITY[rcl],
+          capacity: EXTENSION_ENERGY_CAPACITY[rcl],
         }),
       })
     );
   }
   for (let i = 0; i < towers; i++) {
     built.push(
-      structure(`tower-${i}`, "tower", take(), {
+      structure(`${prefix}tower-${i}`, "tower", take(), {
         store: store({ used: TOWER_CAPACITY / 2, capacity: TOWER_CAPACITY }),
         hits: 3000,
         hitsMax: 3000,
@@ -538,7 +631,7 @@ function placeCluster({
   }
   for (let i = 0; i < storages; i++) {
     built.push(
-      structure(`storage-${i}`, "storage", take(), {
+      structure(`${prefix}storage-${i}`, "storage", take(), {
         store: store({ used: STORAGE_CAPACITY / 5, capacity: STORAGE_CAPACITY }),
         hits: 10000,
         hitsMax: 10000,
@@ -548,10 +641,10 @@ function placeCluster({
 
   const sites = [];
   for (let i = 0; i < extensionSites; i++) {
-    sites.push(register({ id: `site-${i}`, structureType: "extension", pos: take() }));
+    sites.push(register({ id: `${prefix}site-${i}`, structureType: "extension", pos: take() }));
   }
 
-  return { built, sites };
+  return { built, sites, furniture };
 }
 
 // ---------------------------------------------------------------------------
@@ -826,13 +919,21 @@ function buildStubWorld() {
     // One room, so one claimed-tile set: everything the colony already
     // stands on, which `taken` has collected as the room was furnished.
     claimed: new Map([[ROOM, taken]]),
-    grid,
-    homeRoom: room,
-    // The home room's geometry and its clustered tiles, for the ADR 0022
-    // self-check below.
-    sourcePositions: [SOURCE_A, SOURCE_B],
-    controllerPos: CONTROLLER,
-    clustered: cluster.built.concat(cluster.sites).map((s) => s.pos),
+    // The colonies this world expects `Colony.living` to answer with, in
+    // the order `Colony.declared` files them — checked against the
+    // bundle's own `decide` calls every profiled tick.
+    colonies: [ROOM],
+    homeRooms: [room],
+    // Each furnished home room's geometry and its clustered tiles, for
+    // the ADR 0022 self-check below.
+    furnished: [
+      {
+        grid,
+        sourcePositions: [SOURCE_A, SOURCE_B],
+        controllerPos: CONTROLLER,
+        clustered: cluster.built.concat(cluster.sites).map((s) => s.pos),
+      },
+    ],
     describe: () => [
       `stub colony in ${ROOM} at RCL${LEVEL} (2 sources, spawn, controller, ` +
         `${furnitureLine()}, ${plural(roads.length, "road")}, ` +
@@ -885,6 +986,15 @@ function stubCreep({ name, pos, parts, used, ticksToLive = 1500 }) {
     // reaches for takes the whole run down on the tick that row is first
     // matched — which is how a stub answers "this row does not exist" (#163).
     reserveController: ok,
+    // The claim verb (ADR 0047): a **candidate colony** is a declared home
+    // this colony does not own yet, and the creep sent to take it calls
+    // this. Here for the reason `reserveController` above is, and it is the
+    // same bill coming due a third time — the `outpost` scenario has thrown
+    // here since W13S28 was declared (#186) and its rooms became a claim
+    // target the harness had no verb for. A stub that implements exactly
+    // the surface `Bindings.fs` declares is the only stub that cannot
+    // rot this way.
+    claimController: ok,
     pickup: ok,
     move: ok,
     say: ok,
@@ -976,13 +1086,22 @@ const HIRE_CAP = 120;
 // handed. The row is read off the name the intent carries, which is
 // observability (ADR 0006 keeps the row out of what a creep is assigned),
 // and it decides where the creep stands and nothing else.
+//
+// Every spawn in the world is intercepted and not the first alone: since
+// ADR 0047 a tick can hold two colonies, each casting from its own spawn
+// into its own rooms, and a harness that listened to one of them would
+// hire half a world and station it out of the other's stations. Which
+// colony a cast belongs to is read off the name the intent carries —
+// `{row}-{tick}-{spawn}` (`Decide.planSpawns`) — the same string the row
+// is read off, and the same one `Colony.creepColonies` files a creep by.
 function hireFleet(world, game, loop) {
-  const spawn = world.spawns[0];
   const requests = [];
-  spawn.spawnCreep = (parts, name) => {
-    requests.push({ parts: Array.from(parts), name });
-    return 0;
-  };
+  for (const spawn of world.spawns) {
+    spawn.spawnCreep = (parts, name) => {
+      requests.push({ parts: Array.from(parts), name, spawn: spawn.name });
+      return 0;
+    };
+  }
 
   for (const creep of world.creeps) claimsIn(world, creep.room.name).add(keyOf(creep.pos));
   const cursors = new Map();
@@ -1005,7 +1124,9 @@ function hireFleet(world, game, loop) {
     }
     for (const request of requests) {
       const row = request.name.split("-")[0];
-      if (!bodies.has(row)) bodies.set(row, request.parts);
+      const stationTable = stationsFor(world, request.spawn);
+      const bodyKey = `${request.spawn} ${row}`;
+      if (!bodies.has(bodyKey)) bodies.set(bodyKey, request.parts);
       // A row this scenario stations nowhere is not a row to guess at:
       // standing it among the workers would have the report say "hired N
       // creeps by the bundle's own intents" over a fleet in the wrong
@@ -1018,18 +1139,23 @@ function hireFleet(world, game, loop) {
       // than a fallback. Twice is a pattern, so the message now names the
       // edit that closes it: the reader of this throw is whoever just
       // landed the row.
-      if (!Object.hasOwn(world.stations, row)) {
+      if (!Object.hasOwn(stationTable, row)) {
         throw new Error(
-          `the bundle cast a "${row}" body and the ${scenario} scenario stations no such row ` +
-            `(it knows: ${Object.keys(world.stations).join(", ")}), so this run would profile a ` +
-            "fleet standing where the colony would not have put it. A row added to Decide's " +
-            "patternTable owes this harness a station in *both* scenarios' `stations` — the " +
-            "tile that row does its work from — or every profile run throws here"
+          `${request.spawn} cast a "${row}" body and the ${scenario} scenario stations no such ` +
+            `row for it (it knows: ${Object.keys(stationTable).join(", ")}), so this run would ` +
+            "profile a fleet standing where the colony would not have put it. A row added to " +
+            "Decide's patternTable owes this harness a station in *every* scenario's `stations` " +
+            "— the tile that row does its work from — or every profile run throws here"
         );
       }
-      const stations = world.stations[row];
-      const cursor = cursors.get(row) ?? 0;
-      cursors.set(row, cursor + 1);
+      const stations = stationTable[row];
+      // The cursor is one colony's, not the world's: two colonies each
+      // hire a worker row of their own, and a shared cursor would walk
+      // the second colony's first body onto the first colony's second
+      // station.
+      const cursorKey = `${request.spawn} ${row}`;
+      const cursor = cursors.get(cursorKey) ?? 0;
+      cursors.set(cursorKey, cursor + 1);
       // A row whose quota is one body per place must not run out of
       // places. The hauler and worker rows pool over theirs and the cursor
       // is meant to wrap, but the Anchor row's quota is one per Post (ADR
@@ -1043,9 +1169,9 @@ function hireFleet(world, game, loop) {
       // row above is (ADR 0027).
       if (ONE_PER_STATION.has(row) && cursor >= stations.length) {
         throw new Error(
-          `the bundle cast ${cursor + 1} "${row}" bodies and the ${scenario} scenario stations ` +
-            `${stations.length} — that row's quota is one body per place, so the world it hired ` +
-            "against holds places this scenario has not stationed"
+          `${request.spawn} cast ${cursor + 1} "${row}" bodies and the ${scenario} scenario ` +
+            `stations ${stations.length} for it — that row's quota is one body per place, so ` +
+            "the world it hired against holds places this scenario has not stationed"
         );
       }
       // The row's next station, which carries the room as well as the
@@ -1054,7 +1180,21 @@ function hireFleet(world, game, loop) {
       // creep ends up in is the station's and no longer the spawn's.
       const station = stations[cursor % stations.length];
       const claimed = claimsIn(world, station.room.name);
-      const pos = nearestFree(station.grid, station.pos, claimed);
+      // A `stationsOn` row stands on its own tile; every other row is
+      // resolved outward from the tile its work is at. A place-holding row
+      // whose tile is already taken is a bug in the scenario and not a
+      // body to re-seat, so it throws rather than walking off the place it
+      // was given.
+      if (station.onTile && claimed.has(keyOf(station.pos))) {
+        throw new Error(
+          `${request.spawn}'s "${row}" row holds the tile ${station.room.name} ` +
+            `${keyOf(station.pos)} and the ${scenario} scenario has already put something ` +
+            "there, so this body would be stood off the place its row exists to hold"
+        );
+      }
+      const pos = station.onTile
+        ? station.pos
+        : nearestFree(station.grid, station.pos, claimed);
       claimed.add(keyOf(pos));
       const capacity = request.parts.filter((part) => part === "carry").length * CARRY_CAPACITY;
       const creep = stubCreep({
@@ -1071,8 +1211,32 @@ function hireFleet(world, game, loop) {
     }
   }
 
-  spawn.spawnCreep = ok;
-  return { hired, hireTicks, bodies };
+  for (const spawn of world.spawns) spawn.spawnCreep = ok;
+  // The bodies are read back by spawn and row, because in a two-colony
+  // world "the hauler body" is two bodies at two banks and a crew copying
+  // the wrong one would stand a 300-energy body where an 1,800-energy one
+  // works.
+  const bodyOf = (spawnName, row) => bodies.get(`${spawnName} ${row}`);
+  return { hired, hireTicks, bodyOf };
+}
+
+// The body a crew the bundle does not hire is cast from: one the colony
+// itself cast, read back off `hireFleet`'s record by the spawn that cast
+// it and the row it was cast for. Standing in for a missing one with the
+// worker row would be worse than unreachable: `hireFleet` records the
+// *first* body per row, and the first cast of any run is ADR 0006's
+// disaster-fallback minimal worker, so the crew would silently become
+// three-part workers while the report still called them haulers (ADR
+// 0027).
+function crewBody(bodyOf, spawnName, row, rcl) {
+  const parts = bodyOf(spawnName, row);
+  if (!parts) {
+    throw new Error(
+      `${spawnName} cast no "${row}" body at RCL${rcl}, so the crew standing beside its colony ` +
+        "has none to copy"
+    );
+  }
+  return parts;
 }
 
 // ---------------------------------------------------------------------------
@@ -1094,13 +1258,17 @@ const OUTPOST_ROOMS = ["W12S27", "W13S28"];
 // is the plan the suite already reasons about.
 const HOME_SPAWN = { x: 12, y: 40 };
 
-// The containers standing in the outposts, as the live server holds them
-// (read off the read-only API at t140,810): one beside each outpost
-// source, on the Seat #128 placed the site on. ADR 0042 makes a standing
-// container the switch that admits an outpost into the economy — until one
-// stands, the room is invisible to every quota but the reserver's — so a
-// scenario without them profiles two rooms whose sources the bundle prices
-// at nothing, which is not the colony that exists.
+// The containers standing in the colony's neighbouring rooms, as the live
+// server holds them (read off the read-only API at t140,810): one beside
+// each source, on the Seat #128 placed the site on. ADR 0042 makes a
+// standing container the switch that admits an outpost into the economy —
+// until one stands, the room is invisible to every quota but the
+// reserver's — so a scenario without them profiles rooms whose sources the
+// bundle prices at nothing, which is not the colony that exists. W13S28's
+// two are the same tiles whether the room is read as an outpost (the
+// `outpost` scenario, which predates its spawn) or as the young colony it
+// has since become (`young`, `pair`): a container is where it was built,
+// and what changed is who owns the room.
 //
 // Written down as tiles rather than derived, for the reason the spawn tile
 // above is: which Seat the container landed on is a decision the colony
@@ -1108,7 +1276,7 @@ const HOME_SPAWN = { x: 12, y: 40 };
 // here would have the harness profile the room it thinks the colony should
 // have rather than the one it has. Each is range 1 of its own source
 // (`16,45`; `18,4`; `16,7`) and walkable — 18,3 plain, the other two swamp.
-const OUTPOST_CONTAINERS = {
+const LIVE_CONTAINERS = {
   W12S27: [{ x: 15, y: 44 }],
   W13S28: [
     { x: 18, y: 3 },
@@ -1178,6 +1346,273 @@ function loadCapture(roomName) {
   };
 }
 
+// The level a colony starts paving at: `Colony.bootstrapLevel`, which is
+// where ADR 0034's ramparts and #209's road sites both begin. A room under
+// it earns eight energy a tick and its Layout places neither (#209, #214),
+// so a scenario that paved a young room would profile a colony whose
+// hauler quota, Repair pool and walk costs are all a level's worth of
+// furniture ahead of the room it is standing in.
+const BOOTSTRAP_LEVEL = 3;
+
+// One captured room furnished as a colony's home: its sources and
+// controller, the containers its Layout would have built, the level's own
+// cluster, and — only from `BOOTSTRAP_LEVEL` up — the trunk roads. Written
+// once and called by every scenario that stands a home on real terrain, so
+// a mother's room at RCL5 and a child's at RCL1 are furnished by the same
+// rules at two levels rather than by two copies free to drift apart.
+//
+// Every id it registers carries the caller's `prefix`, because an object
+// id is unique across the world and a two-colony scenario furnishes two
+// rooms through this one function.
+function furnishHome({
+  capture,
+  spawnPos,
+  spawnName,
+  rcl,
+  prefix,
+  register,
+  structure,
+  // Where the source containers stand: "derive" places each on the
+  // nearest free tile to its source, which is what a scenario with no
+  // live room to copy has to do, or an array of tiles for a room whose
+  // containers the server already holds (`LIVE_CONTAINERS`).
+  sourceContainers = "derive",
+  // Whether the controller carries an upgrade buffer (ADR 0046). A colony
+  // that has only just started building has none — its Layout puts the
+  // Posts up first — and its upgrader row is not hired at that bank
+  // anyway (#187).
+  buffer = true,
+}) {
+  const furniture = furnitureFor(rcl);
+  const taken = new Set([keyOf(spawnPos)]);
+  const claim = (pos) => {
+    taken.add(keyOf(pos));
+    return pos;
+  };
+  for (const source of capture.sources) claim(source.pos);
+  claim(capture.controller.pos);
+
+  const sources = capture.sources.map((source) =>
+    register({
+      id: source.id,
+      pos: source.pos,
+      energy: 3000,
+      ticksToRegeneration: undefined,
+    })
+  );
+  const controller = register({
+    id: capture.controller.id,
+    my: true,
+    // The colony's own name, which every reservation is judged against —
+    // see the stub scenario's controller for why it is here.
+    owner: { username: COLONY_OWNER },
+    level: rcl,
+    ticksToDowngrade: 9000,
+    safeModeAvailable: 1,
+    safeMode: undefined,
+    pos: capture.controller.pos,
+    activateSafeMode: ok,
+  });
+
+  // Containers where the plan would want them: one on each source's Seat,
+  // and the upgrade buffer beside the controller where the room has one.
+  // Placed by the terrain rather than by hand unless the caller names the
+  // tiles the live server holds, so the scenario does not smuggle in a
+  // tile the room does not have.
+  const seats =
+    sourceContainers === "derive"
+      ? capture.sources.map((source) => nearestFree(capture, source.pos, taken))
+      : sourceContainers;
+  // A source container off its source's Seat ring is no Post at all (ADR
+  // 0012, ADR 0020), and everything below stations the Anchor row on these
+  // tiles — so a tile the caller wrote down wrong would stand a work-heavy
+  // body where it can never dig, and the report would still call it a
+  // Post. Checked here rather than trusted, the way every other placement
+  // in this file fails loudly (ADR 0027).
+  // Which seat serves which source is read off the terrain and never off
+  // the order the tiles were written in: `LIVE_CONTAINERS` lists W13S28's
+  // two in the reverse of the capture's source order, deliberately, and a
+  // check that paired them by index would call the room's own furniture a
+  // mistake.
+  const posted = new Set();
+  for (const seat of seats) {
+    const source = capture.sources.find(
+      (candidate) =>
+        !posted.has(candidate.id) &&
+        Math.max(Math.abs(seat.x - candidate.pos.x), Math.abs(seat.y - candidate.pos.y)) === 1
+    );
+    if (!source) {
+      throw new Error(
+        `${capture.name}: the container at ${keyOf(seat)} is on no unposted source's Seat, so ` +
+          "it makes no Post — a Post is the Seat a source container stands on (ADR 0012)"
+      );
+    }
+    posted.add(source.id);
+  }
+  const containers = seats.map((pos, i) =>
+    structure(`${prefix}cont-${i}`, "container", claim(pos), {
+      store: store({ used: 1500, capacity: CONTAINER_CAPACITY }),
+    })
+  );
+  // The buffer is a different thing from the rest and is named rather than
+  // left as an index expression, because two rules read it: it is stocked
+  // at 800 where a source container holds 1500, and it is where the
+  // upgrader row stands.
+  const bufferContainer = buffer
+    ? structure(
+        `${prefix}cont-buffer`,
+        "container",
+        claim(nearestFree(capture, capture.controller.pos, taken)),
+        { store: store({ used: 800, capacity: CONTAINER_CAPACITY }) }
+      )
+    : null;
+  if (bufferContainer) containers.push(bufferContainer);
+
+  const spawn = structure(`${prefix}spawn-1`, "spawn", spawnPos, {
+    store: store({ used: SPAWN_ENERGY_CAPACITY, capacity: SPAWN_ENERGY_CAPACITY }),
+    hits: 5000,
+    hitsMax: 5000,
+  });
+
+  // The level's cluster on the room's own ground: the extensions, towers
+  // and Storage this level allows, and the extension sites held back out
+  // of that same allowance.
+  const cluster = placeCluster({
+    grid: capture,
+    spawnPos,
+    sourcePositions: capture.sources.map((source) => source.pos),
+    controllerPos: capture.controller.pos,
+    taken,
+    structure,
+    register,
+    rcl,
+    prefix,
+  });
+
+  // The paved trunks: spawn to every container, along walkable ground and
+  // around the cluster rather than through it — and none at all under
+  // `BOOTSTRAP_LEVEL`, where the colony places no road site.
+  const blocked = new Set(cluster.built.concat(cluster.sites).map((s) => keyOf(s.pos)));
+  const roadTiles = [];
+  if (rcl >= BOOTSTRAP_LEVEL) {
+    for (const container of containers) {
+      for (const tile of route(capture, spawnPos, container.pos, blocked)) {
+        if (taken.has(keyOf(tile))) continue;
+        claim(tile);
+        roadTiles.push(tile);
+      }
+    }
+  }
+  // A couple of roads below half hits, so the Repair family is in the
+  // measurement instead of pooling zero tasks — the stub scenario's rule.
+  const roads = roadTiles.map((pos, i) =>
+    structure(`${prefix}road-${i}`, "road", pos, i % 8 === 3 ? { hits: 2100 } : {})
+  );
+
+  const finds = {
+    105: sources,
+    108: [spawn, ...cluster.built],
+    107: [spawn, ...cluster.built, ...roads, ...containers],
+    114: cluster.sites,
+    103: [],
+    106: [],
+  };
+  const room = stubRoom({
+    name: capture.name,
+    controller,
+    findTables: finds,
+    energy: { available: furniture.bank, capacity: furniture.bank },
+  });
+  Object.assign(spawn, { name: spawnName, spawning: null, room, spawnCreep: ok });
+
+  const postKeys = new Set(seats.map(keyOf));
+  return {
+    capture,
+    rcl,
+    furniture,
+    taken,
+    // The Posts this room's Layout made: the tile each source container
+    // stands on (ADR 0012, ADR 0051), in the sources' own order. Beside
+    // `containers` rather than read back out of it, because the buffer is
+    // in that list and is never a Post (ADR 0046 against ADR 0012's
+    // generalization).
+    posts: seats,
+    // What a creep may not be stood on in this room: `taken` is every tile
+    // the furnishing *placed* something on, and this is that set less the
+    // Posts — `furnishOutpost`'s rule, and for its reason. A container is
+    // walkable, standing on one is exactly what garrisoning a Post means
+    // (ADR 0020), and Harvest offers a work-heavy body no other footing
+    // (ADR 0048), so an Anchor resolved against `taken` would be pushed
+    // off the one tile it can work from and the run would time a creep in
+    // transit.
+    occupied: new Set([...taken].filter((key) => !postKeys.has(key))),
+    blocked,
+    sources,
+    controller,
+    containers,
+    buffer: bufferContainer,
+    spawn,
+    spawnPos,
+    cluster,
+    roads,
+    finds,
+    room,
+  };
+}
+
+// One captured room furnished as an outpost: the rocks, the reservation
+// the colony holds on the controller, and the containers the live server
+// stands there. Nothing owned — an outpost is a room we do not own, so no
+// spawn, no extension and no tower — and no road either: ADR 0042 declines
+// to pave one, so the colony has none to model.
+function furnishOutpost(capture, register, structure) {
+  const sources = capture.sources.map((source) =>
+    register({
+      id: source.id,
+      pos: source.pos,
+      energy: 3000,
+      ticksToRegeneration: undefined,
+    })
+  );
+  const controller = register({
+    id: capture.controller.id,
+    my: false,
+    level: 0,
+    ticksToDowngrade: undefined,
+    safeModeAvailable: 0,
+    safeMode: undefined,
+    reservation: { username: COLONY_OWNER, ticksToEnd: OUTPOST_RESERVATION_TICKS },
+    pos: capture.controller.pos,
+    activateSafeMode: ok,
+  });
+  const containers = (LIVE_CONTAINERS[capture.name] ?? []).map((pos, i) =>
+    structure(`${capture.name.toLowerCase()}-cont-${i}`, "container", pos, {
+      store: store({ used: 1500, capacity: CONTAINER_CAPACITY }),
+    })
+  );
+  return {
+    capture,
+    sources,
+    containers,
+    // What a creep may not be stood on here: a source and a controller
+    // are obstacles the engine will not let one share, and nothing else
+    // in the room is — a container is walkable, and standing an Anchor
+    // on one is exactly what a Post is (ADR 0020). Handed to `hireFleet`
+    // and to the crew below as one set per room, so the reserver and the
+    // Anchor the bundle stations here and the hauler crew stood beside
+    // them cannot land on one tile.
+    occupied: new Set([
+      ...sources.map((source) => keyOf(source.pos)),
+      keyOf(capture.controller.pos),
+    ]),
+    room: stubRoom({
+      name: capture.name,
+      controller,
+      findTables: { 105: sources, 108: [], 107: containers, 114: [], 103: [], 106: [] },
+    }),
+  };
+}
+
 function buildOutpostWorld() {
   const byId = new Map();
   const register = (obj) => {
@@ -1199,106 +1634,27 @@ function buildOutpostWorld() {
   const outposts = OUTPOST_ROOMS.map(loadCapture);
 
   // --- the home room, furnished on its own terrain -----------------------
-  const taken = new Set([keyOf(HOME_SPAWN)]);
-  const claim = (pos) => {
-    taken.add(keyOf(pos));
-    return pos;
-  };
-  for (const source of home.sources) claim(source.pos);
-  claim(home.controller.pos);
-
-  const homeSources = home.sources.map((source) =>
-    register({
-      id: source.id,
-      pos: source.pos,
-      energy: 3000,
-      ticksToRegeneration: undefined,
-    })
-  );
-  const homeController = register({
-    id: home.controller.id,
-    my: true,
-    // The colony's own name, which every reservation below is judged
-    // against — see the stub scenario's controller for why it is here.
-    owner: { username: COLONY_OWNER },
-    level: LEVEL,
-    ticksToDowngrade: 9000,
-    safeModeAvailable: 1,
-    safeMode: undefined,
-    pos: home.controller.pos,
-    activateSafeMode: ok,
-  });
-
-  // Containers where the plan would want them: one beside each source, one
-  // beside the controller. Placed by the terrain rather than by hand, so
-  // the scenario does not smuggle in a tile the room does not have.
-  const containerTargets = [...home.sources.map((s) => s.pos), home.controller.pos];
-  // The controller's is the last of them, and it is the one that is a
-  // different thing from the rest: the upgrade buffer (ADR 0046). Named
-  // rather than left as an index expression, because two rules read it —
-  // it is stocked at 800 where a source container holds 1500, and it is
-  // where the upgrader row stands.
-  const bufferIndex = containerTargets.length - 1;
-  const containers = containerTargets.map((target, i) =>
-    structure(`cont-${i}`, "container", claim(nearestFree(home, target, taken)), {
-      store: store({
-        used: i === bufferIndex ? 800 : 1500,
-        capacity: CONTAINER_CAPACITY,
-      }),
-    })
-  );
-  const buffer = containers[bufferIndex];
-
-  const spawn = structure("spawn-1", "spawn", HOME_SPAWN, {
-    store: store({ used: SPAWN_ENERGY_CAPACITY, capacity: SPAWN_ENERGY_CAPACITY }),
-    hits: 5000,
-    hitsMax: 5000,
-  });
-
-  // The level's cluster on the room's own ground: the extensions, towers
-  // and Storage this level allows, and the extension sites held back out
-  // of that same allowance.
-  const cluster = placeCluster({
-    grid: home,
+  const furnished = furnishHome({
+    capture: home,
     spawnPos: HOME_SPAWN,
-    sourcePositions: home.sources.map((source) => source.pos),
-    controllerPos: home.controller.pos,
-    taken,
-    structure,
+    spawnName: "Spawn1",
+    rcl: LEVEL,
+    prefix: "",
     register,
+    structure,
   });
-
-  // The paved trunks: spawn to every container, along walkable ground and
-  // around the cluster rather than through it.
-  const blocked = new Set(cluster.built.concat(cluster.sites).map((s) => keyOf(s.pos)));
-  const roadTiles = [];
-  for (const container of containers) {
-    for (const tile of route(home, HOME_SPAWN, container.pos, blocked)) {
-      if (taken.has(keyOf(tile))) continue;
-      claim(tile);
-      roadTiles.push(tile);
-    }
-  }
-  // A couple of roads below half hits, so the Repair family is in the
-  // measurement instead of pooling zero tasks — the stub scenario's rule.
-  const roads = roadTiles.map((pos, i) =>
-    structure(`road-${i}`, "road", pos, i % 8 === 3 ? { hits: 2100 } : {})
-  );
-
-  const homeFinds = {
-    105: homeSources,
-    108: [spawn, ...cluster.built],
-    107: [spawn, ...cluster.built, ...roads, ...containers],
-    114: cluster.sites,
-    103: [],
-    106: [],
-  };
-  const homeRoom = stubRoom({
-    name: home.name,
-    controller: homeController,
-    findTables: homeFinds,
-    energy: { available: FURNITURE.bank, capacity: FURNITURE.bank },
-  });
+  const {
+    taken,
+    blocked,
+    sources: homeSources,
+    containers,
+    buffer,
+    spawn,
+    cluster,
+    roads,
+    finds: homeFinds,
+    room: homeRoom,
+  } = furnished;
 
   // --- the outposts ------------------------------------------------------
   // Vision in both, which is the expensive half: a room we can see is
@@ -1307,60 +1663,14 @@ function buildOutpostWorld() {
   // Nothing *owned* stands in them — an outpost is a room we do not own,
   // so no spawn, no extension and no tower — but the three source
   // containers do, on the tiles the live server holds them
-  // (`OUTPOST_CONTAINERS`), because a container is nobody's and is the one
+  // (`LIVE_CONTAINERS`), because a container is nobody's and is the one
   // structure ADR 0042 puts in an outpost. Roads are still out: ADR 0042
   // declines to pave an outpost, so the colony has none to model.
   //
   // Their controllers carry the colony's own reservation
   // (`OUTPOST_RESERVATION_TICKS`), which is what doubles those sources and
   // is the reserver row's whole reason to exist.
-  const outpostRooms = outposts.map((capture) => {
-    const sources = capture.sources.map((source) =>
-      register({
-        id: source.id,
-        pos: source.pos,
-        energy: 3000,
-        ticksToRegeneration: undefined,
-      })
-    );
-    const controller = register({
-      id: capture.controller.id,
-      my: false,
-      level: 0,
-      ticksToDowngrade: undefined,
-      safeModeAvailable: 0,
-      safeMode: undefined,
-      reservation: { username: COLONY_OWNER, ticksToEnd: OUTPOST_RESERVATION_TICKS },
-      pos: capture.controller.pos,
-      activateSafeMode: ok,
-    });
-    const containers = (OUTPOST_CONTAINERS[capture.name] ?? []).map((pos, i) =>
-      structure(`${capture.name.toLowerCase()}-cont-${i}`, "container", pos, {
-        store: store({ used: 1500, capacity: CONTAINER_CAPACITY }),
-      })
-    );
-    return {
-      capture,
-      sources,
-      containers,
-      // What a creep may not be stood on here: a source and a controller
-      // are obstacles the engine will not let one share, and nothing else
-      // in the room is — a container is walkable, and standing an Anchor
-      // on one is exactly what a Post is (ADR 0020). Handed to `hireFleet`
-      // and to the crew below as one set per room, so the reserver and the
-      // Anchor the bundle stations here and the hauler crew stood beside
-      // them cannot land on one tile.
-      occupied: new Set([
-        ...sources.map((source) => keyOf(source.pos)),
-        keyOf(capture.controller.pos),
-      ]),
-      room: stubRoom({
-        name: capture.name,
-        controller,
-        findTables: { 105: sources, 108: [], 107: containers, 114: [], 103: [], 106: [] },
-      }),
-    };
-  });
+  const outpostRooms = outposts.map((capture) => furnishOutpost(capture, register, structure));
 
   // --- the fleet ---------------------------------------------------------
   // Hired by the bundle itself (`hireFleet`), so its size is this level's
@@ -1391,24 +1701,8 @@ function buildOutpostWorld() {
   // have the bundle hire that much less and the run would measure a fleet
   // nobody chose the size of.
   const creeps = [];
-  const crewOutposts = (bodies, game) => {
-    // The home cast is the only source of these bodies, and standing in
-    // for a missing one with the worker row would be worse than
-    // unreachable: `hireFleet` records the *first* body per row, and the
-    // first cast of any run is ADR 0006's disaster-fallback minimal
-    // worker, so the crew would silently become three-part workers while
-    // the report still called them haulers (ADR 0027).
-    const partsFor = (row) => {
-      const parts = bodies.get(row);
-      if (!parts) {
-        throw new Error(
-          `the home room cast no "${row}" body at RCL${LEVEL} (it cast: ` +
-            `${[...bodies.keys()].join(", ")}), so the outpost crew has none to copy`
-        );
-      }
-      return parts;
-    };
-    const haulerParts = partsFor("hauler");
+  const crewOutposts = (bodyOf, game) => {
+    const haulerParts = crewBody(bodyOf, "Spawn1", "hauler", LEVEL);
     for (const outpost of outpostRooms) {
       // The room's own claimed tiles, the same set `hireFleet` stood the
       // reserver and the outpost Anchors out of, so the crew cannot be put
@@ -1441,8 +1735,6 @@ function buildOutpostWorld() {
       }
     }
   };
-
-  Object.assign(spawn, { name: "Spawn1", spawning: null, room: homeRoom, spawnCreep: ok });
 
   // The spare lane the census perturbation walks: the walkable ground
   // between one container and the next, which no trunk paves — every trunk
@@ -1549,11 +1841,19 @@ function buildOutpostWorld() {
       [home.name, taken],
       ...outpostRooms.map((outpost) => [outpost.room.name, outpost.occupied]),
     ]),
-    grid: home,
-    homeRoom,
-    sourcePositions: home.sources.map((source) => source.pos),
-    controllerPos: home.controller.pos,
-    clustered: cluster.built.concat(cluster.sites).map((s) => s.pos),
+    // One living colony: the neighbours hold no spawn of ours, so
+    // `Colony.living` answers with the home room alone however many rooms
+    // this world models.
+    colonies: [home.name],
+    homeRooms: [homeRoom],
+    furnished: [
+      {
+        grid: home,
+        sourcePositions: home.sources.map((source) => source.pos),
+        controllerPos: home.controller.pos,
+        clustered: cluster.built.concat(cluster.sites).map((s) => s.pos),
+      },
+    ],
     crew: crewOutposts,
     describe: () => [
       `outpost colony on real terrain (ADR 0036) at RCL${LEVEL}, ${creeps.length} creeps over ` +
@@ -1582,7 +1882,425 @@ function buildOutpostWorld() {
   };
 }
 
-const buildWorld = () => (scenario === "outpost" ? buildOutpostWorld() : buildStubWorld());
+// ---------------------------------------------------------------------------
+// Scenarios `young` and `pair`: the colony at the start of its life, and
+// the two colonies a live tick actually holds (ADR 0052).
+// ---------------------------------------------------------------------------
+
+// The second colony, on its own committed terrain: W13S28, claimed on
+// 2026-09-06 and spawning from (16,12) — the tile the live Spawn2 stands
+// on, written down for the reason `HOME_SPAWN` is. Its sources are 16,7
+// and 18,4 and its controller 24,17, all read off the capture and none of
+// them written here.
+const CHILD_ROOM = "W13S28";
+const CHILD_SPAWN = { x: 16, y: 12 };
+const CHILD_SPAWN_NAME = "Spawn2";
+
+// The world-unique id prefix the child's furniture carries. An object id
+// is unique across the world (ADR 0041) and the `pair` scenario furnishes
+// two home rooms through one `furnishHome`, so the child's extensions,
+// containers and roads cannot be `ext-0` twice.
+const CHILD_PREFIX = "w13-";
+
+// `Decide.pioneerCount`: how many bodies over her income workers a mother
+// hires for a child she is bootstrapping (ADR 0047 decision 4). Copied
+// rather than shared, like `CONTROLLER_STRUCTURES` above and for the same
+// reason — the constant is `private` to Core and this script drives the
+// compiled bundle — and read by nothing but the station table: the count
+// the bundle actually hires is its own, and this only decides how many of
+// that row stand in the child's room rather than the mother's.
+const PIONEER_COUNT = 3;
+
+// The rows every scenario has to station, filled for a colony that works
+// only its own room: the Anchor row on its Posts, the hauler at its spawn,
+// the worker at its controller and its sites, the upgrader on the ground
+// it upgrades from, and the reserver — which such a colony never casts,
+// its quota being one per *declared* outpost and it declaring none — at
+// its spawn, so that the day a human declares one this harness reports a
+// creep in the wrong room rather than throwing on the first cast.
+function homeStations(furnished) {
+  const { room, capture, cluster } = furnished;
+  const at = (positions) => stationsIn(room, capture, positions);
+  return {
+    reserver: at([furnished.spawnPos]),
+    // The Anchor row stands **on** its Posts — the tiles the source
+    // containers stand on — and not beside them: Harvest's Work Area for a
+    // work-heavy body is that room's Posts alone (ADR 0020, ADR 0048), and
+    // a Post's Seat is the garrison's (ADR 0051). The tiles are handed
+    // over rather than left to `nearestFree` from the rock, because
+    // "nearest free" is the wrong answer on real terrain twice over: it
+    // walks past the Post itself, which the furnishing has claimed, and on
+    // W13S28's `16,7` — whose only Seat is the container's — it lands two
+    // tiles from the rock, where the body can neither dig nor fill. That
+    // room's own claimed set (`furnished.occupied`) leaves the Posts out
+    // for exactly this row, the way an outpost's does.
+    anchor: stationsOn(room, capture, furnished.posts),
+    hauler: at([furnished.spawnPos]),
+    // The buffer where the room has one, and the controller where it does
+    // not: a colony this young has built no upgrade buffer yet, and at its
+    // bank the row is not hired at all (ADR 0046, #187) — so the seat is
+    // ground inside the Upgrade Work Area, and it stands empty.
+    upgrader: at([furnished.buffer ? furnished.buffer.pos : capture.controller.pos]),
+    worker: at([capture.controller.pos, ...cluster.sites.map((site) => site.pos)]),
+  };
+}
+
+// One colony's world, on the child's captured terrain: the room, its
+// furniture and the fleet the bundle hires against a 300 bank. What makes
+// it the `young` scenario and not a small `outpost` one is what is *not*
+// here: no road and no rampart, because a colony under
+// `Colony.bootstrapLevel` places neither (#209, #214); no extension the
+// level does not allow; and no upgrade buffer — which is a fact about
+// *this room* and not about its level, the container plan being "RCL-gated
+// by nothing" (`Decide.planLayout`), so the live W13S28 has simply built
+// its two Posts first. Every quota that reads a walk, a Repair or a bank
+// reads it off exactly that. (`RoomFixtures.colonyAt` models the other
+// half of the same rung — the room its Layout has *finished*, buffer and
+// all — and the two are meant to differ there.)
+function buildYoungWorld() {
+  const byId = new Map();
+  const register = (obj) => {
+    byId.set(obj.id, obj);
+    return obj;
+  };
+  const structure = (id, structureType, pos, extra = {}) =>
+    register({
+      id,
+      structureType,
+      pos,
+      hits: 4000,
+      hitsMax: 5000,
+      store: store(),
+      ...extra,
+    });
+
+  const capture = loadCapture(CHILD_ROOM);
+  const home = furnishHome({
+    capture,
+    spawnPos: CHILD_SPAWN,
+    spawnName: CHILD_SPAWN_NAME,
+    rcl: LEVEL,
+    prefix: "",
+    register,
+    structure,
+    // The two containers the live server holds in this room, which are
+    // what make both its sources Posts (ADR 0042) — the two posted rocks
+    // ADR 0052's scenario is about.
+    sourceContainers: LIVE_CONTAINERS[CHILD_ROOM],
+    buffer: false,
+  });
+
+  // The spare lane the census perturbation walks: the ground between the
+  // two Posts, which nothing paves here — this room is under the level
+  // that places a road at all, so every tile of it is spare.
+  const spare = route(capture, home.containers[0].pos, home.containers[1].pos, home.blocked).filter(
+    (tile) => !home.taken.has(keyOf(tile))
+  );
+  if (spare.length === 0) {
+    throw new Error(`${capture.name}: no unpaved tile between the two Posts to move the census`);
+  }
+
+  const creeps = [];
+  const stations = homeStations(home);
+
+  return {
+    terrains: new Map([[capture.name, capture.terrain]]),
+    rooms: [home.room],
+    spawns: [home.spawn],
+    creeps,
+    byId,
+    perturb: pavingPerturbation({ spare, structures: home.finds[107], byId, structure }),
+    stations,
+    // The room's own claimed tiles less its Posts (`furnished.occupied`),
+    // so `hireFleet` can stand the Anchor row on the containers it
+    // garrisons rather than being pushed off them.
+    claimed: new Map([[capture.name, home.occupied]]),
+    colonies: [capture.name],
+    homeRooms: [home.room],
+    furnished: [
+      {
+        grid: capture,
+        sourcePositions: capture.sources.map((source) => source.pos),
+        controllerPos: capture.controller.pos,
+        clustered: home.cluster.built.concat(home.cluster.sites).map((s) => s.pos),
+      },
+    ],
+    describe: () => [
+      `young colony in ${capture.name} on real terrain (ADR 0036) at RCL${LEVEL}, ` +
+        `${creeps.length} creeps in one room`,
+      `  ${capture.name} home     ${plural(home.sources.length, "source")}, controller, ` +
+        `${furnitureLine(home.furniture)}, ${plural(home.roads.length, "road")}, ` +
+        `${plural(home.containers.length, "container")} (both of them Posts), ` +
+        `${plural(home.cluster.sites.length, "site")}, ` +
+        `${CHILD_SPAWN_NAME} at ${keyOf(CHILD_SPAWN)}`,
+      LEVEL < BOOTSTRAP_LEVEL
+        ? `  no road and no rampart: this room is under Colony.bootstrapLevel, where the Layout ` +
+          "places neither (#209, #214) — so the Repair pool is the containers' alone and every " +
+          "walk is priced on bare ground"
+        : `  at or past Colony.bootstrapLevel, so this room paves and ramparts like any other ` +
+          "(#209, #214) — the flag has moved it off the rung the scenario is named for, and " +
+          "its Repair pool and walk costs are a paved colony's",
+      `  ${plural(stationsOf(creeps, "anchor").length, "anchor")} at ` +
+        `${stationsOf(creeps, "anchor").join(", ") || "no station"} — one per Post, on the ` +
+        "container the live server holds, which is what garrisoning a Post means (ADR 0020)",
+      `  ${plural(stationsOf(creeps, "upgrader").length, "upgrader")} at ` +
+        `${stationsOf(creeps, "upgrader").join(", ") || "no station"}: this room has built no ` +
+        "upgrade buffer, so the row has no working ground and hires nobody (ADR 0046) — a fact " +
+        "about the room and not about its level, the container plan being RCL-gated by " +
+        "nothing" +
+        (home.furniture.bank < 800
+          ? ", and at this bank the row's own cast is no standing body either (#187)"
+          : "") +
+        " — so the seat by the controller stands empty",
+    ],
+    spareTiles: spare.length,
+  };
+}
+
+// Two colonies in one tick, which is what every live tick has been since
+// W13S28's spawn stood (ADR 0047, #191): the mother W12S28 with her one
+// declared outpost, and the child W13S28 bootstrapping beside her. What
+// this scenario measures that no other does is the shape of that tick —
+// `Main.loop` builds one Snapshot per living colony and runs `decide` once
+// over each, the mother projecting the child's room as a bootstrap layer
+// while it is under `Colony.bootstrapLevel` (#192), and the report prices
+// each colony's `decide` on its own row.
+function buildPairWorld() {
+  const byId = new Map();
+  const register = (obj) => {
+    byId.set(obj.id, obj);
+    return obj;
+  };
+  const structure = (id, structureType, pos, extra = {}) =>
+    register({
+      id,
+      structureType,
+      pos,
+      hits: 4000,
+      hitsMax: 5000,
+      store: store(),
+      ...extra,
+    });
+
+  const motherCapture = loadCapture(HOME_ROOM);
+  const childCapture = loadCapture(CHILD_ROOM);
+  // The mother's outposts as `Colony.declared` spells them today: W12S27
+  // alone, W13S28 having left the list the day it stood its own spawn.
+  const outposts = OUTPOST_ROOMS.filter((name) => name !== CHILD_ROOM).map(loadCapture);
+
+  const mother = furnishHome({
+    capture: motherCapture,
+    spawnPos: HOME_SPAWN,
+    spawnName: "Spawn1",
+    rcl: MOTHER_LEVEL,
+    prefix: "",
+    register,
+    structure,
+  });
+  const child = furnishHome({
+    capture: childCapture,
+    spawnPos: CHILD_SPAWN,
+    spawnName: CHILD_SPAWN_NAME,
+    rcl: LEVEL,
+    prefix: CHILD_PREFIX,
+    register,
+    structure,
+    sourceContainers: LIVE_CONTAINERS[CHILD_ROOM],
+    buffer: false,
+  });
+  const outpostRooms = outposts.map((capture) => furnishOutpost(capture, register, structure));
+
+  // The crew the bundle does not hire, on the mother's side alone: one
+  // hauler per outpost container, standing the far end of a round trip
+  // whose near end is her own hired hauler row. The `outpost` scenario's
+  // rule and its reasons, and none of it is the child's — nothing of the
+  // child's is a room away from its spawn.
+  const creeps = [];
+  const crewOutposts = (bodyOf, game) => {
+    const haulerParts = crewBody(bodyOf, "Spawn1", "hauler", MOTHER_LEVEL);
+    for (const outpost of outpostRooms) {
+      for (const [i, container] of outpost.containers.entries()) {
+        const pos = nearestFree(outpost.capture, container.pos, outpost.occupied);
+        outpost.occupied.add(keyOf(pos));
+        const capacity = haulerParts.filter((part) => part === "carry").length * CARRY_CAPACITY;
+        const creep = register(
+          stubCreep({
+            name: `${outpost.capture.name.toLowerCase()}-${i}`,
+            pos,
+            parts: haulerParts,
+            used: Math.round(capacity * FILLS[i % FILLS.length]),
+          })
+        );
+        creep.room = outpost.room;
+        creeps.push(creep);
+        game.creeps[creep.name] = creep;
+      }
+    }
+  };
+
+  const motherStations = homeStations(mother);
+  const childStations = homeStations(child);
+
+  // The mother's rows, widened by the two rooms she works that are not her
+  // own. The reserver's station is her one declared outpost's controller,
+  // and the Anchor row gains that outpost's Post beside her own two rocks
+  // (ADR 0042: one Anchor per Post, wherever the Post lies).
+  motherStations.reserver = outpostRooms.flatMap((outpost) =>
+    stationsIn(outpost.room, outpost.capture, [outpost.room.controller.pos])
+  );
+  motherStations.anchor = [
+    ...motherStations.anchor,
+    ...outpostRooms.flatMap((outpost) =>
+      stationsIn(
+        outpost.room,
+        outpost.capture,
+        outpost.sources.map((source) => source.pos)
+      )
+    ),
+  ];
+  // The pioneers (ADR 0047 decision 4, #213): the mother's worker row
+  // hires `pioneerCount` bodies over its income workers for the child's
+  // Upgrade and Build, and their work is in the child's room. Nothing in
+  // the cast tells the two apart — a pioneer is a worker, cast from the
+  // worker row and named like one — so the harness stands the row's first
+  // three bodies at the child's controller and pools the rest over her own
+  // room. It is an approximation of *which* bodies, and it is exact in
+  // what it is for: a colony that hires pioneers has that many bodies
+  // standing in its child's room, and a run that stood them all at home
+  // would time a walk across a Seam that a frozen world never finishes.
+  //
+  // Only while the window is open, which is the whole of the rule: the
+  // mother hires pioneers until the child's controller reaches
+  // `Colony.bootstrapLevel` and none after (ADR 0047 decision 4,
+  // `Colony.bootstrapping`). Past it she no longer projects the child's
+  // room at all, so a body of hers standing there would be adopted by the
+  // child for the tick (`Colony.creepColonies`) — and the `decide by
+  // colony` table this scenario exists to print would charge three of the
+  // mother's workers to the child while her own row came up three short.
+  const pioneering = LEVEL < BOOTSTRAP_LEVEL;
+  if (pioneering) {
+    motherStations.worker = [
+      ...stationsIn(
+        child.room,
+        childCapture,
+        Array(PIONEER_COUNT).fill(childCapture.controller.pos)
+      ),
+      ...motherStations.worker,
+    ];
+  }
+
+  // The spare lane, on the mother's side: the `outpost` scenario's own —
+  // the ground between one container and the next, which no trunk paves.
+  // Hers and not the child's because the census that matters here is the
+  // bigger room's, and because the child's room is paved by nothing at all
+  // (it is under `BOOTSTRAP_LEVEL`), so a tile paved there would be the
+  // first road in a room whose Layout places none.
+  const paved = new Set(mother.taken);
+  const spare = [];
+  for (let i = 0; i + 1 < mother.containers.length; i++) {
+    for (const tile of route(
+      motherCapture,
+      mother.containers[i].pos,
+      mother.containers[i + 1].pos,
+      mother.blocked
+    )) {
+      const key = keyOf(tile);
+      if (paved.has(key)) continue;
+      paved.add(key);
+      spare.push(tile);
+    }
+  }
+  if (spare.length === 0) {
+    throw new Error(`${motherCapture.name}: every tile between the containers is already paved`);
+  }
+
+  const rooms = [mother.room, child.room, ...outpostRooms.map((o) => o.room)];
+  return {
+    terrains: new Map([
+      [motherCapture.name, motherCapture.terrain],
+      [childCapture.name, childCapture.terrain],
+      ...outposts.map((capture) => [capture.name, capture.terrain]),
+    ]),
+    rooms,
+    spawns: [mother.spawn, child.spawn],
+    creeps,
+    byId,
+    perturb: pavingPerturbation({ spare, structures: mother.finds[107], byId, structure }),
+    // A station table per spawn, because the two colonies' rows are the
+    // same five names over different rooms: the mother's worker stands at
+    // her controller or her child's, the child's at its own.
+    stationsBySpawn: { Spawn1: motherStations, [CHILD_SPAWN_NAME]: childStations },
+    claimed: new Map([
+      [motherCapture.name, mother.occupied],
+      [childCapture.name, child.occupied],
+      ...outpostRooms.map((outpost) => [outpost.room.name, outpost.occupied]),
+    ]),
+    // Both, in `Colony.declared`'s order — and the run throws on the first
+    // profiled tick if the bundle decides for anything else.
+    colonies: [motherCapture.name, childCapture.name],
+    homeRooms: [mother.room, child.room],
+    furnished: [
+      {
+        grid: motherCapture,
+        sourcePositions: motherCapture.sources.map((source) => source.pos),
+        controllerPos: motherCapture.controller.pos,
+        clustered: mother.cluster.built.concat(mother.cluster.sites).map((s) => s.pos),
+      },
+      {
+        grid: childCapture,
+        sourcePositions: childCapture.sources.map((source) => source.pos),
+        controllerPos: childCapture.controller.pos,
+        clustered: child.cluster.built.concat(child.cluster.sites).map((s) => s.pos),
+      },
+    ],
+    crew: crewOutposts,
+    describe: () => [
+      `mother and bootstrapping child on real terrain (ADR 0036, ADR 0052): ${motherCapture.name}` +
+        ` at RCL${MOTHER_LEVEL} and ${childCapture.name} at RCL${LEVEL}, ${creeps.length} creeps ` +
+        `over ${rooms.length} rooms`,
+      `  ${motherCapture.name} mother   ${plural(mother.sources.length, "source")}, controller, ` +
+        `${furnitureLine(mother.furniture)}, ${plural(mother.roads.length, "road")}, ` +
+        `${plural(mother.containers.length, "container")}, ` +
+        `${plural(mother.cluster.sites.length, "site")}, Spawn1 at ${keyOf(HOME_SPAWN)}`,
+      ...outpostRooms.map(
+        (outpost) =>
+          `  ${outpost.capture.name} outpost  ${plural(outpost.sources.length, "source")}, ` +
+          `controller reserved ${OUTPOST_RESERVATION_TICKS} ticks, ` +
+          `${plural(outpost.containers.length, "container")}, vision`
+      ),
+      `  ${childCapture.name} child    ${plural(child.sources.length, "source")}, controller, ` +
+        `${furnitureLine(child.furniture)}, ${plural(child.roads.length, "road")}, ` +
+        `${plural(child.containers.length, "container")} (both Posts), ` +
+        `${plural(child.cluster.sites.length, "site")}, ${CHILD_SPAWN_NAME} at ` +
+        `${keyOf(CHILD_SPAWN)}` +
+        (LEVEL < BOOTSTRAP_LEVEL
+          ? " — under Colony.bootstrapLevel, so the mother projects this room as a bootstrap " +
+            "layer and her workers may cross for its Upgrade and Build (#192, #213)"
+          : " — at or past Colony.bootstrapLevel, so the bootstrap window is shut: the mother " +
+            "no longer projects this room and the two colonies share nothing"),
+      `  ${plural(stationsOf(creeps, "worker", "Spawn1").length, "mother's worker")} at ` +
+        `${stationsOf(creeps, "worker", "Spawn1").join(", ") || "no station"}` +
+        (pioneering
+          ? ` — the first ${PIONEER_COUNT} of them at the child's controller, which is what a ` +
+            "pioneer is"
+          : " — all of them in her own room: the window is shut, so she hires no pioneer and " +
+            "stands nobody in a room she no longer projects"),
+      `  ${plural(stationsOf(creeps, "anchor", CHILD_SPAWN_NAME).length, "child's anchor")} at ` +
+        `${stationsOf(creeps, "anchor", CHILD_SPAWN_NAME).join(", ") || "no station"}, one per ` +
+        "Post of its own",
+    ],
+    spareTiles: spare.length,
+  };
+}
+
+const WORLDS = {
+  stub: buildStubWorld,
+  outpost: buildOutpostWorld,
+  young: buildYoungWorld,
+  pair: buildPairWorld,
+};
+
+const buildWorld = () => WORLDS[scenario]();
 
 // The frames the census-keyed memos exist to skip: the Layout and the
 // hauler quota behind the plan memo (ADR 0017), and the spawn walks behind
@@ -1709,6 +2427,47 @@ function printCensusKeyed(classes) {
   }
 }
 
+// The CPU line ADR 0052 asks for: one row per colony's `decide` and one
+// for the sum of them, per class of tick. It is the harness's clock and
+// not the bot's — `Main.loop`'s decide phase is one reading over every
+// colony (ADR 0047), which is the whole reason this table is taken from
+// outside — so read it against the ms/tick above and never against the
+// observe channel's own `decide` column, which prices the same work plus
+// the fold around it.
+//
+// The total is the sum of the colonies' means and not a fourth
+// measurement: what a reader compares it against is the tick, and the gap
+// between the two is the projection, the Memory writes and the intents —
+// everything `decide` is not.
+function printDecideByColony(classes, decideMs, ticks) {
+  const mean = (rows) => (rows.length ? rows.reduce((a, b) => a + b, 0) / rows.length : 0);
+  const tickMs = {
+    all: ticks.all.map((row) => row.ms),
+    perturbed: ticks.perturbed,
+    quiet: ticks.quiet,
+  };
+  console.log("\ndecide by colony — ms per tick of each class (this harness's clock)");
+  console.log(`  ${classes.map((c) => c.label.padStart(9)).join("  ")}  colony`);
+  const homes = [...decideMs.all.keys()];
+  const column = (label, home) =>
+    mean(decideMs[label].get(home) ?? [])
+      .toFixed(2)
+      .padStart(9);
+  for (const home of homes) {
+    console.log(`  ${classes.map((c) => column(c.label, home)).join("  ")}  ${home}`);
+  }
+  const totalOf = (label) =>
+    homes.reduce((total, home) => total + mean(decideMs[label].get(home) ?? []), 0);
+  console.log(
+    `  ${classes.map((c) => totalOf(c.label).toFixed(2).padStart(9)).join("  ")}  ` +
+      `all ${homes.length} colon${homes.length === 1 ? "y" : "ies"}`
+  );
+  console.log(
+    `  ${classes.map((c) => mean(tickMs[c.label] ?? []).toFixed(2).padStart(9)).join("  ")}  ` +
+      "the whole tick, for comparison (projection, Memory and intents included)"
+  );
+}
+
 function printReport(classes, pooled, world, allTicks) {
   // The level is printed on the first line of every run, tripped trigger
   // or not: the ms below are a colony's only at the level it was built at,
@@ -1816,6 +2575,75 @@ function printReport(classes, pooled, world, allTicks) {
 }
 
 // ---------------------------------------------------------------------------
+// The bundle, with one probe in it: what each colony's `decide` costs.
+// ---------------------------------------------------------------------------
+
+// `Main.loop` runs `decide` once per living colony (ADR 0047) inside one
+// pair of `Game.cpu.getUsed()` readings, so the bot's own CPU line prices
+// the tick's whole decide phase and never one colony's share of it. ADR
+// 0052 asks for the share, and R0 changes no runtime line to get it — so
+// the harness takes the reading on the outside, by wrapping the bundle's
+// own `decide` before the bundle is ever called.
+//
+// A textual patch on a compiled artifact, which is exactly as brittle as
+// it sounds, so it fails loudly rather than silently measuring nothing
+// (ADR 0027): the name has to appear exactly once as a top-level
+// declaration, or the run stops and names the edit that closes it. The
+// wrapper is two clock reads per colony per tick — under a microsecond
+// against a tick's milliseconds — and it is in every scenario's numbers
+// rather than only the two-colony one, so the four scenarios stay
+// comparable with each other.
+//
+// The row's label is the colony's home room, read off the Snapshot the
+// call was handed (`SpatialInfo.RoomName`, which `Snapshot.build` sets to
+// the colony's home): the same name `Colony.living` files the colony
+// under, so the table and the declaration cannot drift apart.
+const DECIDE_PROBE = `
+// ---- appended by scripts/profile.mjs: one timing per decide call --------
+globalThis.__fabotDecideCalls = [];
+{
+  const inner = decide;
+  decide = function decideProbe(snapshot, assignments, verbose, memo) {
+    const started = globalThis.__fabotClock();
+    try {
+      return inner(snapshot, assignments, verbose, memo);
+    } finally {
+      globalThis.__fabotDecideCalls.push({
+        home: (snapshot && snapshot.Spatial && snapshot.Spatial.RoomName) || "(unnamed)",
+        ms: globalThis.__fabotClock() - started,
+      });
+    }
+  };
+}
+`;
+
+// The bundle as the engine would load it, plus the probe above. Written
+// beside the original rather than over it — under the same basename, so
+// the hotspot tables' `[main.js:NNNN]` locations still name the lines a
+// reader can open, and appended rather than spliced, so every line number
+// in them is the bundle's own.
+function loadBundle(file) {
+  const source = readFileSync(file, "utf8");
+  const declarations = source.match(/^function decide\(/gm) ?? [];
+  if (declarations.length !== 1) {
+    throw new Error(
+      `${path.relative(process.cwd(), file)} holds ${declarations.length} top-level ` +
+        "`function decide(` declarations and this harness needs exactly one to time each " +
+        "colony's decide (ADR 0052's CPU row per colony). Whatever renamed or inlined it — a " +
+        "Fable or esbuild upgrade, a rename in Decide.fs — is what this probe has to be " +
+        "re-pointed at"
+    );
+  }
+  globalThis.__fabotClock = () => performance.now();
+  const probed = path.join(here, "..", "build", "probe");
+  mkdirSync(probed, { recursive: true });
+  const probedFile = path.join(probed, path.basename(file));
+  writeFileSync(probedFile, source + DECIDE_PROBE);
+  const { loop } = createRequire(import.meta.url)(probedFile);
+  return { loop, decideCalls: () => globalThis.__fabotDecideCalls };
+}
+
+// ---------------------------------------------------------------------------
 // Drive it.
 // ---------------------------------------------------------------------------
 
@@ -1862,14 +2690,19 @@ if (worldRooms.length > 1 && new Set(wallCounts.map(([, n]) => n)).size !== worl
 // exclusion in `clusterTiles` fails here instead of quietly furnishing a
 // room the colony's Layout would never build — which is what an untested
 // level bump did at RCL6, taking the east source's Seat at 17,39 (#144).
-const reservedGround = workingGround(world.grid, world.sourcePositions, world.controllerPos);
-const onWorkingGround = world.clustered.filter((pos) => reservedGround.has(keyOf(pos)));
-if (onWorkingGround.length > 0) {
-  console.error(
-    `${world.grid.name}: ${onWorkingGround.length} clustered structure(s) stand on the working ` +
-      `ground ADR 0022 keeps the Layout off — ${onWorkingGround.map(keyOf).join(", ")}`
-  );
-  process.exit(1);
+// Once per furnished home room and not once per world: a `pair` run
+// furnishes a mother's room and a child's, at two levels, and a check that
+// read the first would pass a cluster standing on the other's Seats.
+for (const home of world.furnished) {
+  const reservedGround = workingGround(home.grid, home.sourcePositions, home.controllerPos);
+  const onWorkingGround = home.clustered.filter((pos) => reservedGround.has(keyOf(pos)));
+  if (onWorkingGround.length > 0) {
+    console.error(
+      `${home.grid.name}: ${onWorkingGround.length} clustered structure(s) stand on the working ` +
+        `ground ADR 0022 keeps the Layout off — ${onWorkingGround.map(keyOf).join(", ")}`
+    );
+    process.exit(1);
+  }
 }
 
 // The self-check's own reads are not the bot's, so the counters start the
@@ -1881,28 +2714,30 @@ if (onWorkingGround.length > 0) {
 // projects every tick.
 for (const name of worldRooms) terrainReads.set(name, 0);
 
-const { loop } = createRequire(import.meta.url)(bundle);
+const { loop, decideCalls } = loadBundle(bundle);
 
 // The fleet, before a tick is either warmed or measured: the bundle hires
 // it against this level's bank, and the outpost crews follow it. Neither
 // count is written down anywhere in this file (#144).
-const { hired, hireTicks, bodies } = hireFleet(world, game, loop);
-if (world.crew) world.crew(bodies, game);
+const { hired, hireTicks, bodyOf } = hireFleet(world, game, loop);
+if (world.crew) world.crew(bodyOf, game);
 // Where the hired fleet stands, which since #163 is no longer the home
 // room for every body: the reserver row and the outposts' own Anchors are
 // cast by the home spawn and stationed a room away (ADR 0042), so a line
 // that read every hire as the home room's would over-count it by exactly
-// the rows that left. The crew stands outside the count entirely — it is
-// not hired — and is named after it.
-const homeHires = world.creeps.filter((creep) => creep.room.name === world.homeRoom.name).length;
+// the rows that left. Counted per home room since ADR 0052's `pair`, where
+// there are two of them and "at home" is a different room for each colony.
+// The crew stands outside the count entirely — it is not hired — and is
+// named after it.
+const homeNames = world.homeRooms.map((room) => room.name);
+const atHome = (name) => world.creeps.filter((creep) => creep.room.name === name).length;
+const homeHires = homeNames.reduce((total, name) => total + atHome(name), 0);
 const outpostHires = hired - homeHires;
 console.log(
-  `hired ${hired} creep${hired === 1 ? "" : "s"} for ${world.homeRoom.name} at RCL${LEVEL} ` +
-    `off a ${FURNITURE.bank} bank over ${hireTicks} ticks, by the bundle's own SpawnCreep ` +
-    "intents" +
-    (outpostHires
-      ? ` (${homeHires} standing at home, ${outpostHires} stationed in the outposts)`
-      : "") +
+  `hired ${hired} creep${hired === 1 ? "" : "s"} for ` +
+    `${homeNames.map((name) => `${name} (${atHome(name)} standing there)`).join(" and ")} ` +
+    `over ${hireTicks} ticks, by the bundle's own SpawnCreep intents` +
+    (outpostHires ? `, ${outpostHires} of them stationed outside a home room` : "") +
     (world.creeps.length > hired ? `, plus ${world.creeps.length - hired} outpost crew` : "")
 );
 
@@ -1941,15 +2776,55 @@ await session.post("Profiler.enable");
 await session.post("Profiler.setSamplingInterval", { interval: SAMPLE_INTERVAL_US });
 await session.post("Profiler.start");
 
+// Every colony's `decide`, tick by tick and class by class: the probe
+// pushes one row per call and this reads the tick's rows back off it, so a
+// tick that ran a colony fewer than the scenario declares is caught here
+// rather than showing up as a mean over the wrong divisor.
+const decideMs = { all: new Map(), perturbed: new Map(), quiet: new Map() };
+const recordDecide = (label, calls) => {
+  const table = decideMs[label];
+  for (const call of calls) {
+    const rows = table.get(call.home) ?? [];
+    rows.push(call.ms);
+    table.set(call.home, rows);
+  }
+};
+
 const ticks = { all: [], perturbed: [], quiet: [] };
 for (let i = 0; i < TICKS; i++) {
   const moved = movesCensus();
   if (moved) world.perturb();
   const run = tickThrough(moved);
+  decideCalls().length = 0;
   const start = performance.now();
   tickStart = start;
   run();
   const ms = performance.now() - start;
+  const calls = decideCalls();
+  // The colonies the scenario built against the colonies the bundle
+  // actually decided for: a child whose spawn stands in a room the
+  // controller does not answer `my` for is simply not living
+  // (`Colony.living`), and nothing else in this report would say so — the
+  // ms would just be one colony's under a two-colony heading.
+  // Compared by name and not by count: a count alone passes any change
+  // that keeps the number and moves the identity — a `Colony.declared`
+  // edit that made the mother and her *outpost* the two living colonies of
+  // the `pair` world would print a `decide by colony` table headed by a
+  // room this scenario furnished as an outpost and never as a colony, and
+  // the two-colony mean under it would be over the wrong two colonies.
+  const decided = calls.map((call) => call.home).sort();
+  const declared = [...world.colonies].sort();
+  if (decided.length !== declared.length || decided.some((home, i) => home !== declared[i])) {
+    throw new Error(
+      `the ${scenario} scenario declares ${world.colonies.length} living colon` +
+        `${world.colonies.length === 1 ? "y" : "ies"} (${world.colonies.join(", ")}) and the ` +
+        `bundle ran decide ${calls.length} time${calls.length === 1 ? "" : "s"} this tick ` +
+        `(${calls.map((call) => call.home).join(", ") || "none"}): ` +
+        "`Colony.living` is not reading this world the way the scenario describes it"
+    );
+  }
+  recordDecide("all", calls);
+  recordDecide(moved ? "perturbed" : "quiet", calls);
   ticks.all.push({ t: game.time, ms });
   (moved ? ticks.perturbed : ticks.quiet).push(ms);
   game.time++;
@@ -1977,6 +2852,7 @@ const classes = CENSUS_EVERY
   : [{ label: "all", ms: ticks.all.map((row) => row.ms), summary: pooled }];
 
 printReport(classes, pooled, world, ticks.all);
+printDecideByColony(classes, decideMs, ticks);
 
 // Per room, because ADR 0041 layered the memo by room name: the number to
 // read is one read per room the bundle projected, over the whole run. Read

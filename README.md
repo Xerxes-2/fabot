@@ -38,7 +38,9 @@ npm run build
 npm run profile            # 100 ticks at RCL5; or: npm run profile -- 500 [top-N]
 npm run profile -- 100 30 --census-every 10   # move the census every 10 ticks
 npm run profile -- --scenario outpost         # the colony and its neighbours
-npm run profile -- --level 4                  # build both scenarios at another RCL
+npm run profile -- --scenario young           # one colony at RCL1, on a 300 bank
+npm run profile -- --scenario pair            # an RCL5 mother and her child
+npm run profile -- --level 4                  # build the colony at another RCL
 ```
 
 `npm run profile` drives the compiled `loop()` in Node against a stub colony
@@ -59,7 +61,7 @@ clock, which is a floor for the same reason its ms/tick is (below) — a run
 that prints "not triggered" has failed to trip the trigger, and has not
 cleared it.
 
-Two scenarios:
+Four scenarios:
 
 - **`stub`** (the default) is one synthetic room (`W1N1`) shaped like the
   live colony. A room it does not model, such as a declared outpost,
@@ -106,10 +108,44 @@ Two scenarios:
   all three rooms: the run prints the terrain read per
   room, and says so out loud if a room of the world ever falls outside the
   scan (a declaration removed, or ADR 0043's stand-down shutting one).
+- **`young`** is the same room W13S28 read as what it now is: one colony
+  at **RCL1 on a 300 bank**, with a container on each of its two sources
+  (both Posts, ADR 0042, each garrisoned by an Anchor standing *on* it,
+  ADR 0020) and nothing else standing: no road and no rampart, because a
+  room under `Colony.bootstrapLevel` places neither (#209, #214); no
+  extension the level does not allow; and no upgrade buffer — which is a
+  fact about this room and not about its level, the container plan being
+  RCL-gated by nothing, so the live W13S28 has simply built its two Posts
+  first (its upgrader row is not hired at that bank either, #187).
+  `RoomFixtures.colonyAt` models the other half of the same rung — the
+  room whose Layout has *finished*, buffer and all — and the two are meant
+  to differ there. Every body in it is what `Decide.bodyFor` casts at 300.
+  It is the other end of the range ADR 0052 rewrites the model over: every
+  quota, walk and Repair here is priced on bare ground rather than on the
+  mother's furniture.
+- **`pair`** is the tick the live bot actually runs (ADR 0047, ADR 0052):
+  **two colonies**, the mother W12S28 at RCL5 with her one declared
+  outpost W12S27, and the child W13S28 bootstrapping beside her with its
+  own Spawn2 standing at `16,12`. `Main.loop` builds a Snapshot per living
+  colony and runs `decide` once over each; while the child is under
+  `Colony.bootstrapLevel` the mother projects its room as a bootstrap
+  layer and her worker row stands `pioneerCount` bodies at the child's
+  controller (#192, #213). Every report prints a **`decide by colony`**
+  table — one row per colony, their sum, and the whole tick beside it —
+  and a run whose living colonies are not the ones the scenario describes
+  throws rather than reporting a mean over the wrong divisor.
 
-Both are built at a **controller level** — `--level N`, RCL5 by default,
-which is where the live colony stands — and the first line of every report
-says which one it ran at. Everything the level implies is derived from it
+Each is built at a **controller level** — `--level N` — and the first line
+of every report says which one it ran at. Which colony the flag moves is
+the scenario's: `stub` and `outpost` build their one colony (RCL5 by
+default, where the mother stands), `young` its one young colony (RCL1),
+and `pair` the **child** (RCL2 by default, where W13S28 stands today)
+while the mother stays pinned at RCL5. `--scenario pair --level 3` is a
+reading rather than a mistake: at `Colony.bootstrapLevel` the window
+shuts, the mother stops projecting the child's room, and the two colonies
+run side by side sharing nothing.
+
+Everything the level implies is derived from it
 rather than written down: the extension, tower and Storage counts come off
 the engine's `CONTROLLER_STRUCTURES` table (RCL5: 30 extensions, of which 3
 stay construction sites so the Build family is measured, 2 towers, 1
@@ -124,7 +160,7 @@ the script. Moving the colony a level is one flag, and no count in
 What a derived fleet does ask for by hand is one line per **row**. The
 harness stations a hire by the row its name carries, and a row it has no
 station for is refused rather than stood among the workers, so **a row
-added to `Decide.patternTable` owes both scenarios a `stations` entry** —
+added to `Decide.patternTable` owes every scenario a `stations` entry** —
 the tile that row does its work from — or every profile run throws on the
 first body of it that is cast. That bill has now come due twice, both
 times a level's worth of measurement after the row landed: ADR 0042's
@@ -211,6 +247,15 @@ at the RCL5 default: unflagged `stub` means **2.6 ms/tick** and
 `--scenario outpost` **2.0**, and a perturbed tick under `--census-every
 10` costs **6.7** on `stub` and **7.4** on `outpost` — against 2.6 and 2.0
 on that run's quiet ticks, which is the whole point of splitting them.
+
+**ADR 0052's own anchor** is the two new scenarios, 300 ticks under
+`--census-every 10` at their default levels (posted to #50): `young`
+**1.5 ms** on a quiet tick and **4.6** on a census tick, all of it one
+colony's; `pair` **3.9** and **7.9**, which the `decide by colony` table
+splits into the mother's 2.4/6.4 and the child's 1.0/1.0 — the child's
+two columns being equal because the perturbation moves the mother's
+census and not its own. They are the line R1 to R5 of ADR 0052 are read
+against.
 
 The two scenarios reached that anchor by different routes, and the split is
 worth keeping straight. `stub` furnishes and derives exactly as it did
