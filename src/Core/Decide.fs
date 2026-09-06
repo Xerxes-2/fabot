@@ -1243,11 +1243,20 @@ let private heldRateOf (control: RoomControlInfo) =
     else
         neutralOutputPerTick
 
-/// One source's output per tick (ADR 0042), read off the room it stands
-/// in. A fact read per source and not a module constant, because a
-/// reservation can lapse — a reserver dies, an invader core taps the
-/// controller — and quotas sized for the held rate against a source
-/// yielding five overbuild their rows twofold.
+/// One source's **rate** per tick (ADR 0042), read off the room it stands
+/// in: what the rock regenerates, and so the ceiling on what anything
+/// standing over it can take out. A fact read per source and not a module
+/// constant, because a reservation can lapse — a reserver dies, an invader
+/// core taps the controller — and quotas sized for the held rate against a
+/// source yielding five overbuild their rows twofold.
+///
+/// The rate and not the output: what a Post is *worth* is what the body
+/// garrisoning it digs, which is this number only while the row's cast can
+/// reach it (`sourceOutputOf` below, #208). Two readers want the ceiling
+/// itself rather than the capped answer — `anchorWorkCapOf` just below,
+/// which derives the row's Work cap from it and would otherwise size the
+/// body off a number the body decides, and the cap inside `sourceOutputOf`
+/// itself.
 ///
 /// None for a source in a room the colony has no vision in this tick, and
 /// for one the projection does not place: who holds a room we cannot look
@@ -1261,7 +1270,7 @@ let private heldRateOf (control: RoomControlInfo) =
 /// that places its id (ADR 0041), never the outpost declaration: the quota
 /// is derived from the projection, and a source the projection does not
 /// place counts nothing wherever it was declared.
-let private sourceOutputOf (snapshot: Snapshot) atlas (sourceId: string) : int option =
+let private sourceRateOf (snapshot: Snapshot) atlas (sourceId: string) : int option =
     Atlas.targetRoom atlas sourceId
     |> Option.bind (fun room -> Map.tryFind room snapshot.RoomControl)
     |> Option.map heldRateOf
@@ -1329,6 +1338,15 @@ let private isPosted atlas (s: SourceInfo) =
 /// answers the held ceiling: the largest the rule gives, which is the safe
 /// direction above and today's number besides.
 ///
+/// **The rock's rate and never `sourceOutputOf`'s capped answer** (#208).
+/// That answer is the rate capped by what this row's own cast digs, so a
+/// ceiling derived from it would size the body off a number the body
+/// decides: at a 300 bank the cast is `2W`, the capped output four, the
+/// ceiling three, the next cast still `2W` — a circle that can only
+/// ratchet downwards and never lets a growing bank buy the Work the rock
+/// is waiting for. The cap is the room's; the body's dig rate is applied
+/// after it, where the quotas read a store.
+///
 /// **What this does not yet buy is a number the live colony can move.**
 /// The colony's own room's Posts are in the set folded here and an owned
 /// room prices at the held rate, so `List.max` is `heldOutputPerTick` in
@@ -1337,7 +1355,12 @@ let private isPosted atlas (s: SourceInfo) =
 /// against a rock giving five. ADR 0042's "a lapsed reservation is now a
 /// visible economic event" is delivered by the hauler quota and the income
 /// base, which do shrink on their own (#127), and not yet by this row's
-/// body. Narrowing the fold to the Posts a cast is actually filling —
+/// body — and since #208 those two shrink only where the cast can dig
+/// past the lapsed rate, which is a bank of 400 and up. Under it the row
+/// digs four whatever the controller says and the lapse costs the colony
+/// nothing to hear about, because it costs the colony nothing: a `2W`
+/// Anchor takes the same four a tick out of a rock giving five as out of
+/// one giving ten. Narrowing the fold to the Posts a cast is actually filling —
 /// #132's other option — is deferred rather than refused, and it is a
 /// wider change than it looks: the unmanned Posts have to be paired to
 /// their sources *at arrival* (ADR 0026), or an ordinary succession sizes
@@ -1347,10 +1370,10 @@ let private isPosted atlas (s: SourceInfo) =
 let private anchorWorkCapOf (snapshot: Snapshot) atlas : int =
     snapshot.Sources
     |> List.filter (isPosted atlas)
-    |> List.choose (fun s -> sourceOutputOf snapshot atlas s.Id)
+    |> List.choose (fun s -> sourceRateOf snapshot atlas s.Id)
     |> function
         | [] -> heldWorkCap
-        | outputs -> List.max outputs |> workCapOf
+        | rates -> List.max rates |> workCapOf
 
 /// The richest bank the colony could fill this tick: every projected
 /// room's capacity, and the largest of them. Four readers who must not
@@ -1372,6 +1395,54 @@ let private richestCapacity (snapshot: Snapshot) =
     |> function
         | [] -> 0
         | caps -> List.max caps
+
+/// What one source is **worth to the quotas that read a store** (ADR 0042
+/// as #208 amends it): what the Anchor row's cast digs there, capped at
+/// the rate its room pays. The rock's rate is the ceiling and never the
+/// answer — a Post yields what the body garrisoning it takes out of it,
+/// and a bank that cannot buy the Work to drain a source does not earn ten
+/// a tick because the room would have paid ten.
+///
+/// The defect that put it here, live at t169,0xx: at a 300 bank the row
+/// casts `anchorBodyFor workCap 300` = `2W/1C/1M`, which digs four a tick,
+/// while `sourceRateOf` said ten. A child colony with two Posts read
+/// twenty a tick of income it never earned, hired eighteen workers off it
+/// and left twelve of them standing idle beside four haulers with nothing
+/// to ship. The home room never showed it because at an 1,800 bank the
+/// cast is `6W` — twelve a tick, over the rate — and the cap is not
+/// binding: this rule changes no number a colony past the early banks
+/// reads.
+///
+/// **The row's cast at this bank, and emphatically not the living
+/// Anchor's body.** A quota read off a living body oscillates on that
+/// body's death — the income base would halve the tick an Anchor expired
+/// and double again when its successor arrived, and the worker row would
+/// chase it — where what the row *casts* is a colony fact that holds
+/// whether the Post is manned or empty (ADR 0006). It is the same call
+/// `surplusOverLifetime` already prices the row's amortization by, so what
+/// the colony charges the row for and what it credits the row with digging
+/// come out of one body.
+///
+/// One number over the whole colony rather than one per Post, because the
+/// body is: `anchorWorkCapOf` folds the posted set into one ceiling for
+/// the reason recorded there — a cast is a body and not a posting, and no
+/// caster knows which Post the Anchor it casts will man (ADR 0021, ADR
+/// 0006).
+///
+/// Unpriceable stays unpriceable: the cap is applied to a rate that is
+/// there, so a source in a room the colony cannot see is still None and
+/// still enters no quota (ADR 0004).
+let private sourceOutputOf (snapshot: Snapshot) atlas (sourceId: string) : int option =
+    // The Work the row would cast this tick times HARVEST_POWER — the same
+    // `anchorBodyFor anchorWorkCapOf richestCapacity` triple the
+    // amortization is priced by, so the two readings cannot drift apart.
+    let dug =
+        anchorBodyFor (anchorWorkCapOf snapshot atlas) (richestCapacity snapshot)
+        |> List.filter ((=) Work)
+        |> List.length
+        |> (*) harvestPerWork
+
+    sourceRateOf snapshot atlas sourceId |> Option.map (min dug)
 
 /// The hauler row's quota rule (ADR 0012) — the row's colony fact, per
 /// ADR 0006's law that a row arrives with its quota or not at all:
@@ -1410,6 +1481,13 @@ let private richestCapacity (snapshot: Snapshot) =
 /// haul capacity on it. A container whose source's room the colony cannot
 /// price hires nobody at all, the same answer unreachable geometry gets
 /// (ADR 0004).
+///
+/// And that output is what the Post's garrison digs, capped at the rock's
+/// rate (`sourceOutputOf`, #208): a container is filled by the Anchor
+/// standing on it and never by the room's regeneration, so at a 300 bank —
+/// where the row casts `2W` and digs four a tick — this row hired three
+/// bodies to ship a flow that asks for one, and the four of them stood
+/// full beside a spawn already at capacity.
 ///
 /// Every room the projection carries, and not the colony's own alone
 /// (ADR 0042): an outpost's container ships its source's energy home
@@ -1777,6 +1855,13 @@ let private reserverClaimsOf (snapshot: Snapshot) atlas : int list =
 /// their own prose is what puts it in, "posted ones enter the income base
 /// at the source's output".
 ///
+/// An output is **what the garrison digs, capped at the source's rate**
+/// (`sourceOutputOf`, #208): the rate is what the rock regenerates and the
+/// Anchor row's cast at this bank is what leaves it, so a colony whose
+/// bank buys `2W` earns four a tick from a Post and not the ten the room
+/// would pay a body big enough to take it. The row is charged its
+/// replacement here at that same body, so credit and charge are one cast.
+///
 /// From that income the reserver, anchor and hauler rows' replacement
 /// amortization (body cost spread over a creep's lifetime) is deducted.
 /// Those three are hired off facts about the *ground* — a declared
@@ -1837,7 +1922,9 @@ let private surplusOverLifetime
     // Summed over the posted sources at each one's own output, never a
     // count times a constant (ADR 0042): a source the colony cannot price
     // contributes nothing, which is the same zero it would contribute by
-    // not being posted.
+    // not being posted. The output is the garrison's dig rate under the
+    // rock's own ceiling (#208), which is the body the amortization above
+    // is priced at — one cast, read once as a cost and once as income.
     let income =
         snapshot.Sources
         |> List.filter (isPosted atlas)
