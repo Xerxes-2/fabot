@@ -1593,10 +1593,24 @@ let private isStandingBody (creep: CreepInfo) =
 let private upgraderDrain capacity =
     upgradeDrainOf (bodyFor upgraderPattern capacity)
 
-/// The upgrader row's quota (ADR 0046): the surplus divided by one
-/// standing body's drain, rounded up as the worker row's is (ADR 0037) —
-/// the granularity a floor drops is a whole body's Work, and here that is
-/// eleven of them at the live RCL5 bank.
+/// The upgrader row's quota (ADR 0046, amended by #195): the surplus
+/// divided by one standing body's drain, rounded **down** — the whole
+/// bodies the surplus pays for, and the remainder handed on to the worker
+/// row below, whose own division rounds up (ADR 0037) and is what turns a
+/// part of a body into a hire.
+///
+/// The two rows are hired out of one surplus, so only one of them may
+/// round up: ADR 0037 admits an oversell bounded by *one body's* lifetime
+/// drain, paid out of stock rather than income, and two rows rounding up
+/// against the same number sell that bound twice. Which row keeps the
+/// rounding is settled by the size of the body it oversells — the bound is
+/// the body, and this row's is the larger one. At the live RCL5 bank a
+/// remainder of half a body rounded up here promised eleven Work it had no
+/// income for: 16,500 more energy over a lifetime against a surplus of
+/// 26,800, twenty-two a tick drawn against twenty coming in, the
+/// difference made up out of the storage every tick of both lives. The
+/// same remainder rounded up on the worker row buys nine Work, which is
+/// the bound ADR 0037 argued for and the body it argued about.
 ///
 /// **Non-zero only while a built controller container stands in the
 /// room.** The buffer is this row's working ground — the Work Area of one
@@ -1626,6 +1640,9 @@ let private upgraderDrain capacity =
 ///
 /// A negative surplus hires none: `max 0` is this row's floor, and the
 /// worker row's floor below is what keeps a body in the colony at all.
+/// F#'s integer division truncates toward zero, so a shortfall smaller
+/// than one body's lifetime drain already answers 0 unaided and the `max`
+/// is the guard over the rest.
 ///
 /// Built and not pending, because `Atlas.controllerContainers` folds the
 /// standing census alone — a container *site* at the controller is a
@@ -1641,16 +1658,23 @@ let private upgraderQuota (snapshot: Snapshot) atlas surplus =
     then
         0
     else
-        ceilDiv surplus (upgraderDrain capacity * creepLifetime) |> max 0
+        surplus / (upgraderDrain capacity * creepLifetime) |> max 0
 
 /// The worker row's floor (ADR 0046): the row's income term is whatever
-/// the upgrader row has not eaten, and beside a buffer that is often
-/// nothing at all — the quota above rounds *up*, so one standing body can
-/// be hired against the whole surplus and leave the generalist row asking
-/// for zero. A colony with no generalist in it builds nothing and repairs
-/// nothing: a standing body is shut out of all three deliveries (ADR
-/// 0046), and the hauler row carries no Work part, so a container site or
-/// a decaying road would stand while the controller ticked up beside it.
+/// the upgrader row has not eaten, and beside a buffer that can still be
+/// nothing at all. The quota above rounds down since #195, so the
+/// remainder it leaves is a real one — but it is bounded by one standing
+/// body's whole lifetime drink, and the standing row's own replacement is
+/// charged against it before the commuting row divides: a surplus landing
+/// just past a whole multiple of that drink leaves the worker row nothing
+/// at all. At the RCL4 bank one posted source is 13,100 of surplus over a
+/// 12,000 drink — one body hired, 1,100 left, and the 1,250 that body
+/// costs to replace takes more than the whole of it. A colony with no
+/// generalist in it
+/// builds nothing and repairs nothing: a standing body is shut out of all
+/// three deliveries (ADR 0046), and the hauler row carries no Work part,
+/// so a container site or a decaying road would stand while the
+/// controller ticked up beside it.
 ///
 /// Two while anything stands in the Build or Repair pool, one otherwise.
 /// Both numbers are tunables and the shape of the rule is not: two,
@@ -1763,16 +1787,16 @@ let private workforceTarget
     // terms as the three rows charged inside `surplus` and priced at the
     // body the casting step below would actually cast.
     //
-    // The second term cannot move the target while the quota above rounds
-    // *up*: a row hired at `ceil(surplus / drain)` drinks at least the
-    // whole surplus, so the remainder is already at or under zero before
-    // its bodies are charged, and the worker row is at its floor either
-    // way. It is written all the same, because what the sum says is the
-    // rule and not the arithmetic that happens to be redundant at this
-    // rounding — a quota with a cap or a ceiling on it (ADR 0046's option
-    // ③, or a bank too poor for the row) leaves a remainder for this to
-    // bite into, and a term missing then would hire an upgrade mouth the
-    // standing row's own replacement is paying for.
+    // The second term bites since #195: the quota rounds down, so the
+    // remainder is what is left of a whole body's drain and the standing
+    // row's own replacement comes out of it before the commuting row is
+    // hired against the rest. Under the old rounding it could not move the
+    // target at all — a row hired at `ceil(surplus / drain)` drinks at
+    // least the whole surplus, so the remainder was already at or under
+    // zero before its bodies were charged — and it was written then for
+    // the reason it earns now: what the sum says is the rule, and an
+    // upgrade mouth hired out of energy the standing row's own replacement
+    // is paying for is a mouth twice sold.
     let upgraderCost =
         upgraderQuota * upgraderDrain capacity * creepLifetime
         + upgraderQuota * bodyCost (bodyFor upgraderPattern capacity)

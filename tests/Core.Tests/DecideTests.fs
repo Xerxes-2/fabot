@@ -19037,15 +19037,25 @@ let private upgraderColony room =
     }
 
 /// The two rows the ground hires, and as many of the two surplus rows as
-/// the case wants: two Anchors for the two Posts, the one hauler both
-/// round trips come to together at this bank (ADR 0049), then upgraders
-/// and generalists.
-let private upgraderFleet upgraders workers =
-    [ anchor "a1" 0 50; anchor "a2" 0 50; hauler "h1" 0 100 ]
+/// the case wants: one Anchor per Post, the one hauler every round trip
+/// comes to together at this bank (ADR 0049), then upgraders and
+/// generalists. The bank is a parameter and not the literal 1,800 because
+/// the standing row's stand-in has to be the body *this* bank's sizing
+/// rule casts — a fixture at a poorer bank whose fleet still held
+/// `11W/1C/11M` would have `patternOf` read a row the colony could not
+/// have cast, and the row's living count is what every reading below is.
+let private upgraderFleetAt capacity anchors upgraders workers =
+    [ for i in 1..anchors -> anchor $"a{i}" 0 50 ]
+    @ [ hauler "h1" 0 100 ]
     @ [
-        for i in 1..upgraders -> creepWith $"u{i}" 0 50 (bodyFor upgraderPattern 1800)
+        for i in 1..upgraders -> creepWith $"u{i}" 0 50 (bodyFor upgraderPattern capacity)
     ]
     @ [ for i in 1..workers -> worker $"w{i}" 0 50 ]
+
+/// The fleet at the live RCL5 bank and this room's two Posts, which is
+/// what most of the readings below are read against.
+let private upgraderFleet upgraders workers =
+    upgraderFleetAt 1800 2 upgraders workers
 
 /// A construction site standing on the corridor's top row, out of the way
 /// of the trunk the haulers walk: what puts a Build in the pool, which is
@@ -19075,6 +19085,40 @@ let private withDeclaredOutpost (colony: Snapshot) =
                     Terrain = Map.ofList (corridor 25 41 48)
                     TargetPositions = Map.ofList [ "ctrl-out", { X = 25; Y = 45 } ]
                 }
+    }
+
+/// The same colony with a third source embedded in the wall at (14,10)
+/// and its built container standing on the Seat at (15,10) — a third Post,
+/// and with it a third ten a tick of income. The one knob #195's pairwise
+/// turns: two posted sources are a surplus of one and a half standing
+/// bodies, three are two and a half.
+let private thirdSource (colony: Snapshot) =
+    { colony with
+        Sources = colony.Sources @ [ source "src-c" ]
+        Spatial =
+            colony.Spatial
+            |> withTargets
+                [
+                    "src-c", { X = 14; Y = 10 }, Source
+                    "can-c", { X = 15; Y = 10 }, Structure BuiltKind.Container
+                ]
+            |> withHome (fun layer ->
+                { layer with
+                    Terrain = layer.Terrain |> Map.add { X = 14; Y = 10 } Wall
+                })
+    }
+
+/// The same colony with one posted source instead of two — `src-b` and its
+/// container out of the projection and out of the Sources beside it. The
+/// other side of the same pairwise: half the income is a surplus that does
+/// not reach one whole standing body.
+let private oneSource (colony: Snapshot) =
+    { colony with
+        Sources = colony.Sources |> List.filter (fun s -> s.Id <> "src-b")
+        Spatial =
+            { colony.Spatial with
+                TargetKinds = colony.Spatial.TargetKinds |> Map.remove "src-b" |> Map.remove "can-b"
+            }
     }
 
 /// One tick's casts off the one idle spawn: empty, or the one row whose
@@ -19111,8 +19155,9 @@ let upgraderQuotaTests =
                 // over a 1,500-tick life is 30,000; the two rows hired off
                 // the ground cost 2 × 700 of Anchor and 1 × 1,800 of
                 // hauler, so the surplus is 26,800 and one standing body's
-                // eleven Work drinks 16,500 of it — a quota of two, rounded
-                // up as the worker row's is (ADR 0037).
+                // eleven Work drinks 16,500 of it — a quota of one, the
+                // whole bodies the surplus buys and no part of one (#195,
+                // pinned below).
                 //
                 // The body is the row's sizing rule and not the
                 // generalist's: eleven Work, one Carry, eleven Move for
@@ -19127,6 +19172,101 @@ let upgraderQuotaTests =
                         (List.replicate 11 Work @ [ Carry ] @ List.replicate 11 Move)
                         "11W/1C/11M, the row's own cast at the RCL5 bank"
                 | other -> failtest $"expected exactly one SpawnCreep intent, got %A{other}"
+            }
+
+            test
+                "the quota is the whole bodies the surplus buys, and the remainder is the generalist row's" {
+                // #195, amending ADR 0046: two rows are hired out of one
+                // surplus and only one of them may round up. ADR 0037
+                // admits an oversell bounded by *one body's* lifetime
+                // drain, paid out of stock rather than income, and two
+                // rows rounding up against the same number sell that bound
+                // twice — so the rounding stays with the smaller body,
+                // which is the generalist's.
+                //
+                // 26,800 of surplus over 16,500 of drink is one and a half
+                // standing bodies. One is hired; the remainder — 10,300 of
+                // drink less the 1,700 that body costs to replace, so
+                // 8,600 — is the generalist row's, and its own rounding up
+                // (ADR 0037) turns it against a 13,500 drain into one
+                // worker, which is the number ADR 0046's own #195 bullet
+                // hands on. Rounded up here
+                // instead it was two standing bodies drinking 33,000
+                // against 26,800 of surplus — twenty-two a tick against
+                // twenty of income, the difference made up out of the
+                // storage for the whole of both lives (#187's finding).
+                Expect.isEmpty
+                    (buffered 1 1)
+                    "one standing body and one generalist are the whole of what this surplus hires"
+
+                Expect.stringStarts
+                    (castName (buffered 0 1))
+                    "upgrader-"
+                    "one short of the standing row, the gap is the buffer's"
+
+                Expect.stringStarts
+                    (castName (buffered 1 0))
+                    "worker-"
+                    "and one short of the generalist, the remainder hires it"
+
+                Expect.isEmpty
+                    (buffered 2 1)
+                    "a second standing body is over the quota, and it holds the generalist row down rather than casting beside it"
+            }
+
+            test "a surplus of two and a half standing bodies hires two" {
+                // The pairwise on the surplus alone, one rival at a time:
+                // the same room, the same 1,800 bank, the same
+                // `11W/1C/11M`, and a third posted source. 45,000 in over
+                // a lifetime less 2,100 of Anchor and the hauler row's
+                // body is a surplus of rather over two whole standing
+                // bodies, and the quota is the two — the floor is the
+                // *quotient's* whole part and never a cap of one.
+                let richer =
+                    thirdSource (upgraderColony (withBuffer (Structure BuiltKind.Container)))
+
+                let richFleet = upgraderFleetAt 1800 3
+
+                Expect.stringStarts
+                    (castName (casts richer (richFleet 1 1)))
+                    "upgrader-"
+                    "one standing body in and the surplus still buys a whole second"
+
+                Expect.isEmpty
+                    (casts richer (richFleet 2 1))
+                    "and the second is where it stops: the half body left over is not a third hire"
+            }
+
+            test "a surplus short of one whole standing body hires none of the row" {
+                // The other half of the same pairwise, and the case the
+                // old rounding got most wrong: one posted source instead
+                // of two. 15,000 in less 700 of Anchor and the hauler's
+                // body is a surplus of about three quarters of the 16,500
+                // one standing body drinks. Rounded up that hired a whole
+                // eleven-Work body against three quarters of the income to
+                // feed it; rounded down the row is empty and the surplus
+                // goes to the generalist row, which is where it went
+                // before the buffer stood.
+                let lean = oneSource (upgraderColony (withBuffer (Structure BuiltKind.Container)))
+
+                // The standing row is empty in both readings, so the fleet
+                // is the one Anchor this room's one Post hires, its hauler
+                // and the generalists.
+                let leanFleet = upgraderFleetAt 1800 1 0
+
+                Expect.stringStarts
+                    (castName (buffered 0 0))
+                    "upgrader-"
+                    "the premise: at two posted sources this same buffer hires the standing row"
+
+                Expect.stringStarts
+                    (castName (casts lean (leanFleet 0)))
+                    "worker-"
+                    "at one it does not, and the surplus that cannot carry a standing body is the generalist's"
+
+                Expect.isEmpty
+                    (casts lean (leanFleet 1))
+                    "and that one generalist is the whole of what the half-income colony hires"
             }
 
             test "a buffer still under construction hires none, and the worker row is unmoved" {
@@ -19196,9 +19336,9 @@ let upgraderQuotaTests =
                     "and so is an unshipped round trip"
 
                 Expect.stringStarts
-                    (castName (buffered 2 0))
+                    (castName (buffered 1 0))
                     "worker-"
-                    "with the quota's two standing, what is left of the target is the generalist's"
+                    "with the quota's one standing, what is left of the target is the generalist's"
             }
 
             test "a declared outpost's reserver is cast before the standing row" {
@@ -19227,32 +19367,40 @@ let upgraderQuotaTests =
             }
 
             test "the worker row's floor is two while a Build stands in the pool and one otherwise" {
-                // ADR 0046's floor, pairwise on the pool alone. The
-                // upgrader row eats this colony's surplus whole — two
-                // bodies drinking eleven a tick against twenty of income —
-                // so the generalist row's income term is nothing and the
-                // floor is the only thing hiring it. Without the floor a
-                // colony beside a rich buffer would run no body that may
-                // build or repair at all: a standing body is shut out of
-                // all three deliveries (ADR 0046) and the hauler row has no
-                // Work part.
+                // ADR 0046's floor, pairwise on the pool alone: the same
+                // colony, the same fleet, one construction site between
+                // the two readings. Without the floor a colony beside a
+                // rich buffer would run no body that may build or repair
+                // at all — a standing body is shut out of all three
+                // deliveries (ADR 0046) and the hauler row has no Work
+                // part.
+                //
+                // This fixture's income term is one since #195: the
+                // remainder the standing row leaves feeds one generalist
+                // mouth, so what these readings pin is the floor's *upper*
+                // half — the step from one to two that a site in the pool
+                // buys. The lower half, the one otherwise, is pinned at
+                // the poorer bank further down ("the standing row's own
+                // replacement can eat the whole remainder"), where the
+                // income term really is zero and the floor is the only
+                // thing hiring a body that may build.
                 Expect.stringStarts
-                    (castName (buffered 2 0))
+                    (castName (buffered 1 0))
                     "worker-"
-                    "the floor hires the first generalist with nothing left to feed it"
+                    "the remainder and the floor agree at one, and the colony is one short of it"
 
-                Expect.isEmpty (buffered 2 1) "and with a quiet pool it stops at one"
+                Expect.isEmpty (buffered 1 1) "and with a quiet pool it stops at one"
 
                 let building =
                     withBuildSite (upgraderColony (withBuffer (Structure BuiltKind.Container)))
 
                 Expect.stringStarts
-                    (castName (casts building (upgraderFleet 2 1)))
+                    (castName (casts building (upgraderFleet 1 1)))
                     "worker-"
-                    "a site in the pool raises the same floor to two"
+                    "a site in the pool raises the floor to two, and the same fleet is one short"
 
                 Expect.isEmpty
-                    (casts building (upgraderFleet 2 2))
+                    (casts building (upgraderFleet 1 2))
                     "and stops there: the floor is two, not a body per site"
             }
 
@@ -19266,11 +19414,20 @@ let upgraderQuotaTests =
                 //
                 // A colony with no Post has no amortization either, so the
                 // surplus here is exactly zero rather than negative and it
-                // is `ceilDiv`'s own answer that is being read: the quota's
-                // `|> max 0` is the floor under the case this fixture
-                // cannot reach, an amortization above income by more than
-                // one whole body's lifetime drain (`ceilDiv` divides toward
-                // zero, so a smaller shortfall answers 0 unaided).
+                // is the division's own answer that is being read: the
+                // quota's `|> max 0` is the floor under the case this
+                // fixture cannot reach, an amortization above income by
+                // more than one whole body's lifetime drain (integer
+                // division truncates toward zero, so a smaller shortfall
+                // answers 0 unaided).
+                //
+                // The generalist below is *not* the worker row's floor
+                // being read: with no Post there is no Anchor and no
+                // hauler either, so the sum is one body at most and
+                // `max minWorkforce` (ADR 0012) answers two whatever the
+                // floor is. ADR 0046's floor is pinned where it is
+                // separable — at the RCL4 bank below, where the ground
+                // rows carry the sum clear of two on their own.
                 let unposted =
                     { upgraderColony (withBuffer (Structure BuiltKind.Container)) with
                         Sources = []
@@ -19304,14 +19461,77 @@ let upgraderQuotaTests =
 
             // The same room and the same standing buffer at a poorer bank,
             // which is the one knob that moves what the row's own cast is
-            // (`bodyFor upgraderPattern`). The levels are the banks' real
-            // ones: 800 is RCL3's ten extensions, 750 the same room one
-            // extension short of them, 550 RCL2's five.
+            // (`bodyFor upgraderPattern`) and, with it, the drink the
+            // surplus is divided by. The levels are the banks' real ones:
+            // 1,300 is RCL4's, 800 RCL3's ten extensions, 750 the same
+            // room one extension short of them, 550 RCL2's five.
             let atBank capacity level =
                 { upgraderColony (withBuffer (Structure BuiltKind.Container)) with
                     RoomEnergy = bank capacity capacity
                     Controller = Some(controllerAt level)
                 }
+
+            test
+                "the standing row's own replacement can eat the whole remainder, and the floor hires the generalist then" {
+                // ADR 0046's floor at its lower half, separable at last
+                // (#195). Rounding down leaves a remainder, but the
+                // remainder is bounded by one whole drink and the standing
+                // row's own replacement is charged against it before the
+                // commuting row divides — so a surplus landing just past a
+                // whole multiple of the drink leaves the generalist row
+                // asking for nothing, and only the floor keeps a body that
+                // may Build or Repair in the colony.
+                //
+                // One posted source at the RCL4 bank is that colony:
+                // 15,000 in, less 700 of Anchor and 1,200 of hauler, is
+                // 13,100 of surplus; the row's `8W/1C/8M` drinks 12,000 of
+                // it, so the quota is one and 1,100 is left — and the
+                // 1,250 that body costs to replace is more than the whole
+                // of it, so the income term is zero. The target is one
+                // Anchor, one hauler, one standing body and the floor's
+                // one generalist, which is four and clear of ADR 0012's
+                // colony floor of two: what is read here is ADR 0046's
+                // row floor and nothing else.
+                let quiet = oneSource (atBank 1300 4)
+
+                Expect.stringStarts
+                    (castName (casts quiet (upgraderFleetAt 1300 1 1 0)))
+                    "worker-"
+                    "the remainder feeds no generalist mouth, and the floor hires one all the same"
+
+                Expect.isEmpty
+                    (casts quiet (upgraderFleetAt 1300 1 1 1))
+                    "and with a quiet pool the floor is one, so that generalist is where it stops"
+            }
+
+            test
+                "the standing row's replacement is charged before the generalist row divides the remainder" {
+                // The amortization term ADR 0046 asks `workforceTarget` to
+                // grow, which was inert while the quota rounded up and
+                // bites since #195: what the commuting row divides is the
+                // remainder *less* the standing bodies' own replacement,
+                // or the colony hires an upgrade mouth out of energy that
+                // replacement is already spending.
+                //
+                // One posted source at the RCL3 bank is where the charge
+                // is the whole of the answer: 15,000 in, less 700 of
+                // Anchor and 750 of hauler, is 13,550; the row's
+                // `5W/1C/5M` drinks 7,500, so the quota is one and 6,050
+                // is left. Charged the 800 that body costs to replace it
+                // is 5,250, and ADR 0037's rounding turns that against a
+                // 6,000 drain into one generalist. Uncharged it would be
+                // 6,050 — over the drain, and a second generalist.
+                let poorer = oneSource (atBank 800 3)
+
+                Expect.stringStarts
+                    (castName (casts poorer (upgraderFleetAt 800 1 1 0)))
+                    "worker-"
+                    "5,250 of remainder against a 6,000 drain is one generalist"
+
+                Expect.isEmpty
+                    (casts poorer (upgraderFleetAt 800 1 1 1))
+                    "and it is one and not two: the 6,050 that would have bought a second is the standing body's replacement"
+            }
 
             test "a bank whose own cast is no standing body hires none of the row" {
                 // The gate's other half (#187, ADR 0046's amended
