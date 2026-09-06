@@ -1456,6 +1456,14 @@ let containerTiles (atlas: Atlas) : Set<Pos> = containerTilesIn atlas atlas.Home
 let pendingContainerTilesIn (atlas: Atlas) (room: string) : Set<Pos> =
     tilesOfKindIn atlas room (Site BuiltKind.Container)
 
+/// The same census in the colony's own room — what the Layout's road
+/// placement reads. The mirror of `pendingRoadTiles`, and asked for the
+/// same reason: the engine takes one construction site per tile, so a
+/// tile already carrying a container site is a tile no road site may be
+/// asked for (ADR 0040's tile clause, in the direction #209 opened).
+let pendingContainerTiles (atlas: Atlas) : Set<Pos> =
+    pendingContainerTilesIn atlas atlas.Home
+
 /// ADR 0040's container census in one room: the tiles a container stands
 /// on united with the tiles one is pending on — the set every "must
 /// another container be built?" question is asked against, at home and in

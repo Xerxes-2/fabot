@@ -2940,6 +2940,41 @@ let private storageLevel = 4
 /// tiles against thousands (ADR 0034).
 let private rampartLevel = 2
 
+/// The level the Layout places **road sites** from (ADR 0011 as #209
+/// amends it). Not an engine unlock — the engine allows a road at RCL1 —
+/// but the level below which a road is the wrong spend: the trunk set a
+/// bootstrapping room plans is thousands of energy of income placed in one
+/// tick, in the same surplus tier as the Upgrade and nearer to hand than
+/// the controller (the Matcher orders inside a tier by [[travel cost]]
+/// alone), so every worker builds roads and nobody upgrades. W13S28 at
+/// RCL1 planned some 19,000 energy of it against 8 a tick — around 2,400
+/// ticks of the colony's entire income, spent ahead of the 200 progress
+/// that unlocks five extensions and doubles the body.
+///
+/// This narrows ADR 0010 and does not contradict it. A road is worth
+/// exactly what that ADR prices it at, to this body too: `1W/2C/2M`
+/// carrying energy generates 3 fatigue a tile on road against 6 on plain
+/// and recovers 4, so the loaded commute is one tile a tick paved and one
+/// tile per two ticks bare — the half speed ADR 0010 was written about.
+/// What #209 says is not that the body cannot feel it but that half a tick
+/// a loaded step, on a room whose whole income is 8 a tick, is not worth
+/// 2,400 ticks of that income when the same energy buys the level that
+/// doubles the body outright.
+///
+/// It is `Colony.bootstrapLevel` and not a number of its own, because it is
+/// the same question: ADR 0047 chose RCL3 as the line a colony can feed and
+/// defend itself at — the tenth extension and the first tower, 800 energy
+/// of bank, a body that is not the 300-energy starter. Below that line the
+/// colony is still buying its own economy; above it, roads are what the
+/// economy is for. One constant read off the other, so the two lines cannot
+/// drift apart.
+///
+/// This gates the **placement** and never the plan: the trunks are routed
+/// whole every tick regardless of level (ADR 0011's "computed whole"), so
+/// they still route around tomorrow's reserved tiles and a Link footing
+/// still dodges them.
+let private roadLevel = Colony.bootstrapLevel
+
 /// The Layout horizon (ADR 0011, moved to RCL5 by ADR 0039): the whole
 /// plan is computed up to this level regardless of the current one, so
 /// today's roads route around tomorrow's structures. One level of
@@ -3156,6 +3191,33 @@ let private planLayout
         let roadGap =
             Set.difference roadPlan (Atlas.roadTiles atlas)
             |> fun wanted -> Set.difference wanted (Atlas.pendingRoadTiles atlas)
+
+        // The road sites this tick: the whole gap from `roadLevel` up, none
+        // below it (#209). The level gate is a filter on the placement and
+        // not on the plan — `roadPlan` and `roadGap` above are computed at
+        // every level, so the trunks still route around the reservation and
+        // the Link footings still dodge the pavement — and it is a gate
+        // rather than pacing, which ADR 0011 rejected and still rejects: a
+        // stateless planner has no memory to pace with, and this needs
+        // none. It is the same shape the clustered kinds already have
+        // (`storageGap level`, `towerGap level`): the plan is whole, the
+        // level says how much of it is placed.
+        //
+        // The container sites are subtracted with the roads' own census,
+        // which is ADR 0040's tile clause read in the other direction. It
+        // is the direction the gate opened: below `roadLevel` a source
+        // container drops on an unpaved trunk tile (`owedRoad` below), and
+        // the tick the room reaches RCL3 that tile is still in the road
+        // gap — no road stands on it and no road site pends — so the
+        // Layout would ask for a road on a tile already carrying a
+        // container site and the engine would refuse it every tick until
+        // the container finished. One construction site per tile is one
+        // rule, and both kinds have to read it.
+        let placedRoads =
+            if controller.Level >= roadLevel then
+                Set.difference roadGap (Atlas.pendingContainerTiles atlas)
+            else
+                Set.empty
 
         // Containers (ADR 0012), computed whole like everything else and
         // RCL-gated by nothing — the engine allows them from level 0. Each
@@ -3375,7 +3437,18 @@ let private planLayout
         // container (planned onto the trunk's first tile) waits for the
         // road to stand and then coexists with it. This is about the tile
         // and moves with no target.
-        let owedRoad = Set.union (Atlas.pendingRoadTiles atlas) roadGap
+        //
+        // It reads the road sites actually placed and not the whole gap
+        // (#209): the clause exists because two sites cannot share a tile,
+        // so below `roadLevel`, where no road site is placed at all, there
+        // is nothing for the container to collide with and nothing to wait
+        // for. Read off `roadGap` instead, a bootstrapping room would hold
+        // its source containers back until RCL3 waiting on a road that is
+        // not coming — and a source container **site** on a Seat is already
+        // a [[post]] (#205), the one that hires the [[anchor]] whose income
+        // the gate exists to protect. Holding it back would spend the gate's
+        // own saving.
+        let owedRoad = Set.union (Atlas.pendingRoadTiles atlas) placedRoads
 
         let containerGap =
             unservedPicks |> List.filter (fun tile -> not (Set.contains tile owedRoad))
@@ -3409,7 +3482,7 @@ let private planLayout
         place Storage (storagePick |> List.truncate (storageGap controller.Level))
         @ place Tower (towerTiles |> List.truncate (towerGap controller.Level))
         @ place Extension (extensionTiles |> List.truncate (extensionGap controller.Level))
-        @ place Road (Set.toList roadGap)
+        @ place Road (Set.toList placedRoads)
         @ place Container containerGap
         @ place Rampart (Set.toList rampartGap),
         List.rev servedFootings,

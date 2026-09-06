@@ -1236,6 +1236,10 @@ let pocketColony level =
 /// The colony with its own road plan already standing: the state the
 /// source containers drop in — a container defers to a road site on its
 /// tile (one construction site per tile) and coexists with the built road.
+///
+/// It stands the roads the plan *places*, not the roads it plans, so
+/// below `roadLevel` it stands none (#209) and the premise is empty:
+/// every caller that needs a road under its container asks from RCL3 up.
 let withRoadsBuilt colony =
     let { Intents = intents } = decide colony Map.empty Set.empty None
 
@@ -1268,7 +1272,7 @@ let layoutTests =
     testList
         "layout"
         [
-            test "RCL2 places the extension gap and every trunk road, no tower" {
+            test "RCL2 places the extension gap and no tower — and not one road" {
                 let { Intents = intents } = decide (trunkColony 2) Map.empty Set.empty None
 
                 Expect.isEmpty (sitesOfKind Tower intents) "no tower below RCL3"
@@ -1278,6 +1282,18 @@ let layoutTests =
                     3
                     "only the gap against the two built extensions is placed"
 
+                // The level gate on road sites (#209 amending ADR 0011):
+                // the trunks are planned whole at every level and placed
+                // from `roadLevel` up. Below it the pavement costs the
+                // level that would make the body bigger, which is worth
+                // more than the half tick a loaded step it buys (ADR 0010,
+                // narrowed at `roadLevel`). Pairwise against the test
+                // below, same fixture one level on.
+                Expect.isEmpty (sitesOfKind Road intents) "no road site below the road level"
+            }
+
+            test "the same fixture at RCL3 places every trunk road" {
+                let { Intents = intents } = decide (trunkColony 3) Map.empty Set.empty None
                 let roads = sitesOfKind Road intents |> Set.ofList
 
                 Expect.isTrue
@@ -1332,9 +1348,14 @@ let layoutTests =
             }
 
             test "trunks route around every horizon reservation" {
-                let rcl2 = decide (trunkColony 2) Map.empty Set.empty None
+                // Read from `roadLevel` up, where the sites are placed
+                // (#209): below it the plan is still routed whole but
+                // nothing of it reaches the ground, so the road *sites* are
+                // the same at every level the gate lets through and this
+                // pair is RCL3 against the horizon's own RCL4.
+                let rcl3 = decide (trunkColony 3) Map.empty Set.empty None
                 let rcl4 = decide (trunkColony 4) Map.empty Set.empty None
-                let roads = sitesOfKind Road rcl2.Intents |> Set.ofList
+                let roads = sitesOfKind Road rcl3.Intents |> Set.ofList
 
                 // Read off the horizon's own level, where the whole
                 // reservation is on the ground — the second tower and the
@@ -1408,7 +1429,9 @@ let layoutTests =
             }
 
             test "without a source only the Work Area swamps are paved, never plain" {
-                let { Intents = intents } = decide (noSourceColony 2) Map.empty Set.empty None
+                // At `roadLevel`, the level the sites reach the ground from
+                // (#209): below it the answer is empty whatever the plan is.
+                let { Intents = intents } = decide (noSourceColony 3) Map.empty Set.empty None
 
                 Expect.equal
                     (sitesOfKind Road intents |> Set.ofList)
@@ -1417,7 +1440,9 @@ let layoutTests =
             }
 
             test "built roads and pending road sites are never placed again" {
-                let colony = noSourceColony 2
+                // At `roadLevel` too: below it the gate would answer empty
+                // for its own reason and the census rule would go untested.
+                let colony = noSourceColony 3
 
                 let snapshot =
                     { colony with
@@ -1439,7 +1464,9 @@ let layoutTests =
             }
 
             test "each source gets one container on the Seat where its trunk starts" {
-                let colony = withRoadsBuilt (trunkColony 2)
+                // Roads stand from `roadLevel` up (#209), so the level that
+                // has a trunk to seat the container beside is RCL3.
+                let colony = withRoadsBuilt (trunkColony 3)
                 let { Intents = intents } = decide colony Map.empty Set.empty None
 
                 let sourceContainers =
@@ -1457,8 +1484,11 @@ let layoutTests =
             test "a container never shares a tile with a planned road site" {
                 // One construction site per tile (engine rule): on a fresh
                 // plan the source container defers to the trunk road site
-                // under it and drops only once that road stands.
-                let { Intents = intents } = decide (trunkColony 2) Map.empty Set.empty None
+                // under it and drops only once that road stands. At
+                // `roadLevel`, where there is a road site to collide with —
+                // below it none is placed and the clause has nothing to say
+                // (#209).
+                let { Intents = intents } = decide (trunkColony 3) Map.empty Set.empty None
                 let roads = sitesOfKind Road intents |> Set.ofList
 
                 for tile in sitesOfKind Container intents do
@@ -1468,7 +1498,9 @@ let layoutTests =
             }
 
             test "the controller container lands in the Work Area beside a trunk" {
-                let { Intents = intents } = decide (trunkColony 2) Map.empty Set.empty None
+                // At `roadLevel`: the trunk it is judged against is a road
+                // site, and those are placed from RCL3 up (#209).
+                let { Intents = intents } = decide (trunkColony 3) Map.empty Set.empty None
                 let controllerPos = { X = 35; Y = 25 }
 
                 let controllerContainers =
@@ -1487,9 +1519,22 @@ let layoutTests =
                 Expect.isFalse (Set.contains tile roads) "the container stays off the road itself"
             }
 
-            test "containers have no RCL gate — level 1 already places both kinds" {
-                let { Intents = intents } =
-                    decide (withRoadsBuilt (trunkColony 1)) Map.empty Set.empty None
+            test "containers have no RCL gate — level 1 already places both kinds, on no road" {
+                // The tile clause (ADR 0040) defers a container to a road
+                // *site* on its tile, because two sites cannot share one.
+                // Below `roadLevel` no road site is placed, so there is
+                // nothing to collide with and nothing to wait for (#209):
+                // read off the whole road *plan* instead, this fixture's
+                // source container would sit on the trunk's own first tile
+                // and be held back until RCL3, and a container site on a
+                // Seat is the [[post]] that hires the [[anchor]] (#205)
+                // whose income the gate exists to protect. Nothing stands
+                // in this fixture, so what the containers coexist with is
+                // the empty placement and not a built road — the standing
+                // road's own case is the RCL3 tests below.
+                let { Intents = intents } = decide (trunkColony 1) Map.empty Set.empty None
+
+                Expect.isEmpty (sitesOfKind Road intents) "the premise: RCL1 places no road"
 
                 Expect.hasLength
                     (sitesOfKind Container intents)
@@ -1497,9 +1542,61 @@ let layoutTests =
                     "one source container and one controller container"
             }
 
-            test "a one-Seat source gets its container on that Seat" {
+            test "the road the level withheld is never asked for onto a pending container" {
+                // The mirror of the tile clause (ADR 0040), in the
+                // direction the level gate opened (#209): the source
+                // container drops on the trunk's first tile at RCL1
+                // because no road site is placed there to collide with,
+                // and it is still a *site* — 5,000 energy of progress —
+                // when the room reaches `roadLevel`. That tile is still in
+                // the road gap, so a road site would be asked for on top
+                // of it and the engine would refuse it every tick until
+                // the container finished.
+                let rcl1 = decide (trunkColony 1) Map.empty Set.empty None
+
+                let trunkRoads =
+                    decide (trunkColony 3) Map.empty Set.empty None
+                    |> fun result -> sitesOfKind Road result.Intents |> Set.ofList
+
+                let onTrunk =
+                    sitesOfKind Container rcl1.Intents
+                    |> List.filter (fun tile -> Set.contains tile trunkRoads)
+
+                Expect.isNonEmpty
+                    onTrunk
+                    "the premise: RCL1 seats a container on a tile the trunk wants"
+
+                let pending =
+                    onTrunk
+                    |> List.mapi (fun index tile ->
+                        $"can-site-%d{index}", tile, Site BuiltKind.Container)
+
+                let colony = trunkColony 3
+
                 let { Intents = intents } =
-                    decide (withRoadsBuilt (pocketColony 2)) Map.empty Set.empty None
+                    decide
+                        { colony with
+                            Spatial = colony.Spatial |> withTargets pending
+                        }
+                        Map.empty
+                        Set.empty
+                        None
+
+                let roads = sitesOfKind Road intents |> Set.ofList
+
+                Expect.isEmpty
+                    (onTrunk |> List.filter (fun tile -> Set.contains tile roads))
+                    "one construction site per tile: the road waits for the container to stand"
+
+                Expect.isNonEmpty roads "and the rest of the trunk set still drops"
+            }
+
+            test "a one-Seat source gets its container on that Seat" {
+                // From `roadLevel` up, where `withRoadsBuilt` has a road
+                // set to stand (#209): below it the plan places none and
+                // the fixture would carry an empty premise.
+                let { Intents = intents } =
+                    decide (withRoadsBuilt (pocketColony 3)) Map.empty Set.empty None
 
                 Expect.contains
                     (sitesOfKind Container intents)
@@ -1508,7 +1605,10 @@ let layoutTests =
             }
 
             test "built containers and pending container sites are never placed again" {
-                let colony = withRoadsBuilt (trunkColony 2)
+                // From `roadLevel` up, so the roads `withRoadsBuilt`
+                // stands are the plan's own and the containers are read
+                // beside a real road census (#209).
+                let colony = withRoadsBuilt (trunkColony 3)
                 let planned = decide colony Map.empty Set.empty None
 
                 let standing =

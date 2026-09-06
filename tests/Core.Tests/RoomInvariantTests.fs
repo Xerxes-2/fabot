@@ -2490,3 +2490,128 @@ let boundedBandTests =
                 Expect.isGreaterThan walked 20 "the sweep really did walk across"
             }
         ]
+
+/// The road level gate on real terrain (#209 amending ADR 0011). Stated
+/// pairwise on one fixture and one spawn, a level at a time: what the gate
+/// changes is *when* the plan reaches the ground, so nothing but the level
+/// may differ between the two runs it is read off. The child colony the
+/// gate was written for is W13S28 — the room that placed 64 road sites at
+/// RCL1 with 8 energy a tick coming in — and the mother is W12S28, which
+/// is above the line and must not move.
+///
+/// No tile is named: the room says which tiles the trunks want and this
+/// says only that the level decides whether they are asked for.
+[<Tests>]
+let roadLevelTests =
+    /// One captured room planned from one fixed spawn at a level, as the
+    /// sweep plans it — the same `colonyOf` and the same projection, so the
+    /// only thing that varies across a pair below is the controller level.
+    ///
+    /// The spawn is the tile the room's colony actually stands on where
+    /// there is one: `AlsoSweep` carries W12S28's live spawn for exactly
+    /// that reason (its own doc above), and the stride's first tile is
+    /// (6,6), a corner of the room no colony has ever stood in. A pair
+    /// read off `List.head` would be a real pair about an imaginary
+    /// mother. A room the capture cannot answer for is planned from the
+    /// stride's first tile, which is a premise and not an answer: what the
+    /// gate is read off is the level, and the spawn only has to be the
+    /// same in both runs.
+    let placedAt roomName level =
+        let room = rooms |> List.find (fun room -> room.Name = roomName)
+        let capture = load roomName
+
+        let spawn =
+            match room.AlsoSweep with
+            | live :: _ -> live
+            | [] -> spawnTiles room capture |> List.head
+
+        let loaded = project capture spawn room.FallbackController
+
+        decide (colonyOf loaded level) Map.empty Set.empty None
+        |> fun result -> placementsOf result.Intents
+
+    testList
+        "the road level gate on real terrain"
+        [
+            test "W13S28 places no road site below RCL3 and its whole trunk set at RCL3" {
+                let rcl1 = placedAt "W13S28" 1
+                let rcl2 = placedAt "W13S28" 2
+                let rcl3 = placedAt "W13S28" 3
+
+                Expect.isEmpty
+                    (tilesOfKind Road rcl1)
+                    "RCL1: the bootstrapping colony pours no income into pavement"
+
+                Expect.isEmpty (tilesOfKind Road rcl2) "RCL2: still under the road level"
+
+                Expect.isNonEmpty
+                    (tilesOfKind Road rcl3)
+                    "RCL3: `roadLevel` is reached and the whole gap drops at once"
+            }
+
+            test "the road gap is all the level withheld, and it drops whole" {
+                // The gate is a filter on the placement and never on the
+                // plan (ADR 0011's "computed whole"), so the set that
+                // arrives at RCL3 is the set the room wanted all along —
+                // pinned as level-invariance above the line rather than as
+                // a tile list, since the plan is the room's answer and not
+                // the test's.
+                Expect.equal
+                    (tilesOfKind Road (placedAt "W13S28" 4) |> Set.ofList)
+                    (tilesOfKind Road (placedAt "W13S28" 3) |> Set.ofList)
+                    "nothing above the line moves: RCL4 places what RCL3 places"
+            }
+
+            test "a bootstrapping room still gets its containers — they wait on no road" {
+                // The tile clause (ADR 0040) defers a container to a road
+                // *site* on its tile, and below the gate there is none. A
+                // source container is the [[post]] that hires the [[anchor]]
+                // whose income the gate exists to protect, so holding it
+                // back until RCL3 would spend the gate's own saving.
+                let rcl1 = placedAt "W13S28" 1
+
+                Expect.isNonEmpty
+                    (tilesOfKind Container rcl1)
+                    "the containers are planned at RCL1, with no road owed under them"
+            }
+
+            test "the mother is above the line and does not move" {
+                // W12S28 from the tile its colony stands on, at the live
+                // RCL5: the gate is inert from `roadLevel` up, so the road
+                // sites there are the same set RCL3 places. What this pins
+                // is the gate's upper edge and not byte-identity with the
+                // revision before it — one revision cannot compare itself
+                // to another, and a stored tile list is the expected value
+                // this suite refuses to hold (`RoomFixtures`: real terrain
+                // is a counterexample generator, not a source of expected
+                // values). What judges the set itself is the RCL4 sweep's
+                // own road invariants, which run over every swept spawn of
+                // this room, this tile among them.
+                let rcl5 = tilesOfKind Road (placedAt "W12S28" 5) |> Set.ofList
+
+                Expect.isNonEmpty rcl5 "the mother still paves"
+
+                Expect.equal
+                    rcl5
+                    (tilesOfKind Road (placedAt "W12S28" 3) |> Set.ofList)
+                    "and paves exactly what it pays for at every level the gate lets through"
+            }
+
+            test "the gate withholds one kind and does not stop the Layout" {
+                // What a level gate on roads is not: a Layout that waits for
+                // RCL3. Every other kind is judged at RCL2 by its own rule
+                // and still reaches the ground — the extensions the level
+                // does unlock, the containers no level gates at all, the
+                // ramparts from `rampartLevel` up — so the room goes on
+                // growing into exactly the spend the gate is protecting.
+                let rcl2 = placedAt "W13S28" 2
+
+                Expect.isEmpty (tilesOfKind Road rcl2) "the premise: RCL2 places no road"
+
+                Expect.isNonEmpty
+                    (tilesOfKind Extension rcl2)
+                    "the extensions the level unlocks still drop"
+
+                Expect.isNonEmpty (tilesOfKind Container rcl2) "and the containers with them"
+            }
+        ]
