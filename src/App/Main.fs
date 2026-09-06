@@ -171,16 +171,34 @@ let loop () =
     let assignments = loadAssignments ()
     let verbose = ObserveMemory.loadVerbose ()
 
+    // Each colony decides its own tick, with its movement left
+    // unarbitrated (#216 R2b): a room two colonies both work is one room,
+    // and half its traffic arbitrated against the other half read as empty
+    // is how a mother's [[pioneer]] came to claim the child's [[anchor]]'s
+    // tile every tick for a body the engine never let it into (#220).
     let decisions =
         views
         |> List.map (fun (colony, view) ->
-            colony, view, decide view assignments verbose (Map.tryFind colony.Home planMemos))
+            colony,
+            view,
+            decideUnarbitrated view assignments verbose (Map.tryFind colony.Home planMemos))
+
+    // The one movement pass of the tick: every colony's Move Intents folded
+    // together and arbitrated once per room, over every creep of ours
+    // standing in it, each moving on the intent its own colony registered
+    // (ADR 0001 — movement is still issued nowhere but a pure Resolver, and
+    // this is that Resolver taking the whole room as its argument).
+    let moveIntents, moveVerdicts =
+        resolveRooms (decisions |> List.map (fun (_, _, decision) -> decision.Movement))
 
     // The decision boundary, and every colony's `decide` is inside it: the
     // column is what the tick spent deciding and not what one colony did
     // (ADR 0047). The two Memory reads above are inside it too: they are
     // `decide`'s arguments, which costs the phase a hash walk and buys the
-    // reading a place the code cannot drift away from.
+    // reading a place the code cannot drift away from. The movement pass is
+    // inside it as well, for the same reason it is one pass: it is the
+    // tick's arbitration and not any one colony's, and pricing it in a
+    // column of its own would say the opposite.
     let atDecide = Game.cpu.getUsed ()
 
     planMemos <-
@@ -222,7 +240,8 @@ let loop () =
         Observe.capPerCreep
         Game.time
         living
-        (decisions |> List.collect (fun (_, _, decision) -> decision.Verdicts))
+        ((decisions |> List.collect (fun (_, _, decision) -> decision.Verdicts))
+         @ moveVerdicts)
     |> ObserveMemory.save
 
     for colony, view, decision in decisions do
@@ -292,7 +311,10 @@ let loop () =
     // (ADR 0047). Nothing here has to be merged or deduplicated — an Intent
     // names an actor, and no actor is two colonies' this tick.
     let outcomes =
-        Executor.run (decisions |> List.collect (fun (_, _, decision) -> decision.Intents))
+        Executor.run (
+            (decisions |> List.collect (fun (_, _, decision) -> decision.Intents))
+            @ moveIntents
+        )
 
     let accepted =
         outcomes

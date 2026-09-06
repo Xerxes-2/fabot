@@ -2602,6 +2602,14 @@ function printReport(classes, pooled, world, allTicks) {
 // rather than only the two-colony one, so the four scenarios stay
 // comparable with each other.
 //
+// What it wraps is `decideUnarbitrated` and not `decide` (#216 R2b): a
+// room's movement is arbitrated once for the whole tick over every creep
+// of ours standing in it, so it is nobody's column — it sits outside every
+// row here and inside the whole-tick number underneath them, which is why
+// the rows now sum to less than that number by more than the projection.
+// `decide` itself is the single-colony seam the suite drives and the shell
+// does not call it, so the bundle no longer carries it at all.
+//
 // The row's label is the colony's home room, read off the colony view
 // the call was handed (`SpatialInfo.RoomName`, which `ColonyView.ofWorld`
 // sets to the colony's home): the same name `Colony.living` files the colony
@@ -2619,14 +2627,14 @@ const DECIDE_PROBE = `
 // ---- appended by scripts/profile.mjs: one timing per decide call --------
 globalThis.__fabotDecideCalls = [];
 {
-  const inner = decide;
+  const inner = decideUnarbitrated;
   const stageOf = (snapshot, home) => {
     const stages = snapshot && snapshot.Stages;
     if (!home || !stages || typeof stages[Symbol.iterator] !== "function") return null;
     for (const [room, stage] of stages) if (room === home) return String(stage);
     return null;
   };
-  decide = function decideProbe(snapshot, assignments, verbose, memo) {
+  decideUnarbitrated = function decideProbe(snapshot, assignments, verbose, memo) {
     const started = globalThis.__fabotClock();
     const home = (snapshot && snapshot.Spatial && snapshot.Spatial.RoomName) || "(unnamed)";
     try {
@@ -2649,11 +2657,11 @@ globalThis.__fabotDecideCalls = [];
 // in them is the bundle's own.
 function loadBundle(file) {
   const source = readFileSync(file, "utf8");
-  const declarations = source.match(/^function decide\(/gm) ?? [];
+  const declarations = source.match(/^function decideUnarbitrated\(/gm) ?? [];
   if (declarations.length !== 1) {
     throw new Error(
       `${path.relative(process.cwd(), file)} holds ${declarations.length} top-level ` +
-        "`function decide(` declarations and this harness needs exactly one to time each " +
+        "`function decideUnarbitrated(` declarations and this harness needs exactly one to time each " +
         "colony's decide (ADR 0052's CPU row per colony). Whatever renamed or inlined it — a " +
         "Fable or esbuild upgrade, a rename in Decide.fs — is what this probe has to be " +
         "re-pointed at"

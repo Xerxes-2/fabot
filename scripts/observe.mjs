@@ -927,6 +927,8 @@ if (command === "console") {
         return `yielded to ${v.counterpart}`;
       case "rerouted":
         return "rerouted";
+      case "stalled":
+        return "stalled: nobody this pass can name holds the tile";
       default:
         return JSON.stringify(v);
     }

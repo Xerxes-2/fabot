@@ -2676,7 +2676,8 @@ let private verdictCreep =
     | Verdict.Scoring(creep, _)
     | Verdict.Grounded creep
     | Verdict.Yielded(creep, _)
-    | Verdict.Rerouted creep -> creep
+    | Verdict.Rerouted creep
+    | Verdict.Stalled creep -> creep
 
 /// The three rungs of a colony's life the fixture is built at: the child
 /// as it was claimed, the child at the level the bootstrap window closes
@@ -2713,6 +2714,113 @@ let colonyTierTests =
                         Expect.isTrue
                             (Set.contains creep.Name judged)
                             $"{creep.Name} came out of the tick with no Verdict"
+                }
+        ]
+
+/// The arbitration's own invariant, and the one #216 R2b bought: what a
+/// room's pass settles is a **matching** — one creep to a tile, one tile to
+/// a creep. The settle it replaced could not promise it: a creep left with
+/// no open candidate stayed on its own tile and let the engine fail
+/// whichever move contested it, which is two creeps judged onto one tile
+/// and a `MoveCreep` the engine deletes in silence.
+///
+/// Pinned on a **crowd in a corridor**, exhaustively, because that is where
+/// the property can be lost and a colony is not: every way of standing
+/// three bodies on the eight tiles of `DecideTests.lane` with either rock
+/// as either body's goal — 5,376 arrangements — and each of them a chain
+/// the search may have to walk end to end. The three colony fixtures below
+/// it are a smoke check over a real fleet on real terrain and deliberately
+/// not the pin: at one or two movers a tick they hold almost no contested
+/// tile, and this invariant was lost for a whole review round under them
+/// (the search freed a displaced body's tile before recursing, so a body
+/// deeper in the chain could take the tile the initiator was claiming).
+[<Tests>]
+let arbitrationInjectiveTests =
+    testList
+        "one settled tile each"
+        [
+            test "a one-wide lane, every three-body arrangement of it" {
+                let tiles = [ for x in 8..15 -> { X = x; Y = 12 } ]
+                let names = [ "a"; "b"; "c" ]
+                let rocks = [ "src-w"; "src-e" ]
+
+                let settledOn pocket places goals =
+                    let view =
+                        { DecideTests.bareRespawn with
+                            Sources = rocks |> List.map DecideTests.source
+                            Controller = None
+                            Creeps = names |> List.map (fun name -> DecideTests.worker name 0 50)
+                            Spatial =
+                                DecideTests.lane pocket
+                                |> DecideTests.withHome (fun layer ->
+                                    { layer with
+                                        CreepPositions = List.zip names places |> Map.ofList
+                                    })
+                        }
+
+                    let stepOf =
+                        DecideTests.resolveOn view (List.zip names goals)
+                        |> DecideTests.moveIntents
+                        |> Map.ofList
+
+                    List.zip names places
+                    |> List.map (fun (creep, pos) ->
+                        match Map.tryFind creep stepOf with
+                        | Some direction -> DecideTests.stepFrom pos direction
+                        | None -> pos)
+
+                let jams =
+                    [
+                        for pocket in [ false; true ] do
+                            for a in tiles do
+                                for b in tiles do
+                                    for c in tiles do
+                                        if a <> b && a <> c && b <> c then
+                                            for ga in rocks do
+                                                for gb in rocks do
+                                                    for gc in rocks do
+                                                        let places = [ a; b; c ]
+
+                                                        let goals =
+                                                            [ Harvest ga; Harvest gb; Harvest gc ]
+
+                                                        let settled = settledOn pocket places goals
+
+                                                        if
+                                                            List.length (List.distinct settled)
+                                                            <> List.length settled
+                                                        then
+                                                            yield pocket, places, goals, settled
+                    ]
+
+                Expect.isEmpty jams "every arrangement settles three bodies onto three tiles"
+            }
+
+            for room, level, bank in colonyTiers do
+                test $"{room} at RCL{level}: no two bodies are settled onto one tile" {
+                    let snapshot = colonyAt (load room) level bank
+                    let decision = decide snapshot Map.empty Set.empty None
+
+                    let stepOf =
+                        decision.Intents
+                        |> List.choose (function
+                            | MoveCreep(name, direction) -> Some(name, direction)
+                            | _ -> None)
+                        |> Map.ofList
+
+                    for KeyValue(name, layer) in snapshot.Spatial.Rooms do
+                        let settled =
+                            layer.CreepPositions
+                            |> Map.toList
+                            |> List.map (fun (creep, pos) ->
+                                match Map.tryFind creep stepOf with
+                                | Some direction -> DecideTests.stepFrom pos direction
+                                | None -> pos)
+
+                        Expect.hasLength
+                            (List.distinct settled)
+                            (List.length settled)
+                            $"two bodies settled onto one tile of {name}"
                 }
         ]
 

@@ -1116,6 +1116,43 @@ module Colony =
                 |> Option.exists (fun stage -> stage <> Independent)))
         |> List.map (fun child -> child.Home)
 
+    /// The declared children of this colony that have stopped being ours,
+    /// and are nobody else's either (#221): the second half of what a
+    /// mother projects for a child, and the one that has nothing to do with
+    /// raising it.
+    ///
+    /// A [[stage]] is `None` for a room we do not own — that is what makes
+    /// a room nobody claimed one no mother projects (ADR 0052 decision 3)
+    /// — so a child whose spawn is destroyed and whose controller is then
+    /// lost, to a rival's claim or to the 20,000-tick RCL1 downgrade, left
+    /// every projection there was: the room stood empty, no [[claim]] was
+    /// pooled anywhere, and only a human's edit to the declaration could
+    /// take it back. The level map the stage replaced carried a **seen**
+    /// controller at 0 and kept the room, which is the behaviour restored
+    /// here — off the ownership the world reads back rather than off a
+    /// level, because "ours to take" is what the [[claim]] asks.
+    ///
+    /// **Unowned and never a rival's**: a room somebody else holds is ADR
+    /// 0043's business and not a projection's, and a room with no control
+    /// entry is one nothing looked into this tick, which classifies nothing
+    /// (ADR 0004). What the mother then carries of it is the borrowing's
+    /// own narrowing — the controller, the sites and the spawn tile — which
+    /// is exactly what `Decide.claimTargets` reads and no more.
+    ///
+    /// The same three declaration clauses as `bootstrapping` above, and for
+    /// the same reasons: a room still in her outpost list is worked as one,
+    /// and a declaration naming itself its own mother is a human's slip.
+    let reclaiming (unowned: Set<string>) (colonies: Colony list) (colony: Colony) : string list =
+        let worked = colony.Outposts |> List.map (fun outpost -> outpost.RoomName)
+
+        colonies
+        |> List.filter (fun child ->
+            child.Mother = Some colony.Home
+            && child.Home <> colony.Home
+            && not (List.contains child.Home worked)
+            && Set.contains child.Home unowned)
+        |> List.map (fun child -> child.Home)
+
     /// The rooms one colony projects this tick: its home and its worked
     /// [[outpost]]s (`Outpost.roomsProjected`), and beside them the rooms
     /// it bootstraps (`bootstrapping`). The whole scan set in one sentence,
@@ -1655,23 +1692,45 @@ module World =
     /// nothing pooled in it, or pooled with nothing projecting it.
     let scanOf
         (stages: Map<string, ColonyStage>)
+        (unowned: Set<string>)
         (colonies: Colony list)
         (shut: Set<string>)
         (colony: Colony)
         : Outpost list * string list * string list =
         let outposts = Outpost.worked shut colony.Outposts
-        let bootstrap = Colony.bootstrapping stages colonies colony
-        outposts, bootstrap, Colony.roomsProjected outposts bootstrap colony.Home
+
+        // The two halves of what a mother projects for a child of hers, and
+        // they are disjoint by construction: a room she is raising is one we
+        // own, and a room she may take back is one we do not (#221).
+        let borrowed =
+            Colony.bootstrapping stages colonies colony
+            @ Colony.reclaiming unowned colonies colony
+
+        outposts, borrowed, Colony.roomsProjected outposts borrowed colony.Home
+
+    /// The declared homes that stand empty this tick: ours to take back if
+    /// they ever were ours, and the candidates a human means to take
+    /// (#221). Read off the same control entry ownership is read off
+    /// everywhere (ADR 0042); a room nothing looked into answers no, which
+    /// is ADR 0004's absence and not a claim that somebody holds it.
+    let unownedHomes (colonies: Colony list) (world: World) : Set<string> =
+        Colony.homes colonies
+        |> List.filter (fun name ->
+            (roomOf world name).Control
+            |> Option.exists (fun control -> control.Owner = Ownership.Unowned))
+        |> Set.ofList
 
     /// The rooms one colony projects this tick, off the world: `scanOf`'s
-    /// union with the stages it needs read for it.
+    /// union with the stages and the ownership it needs read for it.
     let roomsProjected
         (colonies: Colony list)
         (shut: Set<string>)
         (world: World)
         (colony: Colony)
         : string list =
-        let _, _, scanned = scanOf (stages colonies world) colonies shut colony
+        let _, _, scanned =
+            scanOf (stages colonies world) (unownedHomes colonies world) colonies shut colony
+
         scanned
 
     /// Which colony holds each creep this tick (`Colony.creepColonies`, ADR
@@ -1723,13 +1782,21 @@ module World =
 /// child's.
 type BorrowedWork =
     {
-        /// The home rooms of the children this colony is raising — the
-        /// rooms it may take an Upgrade and a Build in, and nothing else
-        /// (ADR 0047 decision 4, `Colony.bootstrapping`). The view carries
-        /// only those two kinds of target for these rooms, so the mother
-        /// pools no Harvest on the child's rock, hires no Anchor for its
-        /// Post, counts none of its Seats into her quotas and hauls none of
-        /// its energy home.
+        /// The home rooms of the children this colony carries in its
+        /// projection for a reason that is not mining them, and it is two
+        /// reasons: the children it is **raising**, whose Upgrade and Build
+        /// its bodies may cross for (ADR 0047 decision 4,
+        /// `Colony.bootstrapping`), and the children it has **lost**, whose
+        /// controller is a [[claim]] to make (#221, `Colony.reclaiming`).
+        /// The two are disjoint by construction — one is a room we own and
+        /// the other a room we do not — and they narrow to the same three
+        /// kinds, because a Claim asks for exactly what an Upgrade does: a
+        /// controller placed on a tile a body can stand beside.
+        ///
+        /// The view carries only those kinds of target for these rooms, so
+        /// the mother pools no Harvest on the child's rock, hires no Anchor
+        /// for its Post, counts none of its Seats into her quotas and hauls
+        /// none of its energy home.
         ///
         /// The **cap** on the borrowing is not here yet: how many bodies
         /// cross is the worker row's `pioneerCount` (#213), which is a
@@ -1887,11 +1954,13 @@ type ColonyView =
 
 [<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
 module ColonyView =
-    /// What a colony may see of a room it only [[bootstrap]]s: the
-    /// controller its workers upgrade, the sites they build, and the spawn
-    /// — not a target of hers at all, but the tile her [[pioneer]]s walk up
-    /// to and the structure that says a colony lives here (ADR 0047
-    /// decision 4).
+    /// What a colony may see of a room it carries for a child of its own:
+    /// the controller its workers upgrade — or, where the child has been
+    /// lost, [[claim]] (#221) — the sites they build, and the spawn, not a
+    /// target of hers at all but the tile her [[pioneer]]s walk up to and
+    /// the structure that says a colony lives here (ADR 0047 decision 4).
+    /// Both halves of `BorrowedWork.Rooms` narrow through this one filter:
+    /// a Claim asks for exactly what an Upgrade does.
     ///
     /// Everything else the room holds is the child's own business, and a
     /// mother carrying it would pool a Harvest on the child's rock, hire an
@@ -1981,7 +2050,8 @@ module ColonyView =
         // time it would be a second answer free to disagree — a room
         // projected with nothing pooled in it, or pooled with nothing
         // projecting it.
-        let outposts, bootstrap, scanned = World.scanOf stages colonies shut colony
+        let outposts, bootstrap, scanned =
+            World.scanOf stages (World.unownedHomes colonies world) colonies shut colony
 
         // The scan set with each room's facts beside it, in scan order —
         // a room the world holds nothing for reads empty (ADR 0004), and a
@@ -2962,6 +3032,86 @@ let standDownBasisOf =
             StandDownBasis.Fallback
         ]
 
+/// A creep's Move Intent: candidate standing tiles for next tick in
+/// preference order, plus a priority (the task rank). Input to the
+/// Resolver — not an Intent; the Resolver's output is what becomes one.
+///
+/// Standing tiles but one (#142): a creep walked at a Seam is given the
+/// exit tile itself as its last step, and that is a destination rather
+/// than a place to stand — the engine moves a creep off a border tile at
+/// the end of the tick, which is why no Seat, Work Area or standing
+/// candidate query will ever name one. It is a tile of this room, so the
+/// arbitration below settles it exactly as it settles ground.
+///
+/// Public since #216 R2b, and carrying the room it was registered in: a
+/// room's arbitration is one pass over **every** creep of ours standing in
+/// it, and the intents that pass folds together come from as many `decide`
+/// calls as there are colonies working that room (ADR 0052 decision 7).
+/// A `Pos` carries no room (ADR 0052 decision 2 has not landed), so the
+/// name rides beside it and the merge keys on it.
+type MoveIntent =
+    {
+        /// The room the creep stands in, and the only room its candidates
+        /// are tiles of (#145).
+        Room: string
+        Creep: string
+        Pos: Pos
+        Rank: int
+        Candidates: Pos list
+    }
+
+/// One colony's movement for the tick, before a tile of it is arbitrated
+/// (#216 R2b): where this colony's bodies stand, which of them fatigue
+/// keeps out of the arbitration, what each rested one asked for, and the
+/// two attributions only this colony's Atlas can answer.
+///
+/// It exists because **a room's movement is not one colony's decision**.
+/// Two colonies work one room whenever a [[mother colony]] is raising a
+/// child (ADR 0047 decision 4), and each `decide` used to arbitrate its own
+/// half of that room's traffic against the other half's tiles read as empty
+/// — the mother claiming the tile the child's [[anchor]] stands on, every
+/// tick, for a body the engine then refuses to move (#220). So `decide`
+/// hands its colony's movement out unarbitrated and the shell folds every
+/// colony's together, one pass per room over every creep of ours in it
+/// (`resolveRooms`).
+///
+/// Everything here is an input to the room's pass, and the pass that reads
+/// it is free to see more of the room than the colony that wrote it did.
+/// Everything but `Rerouted`, which is the one Verdict only this colony's
+/// Atlas can answer and so rides along already settled.
+type Movement =
+    {
+        /// This colony's creeps in view order — the order its move Intents
+        /// and its movement Verdicts leave in (ADR 0009).
+        Order: string list
+        /// Where the projection places each of this colony's bodies:
+        /// room, creep and tile (`Atlas.placedCreepsByRoom`). A creep the
+        /// projection cannot place is in no room's pass, exactly as before.
+        Placed: (string * string * Pos) list
+        /// The creeps fatigue takes out of arbitration this tick (ADR 0008
+        /// decision 1). Their tiles are the pass's walls.
+        Tired: Set<string>
+        /// The tiles held by bodies this colony does not hold, per room
+        /// ([[foreign bodies]], ADR 0052 decision 1). A wall to the pass
+        /// **only while no movement in the fold actually holds the body
+        /// standing there**: on the single-colony path — the suite's, and a
+        /// tick in which nobody else works this room — a foreign body is a
+        /// pre-claimed tile nobody may step into (#220), and in the fold
+        /// that raised it the same body is an ordinary occupant its own
+        /// colony registered an intent for, so blocking it would freeze the
+        /// very creep the fold exists to arbitrate.
+        Foreign: Map<string, Set<Pos>>
+        /// Each rested creep's Move Intent, each naming the room it is a
+        /// tile of.
+        Intents: MoveIntent list
+        /// The creeps on the [[verbose list]] whose priced step differs
+        /// from their traffic-blind one (ADR 0018, ADR 0030) — the one
+        /// movement Verdict that is not the arbitration's own answer and
+        /// the one that needs this colony's Atlas, so it is settled here
+        /// and carried.
+        Rerouted: Set<string>
+    }
+
 /// One row of a verbose scoring: a Task in the pool, either scored on the
 /// full matching key — rank tier, travel cost, current load — or rejected
 /// at the first gate it failed. The answer to "why *not* that Task".
@@ -2977,9 +3127,10 @@ type Candidate =
 /// or why nothing was applicable. The Resolver speaks only when something
 /// became of a creep's movement: grounded by fatigue (ADR 0008), yielded —
 /// settled off its preferred tile, naming the counterpart creep that holds
-/// it — or rerouted, detoured by the occupancy surcharge. A creep that
-/// simply steps toward its Work Area says nothing: conclusion level means
-/// events, not every step. Tasks are named by task id. A creep on the
+/// it — rerouted, detoured by the occupancy surcharge; or stalled, settled
+/// off the tile it asked for by a holder its room's pass cannot name. A
+/// creep that simply steps toward its Work Area says nothing: conclusion
+/// level means events, not every step. Tasks are named by task id. A creep on the
 /// verbose list additionally gets a Scoring Verdict: the whole pool as
 /// Candidates, judged against the state its match was decided from.
 [<RequireQualifiedAccess>]
@@ -2992,14 +3143,33 @@ type Verdict =
     | Grounded of creep: string
     | Yielded of creep: string * counterpart: string
     | Rerouted of creep: string
+    /// Rested, settled off the tile it asked for first — with nobody the
+    /// pass can name holding that tile (#219). Yielded's own case with the
+    /// counterpart missing rather than omitted: what holds the tile is a
+    /// [[foreign body]] this colony cannot move, or a tile blocked with no
+    /// occupant filed against it, and a Verdict that invented a name for it
+    /// would name the wrong creep. Whether the creep stood still or took
+    /// its tail and sidestepped is not the distinction — where it *went* is
+    /// the Intent's business, and this says what it did not get. What it
+    /// fills is the timeline's silence — a kept traveller that fails to
+    /// move, tick after tick, used to emit nothing at all.
+    | Stalled of creep: string
 
 /// What one tick of deciding returns: the Intents to execute, the
 /// Assignments to remember for next tick, the plan memo to hold in heap
-/// for next tick (ADR 0017), and the Verdicts explaining them (ADR 0009).
+/// for next tick (ADR 0017), the Verdicts explaining them (ADR 0009), and
+/// this colony's [[move intent]]s before anybody arbitrated them.
 type Decision =
     {
         Intents: Intent list
         Assignments: Assignments
         Memo: PlanMemo
         Verdicts: Verdict list
+        /// This colony's unarbitrated movement (#216 R2b). `decide` folds
+        /// it through the one-colony pass itself, so `Intents` and
+        /// `Verdicts` are a whole answer on their own; a shell running more
+        /// than one colony hands every colony's here to `resolveRooms`
+        /// instead, arbitrating each room once over every creep of ours in
+        /// it (`decideUnarbitrated`).
+        Movement: Movement
     }

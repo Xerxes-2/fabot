@@ -55,13 +55,15 @@ let private creepOf =
     | Verdict.Scoring(creep, _)
     | Verdict.Grounded creep
     | Verdict.Yielded(creep, _)
-    | Verdict.Rerouted creep -> creep
+    | Verdict.Rerouted creep
+    | Verdict.Stalled creep -> creep
 
 let private isMovement =
     function
     | Verdict.Grounded _
     | Verdict.Yielded _
-    | Verdict.Rerouted _ -> true
+    | Verdict.Rerouted _
+    | Verdict.Stalled _ -> true
     | _ -> false
 
 let private isScoring =

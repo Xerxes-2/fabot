@@ -61,7 +61,34 @@ travel-cost semantics (as already revised by ADR 0006):
   Seats look slightly farther than they are.
 - Hostile creeps are not yet in the occupancy set (the projection's
   creep positions cover own creeps only); a hostile squatting a lane is
-  still pathed through at face value.
+  still pathed through at face value. **Another colony's** creeps are, as
+  of #220: a view's `Foreign` tiles enter the occupied grid the flood
+  reads, so a traveller is priced around a garrison it can never
+  displace — occupancy and never an obstacle, exactly as this decision's
+  second Considered Option requires.
+- **"Waits in place for up to 2 ticks" is not a promise the arbitration
+  could keep** (#219, #216 R2b). It holds where a traveller has nowhere
+  to step, which is what the corridor tests pin; it fails where two
+  loaded bodies meet head-on in a lane and are tired every other tick,
+  because the tick on which both are rested and could swap never comes —
+  eight creeps stood in W13S28's north corridor for ten minutes. So a
+  traveller's Move Intent now carries a tail: the ground beside both it
+  and the step it asked for, a way *around* the tile and never a way back
+  down the lane, taken only when the head cannot be had. On the border
+  ring the tail is every tile beside the creep and not only those beside
+  its step — there is no lane behind a ring creep to back down, and
+  standing still there is a bounce across the border rather than a wait
+  (#145), which is the rule this generalises rather than narrows. Grounding is
+  unchanged and is still a wall; what changed is that a wall is no longer
+  the end of the creep's candidate list. The wait this consequence
+  describes therefore survives exactly where there is nothing to sidestep
+  to, and where there is, a body steps out of the lane and back the tick
+  after — two moves against a jam that does not clear on its own.
+- **The arbitration's core is a weighted matching** (#216 R2b), which is
+  where this decision's "blocked" set now lands: a tile in it is a wall no
+  chain runs through, and an occupant with no Move Intent of its own —
+  which is what a fatigued creep is — is the same wall found by looking
+  rather than by remembering to block it. See ADR 0001's Consequences.
 - The flood this decision touches was rewritten from immutable Set/Map
   Dijkstra to flat arrays with a binary heap — an implementation choice,
   not a decision: semantics (including tie-breaking order) are unchanged

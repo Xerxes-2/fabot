@@ -4575,6 +4575,55 @@ let headOnSwap =
                 })
     }
 
+/// A one-wide east-west lane, a rock walled in at either end, and — when
+/// `pocket` — one tile of ground beside it at (11,11). That tile is the
+/// only one there is that is beside both (11,12) and the step east onto
+/// (12,12) and beside nothing further east at all: somewhere to stand out
+/// of the way, and never a way around. Which is what makes it the
+/// counterexample #219 needs — a detour the flood's own occupancy
+/// surcharge can never choose, so what takes it is the Move Intent's tail
+/// and nothing else.
+let lane pocket =
+    { SpatialInfo.empty with
+        RoomName = Some "W1N1"
+    }
+    |> withHome (fun layer ->
+        { layer with
+            Terrain =
+                Map.ofList (
+                    [ for x in 8..15 -> { X = x; Y = 12 }, Plain ]
+                    @ [ { X = 7; Y = 12 }, Wall; { X = 16; Y = 12 }, Wall ]
+                    @ (if pocket then [ { X = 11; Y = 11 }, Plain ] else [])
+                )
+            TargetPositions =
+                Map.ofList [ "src-w", { X = 7; Y = 12 }; "src-e", { X = 16; Y = 12 } ]
+        })
+
+/// The lane with an east-bound body of ours on (11,12) and whatever holds
+/// (12,12) in front of it — a body of ours, or a body of another colony's,
+/// which is the pair #220 turns on.
+let laneWith pocket ours foreign =
+    { bareRespawn with
+        Sources = [ source "src-w"; source "src-e" ]
+        Controller = None
+        Creeps = worker "eb" 0 50 :: ours
+        Spatial =
+            lane pocket
+            |> withHome (fun layer ->
+                { layer with
+                    CreepPositions =
+                        Map.ofList (
+                            ("eb", { X = 11; Y = 12 })
+                            :: (ours |> List.map (fun c -> c.Name, { X = 12; Y = 12 }))
+                        )
+                })
+        Foreign =
+            if foreign then
+                Map.ofList [ "W1N1", Set.singleton { X = 12; Y = 12 } ]
+            else
+                Map.empty
+    }
+
 [<Tests>]
 let arbitrationTests =
     testList
@@ -4713,7 +4762,10 @@ let arbitrationTests =
             test "a contested tile goes to the higher task rank" {
                 // One gap at (10,12): the harvester's and the upgrader's
                 // cheapest paths both step onto it. Harvest outranks Upgrade,
-                // so the upgrader waits in place.
+                // so the gap is the harvester's — and since #219 the loser
+                // is not walled in by losing: its tail holds the tile beside
+                // the gap, which is the one the harvester just left, so it
+                // follows up the corridor it was heading along anyway.
                 let terrain =
                     [
                         { X = 10; Y = 10 }, Wall
@@ -4747,8 +4799,8 @@ let arbitrationTests =
 
                 Expect.equal
                     moves
-                    [ "h", Top ]
-                    "the harvester takes the gap; the outranked upgrader waits"
+                    [ "h", Top; "u", Left ]
+                    "the harvester takes the gap; the outranked upgrader follows into the tile it left"
             }
 
             test "within a rank the most-constrained creep places first" {
@@ -4929,10 +4981,15 @@ let arbitrationTests =
                     "the builder takes the lane; the seated harvester is left alone"
             }
 
-            test "an occupant with no in-area alternative swaps with its displacer" {
+            test "an occupant with no in-area alternative steps out of its Work Area" {
                 // The upgrader's only in-area standing tile is the Seat
                 // itself: every adjacent walkable tile is outside upgrade
-                // range. Displaced, it swaps into the harvester's tile.
+                // range. Displaced, it takes the first ground beside it and
+                // leaves the area — which is the tail every stayer now
+                // carries (#219), where before R2b the only tile it could be
+                // offered was the one its displacer vacated. It upgrades
+                // this tick either way: the Emitter judges from tick-start
+                // geometry.
                 let terrain =
                     [
                         { X = 11; Y = 12 }, Wall
@@ -4964,13 +5021,369 @@ let arbitrationTests =
 
                 Expect.equal
                     (resolveOn snapshot assigned |> moveIntents |> List.sort)
-                    [ "har", Right; "upg", Left ]
-                    "displacer and occupant exchange tiles"
+                    [ "har", Right; "upg", TopLeft ]
+                    "the displacer takes the Seat and the occupant steps off it"
 
                 Expect.contains
                     (emitOn snapshot assigned)
                     (UpgradeController("upg", "ctrl-1"))
                     "the swapped-out upgrader still upgrades from its tick-start tile"
+            }
+
+            test "a traveller whose step is walled steps aside where there is anywhere to" {
+                // #219, at the seam: eight creeps stood in W13S28's north
+                // corridor for ten minutes because a traveller's only
+                // candidate was its step, and the body on it was fatigued
+                // every other tick — a swap needs both parties rested on one
+                // tick, and with a queue behind each of them neither ever
+                // had a free tile to back into. The pocket at (11,11) is
+                // reachable and leads nowhere, so the occupancy surcharge
+                // will never route through it: what takes it is the Move
+                // Intent's tail.
+                let tired = { worker "wb" 0 50 with Fatigue = 4 }
+                let assigned = [ "eb", Harvest "src-e"; "wb", Harvest "src-w" ]
+
+                Expect.equal
+                    (resolveOn (laneWith true [ tired ] false) assigned |> moveIntents)
+                    [ "eb", Top ]
+                    "the east-bound body steps out of the lane rather than standing in it"
+
+                Expect.isEmpty
+                    (resolveOn (laneWith false [ tired ] false) assigned |> moveIntents)
+                    "and with no ground beside the step it waits, as a grounding that drains two a tick deserves (ADR 0008)"
+            }
+
+            test "a chain three deep settles three bodies onto three tiles" {
+                // The injectivity #216 R2b bought, at the one shape that can
+                // lose it: a chain whose innermost creep wants the tile the
+                // chain's own initiator is claiming. The search must not
+                // hand that tile out twice — the initiator's claim is
+                // already staked when the chain is walked past it, and two
+                // bodies judged onto one tile is two `MoveCreep`s the engine
+                // resolves by deleting one in silence, which is the failure
+                // ADR 0001's Consequences say the settle was replaced to
+                // stop.
+                let queue positions =
+                    { bareRespawn with
+                        Sources = [ source "src-w"; source "src-e" ]
+                        Controller = None
+                        Creeps = [ worker "aa" 0 50; worker "bb" 0 50; worker "cc" 0 50 ]
+                        Spatial =
+                            lane false
+                            |> withHome (fun layer ->
+                                { layer with
+                                    CreepPositions = Map.ofList positions
+                                })
+                    }
+
+                let places =
+                    [ "aa", { X = 8; Y = 12 }; "bb", { X = 9; Y = 12 }; "cc", { X = 10; Y = 12 } ]
+
+                // aa and bb head east and cc heads west, so aa's chain runs
+                // aa → bb's tile → cc's tile, and cc's own first candidate
+                // is the tile aa is taking.
+                let assigned =
+                    [ "aa", Harvest "src-e"; "bb", Harvest "src-e"; "cc", Harvest "src-w" ]
+
+                let stepOf = resolveOn (queue places) assigned |> moveIntents |> Map.ofList
+
+                let settled =
+                    places
+                    |> List.map (fun (creep, pos) ->
+                        match Map.tryFind creep stepOf with
+                        | Some direction -> stepFrom pos direction
+                        | None -> pos)
+
+                Expect.hasLength
+                    (List.distinct settled)
+                    (List.length settled)
+                    "three bodies, three tiles: the pass is a matching"
+            }
+
+            test "a ring creep whose step is held keeps every tile beside it" {
+                // #145's rule, which R2b generalised and must not narrow: a
+                // creep the engine put down on the border ring cannot stay
+                // where it is — "stay put" there is a bounce back across
+                // the border every other tick — so its tail is every ground
+                // tile beside it and not only the ones beside its step. The
+                // ordinary tail's narrowing buys "no way back down the lane
+                // it came up", and a ring creep has no lane behind it.
+                //
+                // Here the step is (9,1) and the ground beside the ring
+                // creep runs (9,1) (10,1) (11,1): (11,1) is two tiles from
+                // the step and would be dropped by that narrowing. With the
+                // step and (10,1) both held by bodies fatigue keeps out of
+                // the pass, (11,1) is the only tile there is.
+                let ring held =
+                    { bareRespawn with
+                        Spawns = []
+                        Controller = None
+                        Refillables = []
+                        Sources = [ source "src-home" ]
+                        Creeps = worker "r" 0 50 :: held
+                        Spatial =
+                            { SpatialInfo.empty with
+                                RoomName = Some "W1N1"
+                            }
+                            |> withHome (fun layer ->
+                                { layer with
+                                    Terrain =
+                                        Map.ofList
+                                            [
+                                                { X = 9; Y = 1 }, Plain
+                                                { X = 10; Y = 1 }, Plain
+                                                { X = 11; Y = 1 }, Plain
+                                                { X = 9; Y = 2 }, Plain
+                                                { X = 9; Y = 3 }, Plain
+                                                { X = 9; Y = 4 }, Plain
+                                                { X = 9; Y = 5 }, Wall
+                                            ]
+                                    TargetPositions = Map.ofList [ "src-home", { X = 9; Y = 5 } ]
+                                    CreepPositions =
+                                        Map.ofList (
+                                            ("r", { X = 10; Y = 0 })
+                                            :: (held
+                                                |> List.map (fun c ->
+                                                    c.Name,
+                                                    if c.Name = "on-step" then
+                                                        { X = 9; Y = 1 }
+                                                    else
+                                                        { X = 10; Y = 1 }))
+                                        )
+                                })
+                    }
+
+                let assigned = [ "r", Harvest "src-home" ]
+
+                Expect.equal
+                    (resolveOn (ring []) assigned |> moveIntents)
+                    [ "r", BottomLeft ]
+                    "the premise: with the ring clear the creep walks its step off the ring"
+
+                let asleep name = { worker name 0 50 with Fatigue = 4 }
+
+                Expect.equal
+                    (resolveOn (ring [ asleep "on-step"; asleep "beside" ]) assigned |> moveIntents)
+                    [ "r", BottomRight ]
+                    "and with the step and the tile beside it walled it takes the third, rather than bouncing across the border"
+            }
+
+            test "head-on with alternating fatigue, both bodies arrive — over ticks, not one" {
+                // #219's own acceptance test, driven the way it is written:
+                // two bodies meeting head-on in a lane, tired on opposite
+                // ticks so the tick both are rested and could swap never
+                // comes, walked until they arrive or the run gives up. One
+                // tick cannot show it — the deadlock is that every tick's
+                // answer is the same one.
+                //
+                // The geometry is #219's own and not the phrase's: the live
+                // corridor had (17,1) free beside it the whole ten minutes
+                // and nobody took it. So the pocket lane is the case, and
+                // the strictly one-wide lane is the negative — with nothing
+                // to sidestep to the answer is still "wait", which is ADR
+                // 0008's and is where a single-candidate rule and this one
+                // agree.
+                //
+                // What clears it is two rules and not one: the east-bound
+                // body takes the pocket off its Move Intent's tail, because
+                // its step is a tile fatigue has walled (#219), and the
+                // west-bound one is *priced* round the body in its way,
+                // because the flood charges an occupied tile the occupancy
+                // surcharge (ADR 0008, #220). A one-tile pocket beside a
+                // one-wide lane is always both — every tile beside such a
+                // lane is diagonal to the tiles either side of it — so this
+                // test pins the pair's outcome and the test above pins the
+                // tail on its own.
+                let assigned = [ "eb", Harvest "src-e"; "wb", Harvest "src-w" ]
+
+                let tickOf pocket tick positions =
+                    { bareRespawn with
+                        Sources = [ source "src-w"; source "src-e" ]
+                        Controller = None
+                        Creeps =
+                            [
+                                { worker "eb" 0 50 with
+                                    Fatigue = if tick % 2 = 1 then 4 else 0
+                                }
+                                { worker "wb" 0 50 with
+                                    Fatigue = if tick % 2 = 0 then 4 else 0
+                                }
+                            ]
+                        Spatial =
+                            lane pocket
+                            |> withHome (fun layer ->
+                                { layer with
+                                    CreepPositions = positions
+                                })
+                    }
+
+                let start = Map.ofList [ "eb", { X = 11; Y = 12 }; "wb", { X = 12; Y = 12 } ]
+
+                // The Seats at the two ends: the east rock's is (15,12) and
+                // the west rock's is (8,12), so "arrived" is a tile and the
+                // two bodies have to have passed each other to reach them.
+                let arrived (positions: Map<string, Pos>) =
+                    positions["eb"] = { X = 15; Y = 12 } && positions["wb"] = { X = 8; Y = 12 }
+
+                let rec drive pocket tick positions =
+                    if arrived positions then
+                        Some tick
+                    elif tick > 20 then
+                        None
+                    else
+                        let stepped =
+                            (positions,
+                             resolveOn (tickOf pocket tick positions) assigned |> moveIntents)
+                            ||> List.fold (fun acc (name, direction) ->
+                                Map.add name (stepFrom acc[name] direction) acc)
+
+                        drive pocket (tick + 1) stepped
+
+                Expect.equal
+                    (drive true 0 start)
+                    (Some 9)
+                    "with one tile of ground beside the lane, both bodies reach their Seats"
+
+                Expect.isNone
+                    (drive false 0 start)
+                    "and in a lane with nothing beside it neither ever does, which is the wait ADR 0008 keeps"
+            }
+
+            test "another colony's body is an occupant this colony cannot claim" {
+                // #220: the mother's pioneer stood on (19,2) for fifteen
+                // minutes with fatigue 0, its first step the Post tile the
+                // child's Anchor was garrisoning — a tile her layer did not
+                // carry, so the flood charged it nothing and the arbitration
+                // handed it over every tick for a body the engine would
+                // never let her into.
+                let assigned = [ "eb", Harvest "src-e" ]
+
+                Expect.equal
+                    (resolveOn (laneWith true [] true) assigned |> moveIntents)
+                    [ "eb", Top ]
+                    "carried as a foreign body, the tile is one the mover steps around"
+
+                Expect.equal
+                    (resolveOn (laneWith true [] false) assigned |> moveIntents)
+                    [ "eb", Right ]
+                    "not carried, the tile reads free and the mover walks into a creep that never moves"
+            }
+
+            test "a foreign body's tile is priced at the occupancy surcharge" {
+                // The other half of #220, and the half no arbitration can do
+                // (ADR 0008): the walking flood charges a foreign body's
+                // tile like any other occupied tile, so a traveller is
+                // *priced* around a garrison it can never displace. The way
+                // round here is one swamp tile at (12,11) — dearer than the
+                // lane by eight units and cheaper than the lane plus the
+                // ten-unit surcharge, so the pricing and nothing else
+                // decides which step is taken.
+                let bypass =
+                    { SpatialInfo.empty with
+                        RoomName = Some "W1N1"
+                    }
+                    |> withHome (fun layer ->
+                        { layer with
+                            Terrain =
+                                Map.ofList (
+                                    [ for x in 8..15 -> { X = x; Y = 12 }, Plain ]
+                                    @ [ { X = 12; Y = 11 }, Swamp; { X = 16; Y = 12 }, Wall ]
+                                )
+                            TargetPositions = Map.ofList [ "src-e", { X = 16; Y = 12 } ]
+                            CreepPositions = Map.ofList [ "eb", { X = 11; Y = 12 } ]
+                        })
+
+                let colony foreign =
+                    { bareRespawn with
+                        Sources = [ source "src-e" ]
+                        Controller = None
+                        Creeps = [ worker "eb" 0 50 ]
+                        Spatial = bypass
+                        Foreign =
+                            if foreign then
+                                Map.ofList [ "W1N1", Set.singleton { X = 12; Y = 12 } ]
+                            else
+                                Map.empty
+                    }
+
+                let assigned = [ "eb", Harvest "src-e" ]
+
+                Expect.equal
+                    (resolveOn (colony true) assigned |> moveIntents)
+                    [ "eb", TopRight ]
+                    "priced at the surcharge, the cheapest step is the lane beside the garrison"
+
+                Expect.equal
+                    (resolveOn (colony false) assigned |> moveIntents)
+                    [ "eb", Right ]
+                    "priced at nothing, it is the garrison's own tile"
+            }
+
+            test "a rested creep that gets none of its candidates says which kind of nothing it got" {
+                // The Verdict gap #219 recorded: a kept traveller that
+                // simply fails to move emitted nothing at all, and the
+                // timeline went quiet exactly where it was worth reading.
+                // Which Verdict it is turns on whether the pass can name the
+                // holder: one of ours on the tile is a counterpart, a
+                // foreign body is not.
+                let assigned = [ "eb", Harvest "src-e"; "wb", Harvest "src-w" ]
+                let tired = { worker "wb" 0 50 with Fatigue = 4 }
+
+                Expect.contains
+                    (resolveVerdictsOn (laneWith false [ tired ] false) assigned)
+                    (Verdict.Yielded("eb", "wb"))
+                    "a fatigued body of ours on the tile is named"
+
+                Expect.contains
+                    (resolveVerdictsOn (laneWith false [] true) [ "eb", Harvest "src-e" ])
+                    (Verdict.Stalled "eb")
+                    "a body this colony does not hold cannot be, so the creep is stalled and not yielded"
+            }
+
+            test "one pass per room arbitrates both colonies' bodies against each other" {
+                // #216 R2b: the mother and the child both work the child's
+                // room, and each `decide` used to arbitrate its own half of
+                // it with the other half read as empty. Folded into one pass
+                // the two bodies are ordinary occupants of one room, each
+                // moving on the intent its own colony registered — so the
+                // head-on pair swaps, which neither colony could have
+                // settled alone.
+                let mother = laneWith false [] true
+
+                let child =
+                    { bareRespawn with
+                        Sources = [ source "src-w"; source "src-e" ]
+                        Controller = None
+                        Creeps = [ worker "an" 0 50 ]
+                        Spatial =
+                            lane false
+                            |> withHome (fun layer ->
+                                { layer with
+                                    CreepPositions = Map.ofList [ "an", { X = 12; Y = 12 } ]
+                                })
+                        Foreign = Map.ofList [ "W1N1", Set.singleton { X = 11; Y = 12 } ]
+                    }
+
+                let movementFor view assigned =
+                    movementOf view (Atlas.ofView view) noThreats (Map.ofList assigned) Set.empty
+
+                let together =
+                    resolveRooms
+                        [
+                            movementFor mother [ "eb", Harvest "src-e" ]
+                            movementFor child [ "an", Harvest "src-w" ]
+                        ]
+                    |> fst
+                    |> moveIntents
+
+                Expect.equal
+                    (together |> List.sort)
+                    [ "an", Left; "eb", Right ]
+                    "both bodies move: one room, one pass, two colonies' intents"
+
+                Expect.isEmpty
+                    (resolveOn mother [ "eb", Harvest "src-e" ] |> moveIntents)
+                    "and the mother alone can only see a tile she must not claim"
             }
         ]
 

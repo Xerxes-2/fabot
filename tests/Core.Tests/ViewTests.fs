@@ -14,6 +14,7 @@ module Fabot.Core.Tests.ViewTests
 
 open Expecto
 open Fabot.Core.Types
+open Fabot.Core.Decide
 
 let private mother = "W12S28"
 let private outpost = "W12S27"
@@ -233,6 +234,24 @@ let private spawnlessWorld =
                 child
                 { World.roomOf pairWorld child with
                     Spawns = []
+                }
+    }
+
+/// The same world with the child **lost**: its spawn destroyed, its
+/// controller gone with it, and the room held by whoever the argument says
+/// (#221). The declaration is untouched — a human wrote it and the bot
+/// never edits it — so what decides whether the mother takes the room back
+/// is the ownership the world reads off it and nothing else.
+let private lostWorld owner =
+    { pairWorld with
+        Rooms =
+            pairWorld.Rooms
+            |> Map.add
+                child
+                { World.roomOf pairWorld child with
+                    Spawns = []
+                    Controller = None
+                    Control = Some(control owner)
                 }
     }
 
@@ -569,5 +588,56 @@ let colonyViewTests =
                     (viewOf pairWorld child).Stages
                     (World.stages declared pairWorld)
                     "a stage is a fact about a room, not about who is looking"
+            }
+
+            test "a declared child that stops being ours is projected by its mother, for the Claim" {
+                // #221: a [[stage]] is `None` for a room we do not own, so
+                // the subtraction that stopped a mother raising a room
+                // nobody claimed also stopped her raising one she had
+                // *lost* — the room left every projection there was, no
+                // Claim was pooled anywhere, and only a human's edit could
+                // take it back. Pairwise on the one fact that decides it,
+                // the ownership the world reads off the room.
+                let taken = viewOf (lostWorld Ownership.Unowned) mother
+
+                Expect.contains
+                    taken.Borrowed.Rooms
+                    child
+                    "unowned, the lost child is a room the mother projects again"
+
+                Expect.contains
+                    (planTasks taken noThreats)
+                    (Claim $"ctrl-{child}")
+                    "and its controller is a Claim in her pool"
+
+                let rival = viewOf (lostWorld Ownership.Rival) mother
+
+                Expect.isEmpty
+                    rival.Borrowed.Rooms
+                    "a room somebody else holds is the stand-down's business, not a projection's"
+
+                Expect.isEmpty
+                    (planTasks rival noThreats
+                     |> List.filter (function
+                         | Claim _ -> true
+                         | _ -> false))
+                    "and nothing of it is pooled at all"
+            }
+
+            test "a lost child's rocks and stores stay out of the mother's pool" {
+                // The reclaim rides the borrowing's own narrowing and widens
+                // it by nothing (ADR 0052 decision 7): the controller, the
+                // sites and the spawn tile reach her, and the room's rocks,
+                // containers and stores do not — or she would hire an
+                // Anchor for a Post in a room she does not hold.
+                let taken = viewOf (lostWorld Ownership.Unowned) mother
+
+                Expect.isFalse
+                    (List.contains "src-child" (idsOf taken))
+                    "the lost child's rock is nobody's to mine"
+
+                Expect.isFalse
+                    (Map.containsKey "can-child" taken.Spatial.Stores)
+                    "and its container's stock is nobody's to withdraw"
             }
         ]

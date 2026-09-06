@@ -104,6 +104,7 @@ let private encodeVerdict verdict =
         o?kind <- "yielded"
         o?counterpart <- counterpart
     | Verdict.Rerouted _ -> o?kind <- "rerouted"
+    | Verdict.Stalled _ -> o?kind <- "stalled"
 
     o
 
@@ -137,6 +138,7 @@ let private decodeVerdict creep (raw: obj) : Verdict =
     | "grounded" -> Verdict.Grounded creep
     | "yielded" -> Verdict.Yielded(creep, string raw?counterpart)
     | "rerouted" -> Verdict.Rerouted creep
+    | "stalled" -> Verdict.Stalled creep
     | _ -> failwith "unknown verdict kind"
 
 let private encodeCreepLog (log: CreepLog) =

@@ -1035,7 +1035,7 @@ let ofViewRecalling (walks: WalkTable) (view: ColonyView) : Atlas =
     // nowhere else: terrain first, then roads over the passable ground
     // they discount, then obstacles over everything. The array's initial
     // -1 is the answer for every tile outside the projection.
-    let gridOf (layer: RoomLayer) =
+    let gridOf (foreign: Set<Pos>) (layer: RoomLayer) =
         let ground = Array.create tileCount -1
 
         layer.Terrain
@@ -1062,6 +1062,17 @@ let ofViewRecalling (walks: WalkTable) (view: ColonyView) : Atlas =
 
         layer.CreepPositions |> Map.iter (fun _ tile -> occupied.[indexOf tile] <- true)
 
+        // The bodies this colony does not hold stand here too (#220, ADR
+        // 0052 decision 1). The layer carries only its own fleet — a body
+        // two colonies both moved would be moved twice — so a [[mother
+        // colony]]'s [[pioneer]] on the child's [[anchor]] tile would price
+        // at nothing and the walking flood would send a traveller straight
+        // into a creep it can never displace, which is the deadlock #220
+        // recorded. Occupancy and never an obstacle (ADR 0008): the tile
+        // stays passable, it just costs the surcharge, so a crowd a body
+        // cannot get through never makes a Task inapplicable.
+        foreign |> Set.iter (fun tile -> occupied.[indexOf tile] <- true)
+
         ground, weights, occupied
 
     // The border ring's own grid, laid off the border layer and keyed by
@@ -1076,7 +1087,11 @@ let ofViewRecalling (walks: WalkTable) (view: ColonyView) : Atlas =
 
         grid
 
-    let grids = spatial.Rooms |> Map.map (fun _ layer -> gridOf layer)
+    let grids =
+        spatial.Rooms
+        |> Map.map (fun room layer ->
+            gridOf (Map.tryFind room view.Foreign |> Option.defaultValue Set.empty) layer)
+
     let ground = grids |> Map.map (fun _ (bare, _, _) -> bare)
     let weights = grids |> Map.map (fun _ (_, grid, _) -> grid)
     let occupied = grids |> Map.map (fun _ (_, _, standing) -> standing)
