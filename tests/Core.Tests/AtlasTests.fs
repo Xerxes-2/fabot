@@ -29,6 +29,10 @@ let snapshotWith creeps spatial =
         // geometry, and which rooms a human means to own is the Planner's
         // question (ADR 0047).
         ColonyHomes = []
+        // And neither does a [[stage]]: where a colony stands in its life
+        // decides what it builds and who it raises (ADR 0052 decision 3),
+        // and the Atlas builds nothing.
+        Stages = Map.empty
     }
 
 let worker name =

@@ -102,6 +102,27 @@ let coreReservedRoom ticksToEnd : RoomControlInfo =
         SafeMode = false
     }
 
+/// The [[stage]] map of a colony that declares itself and nothing else
+/// (ADR 0052 decision 3), standing at the given controller level. Keyed by
+/// the room its projection is filed under, which is the name every reader
+/// looks a home up by — and by that name **alone**, unlike `homeControl`
+/// below: a control entry prices a room, where a stage entry says a colony
+/// of ours lives there, so a second name here would be a second colony,
+/// and the fixtures' home room would have a [[nursery]] beside it hiring
+/// [[pioneer]]s.
+///
+/// Owned, with a spawn standing, because that is what `Main.loop` runs
+/// `decide` for (ADR 0047 decision 1). Derived through `Colony.stageOf`
+/// from the level the fixture's own controller carries, and never written
+/// down beside it: a fixture that spelled a stage out could spell a colony
+/// the shell can never build — an RCL5 room the roads are gated out of, an
+/// RCL1 one that keeps ramparts — and every rule that used to read the
+/// level reads this.
+let homeStages (spatial: SpatialInfo) level =
+    match Colony.stageOf true true (Some level) with
+    | Some stage -> Map.ofList [ SpatialInfo.homeName spatial, stage ]
+    | None -> Map.empty
+
 /// The control map for a colony holding its own room and nothing else.
 /// Both names the fixtures below file a home layer under: `SpatialInfo.empty`
 /// and the `spatial` funnel leave `RoomName` unset and file under the empty
@@ -144,6 +165,16 @@ let bareRespawn =
         // 0047), so an empty list is every fixture that claims nothing —
         // which is every fixture but the claim tests' own.
         ColonyHomes = []
+        // And no [[stage]] for it either (ADR 0052 decision 3), which is
+        // deliberate and is the same sentence: this fixture's home is
+        // `SpatialInfo.empty`'s unnamed room, and a fixture that named a
+        // room of its own — `openRoom`'s "W1N1" — would inherit a stage
+        // filed under the wrong name and read as a colony of ours standing
+        // beside it, hiring [[pioneer]]s for it. So a stage arrives with
+        // the room: `atLevel` and `withLevel` file one under the home the
+        // fixture actually has, and a colony with none answers every stage
+        // rule the way one whose controller cannot be placed does.
+        Stages = Map.empty
     }
 
 /// A creep with the given body's part counts, freshly cast: a full
@@ -962,10 +993,23 @@ let sitesOfKind kind intents =
     placementIntents intents
     |> List.choose (fun (_, pos, k) -> if k = kind then Some pos else None)
 
+/// The colony at one controller level: the level its controller carries
+/// and the [[stage]] that level puts it at, moved together (ADR 0052
+/// decision 3), because they are one fact of the world read twice and a
+/// fixture that moved one alone would be a colony the shell cannot build.
 let atLevel level room =
     { bareRespawn with
         Controller = Some(controllerAt level)
+        Stages = homeStages room level
         Spatial = room
+    }
+
+/// The same rule for a colony a fixture has already assembled: move the
+/// level and the stage together, never one alone.
+let withLevel level (colony: Snapshot) =
+    { colony with
+        Controller = Some(controllerAt level)
+        Stages = homeStages colony.Spatial level
     }
 
 [<Tests>]
@@ -1193,6 +1237,7 @@ let trunkColony level =
     { bareRespawn with
         Sources = [ source "src-a" ]
         Controller = Some(controllerAt level)
+        Stages = homeStages trunkRoom level
         Spatial = trunkRoom
     }
 
@@ -1243,7 +1288,7 @@ let pocketColony level =
 /// tile (one construction site per tile) and coexists with the built road.
 ///
 /// It stands the roads the plan *places*, not the roads it plans, so
-/// below `roadLevel` it stands none (#209) and the premise is empty:
+/// below the road gate it stands none (#209) and the premise is empty:
 /// every caller that needs a road under its container asks from RCL3 up.
 let withRoadsBuilt colony =
     let { Intents = intents } = decide colony Map.empty Set.empty None
@@ -1287,13 +1332,14 @@ let layoutTests =
                     3
                     "only the gap against the two built extensions is placed"
 
-                // The level gate on road sites (#209 amending ADR 0011):
-                // the trunks are planned whole at every level and placed
-                // from `roadLevel` up. Below it the pavement costs the
-                // level that would make the body bigger, which is worth
-                // more than the half tick a loaded step it buys (ADR 0010,
-                // narrowed at `roadLevel`). Pairwise against the test
-                // below, same fixture one level on.
+                // The gate on road sites (#209 amending ADR 0011): the
+                // trunks are planned whole at every level and placed only
+                // for a colony past the bootstrap line (`placesRoads`, ADR
+                // 0052 decision 3). Below it the pavement costs the level
+                // that would make the body bigger, which is worth more than
+                // the half tick a loaded step it buys (ADR 0010, narrowed
+                // by that gate). Pairwise against the test below, same
+                // fixture one level on.
                 Expect.isEmpty (sitesOfKind Road intents) "no road site below the road level"
             }
 
@@ -1353,7 +1399,7 @@ let layoutTests =
             }
 
             test "trunks route around every horizon reservation" {
-                // Read from `roadLevel` up, where the sites are placed
+                // Read from the road gate up, where the sites are placed
                 // (#209): below it the plan is still routed whole but
                 // nothing of it reaches the ground, so the road *sites* are
                 // the same at every level the gate lets through and this
@@ -1434,7 +1480,7 @@ let layoutTests =
             }
 
             test "without a source only the Work Area swamps are paved, never plain" {
-                // At `roadLevel`, the level the sites reach the ground from
+                // At the road gate, the stage the sites reach the ground from
                 // (#209): below it the answer is empty whatever the plan is.
                 let { Intents = intents } = decide (noSourceColony 3) Map.empty Set.empty None
 
@@ -1445,7 +1491,7 @@ let layoutTests =
             }
 
             test "built roads and pending road sites are never placed again" {
-                // At `roadLevel` too: below it the gate would answer empty
+                // At the road gate too: below it the gate would answer empty
                 // for its own reason and the census rule would go untested.
                 let colony = noSourceColony 3
 
@@ -1469,7 +1515,7 @@ let layoutTests =
             }
 
             test "each source gets one container on the Seat where its trunk starts" {
-                // Roads stand from `roadLevel` up (#209), so the level that
+                // Roads stand from the road gate up (#209), so the level that
                 // has a trunk to seat the container beside is RCL3.
                 let colony = withRoadsBuilt (trunkColony 3)
                 let { Intents = intents } = decide colony Map.empty Set.empty None
@@ -1490,7 +1536,7 @@ let layoutTests =
                 // One construction site per tile (engine rule): on a fresh
                 // plan the source container defers to the trunk road site
                 // under it and drops only once that road stands. At
-                // `roadLevel`, where there is a road site to collide with —
+                // the road gate, where there is a road site to collide with —
                 // below it none is placed and the clause has nothing to say
                 // (#209).
                 let { Intents = intents } = decide (trunkColony 3) Map.empty Set.empty None
@@ -1503,7 +1549,7 @@ let layoutTests =
             }
 
             test "the controller container lands in the Work Area beside a trunk" {
-                // At `roadLevel`: the trunk it is judged against is a road
+                // At the road gate: the trunk it is judged against is a road
                 // site, and those are placed from RCL3 up (#209).
                 let { Intents = intents } = decide (trunkColony 3) Map.empty Set.empty None
                 let controllerPos = { X = 35; Y = 25 }
@@ -1527,7 +1573,7 @@ let layoutTests =
             test "containers have no RCL gate — level 1 already places both kinds, on no road" {
                 // The tile clause (ADR 0040) defers a container to a road
                 // *site* on its tile, because two sites cannot share one.
-                // Below `roadLevel` no road site is placed, so there is
+                // Below the road gate no road site is placed, so there is
                 // nothing to collide with and nothing to wait for (#209):
                 // read off the whole road *plan* instead, this fixture's
                 // source container would sit on the trunk's own first tile
@@ -1553,7 +1599,7 @@ let layoutTests =
                 // container drops on the trunk's first tile at RCL1
                 // because no road site is placed there to collide with,
                 // and it is still a *site* — 5,000 energy of progress —
-                // when the room reaches `roadLevel`. That tile is still in
+                // when the colony reaches the road gate. That tile is still in
                 // the road gap, so a road site would be asked for on top
                 // of it and the engine would refuse it every tick until
                 // the container finished.
@@ -1597,7 +1643,7 @@ let layoutTests =
             }
 
             test "a one-Seat source gets its container on that Seat" {
-                // From `roadLevel` up, where `withRoadsBuilt` has a road
+                // From the road gate up, where `withRoadsBuilt` has a road
                 // set to stand (#209): below it the plan places none and
                 // the fixture would carry an empty premise.
                 let { Intents = intents } =
@@ -1610,7 +1656,7 @@ let layoutTests =
             }
 
             test "built containers and pending container sites are never placed again" {
-                // From `roadLevel` up, so the roads `withRoadsBuilt`
+                // From the road gate up, so the roads `withRoadsBuilt`
                 // stands are the plan's own and the containers are read
                 // beside a real road census (#209).
                 let colony = withRoadsBuilt (trunkColony 3)
@@ -5428,10 +5474,7 @@ let repairTests =
                 let floor = 100_000
                 let max = 3_000_000
 
-                let keeping =
-                    { bareRespawn with
-                        Controller = Some(controllerAt 3)
-                    }
+                let keeping = bareRespawn |> withLevel 3
 
                 let below = keeping |> withHits "ram-1" BuiltKind.Rampart (floor - 1) max
                 let at = keeping |> withHits "ram-1" BuiltKind.Rampart floor max
@@ -5461,16 +5504,13 @@ let repairTests =
                 // #214: a child at RCL2 raised three ramparts the tick the
                 // engine allowed them and then held four of its five loaded
                 // workers repairing them toward a floor derived for the
-                // home. Below `rampartLevel` a standing rampart is not the
-                // pool's business; the decaying kinds and the Keep are.
+                // home. Below the stage the colony keeps ramparts from
+                // (`keepsRamparts`) a standing rampart is not the pool's
+                // business; the decaying kinds and the Keep are.
                 let floor = 100_000
                 let max = 300_000
 
-                let young =
-                    { bareRespawn with
-                        Controller = Some(controllerAt 2)
-                    }
-                    |> withHits "ram-1" BuiltKind.Rampart 1 max
+                let young = bareRespawn |> withLevel 2 |> withHits "ram-1" BuiltKind.Rampart 1 max
 
                 Expect.isEmpty
                     (repairTasks (planTasks young noThreats))
@@ -5484,10 +5524,7 @@ let repairTests =
                     "the decaying kinds keep their trigger in the same room"
 
                 let grown =
-                    { bareRespawn with
-                        Controller = Some(controllerAt 3)
-                    }
-                    |> withHits "ram-1" BuiltKind.Rampart (floor - 1) max
+                    bareRespawn |> withLevel 3 |> withHits "ram-1" BuiltKind.Rampart (floor - 1) max
 
                 Expect.equal
                     (repairTasks (planTasks grown noThreats))
@@ -18829,6 +18866,12 @@ let private asNursery (colony: Snapshot) =
     { colony with
         RoomControl = Map.add "W1N2" ownedRoom colony.RoomControl
         ColonyHomes = [ SpatialInfo.homeName colony.Spatial; "W1N2" ]
+        // Declared and owned with no spawn of ours standing in it is the
+        // whole of the [[stage]] `Nursery` (ADR 0052 decision 3), so the
+        // shell would derive exactly this entry for the room; the
+        // ownership above is what makes the room *this* colony's to raise
+        // and stays beside it.
+        Stages = Map.add "W1N2" Nursery colony.Stages
     }
 
 /// The same colony with a spawn of ours standing in the north room:
@@ -18838,15 +18881,19 @@ let private asNursery (colony: Snapshot) =
 /// finished changes for this rule; the human's edit splitting
 /// `Colony.declared` in two follows that tick rather than causing it.
 ///
-/// Placed in the projection and not in `Snapshot.Spawns`, which is the
-/// colony's own spawn list since #191 — the spawns it casts from and banks
-/// for, and a room it does not run is not a room it casts in. The
-/// mother reads the child's spawn the way she reads everything else about
-/// that room: off the layer she projects it under.
+/// Placed in the projection *and* in the room's stage, which is where the
+/// rule reads it since ADR 0052 decision 3: a spawn standing in a claimed
+/// room is what turns `Nursery` into `Bootstrapping`, the shell derives
+/// the pair off the world together, and the spawn structure stays in the
+/// layer because that is what the mother's pioneers walk up to. Not in
+/// `Snapshot.Spawns`, which is the colony's own spawn list since #191 —
+/// the spawns it casts from and banks for, and a room it does not run is
+/// not a room it casts in.
 let private withNorthSpawn (colony: Snapshot) =
     let outpost = SpatialInfo.layerOf colony.Spatial "W1N2"
 
     { colony with
+        Stages = Map.add "W1N2" Bootstrapping colony.Stages
         Spatial =
             { colony.Spatial with
                 TargetKinds =
@@ -18879,6 +18926,13 @@ let private withoutNorthRoom (colony: Snapshot) =
 
     { colony with
         RoomControl = Map.remove "W1N2" colony.RoomControl
+        // The stage the room left over, and it stays: `Stages` is the
+        // world's map and reaches every colony whatever it projects (ADR
+        // 0052 decision 3), so what RCL3 does to it is turn one entry
+        // `Independent` — never remove it. The room leaves this colony's
+        // *projection*, which is the subtraction below, and that is what
+        // every rule here answers off.
+        Stages = Map.add "W1N2" Independent colony.Stages
         ConstructionSites =
             colony.ConstructionSites
             |> List.filter (fun site -> not (Map.containsKey site.Id placed))
@@ -19034,11 +19088,14 @@ let nurseryTests =
                         "one short of sixteen the bootstrapped child's mother casts too, and on the same generalist row"
                 | other -> failtest $"expected exactly one SpawnCreep intent, got %A{other}"
 
-                // And the end of it. RCL3 is not a fact this Snapshot
-                // carries: it takes the whole room out of the mother's scan
-                // set (`withoutNorthRoom`), and every rule that read the
-                // room reads absence instead — which is what carries the
-                // addend away with the Upgrade and the Build.
+                // And the end of it. RCL3 reaches this Snapshot as the
+                // child's [[stage]] and is still not what closes the
+                // window: it takes the whole room out of the mother's scan
+                // set (`withoutNorthRoom`, which turns the stage
+                // `Independent` and drops the room together, the way the
+                // shell does), and every rule that read the room reads
+                // absence instead — which is what carries the addend away
+                // with the Upgrade and the Build.
                 Expect.isEmpty
                     (casts (withoutNorthRoom (withNorthSpawn nursery)) switchHomeFleet)
                     "and once the child outgrows her the room is gone from the projection: thirteen again"
@@ -19150,12 +19207,14 @@ let nurseryTests =
             }
 
             test "the declaration and the home exclusion each do their own work" {
-                // `isNurseryRoom` is three facts, and the cases above read
-                // two of them: ownership moves between `asCandidate` and
-                // `asNursery`, and the spawn moves under `withNorthSpawn`.
-                // These are the other two, one at a time, because a rule
-                // whose guard clauses nothing reads is two weaker rules
-                // wearing one name.
+                // `isNurseryRoom` is two facts, and the cases above move
+                // the stage through both of its inputs: ownership between
+                // `asCandidate` and `asNursery`, the spawn under
+                // `withNorthSpawn`. These are the two clauses no case above
+                // touches — the declaration inside the stage, and the home
+                // exclusion beside it — one at a time, because a rule whose
+                // guard clauses nothing reads is two weaker rules wearing
+                // one name.
                 let sited =
                     northBorderColony { X = 10; Y = 38 }
                     |> withNorthOutpost None
@@ -19167,26 +19226,30 @@ let nurseryTests =
                 // reaches this by taking a room out of `Colony.declared`
                 // while leaving it in a mother's outpost list: a rollback,
                 // or a room claimed for some reason of his own. Ownership
-                // and the spawn clause both answer "nursery" here and only
-                // the declaration says otherwise, so without it every site
-                // in that room would be uncapped feeding-tier work on the
-                // strength of a fact no human wrote down.
+                // and the spawn both answer "nursery" here, and what says
+                // otherwise is that the shell derives a stage for the
+                // declared homes alone (`Snapshot.colonyStages`), so an
+                // undeclared room has no entry however plainly it looks
+                // like one — without which every site in that room would be
+                // uncapped feeding-tier work on the strength of a fact no
+                // human wrote down.
                 Expect.equal
                     (matchOf
                         { asNursery sited with
                             ColonyHomes = [ SpatialInfo.homeName sited.Spatial ]
+                            Stages = Map.remove "W1N2" (asNursery sited).Stages
                         })
                     (Some(taskId (Upgrade "ctrl-1"), MatchFactor.TravelCost))
                     "a room of ours nobody declared a home is an outpost still, and its site is surplus"
 
                 // And the colony's own home, excluded by name (ADR 0047).
                 // `Main.loop` runs `decide` only for a colony whose home
-                // holds a spawn, so the other three facts can hold at home
-                // only in a Snapshot the shell does not build — which is
-                // what makes this clause a guard rather than a live rule,
-                // and why a test has to lay that Snapshot by hand for it to
-                // be read at all. Read without it, #157's "home Build is
-                // untouched and stays Surplus" would grow a condition.
+                // holds a spawn, so a home at the `Nursery` stage is a
+                // Snapshot the shell does not build — which is what makes
+                // this clause a guard rather than a live rule, and why a
+                // test has to lay that Snapshot by hand for it to be read
+                // at all. Read without it, #157's "home Build is untouched
+                // and stays Surplus" would grow a condition.
                 let homeSited =
                     let colony =
                         northBorderColony { X = 10; Y = 38 }
@@ -19196,6 +19259,7 @@ let nurseryTests =
                     { colony with
                         ConstructionSites = colony.ConstructionSites @ [ { Id = "site-home" } ]
                         ColonyHomes = [ SpatialInfo.homeName colony.Spatial ]
+                        Stages = Map.ofList [ SpatialInfo.homeName colony.Spatial, Nursery ]
                         Spatial =
                             { colony.Spatial with
                                 TargetKinds =
@@ -19380,17 +19444,17 @@ let private raisedPair =
 /// this table and not over the declaration, so a room the gate withheld
 /// adopts nobody and a room two colonies project names no single adopter.
 ///
-/// The controller levels are handed in because the bootstrap half of the
-/// union is read off them: `Map.empty` is the world in which no declared
-/// home's level can be seen, and every colony that names no mother
-/// projects the same rooms in it either way.
-let private projectionsOf (levels: Map<string, int>) (colonies: Colony list) =
+/// The [[stage]]s are handed in because the bootstrap half of the union is
+/// read off them (ADR 0052 decision 3): `Map.empty` is the world in which
+/// no declared home is a colony anything can see, and every colony that
+/// names no mother projects the same rooms in it either way.
+let private projectionsOf (stages: Map<string, ColonyStage>) (colonies: Colony list) =
     colonies
     |> List.map (fun colony ->
         colony.Home,
         Colony.roomsProjected
             colony.Outposts
-            (Colony.bootstrapping levels colonies colony)
+            (Colony.bootstrapping stages colonies colony)
             colony.Home)
 
 /// The mother of the pair, carrying exactly the creeps the membership rule
@@ -19521,6 +19585,10 @@ let private childRunningItself =
                 { controllerAt 2 with
                     Id = "ctrl-child"
                 }
+        // Its own [[stage]], under its own home: a spawn of its own
+        // standing and RCL2 is `Bootstrapping` (ADR 0052 decision 3), the
+        // colony this whole window is about read from the inside.
+        Stages = Map.ofList [ "W1N2", Bootstrapping ]
         Spatial =
             { colony.Spatial with
                 TargetKinds = Map.add "ctrl-child" TargetKind.Controller colony.Spatial.TargetKinds
@@ -19560,11 +19628,12 @@ let bootstrapTests =
                     (taskId (Upgrade "ctrl-1"))
                     "and her own Upgrade is still hers: the borrowing adds a second, it does not replace the first"
 
-                // Pairwise on the tick the child outgrows her: RCL3 is not
-                // a fact this Snapshot carries — it takes the whole room
-                // out of her scan set (`withoutNorthRoom`), and both Tasks
-                // leave with it, from one subtraction rather than two
-                // gates.
+                // Pairwise on the tick the child outgrows her: what RCL3
+                // does to this Snapshot is take the whole room out of her
+                // scan set (`withoutNorthRoom`), and both Tasks leave with
+                // it, from one subtraction rather than two gates — the
+                // child's [[stage]] turning `Independent` beside it closes
+                // nothing on its own (`the colony stage` below).
                 let outgrown = pool (withoutNorthRoom raisingMother)
 
                 Expect.isFalse
@@ -19935,61 +20004,104 @@ let twoColonyTests =
                     "adoption is inert there — two projectors name no single adopter — so the mother keeps her crews until the human's edit"
             }
 
-            test "a mother goes on projecting the child that names her, until RCL3" {
+            test "a mother goes on projecting the child that names her, until it is independent" {
                 // ADR 0047 decision 4's window, at the seam that decides
-                // how long it lasts. The controller level is not a fact any
+                // how long it lasts. A child's [[stage]] is not a fact any
                 // colony's Snapshot holds for a room it does not own — and
                 // it is what decides whether that room is projected at all
-                // — so it is read off the world once, here, and everything
-                // downstream follows from the scan set (`Decide` reads no
-                // level of its own).
+                // — so it is derived off the world once (ADR 0052 decision
+                // 3, `Colony.stageOf`) and everything downstream follows
+                // from the scan set (`Decide` reads no level of its own).
                 let mother = List.head raisedPair
                 let child = List.item 1 raisedPair
 
-                let raising levels colonies colony =
-                    Colony.bootstrapping (Map.ofList levels) colonies colony
+                let raising stages colonies colony =
+                    Colony.bootstrapping (Map.ofList stages) colonies colony
 
-                // Pairwise on the level alone, one either side of the line.
+                // Pairwise on the stage alone, one either side of the line.
                 Expect.equal
-                    (raising [ "W1N2", 2 ] raisedPair mother)
+                    (raising [ "W1N2", Bootstrapping ] raisedPair mother)
                     [ "W1N2" ]
                     "under `bootstrapLevel` the mother is still raising the child that names her"
 
                 Expect.isEmpty
-                    (raising [ "W1N2", Colony.bootstrapLevel ] raisedPair mother)
+                    (raising [ "W1N2", Independent ] raisedPair mother)
                     "at it she is not: the exception closes and the room leaves her projection"
+
+                // And the stage before it: a child off its mother's
+                // outpost list with no spawn of its own — one whose spawn
+                // was destroyed — is a [[nursery]] she is the only colony
+                // that can raise, and dropping it from her projection
+                // would leave a claimed room nobody builds a spawn in.
+                //
+                // **Wider than the level rule this replaces**, and that is
+                // the whole of what the migration moved here: a nursery is
+                // a nursery at any level (`Colony.stageOf`), where
+                // `level < bootstrapLevel` stopped at RCL3. So a child
+                // that stood its own spawn, reached RCL3 and then lost it
+                // is raised again where the level rule orphaned it — the
+                // right answer, at the nursery's own price, and recorded
+                // in ADR 0047's Consequences.
+                Expect.equal
+                    (raising [ "W1N2", Nursery ] raisedPair mother)
+                    [ "W1N2" ]
+                    "a spawnless child is a nursery she still projects, at any RCL: a lost spawn is the one thing only she can rebuild"
 
                 // And on each of the other three facts, one at a time.
                 Expect.isEmpty
-                    (raising [ "W1N2", 2 ] splitPair (List.head splitPair))
-                    "a child that names no mother is nobody's to raise, whatever its level"
+                    (raising [ "W1N2", Bootstrapping ] splitPair (List.head splitPair))
+                    "a child that names no mother is nobody's to raise, whatever its stage"
 
                 Expect.isEmpty
-                    (raising [ "W1N2", 2 ] raisedPair child)
+                    (raising [ "W1N2", Bootstrapping ] raisedPair child)
                     "and the child raises nobody: the field names one colony and only that one reads it"
 
                 Expect.isEmpty
                     (raising [] raisedPair mother)
-                    "a room whose level nobody can see is not one she is raising — absence classifies nothing"
+                    "a room that is no colony anything can see is not one she is raising — absence classifies nothing"
+
+                // The other absence, and the one that **narrows** this
+                // rule against the level it used to read: a declared child
+                // we do not own has no stage either, where a level map
+                // carried any seen controller and read a 0 that was under
+                // the line. Derived here rather than written down, so the
+                // case is the one `Snapshot.colonyStages` would actually
+                // hand her — a candidate colony that names a mother, or a
+                // child that stops being ours, is projected by nobody, so
+                // nothing pools a Claim to take such a room and the route
+                // to one is her `Outposts` list (ADR 0047's user story and
+                // its Consequences).
+                let unowned = Colony.stageOf false false (Some 1)
+
+                Expect.isNone
+                    unowned
+                    "a declared home we do not own is no colony of ours and has no stage — not a young one"
 
                 Expect.isEmpty
-                    (raising [ "W1N2", 1 ] nurseryPair (List.head nurseryPair))
+                    (raising
+                        (unowned |> Option.map (fun stage -> "W1N2", stage) |> Option.toList)
+                        raisedPair
+                        mother)
+                    "so the child she raised is not one she can take back on her own once it stops being ours"
+
+                Expect.isEmpty
+                    (raising [ "W1N2", Bootstrapping ] nurseryPair (List.head nurseryPair))
                     "and a room she still declares as her outpost is worked as one: the outpost reading names it first"
 
-                // What the level then decides: the scan set, and with it
+                // What the stage then decides: the scan set, and with it
                 // every rule that reads the room off the projection.
-                let projects levels colonies =
-                    projectionsOf (Map.ofList levels) colonies
+                let projects stages colonies =
+                    projectionsOf (Map.ofList stages) colonies
                     |> List.filter (fun (_, rooms) -> List.contains "W1N2" rooms)
                     |> List.map fst
 
                 Expect.equal
-                    (projects [ "W1N2", 2 ] raisedPair)
+                    (projects [ "W1N2", Bootstrapping ] raisedPair)
                     [ "W1N1"; "W1N2" ]
                     "while she raises it the room is in both projections, exactly as it was while it was her nursery"
 
                 Expect.equal
-                    (projects [ "W1N2", Colony.bootstrapLevel ] raisedPair)
+                    (projects [ "W1N2", Independent ] raisedPair)
                     [ "W1N2" ]
                     "and once it has outgrown her, in the child's alone"
 
@@ -19999,20 +20111,20 @@ let twoColonyTests =
                 // hired for the job stay hers to match — and the tick the
                 // window closes they are the child's, like every other
                 // creep standing in a room only it projects.
-                let holder levels =
+                let holder stages =
                     Colony.creepColonies
-                        (projectionsOf (Map.ofList levels) raisedPair)
+                        (projectionsOf (Map.ofList stages) raisedPair)
                         pairSpawns
                         [ motherCast, Some "W1N2" ]
                     |> Map.tryFind motherCast
 
                 Expect.equal
-                    (holder [ "W1N2", 2 ])
+                    (holder [ "W1N2", Bootstrapping ])
                     (Some "W1N1")
                     "a pioneer in the room its own colony is raising stays its own colony's"
 
                 Expect.equal
-                    (holder [ "W1N2", Colony.bootstrapLevel ])
+                    (holder [ "W1N2", Independent ])
                     (Some "W1N2")
                     "and is adopted the tick her projection lets the room go"
             }
@@ -21671,12 +21783,12 @@ let standingBodyTests =
                             (creepWith "w" 100 0 (bodyFor workerPattern 300))
 
                     { colony with
-                        Controller = Some(controllerAt level)
                         Spatial =
                             colony.Spatial
                             |> withTargets
                                 [ "spawn-1", { X = 19; Y = 9 }, Structure BuiltKind.Spawn ]
                     }
+                    |> withLevel level
 
                 let matched level =
                     let { Verdicts = verdicts } = decide (lane level) Map.empty Set.empty None
@@ -22099,6 +22211,7 @@ let private upgraderColony room =
         Refillables = []
         Sources = [ source "src-a"; source "src-b" ]
         Controller = Some(controllerAt 5)
+        Stages = homeStages room 5
         Spatial = room
     }
 
@@ -22544,8 +22657,8 @@ let upgraderQuotaTests =
             let atBank capacity level =
                 { upgraderColony (withBuffer (Structure BuiltKind.Container)) with
                     RoomEnergy = bank capacity capacity
-                    Controller = Some(controllerAt level)
                 }
+                |> withLevel level
 
             test
                 "the standing row's own replacement can eat the whole remainder, and the floor hires the generalist then" {
@@ -23081,5 +23194,299 @@ let postSiteTests =
                     (Map.tryFind "b" digging)
                     (Some(taskId (Harvest "src-out")))
                     "and the second body is refused by the cap it always was"
+            }
+        ]
+
+/// One colony's [[stage]] forced to an answer, with its controller level
+/// left exactly where the fixture put it (ADR 0052 decision 3). The shell
+/// can never build such a Snapshot — it derives the one from the other
+/// (`Snapshot.colonyStages`) — and that is what makes it the instrument
+/// here: a rule that had gone on reading `Controller.Level` would answer
+/// the same either way and every case below would stay green with the
+/// migration undone.
+let private atStage stage (colony: Snapshot) =
+    { colony with
+        Stages = Map.add (SpatialInfo.homeName colony.Spatial) stage colony.Stages
+    }
+
+[<Tests>]
+let colonyStageTests =
+    testList
+        "the colony stage"
+        [
+            test "a stage is ownership, a spawn and a level, and each of the three moves it alone" {
+                // `Colony.stageOf`, the one place `bootstrapLevel` is read
+                // (ADR 0052 decision 3). Pairwise on each input in turn,
+                // the other two held.
+                Expect.equal
+                    (Colony.stageOf false false (Some 1))
+                    None
+                    "a room we do not own is no colony of ours: a candidate, whose one rule is the Claim pool"
+
+                Expect.equal
+                    (Colony.stageOf false true (Some 5))
+                    None
+                    "and ownership is asked first: nothing standing in it makes an unowned room a stage"
+
+                Expect.equal
+                    (Colony.stageOf true false (Some 1))
+                    (Some Nursery)
+                    "claimed with no spawn of ours standing in it is a nursery"
+
+                Expect.equal
+                    (Colony.stageOf true false (Some 8))
+                    (Some Nursery)
+                    "and a nursery at any level: what ends it is a spawn, not a controller"
+
+                Expect.equal
+                    (Colony.stageOf true true (Some(Colony.bootstrapLevel - 1)))
+                    (Some Bootstrapping)
+                    "its own spawn standing and one level short of the line is the bootstrap window"
+
+                Expect.equal
+                    (Colony.stageOf true true (Some Colony.bootstrapLevel))
+                    (Some Independent)
+                    "and at the line it is independent — the one comparison this constant is read in"
+
+                Expect.equal
+                    (Colony.stageOf true true None)
+                    None
+                    "a colony whose controller nothing can place has no stage, and every reader answers it as it always did"
+            }
+
+            test "the road gate reads the stage and not the level" {
+                // #209's gate, migrated (ADR 0052 decision 3). The same
+                // RCL5 fixture the layout tests plan, with the stage moved
+                // under it: the trunks are planned whole either way and
+                // what the stage decides is whether they reach the ground.
+                let roads colony =
+                    let { Intents = intents } = decide colony Map.empty Set.empty None
+                    sitesOfKind Road intents
+
+                Expect.isNonEmpty
+                    (roads (trunkColony 5 |> atStage Independent))
+                    "the premise: an independent colony places its trunk"
+
+                Expect.isEmpty
+                    (roads (trunkColony 5 |> atStage Bootstrapping))
+                    "the same RCL5 room bootstrapping places none — the gate is the stage, and the level says nothing"
+
+                Expect.isEmpty
+                    (roads (trunkColony 5 |> atStage Nursery))
+                    "and a nursery none either: every stage under the line answers alike"
+            }
+
+            test "the rampart line reads the stage and not the level" {
+                // #214's floor, migrated with it. The rampart at one hit is
+                // the Repair pool's business for an independent colony and
+                // decays away for one under the line, and here the level is
+                // held at RCL2 through both — where the level-reading rule
+                // would have answered "no floor" whatever the stage.
+                let hungry colony =
+                    repairTasks (planTasks colony noThreats)
+
+                let ramparted stage =
+                    bareRespawn
+                    |> withLevel 2
+                    |> atStage stage
+                    |> withHits "ram-1" BuiltKind.Rampart 1 300_000
+
+                Expect.equal
+                    (hungry (ramparted Independent))
+                    [ "ram-1" ]
+                    "an independent colony holds its rampart to the floor"
+
+                Expect.isEmpty
+                    (hungry (ramparted Bootstrapping))
+                    "and the same room bootstrapping leaves it to decay, at the very same level"
+            }
+
+            test "a home site's tier reads the stage and not the level" {
+                // The child's own reading of `isBootstrappingRoom`, which
+                // used to be a spawn standing plus `Controller.Level` and
+                // is now the stage those two derive (ADR 0052 decision 3).
+                // The lane is the standing-body fixture's, at one level
+                // throughout: only the stage moves, and the match factor
+                // says which tier decided.
+                let lane stage =
+                    bufferLaneColony
+                        [ "site-1", { X = 15; Y = 10 }, Site BuiltKind.Extension ]
+                        [ { Id = "site-1" } ]
+                        (creepWith "w" 100 0 (bodyFor workerPattern 300))
+                    |> atStage stage
+
+                let matched stage =
+                    let { Verdicts = verdicts } = decide (lane stage) Map.empty Set.empty None
+
+                    verdicts
+                    |> List.tryPick (function
+                        | Verdict.Matched("w", task, factor) -> Some(task, factor)
+                        | _ -> None)
+
+                Expect.equal
+                    (matched Bootstrapping)
+                    (Some(taskId (Build "site-1"), MatchFactor.Rank))
+                    "a bootstrapping colony builds its bank before its controller: the site wins by rank"
+
+                Expect.equal
+                    (matched Independent)
+                    (Some(taskId (Build "site-1"), MatchFactor.TravelCost))
+                    "and an independent one prices it against the Upgrade like any home site"
+            }
+
+            test "the nursery and the bootstrap predicates read the stage and not the census" {
+                // R1's pairwise criterion for the two readers ADR 0052
+                // decision 3 migrated together, and the only instrument
+                // that can show it: a fixture whose kind census and whose
+                // [[stage]] **disagree**. `raisingMother` holds a spawn
+                // structure in the child's layer — the fact both
+                // predicates used to be written on, one asserting it and
+                // the other denying it — and here the stage beside it is
+                // forced back to `Nursery`. A rule that had gone on
+                // counting spawns in the census would answer the census;
+                // these answer the stage.
+                let pool colony =
+                    planTasks colony noThreats |> List.map taskId
+
+                let stagedAs stage colony =
+                    { colony with
+                        Stages = Map.add "W1N2" stage colony.Stages
+                    }
+
+                Expect.contains
+                    (pool raisingMother)
+                    (taskId (Upgrade "ctrl-child"))
+                    "the premise: a child she projects at `Bootstrapping` is one whose controller she upgrades"
+
+                Expect.isFalse
+                    (List.contains
+                        (taskId (Upgrade "ctrl-child"))
+                        (pool (stagedAs Nursery raisingMother)))
+                    "the same room at `Nursery` is not, though the spawn the old rule counted still stands in her census"
+
+                Expect.contains
+                    (pool (stagedAs Nursery raisingMother))
+                    (taskId (Build "site-spawn"))
+                    "and what she works there instead is the site, pooled off the projection as a nursery's always was"
+
+                // The other direction, on the fixture whose census holds
+                // no spawn at all: the stage says one stands, and the
+                // borrowing follows the stage rather than the structure.
+                Expect.isFalse
+                    (List.contains (taskId (Upgrade "ctrl-child")) (pool claimedChild))
+                    "the premise: a nursery's own controller is nobody's business yet"
+
+                Expect.contains
+                    (pool (stagedAs Bootstrapping claimedChild))
+                    (taskId (Upgrade "ctrl-child"))
+                    "and the same census at `Bootstrapping` pools it: no structure moved, only the stage"
+            }
+
+            test "the pioneer addend is flat across the stage, and reads the stage to be" {
+                // The other half of the same migration, and the trap the
+                // ticket names: the addend is flat over both stages before
+                // independence (ADR 0047), so the fleet must not move on
+                // the tick a nursery becomes a bootstrapping child. Pinned
+                // here against the *stage* alone — the census keeps the
+                // spawn structure through the flip — so a `raising` that
+                // had gone on reading the census would answer neither
+                // predicate on the `Nursery` reading and drop her target
+                // by three.
+                let casts colony fleet =
+                    spawnIntents
+                        (decide { colony with Creeps = fleet } Map.empty Set.empty None).Intents
+
+                let short fleet =
+                    List.truncate (List.length fleet - 1) fleet
+
+                let pioneers = [ for i in 1..3 -> worker $"p{i}" 0 50 ]
+                let raised = withNorthSpawn (asNursery switchHome)
+
+                let stillANursery =
+                    { raised with
+                        Stages = Map.add "W1N2" Nursery raised.Stages
+                    }
+
+                Expect.isEmpty
+                    (casts raised (switchHomeFleet @ pioneers))
+                    "the premise: raising a child at `Bootstrapping` puts her target at sixteen"
+
+                Expect.isEmpty
+                    (casts stillANursery (switchHomeFleet @ pioneers))
+                    "and the very same room at `Nursery` leaves it at sixteen: one addend across both stages"
+
+                match casts stillANursery (short (switchHomeFleet @ pioneers)) with
+                | [ (_, _, name) ] ->
+                    Expect.stringStarts
+                        name
+                        "worker-"
+                        "and tight: one short of sixteen she still casts the addend's own row for the nursery"
+                | other -> failtest $"expected exactly one SpawnCreep intent, got %A{other}"
+            }
+
+            test
+                "the mother reads the child's stage, and her scan set and not the stage closes her window" {
+                // ADR 0047's Consequences, pinned against the stage that
+                // now carries the level into her Snapshot: while a human
+                // still declares the child's room one of her `Outposts`
+                // the room is in her scan set through the outpost reading,
+                // which asks no stage — so the borrowing and the addend run
+                // at any RCL until the commit takes that entry out. A
+                // predicate that read `Bootstrapping` alone would close the
+                // window on a tick no human touched, and drop her fleet by
+                // three against ADR 0047's flat addend.
+                let casts colony fleet =
+                    spawnIntents
+                        (decide { colony with Creeps = fleet } Map.empty Set.empty None).Intents
+
+                let short fleet =
+                    List.truncate (List.length fleet - 1) fleet
+
+                let pioneers = [ for i in 1..3 -> worker $"p{i}" 0 50 ]
+                let raised = withNorthSpawn (asNursery switchHome)
+
+                let grownUp =
+                    { raised with
+                        Stages = Map.add "W1N2" Independent raised.Stages
+                    }
+
+                Expect.isEmpty
+                    (casts raised (switchHomeFleet @ pioneers))
+                    "the premise: a bootstrapping child in her projection puts her target at sixteen"
+
+                Expect.isEmpty
+                    (casts grownUp (switchHomeFleet @ pioneers))
+                    "the same room, the same projection, the child independent — and her target is still sixteen"
+
+                match casts grownUp (short (switchHomeFleet @ pioneers)) with
+                | [ (_, _, name) ] ->
+                    Expect.stringStarts
+                        name
+                        "worker-"
+                        "and tight: one short of sixteen she still casts the addend's own row"
+                | other -> failtest $"expected exactly one SpawnCreep intent, got %A{other}"
+
+                // The Upgrade half of the same borrowing, on the fixture
+                // that carries the child's controller: it stays in her pool
+                // while the room is in her scan set, and leaves with the
+                // room.
+                let pool colony =
+                    planTasks colony noThreats |> List.map taskId
+
+                let outgrownInPlace =
+                    { raisingMother with
+                        Stages = Map.add "W1N2" Independent raisingMother.Stages
+                    }
+
+                Expect.contains
+                    (pool outgrownInPlace)
+                    (taskId (Upgrade "ctrl-child"))
+                    "an independent child she still projects is still hers to upgrade"
+
+                Expect.isFalse
+                    (List.contains
+                        (taskId (Upgrade "ctrl-child"))
+                        (pool (withoutNorthRoom outgrownInPlace)))
+                    "and what takes it away is the room leaving her projection, which is the only thing that ever did"
             }
         ]

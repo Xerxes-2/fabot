@@ -367,6 +367,9 @@ let quiet: Snapshot =
         // own decides Tasks and quotas (ADR 0047), and the log records what
         // happened in a room rather than what is planned for one.
         ColonyHomes = []
+        // Nor a [[stage]], for the same reason: what a colony is old
+        // enough to do (ADR 0052 decision 3) is not what happened to it.
+        Stages = Map.empty
     }
 
 /// A hostile creep of the given owner and body standing on a tile of the

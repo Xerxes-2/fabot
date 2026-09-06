@@ -345,6 +345,21 @@ let private colonyOf (room: LoadedRoom) level =
         // candidate colony is a declared home nobody owns yet (ADR 0047),
         // and this room has a spawn standing in it.
         ColonyHomes = []
+        // The [[stage]] this colony stands at, derived from the same level
+        // the controller above carries (ADR 0052 decision 3) rather than
+        // written down beside it: the two cannot disagree, and every rule
+        // that used to read the level — the roads, the ramparts, the
+        // feeding tier of a young room's sites — reads this. A room the
+        // capture gives no controller has no stage, which is the answer
+        // `Colony.stageOf` gives a colony whose controller nothing can
+        // place.
+        Stages =
+            match
+                room.ControllerId
+                |> Option.bind (fun _ -> Colony.stageOf true true (Some level))
+            with
+            | Some stage -> Map.ofList [ name, stage ]
+            | None -> Map.empty
     }
 
 let private placementsOf intents =
@@ -2504,7 +2519,7 @@ let boundedBandTests =
 /// No tile is named: the room says which tiles the trunks want and this
 /// says only that the level decides whether they are asked for.
 [<Tests>]
-let roadLevelTests =
+let roadGateTests =
     /// One captured room planned from one fixed spawn at a level, as the
     /// sweep plans it — the same `colonyOf` and the same projection, so the
     /// only thing that varies across a pair below is the controller level.
@@ -2548,7 +2563,7 @@ let roadLevelTests =
 
                 Expect.isNonEmpty
                     (tilesOfKind Road rcl3)
-                    "RCL3: `roadLevel` is reached and the whole gap drops at once"
+                    "RCL3: the road gate opens and the whole gap drops at once"
             }
 
             test "the road gap is all the level withheld, and it drops whole" {
@@ -2603,7 +2618,7 @@ let roadLevelTests =
 
             test "the mother is above the line and does not move" {
                 // W12S28 from the tile its colony stands on, at the live
-                // RCL5: the gate is inert from `roadLevel` up, so the road
+                // RCL5: the gate is inert from the bootstrap line up, so the road
                 // sites there are the same set RCL3 places. What this pins
                 // is the gate's upper edge and not byte-identity with the
                 // revision before it — one revision cannot compare itself
@@ -2628,7 +2643,7 @@ let roadLevelTests =
                 // RCL3. Every other kind is judged at RCL2 by its own rule
                 // and still reaches the ground — the extensions the level
                 // does unlock, the containers no level gates at all, the
-                // ramparts from `rampartLevel` up — so the room goes on
+                // ramparts from the bootstrap line up — so the room goes on
                 // growing into exactly the spend the gate is protecting.
                 let rcl2 = placedAt "W13S28" 2
 

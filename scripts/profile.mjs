@@ -2439,7 +2439,7 @@ function printCensusKeyed(classes) {
 // measurement: what a reader compares it against is the tick, and the gap
 // between the two is the projection, the Memory writes and the intents —
 // everything `decide` is not.
-function printDecideByColony(classes, decideMs, ticks) {
+function printDecideByColony(classes, decideMs, ticks, stages) {
   const mean = (rows) => (rows.length ? rows.reduce((a, b) => a + b, 0) / rows.length : 0);
   const tickMs = {
     all: ticks.all.map((row) => row.ms),
@@ -2454,7 +2454,15 @@ function printDecideByColony(classes, decideMs, ticks) {
       .toFixed(2)
       .padStart(9);
   for (const home of homes) {
-    console.log(`  ${classes.map((c) => column(c.label, home)).join("  ")}  ${home}`);
+    // The colony's [[stage]] beside its row (ADR 0052 decision 3), read
+    // off the Snapshot the bundle was handed: which of the rules that turn
+    // on it — the road gate, the rampart gate, the tier a young room's
+    // sites are built on — this row's ms were paid under.
+    const stage = stages.get(home);
+    console.log(
+      `  ${classes.map((c) => column(c.label, home)).join("  ")}  ${home}` +
+        (stage ? `  (${stage})` : "  (no stage)")
+    );
   }
   const totalOf = (label) =>
     homes.reduce((total, home) => total + mean(decideMs[label].get(home) ?? []), 0);
@@ -2598,18 +2606,35 @@ function printReport(classes, pooled, world, allTicks) {
 // call was handed (`SpatialInfo.RoomName`, which `Snapshot.build` sets to
 // the colony's home): the same name `Colony.living` files the colony
 // under, so the table and the declaration cannot drift apart.
+//
+// Beside it the colony's [[stage]] (ADR 0052 decision 3), read off the
+// same Snapshot's `Stages` under that same home name — the bundle's own
+// answer and never this harness's arithmetic off `--level`, which is the
+// whole point of printing it: `young --level 3` and `pair` are worlds
+// whose rules turn on the stage, and a scenario that furnished one colony
+// and decided another would say so here. A stage the map does not carry
+// prints as none, which is what a colony whose controller nothing can
+// place is.
 const DECIDE_PROBE = `
 // ---- appended by scripts/profile.mjs: one timing per decide call --------
 globalThis.__fabotDecideCalls = [];
 {
   const inner = decide;
+  const stageOf = (snapshot, home) => {
+    const stages = snapshot && snapshot.Stages;
+    if (!home || !stages || typeof stages[Symbol.iterator] !== "function") return null;
+    for (const [room, stage] of stages) if (room === home) return String(stage);
+    return null;
+  };
   decide = function decideProbe(snapshot, assignments, verbose, memo) {
     const started = globalThis.__fabotClock();
+    const home = (snapshot && snapshot.Spatial && snapshot.Spatial.RoomName) || "(unnamed)";
     try {
       return inner(snapshot, assignments, verbose, memo);
     } finally {
       globalThis.__fabotDecideCalls.push({
-        home: (snapshot && snapshot.Spatial && snapshot.Spatial.RoomName) || "(unnamed)",
+        home,
+        stage: stageOf(snapshot, home),
         ms: globalThis.__fabotClock() - started,
       });
     }
@@ -2781,6 +2806,10 @@ await session.post("Profiler.start");
 // tick that ran a colony fewer than the scenario declares is caught here
 // rather than showing up as a mean over the wrong divisor.
 const decideMs = { all: new Map(), perturbed: new Map(), quiet: new Map() };
+// And the [[stage]] each colony was decided at, off the same rows: one
+// name per home, overwritten every tick because a stage is a fact of the
+// tick and this world never moves one.
+const stages = new Map();
 const recordDecide = (label, calls) => {
   const table = decideMs[label];
   for (const call of calls) {
@@ -2823,6 +2852,7 @@ for (let i = 0; i < TICKS; i++) {
         "`Colony.living` is not reading this world the way the scenario describes it"
     );
   }
+  for (const call of calls) stages.set(call.home, call.stage);
   recordDecide("all", calls);
   recordDecide(moved ? "perturbed" : "quiet", calls);
   ticks.all.push({ t: game.time, ms });
@@ -2852,7 +2882,7 @@ const classes = CENSUS_EVERY
   : [{ label: "all", ms: ticks.all.map((row) => row.ms), summary: pooled }];
 
 printReport(classes, pooled, world, ticks.all);
-printDecideByColony(classes, decideMs, ticks);
+printDecideByColony(classes, decideMs, ticks, stages);
 
 // Per room, because ADR 0041 layered the memo by room name: the number to
 // read is one read per room the bundle projected, over the whole run. Read

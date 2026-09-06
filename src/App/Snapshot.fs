@@ -437,9 +437,11 @@ let private projectRoom (creeps: Set<string>) (roomName: string) : RoomProjectio
 /// of hers. What she is there for is two Tasks — the child's Upgrade and
 /// its Build — so the census keeps three kinds and drops the rest: the
 /// controller those workers upgrade, the sites they build, and the spawn,
-/// which is not a target of hers at all but the fact that says this room
-/// is a child colony and no longer a [[nursery]] (`Decide.isNurseryRoom`,
-/// which reads it off this same census). Everything else in the room —
+/// which is not a target of hers at all but the tile her [[pioneer]]s
+/// walk up to and the structure that told `Decide.isNurseryRoom` this
+/// room was a child colony before that rule read a [[stage]] (ADR 0052
+/// decision 3, `colonyStages`, which now answers it off the world for
+/// every declared home at once). Everything else in the room —
 /// its rocks, its containers and its stock, its structures' hits, its
 /// piles and its tombstones — is the child's own business, and a mother
 /// carrying it would pool a Harvest on the child's rock, hire an Anchor
@@ -483,23 +485,49 @@ let private narrowToBootstrap (projection: RoomProjection) : RoomProjection =
         Stores = Map.empty
     }
 
-/// The controller level of each named room we can see this tick, for the
-/// one rule that needs a level from outside a colony's own Snapshot
-/// (`Colony.bootstrapping`, ADR 0047 decision 4): whether a child colony
-/// has outgrown the mother that raised it decides whether the mother scans
-/// its room at all, so it cannot be read off a projection that scan set
-/// does not exist yet to build.
+/// The [[stage]] of each named room we can see this tick (ADR 0052
+/// decision 3, `Colony.stageOf`): the one derivation, run here because
+/// two of its three facts are the world's and not any one colony's — a
+/// stage decides whether a mother scans her child's room at all
+/// (`Colony.bootstrapping`, ADR 0047 decision 4), so it cannot be read
+/// off a projection that scan set does not exist yet to build.
 ///
 /// Read off `Game.rooms` like every other seen fact, so a room we cannot
 /// look into contributes no entry rather than a zero (ADR 0004) — and a
 /// room with no controller none either, that being a room no colony can
-/// ever be declared in. Asked of the declared homes alone, which is a
-/// handful of names.
-let controllerLevels (rooms: string list) : Map<string, int> =
+/// ever be declared in. Asked of the declared homes **and of every living
+/// colony's home** (`Main.loop`), which is a handful of names either way:
+/// the second term is `Colony.living`'s fallback colony, a spawn room no
+/// declaration names (ADR 0047), which without an entry here would place
+/// no road and keep no rampart however old it is. So a stage entry does
+/// not by itself say a human declared the room — that fallback fires only
+/// when nothing declared is living, so the one room it adds is the one
+/// colony running, excluded by name wherever a rule is about another
+/// room (`Decide.isNurseryRoom`).
+///
+/// The three facts, each off the engine: **owned** is `controller.my`,
+/// undefined and not false on a controller nobody owns (the shape
+/// `RoomControl` reads it in below); a **spawn standing** is one of ours
+/// in `Game.spawns` whose room this is — the whole world's spawns, which
+/// is what makes this the world's answer and not one colony's list
+/// (#191); and the **level** off the same controller.
+let colonyStages (rooms: string list) : Map<string, ColonyStage> =
+    let standing =
+        objectValues<ISpawn> Game.spawns
+        |> Array.map (fun spawn -> spawn.room.name)
+        |> Set.ofArray
+
     rooms
     |> List.choose (fun name ->
         match roomSeen name with
-        | Some room when not (isNull (box room.controller)) -> Some(name, room.controller.level)
+        | Some room when not (isNull (box room.controller)) ->
+            let c = room.controller
+
+            Colony.stageOf
+                (not (isNull (box c.my)) && c.my)
+                (Set.contains name standing)
+                (Some c.level)
+            |> Option.map (fun stage -> name, stage)
         | _ -> None)
     |> Map.ofList
 
@@ -593,33 +621,43 @@ let projectedRooms (colony: Colony) (bootstrap: string list) (shut: Set<string>)
 /// withholding from it (ADR 0043, derived by Core from the previous tick's
 /// [[raid log]] — `Observe.standDown`), the rooms it bootstraps for a
 /// child colony of its own (ADR 0047 decision 4, `Colony.bootstrapping`),
-/// and the creeps that are this colony's this tick
-/// (`Colony.creepColonies`). All four are handed in and none is decided
-/// here: the shell reads which colonies run, which rooms each works, which
-/// children each is still raising and which creeps each holds, and Core
-/// owns every rule behind those four answers.
+/// the creeps that are this colony's this tick (`Colony.creepColonies`)
+/// and the [[stage]] of every declared colony (`colonyStages`, ADR 0052
+/// decision 3). All five are handed in and none is decided here: the
+/// shell reads which colonies run, which rooms each works, which children
+/// each is still raising, which creeps each holds and where each stands
+/// in its life, and Core owns every rule behind those five answers.
 ///
 /// One of these is built per **living** colony and `decide` is run once
-/// over each (`Colony.living`), so nothing in this record is the world's:
-/// the spawns are this colony's own, the bank is its home room's, and a
+/// over each (`Colony.living`), so nothing this colony *works* is another
+/// one's: the spawns are its own, the bank is its home room's, and a
 /// creep another colony holds is in neither its `Creeps` nor any layer's
 /// `CreepPositions`. With one colony declared and running — every tick
 /// this bot has ever run — that is exactly the Snapshot it built before
 /// #191, field for field.
+///
+/// Two fields are the **declaration's** and reach every colony
+/// unfiltered, because neither is a thing one colony's projection could
+/// answer: `ColonyHomes`, which rooms a human means to own, and `Stages`,
+/// where each of those rooms stands in its life (ADR 0052 decision 3). A
+/// rule reading either says beside it what makes that room this colony's
+/// business — `Decide.isNurseryRoom` carries `colonyOwns` for exactly
+/// this reason — or two mothers would hire [[pioneer]]s for one child.
 let build
     (colony: Colony)
     (shut: Set<string>)
     (bootstrap: string list)
     (creeps: Set<string>)
+    (stages: Map<string, ColonyStage>)
     : Snapshot =
     let home = colony.Home
 
     // This colony's spawns and no others': the ones it casts from, banks
     // for and anchors its Layout on. A spawn standing in another colony's
-    // home is that colony's to cast from, and one in this colony's
-    // projection — the spawn a [[nursery]] is waiting for — is read off
-    // the projection where every other fact about that room is read
-    // (`Decide.isNurseryRoom`), never off this list.
+    // home is that colony's to cast from, and the spawn a [[nursery]] is
+    // waiting for is never looked for here: whether one stands in a
+    // declared home is a fact about the world, and it reaches this colony
+    // as that room's [[stage]] (`colonyStages`, ADR 0052 decision 3).
     let spawns =
         objectValues<ISpawn> Game.spawns |> Array.filter (fun s -> s.room.name = home)
 
@@ -1009,4 +1047,9 @@ let build
         // shell passes on what was declared and judges none of it, exactly
         // as it does for the scan set above.
         ColonyHomes = Colony.homes Colony.declared
+        // And where each of those homes stands in its life, derived once
+        // for the tick and handed to every colony unfiltered (ADR 0052
+        // decision 3): a stage is a fact about a room, so the map is the
+        // world's and the reader decides whose business the room is.
+        Stages = stages
     }

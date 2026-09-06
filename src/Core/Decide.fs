@@ -462,6 +462,38 @@ let taskId =
     // and every creep inside a Reach is running from the same thing.
     | Flee -> "flee"
 
+/// The [[stage]] of the colony whose home is the named room, off the one
+/// derivation the shell ran for the tick (ADR 0052 decision 3,
+/// `Colony.stageOf`). `None` for a room no colony of ours lives in —
+/// undeclared, unclaimed, or one nothing could see — which is the answer
+/// every reader here already gives such a room.
+///
+/// What it is not is a claim on the room. The map is the world's and
+/// reaches every colony alike, so a rule about a room that is not this
+/// colony's home says so beside the stage, with the projection fact that
+/// makes it this colony's business (`colonyOwns`, `isNurseryRoom`).
+///
+/// Named for the lookup and not for the derivation: `Colony.stageOf` is
+/// the rule that *decides* a stage, off three facts of the world, and the
+/// doc comments below cite it by name a few lines from every call of
+/// this one.
+let private roomStage (snapshot: Snapshot) room = Map.tryFind room snapshot.Stages
+
+/// This colony's own stage: its home room's entry. Always present for a
+/// living colony — `Main.loop` runs `decide` only for a home that is ours
+/// and holds a spawn of ours (ADR 0047 decision 1), which is a stage by
+/// construction — so `None` is the projection that cannot place its own
+/// controller, and every reader gives that colony the answer it gives one
+/// standing under the line.
+let private homeStage (snapshot: Snapshot) =
+    roomStage snapshot (SpatialInfo.homeName snapshot.Spatial)
+
+/// Whether this colony has outgrown its bootstrap window: `Independent`,
+/// at `Colony.bootstrapLevel` or past it (ADR 0052 decision 3). The one
+/// question the Layout's two gates and the Repair pool's rampart line ask
+/// — a colony below it is still buying the economy those spends serve.
+let private isIndependent (snapshot: Snapshot) = homeStage snapshot = Some Independent
+
 /// The Repair trigger of the decaying kinds: a road or a container enters
 /// the pool when its hits sink strictly below this fraction of max, and
 /// leaves it once repaired back over the line. A tunable, not part of
@@ -478,30 +510,27 @@ let private repairTrigger = 0.5
 /// tick puts a rampart that just dipped back over the line.
 let private rampartFloor = 100_000
 
-/// The level the colony keeps ramparts from (ADR 0034 as #214 amends it):
-/// `Colony.bootstrapLevel`, one past the engine's own unlock (Screeps
-/// CONTROLLER_STRUCTURES for "rampart": none at RCL1, 2,500 from RCL2
-/// up). The covering rule's one gate and the floor's one gate, one
-/// spelling for both: a room below it places no rampart and counts none
-/// of its standing ramparts hungry, so the three a child raised at RCL2
-/// decay away instead of holding four workers to a 100,000-hit floor
-/// derived for a home with a tower and a Storage behind it (W13S28,
-/// t~170,8xx: four of five loaded workers on Repair while the extension
-/// sites — the 550 bank — sat at a few hundred progress). What defends a
-/// bootstrapping room's one-spawn Keep is the safe-mode reflex, whose
-/// Keep arm reads the spawn's own hits and never a rampart's, so that arm
-/// is not gated here. A level rather than an allowance because the count
-/// is never what constrains the cover — the Keep and the Posts are a
-/// handful of tiles against thousands — and the bootstrap line rather
-/// than a second number for the reason `roadLevel` reads it (#209).
-let private rampartLevel = Colony.bootstrapLevel
-
-/// Whether this colony keeps ramparts this tick: its controller stands at
-/// `rampartLevel` or past it. A colony with no controller in the
-/// projection keeps none, which is the same answer the covering rule
-/// gives a room it cannot orient itself in.
-let private keepsRamparts (snapshot: Snapshot) =
-    snapshot.Controller |> Option.exists (fun c -> c.Level >= rampartLevel)
+/// Whether this colony keeps ramparts this tick (ADR 0034 as #214 amends
+/// it): it is `Independent`, past the bootstrap line and one stage past
+/// the engine's own unlock (Screeps CONTROLLER_STRUCTURES for "rampart":
+/// none at RCL1, 2,500 from RCL2 up). The covering rule's one gate and
+/// the floor's one gate, one spelling for both: a colony below it places
+/// no rampart and counts none of its standing ramparts hungry, so the
+/// three a child raised at RCL2 decay away instead of holding four
+/// workers to a 100,000-hit floor derived for a home with a tower and a
+/// Storage behind it (W13S28, t~170,8xx: four of five loaded workers on
+/// Repair while the extension sites — the 550 bank — sat at a few hundred
+/// progress). What defends a bootstrapping room's one-spawn Keep is the
+/// safe-mode reflex, whose Keep arm reads the spawn's own hits and never
+/// a rampart's, so that arm is not gated here. A stage rather than an
+/// allowance because the count is never what constrains the cover — the
+/// Keep and the Posts are a handful of tiles against thousands — and the
+/// [[stage]] rather than a level of its own for the reason the road gate
+/// reads it (#209, ADR 0052 decision 3): one derivation, five readers.
+///
+/// A colony with no stage keeps none, which is the same answer the
+/// covering rule gives a room it cannot orient itself in.
+let private keepsRamparts (snapshot: Snapshot) = isIndependent snapshot
 
 /// Whether a structure of this kind, carrying these hits, is hungry: its
 /// own whole line, read off the kind (ADR 0034). The decaying kinds sit
@@ -533,7 +562,7 @@ let private hungryStructures (snapshot: Snapshot) : (string * BuiltKind) list =
     |> List.choose (fun (id, hits) ->
         match Map.tryFind id snapshot.Spatial.TargetKinds with
         // A rampart below the line the colony keeps them from is not
-        // hungry: it is decaying away (#214, `rampartLevel`).
+        // hungry: it is decaying away (#214, `keepsRamparts`).
         | Some(Structure BuiltKind.Rampart) when not ramparts -> None
         | Some(Structure kind) when isHungry kind hits -> Some(id, kind)
         | _ -> None)
@@ -849,25 +878,6 @@ let private claimTargets (snapshot: Snapshot) : (string * string) list =
         else
             None)
 
-/// Whether a spawn stands in the named room, off the projection's kind
-/// census (ADR 0041): a structure of the spawn kind, placed in that room's
-/// layer. Ours by construction and not by a check — both callers
-/// (`isNurseryRoom` and `isBootstrapRoom`, which are one shape with this
-/// fact inverted) ask it only of a room `colonyOwns` has already answered
-/// for, each with the ownership conjunct ahead of this one, and nobody
-/// else's spawn stands in a room we own.
-///
-/// Vision pays for it like every other structure (ADR 0004), and that
-/// costs the caller nothing: a room the colony cannot see has no
-/// `RoomControl` entry either, so it fails the ownership half first and
-/// never reaches this one.
-let private spawnStandsIn (snapshot: Snapshot) room =
-    snapshot.Spatial.TargetKinds
-    |> Map.exists (fun id kind ->
-        kind = Structure BuiltKind.Spawn
-        && (SpatialInfo.placementOf snapshot.Spatial id
-            |> Option.exists (fun (standing, _) -> standing = room)))
-
 /// Whether the named room is this colony's **nursery**: a declared colony
 /// of ours that has been claimed and has no spawn of its own yet, and so
 /// is not independent (ADR 0047 decision 4). Its home goes on being
@@ -883,28 +893,38 @@ let private spawnStandsIn (snapshot: Snapshot) room =
 /// (`taskCapacities`), so a change to what a nursery *is* has to be
 /// followed to all three from here.
 ///
-/// Three facts, each doing its own work. A **declared** home
-/// (`Snapshot.ColonyHomes`), because a room the colony merely mines is
-/// nobody's child and its sites are the surplus work every other room's
-/// are: this is the same human sentence `claimTargets` reads, one tick
-/// later in the same story. **Owned by us**, which is exactly what
+/// Two facts, each doing its own work. The room's **stage** is `Nursery`
+/// (ADR 0052 decision 3), which is the whole of what a nursery is —
+/// declared, owned by us, and no spawn of ours standing in it — derived
+/// once for the tick off the world (`Colony.stageOf`) where the three
+/// were read one at a time here. Declared, because a room the colony
+/// merely mines is nobody's child and its sites are the surplus work
+/// every other room's are: the same human sentence `claimTargets` reads,
+/// one tick later in the same story. Owned, which is exactly what
 /// `claimTargets` stops answering to the tick the claim lands — the pool
 /// empties itself and this rule takes over, with no state kept and no
-/// constant to reset — and which carries a second fact for free: a control
-/// entry is something vision pays for (ADR 0004), and the vision is bought
-/// by the mother projecting the room, so a declared home nobody projects
-/// is no nursery here, the same silence `claimTargets` gives one. And **no
-/// spawn of ours standing in it**, because a spawn is what independence
+/// constant to reset. And no spawn, because a spawn is what independence
 /// *is*: the nursery ends the tick one stands, and the human's edit
 /// splitting the declaration in two follows that tick rather than causing
-/// it. Read off the projection's kind census (`spawnStandsIn`) and no
-/// longer off `Snapshot.Spawns`, which ADR 0047's Consequences named
-/// before there was a Snapshot per colony: since #191 that list is the
-/// colony's **own** spawns — the ones it casts from, banks for and anchors
-/// its Layout on — and the spawn this rule waits for stands in somebody
-/// else's home. The projection is where the other two facts come from
-/// already, so all three are now one room's entry in one colony's
-/// Snapshot.
+/// it.
+///
+/// The declaration is carried by the stage and no longer by a
+/// `ColonyHomes` conjunct here, and the one room that can hold a stage
+/// without one is harmless by the exclusion below: the shell derives
+/// stages for the declared homes and for every **living** colony's home
+/// (`Snapshot.colonyStages`), and the only living home no declaration
+/// names is `Colony.living`'s fallback, which fires solely when nothing
+/// declared is living — so that room is the colony doing the reading, and
+/// `room <> home` answers it first.
+///
+/// Beside it, **this colony projects the room** (`colonyOwns`): the stage
+/// says what the room is and the projection says whose business it is.
+/// The map is the world's and reaches every colony alike, so the second
+/// conjunct is what keeps a second mother — or a colony that merely
+/// declares the same room — from hiring [[pioneer]]s for a child it never
+/// projects; and it is a control entry, so vision pays for it (ADR 0004)
+/// and a declared home nobody projects is no nursery here, the same
+/// silence `claimTargets` gives one.
 ///
 /// The colony's own home is excluded by name and not by luck. `Main.loop`
 /// runs `decide` only for a **living** colony, one whose home holds a spawn
@@ -914,9 +934,8 @@ let private spawnStandsIn (snapshot: Snapshot) room =
 /// sentence rather than a sentence with an exception.
 let private isNurseryRoom (snapshot: Snapshot) room =
     room <> SpatialInfo.homeName snapshot.Spatial
-    && List.contains room snapshot.ColonyHomes
     && colonyOwns snapshot room
-    && not (spawnStandsIn snapshot room)
+    && roomStage snapshot room = Some Nursery
 
 /// Whether the named room is a child colony this one is still
 /// **bootstrapping** (ADR 0047 decision 4): a declared colony of ours that
@@ -928,47 +947,42 @@ let private isNurseryRoom (snapshot: Snapshot) room =
 /// in a room the colony projects is already pooled by id (#150) — which is
 /// why the borrowing rule is two Tasks and one predicate.
 ///
-/// The same three facts `isNurseryRoom` reads, with the fourth inverted:
-/// declared, ours, not this colony's own home, and a spawn **standing** in
-/// it rather than absent. The two are complements over one room and one
-/// tick apart — the nursery ends the tick a spawn stands and the bootstrap
-/// window opens on it — so they are written as one shape and cannot both
-/// answer for a room.
+/// `isNurseryRoom`'s two facts with the stage inverted: this colony
+/// projects the room, and the colony living there has a spawn of its own
+/// standing — which is every stage but `Nursery` (ADR 0052 decision 3).
+/// The two predicates are complements over one room and one tick apart —
+/// the nursery ends the tick a spawn stands and the bootstrap window
+/// opens on it — so they are written as one shape and cannot both answer
+/// for a room.
 ///
-/// **The scan set carries the level, and this predicate does not ask for
-/// one.** ADR 0047 closes the exception at RCL3, and that is where the
-/// borrowing ends, but a controller level is not a fact any colony's
-/// Snapshot holds for a room it does not own the way it owns home — so the
-/// rule that reads it is the one that decides which rooms are projected at
-/// all (`Colony.bootstrapping`, off the world, once for the tick). The
-/// tick the child reaches `bootstrapLevel` its room leaves this colony's
-/// scan set, and with it goes the `RoomControl` entry `colonyOwns` reads,
-/// the layer the controller was placed in and the sites the pool was built
-/// from: the Upgrade disappears, the Build disappears and the addend falls
-/// away, all from one subtraction. That is the shape the Reserve pool is
-/// already written in — read off what the projection carries, never off a
-/// second gate free to disagree with the scan set (`planTasks`).
-///
-/// **The level closes the window for a child that has left the outpost
-/// list, and that is the only shape it closes.** While a human still
+/// **Both standing stages, and that is the whole reason it is written as
+/// two.** `Bootstrapping` is the child under `bootstrapLevel`;
+/// `Independent` is the same child past it, and this predicate goes on
+/// answering true for it, because what closes the borrowing is the scan
+/// set and never a level read here (ADR 0047's Consequences, #192). The
+/// tick a child that has **left** its mother's outpost list reaches RCL3
+/// it stops being bootstrapped (`Colony.bootstrapping`) and the whole
+/// room leaves this colony's projection: the `RoomControl` entry
+/// `colonyOwns` reads goes with it, and the Upgrade, the Build and the
+/// addend fall away from one subtraction. But while a human still
 /// declares the child's room as one of this colony's `Outposts`, the room
-/// is in the scan set through the *outpost* reading, which asks no level
-/// (`Colony.bootstrapping` refuses to narrow such a room, and the union
-/// keeps the outpost's own entry) — so all four facts here go on
-/// answering true whatever the child's RCL, and the borrowing and the
-/// addend run until the human's commit takes that entry out. That is ADR
-/// 0047's already-named window between the spawn standing and the human's
-/// edit, where the mother is *also* still mining the room, planning it and
-/// hauling its energy home, and what bounds it is the same deploy those
-/// cost. Deliberately not gated here: the addend is flat across the tick a
-/// spawn stands (ADR 0047), and a level read at this predicate would drop
-/// the mother's fleet by three on the tick the nursery ended and hand it
-/// back on the tick the human committed.
+/// is in the scan set through the *outpost* reading, which asks no stage
+/// — so the borrowing and the addend run at any RCL until the commit
+/// takes that entry out. That is ADR 0047's already-named window between
+/// the spawn standing and the human's edit, where the mother is *also*
+/// still mining the room, planning it and hauling its energy home, and
+/// what bounds it is the same deploy those cost. A stage read as
+/// `Bootstrapping` alone would close it instead, and drop the mother's
+/// fleet by three on a tick no human touched, against the flat addend ADR
+/// 0047 chose.
 let private isBootstrapRoom (snapshot: Snapshot) room =
     room <> SpatialInfo.homeName snapshot.Spatial
-    && List.contains room snapshot.ColonyHomes
     && colonyOwns snapshot room
-    && spawnStandsIn snapshot room
+    && (match roomStage snapshot room with
+        | Some Bootstrapping
+        | Some Independent -> true
+        | Some Nursery
+        | None -> false)
 
 /// Whether an Upgrade in this pool is **borrowed**: its controller is not
 /// this colony's own (`Snapshot.Controller`), so it is a bootstrapped
@@ -2342,19 +2356,22 @@ let private workforceTarget
     // `decide` running, its controller still under `bootstrapLevel` — which
     // is the second half of the same sentence and the crowd the child's
     // first Layout is built by. One addend and not two, flat over both
-    // states for the reason it is flat over two nurseries: what a mother
-    // spends on children is three bodies, and a human declaring a second
-    // child can see the three being shared and retune the number.
+    // [[stage]]s for the reason it is flat over two nurseries: what a
+    // mother spends on children is three bodies, and a human declaring a
+    // second child can see the three being shared and retune the number.
     //
-    // The two predicates are complements over one room — a claimed room
-    // has a spawn of ours in it or it has not — so the `exists` cannot
-    // count one room twice, and a room that leaves this colony's scan set
-    // at RCL3 answers neither.
+    // Swept over the stages, which is the declaration and the world in one
+    // map (ADR 0052 decision 3): a declared home with no stage is not a
+    // colony this tick and neither predicate can answer for it. The two
+    // predicates are complements over one room — a claimed room has a
+    // spawn of ours in it or it has not — so the `exists` cannot count one
+    // room twice, and a room that leaves this colony's scan set at RCL3
+    // answers neither.
     let pioneers =
         let raising room =
             isNurseryRoom snapshot room || isBootstrapRoom snapshot room
 
-        if snapshot.ColonyHomes |> List.exists raising then
+        if snapshot.Stages |> Map.exists (fun room _ -> raising room) then
             pioneerCount
         else
             0
@@ -3097,9 +3114,10 @@ let private storageAllowance level =
 /// revisit of the horizon.
 let private storageLevel = 4
 
-/// The level the Layout places **road sites** from (ADR 0011 as #209
-/// amends it). Not an engine unlock — the engine allows a road at RCL1 —
-/// but the level below which a road is the wrong spend: the trunk set a
+/// Whether the Layout places **road sites** at all this tick (ADR 0011 as
+/// #209 amends it): only for an `Independent` colony. Not an engine
+/// unlock — the engine allows a road at RCL1 — but the stage below which
+/// a road is the wrong spend: the trunk set a
 /// bootstrapping room plans is thousands of energy of income placed in one
 /// tick, in the same surplus tier as the Upgrade and nearer to hand than
 /// the controller (the Matcher orders inside a tier by [[travel cost]]
@@ -3118,19 +3136,20 @@ let private storageLevel = 4
 /// 2,400 ticks of that income when the same energy buys the level that
 /// doubles the body outright.
 ///
-/// It is `Colony.bootstrapLevel` and not a number of its own, because it is
-/// the same question: ADR 0047 chose RCL3 as the line a colony can feed and
-/// defend itself at — the tenth extension and the first tower, 800 energy
-/// of bank, a body that is not the 300-energy starter. Below that line the
-/// colony is still buying its own economy; above it, roads are what the
-/// economy is for. One constant read off the other, so the two lines cannot
+/// It is the [[stage]] and not a level of its own, because it is the same
+/// question: ADR 0047 chose RCL3 as the line a colony can feed and defend
+/// itself at — the tenth extension and the first tower, 800 energy of
+/// bank, a body that is not the 300-energy starter — and ADR 0052
+/// decision 3 made that line a stage every rule reads. Below it the colony
+/// is still buying its own economy; at it, roads are what the economy is
+/// for. One derivation, so this gate and the rampart gate below it cannot
 /// drift apart.
 ///
 /// This gates the **placement** and never the plan: the trunks are routed
-/// whole every tick regardless of level (ADR 0011's "computed whole"), so
+/// whole every tick regardless of stage (ADR 0011's "computed whole"), so
 /// they still route around tomorrow's reserved tiles and a Link footing
 /// still dodges them.
-let private roadLevel = Colony.bootstrapLevel
+let private placesRoads (snapshot: Snapshot) = isIndependent snapshot
 
 /// The Layout horizon (ADR 0011, moved to RCL5 by ADR 0039): the whole
 /// plan is computed up to this level regardless of the current one, so
@@ -3349,20 +3368,22 @@ let private planLayout
             Set.difference roadPlan (Atlas.roadTiles atlas)
             |> fun wanted -> Set.difference wanted (Atlas.pendingRoadTiles atlas)
 
-        // The road sites this tick: the whole gap from `roadLevel` up, none
-        // below it (#209). The level gate is a filter on the placement and
-        // not on the plan — `roadPlan` and `roadGap` above are computed at
-        // every level, so the trunks still route around the reservation and
-        // the Link footings still dodge the pavement — and it is a gate
-        // rather than pacing, which ADR 0011 rejected and still rejects: a
-        // stateless planner has no memory to pace with, and this needs
-        // none. It is the same shape the clustered kinds already have
-        // (`storageGap level`, `towerGap level`): the plan is whole, the
-        // level says how much of it is placed.
+        // The road sites this tick: the whole gap once the colony is
+        // `Independent`, none before it (#209). The stage gate is a filter
+        // on the placement and not on the plan — `roadPlan` and `roadGap`
+        // above are computed at every stage, so the trunks still route
+        // around the reservation and the Link footings still dodge the
+        // pavement — and it is a gate rather than pacing, which ADR 0011
+        // rejected and still rejects: a stateless planner has no memory to
+        // pace with, and this needs none. It is the same shape the
+        // clustered kinds already have (`storageGap level`, `towerGap
+        // level`), one question coarser: the plan is whole either way, a
+        // level says how much of it is placed and the stage says whether
+        // any of it is.
         //
         // The container sites are subtracted with the roads' own census,
         // which is ADR 0040's tile clause read in the other direction. It
-        // is the direction the gate opened: below `roadLevel` a source
+        // is the direction the gate opened: below the gate a source
         // container drops on an unpaved trunk tile (`owedRoad` below), and
         // the tick the room reaches RCL3 that tile is still in the road
         // gap — no road stands on it and no road site pends — so the
@@ -3371,7 +3392,7 @@ let private planLayout
         // the container finished. One construction site per tile is one
         // rule, and both kinds have to read it.
         let placedRoads =
-            if controller.Level >= roadLevel then
+            if placesRoads snapshot then
                 Set.difference roadGap (Atlas.pendingContainerTiles atlas)
             else
                 Set.empty
@@ -3597,7 +3618,7 @@ let private planLayout
         //
         // It reads the road sites actually placed and not the whole gap
         // (#209): the clause exists because two sites cannot share a tile,
-        // so below `roadLevel`, where no road site is placed at all, there
+        // so below the gate, where no road site is placed at all, there
         // is nothing for the container to collide with and nothing to wait
         // for. Read off `roadGap` instead, a bootstrapping room would hold
         // its source containers back until RCL3 waiting on a road that is
@@ -3616,14 +3637,17 @@ let private planLayout
         // allowance to size against: the rule is the whole plan, so the
         // gap is the covering census alone, standing ramparts and pending
         // sites subtracted the way the roads' is. The one gate is the
-        // level the engine allows a rampart at, which is the level after
-        // the first: below it every site would be refused, every tick. The
-        // working-ground exclusion does not apply — a rampart is no
+        // colony's [[stage]] (`keepsRamparts`, #214), which stands one
+        // past the level the engine allows a rampart at: below it a
+        // rampart is a floor the young colony's whole loaded crowd is held
+        // to, and below the engine's own line every site would be refused,
+        // every tick. The working-ground exclusion does not apply — a
+        // rampart is no
         // footprint, walkable, blocking nothing, taking no tile from the
         // Post it covers (ADR 0022 as ADR 0034 revises it) — which is why
         // these tiles are read off the census and not off the ordering.
         let covered =
-            if controller.Level >= rampartLevel then
+            if keepsRamparts snapshot then
                 Set.union (Atlas.keepTiles atlas) (Atlas.postContainerTiles atlas)
             else
                 Set.empty
@@ -4145,16 +4169,22 @@ let private isNurserySite (snapshot: Snapshot) atlas siteId =
 
 /// Whether a room is **bootstrapping** as seen from this colony's tick: a
 /// child of ours running its own spawn (`isBootstrapRoom`, the mother's
-/// reading), or this colony's own home while its controller is under
-/// `Colony.bootstrapLevel` with a spawn standing (the child's own
-/// reading). One predicate for both ticks, because the rule that reads it
-/// is about the room and not about who is looking (ADR 0052 decision 3:
-/// a stage, read wherever a rule differs by stage).
+/// reading), or this colony's own home standing at the `Bootstrapping`
+/// stage (the child's own reading). One predicate for both ticks, because
+/// the rule that reads it is about the room and not about who is looking
+/// (ADR 0052 decision 3: a stage, read wherever a rule differs by stage).
+///
+/// The home half reads the stage and no longer a level of its own: a
+/// living colony's home has a spawn standing by construction (ADR 0047
+/// decision 1), so `Bootstrapping` is exactly "a spawn of ours and a
+/// controller under `Colony.bootstrapLevel`", the two facts this used to
+/// spell out. The mother's half is deliberately the wider one, at any RCL
+/// while she still projects the room — see `isBootstrapRoom` — because
+/// what closes her window is her scan set.
 let private isBootstrappingRoom (snapshot: Snapshot) room =
     isBootstrapRoom snapshot room
     || (room = SpatialInfo.homeName snapshot.Spatial
-        && spawnStandsIn snapshot room
-        && snapshot.Controller |> Option.exists (fun c -> c.Level < Colony.bootstrapLevel))
+        && homeStage snapshot = Some Bootstrapping)
 
 /// A site standing in a bootstrapping room: feeding-tier in both pools
 /// (user, 2026-09-06: "pioneer 都在升级没人建 extension … 房间里很多小

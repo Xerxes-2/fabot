@@ -740,6 +740,32 @@ module Outpost =
         ]
 
 
+/// Where one colony stands in its life (ADR 0052 decision 3). Three
+/// answers to one question — how much of its own economy a colony has
+/// bought yet — and the fact five rules used to read as a controller
+/// level apiece: whether it places roads and keeps ramparts, whether its
+/// sites come before its controller, whether a [[mother colony]] is still
+/// raising it and hires [[pioneer]]s for it.
+///
+/// Derived once (`Colony.stageOf`) and never stored: it is a fact about
+/// the world this tick, like everything else the shell reads, and the
+/// level it is derived from appears nowhere else.
+type ColonyStage =
+    /// Claimed, and no spawn of ours standing in it yet: a [[nursery]] —
+    /// a room that is a colony by declaration and by ownership, and by
+    /// nothing else it can do for itself. What ends it is a spawn, which
+    /// is what independence *is* (ADR 0047 decision 4).
+    | Nursery
+    /// Its own spawn standing and its controller still under
+    /// `Colony.bootstrapLevel`: running its own `decide`, casting its own
+    /// bodies, and still being raised — the **bootstrap window**.
+    | Bootstrapping
+    /// At `Colony.bootstrapLevel` or past it: the first tower and the
+    /// tenth extension, a bank that casts a body which is not the
+    /// 300-energy starter. The stage every rule written for the one home
+    /// this bot grew up in was written at (ADR 0052).
+    | Independent
+
 /// One colony: a [[home room]] and the [[outpost]]s worked from it (ADR
 /// 0047). The unit the whole decision layer is written in — one Atlas, one
 /// Layout, one set of quotas, one Task pool — and so the unit a
@@ -786,7 +812,7 @@ type Colony =
         /// A human's, like the rest of the declaration, and cleared by a
         /// human: the bot never edits it, and leaving it in past
         /// `bootstrapLevel` costs nothing, because the rule that reads it
-        /// (`bootstrapping`) asks the world for the child's level and
+        /// (`bootstrapping`) asks the world for the child's [[stage]] and
         /// stops on its own.
         Mother: string option
     }
@@ -964,28 +990,93 @@ module Colony =
     /// the window is read off the world.
     let bootstrapLevel = 3
 
+    /// One colony's [[stage]] this tick, off the three facts that decide
+    /// it (ADR 0052 decision 3). **The one place `bootstrapLevel` is
+    /// read**: every rule that used to compare a controller level of its
+    /// own asks for a stage instead, so the line moves in one constant
+    /// and cannot drift between the five readers it had.
+    ///
+    /// `None` for a room that is not a colony at all. Not owned by us is
+    /// not a stage: a declared home nobody has claimed yet is a
+    /// **candidate colony**, whose one rule is the Claim pool
+    /// (`Decide.claimTargets`), and a room a rival holds is a declaration
+    /// a human has not caught up with. Owned with no controller level to
+    /// read is `None` too — the shape a colony whose controller the
+    /// projection cannot place arrives in — and every reader's answer for
+    /// `None` is the one it already gives that colony today: no rampart
+    /// kept, no road placed, nothing bootstrapped.
+    ///
+    /// The level is asked for last and only once the spawn stands,
+    /// because that is the order the stages are in: a [[nursery]] is a
+    /// nursery at any level, and RCL3 is what a colony that runs itself
+    /// climbs to.
+    let stageOf (owned: bool) (spawnStanding: bool) (level: int option) : ColonyStage option =
+        if not owned then
+            None
+        elif not spawnStanding then
+            Some Nursery
+        else
+            level
+            |> Option.map (fun level ->
+                if level >= bootstrapLevel then
+                    Independent
+                else
+                    Bootstrapping)
+
     /// The rooms one colony **bootstraps** this tick (ADR 0047 decision
     /// 4): the homes of the colonies it is the [[mother colony]] of, while
-    /// their controllers are still below `bootstrapLevel`. The mother
-    /// projects each of them beside her own rooms and works two Tasks
-    /// there — the child's Upgrade and its Build — which is the one
-    /// cross-colony borrowing rule there is.
+    /// those colonies are not yet `Independent`. The mother projects each
+    /// of them beside her own rooms and works two Tasks there — the
+    /// child's Upgrade and its Build — which is the one cross-colony
+    /// borrowing rule there is.
     ///
-    /// The levels are handed in, read off the world by the shell for the
-    /// declared homes, because a colony's own Snapshot cannot answer for a
-    /// room that is not in its scan set and this is the rule that *decides*
-    /// that set. One evaluation, three readers: the scan set, the narrowed
-    /// layer the shell projects those rooms under, and the Snapshot the
-    /// pool is built from — the shape `Outpost.worked`'s stand-down gate
-    /// already has, and for its reason: a second derivation is a second
-    /// answer free to disagree, and here it would be a room projected with
-    /// nothing pooled in it, or pooled with nothing projecting it.
+    /// The stages are handed in, derived off the world by the shell for
+    /// the declared homes (`stageOf`), because a colony's own Snapshot
+    /// cannot answer for a room that is not in its scan set and this is
+    /// the rule that *decides* that set. One evaluation, three readers:
+    /// the scan set, the narrowed layer the shell projects those rooms
+    /// under, and the Snapshot the pool is built from — the shape
+    /// `Outpost.worked`'s stand-down gate already has, and for its reason:
+    /// a second derivation is a second answer free to disagree, and here
+    /// it would be a room projected with nothing pooled in it, or pooled
+    /// with nothing projecting it.
     ///
-    /// A room with no level is not bootstrapped. Absence classifies nothing
-    /// (ADR 0004), and the absence cannot be the interesting case: a colony
-    /// we own a spawn in is a room we can always see, so a child that has
-    /// left its mother's outpost list has a level for as long as it is a
-    /// colony at all.
+    /// **Both of the stages before independence**, and not the bootstrap
+    /// window alone. A child that has left its mother's outpost list and
+    /// has no spawn standing — one whose spawn was destroyed, or one a
+    /// human split off early — is a [[nursery]] again, and the mother is
+    /// the only colony that can raise it: dropped from her projection it
+    /// would be a claimed room with no spawn, no vision and nobody
+    /// building the spawn site that ends the state. The tick a child
+    /// crosses the line it is `Independent` and leaves, exactly as before.
+    ///
+    /// **That is wider than the level rule it replaces, deliberately and
+    /// in one shape.** A nursery is a nursery at any level (`stageOf`),
+    /// where `level < bootstrapLevel` stopped at RCL3 — so a child that
+    /// stood its own spawn, reached RCL3 and then *lost* that spawn is
+    /// raised again here where the level rule orphaned it. That is the
+    /// right answer for the case and the reason it is one: the room is
+    /// claimed, it can cast nothing, and its mother is the only colony
+    /// that can put a spawn site back up. What it costs is the nursery's
+    /// own price paid over a grown room — every site in it is
+    /// feeding-tier and uncapped in the mother's pool
+    /// (`Decide.isNurserySite`), and her worker row carries the
+    /// [[pioneer]] addend — until the spawn stands again.
+    ///
+    /// A room with no stage is not bootstrapped. Absence classifies
+    /// nothing (ADR 0004): a room we cannot see has no entry, and neither
+    /// has one we do not own — which **narrows** this rule against the
+    /// level it used to read, where an unowned room read level 0 and was
+    /// bootstrapped like any young one. Two shapes leave with it, and
+    /// both go to the `Outposts` list rather than here. A **candidate**
+    /// colony that names a mother and is in no outpost list of hers is no
+    /// longer projected by her, so its Claim is pooled by nobody; ADR
+    /// 0047's own user story keeps a child in its mother's `Outposts`
+    /// until the day it stands its own spawn, which is where every claim
+    /// this bot has made was pooled from. And a child that stops being
+    /// ours — a rival's claim, or an RCL1 controller left to its 20,000
+    /// ticks — leaves her projection the same way, so no Claim is pooled
+    /// to take it back and a human's edit is what recovers it.
     ///
     /// **A room the mother still declares as an outpost is worked as one**,
     /// and never as a bootstrap layer. That is the [[nursery]] and the
@@ -1001,7 +1092,7 @@ module Colony =
     /// slip, and the home room narrowed to a bootstrap layer would be a
     /// colony that cannot see its own rocks.
     let bootstrapping
-        (levels: Map<string, int>)
+        (stages: Map<string, ColonyStage>)
         (colonies: Colony list)
         (colony: Colony)
         : string list =
@@ -1012,8 +1103,8 @@ module Colony =
             child.Mother = Some colony.Home
             && child.Home <> colony.Home
             && not (List.contains child.Home worked)
-            && (Map.tryFind child.Home levels
-                |> Option.exists (fun level -> level < bootstrapLevel)))
+            && (Map.tryFind child.Home stages
+                |> Option.exists (fun stage -> stage <> Independent)))
         |> List.map (fun child -> child.Home)
 
     /// The rooms one colony projects this tick: its home and its worked
@@ -1356,6 +1447,27 @@ type Snapshot =
         /// claimed, and every controller in the projection is the [[reserve]]
         /// it always was.
         ColonyHomes: string list
+        /// The [[stage]] of every declared colony that is one this tick,
+        /// under its home room's name (ADR 0052 decision 3) — this
+        /// colony's own and its children's alike, the same map handed to
+        /// every colony because a stage is a fact about a room and not
+        /// about who is looking.
+        ///
+        /// Derived by the shell off the world (`Colony.stageOf`), for the
+        /// reason `Colony.bootstrapping`'s levels were: a colony's own
+        /// Snapshot cannot answer for a room outside its scan set, and one
+        /// of these stages is what *decides* that set. A declared home
+        /// with no entry is a room that is not a colony this tick — never
+        /// claimed, lost, or one nothing can see — and every reader gives
+        /// it the answer it gives a room it knows nothing about.
+        ///
+        /// What it does **not** say is whose business that room is. The
+        /// stage is the world's answer and reaches every colony; whether
+        /// this colony is the one raising that nursery is its own
+        /// projection's (`Decide.isNurseryRoom` reads `RoomControl`
+        /// beside the stage), or two mothers would hire [[pioneer]]s for
+        /// one child.
+        Stages: Map<string, ColonyStage>
     }
 
 /// A unit of work in this tick's Task pool; creeps are interchangeable

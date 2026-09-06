@@ -150,15 +150,29 @@ let loop () =
     // sources a colony pools — and a second derivation is a second answer
     // free to disagree.
     //
-    // The levels are read off the world here rather than out of a Snapshot,
-    // because whether a child has outgrown its mother decides whether the
-    // mother projects that room at all: the fact is needed before the scan
-    // set it would have to come out of exists. Asked of the declared homes
-    // alone (`Colony.homes`), which is a handful of names and no sweep.
-    let levels = Snapshot.controllerLevels (Colony.homes Colony.declared)
+    // The [[stage]]s are derived off the world here rather than out of a
+    // Snapshot, because whether a child has outgrown its mother decides
+    // whether the mother projects that room at all: the fact is needed
+    // before the scan set it would have to come out of exists (ADR 0052
+    // decision 3). The one answer every Snapshot below carries, so the
+    // rules that read a stage and the rule that cuts the scan set by one
+    // cannot disagree.
+    //
+    // Asked of the declared homes and of every **living** colony's home,
+    // which is a handful of names and no sweep. The declared ones because
+    // that is what the raising rule asks about — a child a mother projects
+    // is one she may not be able to see the inside of otherwise — and the
+    // living ones because a spawn room no declaration names is a colony of
+    // its own (`Colony.living`'s fallback, ADR 0047), and a colony with no
+    // stage would place no road and keep no rampart however old it is.
+    let stages =
+        Colony.homes Colony.declared
+        @ (colonies |> List.map (fun colony -> colony.Home))
+        |> List.distinct
+        |> Snapshot.colonyStages
 
     let bootstrapOf colony =
-        Colony.bootstrapping levels Colony.declared colony
+        Colony.bootstrapping stages Colony.declared colony
 
     // Which rooms each colony projects, before any of them is built:
     // adoption is decided over the whole table at once (ADR 0047 decision
@@ -191,7 +205,7 @@ let loop () =
                     if home = colony.Home then Some creep else None)
                 |> Set.ofList
 
-            colony, Snapshot.build colony (shutOf colony.Home) (bootstrapOf colony) mine)
+            colony, Snapshot.build colony (shutOf colony.Home) (bootstrapOf colony) mine stages)
 
     // The Snapshot boundary, and the Raid logs' reads ride in this phase
     // rather than in the prelude: the two are one act — the gate decides

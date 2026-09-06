@@ -781,4 +781,14 @@ let colonyAt (capture: RoomCapture) (level: int) (bank: int) : Snapshot =
                     |> Map.ofList
             }
         ColonyHomes = [ capture.RoomName ]
+        // The rung as a [[stage]] (ADR 0052 decision 3): owned, a spawn
+        // standing, and the level above — so RCL1 and RCL3 are one stage
+        // apart and the road, the rampart and the feeding-tier rules read
+        // that and not the number. Derived and never written down beside
+        // the level, so a rung cannot be furnished as one colony and
+        // decided as another.
+        Stages =
+            match Colony.stageOf true true (Some level) with
+            | Some stage -> Map.ofList [ capture.RoomName, stage ]
+            | None -> Map.empty
     }
