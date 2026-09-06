@@ -1492,14 +1492,14 @@ let crossRoomWalkTests =
             }
         ]
 
-/// The outposts this colony works: the entry `Colony.declared` files under
-/// W12S28, the home room every capture below is read relative to (ADR
-/// 0047). ADR 0042's two rooms are inside that entry now rather than in a
-/// constant of their own, and this is the one place the tests below join
-/// the colony to its outposts — a second reading could name a home the
-/// declaration does not carry and check an empty list forever, which is
-/// what the non-emptiness guard beside each loop is for.
-let private declaredOutposts = Colony.outpostsOf Colony.declared "W12S28"
+/// The outposts the captures below are read with: ADR 0042's two rooms,
+/// laid in beside W12S28 the way they were when the captures were taken.
+/// Read off `Outpost.adr0042` and not off the live declaration, which
+/// moved when W13S28 stood its own spawn (ADR 0047) — the geometry these
+/// tests pin did not. This is the one place the tests join the home to
+/// its outposts; the non-emptiness guard beside each loop is what keeps a
+/// renamed pair from being checked as an empty list forever.
+let private declaredOutposts = Outpost.adr0042
 
 /// The Atlas over the projection of one declared outpost on the tick the
 /// colony cannot see it: that room's committed terrain and border ring —

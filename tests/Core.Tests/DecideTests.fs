@@ -15340,12 +15340,17 @@ let outpostTests =
 
                 Expect.equal
                     (outposts |> List.map (fun outpost -> outpost.RoomName))
+                    [ "W12S27" ]
+                    "the north outpost alone: the west one is a colony of its own now (ADR 0047)"
+
+                Expect.equal
+                    (Outpost.adr0042 |> List.map (fun outpost -> outpost.RoomName))
                     [ "W12S27"; "W13S28" ]
-                    "the north outpost and the west one"
+                    "while ADR 0042's measured pair is kept whole for the real-terrain fixtures"
 
                 Expect.isEmpty
                     (Colony.outpostsOf Colony.declared "W13S28")
-                    "and the candidate colony works no outposts of its own yet"
+                    "and the second colony works no outposts of its own yet"
 
                 Expect.isEmpty
                     (Colony.outpostsOf Colony.declared "W1N1")
@@ -15353,8 +15358,8 @@ let outpostTests =
 
                 Expect.equal
                     (Outpost.roomsProjected outposts "W12S28")
-                    [ "W12S28"; "W12S27"; "W13S28" ]
-                    "so the projection covers the spawn room and both of them"
+                    [ "W12S28"; "W12S27" ]
+                    "so the mother's projection covers the home room and its one outpost"
             }
 
             test "a declared outpost joins the spawn room in the set the shell scans" {

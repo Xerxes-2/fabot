@@ -706,6 +706,31 @@ module Outpost =
         ]
         |> List.distinctBy (fun source -> source.Id)
 
+    /// The two rooms ADR 0042 measured, as the outposts they were declared
+    /// as: the real-terrain fixtures (`RoomInvariantTests`) read the
+    /// captures relative to W12S28 with both of them laid in, and keep
+    /// doing so after W13S28 became a colony of its own — the geometry the
+    /// tests pin did not move when the declaration did. The ids and tiles
+    /// are the engine's, pinned against the committed captures.
+    let adr0042: Outpost list =
+        [
+            {
+                RoomName = "W12S27"
+                Sources = [ "6a8caabadd4872bccd3194a6", { X = 16; Y = 45 } ]
+                Controller = "6a8caabadd4872bccd3194a5", { X = 37; Y = 43 }
+            }
+            {
+                RoomName = "W13S28"
+                Sources =
+                    [
+                        "6a8caaaddd4872bccd319362", { X = 16; Y = 7 }
+                        "6a8caaaddd4872bccd319361", { X = 18; Y = 4 }
+                    ]
+                Controller = "6a8caaaddd4872bccd319363", { X = 24; Y = 17 }
+            }
+        ]
+
+
 /// One colony: a [[home room]] and the [[outpost]]s worked from it (ADR
 /// 0047). The unit the whole decision layer is written in — one Atlas, one
 /// Layout, one set of quotas, one Task pool — and so the unit a
@@ -770,31 +795,16 @@ module Colony =
         [
             {
                 Home = "W12S28"
-                Outposts =
-                    [
-                        {
-                            RoomName = "W12S27"
-                            Sources = [ "6a8caabadd4872bccd3194a6", { X = 16; Y = 45 } ]
-                            Controller = "6a8caabadd4872bccd3194a5", { X = 37; Y = 43 }
-                        }
-                        {
-                            RoomName = "W13S28"
-                            Sources =
-                                [
-                                    "6a8caaaddd4872bccd319362", { X = 16; Y = 7 }
-                                    "6a8caaaddd4872bccd319361", { X = 18; Y = 4 }
-                                ]
-                            Controller = "6a8caaaddd4872bccd319363", { X = 24; Y = 17 }
-                        }
-                    ]
+                // W12S27 alone since W13S28 stood its own spawn (below); the
+                // room is ADR 0042's north outpost, read off the pair above.
+                Outposts = Outpost.adr0042 |> List.filter (fun o -> o.RoomName = "W12S27")
             }
-            // The second colony (ADR 0047): W13S28 is declared a home of its
-            // own while it stays the first colony's outpost above. Until
-            // this colony owns it the entry is a candidate — its controller
-            // is claimed rather than reserved — and once claimed but still
-            // without a spawn it is a nursery the mother builds. The spawn
-            // tile the human will place is (16,12) (#188). Moved by a
-            // human, like every declaration here.
+            // The second colony (ADR 0047). W13S28 was the first colony's
+            // outpost until its spawn stood at (16,12) on 2026-09-06
+            // (t~167,5xx); that tick it became a living colony of its own
+            // and left the mother's list above, so one room is projected
+            // by one colony. It works no outposts of its own yet. Moved by
+            // a human, like every declaration here.
             { Home = "W13S28"; Outposts = [] }
         ]
 
