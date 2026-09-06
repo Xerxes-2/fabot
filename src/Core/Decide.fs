@@ -805,9 +805,11 @@ let private claimTargets (snapshot: Snapshot) : (string * string) list =
 
 /// Whether a spawn stands in the named room, off the projection's kind
 /// census (ADR 0041): a structure of the spawn kind, placed in that room's
-/// layer. Ours by construction and not by a check — the one caller asks it
-/// only of a room `colonyOwns` has already answered for, and nobody else's
-/// spawn stands in a room we own.
+/// layer. Ours by construction and not by a check — both callers
+/// (`isNurseryRoom` and `isBootstrapRoom`, which are one shape with this
+/// fact inverted) ask it only of a room `colonyOwns` has already answered
+/// for, each with the ownership conjunct ahead of this one, and nobody
+/// else's spawn stands in a room we own.
 ///
 /// Vision pays for it like every other structure (ADR 0004), and that
 /// costs the caller nothing: a room the colony cannot see has no
@@ -870,6 +872,58 @@ let private isNurseryRoom (snapshot: Snapshot) room =
     && colonyOwns snapshot room
     && not (spawnStandsIn snapshot room)
 
+/// Whether the named room is a child colony this one is still
+/// **bootstrapping** (ADR 0047 decision 4): a declared colony of ours that
+/// stands its own spawn — so it is running its own `decide` and is nobody's
+/// [[nursery]] any more — and that this colony is nonetheless projecting.
+/// Two rules read it: the child's controller joins this colony's Upgrade
+/// pool (`planTasks`), and the worker row keeps hiring `pioneerCount`
+/// bodies (`workforceTarget`). Its Build needs no rule of its own — a site
+/// in a room the colony projects is already pooled by id (#150) — which is
+/// why the borrowing rule is two Tasks and one predicate.
+///
+/// The same three facts `isNurseryRoom` reads, with the fourth inverted:
+/// declared, ours, not this colony's own home, and a spawn **standing** in
+/// it rather than absent. The two are complements over one room and one
+/// tick apart — the nursery ends the tick a spawn stands and the bootstrap
+/// window opens on it — so they are written as one shape and cannot both
+/// answer for a room.
+///
+/// **The scan set carries the level, and this predicate does not ask for
+/// one.** ADR 0047 closes the exception at RCL3, and that is where the
+/// borrowing ends, but a controller level is not a fact any colony's
+/// Snapshot holds for a room it does not own the way it owns home — so the
+/// rule that reads it is the one that decides which rooms are projected at
+/// all (`Colony.bootstrapping`, off the world, once for the tick). The
+/// tick the child reaches `bootstrapLevel` its room leaves this colony's
+/// scan set, and with it goes the `RoomControl` entry `colonyOwns` reads,
+/// the layer the controller was placed in and the sites the pool was built
+/// from: the Upgrade disappears, the Build disappears and the addend falls
+/// away, all from one subtraction. That is the shape the Reserve pool is
+/// already written in — read off what the projection carries, never off a
+/// second gate free to disagree with the scan set (`planTasks`).
+///
+/// **The level closes the window for a child that has left the outpost
+/// list, and that is the only shape it closes.** While a human still
+/// declares the child's room as one of this colony's `Outposts`, the room
+/// is in the scan set through the *outpost* reading, which asks no level
+/// (`Colony.bootstrapping` refuses to narrow such a room, and the union
+/// keeps the outpost's own entry) — so all four facts here go on
+/// answering true whatever the child's RCL, and the borrowing and the
+/// addend run until the human's commit takes that entry out. That is ADR
+/// 0047's already-named window between the spawn standing and the human's
+/// edit, where the mother is *also* still mining the room, planning it and
+/// hauling its energy home, and what bounds it is the same deploy those
+/// cost. Deliberately not gated here: the addend is flat across the tick a
+/// spawn stands (ADR 0047), and a level read at this predicate would drop
+/// the mother's fleet by three on the tick the nursery ended and hand it
+/// back on the tick the human committed.
+let private isBootstrapRoom (snapshot: Snapshot) room =
+    room <> SpatialInfo.homeName snapshot.Spatial
+    && List.contains room snapshot.ColonyHomes
+    && colonyOwns snapshot room
+    && spawnStandsIn snapshot room
+
 /// Planner: rebuild this tick's full Task pool from the Snapshot. Pure and
 /// from scratch every tick — Tasks are never persisted.
 let planTasks (snapshot: Snapshot) (threats: Threats) : Task list =
@@ -897,9 +951,6 @@ let planTasks (snapshot: Snapshot) (threats: Threats) : Task list =
     // order (ADR 0010, ADR 0034).
     let repairs = hungryStructures snapshot |> List.map (fst >> Repair)
 
-    let upgrades =
-        snapshot.Controller |> Option.toList |> List.map (fun c -> Upgrade c.Id)
-
     // The ids of one projected kind, in id order. The containers, the
     // Storage and the controllers are all pooled by the projection's kind
     // — never by position, never by name — so the rule is written once.
@@ -907,6 +958,38 @@ let planTasks (snapshot: Snapshot) (threats: Threats) : Task list =
         snapshot.Spatial.TargetKinds
         |> Map.toList
         |> List.choose (fun (id, k) -> if k = kind then Some id else None)
+
+    // The colony's own controller, and the controller of every child it is
+    // still bootstrapping (ADR 0047 decision 4, `isBootstrapRoom`) — the
+    // one cross-colony borrowing rule there is, and half of it: a loaded
+    // worker of the mother's may cross the Seam and spend into the child's
+    // controller until that controller reaches `bootstrapLevel`.
+    //
+    // Surplus tier, like the home Upgrade it stands beside (`tierOf`), so
+    // the mother's own flow is fed first and nothing but travel cost
+    // separates the two Upgrades — which is what leaves the child's to the
+    // bodies already standing in its room, the [[pioneer]]s, and the home
+    // one to everybody else. The child pools the very same Upgrade in its
+    // own tick, off its own `Snapshot.Controller`, and the two pools are
+    // two colonies' business over one target: each Matcher counts only its
+    // own holders, exactly as the [[nursery]] window's two pools do.
+    //
+    // Read off the projection's kind census in the rooms the predicate
+    // names, never off `Snapshot.Controller`, which is this colony's own
+    // and nothing else (ADR 0047 decision 1) — the child's controller is
+    // a target in a layer she projects, like every other fact she has
+    // about that room.
+    let upgrades =
+        let own = snapshot.Controller |> Option.toList |> List.map (fun c -> c.Id)
+
+        let children =
+            idsOfKind Controller
+            |> List.filter (fun id ->
+                SpatialInfo.placementOf snapshot.Spatial id
+                |> Option.map fst
+                |> Option.exists (isBootstrapRoom snapshot))
+
+        own @ children |> List.map Upgrade
 
     // One Claim per candidate colony's controller (ADR 0047), read off
     // the one rule that says which those are (`claimTargets`).
@@ -2109,8 +2192,25 @@ let private workforceTarget
     // charged like every other generalist — which is to say not at all —
     // and the nursery's cost to the mother is the bodies and not a second
     // arithmetic.
+    //
+    // And the addend outlives the nursery (ADR 0047 decision 4): it runs
+    // on while the child is bootstrapped — its own spawn standing, its own
+    // `decide` running, its controller still under `bootstrapLevel` — which
+    // is the second half of the same sentence and the crowd the child's
+    // first Layout is built by. One addend and not two, flat over both
+    // states for the reason it is flat over two nurseries: what a mother
+    // spends on children is three bodies, and a human declaring a second
+    // child can see the three being shared and retune the number.
+    //
+    // The two predicates are complements over one room — a claimed room
+    // has a spawn of ours in it or it has not — so the `exists` cannot
+    // count one room twice, and a room that leaves this colony's scan set
+    // at RCL3 answers neither.
     let pioneers =
-        if snapshot.ColonyHomes |> List.exists (isNurseryRoom snapshot) then
+        let raising room =
+            isNurseryRoom snapshot room || isBootstrapRoom snapshot room
+
+        if snapshot.ColonyHomes |> List.exists raising then
             pioneerCount
         else
             0
@@ -4390,9 +4490,26 @@ let private deadlineRank = -1
 /// Task's tier. One exception: a controller inside the downgrade deadline
 /// makes Upgrade the colony's most urgent work, outranking even the
 /// feeding tier (ADR 0007).
+///
+/// **The colony's own controller and no other.** The deadline is read off
+/// `Snapshot.Controller`, which is this colony's alone, and since ADR 0047
+/// decision 4 the pool can hold a second Upgrade — a bootstrapped child's
+/// (`planTasks`). Lifting that one on the mother's timer would send her
+/// whole loaded fleet across the Seam on the tick her *own* controller was
+/// closest to downgrading, which is the exact opposite of what ADR 0007's
+/// escalation is for. The child's own colony escalates its own controller
+/// on its own timer, in its own tick, off the same rule.
+///
+/// The id test sits inside the Upgrade arm rather than above the match:
+/// this runs once per candidate pair the Matcher prices, and every other
+/// Task would be paying for a read it never uses.
 let private rank (snapshot: Snapshot) atlas task =
     match task with
-    | Upgrade _ when insideDowngradeDeadline snapshot -> deadlineRank
+    | Upgrade id when
+        insideDowngradeDeadline snapshot
+        && snapshot.Controller |> Option.exists (fun c -> c.Id = id)
+        ->
+        deadlineRank
     | _ -> tierOf snapshot atlas task |> rankOfTier
 
 /// How many creeps the colony will have building outpost container sites

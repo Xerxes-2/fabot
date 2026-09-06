@@ -429,10 +429,84 @@ let private projectRoom (creeps: Set<string>) (roomName: string) : RoomProjectio
         }
     | Some room -> projectVisible creeps terrain room
 
+/// One room's projection narrowed to a **bootstrap** layer (ADR 0047
+/// decision 4): the ground a body walks on and the targets the mother
+/// works there, and nothing else the room holds.
+///
+/// A room a colony bootstraps is another colony's *home*, not an outpost
+/// of hers. What she is there for is two Tasks — the child's Upgrade and
+/// its Build — so the census keeps three kinds and drops the rest: the
+/// controller those workers upgrade, the sites they build, and the spawn,
+/// which is not a target of hers at all but the fact that says this room
+/// is a child colony and no longer a [[nursery]] (`Decide.isNurseryRoom`,
+/// which reads it off this same census). Everything else in the room —
+/// its rocks, its containers and its stock, its structures' hits, its
+/// piles and its tombstones — is the child's own business, and a mother
+/// carrying it would pool a Harvest on the child's rock, hire an Anchor
+/// for the child's Post, count the child's Seats into her own quotas and
+/// haul the child's energy back across the Seam to her Storage, which is
+/// the arrangement ADR 0047's Considered Options rejected a single
+/// projection over two colonies for.
+///
+/// Taken back off the full projection rather than gated inside it: the
+/// `find` sweep answers for the room whatever is asked of it, so what this
+/// is choosing is not what to read but what to *carry*, and one filter
+/// over the assembled kind census is one place for that rule instead of
+/// six conditions spread through `projectVisible`.
+///
+/// What is left is exactly ADR 0004's per-entry absence — the shape a room
+/// with no vision arrives in — so every rule downstream already answers
+/// correctly for it: an unplaced target is unpriceable, enters no Task and
+/// blocks no action. The geometry is kept whole, because it is what the
+/// mother's workers walk over: terrain, the border ring the Seam is read
+/// off, the obstacles and roads that price the crossing, and her own
+/// creeps standing in the room, which are the [[pioneer]]s themselves.
+let private narrowToBootstrap (projection: RoomProjection) : RoomProjection =
+    let kinds =
+        projection.TargetKinds
+        |> Map.filter (fun _ kind ->
+            match kind with
+            | Controller
+            | Site _
+            | Structure BuiltKind.Spawn -> true
+            | _ -> false)
+
+    { projection with
+        Layer =
+            { projection.Layer with
+                TargetPositions =
+                    projection.Layer.TargetPositions
+                    |> Map.filter (fun id _ -> Map.containsKey id kinds)
+            }
+        TargetKinds = kinds
+        Hits = Map.empty
+        Stores = Map.empty
+    }
+
+/// The controller level of each named room we can see this tick, for the
+/// one rule that needs a level from outside a colony's own Snapshot
+/// (`Colony.bootstrapping`, ADR 0047 decision 4): whether a child colony
+/// has outgrown the mother that raised it decides whether the mother scans
+/// its room at all, so it cannot be read off a projection that scan set
+/// does not exist yet to build.
+///
+/// Read off `Game.rooms` like every other seen fact, so a room we cannot
+/// look into contributes no entry rather than a zero (ADR 0004) — and a
+/// room with no controller none either, that being a room no colony can
+/// ever be declared in. Asked of the declared homes alone, which is a
+/// handful of names.
+let controllerLevels (rooms: string list) : Map<string, int> =
+    rooms
+    |> List.choose (fun name ->
+        match roomSeen name with
+        | Some room when not (isNull (box room.controller)) -> Some(name, room.controller.level)
+        | _ -> None)
+    |> Map.ofList
+
 /// The tick's projection: the rooms the colony works, each under its own
 /// name, in one projection and never two (ADR 0005, layered by ADR 0041).
 /// The scan set is handed in rather than derived here: it is Core's rule
-/// (`Outpost.roomsProjected`) and the projection is not its only reader,
+/// (`Colony.roomsProjected`) and the projection is not its only reader,
 /// so `build` takes the union once for the whole tick — the shell decides
 /// nothing about which rooms the colony works, it only reads them.
 ///
@@ -442,9 +516,25 @@ let private projectRoom (creeps: Set<string>) (roomName: string) : RoomProjectio
 /// collision that cannot happen: the fold walks the scan set in order, so
 /// the last room to name an id would win — and one object id stands in one
 /// room, so no id is ever merged twice.
-let private buildSpatial (creeps: Set<string>) (home: string) (scanned: string list) : SpatialInfo =
+let private buildSpatial
+    (creeps: Set<string>)
+    (home: string)
+    (scanned: string list)
+    (bootstrap: string list)
+    : SpatialInfo =
     let projected =
-        scanned |> List.map (fun roomName -> roomName, projectRoom creeps roomName)
+        scanned
+        |> List.map (fun roomName ->
+            let room = projectRoom creeps roomName
+
+            // The rooms this colony bootstraps enter the projection under
+            // the same union as every other scanned room and carry only
+            // what she works there (`narrowToBootstrap`, ADR 0047).
+            roomName,
+            if List.contains roomName bootstrap then
+                narrowToBootstrap room
+            else
+                room)
 
     let mergedBy (select: RoomProjection -> Map<string, 'v>) =
         (Map.empty, projected)
@@ -476,28 +566,38 @@ let private buildSpatial (creeps: Set<string>) (home: string) (scanned: string l
 let private worked (colony: Colony) (shut: Set<string>) : Outpost list =
     Outpost.worked shut colony.Outposts
 
-/// The rooms one colony projects this tick — its home room and every
-/// declared outpost that survived the gate beside it (ADR 0041). Core owns
-/// the union (`Outpost.roomsProjected`) and the shell reads it here,
-/// because the projection is not the only thing built off a room scan: an
-/// outpost's Tasks join the *same* pool as the home room's, so the entity
-/// lists the Planner pools from are scanned over the same set.
+/// The rooms one colony projects this tick — its home room, every declared
+/// outpost that survived the gate beside it (ADR 0041), and every room it
+/// bootstraps (ADR 0047 decision 4). Core owns the union
+/// (`Colony.roomsProjected`) and the shell reads it here, because the
+/// projection is not the only thing built off a room scan: an outpost's
+/// Tasks join the *same* pool as the home room's, so the entity lists the
+/// Planner pools from are scanned over the same set.
+///
+/// The bootstrapped rooms are handed in rather than derived here for the
+/// reason the [[stand-down]]'s `shut` set is: the rule is Core's
+/// (`Colony.bootstrapping`), it is decided once for the tick over facts no
+/// single colony's Snapshot holds, and its readers — this set and the
+/// narrowed layer `build` projects those rooms under — must not be two
+/// evaluations free to disagree.
 ///
 /// Public because `Main.loop` needs every colony's set *before* it builds
 /// any of them: which colony adopts a creep is decided over the whole
 /// table of projections (ADR 0047 decision 2), and a Snapshot cannot be
 /// cut by a membership that is not decided yet.
-let projectedRooms (colony: Colony) (shut: Set<string>) : string list =
-    Outpost.roomsProjected (worked colony shut) colony.Home
+let projectedRooms (colony: Colony) (bootstrap: string list) (shut: Set<string>) : string list =
+    Colony.roomsProjected (worked colony shut) bootstrap colony.Home
 
 /// One colony's Snapshot this tick (ADR 0047 decision 1): the colony
 /// whose declaration this is, the rooms the [[stand-down]] gate is
 /// withholding from it (ADR 0043, derived by Core from the previous tick's
-/// [[raid log]] — `Observe.standDown`), and the creeps that are this
-/// colony's this tick (`Colony.creepColonies`). All three are handed in
-/// and none is decided here: the shell reads which colonies run, which
-/// rooms each works and which creeps each holds, and Core owns every rule
-/// behind those three answers.
+/// [[raid log]] — `Observe.standDown`), the rooms it bootstraps for a
+/// child colony of its own (ADR 0047 decision 4, `Colony.bootstrapping`),
+/// and the creeps that are this colony's this tick
+/// (`Colony.creepColonies`). All four are handed in and none is decided
+/// here: the shell reads which colonies run, which rooms each works, which
+/// children each is still raising and which creeps each holds, and Core
+/// owns every rule behind those four answers.
 ///
 /// One of these is built per **living** colony and `decide` is run once
 /// over each (`Colony.living`), so nothing in this record is the world's:
@@ -506,7 +606,12 @@ let projectedRooms (colony: Colony) (shut: Set<string>) : string list =
 /// `CreepPositions`. With one colony declared and running — every tick
 /// this bot has ever run — that is exactly the Snapshot it built before
 /// #191, field for field.
-let build (colony: Colony) (shut: Set<string>) (creeps: Set<string>) : Snapshot =
+let build
+    (colony: Colony)
+    (shut: Set<string>)
+    (bootstrap: string list)
+    (creeps: Set<string>)
+    : Snapshot =
     let home = colony.Home
 
     // This colony's spawns and no others': the ones it casts from, banks
@@ -525,13 +630,25 @@ let build (colony: Colony) (shut: Set<string>) (creeps: Set<string>) : Snapshot 
 
     // Three rooms for the colony this bot has always run: the home room,
     // W12S27 and W13S28.
-    let scanned = projectedRooms colony shut
+    let scanned = projectedRooms colony bootstrap shut
 
     // The scanned rooms we can actually see. What vision pays for is read
     // off these and is absent entry by entry where there is none (ADR
     // 0004); what a declaration carries is read off `outposts` instead and
     // needs no vision at all (ADR 0041).
     let seen = scanned |> List.choose roomSeen
+
+    // The seen rooms this colony **mines**: every one it scans but the ones
+    // it merely bootstraps (ADR 0047 decision 4). A child colony's rocks
+    // are the child's, and a mother pooling them would hire a second
+    // Anchor for a Post the child already garrisons and count that room's
+    // output into her own quotas twice over. The other half of the same
+    // subtraction is the narrowed layer (`narrowToBootstrap`), which is
+    // what keeps the rock out of the census the quotas read; both are the
+    // one answer `bootstrap` carries, exactly as the stand-down's three
+    // readings are one subtraction.
+    let mined =
+        seen |> List.filter (fun room -> not (List.contains room.name bootstrap))
 
     // The name the engine spells this colony, off the controller of the
     // room its spawns stand in — a spawn cannot stand in a room this
@@ -606,6 +723,10 @@ let build (colony: Colony) (shut: Set<string>) (creeps: Set<string>) : Snapshot 
         // list's question: it is answered once, in
         // `Decide.workforceTarget`, and the answer is nothing (ADR 0042).
         //
+        // Swept over `mined` and not `seen` since #192: a room this colony
+        // only bootstraps is another colony's home, and its rocks are that
+        // colony's to pool (ADR 0047 decision 4).
+        //
         // The lists beside it stay home-only on purpose. `Refillables`,
         // `Controller` and `RoomEnergy` are about rooms we own, and an
         // outpost is by definition one we do not. Two lists have left that
@@ -616,7 +737,7 @@ let build (colony: Colony) (shut: Set<string>) (creeps: Set<string>) : Snapshot 
         // for. Both read `seen` now, and each says below why that set and
         // not this one's.
         Sources =
-            seen
+            mined
             |> List.collect (fun room -> room.find findSources |> Array.toList)
             |> List.map (fun o ->
                 let s = o :?> ISource
@@ -742,8 +863,10 @@ let build (colony: Colony) (shut: Set<string>) (creeps: Set<string>) : Snapshot 
         // cannot look into contributes none of them (ADR 0004) rather than
         // a guess. The dedupe the spawn-keyed read needed goes with it —
         // `seen` is `scanned` filtered by vision (`List.choose`), and
-        // `scanned` names each room once (`Outpost.roomsProjected`), so no
-        // room's sites can be collected twice.
+        // `scanned` names each room once (`Colony.roomsProjected`, whose
+        // union of the outpost reading and the bootstrapped rooms is
+        // deduplicated for exactly this claim), so no room's sites can be
+        // collected twice.
         //
         // This is not cross-room paving, which stays out of scope (ADR
         // 0042). The container rule is the only thing *this colony* places
@@ -797,7 +920,7 @@ let build (colony: Colony) (shut: Set<string>) (creeps: Set<string>) : Snapshot 
         // is looking into contributes none of them rather than a guess
         // (ADR 0004) — and a room the colony has no creep in is one no
         // Reach could gate anything of ours in anyway. `seen` names each
-        // room once (`Outpost.roomsProjected` filtered by vision), so no
+        // room once (`Colony.roomsProjected` filtered by vision), so no
         // room's hostiles are collected twice, and the home room is in it
         // by construction: a spawn cannot stand in a room with no vision.
         //
@@ -873,7 +996,7 @@ let build (colony: Colony) (shut: Set<string>) (creeps: Set<string>) : Snapshot 
         // it is this one splice. It lays nothing into a room the scan set
         // left out, and neither does the pool above, so the union stays
         // the single gate on which rooms the colony works.
-        Spatial = buildSpatial creeps home scanned |> Outpost.place outposts
+        Spatial = buildSpatial creeps home scanned bootstrap |> Outpost.place outposts
         // The declaration's other half, handed over whole (ADR 0047): every
         // home room a human has declared a colony for, this one's included
         // and unfiltered. Which of them are **candidate colonies** — the

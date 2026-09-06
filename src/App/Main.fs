@@ -143,12 +143,30 @@ let loop () =
     let shutOf home =
         shut |> Map.tryFind home |> Option.defaultValue Set.empty
 
+    // Which rooms each colony is still **bootstrapping** for a child of its
+    // own (ADR 0047 decision 4), derived once for the tick like the gate
+    // above and for the same reason: three readers take this answer — the
+    // scan set, the narrowed layer those rooms are projected under, and the
+    // sources a colony pools — and a second derivation is a second answer
+    // free to disagree.
+    //
+    // The levels are read off the world here rather than out of a Snapshot,
+    // because whether a child has outgrown its mother decides whether the
+    // mother projects that room at all: the fact is needed before the scan
+    // set it would have to come out of exists. Asked of the declared homes
+    // alone (`Colony.homes`), which is a handful of names and no sweep.
+    let levels = Snapshot.controllerLevels (Colony.homes Colony.declared)
+
+    let bootstrapOf colony =
+        Colony.bootstrapping levels Colony.declared colony
+
     // Which rooms each colony projects, before any of them is built:
     // adoption is decided over the whole table at once (ADR 0047 decision
     // 2), so a creep's colony cannot be known from inside one Snapshot.
     let projections =
         colonies
-        |> List.map (fun colony -> colony.Home, Snapshot.projectedRooms colony (shutOf colony.Home))
+        |> List.map (fun colony ->
+            colony.Home, Snapshot.projectedRooms colony (bootstrapOf colony) (shutOf colony.Home))
 
     // Every creep this bot owns, filed under the colony that holds it this
     // tick: the one it was cast by, or the one that has adopted it. Cut
@@ -173,7 +191,7 @@ let loop () =
                     if home = colony.Home then Some creep else None)
                 |> Set.ofList
 
-            colony, Snapshot.build colony (shutOf colony.Home) mine)
+            colony, Snapshot.build colony (shutOf colony.Home) (bootstrapOf colony) mine)
 
     // The Snapshot boundary, and the Raid logs' reads ride in this phase
     // rather than in the prelude: the two are one act — the gate decides

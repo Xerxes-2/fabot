@@ -756,6 +756,30 @@ type Colony =
         /// projected by two colonies at once is exactly what the mother's
         /// outpost declaration already means (ADR 0047).
         Outposts: Outpost list
+        /// The home room of the [[mother colony]] that raised this one, for
+        /// as long as it is still being raised (ADR 0047 decision 4): the
+        /// **bootstrap** window, which runs from the day the child leaves
+        /// its mother's outpost list to the tick its controller reaches
+        /// `bootstrapLevel`. `None` for a colony that was never anybody's
+        /// child and for one that has outgrown its mother.
+        ///
+        /// A field, and the one part of the mother–child relation that has
+        /// to be one. Until the child is independent the relation is the
+        /// mother's `Outposts` entry naming the child's home, and nothing
+        /// else is needed: one room, two declarations, and each of them
+        /// says the whole of it. The day the human splits the declaration
+        /// that entry goes, and with it every trace of which colony raised
+        /// which — while the borrowing rule below still has two whole
+        /// levels to run. So the field carries exactly what the outpost
+        /// entry carried and nothing more: the name of the colony whose
+        /// workers may cross for this one's Upgrade and Build.
+        ///
+        /// A human's, like the rest of the declaration, and cleared by a
+        /// human: the bot never edits it, and leaving it in past
+        /// `bootstrapLevel` costs nothing, because the rule that reads it
+        /// (`bootstrapping`) asks the world for the child's level and
+        /// stops on its own.
+        Mother: string option
     }
 
 [<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
@@ -798,6 +822,7 @@ module Colony =
                 // W12S27 alone since W13S28 stood its own spawn (below); the
                 // room is ADR 0042's north outpost, read off the pair above.
                 Outposts = Outpost.adr0042 |> List.filter (fun o -> o.RoomName = "W12S27")
+                Mother = None
             }
             // The second colony (ADR 0047). W13S28 was the first colony's
             // outpost until its spawn stood at (16,12) on 2026-09-06
@@ -805,7 +830,18 @@ module Colony =
             // and left the mother's list above, so one room is projected
             // by one colony. It works no outposts of its own yet. Moved by
             // a human, like every declaration here.
-            { Home = "W13S28"; Outposts = [] }
+            //
+            // W12S28 raised it and goes on raising it: the mother's workers
+            // may cross the Seam for this room's Upgrade and Build, and her
+            // worker row hires `pioneerCount` bodies for the job, until the
+            // controller here reaches `bootstrapLevel` (ADR 0047 decision
+            // 4). The day it does, this room leaves her projection on its
+            // own; the name may then be cleared by a human or left standing.
+            {
+                Home = "W13S28"
+                Outposts = []
+                Mother = Some "W12S28"
+            }
         ]
 
     /// The outposts one home room works: its own declaration's, and none
@@ -893,9 +929,103 @@ module Colony =
             spawnRooms
             |> List.filter (fun room -> Set.contains room owned)
             |> List.tryHead
-            |> Option.map (fun home -> { Home = home; Outposts = [] })
+            |> Option.map (fun home ->
+                {
+                    Home = home
+                    Outposts = []
+                    // Nobody's child: a room the declaration does not
+                    // describe is one no human wrote a mother for, and a
+                    // fallback that invented one would hire pioneers for a
+                    // colony that exists only because a constant slipped.
+                    Mother = None
+                })
             |> Option.toList
         | living -> living
+
+    /// The controller level a child colony stops being bootstrapped at
+    /// (ADR 0047 decision 4): at RCL3 the borrowing rule closes, the
+    /// [[pioneer]] addend falls away and the mother stops projecting the
+    /// room altogether.
+    ///
+    /// Three, because that is the level a colony can defend and feed
+    /// itself at: RCL3 unlocks the first tower and the tenth extension —
+    /// 800 energy of bank, enough to cast a body that is not the 300-energy
+    /// starter — and it is the level ADR 0047 chose the exception's end at.
+    /// A tunable, and the only number in the rule: everything else about
+    /// the window is read off the world.
+    let bootstrapLevel = 3
+
+    /// The rooms one colony **bootstraps** this tick (ADR 0047 decision
+    /// 4): the homes of the colonies it is the [[mother colony]] of, while
+    /// their controllers are still below `bootstrapLevel`. The mother
+    /// projects each of them beside her own rooms and works two Tasks
+    /// there — the child's Upgrade and its Build — which is the one
+    /// cross-colony borrowing rule there is.
+    ///
+    /// The levels are handed in, read off the world by the shell for the
+    /// declared homes, because a colony's own Snapshot cannot answer for a
+    /// room that is not in its scan set and this is the rule that *decides*
+    /// that set. One evaluation, three readers: the scan set, the narrowed
+    /// layer the shell projects those rooms under, and the Snapshot the
+    /// pool is built from — the shape `Outpost.worked`'s stand-down gate
+    /// already has, and for its reason: a second derivation is a second
+    /// answer free to disagree, and here it would be a room projected with
+    /// nothing pooled in it, or pooled with nothing projecting it.
+    ///
+    /// A room with no level is not bootstrapped. Absence classifies nothing
+    /// (ADR 0004), and the absence cannot be the interesting case: a colony
+    /// we own a spawn in is a room we can always see, so a child that has
+    /// left its mother's outpost list has a level for as long as it is a
+    /// colony at all.
+    ///
+    /// **A room the mother still declares as an outpost is worked as one**,
+    /// and never as a bootstrap layer. That is the [[nursery]] and the
+    /// window after it (ADR 0047's Consequences): while the room is in the
+    /// outpost list its rocks are the mother's to mine, its Seats hire her
+    /// Anchors and the container rule places her container there, and a
+    /// second, narrower projection of the same room would take all of that
+    /// away on the strength of the same human's other sentence. The
+    /// bootstrap layer begins exactly where the outpost declaration ends.
+    ///
+    /// The colony's own home is excluded by name, for `isNurseryRoom`'s
+    /// reason: a declaration naming itself its own mother is a human's
+    /// slip, and the home room narrowed to a bootstrap layer would be a
+    /// colony that cannot see its own rocks.
+    let bootstrapping
+        (levels: Map<string, int>)
+        (colonies: Colony list)
+        (colony: Colony)
+        : string list =
+        let worked = colony.Outposts |> List.map (fun outpost -> outpost.RoomName)
+
+        colonies
+        |> List.filter (fun child ->
+            child.Mother = Some colony.Home
+            && child.Home <> colony.Home
+            && not (List.contains child.Home worked)
+            && (Map.tryFind child.Home levels
+                |> Option.exists (fun level -> level < bootstrapLevel)))
+        |> List.map (fun child -> child.Home)
+
+    /// The rooms one colony projects this tick: its home and its worked
+    /// [[outpost]]s (`Outpost.roomsProjected`), and beside them the rooms
+    /// it bootstraps (`bootstrapping`). The whole scan set in one sentence,
+    /// here and not in the shell, for the reason the outpost union is
+    /// Core's: the projection is not the set's only reader — the entity
+    /// lists the Task pool is built from are swept over it too — so the
+    /// rule is stated once and read twice rather than copied.
+    ///
+    /// The bootstrapped rooms come last and the list is deduplicated, so a
+    /// room that is somehow both an outpost and a child's home is projected
+    /// once, under the outpost reading that named it first (`bootstrapping`
+    /// refuses that pair at the source; this is the union's own guard, the
+    /// one `roomsProjected` already has for a declaration naming home).
+    let roomsProjected
+        (outposts: Outpost list)
+        (bootstrap: string list)
+        (home: string)
+        : string list =
+        Outpost.roomsProjected outposts home @ bootstrap |> List.distinct
 
     /// The colony that cast one creep, read off its own name: creep names
     /// are `{pattern}-{tick}-{spawn}` (`Decide.planSpawns`), so the spawn

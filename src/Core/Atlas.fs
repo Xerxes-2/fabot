@@ -1802,10 +1802,11 @@ let dualSeats (atlas: Atlas) : Set<Pos> = dualSeatsIn atlas atlas.Home
 /// has a second thing to do without moving, which is why ADR 0025 gives
 /// it no reprieve through its source's empty window and ADR 0048 leaves
 /// that exclusion standing. Read in the creep's own room and answered for
-/// the colony's own room alone, for `postsIn`'s reason: the colony
-/// upgrades one controller, so a Seat beside an outpost's is a tile
-/// nobody ever upgrades from (ADR 0042). An unplaced creep stands on
-/// nothing (ADR 0004).
+/// the colony's own room alone, for `postsIn`'s reason: a Seat beside a
+/// controller the colony does not upgrade from that tile is a tile nobody
+/// ever upgrades from (ADR 0042, narrowed by ADR 0047 decision 4 — see the
+/// standing-Post census below for what a second Upgrade in the pool does
+/// and does not change). An unplaced creep stands on nothing (ADR 0004).
 let standsOnDualSeat (atlas: Atlas) (creep: string) : bool =
     match Map.tryFind creep atlas.CreepAt with
     | Some(room, tile) when room = atlas.Home -> Set.contains tile (dualSeats atlas)
@@ -1823,7 +1824,7 @@ let standsOnDualSeat (atlas: Atlas) (creep: string) : bool =
 /// The Dual Seat half is the colony's own room's alone, and only the
 /// container half crosses a border (ADR 0042). A Dual Seat is a tile a
 /// creep harvests *and upgrades* from without moving, and the colony
-/// upgrades one controller — its own (`planTasks` pools an Upgrade for
+/// upgrades its own controller (`planTasks` pools an Upgrade for
 /// `snapshot.Controller`, never for a declared outpost's controller,
 /// which it reserves instead). Counted in an outpost the intersection
 /// would name a tile nobody ever upgrades from, and that tile would be a
@@ -1831,6 +1832,19 @@ let standsOnDualSeat (atlas: Atlas) (creep: string) : bool =
 /// no container standing under it — precisely the switch ADR 0042 makes
 /// the container be. So a room the colony does not upgrade in has exactly
 /// the Posts its built containers give it.
+///
+/// Since ADR 0047 decision 4 the pool holds a *second* Upgrade — a
+/// bootstrapped child's controller, in a room this colony projects — and
+/// the reading above does not move for it. A bootstrap layer carries the
+/// controller, the sites and the spawn and no rock at all
+/// (`Snapshot.narrowToBootstrap`), so that room's Seat union is empty and
+/// the intersection with it would be empty whichever room this were
+/// answered for. The one shape where a projected room holds both the
+/// child's controller and rocks of the colony's own is the window ADR 0047
+/// names between the spawn standing and the human's edit, where the room
+/// is still a declared `Outpost` — and there this staying home-only is the
+/// conservative half of the same argument, because a Dual Seat counted
+/// there would hire an Anchor onto an unpotted source.
 ///
 /// Separated from `postsIn` below by #205, and the split is the one ADR
 /// 0042 already draws between what a room is *worth* and what it is
