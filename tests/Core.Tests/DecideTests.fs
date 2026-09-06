@@ -23590,13 +23590,17 @@ let upgraderQuotaTests =
                 // RCL3 — because 800 is where one Carry against
                 // `floor((capacity - 50) / 150)` Work reaches four Work to
                 // the Carry.
+                // Two haulers standing, as the RCL2 arm below has: the
+                // hauler row is priced at the dearest sink it reaches, and
+                // at an 800 bank this room's two containers ask for two
+                // bodies, whose gap would be cast ahead of the upgrader's.
                 Expect.stringStarts
-                    (castName (casts (atBank 800 3) (upgraderFleet 0 0)))
+                    (castName (casts (atBank 800 3) (upgraderFleet 0 0 @ [ hauler "h2" 0 100 ])))
                     "upgrader-"
                     "at the 800 bank the row's own cast is a standing body, so the surplus hires it"
 
                 Expect.stringStarts
-                    (castName (casts (atBank 750 3) (upgraderFleet 0 0)))
+                    (castName (casts (atBank 750 3) (upgraderFleet 0 0 @ [ hauler "h2" 0 100 ])))
                     "worker-"
                     "fifty energy poorer the same cast is `4W/1C/4M` and the row is not hired"
 
@@ -24685,15 +24689,16 @@ let quotaInputTests =
                     "and the spawn alone still answers one, which is the body the buffer never got"
             }
 
-            test "the same split hires fewer bodies where the buffer is the nearer sink" {
-                // The mirror of the case above, and the honest half of the
-                // even split's doc: the average is a claim about
-                // *proportion*, so against the spawn-only price it reads
-                // high wherever a sink stands further off than the cluster
-                // and low wherever one stands nearer. Here the buffer is
-                // one tile from the source container and the cluster is
-                // across the room, which is the direction the rule can err
-                // in that the live defect never showed.
+            test "a nearer sink lowers nothing: the row is sized to the dearest sink it reaches" {
+                // The mirror of the case above. Under R4's mean this read
+                // *two*: the average was a claim about proportion, and a
+                // buffer one tile from the container pulled the long haul
+                // to the cluster down. Live (W13S28, 2026-09-07) the near
+                // sink was the spawn cluster, which fills in a trip, so the
+                // flow that ran all day was the far one and the mean hired
+                // a body short while both containers stood full. The row is
+                // priced at the dearest reachable sink now, so a nearer sink
+                // never lowers the count.
                 let clusterAcrossTheRoom (colony: ColonyView) =
                     let away = { X = 45; Y = 25 }
 
@@ -24727,8 +24732,8 @@ let quotaInputTests =
 
                 Expect.equal
                     (quotaOf colony)
-                    2
-                    "and averaged with a buffer one tile off the container it asks for two — the direction the split can also err in"
+                    3
+                    "and with a buffer one tile off the container it still asks for three: the cluster across the room is the sink the flow runs to"
             }
 
             test "the capture the scope note was written from hires the hauler it was missing" {

@@ -1773,11 +1773,19 @@ let private haulerDemandOf (view: ColonyView) atlas : int * HaulDemandRow list *
         [ "cluster", cluster; "buffer", buffers; "storage", storages ]
         |> List.filter (snd >> List.isEmpty >> not)
 
-    // Each container's own haul, spread evenly over the sinks it can
-    // price and summed over the colony — the fraction of a hauler it asks
-    // for, and never that fraction rounded. Kept line by line for the
-    // `quotas` view (ADR 0009): each sink group's cheapest round trip, or
-    // None where no place of it is reachable, and the demand the line adds.
+    // Each container's own haul, priced at the **dearest** sink it can
+    // reach and summed over the colony — the fraction of a hauler it asks
+    // for, and never that fraction rounded. The dearest and not the mean
+    // (live, W13S28 2026-09-07): the near sink is the spawn cluster, and
+    // a cluster holds a few hundred energy and fills in a trip, so the
+    // flow that goes on all day is the flow to the far one — the buffer
+    // or the Storage — and a quota sized to the mean of the two hired one
+    // body for a room whose both containers stood full with the buffer at
+    // zero. A hauler is 750 energy over 1,500 ticks; an overflowing Post
+    // is ten a tick for as long as it stands, so this row errs toward the
+    // body. Kept line by line for the `quotas` view (ADR 0009): each sink
+    // group's cheapest round trip, or None where no place of it is
+    // reachable, and the demand the line adds.
     let rows =
         sourceContainers
         |> List.map (fun (container, output) ->
@@ -1803,7 +1811,7 @@ let private haulerDemandOf (view: ColonyView) atlas : int * HaulDemandRow list *
                 Demand =
                     match trips with
                     | [] -> 0
-                    | trips -> output * List.sum trips / List.length trips
+                    | trips -> output * List.max trips
             })
 
     let demand = rows |> List.sumBy (fun row -> row.Demand)
