@@ -612,7 +612,7 @@ if (command === "console") {
         "the leaf was hand-edited, or its wire shape has moved.",
     );
   }
-  if (jsonOut) {
+  if (json) {
     console.log(JSON.stringify({ home, ...stored }, null, 2));
   } else {
     console.log(`colony ${home}`);
