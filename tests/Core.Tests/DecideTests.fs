@@ -19743,6 +19743,10 @@ let private asNursery (colony: ColonyView) =
     { colony with
         RoomControl = Map.add "W1N2" ownedRoom colony.RoomControl
         Declared = [ SpatialInfo.homeName colony.Spatial; "W1N2" ]
+        // The shell's `ColonyView.ofWorld` borrows a nursery for the
+        // mother the tick it is claimed; the pool's budget reads that
+        // field (#210), so the fixture carries it as the shell would.
+        Borrowed = { Rooms = [ "W1N2" ] }
         // Declared and owned with no spawn of ours standing in it is the
         // whole of the [[stage]] `Nursery` (ADR 0052 decision 3), so the
         // shell would derive exactly this entry for the room; the
@@ -20161,7 +20165,7 @@ let nurseryTests =
                     "the colony's own spawnless home is no nursery of its own: its site stays surplus"
             }
 
-            test "a nursery's site keeps its place in the builders' budget" {
+            test "a nursery's site leaves the builders' budget to the outposts' own" {
                 // The budget is a colony-wide two spread over the outpost
                 // container sites the pool holds, floored at one apiece
                 // (#157), and it falls to the survivors only as sites are
@@ -20226,10 +20230,13 @@ let nurseryTests =
                     [ taskId (Build "site-out"), 1; taskId (Build "site-west"), 1 ]
                     "two ordinary outpost sites share the colony's two builders, one apiece"
 
+                // #210 (user decision 2026-09-07): a borrowed room's site is
+                // the child's own — uncapped, and out of the divisor — so the
+                // west outpost's site has the whole budget of two.
                 Expect.equal
                     (held (sites asNursery))
-                    [ taskId (Build "site-out"), 3; taskId (Build "site-west"), 1 ]
-                    "claimed, the north site is uncapped and the west one keeps the one it had"
+                    [ taskId (Build "site-out"), 2; taskId (Build "site-west"), 2 ]
+                    "claimed, the north site is uncapped and the west one takes the whole budget"
             }
         ]
 
@@ -25493,5 +25500,137 @@ let fullContainerTests =
                     (matched 1000)
                     (Some(taskId (Withdraw "can-a"), MatchFactor.TravelCost))
                     "both half-full: the near one, by travel cost"
+            }
+        ]
+
+[<Tests>]
+let borrowedRoomBudgetTests =
+    testList
+        "a borrowed room's sites and the budgets"
+        [
+            test "a child's container site neither draws nor dilutes the outpost builders' budget" {
+                // #210 (user decision 2026-09-07). Two container sites: one
+                // in the north room, one in the west outpost. As a candidate
+                // colony the north room is an outpost and the two sites
+                // split the budget of two, one apiece; claimed as a nursery
+                // the north site is the child's own, so the west site has
+                // the whole budget — two builders, where it had one.
+                let westward (colony: ColonyView) =
+                    let west =
+                        { RoomLayer.empty with
+                            Terrain = Map.ofList [ for x in 45..49 -> { X = x; Y = 2 }, Plain ]
+                            TargetPositions = Map.ofList [ "site-west", { X = 48; Y = 2 } ]
+                        }
+
+                    { colony with
+                        ConstructionSites = colony.ConstructionSites @ [ { Id = "site-west" } ]
+                        Creeps = [ for i in 1..4 -> worker $"w{i}" 50 0 ]
+                        Spatial =
+                            { colony.Spatial with
+                                Borders = Map.add "W2N1" plainRing colony.Spatial.Borders
+                                TargetKinds =
+                                    Map.add
+                                        "site-west"
+                                        (Site BuiltKind.Container)
+                                        colony.Spatial.TargetKinds
+                            }
+                            |> withNeighbour "W2N1" west
+                            |> withHome (fun layer ->
+                                { layer with
+                                    Terrain =
+                                        (layer.Terrain, [ for x in 0..10 -> { X = x; Y = 2 } ])
+                                        ||> List.fold (fun acc pos -> Map.add pos Plain acc)
+                                    // W2N1 lies west of W1N1, so the Seam to it is
+                                    // the home room's x = 0 edge: the crowd stands
+                                    // beside it.
+                                    CreepPositions =
+                                        Map.ofList
+                                            [ for i in 1..4 -> $"w{i}", { X = 1 + i; Y = 2 } ]
+                                })
+                    }
+
+                let westBuilders control =
+                    let colony =
+                        northBorderColony { X = 10; Y = 38 }
+                        |> withNorthOutpost None
+                        |> withOutpostSite { X = 10; Y = 43 }
+                        |> westward
+                        |> control
+
+                    let { Assignments = assignments } = decide colony Map.empty Set.empty None
+
+                    assignments
+                    |> Map.toList
+                    |> List.filter (fun (_, t) -> t = taskId (Build "site-west"))
+                    |> List.length
+
+                Expect.equal
+                    (westBuilders asCandidate)
+                    1
+                    "two outpost sites share the budget of two: one builder west"
+
+                Expect.equal
+                    (westBuilders asNursery)
+                    2
+                    "the nursery's site is the child's own and out of the divisor: the west site takes both"
+            }
+
+            test "one FerryLoads budget is spread over a child room's buffers in id order" {
+                // #224 (user decision 2026-09-07): the hauler row hires
+                // FerryLoads bodies per child, so the pool admits that many
+                // per child — the first buffer by id takes the budget's
+                // share and a second one what is left. Pairwise on the
+                // budget: at two, one apiece.
+                let twoBuffers loads =
+                    let mother = ferryMother Bootstrapping
+                    let north = SpatialInfo.layerOf mother.Spatial "W1N2"
+
+                    { mother with
+                        Tuning =
+                            { mother.Tuning with
+                                FerryLoads = loads
+                            }
+                        Spatial =
+                            { mother.Spatial with
+                                TargetKinds =
+                                    Map.add
+                                        "can-child2"
+                                        (Structure BuiltKind.Container)
+                                        mother.Spatial.TargetKinds
+                                Stores = Map.add "can-child2" 500 mother.Spatial.Stores
+                            }
+                            |> withNeighbour
+                                "W1N2"
+                                { north with
+                                    TargetPositions =
+                                        Map.add
+                                            "can-child2"
+                                            { X = 10; Y = 47 }
+                                            north.TargetPositions
+                                }
+                    }
+
+                let capOf loads id =
+                    let view = twoBuffers loads
+
+                    planPool view (Atlas.ofView view) (planTasks view noThreats)
+                    |> List.tryPick (fun pooled ->
+                        if pooled.Task = Refill id then
+                            pooled.Capacity.Total
+                        else
+                            None)
+
+                Expect.equal
+                    (capOf 1 "can-child")
+                    (Some 1)
+                    "one load: the first buffer by id takes it"
+
+                Expect.equal (capOf 1 "can-child2") (Some 0) "and the second takes none"
+                Expect.equal (capOf 2 "can-child") (Some 1) "two loads: one apiece"
+
+                Expect.equal
+                    (capOf 2 "can-child2")
+                    (Some 1)
+                    "so the pool admits exactly what the row hires"
             }
         ]

@@ -4555,7 +4555,16 @@ let private threatened (threats: Threats) atlas (creep: CreepInfo) task =
 let private isOutpostContainerSite (view: ColonyView) atlas siteId =
     Map.tryFind siteId view.Spatial.TargetKinds = Some(Site BuiltKind.Container)
     && Atlas.targetRoom atlas siteId
-       |> Option.exists (fun room -> room <> SpatialInfo.homeName view.Spatial)
+       |> Option.exists (fun room ->
+           room <> SpatialInfo.homeName view.Spatial
+           // A borrowed room's container site is the child's own and not
+           // an outpost switch (#210, user decision 2026-09-07): it neither
+           // draws the outpost builders' budget nor dilutes it — the
+           // nursery's and the bootstrapping child's sites reach the pool
+           // by their own rules (`isNurserySite`, `isBootstrappingSite`),
+           // and the budget is spread over the sites of rooms the colony
+           // *mines* alone.
+           && not (List.contains room view.Borrowed.Rooms))
 
 /// Whether a construction site stands in a **nursery** — a room this
 /// colony has claimed and not yet stood a spawn in (`isNurseryRoom`, ADR
@@ -4818,6 +4827,25 @@ let planPool (view: ColonyView) atlas (tasks: Task list) : PooledTask list =
     // written down and bounded, so the Refill `planTasks` pooled for the
     // child's buffer carries that bound here.
     let ferrySinks = ferryBuffers view
+
+    // One `Tuning.FerryLoads` budget per child room, spread over that
+    // room's buffers in id order (#224, user decision 2026-09-07): the
+    // hauler row hires per child, so the pool admits per child — a second
+    // buffer in one room shares the lend rather than doubling it, and with
+    // a budget smaller than the buffer count the last ones take none.
+    let ferryShare: Map<string, int> =
+        ferrySinks
+        |> Set.toList
+        |> List.choose (fun id -> Atlas.targetRoom atlas id |> Option.map (fun room -> room, id))
+        |> List.groupBy fst
+        |> List.collect (fun (_, buffers) ->
+            let ids = buffers |> List.map snd |> List.sort
+            let n = List.length ids
+            let budget = view.Tuning.FerryLoads
+
+            ids
+            |> List.mapi (fun i id -> id, budget / n + (if i < budget % n then 1 else 0)))
+        |> Map.ofList
 
     let stored id =
         view.Spatial.Stores |> Map.tryFind id |> Option.defaultValue 0
@@ -5217,7 +5245,7 @@ let planPool (view: ColonyView) atlas (tasks: Task list) : PooledTask list =
         // sink at home, so a loaded worker reaches it only when there is
         // nothing nearer, which is the case the bound is for.
         | Refill structureId when Set.contains structureId ferrySinks ->
-            Capacity.total view.Tuning.FerryLoads
+            Capacity.total (Map.tryFind structureId ferryShare |> Option.defaultValue 0)
         // A borrowed Upgrade takes the bodies hired for it and no more
         // (#213): `Tuning.PioneerCount`, the same constant the worker row is
         // raised by, so a human retuning the hire retunes the lift with it.
