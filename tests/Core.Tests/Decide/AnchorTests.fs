@@ -497,6 +497,11 @@ let anchorTests =
                     })
 
             test "a distant Build flows to the generalist; the Anchor upgrades in place" {
+                // What holds the Anchor here is the body gate and no longer
+                // the distance (#234): a site outranks the Upgrade beside it
+                // by a rung now, so a heavy body offered one would walk to it
+                // at any price. The case below is the same claim with the
+                // distance taken away.
                 let snapshot =
                     { dualSeatColony with
                         ConstructionSites = [ { Id = "site-1" } ]
@@ -522,6 +527,43 @@ let anchorTests =
                     (Map.tryFind "a1" assignments)
                     (Some(taskId (Upgrade "ctrl-1")))
                     "the slow heavy body stays where it is valuable"
+            }
+
+            test "a site one step off the rock is still not the Anchor's" {
+                // #234 closed the Build gate over the whole tier, and this
+                // is the case that says why it had to. Travel cost was what
+                // pinned a heavy body on its rock while a home site was
+                // ordinary surplus work; a rung above the Upgrade beside it,
+                // no distance decides between the two any more, and the
+                // Anchor would walk off its Post for fifty carried energy at
+                // four to seven ticks a step. What refuses it is the
+                // prohibition ADR 0020 and ADR 0048 already wrote for the
+                // feeding-tier site, now asked of every one: a heavy body's
+                // work is its Post and never a delivery, however short the
+                // delivery is. The site is one step away here, so nothing in
+                // the answer can be the distance.
+                //
+                // #205's exception is untouched and is the pair: a container
+                // site on the body's **own** Post is built where it stands,
+                // and its own cases are below.
+                let snapshot =
+                    { dualSeatColony with
+                        ConstructionSites = [ { Id = "site-1" } ]
+                        Creeps = [ anchor "a1" 50 0 ]
+                        Spatial =
+                            corridorEast [ "site-1", { X = 12; Y = 10 } ]
+                            |> withHome (fun layer ->
+                                { layer with
+                                    CreepPositions = Map.ofList [ "a1", { X = 11; Y = 10 } ]
+                                })
+                    }
+
+                let { Assignments = assignments } = decide snapshot Map.empty Set.empty None
+
+                Expect.equal
+                    (Map.tryFind "a1" assignments)
+                    (Some(taskId (Upgrade "ctrl-1")))
+                    "the site is a step away and the Anchor still spends into the controller"
             }
 
             test "a distant Refill flows to the generalist; the empty Anchor harvests" {
@@ -1948,26 +1990,27 @@ let standingBodyTests =
                     "the generalist walks to that buffer, so the line prices the walk and refuses"
             }
 
-            test "under RCL3 the colony's own extension site outranks its Upgrade" {
+            test "under RCL3 the colony's own extension site joins the flow" {
                 // A bootstrapping room builds its bank before its
                 // controller: the site is feeding-tier while the controller
                 // is under `Tuning.BootstrapLevel` with a spawn standing, and
                 // surplus like any home site from RCL3 up. Pairwise on the
                 // level alone: the same lane, the same worker, the same
                 // site, and the match factor says which tier decided.
+                //
+                // Measured against the **flow** and no longer against the
+                // Upgrade beside it (#234): a surplus Build outranks that
+                // Upgrade by a rung now, so the site wins on rank at either
+                // level and the controller has stopped being an instrument.
+                // The hungry spawn `bufferLaneFlow` stands at the lane's far
+                // end is one: on the feeding tier the site ties it and takes
+                // the worker on price, and a rung below it the site is
+                // outranked by it however near it stands.
                 let lane level =
-                    let colony =
-                        bufferLaneColony
-                            [ "site-1", { X = 15; Y = 10 }, Site BuiltKind.Extension ]
-                            [ { Id = "site-1" } ]
-                            (creepWith "w" 100 0 (bodyFor workerPattern 300))
-
-                    { colony with
-                        Spatial =
-                            colony.Spatial
-                            |> withTargets
-                                [ "spawn-1", { X = 19; Y = 9 }, Structure BuiltKind.Spawn ]
-                    }
+                    bufferLaneFlow
+                        [ "site-1", { X = 15; Y = 10 }, Site BuiltKind.Extension ]
+                        [ { Id = "site-1" } ]
+                        (creepWith "w" 100 0 (bodyFor workerPattern 300))
                     |> withLevel level
 
                 let matched level =
@@ -1980,13 +2023,13 @@ let standingBodyTests =
 
                 Expect.equal
                     (matched 2)
-                    (Some(taskId (Build "site-1"), MatchFactor.Rank))
-                    "at RCL2 the extension site is feeding-tier and wins by rank"
+                    (Some(taskId (Build "site-1"), MatchFactor.TravelCost))
+                    "at RCL2 the extension site is feeding-tier: it ties the flow and stands nearer"
 
                 Expect.equal
                     (matched 3)
-                    (Some(taskId (Build "site-1"), MatchFactor.TravelCost))
-                    "at RCL3 it is surplus like the Upgrade beside it, and only price separates them"
+                    (Some(taskId (Refill "spawn-1"), MatchFactor.Rank))
+                    "at RCL3 it is surplus, and the flow five steps off outranks it"
             }
 
             test "a standing body fetches from the buffer alone: dry, it waits for the haulers" {

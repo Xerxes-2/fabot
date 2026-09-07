@@ -806,17 +806,24 @@ let outpostTests =
                 // onto the feeding tier and pull the whole worker row off
                 // the controller with it.
                 //
-                // Discriminating by construction: the home site is the
-                // farther of the two targets and the controller the nearer,
-                // so on the surplus tier they share the controller wins on
-                // cost — and read as a switch the site would have won on
-                // rank instead, which is exactly the failure this pins.
-                // Pairwise: one Build, one Upgrade.
+                // Discriminating by construction, and against the **flow**
+                // since #234: this site stands at home, so the rung reaches
+                // it and the controller under the creep's feet stopped being
+                // an instrument. What tells the two readings apart is a
+                // hungry extension placed **farther** than the site. Read as
+                // a switch the site ties that Refill on the feeding tier and
+                // wins on price — which is exactly the failure this pins;
+                // read as the surplus it is, the Refill outranks it outright
+                // however near it stands. The two readings differ in the
+                // winner and not merely in the factor. Pairwise: one Build,
+                // one Refill, and an Upgrade the rung leaves cheapest to
+                // neither.
                 let homeSite =
                     let colony =
                         northBorderColony { X = 10; Y = 38 }
                         |> loaded
                         |> withHomeController { X = 10; Y = 5 }
+                        |> withHungryExtension { X = 10; Y = 40 }
 
                     { colony with
                         ConstructionSites = [ { Id = "site-home" } ]
@@ -825,8 +832,56 @@ let outpostTests =
 
                 Expect.equal
                     (matchOf homeSite)
-                    (Some(taskId (Upgrade "ctrl-1"), MatchFactor.TravelCost))
-                    "the colony's own container site shares Upgrade's tier and loses on distance"
+                    (Some(taskId (Refill "ext-1"), MatchFactor.Rank))
+                    "the colony's own container site is surplus work, and the flow outranks it"
+            }
+
+            test "an ordinary outpost site keeps its travel cost: #234's rung stops at home" {
+                // The other half of #234's rung, and the reason it reads the
+                // site's room (`isHomeSite`). At home the rung is the whole
+                // point — a site outranks the controller a loaded body is
+                // already standing beside. Out here it would be the failure
+                // #157's builders' budget was invented against, "or the tier
+                // would walk the whole worker row over the Seam at once", and
+                // applied to a class of site that budget does not cover:
+                // `cappedContainerSites` holds the container this colony
+                // places itself, and a **road** site in an outpost is a
+                // human's, capped by nothing at all. The one uncapped
+                // crossing this colony makes is a nursery's, at the price ADR
+                // 0047 was chosen at; nothing has ever deliberated this one.
+                //
+                // A road on purpose, so the container rule cannot be what
+                // answers: the whole row is loaded, standing inside the home
+                // controller's Work Area and a Seam from the site.
+                let crowd =
+                    let colony =
+                        northBorderColony { X = 10; Y = 38 }
+                        |> withNorthOutpost None
+                        |> withOutpostSiteOf BuiltKind.Road { X = 10; Y = 41 }
+                        |> withHomeController { X = 10; Y = 5 }
+
+                    { colony with
+                        Creeps = [ for name in [ "w1"; "w2"; "w3" ] -> worker name 50 0 ]
+                        Spatial =
+                            colony.Spatial
+                            |> withHome (fun layer ->
+                                { layer with
+                                    CreepPositions =
+                                        Map.ofList
+                                            [
+                                                "w1", { X = 10; Y = 2 }
+                                                "w2", { X = 10; Y = 3 }
+                                                "w3", { X = 10; Y = 4 }
+                                            ]
+                                })
+                    }
+
+                let { Assignments = assignments } = decide crowd Map.empty Set.empty None
+
+                Expect.equal
+                    (assignments |> Map.toList |> List.map snd |> List.countBy id |> List.sort)
+                    [ taskId (Upgrade "ctrl-1"), 3 ]
+                    "the row stays home and the site past the Seam is priced, not ranked"
             }
 
             test "two builders cross for the site, and the third stays home" {

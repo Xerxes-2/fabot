@@ -1143,6 +1143,37 @@ let withHomeController (pos: Pos) (colony: ColonyView) =
                 })
     }
 
+/// The same colony with one hungry extension of ours standing where the
+/// caller puts it: the **Feeding**-tier rival a *home* site's Build is
+/// measured against since #234.
+///
+/// The controller `withHomeController` adds cannot do that work for a home
+/// site any more. Such a site outranks the Upgrade beside it by a rung now
+/// (`isHomeSite`), so it wins on rank whichever tier it is on and the
+/// factor stops naming the tier. The flow still names it, because the rung
+/// never leaves the surplus tier: a site lifted onto the flow (ADR 0042,
+/// ADR 0047) *ties* this Refill and the nearer of the two wins, while a
+/// surplus one is outranked by it outright however near it stands. Place
+/// it **farther** than the site and the two readings differ in the winner
+/// and not merely in the factor, which is what the cases below do.
+///
+/// A site past the Seam needs none of this: the rung stops at the home
+/// room, so the controller is still the instrument there and the cases
+/// about an outpost's site go on reading it.
+let withHungryExtension (pos: Pos) (colony: ColonyView) =
+    { colony with
+        Refillables = colony.Refillables @ [ refillable "ext-1" 50 BuiltKind.Extension ]
+        Spatial =
+            { colony.Spatial with
+                TargetKinds =
+                    Map.add "ext-1" (Structure BuiltKind.Extension) colony.Spatial.TargetKinds
+            }
+            |> withHome (fun layer ->
+                { layer with
+                    TargetPositions = Map.add "ext-1" pos layer.TargetPositions
+                })
+    }
+
 /// The names of the bodies a tick casts, in the order the colony emits
 /// them — the row a spawn Intent came from, which is the whole of what the
 /// cases below read.
@@ -1454,7 +1485,8 @@ let bufferLane =
         })
 
 /// The lane with one creep on the buffer's doorstep and the given
-/// furniture at (15,10). No source, no hungry spawn and no Storage, so the
+/// furniture wherever the case wants it — (15,10), a step out, for ADR
+/// 0046's own cases. No source, no hungry spawn and no Storage, so the
 /// pool is exactly the controller's Upgrade, the buffer's own Withdraw and
 /// Refill, and whatever the case stands beside the creep — the smallest
 /// pool that can hold ADR 0046's question. The bank is the live RCL5
@@ -1474,6 +1506,24 @@ let bufferLaneColony furniture sites creep =
                 { layer with
                     CreepPositions = Map.ofList [ (creep: CreepInfo).Name, { X = 14; Y = 10 } ]
                 })
+    }
+
+/// The same lane with the flow standing in it: a spawn of the colony's own
+/// at (19,9), hungry, five steps from the creep and so the **farther** of
+/// the two deliveries. It is the Feeding-tier rival a site in this lane is
+/// measured against since #234 — `withHungryExtension`'s reason, in the one
+/// fixture that has a controller of its own and so no room for an extension
+/// beside it. A site read onto the flow ties this Refill and wins on price;
+/// a surplus one is outranked by it.
+let bufferLaneFlow furniture sites creep =
+    let colony =
+        bufferLaneColony
+            (("spawn-1", { X = 19; Y = 9 }, Structure BuiltKind.Spawn) :: furniture)
+            sites
+            creep
+
+    { colony with
+        Refillables = [ refillable "spawn-1" 50 BuiltKind.Spawn ]
     }
 
 /// A mother one room north of a child of hers, at whichever [[stage]] the

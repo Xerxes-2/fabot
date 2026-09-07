@@ -2171,13 +2171,26 @@ let rankTierTests =
                     "reproduction fed, the guns outrank the buffer: rank decided"
             }
 
-            test "tower Refill, Build, Repair and Upgrade are one surplus tier" {
+            test "tower Refill, Repair and Upgrade are one surplus rung; Build stands above" {
                 // Pairwise, because the deciding factor is read off the winner
                 // and its cheapest rival alone: pool all four at once and the
                 // three-way tie hides whichever one left the tier. So each
                 // surplus Task meets the tower Refill by itself, and pool order
-                // — not rank — has to be what breaks every one of those ties.
-                // Build sits beside Upgrade, not above it.
+                // — not rank — has to be what breaks the ties that remain.
+                //
+                // Build makes none of them any more (#234): it is the tier's
+                // own top rung, so it outranks the tower's Refill on a fixture
+                // where nothing is priceable and rank is the only thing that
+                // can separate anything. That is the one comparison the rung
+                // moves which is not Build-against-Upgrade, and it moves it for
+                // the generalists alone — the row that feeds a tower is Carry
+                // with no Work part, and no such body is applicable to a Build.
+                //
+                // The rung reads the site's room (`isHomeSite`) and this
+                // fixture places nothing, which is the total resolving toward
+                // home exactly as `isOutpostContainerSite`'s does: absence
+                // never counts against a Task (ADR 0004). The rung's *room*
+                // is pinned where a room exists to pin it, in `OutpostTests`.
                 let verdictsFor colony =
                     (decide colony Map.empty Set.empty None).Verdicts
 
@@ -2189,8 +2202,8 @@ let rankTierTests =
                         { surplusColony with
                             ConstructionSites = [ { Id = "site-1" } ]
                         })
-                    tied
-                    "Build ties the tower Refill: pool order broke it, not rank"
+                    [ Verdict.Matched("w1", taskId (Build "site-1"), MatchFactor.Rank) ]
+                    "Build outranks the tower Refill: rank broke it, not pool order"
 
                 Expect.equal
                     (verdictsFor (surplusColony |> withHits "road-1" BuiltKind.Road 100 5000))
@@ -2204,6 +2217,54 @@ let rankTierTests =
                         })
                     tied
                     "Upgrade ties the tower Refill: pool order broke it, not rank"
+            }
+
+            // The lane a loaded generalist really stands in (#234, live
+            // t195,8xx): it fills at the [[buffer]] and is left standing in
+            // the controller's Upgrade Work Area, where the Upgrade costs it
+            // one step, applies to any load and never goes task-gone — so two
+            // colonies holding fifty construction sites between them upgraded
+            // with every worker they had. Pairwise on the pool alone: the same
+            // lane, the same worker on the same tile, the site added and taken
+            // away. The site is the **farther** of the two targets, so a win
+            // on travel cost is not a win this case would accept.
+            let siteDownTheLane sites =
+                bufferLaneColony
+                    [ "site-1", { X = 20; Y = 10 }, Site BuiltKind.Extension ]
+                    sites
+                    (creepWith "w" 100 0 (bodyFor workerPattern 300))
+
+            test "a site down the lane outbids the controller beside the buffer" {
+                Expect.equal
+                    (matchOf (siteDownTheLane [ { Id = "site-1" } ]))
+                    (Some(taskId (Build "site-1"), MatchFactor.Rank))
+                    "three steps out against the controller's one, and the site wins on rank"
+
+                Expect.equal
+                    (matchOf (siteDownTheLane []))
+                    (Some(taskId (Upgrade "ctrl-1"), MatchFactor.Rank))
+                    "with nothing standing to build, the same load goes into the controller"
+            }
+
+            test "the downgrade deadline still outranks a site" {
+                // The rung is one step inside the surplus tier and the
+                // deadline is a whole tier above the shallowest work there is
+                // (ADR 0007, `deadlineRank`), so #234 does not reach it: a
+                // controller about to lose a level takes back the load the
+                // site had off it a tick before.
+                let expiring =
+                    { siteDownTheLane [ { Id = "site-1" } ] with
+                        Controller =
+                            Some
+                                { controllerAt 2 with
+                                    TicksToDowngrade = 4000
+                                }
+                    }
+
+                Expect.equal
+                    (matchOf expiring)
+                    (Some(taskId (Upgrade "ctrl-1"), MatchFactor.Rank))
+                    "inside the deadline the controller outranks the site outright"
             }
         ]
 

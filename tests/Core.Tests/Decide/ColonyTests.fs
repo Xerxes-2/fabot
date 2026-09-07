@@ -407,6 +407,11 @@ let nurseryTests =
                 // Pairwise, one rival at a time: one Build, one Upgrade, and
                 // a home Harvest inapplicable to a body with nothing free to
                 // fill.
+                //
+                // #234's rung does not reach this comparison and the
+                // controller is still the instrument: the rung stops at the
+                // home room (`isHomeSite`), and a site past the Seam is
+                // exactly what it stops for.
                 let sited =
                     northBorderColony { X = 10; Y = 38 }
                     |> withNorthOutpost None
@@ -606,11 +611,12 @@ let nurseryTests =
             }
 
             test "a Work-heavy body still may not cross for a nursery's site" {
-                // The body gate #157 put on the one Build it lifted, moved
-                // with the tier rather than left behind it. On the feeding
-                // tier there is no travel cost left to pin an Anchor at its
-                // Post, and a heavy body's cross-room work is a Post and
-                // never a fifty-tile delivery (ADR 0020). A nursery has
+                // The body gate #157 put on the one Build it lifted, and
+                // since #234 the gate every Build carries: a site a rung
+                // over the Upgrade beside it leaves no travel cost anywhere
+                // on the ladder to pin an Anchor at its Post, and a heavy
+                // body's cross-room work is a Post and never a fifty-tile
+                // delivery (ADR 0020). A nursery has
                 // Posts of its own — it is still the mother's outpost, so
                 // the container rule places a container on its source and
                 // a standing one makes that Seat a Post (`Atlas.postsIn`)
@@ -650,6 +656,11 @@ let nurseryTests =
                 // exclusion beside it — one at a time, because a rule whose
                 // guard clauses nothing reads is two weaker rules wearing
                 // one name.
+                //
+                // The outpost half reads against the controller like the case
+                // above, for the same reason: #234's rung stops at the home
+                // room. The **home** half below cannot — that site takes the
+                // rung — so it is read against the flow instead.
                 let sited =
                     northBorderColony { X = 10; Y = 38 }
                     |> withNorthOutpost None
@@ -685,11 +696,21 @@ let nurseryTests =
                 // test has to lay that ColonyView by hand for it to be read
                 // at all. Read without it, #157's "home Build is untouched
                 // and stays Surplus" would grow a condition.
+                //
+                // This site *is* at home, so #234's rung reaches it and the
+                // controller under the creep's feet can no longer say which
+                // tier it is on. The instrument is a hungry extension placed
+                // **farther** than the site: read as a nursery's the site
+                // ties that Refill on the feeding tier and wins on price;
+                // read as the surplus it is, the Refill outranks it outright.
+                // The two readings differ in the winner and not merely in the
+                // factor.
                 let homeSited =
                     let colony =
                         northBorderColony { X = 10; Y = 38 }
                         |> loaded
                         |> withHomeController { X = 10; Y = 5 }
+                        |> withHungryExtension { X = 10; Y = 40 }
 
                     { colony with
                         ConstructionSites = colony.ConstructionSites @ [ { Id = "site-home" } ]
@@ -708,14 +729,14 @@ let nurseryTests =
                                     TargetPositions =
                                         Map.add
                                             "site-home"
-                                            { X = 10; Y = 40 }
+                                            { X = 10; Y = 30 }
                                             layer.TargetPositions
                                 })
                     }
 
                 Expect.equal
                     (matchOf homeSited)
-                    (Some(taskId (Upgrade "ctrl-1"), MatchFactor.TravelCost))
+                    (Some(taskId (Refill "ext-1"), MatchFactor.Rank))
                     "the colony's own spawnless home is no nursery of its own: its site stays surplus"
             }
 
@@ -1923,8 +1944,14 @@ let colonyStageTests =
                 // The lane is the standing-body fixture's, at one level
                 // throughout: only the stage moves, and the match factor
                 // says which tier decided.
+                //
+                // Against the flow and not against the controller (#234):
+                // an independent colony's site outranks its own Upgrade by
+                // a rung now, so both stages win on rank over that one and
+                // only the hungry spawn at the lane's far end still tells
+                // the feeding tier from the surplus one.
                 let lane stage =
-                    bufferLaneColony
+                    bufferLaneFlow
                         [ "site-1", { X = 15; Y = 10 }, Site BuiltKind.Extension ]
                         [ { Id = "site-1" } ]
                         (creepWith "w" 100 0 (bodyFor workerPattern 300))
@@ -1940,13 +1967,13 @@ let colonyStageTests =
 
                 Expect.equal
                     (matched Bootstrapping)
-                    (Some(taskId (Build "site-1"), MatchFactor.Rank))
-                    "a bootstrapping colony builds its bank before its controller: the site wins by rank"
+                    (Some(taskId (Build "site-1"), MatchFactor.TravelCost))
+                    "a bootstrapping colony builds its bank before its controller: the site ties the flow and is nearer"
 
                 Expect.equal
                     (matched Independent)
-                    (Some(taskId (Build "site-1"), MatchFactor.TravelCost))
-                    "and an independent one prices it against the Upgrade like any home site"
+                    (Some(taskId (Refill "spawn-1"), MatchFactor.Rank))
+                    "and an independent one leaves it surplus, under the flow like any home site"
             }
 
             test "the nursery and the bootstrap predicates read the stage and not the census" {

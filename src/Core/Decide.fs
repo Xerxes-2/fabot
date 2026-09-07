@@ -855,15 +855,16 @@ let private claimTargets (view: ColonyView) : (string * string) list =
 /// is not independent (ADR 0047 decision 4). Its home goes on being
 /// projected as this colony's [[outpost]], and three rules read that
 /// state — every site in it is feeding-tier work (`isNurserySite`, which
-/// `isFeedingSite` carries to the tier and to the body gate together), the
-/// concurrent-builder budget does not reach those sites (`planPool`'s
-/// Capacity), and the worker row hires `Tuning.PioneerCount` more bodies
-/// (`workforceTarget`) — so it is one spelling and not three gates free to
-/// disagree, the sentence `colonyOwns` and `claimTargets` above are both
-/// written under. The budget is the one of the three that does not read it
-/// through `isFeedingSite`, because what it asks is narrower than the tier
-/// (`planPool`'s Capacity), so a change to what a nursery *is* has to be
-/// followed to all three from here.
+/// `isFeedingSite` carries to the tier), the concurrent-builder budget
+/// does not reach those sites (`planPool`'s Capacity), and the worker row
+/// hires `Tuning.PioneerCount` more bodies (`workforceTarget`) — so it is
+/// one spelling and not three gates free to disagree, the sentence
+/// `colonyOwns` and `claimTargets` above are both written under. The
+/// budget does not read it through `isFeedingSite`, because what it asks
+/// is narrower than the tier (`planPool`'s Capacity), so a change to what
+/// a nursery *is* has to be followed to all three from here. The Build
+/// body gate is **not** one of the three and stopped being one at #234: it
+/// reads the body alone now and has no nursery clause left to follow.
 ///
 /// Two facts, each doing its own work. The room's **stage** is `Nursery`
 /// (ADR 0052 decision 3), which is the whole of what a nursery is —
@@ -4356,13 +4357,14 @@ let private planLayout
 /// can see and no longer the spawn rooms' alone (#150). The Task, its Work
 /// Area and its price stay outpost-blind — it names a site by id, the area
 /// is that site's room's (ADR 0041) and the price crosses the Seam like
-/// every other cross-room price (#123). Its **tier**, its **cap** and its
-/// **applicability** are not, since #157, and all three ask
-/// `isOutpostContainerSite` which site this is — the tier and the
-/// applicability through `isFeedingSite`, which since ADR 0047 lifts a
+/// every other cross-room price (#123). Its **tier** and its **cap** are
+/// not, since #157, and both ask `isOutpostContainerSite` which site this
+/// is — the tier through `isFeedingSite`, which since ADR 0047 lifts a
 /// [[nursery]]'s sites onto the same tier by their room alone, and the cap
 /// off the rule below it, which is deliberately the narrower question of
-/// the two.
+/// the two. Its **applicability** was a third reader until #234 and asks
+/// nothing about the site any more: the Build body gate reads the body
+/// alone (`applicable`).
 ///
 /// *Which* creep builds it is the ordinary ranking's answer and nothing
 /// this rule arranges — but the ranking had to be corrected before that
@@ -4714,13 +4716,14 @@ let private threatened (threats: Threats) atlas (creep: CreepInfo) task =
 /// site this colony ever places outside its own room
 /// (`planOutpostContainers`), and so the one Build that is a switch on a
 /// room's whole economy rather than a piece of surplus work (ADR 0042).
-/// Three readers, which is why it is a rule and not a line inlined three
-/// times — the applicability gate just below, the tier that gate exists
-/// because of, and the concurrency cap that keeps the tier from emptying
-/// the home room across the Seam. The first two ask it through
-/// `isFeedingSite` since ADR 0047, which is the one spelling those two
-/// share; the cap asks it here, and asks it alone, because what the budget
-/// covers is narrower than what the tier lifts.
+/// Two readers, which is why it is a rule and not a line inlined twice —
+/// the tier, and the concurrency cap that keeps the tier from emptying the
+/// home room across the Seam. The tier asks it through `isFeedingSite`
+/// since ADR 0047; the cap asks it here, and asks it alone, because what
+/// the budget covers is narrower than what the tier lifts. The
+/// applicability gate below was a third reader until #234, when the rung
+/// it existed to answer for reached every home site and the gate stopped
+/// asking about the target at all.
 ///
 /// Both halves come off the projection and neither off the declaration
 /// (ADR 0041), exactly as the Reserve pool's does: the id-keyed kind
@@ -4815,11 +4818,14 @@ let private sitesPendingBeside (view: ColonyView) atlas controllerId =
 
 /// Whether this Build is on the feeding tier rather than in the surplus
 /// the colony's other sites are spent out of — the three rules that lift
-/// one there, said once. Since ADR 0052 decision 6 the body gate that
-/// exists *because* of that tier no longer asks this at all: it reads the
-/// [[priority]] the Planner set off this very predicate, so the two cannot
-/// disagree about which sites they mean because there is only one reading
-/// left.
+/// one there, said once. One reader is left since #234: `tierOf`, and
+/// nothing else. ADR 0052 decision 6 had folded the body gate into this
+/// one reading too — it asked the [[priority]] the Planner set off this
+/// predicate — and then #234 lifted every home site a rung over the
+/// Upgrade beside it, leaving no Build on the ladder travel cost still
+/// thins, so that gate stopped asking about the target at all and reads
+/// the body alone (`applicable`). There is nothing here for it to disagree
+/// with.
 ///
 /// An outpost's container site, the switch on whether that room is in the
 /// economy at all (ADR 0042, #157); and every site in a nursery, the
@@ -4831,6 +4837,36 @@ let private isFeedingSite (view: ColonyView) atlas siteId =
     isOutpostContainerSite view atlas siteId
     || isNurserySite view atlas siteId
     || isBootstrappingSite view atlas siteId
+
+/// Whether a site stands in this colony's **own home room** — the room
+/// #234's surplus rung is scoped to, and the one question that separates
+/// the site a colony grows by from a site it would cross a [[seam]] for.
+///
+/// The rung lifts a Build over the Upgrade it shares the surplus tier
+/// with, and a rank the whole colony shares is exactly what [[travel
+/// cost]] can no longer thin (#157's own sentence). At home that is the
+/// point: the sites and the controller stand a few tiles apart, and which
+/// of them a loaded body walks to is the question the rung answers. Out
+/// past the Seam it is the failure #157's two-builder budget was invented
+/// for — "or the tier would walk the whole worker row over the Seam at
+/// once" — and the only site out there that budget covers is the
+/// container the colony places itself (`cappedContainerSites`). Every
+/// other one is a human's, nothing caps the crowd that would cross for it,
+/// and no ADR has ever deliberated that crossing; the one unbounded
+/// crossing this colony does make is a [[nursery]]'s, at the price ADR
+/// 0047 was chosen at. So the rung stops at the home room and an ordinary
+/// outpost site keeps the travel cost that had it.
+///
+/// The room join is `isOutpostContainerSite`'s, for the reason recorded
+/// there: a `Pos` carries no room (ADR 0041). Total (ADR 0004) and
+/// resolved the same way that rule resolves it, toward home: a site the
+/// projection does not place names no room, and what the absence could
+/// have said is that this is a crossing, which nothing here claims. So it
+/// keeps the rung an unplaced site's Build has no distance to lose
+/// anyway — absence never counts against a Task.
+let private isHomeSite (view: ColonyView) atlas siteId =
+    Atlas.targetRoom atlas siteId
+    |> Option.forall (fun room -> room = SpatialInfo.homeName view.Spatial)
 
 /// The full downgrade timer per controller level (Screeps
 /// CONTROLLER_DOWNGRADE).
@@ -4894,6 +4930,12 @@ type private Tier =
     /// Surplus work: a tower Refill (ADR 0010), Build, Repair and
     /// Upgrade. The colony feeds its own reproduction before its guns,
     /// and everything it merely spends energy on waits behind the flow.
+    /// Not one rung but two: a **home** site's Build stands a step above
+    /// the rest of the tier, in every colony's own pool (#234,
+    /// `priorityOf`, `isHomeSite`), because a site is the colony growing
+    /// and the controller beside the [[buffer]] is where a loaded body
+    /// already stands. A site past the Seam keeps the rung it had, the
+    /// crossing being what #157's builders' budget bounds.
     /// Build with the switches excepted — an outpost container's site and
     /// a nursery's, which decide whether income exists rather than
     /// spending it (`isFeedingSite`, #157, ADR 0047); every other site the
@@ -5308,6 +5350,37 @@ let planPool (view: ColonyView) atlas (tasks: Task list) : PooledTask list =
     // reflex (#166) takes the pile off the same tile for free while the
     // body draws — and a pile on a store that is *not* full keeps the one
     // rung the decay earns it.
+    //
+    // **A site outranks the controller inside the surplus tier** (#234,
+    // live t195,8xx: W12S28 held 42 sites and W13S28 eight — a storage, five
+    // extensions — while every loaded worker in both colonies upgraded).
+    // Build, Repair and Upgrade shared one rung, so travel cost alone
+    // ordered them, and a worker that fills at the [[buffer]] is already
+    // standing in the controller's Work Area: Upgrade costs it nothing, is
+    // applicable to any load, and never goes task-gone, so the nearest
+    // surplus Task is always the controller and the extensions the colony
+    // is hiring workers to raise stand untouched. What ADR 0042 and ADR
+    // 0047 lifted to Feeding was the site that decides whether income
+    // *exists*; this is the ordinary home site, which decides how fast it
+    // grows, and it belongs one rung over the sink that merely spends it.
+    // In every colony's own pool and no longer only under the [[bootstrap
+    // window]] — a colony past that window is precisely the one whose
+    // sites nobody was taking — and scoped to the colony's own home room,
+    // for the reason `isHomeSite` carries: past the Seam the rung is the
+    // uncapped crossing #157's builders' budget exists to refuse.
+    //
+    // **Repair stays on Upgrade's rung.** A repair target leaves the pool
+    // the tick the structure is whole, so a row lifted onto it churns
+    // through task-gone releases (#226); and a decaying road is not the
+    // colony growing, which is what this rung is about.
+    //
+    // A [[priority]] is a scalar, so the lift also carries Build over the
+    // tower [[refill]] this tier holds (ADR 0010). The row that exists to
+    // feed a tower is Carry with no Work part and is inapplicable to a
+    // Build, so nothing the rung does reaches it; what it reorders is the
+    // generalist, which holds both parts and could always have taken
+    // either. For that body a site now beats a gun, exactly as ADR 0010
+    // already put reproduction before guns.
     let priorityOf task =
         let step =
             match task with
@@ -5319,6 +5392,8 @@ let planPool (view: ColonyView) atlas (tasks: Task list) : PooledTask list =
                 tierOf task = Feeding && stored storeId >= Engine.containerCapacity
                 ->
                 -2 * priorityStep
+            | Build siteId when tierOf task = Surplus && isHomeSite view atlas siteId ->
+                -priorityStep
             | _ -> 0
 
         match task with
@@ -5584,11 +5659,18 @@ let planPool (view: ColonyView) atlas (tasks: Task list) : PooledTask list =
 /// the Storage: the gate is scoped to the buffer by id, and the stock's own
 /// in-and-out cycle is closed in the Planner instead (ADR 0023), because
 /// the bodies that must feed the spawn from it are the ones with no Work.
-/// A third gate reads the target beside the body in the same way (#157):
-/// an outpost container site's Build ranks on the feeding tier, where no
-/// travel cost separates it from the work a heavy body should be doing,
-/// so that one Build is inapplicable to a Work-heavy body — the arm
-/// carries why.
+/// A third gate reads the body alone and covers **every** Build (#157,
+/// widened by #234): a Build is inapplicable to a Work-heavy body. It
+/// began as #157's one site, the outpost container's, lifted onto the
+/// feeding tier where no travel cost separated it from the work a heavy
+/// body should be doing; #234 lifted every *home* site a rung over the
+/// Upgrade beside it, which is the whole of what travel cost was pinning
+/// such a body with at home, so the condition had to go there. What was
+/// left for it to cover — an ordinary site past the Seam — is the case
+/// ADR 0020 and ADR 0048 answer outright, a heavy body's cross-room work
+/// being a Post and never a delivery, so the gate reads the body rather
+/// than carrying a clause for it — the arm carries why. The one exception
+/// is #205's, below.
 /// A fourth reads the body alone and covers three Tasks at once (ADR
 /// 0046): Build, Repair and Refill are inapplicable to a **standing body**
 /// — one carrying fewer than one Carry per four Work — because every one
@@ -5810,10 +5892,12 @@ let private applicable
     // `canRefill`, beside Withdraw's (ADR 0050) — the Energy clause is not,
     // being a state and not a fact about the body.
     | Refill _ -> has Carry && creep.Energy > 0 && not (isStandingBody view.Tuning creep)
-    // The one Build with a body gate on it (#157), and it is here for the
-    // same reason ADR 0016's Withdraw gate is: `tierOf` below lifts this
-    // site onto the feeding tier, and a rank the whole colony shares is
-    // exactly what travel cost can no longer thin. What travel cost was
+    // The body gate on Build (#157, and widened to every Build by #234, the
+    // paragraph below), here for the same reason ADR 0016's Withdraw gate
+    // is: the ladder lifts a site over the Task that was pinning the body,
+    // and a rank the whole colony shares is exactly what travel cost can no
+    // longer thin. #157 is the first half of it — `tierOf` below lifts an
+    // outpost's container site onto the feeding tier. What travel cost was
     // holding up is written in the doc above — "Travel cost pins an Anchor
     // that is at its Post" — and on this Task alone it stopped holding: a
     // full Anchor whose Post has no standing container under it (a source
@@ -5826,14 +5910,24 @@ let private applicable
     // Post an Anchor is hired for is this very site (#205) and the
     // exception below leaves it building where it stands.
     //
-    // The gate follows the *tier* and not the container, which is why it
-    // reads this Task's own [[priority]] and not the container rule: ADR
-    // 0047's nursery lifts every site in a claimed room onto the same tier,
-    // and a bootstrapping child's sites with it, so
-    // the same Anchor that was walked off its Post by a container site is
-    // walked off it by a spawn site, and the reason it may not go is the
-    // one above word for word: a heavy body's cross-room work is a Post
-    // and never a delivery (ADR 0020).
+    // The gate followed the *tier* and now follows the body, and #234 is
+    // what closed the difference. It was written to read this Task's own
+    // [[priority]] because ADR 0047's nursery lifts every site in a claimed
+    // room onto the feeding tier, and a bootstrapping child's sites with
+    // it, so the same Anchor that was walked off its Post by a container
+    // site is walked off it by a spawn site. Then #234 lifted the ordinary
+    // **home** site a rung over the Upgrade beside it, and that Upgrade was
+    // the whole of what travel cost was pinning the Anchor with: a full
+    // Anchor on a Dual Seat, offered a site across its own room, now
+    // outranks its own controller off itself and walks. The one Build the
+    // old condition still covered anything with is an ordinary one past the
+    // Seam, and that trip is refused for the reason above word for word: a
+    // heavy body's cross-room work is a Post and never a delivery (ADR
+    // 0020, ADR 0048). So the condition buys nothing a wider rule does not,
+    // and the gate reads the body alone. What that costs is the heavy body
+    // that stood *near* a site and used to raise it out of a short walk;
+    // #197's cornered Anchor — full, beside a Post with no container —
+    // loses one more Task it was never the right body for.
     //
     // A nursery is *not* the empty-handed room the sentence above says an
     // outpost with a pending container is. It is still the mother's
@@ -5874,10 +5968,7 @@ let private applicable
         has Work
         && creep.Energy > 0
         && (Atlas.standsOnPostSite atlas creep.Name siteId
-            || (not (isStandingBody view.Tuning creep)
-                && not (
-                    pooled.Priority <= priorityOfTier Feeding && Atlas.workHeavy atlas creep.Name
-                )))
+            || (not (isStandingBody view.Tuning creep) && not (Atlas.workHeavy atlas creep.Name)))
     // Repair leaves Upgrade's arm with ADR 0046's gate (a delivery, and a
     // standing body's Carry is one trip's worth), and the two stay
     // otherwise identical: a Work part and something to spend.
