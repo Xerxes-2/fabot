@@ -4792,7 +4792,10 @@ let standDownGateTests =
                 let fleet = surplusFleet 4
 
                 let atTick t =
-                    gatedColony [ northGated; westGated ] (Observe.standDown t log) fleet
+                    gatedColony
+                        [ northGated; westGated ]
+                        (Observe.standDown Tuning.defaults t log).Shut
+                        fleet
 
                 Expect.isEmpty
                     (tasksNaming "W1N2" (atTick 899))
@@ -4810,15 +4813,15 @@ let standDownGateTests =
 
             test "a room another player holds is withheld with no clock at all" {
                 // ADR 0043's other trigger, end to end: the fold remembers
-                // the room the tick it is seen taken (`RaidState.Foreign`),
+                // the room the tick it is seen taken (`RaidState.RivalHeld`),
                 // and the gate withholds it for ever after — there is no
-                // expiry, because a room somebody else works has not been
+                // expiry, because a room somebody else **owns** has not been
                 // made dangerous, it has stopped being ours.
                 //
                 // Pairwise against the same room seen held by *us*, which
-                // is the ordinary steady state of every outpost: one field
-                // of one control entry moves.
-                let logWith holder =
+                // is the ordinary steady state of every outpost: one control
+                // entry moves.
+                let logWith control =
                     Observe.RaidState.empty
                     // No world roster: one tick folded off an empty log
                     // has no `Living` baseline, so nothing can be read as a
@@ -4828,29 +4831,114 @@ let standDownGateTests =
                         Set.empty
                         { incomeColony with
                             Time = 100
-                            RoomControl = Map.ofList [ "W1N2", reservedRoom holder 4000 ]
+                            RoomControl = Map.ofList [ "W1N2", control ]
                         }
 
                 let fleet = surplusFleet 4
 
-                let poolAt holder t =
+                let poolAt control t =
                     gatedColony
                         [ northGated; westGated ]
-                        (Observe.standDown t (logWith holder))
+                        (Observe.standDown Tuning.defaults t (logWith control)).Shut
                         fleet
                     |> tasksNaming "W1N2"
 
                 Expect.isNonEmpty
-                    (poolAt true 101)
+                    (poolAt (reservedRoom true 4000) 101)
                     "held by us the room is worked, which is what every outpost's steady state looks like"
 
                 Expect.isEmpty
-                    (poolAt false 101)
-                    "held by another player it is withheld the tick after it was seen"
+                    (poolAt rivalRoom 101)
+                    "owned by another player it is withheld the tick after it was seen"
 
                 Expect.isEmpty
-                    (poolAt false 1_000_000)
+                    (poolAt rivalRoom 1_000_000)
                     "and a million ticks later it is still withheld: this withdrawal carries no clock"
+            }
+
+            test "a room another player reserved is back in the pool when that hold ends" {
+                // #165, end to end at the same seam as the two tests above:
+                // a rival's *reservation* is a clocked stand-down and not the
+                // latch beside it, so the Tasks, the furniture and the
+                // reserver row all come back on the tick the engine's own
+                // countdown reaches — with nobody having gone to look, which
+                // is the whole point of a clock (ADR 0043).
+                //
+                // Pairwise against the room owned outright, one control entry
+                // apart: the latch above is still a latch.
+                let log =
+                    Observe.RaidState.empty
+                    // No world roster, for the reason the test above gives.
+                    |> Observe.foldRaids
+                        Observe.capEpisodes
+                        Set.empty
+                        { incomeColony with
+                            Time = 100
+                            RoomControl = Map.ofList [ "W1N2", reservedRoom false 4000 ]
+                        }
+
+                let fleet = surplusFleet 4
+
+                let atTick t =
+                    gatedColony
+                        [ northGated; westGated ]
+                        (Observe.standDown Tuning.defaults t log).Shut
+                        fleet
+
+                Expect.isEmpty
+                    (tasksNaming "W1N2" (atTick 101))
+                    "the tick after the reservation was seen the room is withheld"
+
+                Expect.isEmpty
+                    (tasksNaming "W1N2" (atTick 4099))
+                    "and stays withheld for every tick of the hold the engine is counting down"
+
+                Expect.isNonEmpty
+                    (tasksNaming "W1N2" (atTick 4100))
+                    "on the tick that hold ends its rock, its controller and its container are pooled again"
+
+                Expect.equal
+                    (reserverCasts (decide (atTick 4100) Map.empty Set.empty None).Intents)
+                    [ oneBlock; oneBlock ]
+                    "and the row hires for it again, no look having been needed"
+            }
+
+            test "the look a re-check buys decides nothing" {
+                // #165's second half at the top seam. On the one tick in
+                // every `Tuning.RivalRecheck` the gate re-admits a latched
+                // room to the **scan**, the colony reads that room's control
+                // entry — and a control entry alone is what the whole
+                // re-admission amounts to: the room is in no layer, its rock
+                // is in no pool and its controller is no Task, so every
+                // reader of `RoomControl` asks it about a room the projection
+                // already carries and finds this one nowhere (ADR 0004).
+                // "Re-admitted to the scan set only, and not to the Task or
+                // quota set" is that sentence, pinned where a reader that
+                // widened it would go red.
+                let fleet = surplusFleet 4
+                let shut = gatedColony [ northGated; westGated ] (Set.singleton "W1N2") fleet
+
+                let looked =
+                    { shut with
+                        RoomControl = Map.add "W1N2" rivalRoom shut.RoomControl
+                    }
+
+                let withoutLook = decide shut Map.empty Set.empty None
+                let withLook = decide looked Map.empty Set.empty None
+
+                Expect.isNonEmpty
+                    withoutLook.Verdicts
+                    "the premise: this colony reaches a decision worth comparing"
+
+                Expect.equal
+                    { withLook with
+                        Memo =
+                            { withLook.Memo with
+                                Walks = withoutLook.Memo.Walks
+                            }
+                    }
+                    withoutLook
+                    "the same decision, memo and census signature and all"
             }
 
             test "the creep standing in a stood-down outpost is released, on the existing path" {

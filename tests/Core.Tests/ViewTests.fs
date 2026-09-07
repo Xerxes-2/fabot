@@ -245,7 +245,7 @@ let private viewUnder colonies world home =
     let holders =
         World.creepColonies Tuning.defaults colonies (World.living colonies world) noneShut world
 
-    ColonyView.ofWorld Tuning.defaults colonies Set.empty holders world colony
+    ColonyView.ofWorld Tuning.defaults colonies StandDown.none holders world colony
 
 /// The same, under the live declaration, which is what almost every test
 /// below wants.
@@ -704,7 +704,9 @@ let colonyViewTests =
                     ColonyView.ofWorld
                         Tuning.defaults
                         declared
-                        (Set.singleton outpost)
+                        { StandDown.none with
+                            Shut = Set.singleton outpost
+                        }
                         (holdersOf pairWorld)
                         pairWorld
                         colony
@@ -731,6 +733,80 @@ let colonyViewTests =
                 Expect.isFalse
                     (Map.containsKey outpost shut.Sightings)
                     "and the colony that has withdrawn remembers nothing of it"
+            }
+
+            test "a re-checked room is looked into and worked no more than before" {
+                // #165's re-admission, and its whole extent: on the one tick
+                // in every `Tuning.RivalRecheck` the gate hands a latched room
+                // back to the **scan**, the colony reads that room's
+                // controller — the one fact the next [[raid log]] needs to
+                // drop a latch the rival has walked away from — and reads
+                // nothing else of it. Pairwise against the same room shut
+                // without a recheck above: one field of the gate moves, and
+                // one entry of the view moves with it.
+                let colony = declared |> List.head
+
+                let looked =
+                    ColonyView.ofWorld
+                        Tuning.defaults
+                        declared
+                        {
+                            Shut = Set.singleton outpost
+                            Rechecked = Set.singleton outpost
+                        }
+                        (holdersOf pairWorld)
+                        pairWorld
+                        colony
+
+                Expect.equal
+                    (Map.tryFind outpost looked.RoomControl)
+                    (Map.tryFind outpost pairWorld.Rooms |> Option.bind (fun facts -> facts.Control))
+                    "the room's control entry is read, which is what a look is"
+
+                Expect.isFalse
+                    (Map.containsKey outpost looked.Spatial.Rooms)
+                    "and the room is still not projected"
+
+                Expect.isFalse
+                    (List.contains "src-out" (idsOf looked))
+                    "its rock is still not pooled"
+
+                Expect.isFalse
+                    (Map.containsKey outpost looked.Sightings)
+                    "and the colony still remembers nothing of it: the withdrawal stands through the look"
+            }
+
+            test "a re-checked room the colony cannot see adds no entry at all" {
+                // ADR 0004 through the same door: the look is a look, not a
+                // conclusion. A latched room nothing has vision into answers
+                // with no control entry, so the fold reads no evidence either
+                // way and the latch survives to the next stride (#165) — the
+                // live case, because the gate's own withdrawal is what took
+                // the vision away.
+                let colony = declared |> List.head
+
+                let blind =
+                    { pairWorld with
+                        Rooms =
+                            pairWorld.Rooms
+                            |> Map.add outpost { RoomFacts.empty with Control = None }
+                    }
+
+                let looked =
+                    ColonyView.ofWorld
+                        Tuning.defaults
+                        declared
+                        {
+                            Shut = Set.singleton outpost
+                            Rechecked = Set.singleton outpost
+                        }
+                        (holdersOf blind)
+                        blind
+                        colony
+
+                Expect.isFalse
+                    (Map.containsKey outpost looked.RoomControl)
+                    "no vision, no entry — and an entry invented here would read as a room nobody holds"
             }
 
             test "a room the colony works carries its sighting, dark or not" {

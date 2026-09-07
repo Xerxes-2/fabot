@@ -125,11 +125,12 @@ let wireVocabularyTests =
                     rejectReasonName
                     (rejectReasonOf sampleNumbers)
 
-                // The Raid log's own vocabulary (ADR 0043): which of the
-                // three deadlines a [[stand-down]]'s expiry tick was read
-                // off. It rides the same Memory subtree as the rest, and a
-                // basis that will not read back costs its episode the
-                // reason it is holding an outpost shut.
+                // The Raid log's own vocabulary (ADR 0043): which deadline a
+                // [[stand-down]]'s expiry tick was read off — ADR 0043's
+                // three for an invader core, and #165's fourth for another
+                // player's reservation. It rides the same Memory subtree as
+                // the rest, and a basis that will not read back costs its
+                // episode the reason it is holding an outpost shut.
                 roundTrips
                     "StandDownBasis"
                     (casesOf<StandDownBasis> ())

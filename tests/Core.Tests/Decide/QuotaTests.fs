@@ -11,16 +11,6 @@ open Fabot.Core.Decide
 open Fabot.Core.Tests
 open Fabot.Core.Tests.Decide.Fixtures
 
-/// A room another player has taken: seen, owned, and owned by somebody
-/// else (ADR 0043). The third answer to one question, which is why it is a
-/// fixture of its own beside the two above rather than a flag on either.
-let rivalRoom: RoomControlInfo =
-    {
-        Owner = Ownership.Rival
-        Reservation = None
-        SafeMode = false
-    }
-
 [<Tests>]
 let partNameTests =
     testList
@@ -1672,11 +1662,11 @@ let sourceOutputTests =
             test "a room another player owns doubles nothing of ours either" {
                 // The other half of "somebody else holds it", and the one
                 // the projection could not tell from an unowned room until
-                // #133: a rival's *ownership*. ADR 0043's clockless
-                // withdrawal is triggered by either half, so either half
-                // has to be a fact the ColonyView can state — and stating it
-                // must not accidentally read as a hold of ours, which is
-                // what this pins.
+                // #133: a rival's *ownership*. ADR 0043 withdraws from
+                // either half — since #165 the owned half is the latch and
+                // the reserved half a clock — so either has to be a fact the
+                // ColonyView can state, and stating it must not accidentally
+                // read as a hold of ours, which is what this pins.
                 //
                 // Pairwise against the neutral room, one rival at a time:
                 // same room, same rock, same container, same fleet. The
@@ -1735,12 +1725,13 @@ let sourceOutputTests =
                 // reservation is the *only* readable deadline it has,
                 // because a level-0 core carries no collapse timer.
                 //
-                // ADR 0043 reads opposite answers off the NPC's hold and a
-                // player's: the NPC's is the clock a stand-down runs to,
-                // a player's is the clockless withdrawal that never
-                // re-enters. So the two must price the same and must stay
-                // tellable apart. Pricing first, pairwise against the
-                // rival's reservation, one input at a time.
+                // ADR 0043 reads different answers off the NPC's hold and a
+                // player's: the NPC's is the clock a core's stand-down runs
+                // to under the fallback floor (#136), a player's the clock
+                // its own stand-down runs to with no floor at all (#165). So
+                // the two must price the same and must stay tellable apart.
+                // Pricing first, pairwise against the rival's reservation,
+                // one input at a time.
                 let priced control =
                     spawnIntents
                         (decide

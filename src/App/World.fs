@@ -312,10 +312,11 @@ let private seenFacts
                                 None
                             else
                                 // Three holders and not two: ADR 0043
-                                // reads opposite answers off the two that
+                                // reads different answers off the two that
                                 // are not ours — the NPC's reservation is
-                                // the clock a stand-down runs to, a
-                                // player's is the clockless withdrawal.
+                                // the clock a core's stand-down runs to
+                                // under a floor, a player's is a stand-down
+                                // clocked to the hold itself (#165).
                                 let holder =
                                     if Some c.reservation.username = ours then
                                         ReservationHolder.Ours

@@ -107,11 +107,14 @@ let loop () =
     // The gate's answer for each colony, derived once from that colony's log:
     // the scan set, the furniture and the pooled rocks all narrow through it
     // inside `ColonyView.ofWorld`, and a second derivation would be a second
-    // answer free to disagree.
-    let shut = raids |> Map.map (fun _ log -> Observe.standDown world.Time log)
+    // answer free to disagree. Both halves of it ride in one record — the rooms
+    // withdrawn from, and the latched rooms this tick looks into once (#165) —
+    // for the same reason.
+    let gates =
+        raids |> Map.map (fun _ log -> Observe.standDown Tuning.defaults world.Time log)
 
-    let shutOf home =
-        shut |> Map.tryFind home |> Option.defaultValue Set.empty
+    let gateOf home =
+        gates |> Map.tryFind home |> Option.defaultValue StandDown.none
 
     // Every creep this bot owns, filed under the colony that holds it this
     // tick: the one it was cast by, or the one that has adopted it (ADR 0047
@@ -121,8 +124,16 @@ let loop () =
     // to the view and not a field of the World, because the rule needs the
     // stand-down gate above, which is Memory's answer and not the world's. The
     // numbers every colony decides under (ADR 0052 decision 5).
+    // The rooms withdrawn from and not the rooms looked into: a creep is
+    // adopted by the colony whose projection it stands in, and a latched room
+    // the gate takes one look at this tick is projected by nobody (#165).
     let holders =
-        World.creepColonies Tuning.defaults Colony.declared colonies shut world
+        World.creepColonies
+            Tuning.defaults
+            Colony.declared
+            colonies
+            (gates |> Map.map (fun _ gate -> gate.Shut))
+            world
 
     // One view per living colony (ADR 0052 decision 1), each cut from the one
     // world by a pure function in Core: the rooms this colony works, the bodies
@@ -136,7 +147,7 @@ let loop () =
             ColonyView.ofWorld
                 Tuning.defaults
                 Colony.declared
-                (shutOf colony.Home)
+                (gateOf colony.Home)
                 holders
                 world
                 colony)

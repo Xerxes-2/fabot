@@ -277,9 +277,10 @@ if (command === "console") {
   // runs to and which deadline that tick was read off; it is a family of
   // its own and `observe.mjs outposts` reads it whole, so this command
   // prints the spawn-room raids alone rather than filtering a mixed list.
-  // `rivalHeld` is that same command's other half — the rooms last seen in
-  // another player's hands, against the tick the gate shut on, ADR 0043's
-  // withdrawal with no clock — and is no more a raid than a stand-down is.
+  // `rivalHeld` is that same command's other half — the rooms last seen
+  // **owned** by another player, against the tick the gate shut on, ADR
+  // 0043's withdrawal with no clock (a rival's reservation is a clocked row
+  // of `outposts` since #165) — and is no more a raid than a stand-down is.
   const { home, stored } = await raidLeaf();
   const episodes = Array.isArray(stored.episodes) ? [...stored.episodes].reverse() : [];
 
@@ -322,11 +323,13 @@ if (command === "console") {
   // `episodes` in the same leaf:
   //   { outposts: [{ room, opened, last, expiry, basis }],
   //     rivalHeld: { <room>: tick } }
-  // One `outposts` row per clocked [[stand-down]] (ADR 0043): the room it
-  // shuts, the window (opened, and the last tick a core was actually seen
-  // there), the absolute tick the stand-down runs to, and which of the
-  // three deadlines that tick was read off. Stored oldest first like the
-  // raids beside it.
+  // One `outposts` row per clocked [[stand-down]]: the room it shuts, the
+  // window (opened, and the last tick the threat was actually seen there),
+  // the absolute tick the stand-down runs to, and which deadline that tick
+  // was read off — ADR 0043's three for an invader core, and since #165 a
+  // fourth for another player's reservation, which is no threat but ends on
+  // a tick the engine is counting down all the same. Stored oldest first
+  // like the raids beside it.
   //
   // Shut or open is `now < expiry` and nothing else — Observe.standingDown,
   // the one place the family's openness is decided — so this command is a
@@ -336,16 +339,20 @@ if (command === "console") {
   // looking and never that the room is clear.
   //
   // `rivalHeld` is ADR 0043's other withdrawal, and it has no row shape
-  // because it has almost nothing to carry: a room another player owns or
-  // reserves is not a threat with a deadline, it is a room that stopped
-  // being ours to work, so the record is the room's name against the tick
-  // the last look concluded it, and the gate withholds it with no clock to
-  // compare against. The tick is not a deadline and nothing is measured
-  // from it; it is the date an income drop is lined up against (#117's
-  // US-20), the answer the clocked family gets from `opened`. It is a
-  // remembered conclusion — the fold writes it on the ticks with vision and
+  // because it has almost nothing to carry: a room another player **owns**
+  // is not a threat with a deadline, it is a room that stopped being ours to
+  // work, so the record is the room's name against the tick the last look
+  // concluded it, and the gate withholds it with no clock to compare
+  // against. Ownership alone since #165 — a rival's reservation decays at
+  // one a tick and is a row of the clocked list above, where it says so in
+  // its basis. The tick is still not a deadline; it is the date an income
+  // drop is lined up against (#117's US-20), the answer the clocked family
+  // gets from `opened`, and — since #165 — the tick the *stride* between
+  // looks is counted from, one look every `Tuning.RivalRecheck` ticks. It is
+  // a remembered conclusion: the fold writes it on the ticks with vision and
   // holds it through the ticks without, because the gate's own effect is to
-  // take that vision away.
+  // take that vision away, and the stride exists because that effect would
+  // otherwise make the conclusion permanent.
   const { home, stored } = await raidLeaf();
   // The list is guarded in its own right, the way each of the Layout
   // record's three is: a leaf carrying `episodes` and no `outposts` is a
@@ -414,7 +421,29 @@ if (command === "console") {
     "collapse-timer": "the core's own collapse timer",
     reservation: "the end of the reservation the Invader core took",
     fallback: "no deadline was readable — ADR 0043's 2,500-tick expansion period",
+    "rival-reservation":
+      "the end of the reservation another player holds — a room somebody else is " +
+      "working, not a threat (#165)",
   };
+
+  // What a row's `last` tick is the last sighting *of*, keyed off the same
+  // basis and over the same keys, because the two families this ring now
+  // holds are seen in different things: three of them by an invader core
+  // standing in the room, and #165's fourth by a reservation read off the
+  // controller with no core there at all.
+  const SIGHTING = {
+    "collapse-timer": "a core last seen there",
+    reservation: "a core last seen there",
+    fallback: "a core last seen there",
+    "rival-reservation": "the reservation last read there",
+  };
+
+  // The stride between looks into a latched room, mirroring
+  // `Tuning.RivalRecheck` in Core (#165). Printed as the date of the next
+  // look, and said to be that mirror rather than a fact off the server: a
+  // bundle deployed under a different tuning would look on other ticks, and
+  // this command has no way to read which.
+  const RIVAL_RECHECK = 5000;
 
   // A row off the wire shape is fatal and quoted, never dropped. The
   // asymmetry is ADR 0043's: a row this reader hid would show its room as
@@ -437,8 +466,10 @@ if (command === "console") {
       // JavaScript internals as its reason, while Core's decoder answers
       // `None` for it (`standDownBasisOf`, Types.fs) and drops the row:
       // the room would stand wide open with this command calling it shut.
-      // The vocabulary is exactly the three names `standDownBasisName`
-      // spells, and nothing the language put on the table beside them.
+      // The vocabulary is exactly the names `standDownBasisName` spells —
+      // and `SIGHTING` is keyed over the same ones, so a row this guard
+      // passes has both clauses — and nothing the language put on the
+      // tables beside them.
       Object.hasOwn(BASIS, row.basis);
     if (!readable) {
       fail(
@@ -516,17 +547,31 @@ if (command === "console") {
 
       for (const held of [...rivalHeld].sort((a, b) => a.room.localeCompare(b.room))) {
         console.log(`${held.room}  shut since ${tickOf(held.since)}, and no clock is running`);
-        console.log("  because another player owns or reserves it — not a threat that passes,");
+        console.log("  because another player owns it — not a threat that passes,");
         console.log("  a room that stopped being ours to work (ADR 0043)");
-        // The truth about getting back in, and it is not a thing the colony
-        // can do: the gate subtracts by room name after the declaration is
-        // read (`Outpost.worked`), so re-declaring this room changes
-        // nothing, and the room is never scanned again, so the tick with
-        // vision that would clear it can never arrive.
-        console.log("  nothing the colony does re-opens it: the room is not scanned, so the");
-        console.log("  look that would clear it never happens, and re-declaring it is a no-op.");
+        // How this one ends, and since #165 the colony has a part in it: the
+        // gate re-admits the room to the **scan** for one tick every
+        // `Tuning.RivalRecheck`, counted from the tick above, and a look on
+        // that tick that finds no owner clears the latch. It is a look and
+        // not a return — the room is in no pool and no quota on that tick
+        // either — and it only tells us anything if something of ours can see
+        // the room, which the withdrawal itself makes unlikely. So the
+        // hand-edit is still worth naming, and is now a shortcut rather than
+        // the only way back.
+        const stride =
+          held.since +
+          Math.ceil(Math.max(1, now - held.since) / RIVAL_RECHECK) * RIVAL_RECHECK;
         console.log(
-          `  clear "${held.room}" from ` +
+          `  the gate looks again at ${tickOf(stride)} — one tick in every ` +
+            `${ticks(RIVAL_RECHECK)}, counted from the tick above (#165); the room is scanned`,
+        );
+        console.log("  on that tick and worked on none, and a look finding no owner clears it");
+        console.log(
+          "  — but only if something of ours can see the room, which is what the " +
+            "withdrawal took away.",
+        );
+        console.log(
+          `  to end it now, clear "${held.room}" from ` +
             `Memory.fabot.observe.colonies.${home}.raids.rivalHeld once a look confirms it ` +
             "is free,",
         );
@@ -558,7 +603,11 @@ if (command === "console") {
               : `${room}  shut until ${tickOf(row.expiry)} — ${ticks(row.expiry - now)} to go`,
           );
           console.log(`  because ${BASIS[row.basis]}`);
-          console.log(`  opened ${tickOf(row.opened)}, a core last seen there ${tickOf(row.last)}`);
+          // What `last` is a sighting *of* is the basis's, not the family's:
+          // since #165 a row of this ring can be opened by a reservation read
+          // off a controller with no core anywhere near it, and naming a core
+          // under such a row contradicts the `because` line printed above it.
+          console.log(`  opened ${tickOf(row.opened)}, ${SIGHTING[row.basis]} ${tickOf(row.last)}`);
         } else {
           const row = spent[0];
           console.log(

@@ -192,6 +192,23 @@ type Tuning =
         /// The [[stand-down]] a threat gave no readable deadline for: 2,500
         /// ticks, the stronghold expansion period (ADR 0043).
         StandDownFallback: int
+        /// How often a [[stand-down]] latched on another player's **ownership**
+        /// is looked at again (#165): the room is re-admitted to the colony's
+        /// scan set on one tick in every this many, and to nothing else — it
+        /// stays out of the Task pool and out of the quotas throughout — so one
+        /// tick of vision can clear a latch the gate's own withdrawal would
+        /// otherwise make permanent. 5,000 ticks, twice ADR 0043's stronghold
+        /// expansion period: a room another player walks away from is a thing
+        /// that happens over hours, so a stride this long costs at most one
+        /// such window of an outpost's income and keeps the withdrawal what
+        /// ADR 0043 made it — a conclusion **held** rather than a judgement
+        /// re-taken every tick. What the stride does not ration is a room
+        /// read: the shell already reads every declared room the engine will
+        /// answer for (`World.ofGame`), so the look itself is a map lookup,
+        /// and this number is how often the colony is willing to question a
+        /// conclusion of its own. Ticks and not a price, so the same at any
+        /// bank and any [[stage]].
+        RivalRecheck: int
         /// Ticks of silence that close a [[raid]] episode (ADR 0028). It has
         /// to outlast a poke-and-heal cycle — #66's squad worked one room
         /// across ~220 ticks, and that is one raid, not forty — and fifty is
@@ -233,6 +250,7 @@ module Tuning =
             BootstrapLevel = 3
             TrunkSwampWeight = 3
             StandDownFallback = 2500
+            RivalRecheck = 5000
             QuietGap = 50
             VisionGrace = 150
         }
@@ -387,9 +405,14 @@ type ControllerInfo =
 /// Whose CLAIM parts hold one room's reservation, as the colony reads it:
 /// three answers and not a username, the same closed shape as `Ownership`
 /// below. The third is load-bearing and not a refinement of the second — ADR
-/// 0043 gives an NPC invader's reservation and another *player's* opposite
-/// meanings, the Invader's being the **clock** a [[stand-down]] runs to and a
-/// player's the **clockless** withdrawal.
+/// 0043 gives an NPC invader's reservation and another *player's* different
+/// meanings, and each is a **clock** a [[stand-down]] runs to that the other's
+/// rule would read wrong: the Invader's is the core's deadline and never
+/// answers earlier than the fallback, because the core re-takes the hold it
+/// lets lapse (#136); a player's is the hold itself, read literally and with no
+/// floor, because a claimer that stops coming re-takes nothing (#165). What
+/// carries no clock at all is a player's *ownership*, which is `Ownership`'s
+/// answer and not this one's.
 [<RequireQualifiedAccess>]
 type ReservationHolder =
     /// This colony's own CLAIM parts. The one answer that doubles the
@@ -400,9 +423,11 @@ type ReservationHolder =
     /// docs/research/remote-mining.md §8.4). Worth the neutral rate like any
     /// hold that is not ours, and, unlike a rival's, an expiry: this lapses.
     | Invader
-    /// Another player. Worth the neutral rate, and the clockless
-    /// withdrawal of ADR 0043 — the one abandonment trigger every mature
-    /// bot implements.
+    /// Another player. Worth the neutral rate, and a [[stand-down]] that
+    /// runs to the end of the hold itself (#165) — the room is being worked
+    /// by somebody else for exactly as long as the engine says it is. The
+    /// abandonment trigger every mature bot implements; its permanent half
+    /// is `Ownership.Rival`.
     | Rival
 
 /// The reservation standing on one room's controller this tick (ADR
@@ -421,16 +446,18 @@ type ReservationInfo =
         /// Ticks left on the reservation — what the reserver row sizes and
         /// quotas from, `ceil((5000 - this) / 600)` CLAIM parts (ADR 0042).
         /// Read as the colony's own hold only where `Holder` is `Ours`; under
-        /// `Invader` it is the deadline ADR 0043 falls back to.
+        /// `Invader` it is the deadline ADR 0043 falls back to, and under
+        /// `Rival` the one the stand-down #165 clocks runs to.
         TicksToEnd: int
     }
 
 /// Whose a room's controller is, as the colony reads it: three answers and not
 /// a username. Two of them are what ADR 0042 prices a source from — ours is
 /// the held rate, nobody's is half — and the third is what ADR 0043's
-/// clockless withdrawal is judged on. A closed vocabulary rather than a pair
-/// of booleans, because "ours" and "somebody else's" answer one question. "We
-/// cannot see" is the absence of the whole entry (ADR 0004).
+/// clockless withdrawal is judged on, the one trigger the engine gives no end
+/// for (#165). A closed vocabulary rather than a pair of booleans, because
+/// "ours" and "somebody else's" answer one question. "We cannot see" is the
+/// absence of the whole entry (ADR 0004).
 [<RequireQualifiedAccess>]
 type Ownership =
     /// Nobody owns the controller — the shape every neutral room and every
@@ -804,7 +831,10 @@ module Outpost =
     /// every room a [[stand-down]] is withholding (ADR 0043). The gate, and the
     /// one place *that* gate narrows the set — `World.scanOf` narrows it once
     /// more beside this, on the declaration's own geometry (`neighbouring`,
-    /// #243), and the two are one clause apiece there.
+    /// #243), and the two are one clause apiece there. The gate's other half
+    /// (`StandDown.Rechecked`, #165) never reaches here: a room it re-admits to
+    /// the scan is still withheld from the work, so a room this drops stays
+    /// dropped whatever tick the recheck falls on.
     let worked (shut: Set<string>) (outposts: Outpost list) : Outpost list =
         outposts
         |> List.filter (fun outpost -> not (Set.contains outpost.RoomName shut))
@@ -983,6 +1013,45 @@ module Outpost =
             Controller = "6a8caaaddd4872bccd319367", { Room = "W13S29"; X = 15; Y = 41 }
         }
 
+/// The [[stand-down]] gate's whole answer for one colony this tick (ADR 0043 as
+/// #165 narrows it), derived once off that colony's [[raid log]]
+/// (`Observe.standDown`) and handed to `ColonyView.ofWorld`: two sets rather
+/// than one, because after #165 the gate has two strengths and not one. A room
+/// is withdrawn from the work the colony does, and a room whose withdrawal
+/// **latched** on another player's ownership is looked into all the same, once
+/// in every `Tuning.RivalRecheck` ticks, so the conclusion that shut it can be
+/// contradicted by the only thing that ever could — a tick with vision. One
+/// record and not two derivations: the two answers are read off one log and one
+/// tick, and split apart they would be free to disagree about which rooms the
+/// colony has withdrawn from.
+type StandDown =
+    {
+        /// Every room the gate withholds from the declaration this colony works
+        /// (`Outpost.worked`): no Task pools there, no quota counts it and
+        /// nothing walks toward it, because the room does not enter the
+        /// [[spatial projection]] at all — the whole of "withdraw" in an
+        /// architecture that recomputes every tick (ADR 0004, ADR 0043).
+        Shut: Set<string>
+        /// The rooms of `Shut` this tick takes one look into (#165): a
+        /// **subset** of it and never a room leaving it. The look re-admits the
+        /// room to the scan — the colony reads its controller, so the next
+        /// [[raid log]] can drop a latch the rival has walked away from — and
+        /// to nothing else: no furniture, no pooled rock, no Task and no quota
+        /// row, which is what keeps ADR 0043's withdrawal in force on the very
+        /// tick the gate is being questioned.
+        Rechecked: Set<string>
+    }
+
+[<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
+module StandDown =
+    /// The open gate: nothing withheld and nothing to look into — what a colony
+    /// with no [[raid log]] yet, and every colony on an ordinary tick, decides
+    /// under.
+    let none =
+        {
+            Shut = Set.empty
+            Rechecked = Set.empty
+        }
 
 /// Where one colony stands in its life (ADR 0052 decision 3). Three answers to
 /// one question — how much of its own economy a colony has bought yet — and the
@@ -1315,13 +1384,14 @@ type InvaderCoreInfo =
         CollapseTick: int option
     }
 
-/// Which of ADR 0043's deadlines an [[outpost]]'s [[stand-down]] runs to — the
-/// provenance of the tick, carried beside it because it cannot be recovered
-/// from the tick afterwards, and an operator asking why an outpost is shut is
-/// asking exactly that. The three answers are the ADR's own fallback order,
-/// best first. A closed vocabulary and not a string, for the reason `Ownership`
-/// gives, and it crosses the wire, so it is spelt once in `standDownBasisName`
-/// and round-tripped against the union itself by `Core.Tests`.
+/// Which deadline an [[outpost]]'s [[stand-down]] runs to — the provenance of
+/// the tick, carried beside it because it cannot be recovered from the tick
+/// afterwards, and an operator asking why an outpost is shut is asking exactly
+/// that. The first three are ADR 0043's own fallback order for a threat, best
+/// first; the fourth is not a threat at all and joined them with #165. A closed
+/// vocabulary and not a string, for the reason `Ownership` gives, and it crosses
+/// the wire, so it is spelt once in `standDownBasisName` and round-tripped
+/// against the union itself by `Core.Tests`.
 [<RequireQualifiedAccess>]
 type StandDownBasis =
     /// The core's own `EFFECT_COLLAPSE_TIMER`: the tick the engine put on
@@ -1338,6 +1408,16 @@ type StandDownBasis =
     /// read, and it errs long deliberately: ADR 0043's gate may be wrong only
     /// in the direction that costs an outpost's income.
     | Fallback
+    /// The end of the [[reservation]] **another player** holds on the room
+    /// (#165). Not a threat with a clock but a room somebody else is working,
+    /// and the engine's own countdown says when it stops being one — which is
+    /// why this withdrawal is a clock where ADR 0043 wrote a latch: a passing
+    /// reserver is a routine event where an owner is not, and a hold that
+    /// decays is reversible where ownership is not. It takes no floor under
+    /// it, unlike `Reservation` above: the Invader's core re-takes the hold it
+    /// lets lapse, so the hold is never the end of the core, while a player's
+    /// claimer that stops coming leaves nothing behind it at all.
+    | RivalReservation
 
 /// What the decision layer knows about one owned creep this tick.
 type CreepInfo =
@@ -1782,7 +1862,14 @@ type ColonyView =
         /// under that room's name — what a source's output per tick is priced
         /// from (ADR 0042), and the fact a rule reads to say whether a room is
         /// this colony's business at all. Absent for a room vision did not
-        /// answer for, per-entry as every other absence is (ADR 0004).
+        /// answer for, per-entry as every other absence is (ADR 0004). One
+        /// entry can be a room the colony does **not** work: the [[stand-down]]
+        /// gate re-admits a room it has latched to the scan for one tick in
+        /// every `Tuning.RivalRecheck` (#165), and this is the whole of what
+        /// such a look reads. Nothing else of that room is here — no layer, no
+        /// rock, no Task — so every reader below finds it nowhere, which is why
+        /// the look moves no decision and only the next [[raid log]] is any
+        /// wiser for it.
         RoomControl: Map<string, RoomControlInfo>
         /// Our construction sites in every room this colony works and has
         /// vision in: the Build pool is this list one to one, so an outpost's
@@ -1939,7 +2026,7 @@ module ColonyView =
     /// about which rooms a colony works, which creeps are its own and what it
     /// may borrow is here, where a test can hand it a two-colony world and read
     /// the answer back. Five facts are handed in and none is decided here: the
-    /// **tunables** (decision 5), the **declaration**, the **shut** set the
+    /// **tunables** (decision 5), the **declaration**, the **gate** the
     /// [[stand-down]] derives off the previous tick's [[raid log]] (ADR 0043 —
     /// Memory's answer, not the world's), the **holders** `World.creepColonies`
     /// cut over every living colony's scan set at once, and the **world**
@@ -1947,7 +2034,7 @@ module ColonyView =
     let ofWorld
         (tuning: Tuning)
         (colonies: Colony list)
-        (shut: Set<string>)
+        (gate: StandDown)
         (holders: Map<string, string>)
         (world: World)
         (colony: Colony)
@@ -1959,7 +2046,7 @@ module ColonyView =
         // derivation the creep adoption reads too (`World.scanOf`). Written
         // here a second time it would be a second answer free to disagree.
         let outposts, bootstrap, scanned =
-            World.scanOf stages (World.unownedHomes colonies world) colonies shut colony
+            World.scanOf stages (World.unownedHomes colonies world) colonies gate.Shut colony
 
         // The scan set with each room's facts beside it, in scan order —
         // a room the world holds nothing for reads empty (ADR 0004), and a
@@ -1995,6 +2082,31 @@ module ColonyView =
 
         let homeFacts = World.roomOf world home
 
+        // The scan set's own control entries, and beside them the one look
+        // #165 buys a room the gate has latched on another player's ownership:
+        // whatever vision answered for that room this tick, and nothing else it
+        // holds. This is the whole of "re-admitted to the scan set only" — the
+        // room contributes no furniture, no rock, no hostile and no layer, so
+        // nothing pools there and no quota counts it while the look happens,
+        // and ADR 0043's withdrawal stands through the tick that questions it.
+        // Read off the **declaration** and never off the latch's own room
+        // names: a hand-edited `rivalHeld` leaf is a room name a human wrote,
+        // and the only rooms this colony may look into are the ones it
+        // declared. A room vision did not answer for adds no entry at all,
+        // which is ADR 0004's absence and the reason the latch survives every
+        // recheck the colony is blind on.
+        let control =
+            (worked
+             |> List.choose (fun (room, facts) ->
+                 facts.Control |> Option.map (fun control -> room, control))
+             |> Map.ofList,
+             colony.Outposts
+             |> List.filter (fun outpost -> Set.contains outpost.RoomName gate.Rechecked))
+            ||> List.fold (fun control outpost ->
+                match (World.roomOf world outpost.RoomName).Control with
+                | Some seen -> Map.add outpost.RoomName seen control
+                | None -> control)
+
         {
             Time = world.Time
             Spawns = homeFacts.Spawns
@@ -2011,11 +2123,7 @@ module ColonyView =
                 |> List.collect (fun (_, facts) -> facts.Sources)
                 |> Outpost.pooledSources scanned outposts
             Controller = homeFacts.Controller
-            RoomControl =
-                worked
-                |> List.choose (fun (room, facts) ->
-                    facts.Control |> Option.map (fun control -> room, control))
-                |> Map.ofList
+            RoomControl = control
             ConstructionSites = worked |> List.collect (fun (_, facts) -> facts.ConstructionSites)
             Creeps = mine |> List.map (fun creep -> creep.Info)
             Hostiles = worked |> List.collect (fun (_, facts) -> facts.Hostiles)
@@ -2970,7 +3078,7 @@ let containerTargetOf =
 /// The wire spelling of each StandDownBasis, on the Raid log's Memory leaf
 /// (ADR 0043), as `footingKindName` is the Layout channel's, and under the same
 /// rule: one spelling, written once here, reversed by the table below and
-/// round-tripped against the union itself by `Core.Tests`, so a fourth basis
+/// round-tripped against the union itself by `Core.Tests`, so a fifth basis
 /// added without a name is a red test rather than a stand-down that decodes to
 /// nothing.
 let standDownBasisName =
@@ -2978,6 +3086,7 @@ let standDownBasisName =
     | StandDownBasis.CollapseTimer -> "collapse-timer"
     | StandDownBasis.Reservation -> "reservation"
     | StandDownBasis.Fallback -> "fallback"
+    | StandDownBasis.RivalReservation -> "rival-reservation"
 
 /// The StandDownBasis a wire name spells, or None for a name this
 /// vocabulary does not have — a row whose basis will not read back is a
@@ -2990,6 +3099,7 @@ let standDownBasisOf =
             StandDownBasis.CollapseTimer
             StandDownBasis.Reservation
             StandDownBasis.Fallback
+            StandDownBasis.RivalReservation
         ]
 
 /// A creep's Move Intent: candidate standing tiles for next tick in preference

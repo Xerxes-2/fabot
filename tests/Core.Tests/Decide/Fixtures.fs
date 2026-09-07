@@ -51,6 +51,19 @@ let ownedRoom: RoomControlInfo =
         SafeMode = false
     }
 
+/// A room another player has taken: seen, owned, and owned by somebody
+/// else (ADR 0043). The third answer to one question, which is why it is a
+/// fixture of its own beside the two around it rather than a flag on
+/// either — and since #165 the one control entry that **latches** a
+/// [[stand-down]], where a rival's reservation runs a clock. Shared since
+/// #165, when the gate's own suite came to want it beside the quota rows.
+let rivalRoom: RoomControlInfo =
+    {
+        Owner = Ownership.Rival
+        Reservation = None
+        SafeMode = false
+    }
+
 /// A neutral room nobody holds: seen, and worth half. Not the same fact as
 /// a room with no entry at all, which is one the colony cannot see and so
 /// cannot price (ADR 0004).

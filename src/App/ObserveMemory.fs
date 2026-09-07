@@ -478,9 +478,12 @@ let loadRaids (home: string) : RaidState =
                                 None)
                         |> Array.toList
                 // The clockless withdrawal's memory (ADR 0043): the rooms last
-                // seen in another player's hands, each against the tick that
-                // look was taken on. An empty map is honest — the room is still
-                // scanned, so the next look with vision re-decides it.
+                // seen **owned** by another player — a rival's reservation is a
+                // clocked row of `outposts` since #165 — each against the tick
+                // that look was taken on, which is also the tick the strides
+                // between rechecks are counted from. An empty map is honest —
+                // the room is still scanned, so the next look with vision
+                // re-decides it.
                 RivalHeld =
                     if isNull raids?rivalHeld then
                         Map.empty
