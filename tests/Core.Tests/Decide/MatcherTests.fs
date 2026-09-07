@@ -1026,6 +1026,42 @@ let walkedTicks colony assigned count (start: Map<string, Pos>) =
 let upgrader name =
     creepWith name 0 50 [ Work; Work; Carry; Move ]
 
+/// The [[storage]] tucked against a wall (#268): the stock at (10,10) with
+/// wall on every side but two — (10,11) and (11,11) — and a corridor running
+/// east from them along y = 11. Those two tiles are the whole of the ground
+/// its [[refill]] can be made from, and they are outside ADR 0022's [[working
+/// ground]] to the last one: the room holds no source and no controller, so
+/// #241's set is empty here and whatever vacates them is the mover's own rule.
+/// The stock's own tile is an obstacle, exactly as the engine has it, so it is
+/// no third standing tile.
+let private wallStorageRoom =
+    { spatial
+          []
+          ([ { X = 10; Y = 10 }, Plain; { X = 10; Y = 11 }, Plain ]
+           @ [ for x in 11..18 -> { X = x; Y = 11 }, Plain ]) with
+        Stores = Map.ofList [ "sto-1", 0 ]
+    }
+    |> withHome (fun layer ->
+        { layer with
+            Obstacles = Set.singleton { X = 10; Y = 10 }
+        })
+    |> withTargets [ "sto-1", { X = 10; Y = 10 }, Structure BuiltKind.Storage ]
+
+/// The colony standing on it: no source, no controller and no placed spawn, so
+/// the only Task the room offers is the stock's own Refill.
+let wallStorageColony creeps positions =
+    { bareRespawn with
+        Sources = []
+        Controller = None
+        Creeps = creeps
+        Spatial =
+            wallStorageRoom
+            |> withHome (fun layer ->
+                { layer with
+                    CreepPositions = Map.ofList positions
+                })
+    }
+
 [<Tests>]
 let arbitrationTests =
     testList
@@ -1867,6 +1903,75 @@ let arbitrationTests =
                 Expect.isTrue
                     (range settled["w1"] { X = 24; Y = 17 } <= 3)
                     "and re-housed inside the Upgrade Work Area, which costs the chain nothing"
+            }
+
+            test "#268 the storage against a wall: the idle bodies ring it and the hauler gets in" {
+                // #241's pocket, arrived at from the half of the geometry ADR
+                // 0022's set never covered. The stock has two standing tiles
+                // and no source's Seat or Upgrade tile among them, so a pair
+                // of idle bodies parked on them shut the hauler holding
+                // `Refill sto-1` out of the room's only Task exactly as the
+                // upgraders shut the buffer's feed out of W13S28 — and #241's
+                // rule, reading the working ground alone, had nothing to say
+                // to either of them.
+                let creeps = [ worker "u1" 0 50; worker "u2" 0 50; hauler "h" 100 0 ]
+
+                let ticks =
+                    walkedTicks
+                        (wallStorageColony creeps)
+                        [ "h", Refill "sto-1" ]
+                        8
+                        (Map.ofList
+                            [
+                                "u1", { X = 10; Y = 11 }
+                                "u2", { X = 11; Y = 11 }
+                                "h", { X = 14; Y = 11 }
+                            ])
+
+                let besideStorage (positions: Map<string, Pos>) =
+                    range positions["h"] { X = 10; Y = 10 } <= 1
+
+                // The ticket's own criterion, and the half the arbitration
+                // already answered: an idle body is the lightest push there
+                // is, so the hauler's chain shoves the one on (11,11) aside
+                // and takes the tile whatever rule the mover reads.
+                Expect.isTrue
+                    (ticks |> List.skip 3 |> List.forall besideStorage)
+                    "the hauler is standing beside the stock by the third tick and stays there"
+
+                // The half the arbitration cannot reach on its own, and the
+                // whole of what this ticket adds: (10,11) is a dead end, so
+                // the body parked on it is in nobody's *head* candidate once
+                // the hauler holds the other tile, is never displaced, and
+                // keeps the stock's second standing tile for the rest of its
+                // life. It leaves because the rule tells it to, not because
+                // somebody pushed it.
+                let idleOnTheRing (positions: Map<string, Pos>) =
+                    [ "u1"; "u2" ]
+                    |> List.filter (fun name -> range positions[name] { X = 10; Y = 10 } <= 1)
+
+                Expect.isTrue
+                    (ticks |> List.skip 3 |> List.forall (idleOnTheRing >> List.isEmpty))
+                    "and by then neither idle body is left standing on the stock's two tiles"
+
+                Expect.isEmpty
+                    (repeatedSwaps ticks)
+                    "and no pair of bodies exchanges tiles on two consecutive ticks"
+            }
+
+            test "#268 two tiles off the stock, the same bodies have no reason to move" {
+                // The pairwise other side: the rule is the stores' rings and
+                // not the room. (12,11) and (13,11) are two and three tiles
+                // from the stock, off every ring the colony draws from or
+                // fills, so nothing walks them anywhere.
+                Expect.isEmpty
+                    (resolveOn
+                        (wallStorageColony
+                            [ worker "u1" 0 50; worker "u2" 0 50 ]
+                            [ "u1", { X = 12; Y = 11 }; "u2", { X = 13; Y = 11 } ])
+                        []
+                     |> moveIntents)
+                    "standing off every store's ring, an idle body stays where it is"
             }
 
             test "#267 the free tile is not adjacent: the row shuffles up and nobody leaves" {

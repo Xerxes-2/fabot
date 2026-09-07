@@ -2640,6 +2640,145 @@ let workingGroundTests =
             }
         ]
 
+/// The store-ring room (#268): the source at (10,10) walled in with its eight
+/// neighbours open, the source container "can-a" standing on the Seat (11,10),
+/// a corridor running east along y = 10 with the [[storage]] "sto-1" standing
+/// in it at (20,10) and the spawn at (30,10). Both of those are obstacles, as
+/// the engine has them, so neither is a tile anything stands on and each
+/// contributes its two corridor neighbours and nothing else. No controller: the
+/// working ground here is the Seats alone, which keeps the two sets far enough
+/// apart to be read off each other.
+let private storeRingRoom =
+    { spatial
+          [
+              "src-a", { X = 10; Y = 10 }
+              "can-a", { X = 11; Y = 10 }
+              "sto-1", { X = 20; Y = 10 }
+              "spawn-1", { X = 30; Y = 10 }
+          ]
+          ([
+              for dx in -1 .. 1 do
+                  for dy in -1 .. 1 do
+                      if (dx, dy) <> (0, 0) then
+                          { X = 10 + dx; Y = 10 + dy }, Plain
+           ]
+           @ [ { X = 10; Y = 10 }, Wall ]
+           @ [ for x in 12..32 -> { X = x; Y = 10 }, Plain ]) with
+        TargetKinds =
+            Map.ofList
+                [
+                    "src-a", Source
+                    "can-a", Structure BuiltKind.Container
+                    "sto-1", Structure BuiltKind.Storage
+                    "spawn-1", Structure BuiltKind.Spawn
+                ]
+    }
+    |> withHome (fun layer ->
+        { layer with
+            Obstacles = Set.ofList [ { X = 20; Y = 10 }; { X = 30; Y = 10 } ]
+        })
+
+/// The same room seen by a colony whose spawn is a [[refill cluster]] member:
+/// the cluster is read off the view's Refillables (ADR 0054), so the spawn's
+/// ring is in the idle ground only because this view says the spawn is one of
+/// the structures the colony fills.
+let private storeRingView =
+    { snapshotWith [] storeRingRoom with
+        Refillables =
+            [
+                {
+                    Id = "spawn-1"
+                    FreeCapacity = 0
+                    Kind = BuiltKind.Spawn
+                }
+            ]
+    }
+
+[<Tests>]
+let idleGroundTests =
+    testList
+        "atlas idleGround"
+        [
+            test "the idle ground is the working ground plus every store's ring" {
+                let atlas = ofView storeRingView
+                let home = atlasHome atlas
+
+                let seats =
+                    Set.ofList
+                        [
+                            for dx in -1 .. 1 do
+                                for dy in -1 .. 1 do
+                                    if (dx, dy) <> (0, 0) then
+                                        { X = 10 + dx; Y = 10 + dy }
+                        ]
+
+                Expect.equal
+                    (workingGroundIn atlas home)
+                    seats
+                    "the premise: with no controller the Layout's set is the source's Seats"
+
+                Expect.equal
+                    (idleGroundIn atlas home)
+                    (Set.union
+                        seats
+                        (Set.ofList
+                            [
+                                // The source container's ring past the Seats:
+                                // the corridor mouth it is drawn from.
+                                { X = 12; Y = 10 }
+                                // The stock's two standing tiles.
+                                { X = 19; Y = 10 }
+                                { X = 21; Y = 10 }
+                                // And the cluster spawn's.
+                                { X = 29; Y = 10 }
+                                { X = 31; Y = 10 }
+                            ]))
+                    "the Seats, and the walkable ring of the container, the Storage and the spawn"
+            }
+
+            test "an obstacle store is no tile of its own, and one store's ring is not another's" {
+                let atlas = ofView storeRingView
+                let ground = idleGroundIn atlas (atlasHome atlas)
+
+                Expect.isFalse
+                    (Set.contains { X = 20; Y = 10 } ground)
+                    "the Storage's own tile is an obstacle: nothing idles there to be moved off"
+
+                Expect.isFalse
+                    (Set.contains { X = 15; Y = 10 } ground)
+                    "and a corridor tile between two stores rings neither of them"
+            }
+
+            test "widening the mover's set leaves the Layout's where it was" {
+                // ADR 0022's exclusion is what pushes every clustered pick a
+                // ring out, so #268's wider set is a second function and never
+                // this one: a Storage's ring inside `workingGroundIn` would
+                // move every extension the Layout places.
+                let atlas = ofView storeRingView
+                let home = atlasHome atlas
+
+                Expect.isFalse
+                    (Set.contains { X = 19; Y = 10 } (workingGroundIn atlas home))
+                    "the stock's standing tile is not working ground"
+
+                Expect.isTrue
+                    (Set.isProperSubset (workingGroundIn atlas home) (idleGroundIn atlas home))
+                    "and the mover's set strictly contains the Layout's"
+            }
+
+            test "a room with no working ground and no store idles anywhere" {
+                let atlas =
+                    spatial [] [ { X = 10; Y = 10 }, Plain; { X = 10; Y = 11 }, Plain ]
+                    |> snapshotWith []
+                    |> ofView
+
+                Expect.equal
+                    (idleGroundIn atlas (atlasHome atlas))
+                    Set.empty
+                    "no geometry, no stores, nothing an idle body has to step off (ADR 0004)"
+            }
+        ]
+
 [<Tests>]
 let consistencyTests =
     testList

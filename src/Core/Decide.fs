@@ -4810,15 +4810,20 @@ let private idleRank = System.Int32.MaxValue
 /// 0056) — and it crosses through the same seam all the same, the Task naming
 /// the room the step is aimed at.
 ///
-/// **A body with no Task parks off the [[working ground]]** (#241, widening ADR
-/// 0022 from the Layout to the mover). The Seats and the Upgrade Work Area are
-/// the tiles the colony works *from*, and an idle body standing on one costs
+/// **A body with no Task parks off the [[idle ground]]** (`Atlas.idleGroundIn`;
+/// #241, widening ADR 0022 from the Layout to the mover, and #268 widening the
+/// mover's set past the Layout's). The Seats and the Upgrade Work Area are the
+/// tiles the colony works *from*, and an idle body standing on one costs
 /// exactly what a clustered structure there would: the tile. W13S28's north
 /// pocket is eight tiles of Upgrade Work Area with the [[buffer]] container
 /// inside it, so its five refill tiles are working ground to the last one; two
 /// idle upgraders parked on them for 190 ticks and the hauler carrying the
 /// energy that would have un-idled them never got in — the buffer stayed empty
 /// because the bodies waiting on it were standing where its feed had to stand.
+/// The [[storage]]'s and the [[refill cluster]]'s standing tiles jam the same
+/// way and are outside ADR 0022's set, which is why the mover reads a set of
+/// its own: "where standing idle blocks somebody" is a fact about traffic and
+/// is strictly wider than "where work happens" (#268).
 /// So an idle body's head is the first step off that ground, and its own tile
 /// falls into the tail behind it: where there is nowhere off the ground to go,
 /// it parks exactly as before. Two things ride on that head. The goal set is
@@ -4913,18 +4918,19 @@ let private moveIntentFor
             Area = Set.empty
         }
     | None, None ->
-        // The room's working ground and the ground just off it: any way off
-        // runs through one of those tiles, so the nearest of them is the
-        // nearest standing room there is outside the colony's workplaces, and
-        // the goal set stays the perimeter rather than the whole room.
-        let working, offGround = idleGround room
+        // The room's [[idle ground]] and the ground just off it: any way off runs
+        // through one of those tiles, so the nearest of them is the nearest
+        // standing room there is outside the colony's workplaces and the lanes
+        // that feed them, and the goal set stays the perimeter rather than the
+        // whole room.
+        let ground, offGround = idleGround room
 
-        // The tail, ordered off the working ground first — the same job the
+        // The tail, ordered off the idle ground first — the same job the
         // other two branches give their own tails. `arbitrate` re-houses a
         // displaced body on the first free tile of its list, so an unordered
         // tail puts a body shoved off the ground straight back onto it, and
         // the two idle bodies trade the one tile off the ground every tick.
-        let off, on = beside |> List.partition (fun tile -> not (Set.contains tile working))
+        let off, on = beside |> List.partition (fun tile -> not (Set.contains tile ground))
 
         let tail = staying @ off @ on
 
@@ -4934,7 +4940,7 @@ let private moveIntentFor
         // step out of a safe pocket into an attacker is one nothing walks it
         // back from. Nowhere safe off the ground is nowhere to go: it parks.
         let stepOff =
-            if Set.contains pos working then
+            if Set.contains pos ground then
                 let reach = Threats.reachIn threats room
 
                 offGround
@@ -5311,33 +5317,35 @@ let movementOf
 
     let placed = Atlas.placedCreeps atlas
 
-    // The [[working ground]] an idle body steps off (#241), and the ring of
-    // ground just outside it that any step off has to land on — one pair per
+    // The ground an idle body steps off (#241, widened by #268), and the ring
+    // of ground just outside it that any step off has to land on — one pair per
     // room some body of ours idles in, and none at all for a tick where every
     // body has a Task, which is the tick that must pay nothing for this rule.
+    // `idleGroundIn` and not `workingGroundIn`: the [[working ground]] is the
+    // Layout's question and this is the mover's, and the two sets part company
+    // at the [[storage]]'s and the [[refill cluster]]'s standing tiles (#268).
     let idleGrounds =
         placed
         |> List.filter (fun (name, _) ->
             not (Map.containsKey name assigned)
             // A graced holder is walking a crossing, not idling (#151): it
-            // steps off nothing and it is not the [[working ground]]'s
-            // problem.
+            // steps off nothing and it is not the [[idle ground]]'s problem.
             && not (Map.containsKey name crossings)
             && not (Set.contains name tired))
         |> List.map (fun (_, at) -> at.Room)
         |> List.distinct
         |> List.map (fun room ->
-            let working = Atlas.workingGroundIn atlas room
+            let ground = Atlas.idleGroundIn atlas room
 
             let off =
-                working
+                ground
                 |> Set.toList
                 |> List.collect (Atlas.adjacentWalkableIn atlas room)
-                |> List.filter (fun tile -> not (Set.contains tile working))
+                |> List.filter (fun tile -> not (Set.contains tile ground))
                 |> Set.ofList
                 |> RoomPos.setAt room
 
-            room, (working, off))
+            room, (ground, off))
         |> Map.ofList
 
     let idleGround room =

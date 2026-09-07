@@ -1400,12 +1400,68 @@ let private upgradeAreaIn (atlas: Atlas) (room: string) : Set<Pos> =
 /// controller's area is ground nobody upgrades from (ADR 0042) — a set the
 /// Layout, asking only about home, never saw the width of until the mover
 /// began asking room by room (#241). Total: a room with neither kind of
-/// geometry reserves nothing (ADR 0004).
+/// geometry reserves nothing (ADR 0004). This is the **Layout's** question and
+/// stays it: what the mover asks is `idleGroundIn` below, a strictly wider set
+/// (#268), and widening this one instead would move every clustered pick.
 let workingGroundIn (atlas: Atlas) (room: string) : Set<Pos> =
     if room = atlas.Home then
         Set.union (seatUnionIn atlas room) (upgradeAreaIn atlas room)
     else
         seatUnionIn atlas room
+
+/// The tiles of one room's **stores**, as #268 enumerates them: a built
+/// [[container]], which is a source container or the [[buffer]] (ADR 0012);
+/// the [[storage]] (ADR 0023); and the [[refill cluster]]'s members, the spawn
+/// and its extensions read as one ring (ADR 0054). A tower is **not** in that
+/// enumeration and is not held out for a reason of its own: a tower is a
+/// [[refill]] target like any other — ADR 0010 puts a tower's Refill in the
+/// pool at the surplus tier, and a hauler holding one stands on its range-1
+/// ring exactly as the Storage's does, so a wall-tucked tower jams the same
+/// way. It is left for a follow-up rather than smuggled in here. A
+/// construction *site* is not one either — nothing is poured into or taken out
+/// of a site. Filed by room like every other census (ADR 0041): a member the
+/// projection places in another room, or not at all, contributes no tile (ADR
+/// 0004).
+let private storeTilesIn (atlas: Atlas) (room: string) : Set<Pos> =
+    let clusterTiles =
+        match atlas.Cluster with
+        | None -> Set.empty
+        | Some cluster ->
+            cluster.Members
+            |> Map.toList
+            |> List.choose (fun (id, _) ->
+                match Map.tryFind id atlas.TargetAt with
+                | Some(where, tile) when where = room -> Some tile
+                | _ -> None)
+            |> Set.ofList
+
+    Set.unionMany [ containerTilesIn atlas room; storageTilesIn atlas room; clusterTiles ]
+
+/// The [[idle ground]] of the room (#268): the working ground above, plus the
+/// walkable range-1 ring of every store in the room. The two
+/// questions are different and this is the one the [[resolver]] asks — the
+/// working ground is "where work happens", which is what the Layout needs;
+/// what the mover needs is "where standing idle blocks somebody", which is a
+/// fact about traffic and strictly larger. #241 gave the mover the Layout's
+/// set on the strength of the stores the live jam was about already standing
+/// inside it — a source container stands on a Seat, the [[buffer]] stands in
+/// the Upgrade Work Area — and the two it left out came back as their own jam:
+/// a [[storage]] against a wall has two standing tiles, and two idle bodies on
+/// them shut the hauler holding its [[refill]] out exactly as W13S28's pocket
+/// did. Only the *ring* is added and never the store's own tile, because every
+/// store a body can stand on is already inside the working-ground half by the
+/// Layout's construction (a container serves a source from one of its Seats or
+/// the controller from its Upgrade Work Area, ADR 0040) and the rest — the
+/// Storage, the spawn, an extension — are obstacles nothing stands on at all.
+/// Total: a room with no working ground and no store answers empty (ADR 0004).
+let idleGroundIn (atlas: Atlas) (room: string) : Set<Pos> =
+    let rings =
+        storeTilesIn atlas room
+        |> Set.toList
+        |> List.collect (adjacentWalkableIn atlas room)
+        |> Set.ofList
+
+    Set.union (workingGroundIn atlas room) rings
 
 /// Dual Seats of the room: tiles inside both some projected source's Seats and
 /// a projected controller's Upgrade Work Area — a creep standing on one
@@ -2399,7 +2455,8 @@ let firstStep (atlas: Atlas) (creep: string) (task: Task) (goals: Set<RoomPos>) 
 
 /// The same first step toward an explicit set of tiles, with no Task beside it:
 /// `firstStep`'s answer for a body that has none to cross a Seam for, which is
-/// what an idle one stepping off the [[working ground]] is (#241). `travelCost`
+/// what an idle one stepping off the [[idle ground]] is (#241, #268).
+/// `travelCost`
 /// and `travelCostWithin` stand in the same pair for the same reason — the Task
 /// buys the cross-room fallback and nothing else, so a caller whose goals are
 /// tiles of the creep's own room by construction has no use for it.

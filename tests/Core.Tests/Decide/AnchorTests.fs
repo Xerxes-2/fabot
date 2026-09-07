@@ -741,7 +741,17 @@ let heavyPinTests =
                     (Verdict.Unassigned("a1", IdleReason.NoneInTime))
                     "and nothing else in the pool is a heavy body's work"
 
-                Expect.isEmpty (moveIntentsFor "a1" intents) "so it holds its ground"
+                // It holds its *place in the queue* and takes no walk — but
+                // it does take the one step #268 asks of every idle body:
+                // (12,10) is the corridor mouth, inside the Post container's
+                // range-1 ring, so a body waiting a restock out there is
+                // standing where the hauler drawing that container has to
+                // stand. The step is off the ring and not toward the
+                // controller, which is the distinction this case is about.
+                Expect.equal
+                    (moveIntentsFor "a1" intents)
+                    [ MoveCreep("a1", Right) ]
+                    "so it holds its ground, stepping only off the store's ring"
             }
 
             test "a distant heavy body is dispatched when its walk covers the wait" {
@@ -1085,17 +1095,21 @@ let heavyPinTests =
 
                 // The one step it does take is off the Seat it has no work
                 // on and onto the corridor tile beside it (#241): a body
-                // with no Task parks off the [[working ground]], and this
-                // body's tile is a Seat of the source the pool no longer
-                // carries. What the gate refuses is the *walk* — the width
-                // of the room, east down the corridor — and the corridor
-                // tile it steps to is where it stays.
+                // with no Task parks off the idle ground, and this body's
+                // tile is a Seat of the source the pool no longer carries.
+                // What the gate refuses is the *walk* — the width of the
+                // room, east down the corridor — so the step is one tile
+                // and never a commute.
                 Expect.equal
                     (moveIntentsFor "a1" intents)
                     [ MoveCreep("a1", TopRight) ]
                     "it steps off the Seat, and nothing walks it the width of the room"
 
-                Expect.isEmpty
+                // One tile further east than #241 left it: (12,10) is inside
+                // the Post container's range-1 ring, which is store ground
+                // the mover now vacates too (#268), so the tile it settles
+                // on is the first one past that ring.
+                Expect.equal
                     (moveIntentsFor
                         "a1"
                         (decide
@@ -1112,7 +1126,33 @@ let heavyPinTests =
                             Set.empty
                             None)
                             .Intents)
-                    "and standing there, off every Seat and still a room from the controller, it stays"
+                    [ MoveCreep("a1", Right) ]
+                    "and there it steps once more, clear of the container's ring, still not a commute"
+
+                // And there it stops: (13,10) is off every Seat, off the
+                // container's ring and still a room from the controller, so
+                // the widened set costs the body one tile and not a walk.
+                // This is the assertion that tells a one-tile step from a
+                // commute — without it a ground that receded a tile a tick
+                // would pass the two above.
+                Expect.isEmpty
+                    (moveIntentsFor
+                        "a1"
+                        (decide
+                            { colony with
+                                Spatial =
+                                    colony.Spatial
+                                    |> withHome (fun layer ->
+                                        { layer with
+                                            CreepPositions =
+                                                Map.ofList [ "a1", { X = 13; Y = 10 } ]
+                                        })
+                            }
+                            Map.empty
+                            Set.empty
+                            None)
+                            .Intents)
+                    "and standing clear of both, it stays"
             }
 
             test "the same body inside the Upgrade Work Area still upgrades in place" {
