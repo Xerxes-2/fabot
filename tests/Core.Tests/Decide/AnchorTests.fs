@@ -2830,8 +2830,8 @@ let postSiteTests =
             }
 
             test "the builder budget prices a commute, and the body on the site pays none" {
-                // #157's budget is `Tuning.OutpostContainerBuilders` spread over
-                // the sites, and every word of its argument is about the
+                // #157's budget is `Tuning.OutpostBuilders` spread over
+                // the sites it has lifted, and every word of its argument is about the
                 // home room's surplus work stopping "for the fifty ticks
                 // each of them spends crossing". A body standing on the
                 // site spends none of those, so it is outside what the

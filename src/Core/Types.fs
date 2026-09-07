@@ -149,11 +149,15 @@ type Tuning =
         /// horizon of 5 computes an extension gap of zero and plans none of the
         /// ten the engine just unlocked.
         HorizonLevel: int
-        /// How many creeps the colony has building outpost container sites at
-        /// once — a budget over all of them together and never a per-site
-        /// number, the Planner placing one site per unserved outpost source on
-        /// the same tick.
-        OutpostContainerBuilders: int
+        /// How many creeps the colony has building in its [[outpost]]s at once
+        /// — a budget over every site out there together and never a per-site
+        /// number, the Planner placing one container site per unserved outpost
+        /// source on the same tick and a human paving the rest by hand. It is
+        /// also how many of those sites the budget lifts onto the feeding tier
+        /// at a time (#266): the crowd that may cross a [[seam]] and the number
+        /// of sites worth crossing for are one number, so a trunk is paved
+        /// outward from the crossing rather than all at once.
+        OutpostBuilders: int
         /// The controller level a child colony stops being bootstrapped at (ADR
         /// 0047 decision 4), and so the line `Colony.stageOf` cuts
         /// `Bootstrapping` from `Independent` on: **the one place this number
@@ -195,7 +199,7 @@ module Tuning =
             SafeModeDeadline = 3
             StorageLevel = 4
             HorizonLevel = 6
-            OutpostContainerBuilders = 2
+            OutpostBuilders = 2
             BootstrapLevel = 3
             TrunkSwampWeight = 3
             StandDownFallback = 2500

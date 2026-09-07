@@ -1064,16 +1064,39 @@ let withNorthOutpost (outpostSource: Pos option) (colony: ColonyView) =
                 }
     }
 
-/// The same colony with a construction site of ours standing in the
-/// outpost — the one the container rule places there, because that rule is
-/// the only thing *this colony* places outside the home room (ADR 0042).
-/// A human's hand is the other way a site gets out there, and that is
-/// `withNorthSpawnSite` below, which the nursery cases are built on.
-/// It arrives in the three pieces the shell hands Core it in:
-/// the id-keyed kind census, the outpost layer's own tile, and the
-/// `ConstructionSites` entry vision pays for (#150). Merges into whatever
-/// layer `withNorthOutpost` already laid, so the two compose in either
-/// order.
+/// The sites standing in the outpost, as many as the caller names, each under
+/// its own id: the container rule is the only thing *this colony* ever places
+/// out there (ADR 0042), so every site of another kind laid here is a human's
+/// hand — the **trunk** #244 recorded and #266's budget queues (`withNorthSpawnSite`
+/// below is the other way one gets there, which the nursery cases are built on).
+/// Each arrives in the three pieces the shell hands Core a site in: the id-keyed
+/// kind census, the outpost layer's own tile, and the `ConstructionSites` entry
+/// vision pays for (#150). Merges into whatever layer `withNorthOutpost` already
+/// laid, so the two compose in either order.
+let withOutpostTrunk (sites: (string * BuiltKind * Pos) list) (colony: ColonyView) =
+    let outpost = SpatialInfo.layerOf colony.Spatial "W1N2"
+
+    { colony with
+        ConstructionSites = colony.ConstructionSites @ [ for id, _, _ in sites -> { Id = id } ]
+        Spatial =
+            { colony.Spatial with
+                TargetKinds =
+                    (colony.Spatial.TargetKinds, sites)
+                    ||> List.fold (fun kinds (id, kind, _) -> Map.add id (Site kind) kinds)
+            }
+            |> withNeighbour
+                "W1N2"
+                { outpost with
+                    TargetPositions =
+                        (outpost.TargetPositions, sites)
+                        ||> List.fold (fun tiles (id, _, pos) -> Map.add id pos tiles)
+                }
+    }
+
+/// One site out there under the frozen id every case that wants a single one
+/// names — `withOutpostTrunk`'s one-site case and never a second spelling of
+/// it, the three pieces above being the shell's contract and this file the one
+/// place it is written.
 ///
 /// The kind is a parameter because #205's gates read it: a Seat's
 /// *container* site is a Post and reopens Build to the body standing on
@@ -1081,20 +1104,7 @@ let withNorthOutpost (outpostSource: Pos option) (colony: ColonyView) =
 /// surplus work it always was. Pairwise cases below swap the kind and
 /// nothing else.
 let withOutpostSiteOf (kind: BuiltKind) (site: Pos) (colony: ColonyView) =
-    let outpost = SpatialInfo.layerOf colony.Spatial "W1N2"
-
-    { colony with
-        ConstructionSites = colony.ConstructionSites @ [ { Id = "site-out" } ]
-        Spatial =
-            { colony.Spatial with
-                TargetKinds = Map.add "site-out" (Site kind) colony.Spatial.TargetKinds
-            }
-            |> withNeighbour
-                "W1N2"
-                { outpost with
-                    TargetPositions = Map.add "site-out" site outpost.TargetPositions
-                }
-    }
+    withOutpostTrunk [ "site-out", kind, site ] colony
 
 /// The container site the outpost rule really places — the kind every case
 /// but #205's pairwise ones wants.
@@ -1110,6 +1120,27 @@ let loaded (colony: ColonyView) =
     { colony with
         Creeps = [ worker "w" 50 0 ]
     }
+
+/// Three loaded workers standing in the home corridor, a step apart: the row
+/// the outpost builders' budget rations, and one more body than the shipped
+/// budget of two, so what the budget refuses is read off the one left over.
+let threeLoadedAtHome (colony: ColonyView) =
+    { colony with
+        Creeps = [ for name in [ "w1"; "w2"; "w3" ] -> worker name 50 0 ]
+        Spatial =
+            colony.Spatial
+            |> withHome (fun layer ->
+                { layer with
+                    CreepPositions = Map.ofList [ for i in 1..3 -> $"w{i}", { X = 10; Y = i + 1 } ]
+                })
+    }
+
+/// What each Task in the colony holds this tick, by Task — the whole tally, so
+/// a budget that admitted one body too many or one too few fails either way.
+let heldBy (colony: ColonyView) =
+    let { Assignments = assignments } = decide colony Map.empty Set.empty None
+
+    assignments |> Map.toList |> List.map snd |> List.countBy id |> List.sort
 
 /// What the tick decided, less the plan memo: the memo carries a mutable
 /// walk table whose identity is not a decision, and these three are the

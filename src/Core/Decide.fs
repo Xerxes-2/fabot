@@ -2650,14 +2650,20 @@ let private planLayout
 /// over the Seats that are left, and a source whose every Seat is taken plans
 /// nothing and waits: asking the engine for a refusal once a tick is not a
 /// plan, and this colony has no vocabulary for cancelling a human's site.
-/// **That wait is not self-clearing**, and it must not be read as one: the
-/// Seat frees when the site on it is *built*, and nothing here builds it — a
-/// non-container site in an outpost is a plain Surplus Build with no home rung
-/// (#234) and outside the builders' budget (#157, keyed on a container site),
-/// so travel cost keeps every loaded worker at the home controller instead
-/// ("an ordinary outpost site keeps its travel cost"). A hand-laid site holds
-/// its Seat for as long as the human leaves it there, and the outage is now
-/// silent, the `-7` line having been the only thing that said so. A
+/// **That wait clears no faster than the builders' budget reaches the site**
+/// (#266), and until #266 it did not clear at all: the Seat frees when the
+/// site on it is *built*, and nothing built it — a non-container site in an
+/// outpost was a plain Surplus Build with no home rung (#234) and outside the
+/// builders' budget (#157, which was keyed on a container site), so travel
+/// cost kept every loaded worker at the home controller. The same budget now
+/// queues those sites, the [[seam]] nearest first, so the Seat frees of itself
+/// once its site reaches the head of that queue — which is a wait on a queue
+/// and no longer a wait on the human. It is still a wait, and can be a long
+/// one: the queue is `Tuning.OutpostBuilders` long against a trunk 45 sites
+/// long, and a Seat is wherever in it the human happened to pave. What keeps
+/// its travel cost meanwhile is everything behind the head ("an ordinary
+/// outpost site keeps its travel cost"), and the outage is silent either way,
+/// the `-7` line having been the only thing that ever said so. A
 /// **standing** road is not subtracted and must not be: a container site goes
 /// down on a built road, and out here that is the best tile there is. It is a
 /// collision rule and not a target one, so ADR 0040's "by target, not by tile"
@@ -3054,35 +3060,42 @@ let private threatened (threats: Threats) atlas (creep: CreepInfo) task =
     not (Set.isEmpty (Atlas.workAreaFor atlas creep.Name task))
     && Set.isEmpty (areaFor threats atlas creep.Name task)
 
-/// Whether a construction site is an outpost's source container: the one site
-/// this colony ever places outside its own room, and so the one Build that is a
-/// switch on a room's whole economy rather than a piece of surplus work (ADR
-/// 0042). Two readers, which is why it is a rule and not a line inlined twice —
-/// the tier, which asks it through `isFeedingSite`, and the concurrency cap
-/// that keeps the tier from emptying the home room across the Seam, which asks
-/// it here because what the budget covers is narrower than what the tier lifts.
-/// Both halves come off the projection and neither off the declaration (ADR
-/// 0041), exactly as the Reserve pool's does, so a room a stand-down drops from
-/// the scan set (ADR 0043) leaves this reading with it. Total (ADR 0004): an
-/// unplaced site names no room, answers false, and is the ordinary surplus
-/// Build it has always been.
-let private isOutpostContainerSite (view: ColonyView) atlas siteId =
-    Map.tryFind siteId view.Spatial.TargetKinds = Some(Site BuiltKind.Container)
-    && Atlas.targetRoom atlas siteId
-       |> Option.exists (fun room ->
-           room <> SpatialInfo.homeName view.Spatial
-           // A borrowed room's container site is the child's own and not an
-           // outpost switch (user decision 2026-09-07): it neither draws the
-           // outpost builders' budget nor dilutes it — the nursery's and the
-           // bootstrapping child's sites reach the pool by their own rules, and
-           // the budget is spread over the sites of rooms the colony *mines*.
-           && not (List.contains room view.Borrowed.Rooms))
+/// Whether a construction site stands in a room this colony **mines** — an
+/// [[outpost]]'s, and so a site the outpost builders' budget may ration rather
+/// than a piece of the home room's surplus. One half of that queue's reading
+/// and not the whole of it: `planPool` narrows it again by what no other rule
+/// already feeds, because a claimed room a human still names in this colony's
+/// outpost list is not `Borrowed` and answers true here (`Colony.bootstrapping`,
+/// ADR 0047 decision 1). The room half alone since #266:
+/// what the budget covered was the container site this colony places itself
+/// (ADR 0042), and out there a human paves too (ADR 0042 as #244 amends it) —
+/// live, 45 hand-laid road sites in W13S29 stood at 0/300 for as long as they
+/// were surplus, because a loaded worker at home is a step from its own
+/// controller and a Seam plus sixty tiles from the trunk. So the kind half is
+/// gone from the *reading* and survives as the order the budget is spent in
+/// (`planPool`), the container staying the switch it always was. Read off the
+/// projection and not off the declaration (ADR 0041), exactly as the Reserve
+/// pool's room join is, so a room a stand-down drops from the scan set (ADR
+/// 0043) leaves this reading with it. Total (ADR 0004): an unplaced site names
+/// no room, answers false, and is the ordinary surplus Build it has always
+/// been.
+let private isOutpostSite (view: ColonyView) atlas siteId =
+    Atlas.targetRoom atlas siteId
+    |> Option.exists (fun room ->
+        room <> SpatialInfo.homeName view.Spatial
+        // A borrowed room's site is the child's own and not an outpost's (user
+        // decision 2026-09-07): it neither draws the outpost builders' budget
+        // nor dilutes it — the nursery's and the bootstrapping child's sites
+        // reach the pool by their own rules, and the budget is spread over the
+        // sites of rooms the colony *mines*.
+        && not (List.contains room view.Borrowed.Rooms))
 
 /// Whether a construction site stands in a **nursery** — a room this colony has
-/// claimed and not yet stood a spawn in (ADR 0047 decision 4). The room half of
-/// `isOutpostContainerSite` with its kind half deliberately dropped: in a
-/// nursery **every** site is the switch, where in an ordinary outpost only the
-/// container is. Total the same way (ADR 0004).
+/// claimed and not yet stood a spawn in (ADR 0047 decision 4). `isOutpostSite`'s
+/// room read asked one question deeper — an outpost is a room this colony mines
+/// and a nursery is one it has claimed — and answered a rank deeper with it: in
+/// a nursery **every** site is feeding-tier outright, where in an outpost only
+/// the builders' budget's own head is. Total the same way (ADR 0004).
 let private isNurserySite (view: ColonyView) atlas siteId =
     Atlas.targetRoom atlas siteId |> Option.exists (isNurseryRoom view)
 
@@ -3120,12 +3133,15 @@ let private sitesPendingBeside (view: ColonyView) atlas controllerId =
 /// said once. One reader is left: `tierOf`, and nothing else. ADR 0052 decision
 /// 6 had folded the body gate into this reading too, and then #234 lifted every
 /// home site a rung over the Upgrade beside it, leaving no Build on the ladder
-/// travel cost still thins, so that gate stopped asking about the target. An
-/// outpost's container site, the switch on whether that room is in the economy
-/// at all (ADR 0042); and every site in a nursery, the switch on whether there
-/// is going to be a second colony at all (ADR 0047).
-let private isFeedingSite (view: ColonyView) atlas siteId =
-    isOutpostContainerSite view atlas siteId
+/// travel cost still thins, so that gate stopped asking about the target. The
+/// outpost sites the builders' budget has picked out this tick — handed in,
+/// because which they are is a fact about the whole outpost's queue and not
+/// about the one site (#266) — the container among them being ADR 0042's switch
+/// on whether that room is in the economy at all; and every site in a nursery,
+/// the switch on whether there is going to be a second colony at all (ADR
+/// 0047).
+let private isFeedingSite (view: ColonyView) atlas (fed: Set<string>) siteId =
+    Set.contains siteId fed
     || isNurserySite view atlas siteId
     || isBootstrappingSite view atlas siteId
 
@@ -3135,7 +3151,7 @@ let private isFeedingSite (view: ColonyView) atlas siteId =
 /// Build over the Upgrade it shares the surplus tier with, and a rank the whole
 /// colony shares is exactly what [[travel cost]] can no longer thin. At home
 /// that is the point: the sites and the controller stand a few tiles apart. The
-/// room join is `isOutpostContainerSite`'s (ADR 0041), and total (ADR 0004)
+/// room join is `isOutpostSite`'s (ADR 0041), and total (ADR 0004)
 /// resolved toward home.
 let private isHomeSite (view: ColonyView) atlas siteId =
     Atlas.targetRoom atlas siteId
@@ -3175,12 +3191,15 @@ type private Tier =
     /// too, because no other work matters while a creep is being killed.
     | Safety
     /// Feeding the economy: Harvest, a container's Withdraw, the Refill of a
-    /// spawn or an extension, Reserve, an **outpost** container site's Build
-    /// (#157) and every site in a **nursery** (ADR 0047) — the flow the colony's
+    /// spawn or an extension, Reserve, the Build of the outpost sites the
+    /// builders' budget has picked out this tick (#157, widened by #266) and
+    /// every site in a **nursery** (ADR 0047) — the flow the colony's
     /// reproduction runs on, and beside it ADR 0042's two switches on a third of
     /// that flow: the Reserve that decides how fast an outpost's rock gives, and
-    /// the Build that decides whether the room is in the economy at all. The
-    /// nursery's sites are the third switch and the deepest of them.
+    /// the Build that decides whether the room is in the economy at all — the
+    /// container that makes the rock a Post, and the trunk the haul off it is
+    /// priced on. The nursery's sites are the third switch and the deepest of
+    /// them.
     | Feeding
     /// The Storage's Withdraw (ADR 0023): the colony's stock as an intake, one
     /// tier below the source containers the flow fills, so a stock standing
@@ -3260,7 +3279,8 @@ let private bodyClassOf (tuning: Tuning) atlas (creep: CreepInfo) : BodyClass =
 /// the tier ladder, the [[downgrade deadline]]'s lift (ADR 0007), a source's
 /// [[seat]]s and [[post]]s (ADR 0024, ADR 0051), a store's stock over the load
 /// of the row that draws it, one holder per controller (ADR 0042, ADR 0047),
-/// the outpost container builders' budget, the [[pioneer]]s' ceiling and the
+/// the outpost builders' budget — which since #266 rations the feeding tier
+/// out there as well as the crowd on it — the [[pioneer]]s' ceiling and the
 /// garrison's own tile.
 let planPool (view: ColonyView) atlas (tasks: Task list) : PooledTask list =
     let bank = view.Bank.Capacity
@@ -3309,36 +3329,121 @@ let planPool (view: ColonyView) atlas (tasks: Task list) : PooledTask list =
     let stored id =
         view.Spatial.Stores |> Map.tryFind id |> Option.defaultValue 0
 
-    // The outpost container sites the pool holds, and whether each stands
-    // in a nursery — read once, because the builders' budget below is a
-    // colony-wide number spread over them.
-    let outpostContainerSites =
+    // **The queue the builders' budget rations** (#266): every site the pool
+    // holds in a room this colony merely mines and that no other rule already
+    // feeds. The second clause is what keeps the budget's head worth having.
+    // A [[nursery]]'s site and a bootstrapping child's are feeding-tier
+    // outright by their own reading (ADR 0047 decision 4) and capped by
+    // nothing, and neither room is always `Borrowed`: while a human still
+    // names the child's room in the mother's `Outposts` list
+    // `Colony.bootstrapping` drops it from `BorrowedWork.Rooms` — its own
+    // docstring spells that state out, and ADR 0047 decision 1 makes it the
+    // normal one before the declaration is split — so `isOutpostSite` answers
+    // true for its sites. Left in the queue they take places the lift buys
+    // them nothing with, and the outpost's own container, ADR 0042's switch on
+    // whether that room is in the economy at all, is pushed back into the
+    // surplus where travel cost answers a Seam and sixty tiles against an
+    // Upgrade underfoot. Asked through `isFeedingSite` with the budget's own
+    // answer held empty, so the queue and the tier read one sentence and
+    // cannot drift apart.
+    let outpostSites =
         tasks
         |> List.choose (function
-            | Build siteId when isOutpostContainerSite view atlas siteId ->
-                Some(siteId, isNurserySite view atlas siteId)
+            | Build siteId when
+                isOutpostSite view atlas siteId
+                && not (isFeedingSite view atlas Set.empty siteId)
+                ->
+                Some siteId
             | _ -> None)
+
+    // **The order the budget is spent in** (#266): the container sites first,
+    // then the nearest to the crossing. The container is ADR 0042's switch on
+    // whether the room is in the economy at all, so it is never queued behind a
+    // road; every other site out there is a human's [[trunk]] (ADR 0042 as #244
+    // amends it), and a trunk is worth building from the [[seam]] outward,
+    // because the paved tiles nearest the crossing are the ones every haul from
+    // that room walks over. The order asks the *kind* only for that one
+    // question and the lift asks it not at all, which is #266's whole
+    // narrowing undone if a kind list were written back in: at RCL0 the engine
+    // allows a road and a container out there and nothing else, so a list
+    // would name what a human is allowed to want built, and out here as in a
+    // [[nursery]] that is not a judgement this colony makes. `Atlas.seamWalkTicks` is the same walk ADR 0042
+    // anchors its container pick on — to the border and not across it — so the
+    // two rules out here measure one thing. **One queue over every outpost and
+    // not one apiece**, which is what keeps the budget the colony-wide number
+    // #157 made it: two rooms' sites are ordered against each other on a walk
+    // that leaves the home-side leg off both, so what the comparison says is
+    // "nearer its own crossing" and not "nearer the spawn" — a tie-break inside
+    // a budget, never a price (ADR 0002 does the pricing, from where the body
+    // stands). Ties fall to the id, the way every
+    // other tie in this colony falls, and a site whose walk cannot be priced
+    // sorts last rather than out of the list: unpriceable is not nearest (ADR
+    // 0004).
+    let siteOrder siteId =
+        let container =
+            if Map.tryFind siteId view.Spatial.TargetKinds = Some(Site BuiltKind.Container) then
+                0
+            else
+                1
+
+        let walk =
+            Atlas.positionOf atlas siteId
+            |> Option.bind (fun tile ->
+                Atlas.seamWalkTicks
+                    atlas
+                    tile.Room
+                    (SpatialInfo.homeName view.Spatial)
+                    (RoomPos.pos tile))
+            |> Option.defaultValue System.Int32.MaxValue
+
+        container, walk, siteId
+
+    // **The budget rations the tier, not just the crowd on it** (#266, live:
+    // W13S29's 45 hand-laid road sites at 0/300 while two workers refilled and
+    // upgraded at home). Lifting *every* outpost site onto the feeding tier is
+    // the failure #157's budget was written against — the whole worker row over
+    // the Seam at once — and leaving them all in the surplus is the failure
+    // above, travel cost answering 120 against an Upgrade underfoot that costs
+    // nothing. So the same number does both: the first `Tuning.OutpostBuilders`
+    // sites in the order above are lifted and the rest stay surplus, and as each
+    // one is finished the next one out takes its place. The head is all that is
+    // wanted, so the order is asked for only when the budget cannot cover the
+    // list — the walk behind it is a flood over the outpost's whole grid, and a
+    // colony whose outpost holds one site pays for none of it.
+    let fedOutpostSites =
+        if List.length outpostSites <= view.Tuning.OutpostBuilders then
+            outpostSites
+        else
+            outpostSites
+            |> List.sortBy siteOrder
+            |> List.truncate view.Tuning.OutpostBuilders
+
+    let fedSiteIds = Set.ofList fedOutpostSites
 
     // **A budget and not a per-site number** (#157): `planOutpostContainers`
     // places a site for *every* unserved outpost source, all on the same tick,
     // so a per-site two is a colony-wide six — the whole worker row, and
     // exactly what the cap exists to prevent. The budget is spread over the
-    // sites the pool holds, floored at one apiece, and as each site completes
-    // the divisor falls and the survivors get the bodies back. **Two is a
-    // tunable, and this is the reason for that number**: one is the smallest
-    // crowd that builds, and two is the smallest that survives losing a body —
-    // a container is 5,000 progress against a generalist's 50, so a lone holder
-    // that dies or is released by a Reach (ADR 0033) leaves the switch open for
-    // a whole cast-and-walk cycle.
+    // sites it has lifted, floored at one apiece, and as each site completes
+    // the divisor falls and the survivors get the bodies back. The divisor is
+    // the **lifted** list and never the whole pool (#266): spread over the
+    // pool, W13S29's 45 sites took one builder apiece and the colony-wide two
+    // was no cap at all. Under #266 the divisor and the queue are one list, so
+    // a room the budget does not ration no longer dilutes it either — the two
+    // used to be separable and are not any more, a place in the list now being
+    // the lift itself. **Two is a tunable, and this is the reason for that
+    // number**: one is the smallest crowd that builds, and two is the smallest
+    // that survives losing a body — a container is 5,000 progress against a
+    // generalist's 50, so a lone holder that dies or is released by a Reach
+    // (ADR 0033) leaves the switch open for a whole cast-and-walk cycle. Which
+    // is why the spread stays a spread rather than becoming one apiece: with a
+    // single switch open the pair is what #157 asked for, and the budget is
+    // spent either way.
     let builderShare =
-        match outpostContainerSites with
+        match fedOutpostSites with
         | [] -> 0
-        | sites -> view.Tuning.OutpostContainerBuilders / List.length sites |> max 1
+        | sites -> view.Tuning.OutpostBuilders / List.length sites |> max 1
 
-    let cappedContainerSites =
-        outpostContainerSites
-        |> List.choose (fun (siteId, nursery) -> if nursery then None else Some siteId)
-        |> Set.ofList
 
     // The tier a Task sits in. Refill, Withdraw and Build are the three Tasks
     // whose tier layers by target (ADR 0010, ADR 0023, ADR 0042). Two of the
@@ -3404,11 +3509,16 @@ let planPool (view: ColonyView) atlas (tasks: Task list) : PooledTask list =
         // all. Read on the surplus tier, only travel cost separated it from
         // Upgrade, and the home controller is a few tiles from a loaded worker
         // while the site is a Seam and fifty tiles away: every worker upgraded,
-        // every tick. The same argument one question deeper for a **nursery**'s
-        // sites (ADR 0047 decision 4): the spawn a human has placed in a room
-        // this colony has claimed decides whether there is going to be a second
-        // colony at all.
-        | Build siteId when isFeedingSite view atlas siteId -> Feeding
+        // every tick. **And the same is true of the road beside it** (#266):
+        // the trunk a human paves out there is what the [[hauler unit]]'s round
+        // trip is priced on, so the argument that lifted the container reaches
+        // as far as the budget can pay for — `fedSiteIds` is the head of that
+        // queue and the tail stays in the surplus, where travel cost goes on
+        // keeping the row at home. The same argument one question deeper for a
+        // **nursery**'s sites (ADR 0047 decision 4): the spawn a human has
+        // placed in a room this colony has claimed decides whether there is
+        // going to be a second colony at all.
+        | Build siteId when isFeedingSite view atlas fedSiteIds siteId -> Feeding
         // A bootstrapped child's Upgrade, in the mother's pool (#213): the tier
         // the pioneers were hired for. Left in the surplus beside the home
         // Upgrade, travel cost — a Seam and fifty tiles against five — kept
@@ -3639,13 +3749,17 @@ let planPool (view: ColonyView) atlas (tasks: Task list) : PooledTask list =
             // same bodies that were hired for the room, on the site that ends
             // its window sooner than its controller does. The child's own room
             // reads no cap here — its own sites are its own workers' to crowd.
+            //
+            // And the crowd the budget rations is the list it lifted, with
+            // nothing left to subtract from it (#266): the rooms whose sites
+            // the budget does not reach — a [[nursery]]'s, a bootstrapping
+            // child's, a borrowed room's — are the rooms whose sites never
+            // entered the queue, so what the cap covers and what the tier
+            // lifts are one list read twice.
             let total =
-                if isBorrowedSite siteId then
-                    Some view.Tuning.PioneerCount
-                elif Set.contains siteId cappedContainerSites then
-                    Some builderShare
-                else
-                    None
+                if isBorrowedSite siteId then Some view.Tuning.PioneerCount
+                elif Set.contains siteId fedSiteIds then Some builderShare
+                else None
 
             { Capacity.unbounded with
                 Total = total

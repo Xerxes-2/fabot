@@ -4744,7 +4744,12 @@ let tuningTests =
                     "a horizon of two reserves an RCL2 room's cluster, and the room may place no more than it planned"
             }
 
-            test "OutpostContainerBuilders is the crowd one switch may take" {
+            test "OutpostBuilders is the crowd the outpost may take" {
+                // One number, two rations since #266: how many bodies may be
+                // across the Seam at once, and how many of the outpost's sites
+                // are worth crossing for — the head of the queue is exactly as
+                // long as the crowd that could work it, so a trunk is paved
+                // outward from the crossing instead of all at once.
                 let crowd =
                     let colony =
                         northBorderColony { X = 10; Y = 38 }
@@ -4781,9 +4786,38 @@ let tuningTests =
                     "two is the shipped budget, and the third worker falls to the Upgrade"
 
                 Expect.equal
-                    (tally (crowd |> tunedBy (fun t -> { t with OutpostContainerBuilders = 1 })))
+                    (tally (crowd |> tunedBy (fun t -> { t with OutpostBuilders = 1 })))
                     [ taskId (Build "site-out"), 1; taskId (Upgrade "ctrl-1"), 2 ]
                     "a budget of one and two of the three stay home"
+
+                // The other half of the same number, pinned where the queue is
+                // longer than it: four hand-laid road sites down one corridor,
+                // and the budget says how many of them are feeding-tier at all.
+                // The ones it names are the nearest the Seam, so what moves
+                // between the two readings is which site, not only how many.
+                let trunk =
+                    crowd
+                    |> withOutpostTrunk
+                        [
+                            "site-r1", BuiltKind.Road, { X = 10; Y = 47 }
+                            "site-r2", BuiltKind.Road, { X = 10; Y = 46 }
+                            "site-r3", BuiltKind.Road, { X = 10; Y = 45 }
+                            "site-r4", BuiltKind.Road, { X = 10; Y = 44 }
+                        ]
+
+                Expect.equal
+                    (tally trunk)
+                    [
+                        taskId (Build "site-out"), 1
+                        taskId (Build "site-r1"), 1
+                        taskId (Upgrade "ctrl-1"), 1
+                    ]
+                    "two lifts the container and the road beside the crossing; the other three roads wait"
+
+                Expect.equal
+                    (tally (trunk |> tunedBy (fun t -> { t with OutpostBuilders = 1 })))
+                    [ taskId (Build "site-out"), 1; taskId (Upgrade "ctrl-1"), 2 ]
+                    "one lifts the container alone — the switch is never queued behind a road"
             }
 
             test "BootstrapLevel is the line a stage is cut at, and the one place it is read" {

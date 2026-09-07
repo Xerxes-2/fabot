@@ -386,14 +386,18 @@ let nurseryTests =
     testList
         "the nursery"
         [
-            test "every site in a nursery is feeding-tier work, and in an outpost none of them is" {
-                // ADR 0047 decision 4, at the seam it decides at. #157
-                // lifted one site off the surplus tier — an outpost's
-                // container, the switch on whether that room is in the
-                // economy at all — and a nursery lifts every site in the
-                // room, because what a human is building there is the spawn
-                // that ends the nursery and no rule of this colony's places
-                // that site for the kind census to recognise.
+            test "every site in a nursery is feeding-tier work, and no builders' budget rations it" {
+                // ADR 0047 decision 4, at the seam it decides at — both
+                // halves of it, because since #266 the second half is what
+                // discriminates. #157 lifted one site off the surplus tier
+                // and #266 lifts `Tuning.OutpostBuilders` of them, nearest
+                // the Seam, so a nursery no longer differs from an outpost
+                // in the *tier* of the one site standing in it. What it
+                // differs in is what ADR 0047 said in the same breath: the
+                // budget does not reach a claimed room. In an outpost the
+                // crowd is rationed; in a nursery every loaded Work-part
+                // body in the colony may cross, which is the price that
+                // decision was taken at.
                 //
                 // A **spawn** site on purpose: read by kind alone it is the
                 // ordinary surplus Build every home site is, so nothing here
@@ -408,10 +412,9 @@ let nurseryTests =
                 // a home Harvest inapplicable to a body with nothing free to
                 // fill.
                 //
-                // #234's rung does not reach this comparison and the
-                // controller is still the instrument: the rung stops at the
-                // home room (`isHomeSite`), and a site past the Seam is
-                // exactly what it stops for.
+                // #234's rung does not reach this comparison either way: the
+                // rung stops at the home room (`isHomeSite`), and a site past
+                // the Seam is exactly what it stops for.
                 let sited =
                     northBorderColony { X = 10; Y = 38 }
                     |> withNorthOutpost None
@@ -421,12 +424,12 @@ let nurseryTests =
 
                 Expect.equal
                     (matchOf sited)
-                    (Some(taskId (Upgrade "ctrl-1"), MatchFactor.TravelCost))
-                    "an ordinary outpost's spawn site is surplus work and loses to the sink underfoot"
+                    (Some(taskId (Build "site-spawn"), MatchFactor.Rank))
+                    "the one site an outpost holds is inside the budget's head, so it outranks the sink (#266)"
 
                 Expect.equal
                     (matchOf (asCandidate sited))
-                    (Some(taskId (Upgrade "ctrl-1"), MatchFactor.TravelCost))
+                    (Some(taskId (Build "site-spawn"), MatchFactor.Rank))
                     "declared and not yet claimed, it is a candidate colony and the site has not moved"
 
                 Expect.equal
@@ -447,6 +450,24 @@ let nurseryTests =
                     (matchOf (asNursery sited |> withNorthSpawn))
                     (Some(taskId (Build "site-spawn"), MatchFactor.Rank))
                     "and a spawn standing in it ends the nursery: the site is the bootstrapping room's, still feeding-tier"
+
+                // And the half that still tells the two rooms apart, read
+                // off the crowd rather than off the tier: one more loaded
+                // body than the shipped budget of two. The outpost's site
+                // takes the budget and leaves the third at home; the
+                // nursery's takes every one of them, `cappedOutpostSites`
+                // never holding a claimed room's site.
+                let crowd (colony: ColonyView) = heldBy (threeLoadedAtHome colony)
+
+                Expect.equal
+                    (crowd sited)
+                    [ taskId (Build "site-spawn"), 2; taskId (Upgrade "ctrl-1"), 1 ]
+                    "an outpost's site is rationed by the builders' budget, and the third body stays home"
+
+                Expect.equal
+                    (crowd (asNursery sited))
+                    [ taskId (Build "site-spawn"), 3 ]
+                    "and the nursery's is rationed by nothing: the whole loaded row crosses for it"
             }
 
             test "the mother's worker row rises by three while the nursery stands" {
@@ -558,7 +579,7 @@ let nurseryTests =
 
             test "the builders' budget does not reach a nursery: every worker may cross" {
                 // #157 caps the crowd on an outpost's container site at
-                // `Tuning.OutpostContainerBuilders`, a colony-wide two, because on
+                // `Tuning.OutpostBuilders`, a colony-wide two, because on
                 // the feeding tier the site outbids the home Upgrade for
                 // every loaded worker at once and travel cost cannot thin a
                 // crowd that is a Seam away to a tile. A nursery is the
@@ -608,6 +629,90 @@ let nurseryTests =
                     (held (crowd (northBorderColony { X = 10; Y = 38 }) |> asNursery))
                     [ taskId (Build "site-out"), 3 ]
                     "claimed, the budget lets go and all three cross for it"
+            }
+
+            test "a claimed room still on the outpost list takes no place in the builders' queue" {
+                // The state ADR 0047 decision 1 describes and
+                // `Colony.bootstrapping`'s own docstring spells out: while a
+                // human still names the child's room in the mother's
+                // `Outposts` list, `not (List.contains child.Home worked)`
+                // keeps it out of `BorrowedWork.Rooms`, and the room reaches
+                // the mother through the outpost reading, which asks no stage.
+                // So the borrowed-room clause `isOutpostSite` carries is not
+                // the whole of "a room this colony merely mines", and #266's
+                // queue says the rest of it itself.
+                //
+                // What that queue is scarce in is places and not bodies: a
+                // claimed room's sites are feeding-tier outright by their own
+                // reading and capped by nothing, so a place in the queue buys
+                // them no lift — and spends the one the mined outpost's
+                // container needed. Containers on both sides, so nothing but
+                // the room can be what separates them: the claimed room's two
+                // stand a tile and two from their own Seam and the outpost's
+                // six from its own, which is the whole of `siteOrder` and puts
+                // the outpost's site third of three against a budget of two.
+                //
+                // The claimed room is left unreachable from home on purpose —
+                // no home tile joins its border — so the Matched factor below
+                // names one comparison, the outpost's site against the sink
+                // underfoot, and not some third candidate. The order the queue
+                // is built in reads `Atlas.seamWalkTicks` inside each site's
+                // own room, so it does not care either way.
+                //
+                // Both stages of the claimed room, because they are two
+                // readings and not one: `isNurserySite` for a room claimed
+                // with no spawn standing, `isBootstrappingSite` for the child
+                // running its own spawn while the mother still declares it.
+                let withWestChild stage (colony: ColonyView) =
+                    { colony with
+                        RoomControl = Map.add "W2N1" ownedRoom colony.RoomControl
+                        Declared = colony.Declared @ [ "W2N1" ]
+                        Stages = Map.add "W2N1" stage colony.Stages
+                        ConstructionSites =
+                            colony.ConstructionSites @ [ { Id = "can-w-a" }; { Id = "can-w-b" } ]
+                        Spatial =
+                            { colony.Spatial with
+                                Borders = Map.add "W2N1" plainRing colony.Spatial.Borders
+                                TargetKinds =
+                                    colony.Spatial.TargetKinds
+                                    |> Map.add "can-w-a" (Site BuiltKind.Container)
+                                    |> Map.add "can-w-b" (Site BuiltKind.Container)
+                            }
+                            |> withNeighbour
+                                "W2N1"
+                                { RoomLayer.empty with
+                                    Terrain =
+                                        Map.ofList [ for x in 45..49 -> { X = x; Y = 25 }, Plain ]
+                                    TargetPositions =
+                                        Map.ofList
+                                            [
+                                                "can-w-a", { X = 48; Y = 25 }
+                                                "can-w-b", { X = 47; Y = 25 }
+                                            ]
+                                }
+                    }
+
+                let mined =
+                    northBorderColony { X = 10; Y = 38 }
+                    |> withNorthOutpost None
+                    |> withOutpostSite { X = 10; Y = 43 }
+                    |> loaded
+                    |> withHomeController { X = 10; Y = 5 }
+
+                Expect.equal
+                    (matchOf mined)
+                    (Some(taskId (Build "site-out"), MatchFactor.Rank))
+                    "the premise: alone out there, the outpost's container is the head of the queue"
+
+                Expect.equal
+                    (matchOf (mined |> withWestChild Nursery))
+                    (Some(taskId (Build "site-out"), MatchFactor.Rank))
+                    "a nursery's two containers are fed by their own rule and take no place from it"
+
+                Expect.equal
+                    (matchOf (mined |> withWestChild Independent))
+                    (Some(taskId (Build "site-out"), MatchFactor.Rank))
+                    "and neither do a child's, the mother declaring the room an outpost still"
             }
 
             test "a Work-heavy body still may not cross for a nursery's site" {

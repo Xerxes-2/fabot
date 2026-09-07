@@ -2694,7 +2694,7 @@ let rankTierTests =
                 //
                 // The rung reads the site's room (`isHomeSite`) and this
                 // fixture places nothing, which is the total resolving toward
-                // home exactly as `isOutpostContainerSite`'s does: absence
+                // home exactly as `isOutpostSite`'s does: absence
                 // never counts against a Task (ADR 0004). The rung's *room*
                 // is pinned where a room exists to pin it, in `OutpostTests`.
                 let verdictsFor colony =
