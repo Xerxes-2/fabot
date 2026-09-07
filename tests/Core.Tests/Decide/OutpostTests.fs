@@ -1557,7 +1557,8 @@ let outpostTests =
                     "a room with no geometry decides exactly what no room at all decides"
             }
 
-            test "the declared outposts are the two ADR 0042 names, so the shell scans three rooms" {
+            test
+                "the declared outposts are ADR 0042's north room and the survey's south one, so the shells scan four rooms" {
                 // #124 landed this constant empty and pinned the emptiness,
                 // because ADR 0041 ships the capability to project a
                 // neighbour and deliberately no behaviour. ADR 0042 fills
@@ -1596,9 +1597,11 @@ let outpostTests =
                     [ "W12S27"; "W13S28" ]
                     "while ADR 0042's measured pair is kept whole for the real-terrain fixtures"
 
-                Expect.isEmpty
-                    (Colony.outpostsOf Colony.declared "W13S28")
-                    "and the second colony works no outposts of its own yet"
+                Expect.equal
+                    (Colony.outpostsOf Colony.declared "W13S28"
+                     |> List.map (fun outpost -> outpost.RoomName))
+                    [ "W13S29" ]
+                    "and the second colony works its south outpost, declared off the 2026-09-07 survey"
 
                 Expect.isEmpty
                     (Colony.outpostsOf Colony.declared "W1N1")

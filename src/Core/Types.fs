@@ -820,6 +820,21 @@ module Outpost =
             }
         ]
 
+    /// W13S28's south outpost, declared 2026-09-07 off the remote survey
+    /// (`docs/research/remote-candidates.md`): two sources, a 12-tile south
+    /// Seam, the best net income of the five rooms a Seam reaches. The ids
+    /// and tiles are the engine's, read the day it was declared.
+    let w13s29: Outpost =
+        {
+            RoomName = "W13S29"
+            Sources =
+                [
+                    "6a8caaaddd4872bccd319365", { Room = "W13S29"; X = 29; Y = 6 }
+                    "6a8caaaddd4872bccd319366", { Room = "W13S29"; X = 14; Y = 29 }
+                ]
+            Controller = "6a8caaaddd4872bccd319367", { Room = "W13S29"; X = 15; Y = 41 }
+        }
+
 
 /// Where one colony stands in its life (ADR 0052 decision 3). Three answers to
 /// one question — how much of its own economy a colony has bought yet — and the
@@ -886,7 +901,9 @@ module Colony =
             // one colony.
             {
                 Home = "W13S28"
-                Outposts = []
+                // W13S29 to the south (2026-09-07): two sources across a
+                // twelve-tile Seam, the survey's first pick.
+                Outposts = [ Outpost.w13s29 ]
                 Mother = Some "W12S28"
             }
         ]
