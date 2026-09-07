@@ -1185,20 +1185,13 @@ module Colony =
             {
                 Home = "W13S28"
                 // W13S29 to the south (2026-09-07): two sources across a
-                // twelve-tile Seam, the survey's first pick.
-                //
-                // **Withdrawn by hand 2026-09-08** while a two-creep invader
-                // raid stands in it. ADR 0043's stand-down is clocked off an
-                // invader **core** and a rival's hold, and a raid of plain
-                // creeps gives it no deadline at all, so the room stayed open
-                // and the rows kept hiring into it: two reservers and a guard
-                // died there in three hundred ticks against invaders still at
-                // full health, and the next tick's quota asked for one more of
-                // each. #257 is the clock that closes this and it is not
-                // landed; until it is, the declaration is the only brake, and
-                // it is a human's to move (ADR 0047). Put the entry back when
-                // the raid has expired.
-                Outposts = []
+                // twelve-tile Seam, the survey's first pick. Withdrawn by hand
+                // for three hundred ticks on 2026-09-08 while a two-creep
+                // raid stood in it with nothing to shut the room — the brake
+                // that should have is ADR 0043's stand-down, which clocks off
+                // an invader *core* and not off creeps (#257) — and put back
+                // once that raid was fifty ticks from expiring.
+                Outposts = [ Outpost.w13s29 ]
                 Mother = Some "W12S28"
             }
         ]

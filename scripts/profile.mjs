@@ -1098,7 +1098,9 @@ function stubCreep({ name, pos, parts, used, ticksToLive = CREEP_LIFE_TIME }) {
     ticksToLive,
     fatigue: 0,
     pos,
-    body: parts.map((type) => ({ type })),
+    // `hits` per part, because the bundle counts only the parts still
+    // standing (#270). A stub that omitted it would leave every body empty.
+    body: parts.map((type) => ({ type, hits: 100 })),
     store: store({
       used,
       capacity:
@@ -2946,7 +2948,8 @@ function printRaid(world) {
   for (const creep of standing) {
     console.log(
       `    ${creep.name.padEnd(width)}  ` +
-        (assignments[creep.name] ?? "no Task at all: it neither ran nor worked"),
+        (assignments[creep.name] ??
+          "no Task at all: it neither ran nor worked"),
     );
   }
 }

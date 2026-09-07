@@ -62,12 +62,23 @@ let upgraderPattern =
 /// this budget: an ATTACK part is 0.231 damage per energy counting the Move
 /// that carries it, against a RANGED_ATTACK's 0.050. One Move per non-Move
 /// part, so ADR 0003's fatigue parity holds with none of the [[anchor]]'s
-/// exemption. The block's order is the body's: TOUGH eats damage first and HEAL
-/// dies last, which is what the community's ordering is for.
+/// exemption.
+///
+/// **The order is a rule and not a layout** (#282). The engine destroys body
+/// parts from the head of the array, so what stands first is what is spent
+/// first. Live, with `Attack` second, the whole of a guard's damage sat inside
+/// the first four hundred hits: it was disarmed on the approach and reached
+/// range 1 with nothing to swing, healing itself and answering
+/// `ERR_NO_BODYPART` every tick while both invaders stayed at full health. So
+/// Tough eats first, the Move parts next — a guard that cannot walk is still a
+/// guard, because it is standing on its target already — then the Attack parts,
+/// and Heal last, which is the ordering the community's own bodies carry. Cast
+/// in whole blocks, the second block's Attack sits a further six hundred hits
+/// down, so the damage degrades a part at a time rather than all at once.
 let guardPattern =
     {
         Name = "guard"
-        Block = [ Tough; Attack; Attack; Attack; Move; Move; Move; Move; Move; Heal ]
+        Block = [ Tough; Move; Move; Move; Move; Move; Attack; Attack; Attack; Heal ]
     }
 
 /// The pattern table: every body the colony casts is a row here, sized by

@@ -208,6 +208,11 @@ type ISpawn =
 type IBodyPartDef =
     /// Part-type string, e.g. "work" or "claim".
     abstract ``type``: string
+    /// Hits left in this one part. The engine destroys parts from the head of
+    /// the body, and a destroyed part stays in the array reading zero — so a
+    /// count that does not read this counts weapons the creep no longer has
+    /// (#270).
+    abstract hits: int
 
 type ICreep =
     abstract id: string

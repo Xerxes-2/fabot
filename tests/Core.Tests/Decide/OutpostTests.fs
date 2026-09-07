@@ -1852,9 +1852,11 @@ let outpostTests =
                     [ "W12S27"; "W13S28" ]
                     "while ADR 0042's measured pair is kept whole for the real-terrain fixtures"
 
-                Expect.isEmpty
-                    (Colony.outpostsOf Colony.declared "W13S28")
-                    "and the second colony works none: W13S29 is withdrawn by hand while its raid stands (#257)"
+                Expect.equal
+                    (Colony.outpostsOf Colony.declared "W13S28"
+                     |> List.map (fun outpost -> outpost.RoomName))
+                    [ "W13S29" ]
+                    "and the second colony works its south outpost, declared off the 2026-09-07 survey"
 
                 Expect.isEmpty
                     (Colony.outpostsOf Colony.declared "W1N1")

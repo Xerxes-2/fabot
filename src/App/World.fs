@@ -580,7 +580,18 @@ let ofGame (colonies: Colony list) (lastPositions: Map<string, RoomPos>) : World
                             Energy = c.store.getUsedCapacity "energy"
                             FreeCapacity = c.store.getFreeCapacity "energy"
                             Body =
+                                // The parts still standing, and never the parts
+                                // it was cast with (#270): the engine destroys
+                                // them from the head of the body and leaves
+                                // them in the array reading zero hits. Live, a
+                                // guard whose three Attack parts were gone went
+                                // on being counted as three, so it read as a
+                                // Fighter, kept the Guard its body could not
+                                // perform, and answered ERR_NO_BODYPART every
+                                // tick while the raid it was hired for went on
+                                // untouched.
                                 c.body
+                                |> Array.filter (fun p -> p.hits > 0)
                                 |> Array.countBy (fun p -> bodyPartOf p.``type``)
                                 |> Map.ofArray
                             Moved =

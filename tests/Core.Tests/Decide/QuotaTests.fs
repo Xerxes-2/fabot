@@ -163,14 +163,14 @@ let patternTableTests =
                             Block =
                                 [
                                     Tough
+                                    Move
+                                    Move
+                                    Move
+                                    Move
+                                    Move
                                     Attack
                                     Attack
                                     Attack
-                                    Move
-                                    Move
-                                    Move
-                                    Move
-                                    Move
                                     Heal
                                 ]
                         }
@@ -363,17 +363,20 @@ let patternTableTests =
             // ADR 0056's own five banks, one at a time so each answer is
             // read against exactly one other: 300 (the RCL1 bank, under one
             // block), 800 and 1,300 (one block), 1,800 (two) and 2,300
-            // (three). The parts come back in the **block's** order — TOUGH,
-            // ATTACK, MOVE, HEAL — because that is the order damage strips
-            // them in, and a body whose HEAL came off first would lose the
-            // twelve a tick it is bought for on the first hit.
+            // (three). The parts come back grouped in the **block's** order —
+            // TOUGH, MOVE, ATTACK, HEAL — and that order is the rule (#282):
+            // damage strips a body from its head, so what stands first is
+            // spent first. Live, with ATTACK second, a guard's whole damage
+            // sat inside the first four hundred hits and it reached its target
+            // disarmed. Move goes ahead of Attack because a guard that cannot
+            // walk is still a guard, and Heal stays last.
             let guardBlock =
-                [ Tough; Attack; Attack; Attack; Move; Move; Move; Move; Move; Heal ]
+                [ Tough; Move; Move; Move; Move; Move; Attack; Attack; Attack; Heal ]
 
             let guardBlocks n =
                 List.replicate n Tough
-                @ List.replicate (3 * n) Attack
                 @ List.replicate (5 * n) Move
+                @ List.replicate (3 * n) Attack
                 @ List.replicate n Heal
 
             test "the guard row's one block is 90 damage, 12 self-heal and 750 energy" {
