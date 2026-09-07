@@ -11,6 +11,7 @@ open Fabot.Core.Types
 open Fabot.Core.Atlas
 open Fabot.Core.Decide
 open Fabot.Core.Tests.RoomFixtures
+open Fabot.Core.Tests.Decide
 
 /// These pin the *capture* — that the loader reads the committed file as
 /// the room the server actually answered with. They name tiles, and the
@@ -2777,7 +2778,7 @@ let colonyTierTests =
 ///
 /// Pinned on a **crowd in a corridor**, exhaustively, because that is where
 /// the property can be lost and a colony is not: every way of standing
-/// three bodies on the eight tiles of `DecideTests.lane` with either rock
+/// three bodies on the eight tiles of `Fixtures.lane` with either rock
 /// as either body's goal — 5,376 arrangements — and each of them a chain
 /// the search may have to walk end to end. The three colony fixtures below
 /// it are a smoke check over a real fleet on real terrain and deliberately
@@ -2797,27 +2798,27 @@ let arbitrationInjectiveTests =
 
                 let settledOn pocket places goals =
                     let view =
-                        { DecideTests.bareRespawn with
-                            Sources = rocks |> List.map DecideTests.source
+                        { Fixtures.bareRespawn with
+                            Sources = rocks |> List.map Fixtures.source
                             Controller = None
-                            Creeps = names |> List.map (fun name -> DecideTests.worker name 0 50)
+                            Creeps = names |> List.map (fun name -> Fixtures.worker name 0 50)
                             Spatial =
-                                DecideTests.lane pocket
-                                |> DecideTests.withHome (fun layer ->
+                                Fixtures.lane pocket
+                                |> Fixtures.withHome (fun layer ->
                                     { layer with
                                         CreepPositions = List.zip names places |> Map.ofList
                                     })
                         }
 
                     let stepOf =
-                        DecideTests.resolveOn view (List.zip names goals)
-                        |> DecideTests.moveIntents
+                        Fixtures.resolveOn view (List.zip names goals)
+                        |> Fixtures.moveIntents
                         |> Map.ofList
 
                     List.zip names places
                     |> List.map (fun (creep, pos) ->
                         match Map.tryFind creep stepOf with
-                        | Some direction -> DecideTests.stepFrom pos direction
+                        | Some direction -> Fixtures.stepFrom pos direction
                         | None -> pos)
 
                 let jams =
@@ -2865,7 +2866,7 @@ let arbitrationInjectiveTests =
                             |> Map.toList
                             |> List.map (fun (creep, pos) ->
                                 match Map.tryFind creep stepOf with
-                                | Some direction -> DecideTests.stepFrom pos direction
+                                | Some direction -> Fixtures.stepFrom pos direction
                                 | None -> pos)
 
                         Expect.hasLength

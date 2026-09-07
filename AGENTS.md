@@ -3,6 +3,7 @@
 ## Code hygiene
 
 - Formatter: Fantomas (local dotnet tool). Run `npm run format` before committing; CI-style check: `npm run format:check`. Style knobs live in `.editorconfig`.
+- A new `Decide` test goes in the file its *domain* owns, never one named after the ticket: the table is in `docs/agents/orchestration.md` § Where a new Decide test goes.
 - Lint: the F# compiler with `TreatWarningsAsErrors` + `--warnon:1182` (unused bindings), set in `Directory.Build.props`. A clean `npm run build` / `dotnet test` is the lint gate.
 - `[<Emit>]` binding stubs use `_`-prefixed params (args are used positionally via `$0`, invisible to the compiler).
 - An `[<Emit>]` accessor with a real body (the checked index that runs on .NET, e.g. the Atlas flood's `at`) names its params normally: the .NET body uses them.

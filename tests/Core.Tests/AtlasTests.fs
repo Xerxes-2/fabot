@@ -5765,7 +5765,7 @@ let crossRoomStepTests =
                 // that opens it. What walks that step is the Resolver,
                 // which arbitrates each projected room by itself (ADR
                 // 0041, #145): the outpost's pass hands the landed creep
-                // that step, and `DecideTests` drives it from the landing
+                // that step, and `OutpostTests` drives it from the landing
                 // tile to the dig. This test's subject is the gate, which
                 // the Atlas keeps shut until the creep may stand.
                 Expect.isFalse

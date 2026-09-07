@@ -7,7 +7,15 @@
     <Compile Include="RoomFixtures.fs" />
     <Compile Include="ViewTests.fs" />
     <Compile Include="AtlasTests.fs" />
-    <Compile Include="DecideTests.fs" />
+    <Compile Include="Decide/Fixtures.fs" />
+    <Compile Include="Decide/LayoutTests.fs" />
+    <Compile Include="Decide/PoolTests.fs" />
+    <Compile Include="Decide/MatcherTests.fs" />
+    <Compile Include="Decide/QuotaTests.fs" />
+    <Compile Include="Decide/ColonyTests.fs" />
+    <Compile Include="Decide/OutpostTests.fs" />
+    <Compile Include="Decide/ThreatTests.fs" />
+    <Compile Include="Decide/AnchorTests.fs" />
     <Compile Include="ObserveTests.fs" />
     <Compile Include="WireTests.fs" />
     <Compile Include="RoomInvariantTests.fs" />

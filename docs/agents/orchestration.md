@@ -27,11 +27,45 @@ the **authority**.
 
 ## One issue at a time
 
-Nearly every issue lands in `src/Core/Decide.fs` and `tests/Core.Tests/DecideTests.fs`, so
+Nearly every issue lands in `src/Core/Decide.fs` and under `tests/Core.Tests/Decide/`, so
 parallel worktrees buy merge conflicts rather than speed. The orchestrator ships each issue
 before the next implementer starts, so every one begins from a clean, pushed `main`.
 
 Parallelise *inside* an issue instead — the review lenses run at once.
+
+## Where a new Decide test goes
+
+`tests/Core.Tests/Decide/` is split **by domain, never by issue**: an issue's tests are
+scattered across the files its behaviour belongs to, and no file is ever named after a
+ticket. Pick by what the test is about, not by what asked for it.
+
+| File | The domain it holds |
+|---|---|
+| `Fixtures.fs` | Snapshot builders and Decision readers shared by **more than one** suite |
+| `LayoutTests.fs` | the planner's clustered ordering, the trunks, the storage, the Link footings, and the plan memo the census signature keys |
+| `PoolTests.fs` | which Tasks a colony offers and what caps them — seats, refill cluster, stores, container Posts, piles, repairs, restock dispatch |
+| `MatcherTests.fs` | applicability, travel cost, yield arbitration, Verdicts, verbose scoring, and the Intents a decision emits — including the `decide` list, the end-to-end cases whose frozen names keep them here |
+| `QuotaTests.fs` | the cast rows, the workforce target and source output behind them, the body patterns, and the Tuning knobs |
+| `ColonyTests.fs` | the colony as a unit — stage, Claim, nursery, two colonies side by side, borrowed-room budgets |
+| `OutpostTests.fs` | rooms the colony mines but does not own — sources, containers, reservation, garrison, invader core, stand-down, and the Anchor of a Post standing in one of them |
+| `ThreatTests.fs` | what the colony sees and flees, the towers, the ramparts over the keep, the spawn hold, safe mode, the downgrade deadline |
+| `AnchorTests.fs` | the heavy body pinned to its rock — its Post, its Work ceiling, its Refill, its succession. The Anchor's own rules live here whatever room it stands in; a case whose subject is the outpost is `OutpostTests.fs` |
+
+A fixture starts **private, in the suite that needs it**. It moves to `Fixtures.fs` the tick
+a second suite wants it, and not before: `Fixtures.fs` is the shared surface, so everything
+in it is a name every suite must keep working.
+
+Each suite keeps its own `[<Tests>] let …Tests = testList "…"` entries. There is no wrapping
+`testList` over the directory — a wrapper would prefix every test name, and the names are
+the contract `dotnet test --list-tests` is diffed on.
+
+No file under `tests/Core.Tests/Decide/` passes 6,000 lines. Past that the file is what
+makes it expensive to edit, and it splits again along the same rule — by domain.
+`AtlasTests.fs` sits outside the directory and is over the line already; #229 left it whole
+because it is one domain, and it splits on its own ticket, not on this rule.
+
+ADRs written before #229 name `DecideTests` for what is now `tests/Core.Tests/Decide/`; they
+are dated records and stay as written, so follow the test *name* they quote, not the file.
 
 ## The per-issue loop
 

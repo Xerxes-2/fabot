@@ -6224,7 +6224,7 @@ type private Matching =
 /// not undo a chain that dead-ended; a swap with no special case, since the
 /// creep a chain starts from is lifted off its tile before the search and a
 /// displaced creep's candidates already hold it; and an injective answer
-/// (`RoomInvariantTests`, and the three-deep chain in `DecideTests` that is
+/// (`RoomInvariantTests`, and the three-deep chain in `MatcherTests` that is
 /// the shape it can be lost at).
 let private arbitrate
     (occupants: Map<RoomPos, string>)
