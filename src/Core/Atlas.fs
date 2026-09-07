@@ -82,6 +82,16 @@ type Atlas =
             /// `TargetKinds` stays flat: an object id is already unique, so the
             /// kind census needs no room.
             TargetAt: Map<string, string * Pos>
+            /// The kind census read the other way round: kind -> the ids of
+            /// that kind, in id order. `SpatialInfo.TargetKinds` answers "what
+            /// kind is this id", and every census on this API asks the
+            /// opposite — "which ids are Towers" — which used to mean walking
+            /// the whole census and comparing a union case per entry, once per
+            /// ask and a dozen asks a tick. Inverted once beside the joins
+            /// above, so an ask is one lookup. Flat for the same reason
+            /// `TargetKinds` is: an object id is unique across the world, so
+            /// the kind census needs no room (ADR 0041).
+            KindIds: Map<TargetKind, string list>
             /// Step weight per tile index, per room name, laid once a tick for
             /// the flood's hot loop: -1 impassable, else the price of stepping
             /// onto the tile — road 1, plain 2, swamp 10; walls, obstacle
@@ -698,6 +708,18 @@ let ofViewRecalling (walks: WalkTable) (view: ColonyView) : Atlas =
     let creepAt = locate (fun (layer: RoomLayer) -> layer.CreepPositions)
     let targetAt = locate (fun (layer: RoomLayer) -> layer.TargetPositions)
 
+    // The kind census inverted, once. `Map.fold` walks the census in ascending
+    // id order and each id is prepended, so reversing each bucket leaves the
+    // ids in the id order every census on this API promises — the same order
+    // the scan it replaces answered in.
+    let kindIds =
+        spatial.TargetKinds
+        |> Map.fold
+            (fun index id kind ->
+                Map.add kind (id :: (Map.tryFind kind index |> Option.defaultValue [])) index)
+            Map.empty
+        |> Map.map (fun _ ids -> List.rev ids)
+
     let placed =
         view.Creeps
         |> List.choose (fun creep ->
@@ -793,6 +815,7 @@ let ofViewRecalling (walks: WalkTable) (view: ColonyView) : Atlas =
         Factors = factors
         CreepAt = creepAt
         TargetAt = targetAt
+        KindIds = kindIds
         Weights = weights
         Ground = ground
         Rings = rings
@@ -964,9 +987,7 @@ let buildableTilesIn (atlas: Atlas) (room: string) : Pos list =
 /// be: an object id is unique across the world (ADR 0041), and this answers
 /// ids, never tiles. Every reader that turns these into tiles joins a room first.
 let private targetsOfKind (atlas: Atlas) (kind: TargetKind) : string list =
-    atlas.Spatial.TargetKinds
-    |> Map.toList
-    |> List.choose (fun (id, k) -> if k = kind then Some id else None)
+    Map.tryFind kind atlas.KindIds |> Option.defaultValue []
 
 /// Placed targets of one kind in one named room: id and tile, in id order.
 /// One of the joins between the flat kind census and the layered positions,
@@ -1044,13 +1065,11 @@ let roadTilesIn (atlas: Atlas) (room: string) : Set<Pos> = (layerOf atlas room).
 let private tilesWhereIn (atlas: Atlas) (room: string) (matches: TargetKind -> bool) : Set<Pos> =
     let layer = layerOf atlas room
 
-    atlas.Spatial.TargetKinds
+    atlas.KindIds
     |> Map.toList
-    |> List.choose (fun (id, kind) ->
-        if matches kind then
-            Map.tryFind id layer.TargetPositions
-        else
-            None)
+    |> List.filter (fun (kind, _) -> matches kind)
+    |> List.collect snd
+    |> List.choose (fun id -> Map.tryFind id layer.TargetPositions)
     |> Set.ofList
 
 /// The same census over one room, by kind.
@@ -1127,13 +1146,9 @@ let rampartTilesIn (atlas: Atlas) (room: string) : Set<Pos> =
 let ourRampartTilesIn (atlas: Atlas) (room: string) : Set<Pos> =
     let layer = layerOf atlas room
 
-    atlas.Spatial.TargetKinds
-    |> Map.toList
-    |> List.choose (fun (id, kind) ->
-        if kind = Structure BuiltKind.Rampart && Map.containsKey id atlas.Spatial.Hits then
-            Map.tryFind id layer.TargetPositions
-        else
-            None)
+    targetsOfKind atlas (Structure BuiltKind.Rampart)
+    |> List.filter (fun id -> Map.containsKey id atlas.Spatial.Hits)
+    |> List.choose (fun id -> Map.tryFind id layer.TargetPositions)
     |> Set.ofList
 
 /// Tiles holding a rampart construction site — the census's pending half,
@@ -1331,9 +1346,14 @@ let private memoised
     (key: 'key)
     (build: unit -> 'value)
     : 'value =
-    match table.TryGetValue key with
-    | true, value -> value
-    | _ ->
+    // `ContainsKey` then the indexer, and never `TryGetValue` in a match:
+    // Fable compiles the out-parameter pattern into an `FSharpRef` wrapping a
+    // getter and a setter closure plus the tuple the match destructures — four
+    // allocations on the one read every memoised table in the Atlas makes,
+    // against two native `Map` probes and none.
+    if table.ContainsKey key then
+        table.[key]
+    else
         let value = build ()
         table.[key] <- value
         value

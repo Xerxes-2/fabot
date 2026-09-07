@@ -65,16 +65,15 @@ module Engine =
     let rangedRange = 3
 
     /// ATTACK_POWER: the hits one ATTACK part takes off a creep at range 1.
-    /// The guard row's count rule prices one block of that row's body with it
-    /// (ADR 0056, as #272 amends it) — melee is 0.231 damage per energy against
-    /// ranged's 0.050, which is why that row's block is an ATTACK block.
+    /// The guard row's count rule prices our own damage with it (ADR 0056) —
+    /// melee is 0.231 damage per energy against ranged's 0.050, which is why
+    /// that row's block is an ATTACK block.
     let attackPower = 30
 
     /// RANGED_ATTACK_POWER: the hits one RANGED_ATTACK part takes off a single
-    /// target at range 1..3. Read beside `attackPower` over the guard row's own
-    /// block (ADR 0056, as #272 amends its count rule), so a block that ever
-    /// carried one would be priced for what it can actually do even though
-    /// today's buys none.
+    /// target at range 1..3. Read beside `attackPower` over our own standing
+    /// guards, so a body carrying one is priced for what it can actually do
+    /// even though the row never buys one (ADR 0056).
     let rangedAttackPower = 10
 
     /// HEAL_POWER: the hits one HEAL part puts back at range 1 — the rate a
@@ -508,12 +507,78 @@ type RoomControlInfo =
 /// phantom [[post]] and a hostile in an [[outpost]] measured at range 0 from
 /// home. Declared **before** `Pos` and never after it: F# resolves a bare `.X`
 /// on an un-annotated value to the *last* record type declaring that field.
-type RoomPos = { Room: string; X: int; Y: int }
+[<CustomEquality; CustomComparison>]
+type RoomPos =
+    {
+        Room: string
+        X: int
+        Y: int
+    }
+
+    /// Hand-written for the reason `Pos` below carries: a `RoomPos` keys every
+    /// Work Area, occupancy map and Move Intent candidate list, and Fable's
+    /// generic walk over a record's fields is the single largest library cost
+    /// in a tick.
+    override this.Equals other =
+        match other with
+        | :? RoomPos as that -> this.X = that.X && this.Y = that.Y && this.Room = that.Room
+        | _ -> false
+
+    override this.GetHashCode() =
+        (this.Room.GetHashCode() * 2503) + (this.X * 50) + this.Y
+
+    interface System.IComparable with
+        /// **Room, then X, then Y** — the field order the record's default
+        /// comparison used, ordinal on the room name as .NET's own record
+        /// comparison is, so no tie anywhere in the colony reorders.
+        member this.CompareTo other =
+            match other with
+            | :? RoomPos as that ->
+                let byRoom = System.String.CompareOrdinal(this.Room, that.Room)
+
+                if byRoom <> 0 then byRoom
+                elif this.X < that.X then -1
+                elif this.X > that.X then 1
+                elif this.Y < that.Y then -1
+                elif this.Y > that.Y then 1
+                else 0
+            | _ -> 1
 
 /// A tile coordinate inside a room. Kept as the **grid** coordinate (ADR 0052
 /// decision 2): a key of `RoomLayer.Terrain`, of `Obstacles`, of the flood
 /// arrays and of every Seat, Reach and Work-Area grid the Atlas lays per room.
-type Pos = { X: int; Y: int }
+[<CustomEquality; CustomComparison>]
+type Pos =
+    {
+        X: int
+        Y: int
+    }
+
+    /// Structural equality by hand. Fable's generic `equals` walks a record's
+    /// fields through `compare`, and a `Pos` is a key of every grid the Atlas
+    /// lays, so that walk is 25% of a tick (measured, `pair` scenario). Two
+    /// ints compared inline answer the same question.
+    override this.Equals other =
+        match other with
+        | :? Pos as that -> this.X = that.X && this.Y = that.Y
+        | _ -> false
+
+    /// The grid index, which is injective over a room's tiles.
+    override this.GetHashCode() = this.X * Engine.roomSide + this.Y
+
+    interface System.IComparable with
+        /// **X then Y**, which is the field order the record's default
+        /// comparison used and which every "ties by (X, Y) order" rule in the
+        /// colony rests on (ADR 0011, ADR 0042, #244).
+        member this.CompareTo other =
+            match other with
+            | :? Pos as that ->
+                if this.X < that.X then -1
+                elif this.X > that.X then 1
+                elif this.Y < that.Y then -1
+                elif this.Y > that.Y then 1
+                else 0
+            | _ -> 1
 
 /// Screeps range: Chebyshev distance between two tiles of **one** room. The
 /// one definition — the Atlas's geometry, the two hostile reflexes and the
