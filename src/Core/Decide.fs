@@ -298,6 +298,47 @@ let taskId =
     // and every creep inside a Reach is running from the same thing.
     | Flee -> "flee"
 
+/// The **target** inside a Task id: the engine's own object id, which is
+/// everything `taskId` writes after its one colon. `None` for Flee, the one id
+/// naming no target. Read by the vision grace, which holds an id and no Task —
+/// the Task it named has left the pool — and stays blind to Task kinds doing
+/// it (ADR 0052 decision 6): what it needs is the id the room's census files
+/// that target under, and every kind spells that the same way.
+let private taskTarget (tid: string) : string option =
+    match tid.IndexOf ':' with
+    | -1 -> None
+    | colon -> Some(tid.Substring(colon + 1))
+
+/// The vision grace's one question (#151): the room a held Task's target was
+/// last seen standing in, when that room has gone **dark** inside
+/// `Tuning.VisionGrace` and not longer. `None` is every other answer — the room
+/// is in view this tick, it was never seen, the darkness has outlasted the
+/// grace, or the id names no target at all.
+///
+/// A Task leaves the pool for two opposite reasons and its id alone cannot tell
+/// them apart: the target was destroyed, or the room carrying it went dark. The
+/// pool stays gated on vision and rightly so (ADR 0004) — a blind room hands
+/// over an empty site list and no rule may price what nobody can see — so what
+/// this asks is about **looking** and never about the target. Two readers, and
+/// they are the two halves of one rule: the Matcher keeps the assignment, and
+/// the mover walks its holder at the room the answer names (`Atlas.stepTowardRoom`).
+/// Written once because a second spelling is free to disagree about which of
+/// them is holding a creep still.
+let private lastSeenIn (view: ColonyView) (tid: string) : string option =
+    match taskTarget tid with
+    | None -> None
+    | Some target ->
+        view.Sightings
+        |> Map.tryPick (fun room sighting ->
+            if
+                sighting.Tick < view.Time
+                && view.Time - sighting.Tick <= view.Tuning.VisionGrace
+                && Set.contains target sighting.Targets
+            then
+                Some room
+            else
+                None)
+
 /// The [[stage]] of the colony whose home is the named room, off the one
 /// derivation the shell ran for the tick (ADR 0052 decision 3). `None` for a
 /// room no colony of ours lives in — undeclared, unclaimed, or one nothing
@@ -3239,6 +3280,17 @@ let private threatened (threats: Threats) atlas (creep: CreepInfo) task =
     not (Set.isEmpty (Atlas.workAreaFor atlas creep.Name task))
     && Set.isEmpty (areaFor threats atlas creep.Name task)
 
+/// Whether the creep itself is standing where it can be hurt: its own tile
+/// inside a Reach of its own room (ADR 0033). Flee's applicability is this and
+/// a body that can run, and the vision grace asks it too — the grace is the one
+/// keep that answers for a Task no gate below can be asked about, so the
+/// question ADR 0033 puts above all work is asked of the creep instead. Total
+/// (ADR 0004): a creep the projection cannot place stands in no Reach.
+let private standsInReach (threats: Threats) atlas (creep: string) =
+    match Atlas.creepTile atlas creep with
+    | Some tile -> Set.contains (RoomPos.pos tile) (Threats.reachIn threats tile.Room)
+    | None -> false
+
 /// Whether a construction site stands in a room this colony **mines** — an
 /// [[outpost]]'s, and so a site the outpost builders' budget may ration rather
 /// than a piece of the home room's surplus. One half of that queue's reading
@@ -4231,11 +4283,7 @@ let private applicable
     // seven ticks a step an Anchor leaving its Post neither escapes nor digs,
     // and the answer for the Post is a rampart (ADR 0034) — which is also why
     // the tile under one is in no Reach.
-    | Flee ->
-        not (Atlas.workHeavy atlas creep.Name)
-        && (match Atlas.creepTile atlas creep.Name with
-            | Some tile -> Set.contains (RoomPos.pos tile) (Threats.reachIn threats tile.Room)
-            | None -> false)
+    | Flee -> not (Atlas.workHeavy atlas creep.Name) && standsInReach threats atlas creep.Name
 
 /// The action Intent a Task asks of a creep, or None for a Task with no
 /// action: Flee is movement and nothing else (ADR 0033), and the Emitter
@@ -4386,6 +4434,17 @@ let private idleRank = System.Int32.MaxValue
 /// was opened about. The rule is the idle body's alone — a body with a Task it
 /// cannot reach parks on the Task's own rank and keeps its tile, because it is
 /// not the ground it is standing on that is stopping it.
+///
+/// **A body crossing for a room it cannot see keeps crossing** (#151). The
+/// vision grace holds a creep's assignment while its target's room is dark, and
+/// a held assignment whose Task left the pool with the vision reaches the mover
+/// as `crossing`: the room the target was last seen in, and nothing else about
+/// it. That is enough to walk — the step is toward the near side of a Seam,
+/// which is border layer and memoised terrain (`Atlas.stepTowardRoom`) — and it
+/// is the whole reason the grace is worth having: a body that stops walking
+/// arrives no sooner than the one that turned round, and it is its own arrival
+/// that ends the darkness. It pushes at `idleRank`, because the Task it is
+/// walking for is in no pool to be priced against the ones that are.
 let private moveIntentFor
     (rankOf: Task -> int)
     (idleGround: string -> Set<Pos> * Set<RoomPos>)
@@ -4394,6 +4453,7 @@ let private moveIntentFor
     (creep: string)
     (at: RoomPos)
     (task: Task option)
+    (crossing: string option)
     : MoveIntent =
     // The room the creep stands in and the only room its candidates are
     // tiles of (#145): it rides on the tile now (ADR 0052 decision 2)
@@ -4416,8 +4476,41 @@ let private moveIntentFor
             Candidates = staying @ beside |> List.map here
         }
 
-    match task with
-    | None ->
+    // The detours behind a step: the ground beside this creep that also lies
+    // beside the step it asked for — a way *around* the tile it wanted and
+    // never a way back down the lane it came up. Both halves are load-bearing.
+    // Without the tail a creep whose one candidate is held by a body that
+    // cannot move stands still for as long as that body does; with the whole
+    // neighbourhood in it, a traveller queued behind a merely fatigued creep
+    // would back away and return every other tick, and ADR 0008's answer —
+    // wait in place — is the right one.
+    let detour step =
+        if onSeam then
+            beside |> List.filter ((<>) step)
+        else
+            let around = Atlas.adjacentWalkableIn atlas room step |> Set.ofList
+            beside |> List.filter (fun tile -> Set.contains tile around)
+
+    // The graced holder's crossing (#151), asked before the Task branches
+    // because it is the one body with neither: its Task left the pool with its
+    // target's room's vision, so there is nothing to price and nothing to act
+    // on, and the room name is the whole of what the mover was handed. No Seam
+    // to that room — it is not next door — and it falls through to the idle
+    // rule below, which is what it is until the vision comes back.
+    let crossingStep =
+        match task, crossing with
+        | None, Some room -> Atlas.stepTowardRoom atlas creep room |> Option.map RoomPos.pos
+        | _ -> None
+
+    match crossingStep, task with
+    | Some step, _ ->
+        {
+            Creep = creep
+            Pos = at
+            Rank = idleRank
+            Candidates = step :: detour step |> List.map here
+        }
+    | None, None ->
         // The room's working ground and the ground just off it: any way off
         // runs through one of those tiles, so the nearest of them is the
         // nearest standing room there is outside the colony's workplaces, and
@@ -4459,7 +4552,7 @@ let private moveIntentFor
                  | None -> tail)
                 |> List.map here
         }
-    | Some task ->
+    | None, Some task ->
         // The area less this tick's Reach (ADR 0033): a creep works from the
         // safe half of its Work Area rather than abandoning the Task because
         // one corner is hot, and its steps go nowhere else. Read against the
@@ -4479,27 +4572,11 @@ let private moveIntentFor
         else
             match Atlas.firstStep atlas creep task area |> Option.map RoomPos.pos with
             | Some step ->
-                // The detours: the ground beside this creep that also lies
-                // beside the step it asked for — a way *around* the tile it
-                // wanted and never a way back down the lane it came up. Both
-                // halves are load-bearing. Without the tail a creep whose one
-                // candidate is held by a body that cannot move stands still for
-                // as long as that body does; with the whole neighbourhood in
-                // it, a traveller queued behind a merely fatigued creep would
-                // back away and return every other tick, and ADR 0008's answer
-                // — wait in place — is the right one.
-                let tail =
-                    if onSeam then
-                        beside |> List.filter ((<>) step)
-                    else
-                        let around = Atlas.adjacentWalkableIn atlas room step |> Set.ofList
-                        beside |> List.filter (fun tile -> Set.contains tile around)
-
                 {
                     Creep = creep
                     Pos = at
                     Rank = rankOf task
-                    Candidates = step :: tail |> List.map here
+                    Candidates = step :: detour step |> List.map here
                 }
             | None -> parked (rankOf task)
 
@@ -4715,7 +4792,10 @@ type private RoomPass =
 /// creep the Atlas places registers one (ADR 0001); a fatigued creep registers
 /// none — the engine would answer its move with ERR_TIRED — and its tile is a
 /// wall for the tick, so nobody plans a step through it (ADR 0008). Takes the
-/// tick's assigned Task per creep as data; a creep absent from the map is idle.
+/// tick's assigned Task per creep as data; a creep absent from the map is idle,
+/// unless it is in `crossings` — the vision grace's holders and the room each
+/// is still walking toward (#151), which is the one assignment that reaches
+/// here without a Task because the Task left the pool with its room's vision.
 /// Rerouted is settled here rather than in the pass, because it is the one
 /// movement Verdict the arbitration does not answer: it compares this creep's
 /// priced first step against the step the same body would take were no tile
@@ -4726,6 +4806,7 @@ let movementOf
     (threats: Threats)
     (pool: PooledTask list)
     (assigned: Map<string, Task>)
+    (crossings: Map<string, string>)
     (verbose: Set<string>)
     : Movement =
     // The push each assigned Task carries into arbitration is its own pooled
@@ -4751,7 +4832,12 @@ let movementOf
     let idleGrounds =
         placed
         |> List.filter (fun (name, _) ->
-            not (Map.containsKey name assigned) && not (Set.contains name tired))
+            not (Map.containsKey name assigned)
+            // A graced holder is walking a crossing, not idling (#151): it
+            // steps off nothing and it is not the [[working ground]]'s
+            // problem.
+            && not (Map.containsKey name crossings)
+            && not (Set.contains name tired))
         |> List.map (fun (_, at) -> at.Room)
         |> List.distinct
         |> List.map (fun room ->
@@ -4797,7 +4883,8 @@ let movementOf
                     atlas
                     name
                     at
-                    (Map.tryFind name assigned))
+                    (Map.tryFind name assigned)
+                    (Map.tryFind name crossings))
         Rerouted =
             placed
             |> List.choose (fun (name, _) ->
@@ -4938,9 +5025,10 @@ let resolve
     (threats: Threats)
     (pool: PooledTask list)
     (assigned: Map<string, Task>)
+    (crossings: Map<string, string>)
     (verbose: Set<string>)
     : Intent list * Verdict list =
-    resolveRooms [ movementOf view atlas threats pool assigned verbose ]
+    resolveRooms [ movementOf view atlas threats pool assigned crossings verbose ]
 
 /// Matcher: keep still-valid assignments (anti-thrash) and greedily assign the
 /// rest. Assignments in, Assignments and the Verdicts explaining them out (ADR
@@ -5080,6 +5168,36 @@ let matchCreeps
                 capacity.Generalists
                 (all - heavy - standingRow)
 
+    // The vision grace (#151): a Task leaves the pool for two opposite reasons
+    // and its id alone cannot tell them apart — the target was destroyed, or
+    // the room carrying it went dark. The pool stays gated on vision and
+    // rightly so (ADR 0004): a blind room hands over an empty site list, and
+    // no rule here may price what nobody can see. What this asks instead is
+    // about **looking**, never about the target — the id stood in a room this
+    // colony works, that room has not been seen since, and it went dark inside
+    // `Tuning.VisionGrace`. Then the assignment is kept: the [[outpost]] whose
+    // [[reserver]] just died is dark for the relief's lead and no longer, and
+    // a builder released here walks a full load home to start the crossing
+    // again on the tick the vision returns. Past the grace the release is
+    // `task-gone` exactly as it was, because a container that really was
+    // destroyed must not be held for ever by a body that cannot see the tile.
+    // One rule over every Task kind that vision pays for, and Harvest needs
+    // none of it: a declared rock is placed and pooled without vision at all
+    // (ADR 0041, #148).
+    //
+    // One thing the grace may not outrank, and it is the one thing nothing
+    // below could have asked for it: Safety (ADR 0033). A Task in no pool has
+    // no Work Area, so `threatened` — which reads the *Task's* tiles — answers
+    // false for it whatever stands where; the question that keeps a body alive
+    // has to be asked of the **creep**. A holder standing inside a Reach is
+    // therefore denied the grace, falls through to `task-gone`, and rematches
+    // to Flee in the cascade below, exactly as it did before the grace existed.
+    let graced (creep: CreepInfo) tid =
+        if standsInReach threats atlas creep.Name then
+            None
+        else
+            lastSeenIn view tid
+
     // Capacity applies to remembered assignments too: memory can carry an
     // oversell from before a cap existed. So does reachability — a Work Area
     // the Atlas can no longer reach releases the assignment, freeing its
@@ -5098,6 +5216,16 @@ let matchCreeps
             | None -> acc, loads, released
             | Some creep ->
                 match Map.tryFind tid byId with
+                // Kept, and by the Verdict every other steady assignment
+                // answers with (ADR 0009): what the colony did this tick about
+                // this creep is nothing, and there is no second word for it.
+                // The Task is in no pool, so no gate below can be asked about
+                // it: `graced` is the whole judgement, and the one gate it
+                // carries is the one a Work Area could not have answered for
+                // (Safety, ADR 0033). The holder counts against its own Task's
+                // crowd the tick the vision returns, on the ordinary path.
+                | None when Option.isSome (graced creep tid) ->
+                    Map.add name tid acc, hold loads tid, released
                 | None -> release ReleaseReason.TaskGone
                 // The raid's release stands ahead of the ordinary one: a
                 // Task whose whole Work Area is in a Reach is gone for this
@@ -5415,6 +5543,22 @@ let decideUnarbitrated
 
     let next, verdicts = matchCreeps view atlas sizing threats pool assignments verbose
     let assigned = assignedTasks tasks next
+
+    // The other half of the vision grace (#151): the holders the Matcher kept
+    // against a Task that is in no pool, and the room each one's target was
+    // last seen in. They reach the Emitter as nothing — there is no act to
+    // spell on a target nobody can see — and the mover as a crossing, which is
+    // the whole of what the grace buys. Read off the same rule the keep was
+    // taken on (`lastSeenIn`), over the assignments that survived it: a keep
+    // with no pooled Task is a graced one by construction.
+    let crossings =
+        next
+        |> Map.toList
+        |> List.filter (fun (name, _) -> not (Map.containsKey name assigned))
+        |> List.choose (fun (name, tid) ->
+            lastSeenIn view tid |> Option.map (fun room -> name, room))
+        |> Map.ofList
+
     let taskIntents = emit view atlas threats assigned
 
     // The reflex, less what a Task already asked for: the Pickup Task's own act
@@ -5439,7 +5583,7 @@ let decideUnarbitrated
         Assignments = next
         Memo = plan
         Verdicts = verdicts
-        Movement = movementOf view atlas threats pool assigned verbose
+        Movement = movementOf view atlas threats pool assigned crossings verbose
         Quotas =
             { quotas with
                 HaulerLoad = plan.HaulerLoad

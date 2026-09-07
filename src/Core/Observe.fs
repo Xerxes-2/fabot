@@ -275,8 +275,10 @@ type RaidState =
         /// room on the tick after it shut it, for ever. That is
         /// `standingDown`'s oscillation reached through the other trigger, and
         /// the answer is the same shape: hold the last conclusion until a tick
-        /// with vision replaces it. This leaf is the only state the colony
-        /// keeps per room (#117).
+        /// with vision replaces it. This leaf is the only per-room state the
+        /// colony keeps **in Memory** (#117); the [[sighting]] the vision grace
+        /// reads is per-room and carried across ticks too, and is heap-only
+        /// (#151).
         RivalHeld: Map<string, int>
         /// The owned creep names the previous tick projected, less the ones
         /// whose life ran out on it: the baseline this tick's losses are read

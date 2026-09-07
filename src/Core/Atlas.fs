@@ -2292,6 +2292,43 @@ let firstStep (atlas: Atlas) (creep: string) (task: Task) (goals: Set<RoomPos>) 
 let firstStepWithin (atlas: Atlas) (creep: string) (goals: Set<RoomPos>) : RoomPos option =
     firstStepVia atlas TravelCost creep goals
 
+/// The step a creep takes toward a **room**, with nothing placed in it to aim
+/// at: toward the near side of any Seam joining the two. `stepAcross` without
+/// its far leg, and that is the whole of the difference — the exit is the one
+/// this room's own flood reaches cheapest instead of the crossing a price was
+/// won at, because a room nobody can see prices nothing (ADR 0004). What it
+/// reads is the border layer and the memoised terrain, and neither waits for
+/// vision (ADR 0031, ADR 0041): no remembered tile enters a walking grid and no
+/// Work Area grows one. Written for the vision grace's crossing creep (#151),
+/// whose target left the projection with its room's vision while the border it
+/// is walking at stayed exactly where it was. Total (ADR 0004): no Seam, no
+/// step, and a creep already in the room is not crossing to it.
+let stepTowardRoom (atlas: Atlas) (creep: string) (room: string) : RoomPos option =
+    match Map.tryFind creep atlas.CreepAt with
+    | Some(creepRoom, from) when creepRoom <> room ->
+        match seams atlas creepRoom room with
+        | [] -> None
+        | band ->
+            let ground = weightsOf atlas creepRoom
+            let exits = band |> List.map fst
+
+            // Standing beside a crossing already: step onto it, exactly as
+            // `stepAcross` does for the exit it priced. The band's own (X, Y)
+            // order settles a body standing beside two of them.
+            let beside =
+                exits
+                |> List.tryFind (fun exit -> List.contains from (besideExitFrom ground from exit))
+
+            match beside with
+            | Some exit -> Some(RoomPos.at creepRoom exit)
+            | None ->
+                exits
+                |> List.collect (besideExit ground)
+                |> Set.ofList
+                |> RoomPos.setAt creepRoom
+                |> firstStepVia atlas TravelCost creep
+    | _ -> None
+
 /// The first step the same body would take were no tile occupied — the
 /// traffic-blind route, otherwise priced exactly like `firstStep`. The Resolver
 /// compares the two: a difference attributes the detour to the occupancy

@@ -660,6 +660,201 @@ let outpostTests =
                     "and may not build a site a room away, however well priced (ADR 0041)"
             }
 
+            test "the tick the outpost goes dark the worker crossing for its site is kept" {
+                // #151's reproduction, at the seam it was reproduced on. The
+                // reserver dies — a CLAIM body lives 600 ticks — and with it
+                // goes the only vision W1N2 had: the site leaves
+                // `ConstructionSites`, the projection stops placing it, and
+                // `build:site-out` leaves the pool. Every gate below the
+                // first in the Matcher's keep cascade is about the *Task*,
+                // so none of them is even reached; the assignment fell
+                // through the one gate that reads an empty lookup as a
+                // target that is gone. The worker turned round with a full
+                // load, and on the tick the vision came back the whole
+                // crossing began again — a half-built container can stand
+                // there for ever that way.
+                //
+                // What the grace changes is exactly that first gate, and it
+                // reads a fact about looking rather than about the site: the
+                // room the id was last seen in has not been seen since, and
+                // it went dark inside `Tuning.VisionGrace`.
+                let crossing =
+                    northBorderColony { X = 10; Y = 38 }
+                    |> withNorthOutpost None
+                    |> withOutpostSite { X = 10; Y = 43 }
+                    |> loaded
+
+                // A tick a long way from zero, so the dark ticks the grace
+                // is read over are ticks and not a fixture's arithmetic.
+                let sited = { crossing with Time = 1000 }
+
+                let held = taskId (Build "site-out")
+                let assignments = Map.ofList [ "w", held ]
+
+                // The room as the shell hands it over with no vision in it:
+                // the site list is empty, the kind census and the tile go
+                // with it (ADR 0004 is right here and this ticket does not
+                // touch it), and the one thing left is the world's own
+                // record of when the room was last looked into and what
+                // stood in it then.
+                let darkSince tick =
+                    { sited with
+                        ConstructionSites = []
+                        Spatial =
+                            { sited.Spatial with
+                                TargetKinds = Map.remove "site-out" sited.Spatial.TargetKinds
+                            }
+                            |> withNeighbour
+                                "W1N2"
+                                { SpatialInfo.layerOf sited.Spatial "W1N2" with
+                                    TargetPositions = Map.empty
+                                }
+                        Sightings =
+                            Map.ofList
+                                [
+                                    "W1N2",
+                                    {
+                                        Tick = tick
+                                        Targets = Set.singleton "site-out"
+                                    }
+                                ]
+                    }
+
+                let verdictsAt tick =
+                    (decide (darkSince tick) assignments Set.empty None).Verdicts
+
+                // Pairwise on the grace and on nothing else: one room, one
+                // creep, one held Task, and the only thing that moves
+                // between the three readings is the tick the room was last
+                // seen at.
+                Expect.contains
+                    (decide sited assignments Set.empty None).Verdicts
+                    (Verdict.Kept("w", held))
+                    "the premise, with the room in view: the site stands and the worker keeps the Build it is crossing for"
+
+                Expect.contains
+                    (verdictsAt 999)
+                    (Verdict.Kept("w", held))
+                    "the tick after the vision went, the worker is kept rather than sent home"
+
+                Expect.contains
+                    (verdictsAt 850)
+                    (Verdict.Kept("w", held))
+                    "and still kept at the last tick of the grace, 150 dark ticks on"
+
+                Expect.contains
+                    (verdictsAt 849)
+                    (Verdict.Released("w", held, ReleaseReason.TaskGone))
+                    "one tick past it the release is task-gone, as it always was: a container really destroyed is not held for ever"
+
+                // What the grace buys, both halves of it. The assignment is
+                // handed to the next tick, *and* the creep keeps walking the
+                // crossing it was released off before: a body that stops
+                // where it stands arrives no sooner than the one that turned
+                // round, and it is the arrival itself that ends the darkness.
+                //
+                // The mover aims it with what the grace already knows — the
+                // room the id was last seen in — and asks the border layer
+                // and the memoised terrain for the rest
+                // (`Atlas.stepTowardRoom`, ADR 0031, ADR 0041), which is the
+                // route `cac0124` built for a crossing creep. No remembered
+                // tile is laid into the layer, nothing is placed and nothing
+                // is priced off the sighting, so ADR 0004's vision gate
+                // stands exactly where #151 left it: the Emitter still has
+                // no act to spell for a target nobody can see.
+                let {
+                        Intents = waiting
+                        Assignments = next
+                    } =
+                    decide (darkSince 999) assignments Set.empty None
+
+                Expect.equal
+                    (Map.tryFind "w" next)
+                    (Some held)
+                    "the assignment is handed to the next tick"
+
+                Expect.equal
+                    (moveIntents waiting)
+                    [ "w", Top ]
+                    "and the worker walks on north for the Seam into the room it cannot see, exactly as it did with the vision"
+
+                Expect.isEmpty
+                    (waiting |> List.filter (fun intent -> moveIntents [ intent ] |> List.isEmpty))
+                    "and nothing else: a target nobody can see is acted on by nobody"
+            }
+
+            test "the tick the vision comes back the Build is judged as it always was" {
+                // The other half of #151's rule, and the reason it is a
+                // grace and not a latch: nothing about a kept assignment
+                // survives the vision returning. The relief lands, the room
+                // answers again, and the site is either standing — the
+                // worker walks the rest of the crossing it never abandoned —
+                // or gone, and the release it was owed arrives one tick
+                // late instead of never.
+                let crossing =
+                    northBorderColony { X = 10; Y = 38 }
+                    |> withNorthOutpost None
+                    |> withOutpostSite { X = 10; Y = 43 }
+                    |> loaded
+
+                // A tick a long way from zero, so the dark ticks the grace
+                // is read over are ticks and not a fixture's arithmetic.
+                let sited = { crossing with Time = 1000 }
+
+                let held = taskId (Build "site-out")
+                let assignments = Map.ofList [ "w", held ]
+
+                // Forty dark ticks behind it, and vision in the room this
+                // tick: the sighting is stamped at the tick it is read, so
+                // the grace can no longer fire whatever it remembers.
+                let backWithSite =
+                    { sited with
+                        Sightings =
+                            Map.ofList
+                                [
+                                    "W1N2",
+                                    {
+                                        Tick = 1000
+                                        Targets = Set.singleton "site-out"
+                                    }
+                                ]
+                    }
+
+                let {
+                        Intents = intents
+                        Verdicts = verdicts
+                    } =
+                    decide backWithSite assignments Set.empty None
+
+                Expect.contains
+                    verdicts
+                    (Verdict.Kept("w", held))
+                    "the site is standing, so the worker keeps the Build it has been holding"
+
+                Expect.equal
+                    (moveIntents intents)
+                    [ "w", Top ]
+                    "and walks on up its corridor, the crossing it never turned back from"
+
+                // The same tick with the site gone: the room is seen, so
+                // the sighting is this tick's and the grace has nothing to
+                // say — a target that vanished under our own eyes is gone.
+                let backWithout =
+                    { backWithSite with
+                        ConstructionSites = []
+                        Spatial =
+                            { backWithSite.Spatial with
+                                TargetKinds = Map.remove "site-out" backWithSite.Spatial.TargetKinds
+                            }
+                        Sightings = Map.ofList [ "W1N2", { Tick = 1000; Targets = Set.empty } ]
+                    }
+
+                Expect.contains
+                    (decide backWithout assignments Set.empty None).Verdicts
+                    (Verdict.Released("w", held, ReleaseReason.TaskGone))
+                    "and a site that finished or was cancelled while we watched releases on the tick it went"
+            }
+
             test "and the worker that landed in the outpost builds it" {
                 // The far half of the same walk, driven the way the engine
                 // drives it: #145 arbitrates the outpost as a room of its

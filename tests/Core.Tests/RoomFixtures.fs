@@ -800,6 +800,9 @@ let colonyAt (capture: RoomCapture) (level: int) (bank: int) : ColonyView =
         // These fixtures declare their outposts by hand and every one of
         // them borders its home, so nothing is refused (#243).
         Refused = []
+        // And nothing remembered of a room it cannot see: these captures
+        // are ticks with vision in every room they carry (#151).
+        Sightings = Map.empty
         // The numbers this bot ships with (ADR 0052 decision 5): a
         // fixture starts from them and the tests that are *about* a
         // tunable move the one field they are about.

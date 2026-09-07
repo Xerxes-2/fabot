@@ -163,6 +163,47 @@ let private declared: Colony list =
 let private pioneerTile = { X = 4; Y = 4 }
 let private haulerTile = { X = 6; Y = 6 }
 
+/// The three rooms of the pair world, each read as a tick with vision reads
+/// one. Named apart from the world below so the sighting map can be stamped
+/// off the same census the rooms carry, which is what `World.ofGame` does
+/// for a room `Game.rooms` answered for (#151).
+let private pairRooms: Map<string, RoomFacts> =
+    Map.ofList
+        [
+            roomOf
+                mother
+                Ownership.Ours
+                [
+                    "ctrl-W12S28", { X = 2; Y = 2 }, Controller
+                    "src-mother", { X = 3; Y = 3 }, Source
+                    "can-mother", { X = 3; Y = 4 }, Structure BuiltKind.Container
+                ]
+            |> ourColony "Spawn1" 5 1800
+            |> withSources [ "src-mother" ]
+            |> withStores [ "can-mother", 1500 ]
+            |> withCreeps [ "worker-900-Spawn1", { X = 2; Y = 3 } ]
+
+            roomOf outpost Ownership.Unowned [ "src-out", { X = 5; Y = 5 }, Source ]
+            |> withSources [ "src-out" ]
+
+            roomOf
+                child
+                Ownership.Ours
+                [
+                    "ctrl-W13S28", { X = 8; Y = 8 }, Controller
+                    "src-child", { X = 9; Y = 9 }, Source
+                    "can-child", { X = 9; Y = 8 }, Structure BuiltKind.Container
+                    "buf-child", { X = 7; Y = 7 }, Structure BuiltKind.Container
+                    "site-child", { X = 7; Y = 8 }, Site BuiltKind.Extension
+                    "spawn-child", { X = 8; Y = 9 }, Structure BuiltKind.Spawn
+                ]
+            |> ourColony "Spawn2" 2 300
+            |> withSources [ "src-child" ]
+            |> withStores [ "can-child", 900; "buf-child", 400 ]
+            |> withSites [ "site-child" ]
+            |> withCreeps [ "pioneer-900-Spawn1", pioneerTile; "hauler-950-Spawn2", haulerTile ]
+        ]
+
 /// The pair world: three rooms, two colonies, two bodies. The child's room
 /// carries everything a room of its own carries — a rock, a stocked
 /// container, a site, its own controller and spawn — because what the
@@ -170,49 +211,23 @@ let private haulerTile = { X = 6; Y = 6 }
 let private pairWorld: World =
     {
         Time = 1000
-        Rooms =
-            Map.ofList
-                [
-                    roomOf
-                        mother
-                        Ownership.Ours
-                        [
-                            "ctrl-W12S28", { X = 2; Y = 2 }, Controller
-                            "src-mother", { X = 3; Y = 3 }, Source
-                            "can-mother", { X = 3; Y = 4 }, Structure BuiltKind.Container
-                        ]
-                    |> ourColony "Spawn1" 5 1800
-                    |> withSources [ "src-mother" ]
-                    |> withStores [ "can-mother", 1500 ]
-                    |> withCreeps [ "worker-900-Spawn1", { X = 2; Y = 3 } ]
-
-                    roomOf outpost Ownership.Unowned [ "src-out", { X = 5; Y = 5 }, Source ]
-                    |> withSources [ "src-out" ]
-
-                    roomOf
-                        child
-                        Ownership.Ours
-                        [
-                            "ctrl-W13S28", { X = 8; Y = 8 }, Controller
-                            "src-child", { X = 9; Y = 9 }, Source
-                            "can-child", { X = 9; Y = 8 }, Structure BuiltKind.Container
-                            "buf-child", { X = 7; Y = 7 }, Structure BuiltKind.Container
-                            "site-child", { X = 7; Y = 8 }, Site BuiltKind.Extension
-                            "spawn-child", { X = 8; Y = 9 }, Structure BuiltKind.Spawn
-                        ]
-                    |> ourColony "Spawn2" 2 300
-                    |> withSources [ "src-child" ]
-                    |> withStores [ "can-child", 900; "buf-child", 400 ]
-                    |> withSites [ "site-child" ]
-                    |> withCreeps
-                        [ "pioneer-900-Spawn1", pioneerTile; "hauler-950-Spawn2", haulerTile ]
-                ]
+        Rooms = pairRooms
         Creeps =
             [
                 creep "worker-900-Spawn1" mother
                 creep "pioneer-900-Spawn1" child
                 creep "hauler-950-Spawn2" child
             ]
+        // Every room seen this tick, each stamped with the census that tick
+        // read out of it (#151). The narrowing this world is here to pin
+        // happens on the way *out* of it, into one colony's view.
+        Sightings =
+            pairRooms
+            |> Map.map (fun _ facts ->
+                {
+                    Tick = 1000
+                    Targets = facts.TargetKinds |> Map.toList |> List.map fst |> Set.ofList
+                })
     }
 
 let private noneShut = Map.empty<string, Set<string>>
@@ -454,6 +469,48 @@ let worldTests =
                     (Some mother)
                     "the colony that projects the room it stands in can move it"
             }
+
+            test "what the world saw before is laid under what it sees now" {
+                // The one thing the world carries across ticks (#151), and
+                // the merge that carries it: the shell reads `Game.rooms`
+                // and stamps a sighting for every room that answered, and
+                // this lays the previous tick's map under that answer. Three
+                // rooms, three fates, one call.
+                let sighting tick targets =
+                    {
+                        Tick = tick
+                        Targets = Set.ofList targets
+                    }
+
+                let thisTick =
+                    { pairWorld with
+                        Sightings = Map.ofList [ mother, sighting 1000 [ "src-mother" ] ]
+                    }
+
+                let recalled =
+                    World.recalling
+                        (Map.ofList
+                            [
+                                mother, sighting 900 [ "gone-since" ]
+                                outpost, sighting 950 [ "src-out" ]
+                                "W9N9", sighting 950 [ "src-elsewhere" ]
+                            ])
+                        thisTick
+
+                Expect.equal
+                    (Map.tryFind mother recalled.Sightings)
+                    (Some(sighting 1000 [ "src-mother" ]))
+                    "a room seen this tick answers for itself, and the older sighting of it goes"
+
+                Expect.equal
+                    (Map.tryFind outpost recalled.Sightings)
+                    (Some(sighting 950 [ "src-out" ]))
+                    "a room this tick could not see keeps the last look taken into it"
+
+                Expect.isFalse
+                    (Map.containsKey "W9N9" recalled.Sightings)
+                    "and a room the world no longer holds at all is forgotten rather than carried for the life of the global"
+            }
         ]
 
 [<Tests>]
@@ -659,6 +716,51 @@ let colonyViewTests =
                 Expect.isFalse (List.contains "src-out" (idsOf shut)) "its rock is not pooled"
 
                 Expect.isFalse (Map.containsKey outpost shut.RoomControl) "and nothing prices it"
+
+                // The fourth consequence, and #151's rule leans on it: the
+                // world remembers what it last saw in that room whatever the
+                // gate says, and the colony that has withdrawn from it must
+                // not. A withheld room carried here would hold every creep
+                // that was working it to a Task for the whole vision grace,
+                // which is the opposite of the withdrawal ADR 0043 spells
+                // through `task-gone`.
+                Expect.isTrue
+                    (Map.containsKey outpost pairWorld.Sightings)
+                    "the world's own sighting of the room stands: the gate is the colony's, not the world's"
+
+                Expect.isFalse
+                    (Map.containsKey outpost shut.Sightings)
+                    "and the colony that has withdrawn remembers nothing of it"
+            }
+
+            test "a room the colony works carries its sighting, dark or not" {
+                // The other side of the same narrowing: an [[outpost]] is
+                // worked whether or not this tick could see into it, so its
+                // sighting rides on the view — the one fact carried across
+                // ticks about a room, and what the Matcher's vision grace
+                // reads (#151).
+                let blind =
+                    { pairWorld with
+                        Rooms = Map.remove outpost pairWorld.Rooms
+                    }
+
+                let view = viewOf blind mother
+
+                Expect.equal
+                    (view.Sightings
+                     |> Map.tryFind outpost
+                     |> Option.map (fun sighting ->
+                         sighting.Tick, Set.contains "src-out" sighting.Targets))
+                    (Some(1000, true))
+                    "the tick it was last seen at, and what stood in it then"
+
+                // The child works her own room and nothing else, so the
+                // mother's outpost is a room the world remembers and this
+                // colony never asks about.
+                Expect.equal
+                    ((viewOf blind child).Sightings |> Map.toList |> List.map fst)
+                    [ child ]
+                    "and a colony carries no sighting of a room outside its own scan set"
             }
 
             test "an unseen outpost still carries its declared furniture" {

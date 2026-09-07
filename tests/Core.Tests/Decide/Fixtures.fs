@@ -181,6 +181,12 @@ let bareRespawn =
         // And nothing refused: "W1N2" borders "W1N1", so the declaration
         // this colony is cut from is one a Seam reaches (#243).
         Refused = []
+        // And nothing remembered of a room it cannot see (#151): a fixture
+        // is a tick with vision wherever it lays a fact, so an empty
+        // sighting map is what every case here decides under, and the
+        // vision grace is inert until a test puts a room in the dark on
+        // purpose (`goneDark`).
+        Sightings = Map.empty
         // The numbers this bot ships with (ADR 0052 decision 5): a
         // fixture starts from them and the tests that are *about* a
         // tunable move the one field they are about.
@@ -496,6 +502,7 @@ let resolveOn snapshot assigned =
         noThreats
         (poolOn snapshot)
         (Map.ofList assigned)
+        Map.empty
         Set.empty
     |> fst
 

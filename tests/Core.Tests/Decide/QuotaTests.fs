@@ -5428,6 +5428,46 @@ let tuningTests =
                     (Some Bootstrapping)
                     "move the line to five and the same room is still being raised"
             }
+
+            test "VisionGrace is how long a held Task outlives the vision that carried it" {
+                // #151's knob, pinned on the field and not on the shipped
+                // number: one colony, one dark room, one dark tick short of
+                // a hundred, read under two graces. The boundary at the
+                // shipped 150 is `OutpostTests`' own case; what this owns is
+                // that the number is read at all.
+                let dark =
+                    { bareRespawn with
+                        Time = 1000
+                        Sources = []
+                        Controller = None
+                        Creeps = [ worker "w1" 50 0 ]
+                        Sightings =
+                            Map.ofList
+                                [
+                                    "",
+                                    {
+                                        Tick = 900
+                                        Targets = Set.singleton "spawn-1"
+                                    }
+                                ]
+                    }
+
+                let held = taskId (Refill "spawn-1")
+                let sticky = Map.ofList [ "w1", held ]
+
+                let verdictsOf colony =
+                    (decide colony sticky Set.empty None).Verdicts
+
+                Expect.contains
+                    (verdictsOf (dark |> tunedBy (fun t -> { t with VisionGrace = 100 })))
+                    (Verdict.Kept("w1", held))
+                    "a grace of a hundred covers a hundred dark ticks, and the holder waits for the vision"
+
+                Expect.contains
+                    (verdictsOf (dark |> tunedBy (fun t -> { t with VisionGrace = 99 })))
+                    (Verdict.Released("w1", held, ReleaseReason.TaskGone))
+                    "one shorter and the same darkness is a Task given up on"
+            }
         ]
 
 [<Tests>]

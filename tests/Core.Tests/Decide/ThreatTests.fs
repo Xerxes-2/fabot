@@ -1181,6 +1181,65 @@ let fleeTests =
                     "and rank is what decided it against the deadline Upgrade"
             }
 
+            test "a holder the vision grace would keep still flees out of a Reach" {
+                // The vision grace keeps an assignment whose Task left the
+                // pool with its room's vision (#151), and it is the one keep
+                // in the cascade no gate below can judge: a Task in no pool
+                // has no Work Area, so `threatened` — which reads the
+                // *Task's* tiles — answers false for it whatever stands
+                // where. The question ADR 0033 puts above all other work has
+                // to be asked of the **creep** instead, or a graced body
+                // stands in the Reach until the grace or the body runs out.
+                //
+                // Pairwise on the hostile and on nothing else: the same dark
+                // room, the same held Refill, the same body on the same tile.
+                let held = taskId (Refill "spawn-1")
+
+                let dark hostiles =
+                    { laneColony [ worker "w1" 50 0 ] [ "w1", { X = 25; Y = 22 } ] with
+                        Time = 1000
+                        // The lane holds no `spawn-1` and pools no Refill for
+                        // it: the Task is gone the way a dark room takes one,
+                        // and the world's last look into that room is what
+                        // says which of the two happened.
+                        Sightings =
+                            Map.ofList
+                                [
+                                    "",
+                                    {
+                                        Tick = 999
+                                        Targets = Set.singleton "spawn-1"
+                                    }
+                                ]
+                    }
+                    |> facing hostiles
+
+                Expect.contains
+                    (decide (dark []) (Map.ofList [ "w1", held ]) Set.empty None).Verdicts
+                    (Verdict.Kept("w1", held))
+                    "the premise, with nothing shooting: the grace holds the assignment through the dark tick"
+
+                let {
+                        Assignments = assignments
+                        Verdicts = verdicts
+                    } =
+                    decide
+                        (dark [ hostileAt "h-1" { X = 25; Y = 20 } [ Attack; Move ] ])
+                        (Map.ofList [ "w1", held ])
+                        Set.empty
+                        None
+
+                Expect.contains
+                    verdicts
+                    (Verdict.Released("w1", held, ReleaseReason.TaskGone))
+                    "with an attacker within reach of its tile the grace is denied and the release is the one it always was"
+
+                Expect.equal
+                    (Map.tryFind "w1" assignments)
+                    (Some(taskId Flee))
+                    "and the released body rematches to Flee, which is what the release was for"
+            }
+
             test "under safe mode a hostile in the home room is no Threat, and nobody flees" {
                 // The engine refuses every harmful act in a room under safe
                 // mode, so the Reach is empty there and the creep keeps its

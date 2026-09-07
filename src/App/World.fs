@@ -482,9 +482,7 @@ let private factsOf (ours: string option) (spawns: SpawnInfo list) (roomName: st
 /// [[stand-down]]'s withheld outpost with one of our creeps still walking out
 /// of it — costs the full `seenFacts` sweep; it is bounded by the rooms our own
 /// bodies stand in, since vision is what `Game.rooms` is.
-let private worldRooms (colonies: Colony list) : string list =
-    let seen = objectEntries Game.rooms |> Array.map fst |> Array.toList
-
+let private worldRooms (colonies: Colony list) (seen: string list) : string list =
     let declared =
         colonies
         |> List.filter (fun colony -> List.contains colony.Home seen)
@@ -531,13 +529,38 @@ let ofGame (colonies: Colony list) (lastPositions: Map<string, RoomPos>) : World
         |> List.map (fun (room, entries) -> room, entries |> List.map snd)
         |> Map.ofList
 
+    // The rooms vision answered for this tick — `Game.rooms` is exactly that
+    // (`roomSeen`) — read once and used twice: it decides which rooms the
+    // world holds facts for, and which of them this tick may stamp a sighting
+    // for (#151).
+    let seen = objectEntries Game.rooms |> Array.map fst |> Array.toList
+
+    let rooms =
+        worldRooms colonies seen
+        |> List.map (fun roomName ->
+            roomName,
+            factsOf ours (Map.tryFind roomName spawnsByRoom |> Option.defaultValue []) roomName)
+
     {
         Time = Game.time
-        Rooms =
-            worldRooms colonies
-            |> List.map (fun roomName ->
+        Rooms = Map.ofList rooms
+        // This tick's sighting for every room this tick could see, and none
+        // for the rest (#151): the ids of the room's own kind census and not
+        // the kinds, which is all the grace asks and so all the sighting
+        // carries (ADR 0007). The rooms it does *not* cover are the ones
+        // `World.recalling` fills from the previous tick's map — the merge is
+        // Core's, so the only thing this reads out of `Game` is which rooms
+        // answered.
+        Sightings =
+            rooms
+            |> List.filter (fun (roomName, _) -> List.contains roomName seen)
+            |> List.map (fun (roomName, facts) ->
                 roomName,
-                factsOf ours (Map.tryFind roomName spawnsByRoom |> Option.defaultValue []) roomName)
+                ({
+                    Tick = Game.time
+                    Targets = facts.TargetKinds |> Map.toList |> List.map fst |> Set.ofList
+                }
+                : RoomSighting))
             |> Map.ofList
         // Every creep we own that is not still gestating, in the engine's
         // own order — whose each of these is this tick is

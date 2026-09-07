@@ -376,6 +376,10 @@ let private colonyOf (room: LoadedRoom) level =
         // And nothing refused: the declarations read here are ADR 0042's,
         // each of them a room bordering W12S28 (#243).
         Refused = []
+        // And nothing remembered of a room it cannot see: every fixture
+        // here is a tick with vision, so the sighting map answers nothing
+        // the pool has not already answered (#151).
+        Sightings = Map.empty
         // The numbers this bot ships with (ADR 0052 decision 5): a
         // fixture starts from them and the tests that are *about* a
         // tunable move the one field they are about.

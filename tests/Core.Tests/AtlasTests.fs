@@ -44,6 +44,9 @@ let snapshotWith creeps spatial =
         // And nothing refused: the outposts these fixtures name border
         // their home, which is what makes a Seam band to price over (#243).
         Refused = []
+        // And nothing remembered of a room it cannot see: the sighting map
+        // is the Matcher's alone and the Atlas prices nothing off it (#151).
+        Sightings = Map.empty
         // The numbers this bot ships with (ADR 0052 decision 5): a
         // fixture starts from them and the tests that are *about* a
         // tunable move the one field they are about.

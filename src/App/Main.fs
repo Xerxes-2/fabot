@@ -51,6 +51,14 @@ let private pruneDeadCreepMemory (living: Set<string>) =
 // never written to Memory.
 let mutable private planMemos: Map<string, PlanMemo> = Map.empty
 
+// What the world last saw standing in each room (#151), carried across ticks
+// on the heap beside the plan memos and deliberately not into Memory: the
+// grace it feeds is worth 150 ticks of one creep's patience, which is not
+// worth a leaf every tick's `JSON.stringify` pays for. A global reset empties
+// it, and a colony that has forgotten decides exactly as it did before the
+// grace existed — the release it would have held is one it takes.
+let mutable private sightings: Map<string, RoomSighting> = Map.empty
+
 // Exported as `loop` on the bundled `main` module; the engine calls it every tick.
 let loop () =
     // The engine's counter is already running when `loop` is entered, and this
@@ -68,7 +76,14 @@ let loop () =
     // The tick's World: every room we declared or can see and every creep we
     // own, read out of the engine once (ADR 0052 decision 1). Every other line
     // in this loop works off this record or off Memory.
-    let world = World.ofGame Colony.declared (ObserveMemory.loadPositions ())
+    // Read with the previous tick's sightings laid under it (#151), so a room
+    // vision did not answer for this tick still says when it was last looked
+    // into and what stood in it then.
+    let world =
+        World.ofGame Colony.declared (ObserveMemory.loadPositions ())
+        |> World.recalling sightings
+
+    sightings <- world.Sightings
 
     // The colonies that run this tick: a declared home that is ours and holds
     // a spawn of ours (`Colony.living`, ADR 0047 decision 1), both facts read

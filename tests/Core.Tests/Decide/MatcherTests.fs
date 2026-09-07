@@ -865,6 +865,7 @@ let resolveVerdictsVerboseOn snapshot assigned verbose =
         noThreats
         (poolOn snapshot)
         (Map.ofList assigned)
+        Map.empty
         (Set.ofList verbose)
     |> snd
 
@@ -1912,6 +1913,7 @@ let arbitrationTests =
                         noThreats
                         (poolOn view)
                         (Map.ofList assigned)
+                        Map.empty
                         Set.empty
 
                 let together =
@@ -2383,6 +2385,54 @@ let verdictTests =
                     verdicts
                     (Verdict.Released("w1", taskId (Refill "spawn-1"), ReleaseReason.TaskGone))
                     "the release names the vanished Task"
+            }
+
+            test "a Task that left a pool we can see releases; the vision grace is about looking" {
+                // #151's line, drawn from the other side. The grace holds an
+                // assignment whose target left the pool **with the vision
+                // that carried it**, and the sighting a room stamps while we
+                // are looking at it must not be mistaken for that: a Refill
+                // that filled, a store that emptied, a pile that decayed all
+                // leave the pool while their target still stands in the
+                // room's census, in full view. Holding those for 150 ticks
+                // would stall the haul cycle every time an extension filled.
+                // So what separates the two is the sighting's own tick, and
+                // this is the pair that pins it — one field of one sighting
+                // moves and nothing else.
+                let snapshot =
+                    { bareRespawn with
+                        Sources = []
+                        Controller = None
+                        Creeps = [ worker "w1" 50 0 ]
+                    }
+
+                let held = taskId (Refill "spawn-1")
+                let sticky = Map.ofList [ "w1", held ]
+
+                // The home room's own name under `SpatialInfo.empty`, which
+                // is the room every fixture here files its facts under.
+                let seenAt tick =
+                    { snapshot with
+                        Sightings =
+                            Map.ofList
+                                [
+                                    "",
+                                    {
+                                        Tick = tick
+                                        Targets = Set.singleton "spawn-1"
+                                    }
+                                ]
+                    }
+
+                Expect.contains
+                    (decide (seenAt snapshot.Time) sticky Set.empty None).Verdicts
+                    (Verdict.Released("w1", held, ReleaseReason.TaskGone))
+                    "seen this tick, the target stands and the Task is gone all the same: released, as it always was"
+
+                Expect.contains
+                    (decide (seenAt (snapshot.Time - 1)) sticky Set.empty None).Verdicts
+                    (Verdict.Kept("w1", held))
+                    "and one tick of blindness later, the same disappearance is a room we cannot see and the holder is kept"
             }
 
             test "a drained source releases its harvester with TooEarly" {

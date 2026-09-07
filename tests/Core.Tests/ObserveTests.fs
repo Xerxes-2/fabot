@@ -380,6 +380,10 @@ let quiet: ColonyView =
         // And nothing refused: the log records what happened, and a room
         // no Seam reaches has nobody in it for anything to happen to (#243).
         Refused = []
+        // And nothing remembered of a room it cannot see: the log records
+        // what happened, and a vision grace changes which assignment a tick
+        // holds and never what a tick did (#151).
+        Sightings = Map.empty
         // The numbers this bot ships with (ADR 0052 decision 5): a
         // fixture starts from them and the tests that are *about* a
         // tunable move the one field they are about.

@@ -197,6 +197,17 @@ type Tuning =
         /// across ~220 ticks, and that is one raid, not forty — and fifty is
         /// about the round trip a retreating squad makes before it is back.
         QuietGap: int
+        /// How long a held assignment outlives its target's room going dark
+        /// (#151): the ticks the Matcher keeps an assignment whose Task left
+        /// the pool with the vision that carried it, before releasing it
+        /// `task-gone` after all. **150**, a [[reserver]] relief's lead — the
+        /// cast plus the walk out — because an [[outpost]] goes dark every
+        /// time its reserver dies, a CLAIM body living 600 ticks, and the
+        /// vision is back the tick the next one lands. Ticks of blindness and
+        /// not a price, so the same at any bank and any [[stage]]; what a
+        /// longer number would buy is a body holding a container that was
+        /// destroyed while nobody could see it go.
+        VisionGrace: int
     }
 
 [<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
@@ -223,6 +234,7 @@ module Tuning =
             TrunkSwampWeight = 3
             StandDownFallback = 2500
             QuietGap = 50
+            VisionGrace = 150
         }
 
 /// What the decision layer knows about one spawn this tick.
@@ -1465,6 +1477,35 @@ type WorldCreep =
         Info: CreepInfo
     }
 
+/// What the world last saw standing in one room, and when (#151): the tick
+/// vision last answered for that room, and the bare ids it answered with. The
+/// one thing carried **across** ticks about a room, and it is carried for one
+/// question only. ADR 0004's absence is per-entry and per-tick, and it is the
+/// right answer for everything a rule prices — geometry that cannot be priced
+/// counts against no Task and blocks no action — but it cannot say *why* an id
+/// left the pool, and the two answers are opposite work: a container destroyed
+/// is a Task gone, a room gone dark is a Task waiting. So this is read by the
+/// vision grace and by nothing else, and what the grace hands on is a **room
+/// name**: the Matcher keeps the assignment and the mover walks its holder at
+/// that room's Seam, which is border layer and terrain and needs no vision.
+/// Nothing is placed or priced off a sighting, and no stale fact reaches a
+/// decision through it.
+type RoomSighting =
+    {
+        /// The tick vision last answered for the room. Equal to the world's
+        /// own `Time` for a room seen this tick, which is how a reader tells
+        /// a room it can see from one it is remembering.
+        Tick: int
+        /// The ids that stood in the room that tick, and nothing about them:
+        /// the keys of its `RoomFacts.TargetKinds`, with the kinds dropped on
+        /// the way in. Set membership is the only question the grace asks, so
+        /// carrying the kinds would be a field no decision reads, which is the
+        /// growth ADR 0007's rule refuses — and it is the narrowing that puts
+        /// the promise above into the *type*: there is no stale kind here for
+        /// the next rule to read one out of.
+        Targets: Set<string>
+    }
+
 /// Everything this tick was seen to hold, once (ADR 0052 decision 1). The shell
 /// builds one (`World.ofGame`, the only code that touches `Game`) and
 /// `ColonyView.ofWorld` cuts one colony's share of it; `decide` is written
@@ -1483,6 +1524,14 @@ type World =
         /// answer and is not stored here: the rule needs the [[stand-down]]
         /// gate, read out of Memory rather than off the world (ADR 0043).
         Creeps: WorldCreep list
+        /// What each room was last seen to carry, under its own name (#151):
+        /// this tick's census for every room vision answered for, and the last
+        /// one taken for a room it did not. Heap state in the shell — beside
+        /// the plan memos and the terrain memo, and deliberately not a Memory
+        /// leaf — so a global reset empties it and the colony decides exactly
+        /// as it did before the grace existed. A room never seen has no entry:
+        /// the absence is per-entry here too (ADR 0004).
+        Sightings: Map<string, RoomSighting>
     }
 
 [<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
@@ -1494,6 +1543,28 @@ module World =
             Time = 0
             Rooms = Map.empty
             Creeps = []
+            Sightings = Map.empty
+        }
+
+    /// This tick's world with what it saw **before** laid under it (#151):
+    /// every room vision answered for this tick keeps this tick's sighting,
+    /// and a room it did not answer for keeps the last one taken. The shell
+    /// carries the previous map on the heap and hands it back here, so the
+    /// merge is one pure function a test can drive rather than a line buried
+    /// in the only code that reads `Game`. This tick wins every entry it
+    /// holds, exactly as vision wins over a declaration (ADR 0041): a
+    /// remembered census is what is left where there was nothing to read.
+    /// What is remembered is bounded by the rooms this tick's world holds —
+    /// the declared ones and the seen ones — so a room that leaves the world
+    /// leaves the memory with it rather than riding a global's whole life in
+    /// a map nobody can ask about: every reader of a sighting narrows it to a
+    /// colony's scan set, and a scan set is drawn from these rooms.
+    let recalling (previous: Map<string, RoomSighting>) (world: World) : World =
+        { world with
+            Sightings =
+                (previous |> Map.filter (fun room _ -> Map.containsKey room world.Rooms),
+                 world.Sightings)
+                ||> Map.fold (fun carried room sighting -> Map.add room sighting carried)
         }
 
     /// One room's facts, as ADR 0004 has every other absence: a room the
@@ -1772,6 +1843,15 @@ type ColonyView =
         /// was filed for. Empty is the healthy answer and rides here all the
         /// same, as the Layout's own loss lists do (ADR 0035).
         Refused: string list
+        /// What each room this colony **works** was last seen to carry (#151):
+        /// the world's sightings, narrowed to the scan set. The narrowing is
+        /// the rule and not housekeeping — a room a [[stand-down]] withholds
+        /// leaves the scan set (ADR 0043) and leaves this map with it, so the
+        /// withdrawal that ADR spells through `task-gone` keeps working
+        /// unchanged. A withheld room is one the colony stops holding
+        /// assignments in; a dark one is a room it is still working and
+        /// cannot see this tick.
+        Sightings: Map<string, RoomSighting>
     }
 
 [<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
@@ -1984,6 +2064,11 @@ module ColonyView =
             // work, and by the time the scan set is cut the name is gone
             // (#243).
             Refused = Outpost.refused home colony.Outposts
+            // The world's memory of these rooms and of no others (#151):
+            // narrowed by the scan set the [[stand-down]] gate has already
+            // cut, so a withheld room's remembered census cannot hold a
+            // creep to a Task in a room the colony has withdrawn from.
+            Sightings = world.Sightings |> Map.filter (fun room _ -> List.contains room scanned)
         }
 
 /// A unit of work in this tick's Task pool; creeps are interchangeable
