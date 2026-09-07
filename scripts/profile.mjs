@@ -98,25 +98,31 @@ let level = null;
 // sibling `--scenario` check already gives.
 let levelArg = null;
 for (let i = 2; i < process.argv.length; i++) {
-  if (process.argv[i] === "--census-every") censusEvery = Number(process.argv[++i]);
+  if (process.argv[i] === "--census-every")
+    censusEvery = Number(process.argv[++i]);
   else if (process.argv[i] === "--scenario") scenario = process.argv[++i];
   else if (process.argv[i] === "--level") {
     levelArg = process.argv[++i];
     level = Number(levelArg);
-  }
-  else positional.push(process.argv[i]);
+  } else positional.push(process.argv[i]);
 }
 
 const TICKS = Number(positional[0] ?? 100);
 const TOP = Number(positional[1] ?? 30);
 const CENSUS_EVERY = censusEvery;
 const notPositive = (n) => !Number.isInteger(n) || n < 1;
-if (notPositive(TICKS) || notPositive(TOP) || (CENSUS_EVERY !== 0 && notPositive(CENSUS_EVERY))) {
+if (
+  notPositive(TICKS) ||
+  notPositive(TOP) ||
+  (CENSUS_EVERY !== 0 && notPositive(CENSUS_EVERY))
+) {
   console.error(USAGE);
   process.exit(1);
 }
 if (!SCENARIOS.includes(scenario)) {
-  console.error(`unknown scenario "${scenario}"; one of: ${SCENARIOS.join(", ")}\n${USAGE}`);
+  console.error(
+    `unknown scenario "${scenario}"; one of: ${SCENARIOS.join(", ")}\n${USAGE}`,
+  );
   process.exit(1);
 }
 // The scenario's own default, resolved after the line is read: a young
@@ -125,7 +131,9 @@ if (!SCENARIOS.includes(scenario)) {
 const LEVEL = level ?? DEFAULT_LEVEL[scenario];
 if (levelArg === null) levelArg = String(LEVEL);
 if (notPositive(LEVEL) || LEVEL > 8) {
-  console.error(`--level must be a controller level, 1 to 8; got "${levelArg}"\n${USAGE}`);
+  console.error(
+    `--level must be a controller level, 1 to 8; got "${levelArg}"\n${USAGE}`,
+  );
   process.exit(1);
 }
 const WARMUP = 3; // unprofiled JIT warm-up ticks
@@ -314,7 +322,12 @@ function buildGame({ terrains, rooms, spawns, creeps, byId, unmodelled }) {
 // standing in it wired to it. Every creep carries the `room` back-reference
 // the engine gives it: `Game.creeps` is world-wide and `World.fs` scopes
 // it to the room being projected by reading `creep.room.name` (ADR 0041).
-function stubRoom({ name, controller, findTables, energy = { available: 0, capacity: 0 } }) {
+function stubRoom({
+  name,
+  controller,
+  findTables,
+  energy = { available: 0, capacity: 0 },
+}) {
   return {
     name,
     energyAvailable: energy.available,
@@ -343,7 +356,8 @@ const keyOf = (p) => `${p.x},${p.y}`;
 // an outpost Post's Anchor stands on its container — so "where this row
 // stands" stopped being answerable inside one room the tick #131 landed.
 // Every other row still hands its own room over, and reads the same.
-const stationsIn = (room, grid, positions) => positions.map((pos) => ({ room, grid, pos }));
+const stationsIn = (room, grid, positions) =>
+  positions.map((pos) => ({ room, grid, pos }));
 
 // The same, for a row that holds a *place* rather than pooling near one:
 // the body stands on the tile itself and is never resolved outward from
@@ -370,7 +384,7 @@ function claimsIn(world, roomName) {
     throw new Error(
       `the ${scenario} scenario holds no claimed tiles for ${roomName} ` +
         `(it knows: ${[...world.claimed.keys()].join(", ")}), so a creep stationed there ` +
-        "would be stood on a tile the world may already be using"
+        "would be stood on a tile the world may already be using",
     );
   }
   return claimed;
@@ -390,7 +404,7 @@ function stationsFor(world, spawnName) {
     throw new Error(
       `the ${scenario} scenario stations no row for ${spawnName} (it knows: ` +
         `${Object.keys(world.stationsBySpawn).join(", ")}), so a body cast there would be stood ` +
-        "in another colony's room"
+        "in another colony's room",
     );
   }
   return table;
@@ -413,7 +427,9 @@ function stationsFor(world, spawnName) {
 const stationsOf = (creeps, row, spawnName = null) =>
   creeps
     .filter((creep) => creep.name.split("-")[0] === row)
-    .filter((creep) => spawnName === null || creep.name.split("-")[2] === spawnName)
+    .filter(
+      (creep) => spawnName === null || creep.name.split("-")[2] === spawnName,
+    )
     .map((creep) => `${creep.room.name} ${keyOf(creep.pos)}`);
 
 function* neighbours(p) {
@@ -448,7 +464,8 @@ function workingGround(grid, sourcePositions, controllerPos) {
     if (tile.x < 1 || tile.x > 48 || tile.y < 1 || tile.y > 48) return;
     if (!isWall(grid, tile)) ground.add(keyOf(tile));
   };
-  for (const source of sourcePositions) for (const tile of neighbours(source)) reserve(tile);
+  for (const source of sourcePositions)
+    for (const tile of neighbours(source)) reserve(tile);
   for (let dx = -3; dx <= 3; dx++) {
     for (let dy = -3; dy <= 3; dy++) {
       reserve({ x: controllerPos.x + dx, y: controllerPos.y + dy });
@@ -517,7 +534,11 @@ function clusterTiles(grid, spawnPos, count, taken, reserved, rcl) {
         if (isWall(grid, step)) continue;
         next.push(step);
         if (reserved.has(key)) continue;
-        if ((step.x + step.y) % 2 === parity && !taken.has(key) && tiles.length < count) {
+        if (
+          (step.x + step.y) % 2 === parity &&
+          !taken.has(key) &&
+          tiles.length < count
+        ) {
           tiles.push(step);
         }
       }
@@ -527,7 +548,7 @@ function clusterTiles(grid, spawnPos, count, taken, reserved, rcl) {
   if (tiles.length < count) {
     throw new Error(
       `${grid.name}: only ${tiles.length} of the ${count} cluster tiles RCL${rcl} needs are ` +
-        `reachable from the spawn at ${keyOf(spawnPos)}`
+        `reachable from the spawn at ${keyOf(spawnPos)}`,
     );
   }
   return tiles;
@@ -561,7 +582,9 @@ function route(grid, from, to, blocked) {
     }
     frontier = next;
   }
-  throw new Error(`${grid.name}: no walkable route from ${keyOf(from)} to ${keyOf(to)}`);
+  throw new Error(
+    `${grid.name}: no walkable route from ${keyOf(from)} to ${keyOf(to)}`,
+  );
 }
 
 // The level's cluster, placed: the built extensions, the towers, the
@@ -617,7 +640,7 @@ function placeCluster({
           used: EXTENSION_ENERGY_CAPACITY[rcl],
           capacity: EXTENSION_ENERGY_CAPACITY[rcl],
         }),
-      })
+      }),
     );
   }
   for (let i = 0; i < towers; i++) {
@@ -626,22 +649,31 @@ function placeCluster({
         store: store({ used: TOWER_CAPACITY / 2, capacity: TOWER_CAPACITY }),
         hits: 3000,
         hitsMax: 3000,
-      })
+      }),
     );
   }
   for (let i = 0; i < storages; i++) {
     built.push(
       structure(`${prefix}storage-${i}`, "storage", take(), {
-        store: store({ used: STORAGE_CAPACITY / 5, capacity: STORAGE_CAPACITY }),
+        store: store({
+          used: STORAGE_CAPACITY / 5,
+          capacity: STORAGE_CAPACITY,
+        }),
         hits: 10000,
         hitsMax: 10000,
-      })
+      }),
     );
   }
 
   const sites = [];
   for (let i = 0; i < extensionSites; i++) {
-    sites.push(register({ id: `${prefix}site-${i}`, structureType: "extension", pos: take() }));
+    sites.push(
+      register({
+        id: `${prefix}site-${i}`,
+        structureType: "extension",
+        pos: take(),
+      }),
+    );
   }
 
   return { built, sites, furniture };
@@ -707,7 +739,14 @@ function buildStubGrid() {
       }
     }
   };
-  for (const p of [SPAWN_POS, SOURCE_A, SOURCE_B, CONTROLLER, CONTAINER_A, CONTAINER_B]) {
+  for (const p of [
+    SPAWN_POS,
+    SOURCE_A,
+    SOURCE_B,
+    CONTROLLER,
+    CONTAINER_A,
+    CONTAINER_B,
+  ]) {
     carve(p);
   }
   for (const [a, b] of [...TRUNKS, [SPAWN_POS, SOURCE_B]]) {
@@ -735,7 +774,12 @@ function buildStubWorld() {
   const grid = buildStubGrid();
 
   const sources = [SOURCE_A, SOURCE_B].map((pos, i) =>
-    register({ id: `src-${i}`, pos, energy: 3000, ticksToRegeneration: undefined })
+    register({
+      id: `src-${i}`,
+      pos,
+      energy: 3000,
+      ticksToRegeneration: undefined,
+    }),
   );
 
   const controller = register({
@@ -772,7 +816,9 @@ function buildStubWorld() {
   // order the room is furnished — the fixed points, then the level's
   // cluster, then the trunks that weave through what the cluster left.
   const taken = new Set(
-    [SPAWN_POS, SOURCE_A, SOURCE_B, CONTROLLER, CONTAINER_A, CONTAINER_B].map(keyOf)
+    [SPAWN_POS, SOURCE_A, SOURCE_B, CONTROLLER, CONTAINER_A, CONTAINER_B].map(
+      keyOf,
+    ),
   );
   const claim = (pos) => {
     taken.add(keyOf(pos));
@@ -793,7 +839,10 @@ function buildStubWorld() {
   // the room exists. Its store is full for the same reason the extensions'
   // are: the bank is what the fleet below is cast from.
   const spawn = structure("spawn-1", "spawn", SPAWN_POS, {
-    store: store({ used: SPAWN_ENERGY_CAPACITY, capacity: SPAWN_ENERGY_CAPACITY }),
+    store: store({
+      used: SPAWN_ENERGY_CAPACITY,
+      capacity: SPAWN_ENERGY_CAPACITY,
+    }),
     hits: 5000,
     hitsMax: 5000,
   });
@@ -811,7 +860,9 @@ function buildStubWorld() {
   // Trunk roads: spawn → source container and spawn → controller container,
   // walked around the cluster's obstacles rather than straight through
   // them, and skipping tiles already holding a structure, site, or endpoint.
-  const blocked = new Set(cluster.built.concat(cluster.sites).map((s) => keyOf(s.pos)));
+  const blocked = new Set(
+    cluster.built.concat(cluster.sites).map((s) => keyOf(s.pos)),
+  );
   const roadTiles = [];
   for (const [a, b] of TRUNKS) {
     for (const p of route(grid, a, b, blocked)) {
@@ -823,7 +874,7 @@ function buildStubWorld() {
   // A couple of roads below half hits, so the Repair family is in the
   // measurement instead of pooling zero tasks.
   const roads = roadTiles.map((pos, i) =>
-    structure(`road-${i}`, "road", pos, i % 8 === 3 ? { hits: 2100 } : {})
+    structure(`road-${i}`, "road", pos, i % 8 === 3 ? { hits: 2100 } : {}),
   );
 
   const findTables = {
@@ -844,7 +895,9 @@ function buildStubWorld() {
   // 0032), while the world stays the same size and shape. The paved tile
   // stands at the default 4000/5000 hits, above the repair trigger, so what
   // a perturbed tick pays for is the recompute and not a new Repair task.
-  const spare = route(grid, SPAWN_POS, SOURCE_B, blocked).filter((p) => !taken.has(keyOf(p)));
+  const spare = route(grid, SPAWN_POS, SOURCE_B, blocked).filter(
+    (p) => !taken.has(keyOf(p)),
+  );
 
   const room = stubRoom({
     name: ROOM,
@@ -853,7 +906,12 @@ function buildStubWorld() {
     energy: { available: FURNITURE.bank, capacity: FURNITURE.bank },
   });
 
-  Object.assign(spawn, { name: "Spawn1", spawning: null, room, spawnCreep: ok });
+  Object.assign(spawn, {
+    name: "Spawn1",
+    spawning: null,
+    room,
+    spawnCreep: ok,
+  });
 
   const creeps = [];
 
@@ -877,7 +935,12 @@ function buildStubWorld() {
     spawns: [spawn],
     creeps,
     byId,
-    perturb: pavingPerturbation({ spare, structures: findTables[107], byId, structure }),
+    perturb: pavingPerturbation({
+      spare,
+      structures: findTables[107],
+      byId,
+      structure,
+    }),
     // Where a hired creep is stationed, by the row the bundle cast it from
     // (see `hireFleet`): an Anchor at a source, a hauler at the spawn it
     // shuttles from, a worker at the controller or a site. A fleet born on
@@ -914,7 +977,10 @@ function buildStubWorld() {
       // would time a body walking to work that is defined as work done in
       // place.
       upgrader: stationsIn(room, grid, [CONTAINER_B]),
-      worker: stationsIn(room, grid, [CONTROLLER, ...cluster.sites.map((site) => site.pos)]),
+      worker: stationsIn(room, grid, [
+        CONTROLLER,
+        ...cluster.sites.map((site) => site.pos),
+      ]),
     },
     // One room, so one claimed-tile set: everything the colony already
     // stands on, which `taken` has collected as the room was furnished.
@@ -972,7 +1038,8 @@ function stubCreep({ name, pos, parts, used, ticksToLive = 1500 }) {
     body: parts.map((type) => ({ type })),
     store: store({
       used,
-      capacity: parts.filter((part) => part === "carry").length * CARRY_CAPACITY,
+      capacity:
+        parts.filter((part) => part === "carry").length * CARRY_CAPACITY,
     }),
     harvest: ok,
     transfer: ok,
@@ -1008,7 +1075,10 @@ function pavingPerturbation({ spare, structures, byId, structure }) {
   const standing = new Map();
   let next = 0;
   return () => {
-    if (!spare.length) throw new Error("--census-every: no unpaved tile left to move the census");
+    if (!spare.length)
+      throw new Error(
+        "--census-every: no unpaved tile left to move the census",
+      );
     const pos = spare[next++ % spare.length];
     const key = `${pos.x},${pos.y}`;
     const road = standing.get(key);
@@ -1103,7 +1173,8 @@ function hireFleet(world, game, loop) {
     };
   }
 
-  for (const creep of world.creeps) claimsIn(world, creep.room.name).add(keyOf(creep.pos));
+  for (const creep of world.creeps)
+    claimsIn(world, creep.room.name).add(keyOf(creep.pos));
   const cursors = new Map();
   const bodies = new Map();
   let hired = 0;
@@ -1119,7 +1190,7 @@ function hireFleet(world, game, loop) {
     if (hired + requests.length > HIRE_CAP) {
       throw new Error(
         `the bundle is still hiring past ${HIRE_CAP} creeps at RCL${LEVEL}: the Workforce ` +
-          "target is not converging, so this run would profile a colony that does not exist"
+          "target is not converging, so this run would profile a colony that does not exist",
       );
     }
     for (const request of requests) {
@@ -1145,7 +1216,7 @@ function hireFleet(world, game, loop) {
             `row for it (it knows: ${Object.keys(stationTable).join(", ")}), so this run would ` +
             "profile a fleet standing where the colony would not have put it. A row added to " +
             "Decide's patternTable owes this harness a station in *every* scenario's `stations` " +
-            "— the tile that row does its work from — or every profile run throws here"
+            "— the tile that row does its work from — or every profile run throws here",
         );
       }
       const stations = stationTable[row];
@@ -1171,7 +1242,7 @@ function hireFleet(world, game, loop) {
         throw new Error(
           `${request.spawn} cast ${cursor + 1} "${row}" bodies and the ${scenario} scenario ` +
             `stations ${stations.length} for it — that row's quota is one body per place, so ` +
-            "the world it hired against holds places this scenario has not stationed"
+            "the world it hired against holds places this scenario has not stationed",
         );
       }
       // The row's next station, which carries the room as well as the
@@ -1189,14 +1260,16 @@ function hireFleet(world, game, loop) {
         throw new Error(
           `${request.spawn}'s "${row}" row holds the tile ${station.room.name} ` +
             `${keyOf(station.pos)} and the ${scenario} scenario has already put something ` +
-            "there, so this body would be stood off the place its row exists to hold"
+            "there, so this body would be stood off the place its row exists to hold",
         );
       }
       const pos = station.onTile
         ? station.pos
         : nearestFree(station.grid, station.pos, claimed);
       claimed.add(keyOf(pos));
-      const capacity = request.parts.filter((part) => part === "carry").length * CARRY_CAPACITY;
+      const capacity =
+        request.parts.filter((part) => part === "carry").length *
+        CARRY_CAPACITY;
       const creep = stubCreep({
         name: request.name,
         pos,
@@ -1233,7 +1306,7 @@ function crewBody(bodyOf, spawnName, row, rcl) {
   if (!parts) {
     throw new Error(
       `${spawnName} cast no "${row}" body at RCL${rcl}, so the crew standing beside its colony ` +
-        "has none to copy"
+        "has none to copy",
     );
   }
   return parts;
@@ -1253,6 +1326,19 @@ function crewBody(bodyOf, spawnName, row, rcl) {
 // west).
 const HOME_ROOM = "W12S28";
 const OUTPOST_ROOMS = ["W12S27", "W13S28"];
+// Rooms a scenario's colonies declare but this harness does not furnish
+// or give vision of: W13S28 declares W13S29 (its south outpost, 2026-09-07),
+// so any world standing W13S28 as a colony must answer `getRoomTerrain`
+// for it — the terrain layer reads every declared room whether or not it
+// is seen (ADR 0041) — while its furniture, reservation and vision stay
+// unmodelled, exactly as a freshly declared outpost is until a reserver
+// walks in. Read off the committed capture, never invented.
+const DECLARED_UNFURNISHED = ["W13S29"];
+const declaredTerrains = () =>
+  DECLARED_UNFURNISHED.map(loadCapture).map((capture) => [
+    capture.name,
+    capture.terrain,
+  ]);
 // The tile the live colony's spawn actually stands on — the same one
 // RoomInvariantTests sweeps W12S28 over, so the plan this scenario profiles
 // is the plan the suite already reasons about.
@@ -1297,7 +1383,13 @@ const LIVE_CONTAINERS = {
 const OUTPOST_RESERVATION_TICKS = 4000;
 
 const capturesDirectory = () =>
-  path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "tests", "Core.Tests", "rooms");
+  path.join(
+    path.dirname(fileURLToPath(import.meta.url)),
+    "..",
+    "tests",
+    "Core.Tests",
+    "rooms",
+  );
 
 // One committed room capture (ADR 0036), read the way RoomFixtures.fs reads
 // it: a header, fifty rows of fifty terrain masks, then the furniture. The
@@ -1322,7 +1414,8 @@ function loadCapture(roomName) {
   }
   const data = new Uint8Array(50 * 50);
   for (let y = 0; y < 50; y++) {
-    for (let x = 0; x < 50; x++) data[y * 50 + x] = rows[y].charCodeAt(x) - 0x30;
+    for (let x = 0; x < 50; x++)
+      data[y * 50 + x] = rows[y].charCodeAt(x) - 0x30;
   }
 
   // The capture's own ids are the engine's, and that is the point: a
@@ -1398,7 +1491,7 @@ function furnishHome({
       pos: source.pos,
       energy: 3000,
       ticksToRegeneration: undefined,
-    })
+    }),
   );
   const controller = register({
     id: capture.controller.id,
@@ -1439,12 +1532,15 @@ function furnishHome({
     const source = capture.sources.find(
       (candidate) =>
         !posted.has(candidate.id) &&
-        Math.max(Math.abs(seat.x - candidate.pos.x), Math.abs(seat.y - candidate.pos.y)) === 1
+        Math.max(
+          Math.abs(seat.x - candidate.pos.x),
+          Math.abs(seat.y - candidate.pos.y),
+        ) === 1,
     );
     if (!source) {
       throw new Error(
         `${capture.name}: the container at ${keyOf(seat)} is on no unposted source's Seat, so ` +
-          "it makes no Post — a Post is the Seat a source container stands on (ADR 0012)"
+          "it makes no Post — a Post is the Seat a source container stands on (ADR 0012)",
       );
     }
     posted.add(source.id);
@@ -1452,7 +1548,7 @@ function furnishHome({
   const containers = seats.map((pos, i) =>
     structure(`${prefix}cont-${i}`, "container", claim(pos), {
       store: store({ used: 1500, capacity: CONTAINER_CAPACITY }),
-    })
+    }),
   );
   // The buffer is a different thing from the rest and is named rather than
   // left as an index expression, because two rules read it: it is stocked
@@ -1463,13 +1559,16 @@ function furnishHome({
         `${prefix}cont-buffer`,
         "container",
         claim(nearestFree(capture, capture.controller.pos, taken)),
-        { store: store({ used: 800, capacity: CONTAINER_CAPACITY }) }
+        { store: store({ used: 800, capacity: CONTAINER_CAPACITY }) },
       )
     : null;
   if (bufferContainer) containers.push(bufferContainer);
 
   const spawn = structure(`${prefix}spawn-1`, "spawn", spawnPos, {
-    store: store({ used: SPAWN_ENERGY_CAPACITY, capacity: SPAWN_ENERGY_CAPACITY }),
+    store: store({
+      used: SPAWN_ENERGY_CAPACITY,
+      capacity: SPAWN_ENERGY_CAPACITY,
+    }),
     hits: 5000,
     hitsMax: 5000,
   });
@@ -1492,7 +1591,9 @@ function furnishHome({
   // The paved trunks: spawn to every container, along walkable ground and
   // around the cluster rather than through it — and none at all under
   // `BOOTSTRAP_LEVEL`, where the colony places no road site.
-  const blocked = new Set(cluster.built.concat(cluster.sites).map((s) => keyOf(s.pos)));
+  const blocked = new Set(
+    cluster.built.concat(cluster.sites).map((s) => keyOf(s.pos)),
+  );
   const roadTiles = [];
   if (rcl >= BOOTSTRAP_LEVEL) {
     for (const container of containers) {
@@ -1506,7 +1607,12 @@ function furnishHome({
   // A couple of roads below half hits, so the Repair family is in the
   // measurement instead of pooling zero tasks — the stub scenario's rule.
   const roads = roadTiles.map((pos, i) =>
-    structure(`${prefix}road-${i}`, "road", pos, i % 8 === 3 ? { hits: 2100 } : {})
+    structure(
+      `${prefix}road-${i}`,
+      "road",
+      pos,
+      i % 8 === 3 ? { hits: 2100 } : {},
+    ),
   );
 
   const finds = {
@@ -1523,7 +1629,12 @@ function furnishHome({
     findTables: finds,
     energy: { available: furniture.bank, capacity: furniture.bank },
   });
-  Object.assign(spawn, { name: spawnName, spawning: null, room, spawnCreep: ok });
+  Object.assign(spawn, {
+    name: spawnName,
+    spawning: null,
+    room,
+    spawnCreep: ok,
+  });
 
   const postKeys = new Set(seats.map(keyOf));
   return {
@@ -1572,7 +1683,7 @@ function furnishOutpost(capture, register, structure) {
       pos: source.pos,
       energy: 3000,
       ticksToRegeneration: undefined,
-    })
+    }),
   );
   const controller = register({
     id: capture.controller.id,
@@ -1581,14 +1692,17 @@ function furnishOutpost(capture, register, structure) {
     ticksToDowngrade: undefined,
     safeModeAvailable: 0,
     safeMode: undefined,
-    reservation: { username: COLONY_OWNER, ticksToEnd: OUTPOST_RESERVATION_TICKS },
+    reservation: {
+      username: COLONY_OWNER,
+      ticksToEnd: OUTPOST_RESERVATION_TICKS,
+    },
     pos: capture.controller.pos,
     activateSafeMode: ok,
   });
   const containers = (LIVE_CONTAINERS[capture.name] ?? []).map((pos, i) =>
     structure(`${capture.name.toLowerCase()}-cont-${i}`, "container", pos, {
       store: store({ used: 1500, capacity: CONTAINER_CAPACITY }),
-    })
+    }),
   );
   return {
     capture,
@@ -1608,7 +1722,14 @@ function furnishOutpost(capture, register, structure) {
     room: stubRoom({
       name: capture.name,
       controller,
-      findTables: { 105: sources, 108: [], 107: containers, 114: [], 103: [], 106: [] },
+      findTables: {
+        105: sources,
+        108: [],
+        107: containers,
+        114: [],
+        103: [],
+        106: [],
+      },
     }),
   };
 }
@@ -1670,7 +1791,9 @@ function buildOutpostWorld() {
   // Their controllers carry the colony's own reservation
   // (`OUTPOST_RESERVATION_TICKS`), which is what doubles those sources and
   // is the reserver row's whole reason to exist.
-  const outpostRooms = outposts.map((capture) => furnishOutpost(capture, register, structure));
+  const outpostRooms = outposts.map((capture) =>
+    furnishOutpost(capture, register, structure),
+  );
 
   // --- the fleet ---------------------------------------------------------
   // Hired by the bundle itself (`hireFleet`), so its size is this level's
@@ -1720,14 +1843,15 @@ function buildOutpostWorld() {
       for (const [i, def] of defs.entries()) {
         const pos = nearestFree(outpost.capture, def.at, occupied);
         occupied.add(keyOf(pos));
-        const capacity = def.parts.filter((part) => part === "carry").length * CARRY_CAPACITY;
+        const capacity =
+          def.parts.filter((part) => part === "carry").length * CARRY_CAPACITY;
         const creep = register(
           stubCreep({
             name: `${outpost.capture.name.toLowerCase()}-${i}`,
             pos,
             parts: def.parts,
             used: Math.round(capacity * FILLS[i % FILLS.length]),
-          })
+          }),
         );
         creep.room = outpost.room;
         creeps.push(creep);
@@ -1747,7 +1871,12 @@ function buildOutpostWorld() {
   const paved = new Set(taken);
   const spare = [];
   for (let i = 0; i + 1 < containers.length; i++) {
-    for (const tile of route(home, containers[i].pos, containers[i + 1].pos, blocked)) {
+    for (const tile of route(
+      home,
+      containers[i].pos,
+      containers[i + 1].pos,
+      blocked,
+    )) {
       const key = keyOf(tile);
       if (paved.has(key)) continue;
       paved.add(key);
@@ -1755,7 +1884,9 @@ function buildOutpostWorld() {
     }
   }
   if (spare.length === 0) {
-    throw new Error(`${home.name}: every tile between the containers is already paved`);
+    throw new Error(
+      `${home.name}: every tile between the containers is already paved`,
+    );
   }
 
   const rooms = [homeRoom, ...outpostRooms.map((o) => o.room)];
@@ -1763,12 +1894,18 @@ function buildOutpostWorld() {
     terrains: new Map([
       [home.name, home.terrain],
       ...outposts.map((capture) => [capture.name, capture.terrain]),
+      ...declaredTerrains(),
     ]),
     rooms,
     spawns: [spawn],
     creeps,
     byId,
-    perturb: pavingPerturbation({ spare, structures: homeFinds[107], byId, structure }),
+    perturb: pavingPerturbation({
+      spare,
+      structures: homeFinds[107],
+      byId,
+      structure,
+    }),
     // Same rule as the stub scenario's for the two rows that never leave
     // the home room: a hauler at the spawn — the storage end of every
     // round trip, wherever the far end lies — and a worker at the
@@ -1795,20 +1932,22 @@ function buildOutpostWorld() {
     // world `hireFleet`'s own throw refuses to profile.
     stations: {
       reserver: outpostRooms.flatMap((outpost) =>
-        stationsIn(outpost.room, outpost.capture, [outpost.room.controller.pos])
+        stationsIn(outpost.room, outpost.capture, [
+          outpost.room.controller.pos,
+        ]),
       ),
       anchor: [
         ...stationsIn(
           homeRoom,
           home,
-          home.sources.map((source) => source.pos)
+          home.sources.map((source) => source.pos),
         ),
         ...outpostRooms.flatMap((outpost) =>
           stationsIn(
             outpost.room,
             outpost.capture,
-            outpost.sources.map((source) => source.pos)
-          )
+            outpost.sources.map((source) => source.pos),
+          ),
         ),
       ],
       hauler: stationsIn(homeRoom, home, [HOME_SPAWN]),
@@ -1867,7 +2006,7 @@ function buildOutpostWorld() {
           `  ${outpost.capture.name} outpost  ${outpost.sources.length} source` +
           `${outpost.sources.length === 1 ? "" : "s"}, controller reserved ` +
           `${OUTPOST_RESERVATION_TICKS} ticks, ` +
-          `${plural(outpost.containers.length, "container")}, vision`
+          `${plural(outpost.containers.length, "container")}, vision`,
       ),
       `  ${plural(stationsOf(creeps, "reserver").length, "reserver")} beside the outpost ` +
         `controllers at ${stationsOf(creeps, "reserver").join(", ") || "no station"}, one per ` +
@@ -1940,8 +2079,13 @@ function homeStations(furnished) {
     // not: a colony this young has built no upgrade buffer yet, and at its
     // bank the row is not hired at all (ADR 0046, #187) — so the seat is
     // ground inside the Upgrade Work Area, and it stands empty.
-    upgrader: at([furnished.buffer ? furnished.buffer.pos : capture.controller.pos]),
-    worker: at([capture.controller.pos, ...cluster.sites.map((site) => site.pos)]),
+    upgrader: at([
+      furnished.buffer ? furnished.buffer.pos : capture.controller.pos,
+    ]),
+    worker: at([
+      capture.controller.pos,
+      ...cluster.sites.map((site) => site.pos),
+    ]),
   };
 }
 
@@ -1993,23 +2137,33 @@ function buildYoungWorld() {
   // The spare lane the census perturbation walks: the ground between the
   // two Posts, which nothing paves here — this room is under the level
   // that places a road at all, so every tile of it is spare.
-  const spare = route(capture, home.containers[0].pos, home.containers[1].pos, home.blocked).filter(
-    (tile) => !home.taken.has(keyOf(tile))
-  );
+  const spare = route(
+    capture,
+    home.containers[0].pos,
+    home.containers[1].pos,
+    home.blocked,
+  ).filter((tile) => !home.taken.has(keyOf(tile)));
   if (spare.length === 0) {
-    throw new Error(`${capture.name}: no unpaved tile between the two Posts to move the census`);
+    throw new Error(
+      `${capture.name}: no unpaved tile between the two Posts to move the census`,
+    );
   }
 
   const creeps = [];
   const stations = homeStations(home);
 
   return {
-    terrains: new Map([[capture.name, capture.terrain]]),
+    terrains: new Map([[capture.name, capture.terrain], ...declaredTerrains()]),
     rooms: [home.room],
     spawns: [home.spawn],
     creeps,
     byId,
-    perturb: pavingPerturbation({ spare, structures: home.finds[107], byId, structure }),
+    perturb: pavingPerturbation({
+      spare,
+      structures: home.finds[107],
+      byId,
+      structure,
+    }),
     stations,
     // The room's own claimed tiles less its Posts (`furnished.occupied`),
     // so `hireFleet` can stand the Anchor row on the containers it
@@ -2022,7 +2176,9 @@ function buildYoungWorld() {
         grid: capture,
         sourcePositions: capture.sources.map((source) => source.pos),
         controllerPos: capture.controller.pos,
-        clustered: home.cluster.built.concat(home.cluster.sites).map((s) => s.pos),
+        clustered: home.cluster.built
+          .concat(home.cluster.sites)
+          .map((s) => s.pos),
       },
     ],
     describe: () => [
@@ -2086,7 +2242,9 @@ function buildPairWorld() {
   const childCapture = loadCapture(CHILD_ROOM);
   // The mother's outposts as `Colony.declared` spells them today: W12S27
   // alone, W13S28 having left the list the day it stood its own spawn.
-  const outposts = OUTPOST_ROOMS.filter((name) => name !== CHILD_ROOM).map(loadCapture);
+  const outposts = OUTPOST_ROOMS.filter((name) => name !== CHILD_ROOM).map(
+    loadCapture,
+  );
 
   const mother = furnishHome({
     capture: motherCapture,
@@ -2108,7 +2266,9 @@ function buildPairWorld() {
     sourceContainers: LIVE_CONTAINERS[CHILD_ROOM],
     buffer: false,
   });
-  const outpostRooms = outposts.map((capture) => furnishOutpost(capture, register, structure));
+  const outpostRooms = outposts.map((capture) =>
+    furnishOutpost(capture, register, structure),
+  );
 
   // The crew the bundle does not hire, on the mother's side alone: one
   // hauler per outpost container, standing the far end of a round trip
@@ -2120,16 +2280,22 @@ function buildPairWorld() {
     const haulerParts = crewBody(bodyOf, "Spawn1", "hauler", MOTHER_LEVEL);
     for (const outpost of outpostRooms) {
       for (const [i, container] of outpost.containers.entries()) {
-        const pos = nearestFree(outpost.capture, container.pos, outpost.occupied);
+        const pos = nearestFree(
+          outpost.capture,
+          container.pos,
+          outpost.occupied,
+        );
         outpost.occupied.add(keyOf(pos));
-        const capacity = haulerParts.filter((part) => part === "carry").length * CARRY_CAPACITY;
+        const capacity =
+          haulerParts.filter((part) => part === "carry").length *
+          CARRY_CAPACITY;
         const creep = register(
           stubCreep({
             name: `${outpost.capture.name.toLowerCase()}-${i}`,
             pos,
             parts: haulerParts,
             used: Math.round(capacity * FILLS[i % FILLS.length]),
-          })
+          }),
         );
         creep.room = outpost.room;
         creeps.push(creep);
@@ -2146,7 +2312,7 @@ function buildPairWorld() {
   // and the Anchor row gains that outpost's Post beside her own two rocks
   // (ADR 0042: one Anchor per Post, wherever the Post lies).
   motherStations.reserver = outpostRooms.flatMap((outpost) =>
-    stationsIn(outpost.room, outpost.capture, [outpost.room.controller.pos])
+    stationsIn(outpost.room, outpost.capture, [outpost.room.controller.pos]),
   );
   motherStations.anchor = [
     ...motherStations.anchor,
@@ -2154,8 +2320,8 @@ function buildPairWorld() {
       stationsIn(
         outpost.room,
         outpost.capture,
-        outpost.sources.map((source) => source.pos)
-      )
+        outpost.sources.map((source) => source.pos),
+      ),
     ),
   ];
   // The pioneers (ADR 0047 decision 4, #213): the mother's worker row
@@ -2183,7 +2349,7 @@ function buildPairWorld() {
       ...stationsIn(
         child.room,
         childCapture,
-        Array(PIONEER_COUNT).fill(childCapture.controller.pos)
+        Array(PIONEER_COUNT).fill(childCapture.controller.pos),
       ),
       ...motherStations.worker,
     ];
@@ -2202,7 +2368,7 @@ function buildPairWorld() {
       motherCapture,
       mother.containers[i].pos,
       mother.containers[i + 1].pos,
-      mother.blocked
+      mother.blocked,
     )) {
       const key = keyOf(tile);
       if (paved.has(key)) continue;
@@ -2211,7 +2377,9 @@ function buildPairWorld() {
     }
   }
   if (spare.length === 0) {
-    throw new Error(`${motherCapture.name}: every tile between the containers is already paved`);
+    throw new Error(
+      `${motherCapture.name}: every tile between the containers is already paved`,
+    );
   }
 
   const rooms = [mother.room, child.room, ...outpostRooms.map((o) => o.room)];
@@ -2220,16 +2388,25 @@ function buildPairWorld() {
       [motherCapture.name, motherCapture.terrain],
       [childCapture.name, childCapture.terrain],
       ...outposts.map((capture) => [capture.name, capture.terrain]),
+      ...declaredTerrains(),
     ]),
     rooms,
     spawns: [mother.spawn, child.spawn],
     creeps,
     byId,
-    perturb: pavingPerturbation({ spare, structures: mother.finds[107], byId, structure }),
+    perturb: pavingPerturbation({
+      spare,
+      structures: mother.finds[107],
+      byId,
+      structure,
+    }),
     // A station table per spawn, because the two colonies' rows are the
     // same five names over different rooms: the mother's worker stands at
     // her controller or her child's, the child's at its own.
-    stationsBySpawn: { Spawn1: motherStations, [CHILD_SPAWN_NAME]: childStations },
+    stationsBySpawn: {
+      Spawn1: motherStations,
+      [CHILD_SPAWN_NAME]: childStations,
+    },
     claimed: new Map([
       [motherCapture.name, mother.occupied],
       [childCapture.name, child.occupied],
@@ -2244,13 +2421,17 @@ function buildPairWorld() {
         grid: motherCapture,
         sourcePositions: motherCapture.sources.map((source) => source.pos),
         controllerPos: motherCapture.controller.pos,
-        clustered: mother.cluster.built.concat(mother.cluster.sites).map((s) => s.pos),
+        clustered: mother.cluster.built
+          .concat(mother.cluster.sites)
+          .map((s) => s.pos),
       },
       {
         grid: childCapture,
         sourcePositions: childCapture.sources.map((source) => source.pos),
         controllerPos: childCapture.controller.pos,
-        clustered: child.cluster.built.concat(child.cluster.sites).map((s) => s.pos),
+        clustered: child.cluster.built
+          .concat(child.cluster.sites)
+          .map((s) => s.pos),
       },
     ],
     crew: crewOutposts,
@@ -2266,7 +2447,7 @@ function buildPairWorld() {
         (outpost) =>
           `  ${outpost.capture.name} outpost  ${plural(outpost.sources.length, "source")}, ` +
           `controller reserved ${OUTPOST_RESERVATION_TICKS} ticks, ` +
-          `${plural(outpost.containers.length, "container")}, vision`
+          `${plural(outpost.containers.length, "container")}, vision`,
       ),
       `  ${childCapture.name} child    ${plural(child.sources.length, "source")}, controller, ` +
         `${furnitureLine(child.furniture)}, ${plural(child.roads.length, "road")}, ` +
@@ -2306,7 +2487,12 @@ const buildWorld = () => WORLDS[scenario]();
 // hauler quota behind the plan memo (ADR 0017), and the spawn walks behind
 // the walk table (ADR 0032). Named rather than ranked, so the perturbation
 // report always shows them however far down the hotspot tables they sit.
-const CENSUS_KEYED = ["planLayout", "haulerQuota", "trunkPath", "castWalkTicks"];
+const CENSUS_KEYED = [
+  "planLayout",
+  "haulerQuota",
+  "trunkPath",
+  "castWalkTicks",
+];
 
 // ---------------------------------------------------------------------------
 // .cpuprofile aggregation: self and inclusive sampled time per call frame.
@@ -2381,7 +2567,8 @@ function tickClasses(profile) {
   const marks = { perturbedTick: "perturbed", quietTick: "quiet" };
   const nodes = new Map(profile.nodes.map((n) => [n.id, n]));
   const parented = new Set();
-  for (const n of profile.nodes) for (const c of n.children ?? []) parented.add(c);
+  for (const n of profile.nodes)
+    for (const c of n.children ?? []) parented.add(c);
 
   const cls = new Map();
   const walk = (id, inherited) => {
@@ -2419,10 +2606,12 @@ function printCensusKeyed(classes) {
     ms.length;
 
   console.log("\ncensus-keyed frames — inclusive ms per tick of each class");
-  console.log(`  ${classes.map((c) => c.label.padStart(9)).join("  ")}  function`);
+  console.log(
+    `  ${classes.map((c) => c.label.padStart(9)).join("  ")}  function`,
+  );
   for (const name of CENSUS_KEYED) {
     console.log(
-      `  ${classes.map((c) => msPerTick(c, name).toFixed(2).padStart(9)).join("  ")}  ${name}`
+      `  ${classes.map((c) => msPerTick(c, name).toFixed(2).padStart(9)).join("  ")}  ${name}`,
     );
   }
 }
@@ -2440,14 +2629,19 @@ function printCensusKeyed(classes) {
 // between the two is the projection, the Memory writes and the intents —
 // everything `decide` is not.
 function printDecideByColony(classes, decideMs, ticks, stages) {
-  const mean = (rows) => (rows.length ? rows.reduce((a, b) => a + b, 0) / rows.length : 0);
+  const mean = (rows) =>
+    rows.length ? rows.reduce((a, b) => a + b, 0) / rows.length : 0;
   const tickMs = {
     all: ticks.all.map((row) => row.ms),
     perturbed: ticks.perturbed,
     quiet: ticks.quiet,
   };
-  console.log("\ndecide by colony — ms per tick of each class (this harness's clock)");
-  console.log(`  ${classes.map((c) => c.label.padStart(9)).join("  ")}  colony`);
+  console.log(
+    "\ndecide by colony — ms per tick of each class (this harness's clock)",
+  );
+  console.log(
+    `  ${classes.map((c) => c.label.padStart(9)).join("  ")}  colony`,
+  );
   const homes = [...decideMs.all.keys()];
   const column = (label, home) =>
     mean(decideMs[label].get(home) ?? [])
@@ -2461,18 +2655,27 @@ function printDecideByColony(classes, decideMs, ticks, stages) {
     const stage = stages.get(home);
     console.log(
       `  ${classes.map((c) => column(c.label, home)).join("  ")}  ${home}` +
-        (stage ? `  (${stage})` : "  (no stage)")
+        (stage ? `  (${stage})` : "  (no stage)"),
     );
   }
   const totalOf = (label) =>
-    homes.reduce((total, home) => total + mean(decideMs[label].get(home) ?? []), 0);
+    homes.reduce(
+      (total, home) => total + mean(decideMs[label].get(home) ?? []),
+      0,
+    );
   console.log(
     `  ${classes.map((c) => totalOf(c.label).toFixed(2).padStart(9)).join("  ")}  ` +
-      `all ${homes.length} colon${homes.length === 1 ? "y" : "ies"}`
+      `all ${homes.length} colon${homes.length === 1 ? "y" : "ies"}`,
   );
   console.log(
-    `  ${classes.map((c) => mean(tickMs[c.label] ?? []).toFixed(2).padStart(9)).join("  ")}  ` +
-      "the whole tick, for comparison (projection, Memory and intents included)"
+    `  ${classes
+      .map((c) =>
+        mean(tickMs[c.label] ?? [])
+          .toFixed(2)
+          .padStart(9),
+      )
+      .join("  ")}  ` +
+      "the whole tick, for comparison (projection, Memory and intents included)",
   );
 }
 
@@ -2487,7 +2690,7 @@ function printReport(classes, pooled, world, allTicks) {
       description[0] +
       (CENSUS_EVERY
         ? `, census moved every ${CENSUS_EVERY} ticks over a ${world.spareTiles}-tile lane`
-        : "")
+        : ""),
   );
   for (const detail of description.slice(1)) console.log(detail);
 
@@ -2501,7 +2704,7 @@ function printReport(classes, pooled, world, allTicks) {
       console.log(
         `ms/tick ${label.padEnd(9)} (${String(s.n).padStart(4)} ticks): ` +
           `mean ${s.mean.toFixed(2)}  median ${s.median.toFixed(2)}  ` +
-          `min ${s.min.toFixed(2)}  max ${s.max.toFixed(2)}`
+          `min ${s.min.toFixed(2)}  max ${s.max.toFixed(2)}`,
       );
     }
     printCensusKeyed(classes);
@@ -2509,7 +2712,7 @@ function printReport(classes, pooled, world, allTicks) {
     const s = stats(classes[0].ms);
     console.log(
       `ms/tick: mean ${s.mean.toFixed(2)}  median ${s.median.toFixed(2)}  ` +
-        `min ${s.min.toFixed(2)}  max ${s.max.toFixed(2)}`
+        `min ${s.min.toFixed(2)}  max ${s.max.toFixed(2)}`,
     );
   }
 
@@ -2531,24 +2734,28 @@ function printReport(classes, pooled, world, allTicks) {
   console.log(`\n${cpuReport(allTicks)}`);
   console.log(
     "  (this harness's clock, a floor: engine-side costs are not simulated — " +
-      "`npm run observe cpu` reads the trigger off the deployed bundle)"
+      "`npm run observe cpu` reads the trigger off the deployed bundle)",
   );
 
   // Samples V8 parents at the root — the garbage collector, and the
   // profiler's own start and stop — sit under no tick marker, so they are in
   // neither class and each class's percentages are on its own base.
-  const outside = pooled.activeUs - classes.reduce((total, c) => total + c.summary.activeUs, 0);
+  const outside =
+    pooled.activeUs -
+    classes.reduce((total, c) => total + c.summary.activeUs, 0);
   if (outside > 0) {
     console.log(
       `\n${(outside / 1000).toFixed(0)} ms sampled outside both classes ` +
-        "(root-parented GC, and the profiler's own start and stop)"
+        "(root-parented GC, and the profiler's own start and stop)",
     );
   }
   console.log("");
 
   for (const { label, summary } of classes) {
     const head = CENSUS_EVERY ? `${label} ticks — sampled` : "sampled";
-    console.log(`${head} ${(summary.activeUs / 1000).toFixed(0)} ms at ${SAMPLE_INTERVAL_US}µs\n`);
+    console.log(
+      `${head} ${(summary.activeUs / 1000).toFixed(0)} ms at ${SAMPLE_INTERVAL_US}µs\n`,
+    );
 
     const pct = (us) => ((100 * us) / summary.activeUs).toFixed(1).padStart(5);
     const line = (row) => {
@@ -2563,7 +2770,9 @@ function printReport(classes, pooled, world, allTicks) {
       console.log(`${title}\n  self%  incl%   self ms  function`);
       const shown = rows.slice(0, TOP);
       for (const row of shown) console.log(line(row));
-      const below = rows.filter((row) => always.includes(row.name) && !shown.includes(row));
+      const below = rows.filter(
+        (row) => always.includes(row.name) && !shown.includes(row),
+      );
       if (below.length) {
         console.log("  census-keyed frames below the cut:");
         for (const row of below) console.log(line(row));
@@ -2573,11 +2782,14 @@ function printReport(classes, pooled, world, allTicks) {
 
     // Self time names where samples land (runtime primitives, floods); the
     // inclusive view names the phases paying for them (decide, planLayout, …).
-    table("hot by self time", [...summary.rows].sort((a, b) => b.selfUs - a.selfUs));
+    table(
+      "hot by self time",
+      [...summary.rows].sort((a, b) => b.selfUs - a.selfUs),
+    );
     table(
       "hot by inclusive time",
       [...summary.rows].sort((a, b) => b.inclusiveUs - a.inclusiveUs),
-      CENSUS_EVERY ? CENSUS_KEYED : []
+      CENSUS_EVERY ? CENSUS_KEYED : [],
     );
   }
 }
@@ -2664,7 +2876,7 @@ function loadBundle(file) {
         "`function decideUnarbitrated(` declarations and this harness needs exactly one to time each " +
         "colony's decide (ADR 0052's CPU row per colony). Whatever renamed or inlined it — a " +
         "Fable or esbuild upgrade, a rename in Decide.fs — is what this probe has to be " +
-        "re-pointed at"
+        "re-pointed at",
     );
   }
   globalThis.__fabotClock = () => performance.now();
@@ -2709,10 +2921,15 @@ const wallsOf = (roomName) => {
 };
 const worldRooms = [...terrainReads.keys()];
 const wallCounts = worldRooms.map((name) => [name, wallsOf(name)]);
-if (worldRooms.length > 1 && new Set(wallCounts.map(([, n]) => n)).size !== worldRooms.length) {
+if (
+  worldRooms.length > 1 &&
+  new Set(wallCounts.map(([, n]) => n)).size !== worldRooms.length
+) {
   console.error(
     "the stub's terrain query answers the same grid for two rooms — it is ignoring its argument:\n" +
-      wallCounts.map(([name, walls]) => `  ${name}  ${walls} wall tiles`).join("\n")
+      wallCounts
+        .map(([name, walls]) => `  ${name}  ${walls} wall tiles`)
+        .join("\n"),
   );
   process.exit(1);
 }
@@ -2727,12 +2944,18 @@ if (worldRooms.length > 1 && new Set(wallCounts.map(([, n]) => n)).size !== worl
 // furnishes a mother's room and a child's, at two levels, and a check that
 // read the first would pass a cluster standing on the other's Seats.
 for (const home of world.furnished) {
-  const reservedGround = workingGround(home.grid, home.sourcePositions, home.controllerPos);
-  const onWorkingGround = home.clustered.filter((pos) => reservedGround.has(keyOf(pos)));
+  const reservedGround = workingGround(
+    home.grid,
+    home.sourcePositions,
+    home.controllerPos,
+  );
+  const onWorkingGround = home.clustered.filter((pos) =>
+    reservedGround.has(keyOf(pos)),
+  );
   if (onWorkingGround.length > 0) {
     console.error(
       `${home.grid.name}: ${onWorkingGround.length} clustered structure(s) stand on the working ` +
-        `ground ADR 0022 keeps the Layout off — ${onWorkingGround.map(keyOf).join(", ")}`
+        `ground ADR 0022 keeps the Layout off — ${onWorkingGround.map(keyOf).join(", ")}`,
     );
     process.exit(1);
   }
@@ -2763,15 +2986,20 @@ if (world.crew) world.crew(bodyOf, game);
 // The crew stands outside the count entirely — it is not hired — and is
 // named after it.
 const homeNames = world.homeRooms.map((room) => room.name);
-const atHome = (name) => world.creeps.filter((creep) => creep.room.name === name).length;
+const atHome = (name) =>
+  world.creeps.filter((creep) => creep.room.name === name).length;
 const homeHires = homeNames.reduce((total, name) => total + atHome(name), 0);
 const outpostHires = hired - homeHires;
 console.log(
   `hired ${hired} creep${hired === 1 ? "" : "s"} for ` +
     `${homeNames.map((name) => `${name} (${atHome(name)} standing there)`).join(" and ")} ` +
     `over ${hireTicks} ticks, by the bundle's own SpawnCreep intents` +
-    (outpostHires ? `, ${outpostHires} of them stationed outside a home room` : "") +
-    (world.creeps.length > hired ? `, plus ${world.creeps.length - hired} outpost crew` : "")
+    (outpostHires
+      ? `, ${outpostHires} of them stationed outside a home room`
+      : "") +
+    (world.creeps.length > hired
+      ? `, plus ${world.creeps.length - hired} outpost crew`
+      : ""),
 );
 
 // One counter over warm-up and profiled ticks alike, so the recompute path
@@ -2792,7 +3020,8 @@ function quietTick() {
   loop();
 }
 
-const tickThrough = (moved) => (!CENSUS_EVERY ? loop : moved ? perturbedTick : quietTick);
+const tickThrough = (moved) =>
+  !CENSUS_EVERY ? loop : moved ? perturbedTick : quietTick;
 
 for (let i = 0; i < WARMUP; i++) {
   const moved = movesCensus();
@@ -2806,7 +3035,9 @@ for (let i = 0; i < WARMUP; i++) {
 const session = new Session();
 session.connect();
 await session.post("Profiler.enable");
-await session.post("Profiler.setSamplingInterval", { interval: SAMPLE_INTERVAL_US });
+await session.post("Profiler.setSamplingInterval", {
+  interval: SAMPLE_INTERVAL_US,
+});
 await session.post("Profiler.start");
 
 // Every colony's `decide`, tick by tick and class by class: the probe
@@ -2851,13 +3082,16 @@ for (let i = 0; i < TICKS; i++) {
   // the two-colony mean under it would be over the wrong two colonies.
   const decided = calls.map((call) => call.home).sort();
   const declared = [...world.colonies].sort();
-  if (decided.length !== declared.length || decided.some((home, i) => home !== declared[i])) {
+  if (
+    decided.length !== declared.length ||
+    decided.some((home, i) => home !== declared[i])
+  ) {
     throw new Error(
       `the ${scenario} scenario declares ${world.colonies.length} living colon` +
         `${world.colonies.length === 1 ? "y" : "ies"} (${world.colonies.join(", ")}) and the ` +
         `bundle ran decide ${calls.length} time${calls.length === 1 ? "" : "s"} this tick ` +
         `(${calls.map((call) => call.home).join(", ") || "none"}): ` +
-        "`Colony.living` is not reading this world the way the scenario describes it"
+        "`Colony.living` is not reading this world the way the scenario describes it",
     );
   }
   for (const call of calls) stages.set(call.home, call.stage);
@@ -2886,7 +3120,10 @@ const classes = CENSUS_EVERY
       { label: "quiet", ms: ticks.quiet },
     ]
       .filter((c) => c.ms.length)
-      .map((c) => ({ ...c, summary: summarize(profile, (id) => classOf.get(id) === c.label) }))
+      .map((c) => ({
+        ...c,
+        summary: summarize(profile, (id) => classOf.get(id) === c.label),
+      }))
   : [{ label: "all", ms: ticks.all.map((row) => row.ms), summary: pooled }];
 
 printReport(classes, pooled, world, ticks.all);
@@ -2901,8 +3138,11 @@ printDecideByColony(classes, decideMs, ticks, stages);
 console.log(
   `engine terrain reads over ${hireTicks + WARMUP + TICKS} ticks (Game.map.getRoomTerrain): ` +
     [...terrainReads]
-      .map(([name, reads]) => `${name} ${reads}${worldRooms.includes(name) ? "" : " (unmodelled)"}`)
-      .join(", ")
+      .map(
+        ([name, reads]) =>
+          `${name} ${reads}${worldRooms.includes(name) ? "" : " (unmodelled)"}`,
+      )
+      .join(", "),
 );
 
 // The self-check's evidence, printed rather than only asserted: a wall
@@ -2910,8 +3150,10 @@ console.log(
 // are the harness saying out loud that the query read its argument.
 console.log(
   "terrain query answers by room name: " +
-    wallCounts.map(([name, walls]) => `${name} ${walls} wall tiles`).join(", ") +
-    (worldRooms.length > 1 ? " (all distinct)" : "")
+    wallCounts
+      .map(([name, walls]) => `${name} ${walls} wall tiles`)
+      .join(", ") +
+    (worldRooms.length > 1 ? " (all distinct)" : ""),
 );
 
 // The observe channel's CPU line as the bundle itself wrote it (ADR 0041),
@@ -2933,15 +3175,16 @@ const inWindow = Array.isArray(cpuLine)
   : [];
 if (!Array.isArray(cpuLine) || cpuLine.length === 0) {
   console.log(
-    "observe CPU line (Memory.fabot.observe.cpu): absent — this bundle does not write it"
+    "observe CPU line (Memory.fabot.observe.cpu): absent — this bundle does not write it",
   );
 } else if (inWindow.length === 0) {
   console.log(
     `observe CPU line (Memory.fabot.observe.cpu): ${cpuLine.length} rows and not one of them a ` +
-      `profiled tick (t${firstProfiled}-t${lastProfiled}) — the channel is broken`
+      `profiled tick (t${firstProfiled}-t${lastProfiled}) — the channel is broken`,
   );
 } else {
-  const mean = inWindow.reduce((total, row) => total + row.ms, 0) / inWindow.length;
+  const mean =
+    inWindow.reduce((total, row) => total + row.ms, 0) / inWindow.length;
   const outside = cpuLine.length - inWindow.length;
   console.log(
     `observe CPU line (Memory.fabot.observe.cpu): ${inWindow.length} of the run's ${TICKS} ` +
@@ -2951,7 +3194,9 @@ if (!Array.isArray(cpuLine) || cpuLine.length === 0) {
         ? ` — short because the bundle's ring holds ${cpuLine.length} rows in all, so the run's ` +
           "oldest ticks have already fallen off the front of it"
         : "") +
-      (outside ? `; ${outside} more rows in the ring, outside the window, not compared` : "")
+      (outside
+        ? `; ${outside} more rows in the ring, outside the window, not compared`
+        : ""),
   );
 }
 
@@ -2963,14 +3208,16 @@ if (!Array.isArray(cpuLine) || cpuLine.length === 0) {
 // — a declaration removed, or a stand-down shutting one — because those
 // ms are then fewer rooms' projection than the world in front of it, and
 // nothing else in the report would say so.
-const projected = wallCounts.filter(([name]) => terrainReads.get(name) > 0).map(([name]) => name);
+const projected = wallCounts
+  .filter(([name]) => terrainReads.get(name) > 0)
+  .map(([name]) => name);
 const unprojected = worldRooms.filter((name) => !projected.includes(name));
 if (unprojected.length) {
   console.log(
     `projection: the bundle read terrain for ${projected.join(", ") || "no room"} and never for ` +
       `${unprojected.join(", ")} — those rooms are in the world but outside the scan set, which ` +
       "is the colony's declared outposts less whatever ADR 0043's stand-down is withholding. " +
-      "These ms are the projected rooms' and not the whole world's."
+      "These ms are the projected rooms' and not the whole world's.",
   );
 
   // And the creeps standing in those rooms are worse than unmeasured, so
@@ -2984,14 +3231,18 @@ if (unprojected.length) {
   // loud rather than worked around: what the decision layer owes a creep
   // it cannot place is ADR 0004's question and Core's to answer, and this
   // ticket adds observation and changes no Core.
-  const stray = world.creeps.filter((creep) => unprojected.includes(creep.room.name));
+  const stray = world.creeps.filter((creep) =>
+    unprojected.includes(creep.room.name),
+  );
   if (stray.length) {
     console.log(
       `  and ${stray.length} of the world's ${world.creeps.length} creeps stand in those rooms ` +
         `(${stray.map((creep) => creep.name).join(", ")}): matched off a position the projection ` +
-        "does not hold, so their share of these ms is a match the colony would not make."
+        "does not hold, so their share of these ms is a match the colony would not make.",
     );
   }
 }
 
-console.log(`\nraw profile: ${path.relative(process.cwd(), profilePath)} (open in Chrome DevTools / speedscope)`);
+console.log(
+  `\nraw profile: ${path.relative(process.cwd(), profilePath)} (open in Chrome DevTools / speedscope)`,
+);
