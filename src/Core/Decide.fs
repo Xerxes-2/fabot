@@ -1278,11 +1278,15 @@ let private isStandingCast (tuning: Tuning) body =
 /// nothing else, like every other row-reading predicate here (ADR 0006), and a
 /// fact about a *body* rather than about a row: the upgrader row's `11W/1C/11M`
 /// is one, and so is the anchor row's `6W/1C/1M`. The gate that reads it is
-/// `applicable` below, on Build, Repair and Refill — and on Pickup and on every
-/// Withdraw but the buffer's. What is left exactly as its own gates already had
-/// it is the working life the upgrader row was shaped for: it draws from the
-/// buffer at its feet (ADR 0019, through ADR 0016's gate) and spends into the
-/// controller in place, or it digs from its Post.
+/// `applicable` below, on Build, Repair and Refill — on Pickup and on every
+/// Withdraw but the buffer's, and since #235 on Harvest, where the body that
+/// keeps it is the Work-heavy one (ADR 0016) and not the standing one, the
+/// anchor row's `6W/1C/1M` being both. What is left exactly as its own gates
+/// already had it is the working life the upgrader row was shaped for: it draws
+/// from the buffer at its feet (ADR 0019, through ADR 0016's gate) and spends
+/// into the controller in place. Digging is not part of it — #206 left Harvest
+/// open on the reasoning that travel cost would keep the row beside its buffer,
+/// and an empty buffer leaves the row nothing else applicable at all.
 let private isStandingBody (tuning: Tuning) (creep: CreepInfo) =
     let count part =
         creep.Body |> Map.tryFind part |> Option.defaultValue 0
@@ -2730,6 +2734,75 @@ let private garrisons atlas (creep: CreepInfo) sourceId =
     Atlas.workHeavy atlas creep.Name
     && Atlas.catchesOverflow atlas creep.Name sourceId
 
+/// Whether a source's **rate** still outruns what the bodies garrisoning it
+/// take — **whether a rock has a dig left in it worth a walk** (#235). A Post's
+/// Anchor is sized to saturate its rock (ADR 0021: the Work that drain the
+/// whole regeneration, plus one spare), so a manned Post ordinarily leaves
+/// nothing over: a light body joining it takes energy the garrison would have
+/// taken anyway, the colony earns not one point for the trip, and the seats it
+/// fills are seats the garrison itself competes for (ADR 0051's cap is over the
+/// source, and live a mother's two workers took the last two of an outpost's
+/// three and its own Anchor read `none-free`). Live at t199,88x a worker with
+/// nine free walked a Seam for one dig on a rock a six-Work Anchor was already
+/// draining.
+///
+/// Named for the **rate** because that is the number it reads, and the file
+/// spells the two apart on purpose (ADR 0042, #208): `sourceOutputOf` is the
+/// quota's number — the row's *cast* capped at that rate — and reading it here
+/// would have a colony too poor to cast a saturating Anchor read its own
+/// half-worked rock as spent and keep its workers off the half nobody is
+/// digging. The garrison side is the **living** bodies, for the same reason
+/// from the other end: this gate prices one walk this tick, where a quota read
+/// off a cast would go on pricing a body that has died. Zero garrison on an
+/// unposted rock and on a vacant Post, so both stay open — the safety valve
+/// that keeps a colony whose Anchor has just died from starving. A rate the
+/// projection cannot price is no evidence of saturation (ADR 0004).
+///
+/// The **standing** Posts and not `Atlas.postsOf`, which is `Decide.isPosted`'s
+/// own query for this same question (ADR 0042 as #205 amended it): a container
+/// site is a garrison place and not yet an economy, so the twelve a tick its
+/// Anchor digs goes into construction progress and reaches no store — and there
+/// is no container standing beside the rock to Withdraw from either, so a rock
+/// closed at the site stage leaves the whole light row with no Feeding intake
+/// at all while both home Posts are still being raised. The clause starts
+/// biting the tick the container stands, which is the tick the rock joins the
+/// economy the clause is rationing.
+///
+/// Read here in `applicable` and not as a `Capacity.Commuters` of zero, where
+/// ADR 0052 decision 6 otherwise keeps the per-source numbers: a capacity
+/// bounds the crowd a Task admits but never evicts a body already holding it,
+/// and #235's case (b) is exactly an eviction — the outpost Anchor stands up
+/// and the squatting light body has to be released that tick, not merely
+/// refused the next time it asks.
+let private hasSpareRate (view: ColonyView) atlas (sourceId: string) =
+    let posts = Atlas.standingPostsOf atlas sourceId
+
+    let dug =
+        if Set.isEmpty posts then
+            0
+        else
+            // Read off the bodies *standing* on the Posts, the way `garrisons`
+            // above reads one — a Post's garrison is a fact about where a body
+            // is (ADR 0024) — and off the heavy ones alone, because ADR 0051
+            // keeps the light bodies' Work Area off these tiles: one standing
+            // there is squatting the Post, not working it. A body standing on
+            // one of these tiles digs *some* source, and where two rocks share
+            // a Seat it is charged to both — the ambiguity `Atlas.postsOf` has
+            // carried since ADR 0024's cap, not one this gate introduces.
+            view.Creeps
+            |> List.sumBy (fun creep ->
+                if
+                    Atlas.workHeavy atlas creep.Name
+                    && Atlas.creepTile atlas creep.Name
+                       |> Option.exists (fun tile -> Set.contains tile posts)
+                then
+                    (creep.Body |> Map.tryFind Work |> Option.defaultValue 0)
+                    * Engine.harvestPerWork
+                else
+                    0)
+
+    sourceRateOf view atlas sourceId |> Option.forall (fun rate -> rate > dug)
+
 /// Whether a Work-heavy body holds a source through its empty window: the
 /// **empty-source** reprieve, which ADR 0048 widened off the container to the
 /// source's whole digging range. Named for the reprieve and not for the Post on
@@ -3454,11 +3527,12 @@ let planPool (view: ColonyView) atlas (tasks: Task list) : PooledTask list =
 
 /// Whether a creep can usefully work this Task right now. The body must
 /// physically be able to do it — Work-part tasks need a Work part, energy
-/// delivery needs a Carry part — and the energy state must call for it: a full
-/// creep is done harvesting, an empty creep has nothing to deliver. Not all of
-/// it is a judgement about the body: the gates below read the target's kind,
-/// its geometry and what is standing in it. Gates read part
-/// arithmetic, never names or roles (ADR 0006). One geometric widening (ADR
+/// delivery needs a Carry part — and the energy state must call for it: a body
+/// past half full is not worth *sending* for more, by digging or by drawing
+/// (#235), and an empty creep has nothing to deliver. Not all of it is a
+/// judgement about the body: the gates below read the target's kind, its
+/// geometry and what is standing in it. Gates read part arithmetic, never names
+/// or roles (ADR 0006). One geometric widening (ADR
 /// 0012), body-aware since ADR 0024: a full Work-heavy creep standing on a
 /// built source container keeps Harvest, the engine dropping the overflow into
 /// the container underfoot. A light body gets no such reprieve, or it would
@@ -3472,7 +3546,12 @@ let planPool (view: ColonyView) atlas (tasks: Task list) : PooledTask list =
 /// body** (ADR 0046), all three being deliveries and a delivery by a body
 /// holding fifty energy against eleven Work being a commute. A sixth reads the
 /// geometry beside the body (ADR 0048): Upgrade is applicable to a Work-heavy
-/// body only where it may already act on it.
+/// body only where it may already act on it. A seventh is three clauses over
+/// one Task (#235), all of them about the walk a light body makes to a rock
+/// and none of them reaching the Work-heavy body ADR 0020 has pinned to a Post:
+/// it must be half empty *or* already standing where it may dig, it must not be
+/// a standing body — which closes #206 for the one Task that ticket spared —
+/// and the rock's rate must still outrun what the bodies garrisoning it take.
 let private applicable
     (view: ColonyView)
     (threats: Threats)
@@ -3485,12 +3564,16 @@ let private applicable
     let has part =
         creep.Body |> Map.tryFind part |> Option.exists (fun n -> n > 0)
 
-    // An intake — a Withdraw or a Pickup — is for a body with room to carry it:
-    // at least half its store free (live: a hauler holding 1,150 of 1,200 walked
-    // forty tiles to pick fifty off a pile while the spawn stood at eighteen
-    // energy). A body past half full is a delivery, and its intake waits until it
-    // has delivered. A standing body's one Carry is a trip's worth, so for it
-    // this is "empty".
+    // An intake — a Withdraw, a Pickup or, since #235, a Harvest — is for a body
+    // with room to carry it: at least half its store free (live: a hauler holding
+    // 1,150 of 1,200 walked forty tiles to pick fifty off a pile while the spawn
+    // stood at eighteen energy). A body past half full is a delivery, and its
+    // intake waits until it has delivered. A standing body's one Carry is a
+    // trip's worth, so for it this is "empty". Harvest joined the other two
+    // late and for a light body only (#235), and there it prices the **walk**
+    // alone: the other two finish in the tick the body arrives, where a dig
+    // runs for dozens, so only Harvest can be half way through when this is
+    // read — and a garrison's whole working life is spent past half full.
     let halfEmpty = creep.FreeCapacity * 2 >= creep.Energy + creep.FreeCapacity
 
     match task with
@@ -3512,6 +3595,52 @@ let private applicable
             || (Atlas.workHeavy atlas creep.Name
                 && not (Set.isEmpty (Atlas.postsOf atlas sourceId))
                 && not (Atlas.mayAct atlas creep.Name task (areaFor threats atlas creep.Name task))))
+        // **Three clauses a light body answers and a garrison does not**
+        // (#235), drawn at ADR 0016's ratio, which is where every other line
+        // that separates the two bodies is drawn. Every one of the three is
+        // about the walk digging costs a body that does not live at the rock,
+        // so none of them can reach the body ADR 0020 has already pinned to a
+        // Post it is standing on: a Work-heavy body's Harvest goes on being
+        // decided by the gate above and by ADR 0024's two reprieves alone.
+        //
+        // **Half empty, like the other two intakes — while the walk is still
+        // ahead of it.** The mirror the Withdraw and the Pickup have carried
+        // since 75edfee never reached Harvest, so any room at all was room
+        // enough: live at t199,88x a `9W/9C/9M` worker with nine free of four
+        // hundred and fifty crossed a Seam, dug once, released full, and
+        // crossed back — and Harvest being the Feeding tier (ADR 0023) it
+        // outranked every Surplus Task the body could have done where it
+        // stood. But Harvest is the one intake that does not finish in a tick,
+        // and this gate is the *release* gate as well as the dispatch one, so
+        // the store mirror alone evicted a body off the Seat it was digging on
+        // the tick it crossed half full: half a load carried home for the whole
+        // of the walk it had already paid. So it is spelled the way ADR 0048
+        // spells its own widening in this same branch — the Emitter's `mayAct`,
+        // false while the walk is ahead of the body and true the tick it
+        // arrives. A body still walking answers the mirror; a body standing
+        // where it may dig has no walk left to price and fills to the brim.
+        //
+        // **A [[standing body]] does not walk to a rock either**, which closes
+        // #206 for the one Task it left open. That ticket shut the Pickup and
+        // every non-buffer Withdraw for a body carrying fewer than one Carry per
+        // four Work, and spared Harvest on the reasoning that travel cost would
+        // keep the upgrader row beside its buffer and that the anchor row is a
+        // standing body too. Travel cost did not: an empty buffer leaves the row
+        // nothing else applicable at all, and W13S28's `11W/1C/11M` upgraders
+        // walked to the sources on the ticks it ran dry, fifty energy a trip
+        // against eleven Work. The anchor row's half of that reasoning is what
+        // the heavy exemption above already answers.
+        //
+        // **And something spare in the rock to dig.** Those last two carry no
+        // arrival exemption on purpose: what they refuse is a body that should
+        // not be at the rock at all, and the release is the point of them —
+        // #235's case (b) is a light body squatting the Seat the outpost's own
+        // Anchor needs the tick it stands up.
+        && (Atlas.workHeavy atlas creep.Name
+            || ((halfEmpty
+                 || Atlas.mayAct atlas creep.Name task (areaFor threats atlas creep.Name task))
+                && not (isStandingBody view.Tuning creep)
+                && hasSpareRate view atlas sourceId))
     // The body half of this gate — a Carry part and ADR 0016's comparative
     // clause — is read a second time out of line by `canRefill`, the supply
     // floor's arming condition (ADR 0050): a clause narrowing what a body may

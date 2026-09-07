@@ -336,6 +336,77 @@ let outpostTests =
                     "the home source is the nearer of the two, and wins the same comparison"
             }
 
+            // #235's live shape, read from the row it evicted. The mother's
+            // workers matched the outpost rock's Harvest across the Seam —
+            // Feeding tier (ADR 0023), and nearer than her own — and the Seats
+            // they took count against that source's whole Total (ADR 0051), so
+            // W12S27's own Anchor read `none-free` on the Post it was standing
+            // on. One clause answers both halves: a rock a six-Work Anchor is
+            // already draining pays a light body nothing for the crossing, so
+            // the mother's worker is not applicable to it at all and the
+            // ranking above falls to her own room.
+            //
+            // Pairwise on the garrison alone. The container stands in both
+            // halves, so what moves between them is a body on the Post — which
+            // is also the safety valve stated as a case: a Post nobody is
+            // standing on is a rock with its whole ten a tick spare, and the
+            // mother's worker is welcome to it.
+            test "an outpost rock its Anchor drains is refused the mother's worker" {
+                let colonyWith garrison =
+                    let base' =
+                        northBorderColony { X = 10; Y = 38 }
+                        |> withNorthOutpost (Some { X = 10; Y = 46 })
+
+                    let outpost = SpatialInfo.layerOf base'.Spatial "W1N2"
+
+                    { base' with
+                        Creeps = base'.Creeps @ garrison
+                        // Reserved by us, so the rock can be priced at all
+                        // (ADR 0004) and prices at the held ten a tick — the
+                        // number six Work overrun by two.
+                        RoomControl = Map.add "W1N2" (reservedRoom true 4000) base'.RoomControl
+                        Spatial =
+                            { base'.Spatial with
+                                TargetKinds =
+                                    Map.add
+                                        "can-out"
+                                        (Structure BuiltKind.Container)
+                                        base'.Spatial.TargetKinds
+                            }
+                            |> withNeighbour
+                                "W1N2"
+                                { outpost with
+                                    TargetPositions =
+                                        Map.add "can-out" { X = 10; Y = 45 } outpost.TargetPositions
+                                    CreepPositions =
+                                        garrison
+                                        |> List.fold
+                                            (fun acc (c: CreepInfo) ->
+                                                Map.add c.Name { X = 10; Y = 45 } acc)
+                                            outpost.CreepPositions
+                                }
+                    }
+
+                Expect.equal
+                    (matchOf (colonyWith []))
+                    (Some(taskId (Harvest "src-out"), MatchFactor.TravelCost))
+                    "a vacant Post leaves the whole rock spare, and the near source still wins"
+
+                let garrisoned = colonyWith [ creepWith "a-out" 0 50 sixWork ]
+
+                Expect.equal
+                    (matchOf garrisoned)
+                    (Some(taskId (Harvest "src-home"), MatchFactor.OnlyCandidate))
+                    "the garrisoned rock is not the worker's to walk to; her own room is"
+
+                let { Assignments = assignments } = decide garrisoned Map.empty Set.empty None
+
+                Expect.equal
+                    (Map.tryFind "a-out" assignments)
+                    (Some(taskId (Harvest "src-out")))
+                    "and the Anchor keeps the Post nobody is displacing it from"
+            }
+
             test "the winner of that comparison is walked toward the Seam, tick after tick" {
                 // #142's reproduction, at the seam it was reproduced on.
                 // Before it, this fixture answered `Matched ("w",
