@@ -1960,6 +1960,73 @@ let outpostTests =
                     (Set.contains (RoomPos.at "W1N2" { X = 10; Y = 42 }) area)
                     "and the controller's own tile is not part of it, standing in Obstacles"
             }
+
+            test "an outpost controller's Upgrade area is nobody's working ground" {
+                // #241 read against ADR 0042. The mover asks for the
+                // [[working ground]] room by room now, and an outpost's
+                // controller is filed under its room like any other: asked
+                // whole, the query hands back the 7x7 around it as a
+                // workplace. The colony upgrades one controller, its own,
+                // and *reserves* an outpost's — a Seat inside an outpost
+                // controller's area is ground nobody upgrades from — so
+                // there is nothing there for an idle body to step out of.
+                // The outpost's Seats are another matter: its Anchor really
+                // does work from those, and they stay in.
+                let outpost creeps =
+                    let colony =
+                        { bareRespawn with
+                            Spawns = []
+                            Sources = []
+                            Controller = None
+                            Refillables = []
+                            Creeps = creeps |> List.map fst
+                        }
+                        |> withOutpost
+                            "W1N2"
+                            [
+                                "ctrl-out", { X = 25; Y = 25 }, Controller
+                                "src-out", { X = 22; Y = 28 }, Source
+                            ]
+                            ([
+                                for x in 20..30 do
+                                    for y in 20..30 -> { X = x; Y = y }, Plain
+                             ]
+                             @ [ { X = 22; Y = 28 }, Wall ])
+
+                    { colony with
+                        Spatial =
+                            colony.Spatial
+                            |> withNeighbour
+                                "W1N2"
+                                { SpatialInfo.layerOf colony.Spatial "W1N2" with
+                                    CreepPositions =
+                                        creeps
+                                        |> List.map (fun (creep: CreepInfo, pos) -> creep.Name, pos)
+                                        |> Map.ofList
+                                }
+                    }
+
+                let beside = outpost [ worker "w" 0 50, { X = 24; Y = 25 } ]
+
+                Expect.equal
+                    (Atlas.workingGroundIn (Atlas.ofView beside) "W1N2")
+                    (Set.ofList
+                        [
+                            for x in 21..23 do
+                                for y in 27..29 do
+                                    if (x, y) <> (22, 28) then
+                                        { X = x; Y = y }
+                        ])
+                    "the room's working ground is the outpost source's Seats and nothing else"
+
+                Expect.isEmpty
+                    (moveIntents (resolveOn beside []))
+                    "so a body idling beside the outpost controller has nowhere it must step off"
+
+                Expect.isNonEmpty
+                    (moveIntents (resolveOn (outpost [ worker "w" 0 50, { X = 21; Y = 27 } ]) []))
+                    "while one idling on the outpost's own Seat steps off it as it would at home"
+            }
         ]
 
 /// The colony with **two** outposts and one Anchor standing beside the

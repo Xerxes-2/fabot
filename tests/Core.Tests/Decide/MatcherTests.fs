@@ -925,6 +925,106 @@ let laneWith pocket ours foreign =
                 Set.empty
     }
 
+/// W13S28's north Upgrade pocket (#241), the geometry the jam is made of,
+/// narrowed to six tiles and written either way round. The controller stands
+/// at (24,17) with the whole row y = 16 walled, so the only ground inside its
+/// Upgrade Work Area is the pocket north of it — (21..23,14) and (21..23,15) —
+/// reached down one corridor along y = 14. The live pocket is the eight tiles
+/// the ticket lists, (21..25,14) and (21..23,15); the two east tiles are left
+/// out here so the corridor is ordinary ground and the pocket's mouth is one
+/// tile.
+///
+/// `mirror` is which way that corridor runs, and it is not decoration: every
+/// tie in this bot falls to the lowest x then y, so the two orientations put
+/// the working ground on opposite sides of the order `arbitrate` re-houses a
+/// displaced body in. One of them can be right by accident, which is why both
+/// are pinned below.
+///
+/// The [[buffer]] container stands at (22,15), *inside* the pocket, so its
+/// five standing tiles are Upgrade [[working ground]] to the last one: nowhere
+/// here is a tile a body can park on without taking it from the row that works
+/// there or from the hauler that feeds them. The buffer is empty, which is
+/// what leaves the upgraders with no Task at all.
+let private pocketFacing (mirror: int -> int) =
+    let controller = { X = mirror 24; Y = 17 }
+    let buffer = { X = mirror 22; Y = 15 }
+
+    { spatial
+          []
+          ([ for x in 16..23 -> { X = mirror x; Y = 14 }, Plain ]
+           @ [ for x in 21..23 -> { X = mirror x; Y = 15 }, Plain ]
+           @ [ controller, Wall ]) with
+        Stores = Map.ofList [ "can-buf", 0 ]
+    }
+    |> withHome (fun layer ->
+        { layer with
+            Obstacles = Set.singleton controller
+        })
+    |> withTargets
+        [
+            "ctrl-1", controller, Controller
+            "can-buf", buffer, Structure BuiltKind.Container
+        ]
+
+/// The live room's orientation: the corridor runs west out of the mouth.
+let pocketRoom = pocketFacing id
+
+/// And the same pocket reflected about x = 20 — mouth at (20,14), corridor
+/// running east.
+let mirroredPocketRoom = pocketFacing (fun x -> 40 - x)
+
+/// The pocket colony: the bodies the test puts in it, standing where it puts
+/// them. No source, so the only work in the room is the controller's and its
+/// buffer's.
+let pocketColonyIn room creeps positions =
+    { bareRespawn with
+        Sources = []
+        Creeps = creeps
+        Spatial =
+            room
+            |> withHome (fun layer ->
+                { layer with
+                    CreepPositions = Map.ofList positions
+                })
+    }
+
+let pocketColony creeps positions =
+    pocketColonyIn pocketRoom creeps positions
+
+/// The pairs that exchanged tiles between two ticks. A swap is a legal answer
+/// to a head-on meeting; a swap repeated is the livelock #241 forbids, and
+/// what `livelock-scan` counted 54 of in 190 ticks.
+let private swaps (before: Map<string, Pos>) (after: Map<string, Pos>) =
+    Set.ofList
+        [
+            for KeyValue(a, _) in before do
+                for KeyValue(b, _) in before do
+                    if a < b && before[a] = after[b] && before[b] = after[a] then
+                        a, b
+        ]
+
+/// The pairs that exchanged tiles on two consecutive tick boundaries of a run.
+let repeatedSwaps (ticks: Map<string, Pos> list) =
+    ticks
+    |> List.pairwise
+    |> List.map (fun (before, after) -> swaps before after)
+    |> List.pairwise
+    |> List.collect (fun (first, second) -> Set.intersect first second |> Set.toList)
+
+/// The positions a colony's bodies settle into, tick by tick, each tick's move
+/// Intents folded onto the tick before it.
+let walkedTicks colony assigned count (start: Map<string, Pos>) =
+    let step (positions: Map<string, Pos>) =
+        (positions, resolveOn (colony (Map.toList positions)) assigned |> moveIntents)
+        ||> List.fold (fun acc (name, direction) -> Map.add name (stepFrom acc[name] direction) acc)
+
+    List.scan (fun positions _ -> step positions) start [ 1..count ]
+
+/// An upgrader-shaped body: the row that stands beside the buffer, and the one
+/// idling in the pocket in #241.
+let upgrader name =
+    creepWith name 0 50 [ Work; Work; Carry; Move ]
+
 [<Tests>]
 let arbitrationTests =
     testList
@@ -1548,6 +1648,146 @@ let arbitrationTests =
                 Expect.isNone
                     (drive false 0 start)
                     "and in a lane with nothing beside it neither ever does, which is the wait ADR 0008 keeps"
+            }
+
+            test "a body with no Task parks off the working ground, and stays put beside it" {
+                // #241, pairwise and one tile apart: the same idle body on
+                // the first tile of the Upgrade Work Area and on the corridor
+                // tile beside it. Inside, it is standing on ground somebody
+                // works from and steps off; outside, it is standing nowhere in
+                // particular and the rule has nothing to say to it.
+                let moved pos =
+                    resolveOn (pocketColony [ upgrader "u" ] [ "u", pos ]) [] |> moveIntents
+
+                Expect.equal
+                    (moved { X = 21; Y = 14 })
+                    [ "u", Left ]
+                    "on the pocket's mouth it steps out into the corridor"
+
+                Expect.isEmpty
+                    (moved { X = 20; Y = 14 })
+                    "one tile west, off every Work Area, it has no reason to move at all"
+
+                // And the third case, the one the rule promises costs
+                // nothing: seal the mouth and the pocket's working ground has
+                // no ground off it at all, so there is nowhere to head and the
+                // body parks exactly as it did before #241.
+                let sealedPocket =
+                    pocketRoom
+                    |> withHome (fun layer ->
+                        { layer with
+                            Terrain = Map.remove { X = 20; Y = 14 } layer.Terrain
+                        })
+
+                Expect.isEmpty
+                    (resolveOn
+                        (pocketColonyIn sealedPocket [ upgrader "u" ] [ "u", { X = 21; Y = 14 } ])
+                        []
+                     |> moveIntents)
+                    "and walled into the pocket, with nowhere off the ground to go, it parks"
+            }
+
+            test "the idle body deep in the pocket walks out of it over ticks" {
+                // The same rule where the way off is more than one step: the
+                // buffer's own tile is as far inside the pocket as ground
+                // goes, and the head is the first step of the walk out rather
+                // than a neighbour that happens to be off it — there is no
+                // such neighbour.
+                let rec walk tick pos =
+                    if tick > 4 then
+                        pos
+                    else
+                        match
+                            resolveOn (pocketColony [ upgrader "u" ] [ "u", pos ]) [] |> moveIntents
+                        with
+                        | [ (_, direction) ] -> walk (tick + 1) (stepFrom pos direction)
+                        | _ -> pos
+
+                Expect.equal
+                    (walk 0 { X = 22; Y = 15 })
+                    { X = 20; Y = 14 }
+                    "it settles on the first tile outside the working ground and stops there"
+            }
+
+            test "#241 the pocket jam: the hauler feeding the buffer gets in" {
+                // The live jam (W13S28, 190 ticks): the buffer empty, two
+                // upgraders with no Task parked on two of its five standing
+                // tiles, two loaded workers walking in to upgrade, and the
+                // hauler carrying the energy that would have un-idled the
+                // upgraders never getting past the pocket's mouth. The ring is
+                // that the bodies waiting on the buffer were standing where its
+                // feed had to stand.
+                //
+                // Driven over ticks, because one tick cannot show it: every
+                // tick's answer was the same one, and the two bodies fighting
+                // over the mouth traded it back and forth for as long as the
+                // scan ran.
+                let creeps =
+                    [
+                        upgrader "u1"
+                        upgrader "u2"
+                        worker "w1" 50 0
+                        worker "w2" 50 0
+                        hauler "h" 100 0
+                    ]
+
+                let assigned =
+                    [ "w1", Upgrade "ctrl-1"; "w2", Upgrade "ctrl-1"; "h", Refill "can-buf" ]
+
+                let start =
+                    Map.ofList
+                        [
+                            "u1", { X = 21; Y = 15 }
+                            "u2", { X = 22; Y = 14 }
+                            "w1", { X = 20; Y = 14 }
+                            "w2", { X = 19; Y = 14 }
+                            "h", { X = 18; Y = 14 }
+                        ]
+
+                // Ten ticks of it: three for the hauler's walk in and seven
+                // more of the steady state the jam never reached.
+                let ticks = walkedTicks (pocketColony creeps) assigned 10 start
+
+                let besideBuffer (positions: Map<string, Pos>) =
+                    range positions["h"] { X = 22; Y = 15 } <= 1
+
+                Expect.isTrue
+                    (ticks |> List.skip 3 |> List.forall besideBuffer)
+                    "the hauler is standing beside the buffer by the third tick and stays there"
+
+                // The other half of the acceptance: nobody trades tiles with
+                // anybody two ticks running.
+                Expect.isEmpty
+                    (repeatedSwaps ticks)
+                    "no pair of bodies exchanges tiles on two consecutive ticks"
+            }
+
+            test "two idle bodies in the mirrored pocket settle instead of trading its mouth" {
+                // The orientation the room happens not to have (#241): the
+                // corridor running east, so the working ground sorts *below*
+                // the tile off it. `arbitrate` re-houses a displaced body on
+                // the first free tile of its list, so with an unordered tail
+                // the body shoved off the mouth lands back inside the pocket,
+                // steps out again next tick, and the pair exchanges the mouth
+                // for as long as the run lasts — the very swap the criterion
+                // above forbids, arrived at from the other side.
+                let creeps = [ upgrader "u1"; upgrader "u2" ]
+
+                let ticks =
+                    walkedTicks
+                        (pocketColonyIn mirroredPocketRoom creeps)
+                        []
+                        10
+                        (Map.ofList [ "u1", { X = 19; Y = 15 }; "u2", { X = 18; Y = 14 } ])
+
+                Expect.isEmpty
+                    (repeatedSwaps ticks)
+                    "neither body is shoved back onto the ground it was told to leave"
+
+                Expect.equal
+                    (List.last ticks |> Map.toList |> List.map snd |> List.sortBy (fun p -> p.X))
+                    [ { X = 20; Y = 14 }; { X = 21; Y = 14 } ]
+                    "both settle on the corridor, one behind the other, and stop"
             }
 
             test "another colony's body is an occupant this colony cannot claim" {

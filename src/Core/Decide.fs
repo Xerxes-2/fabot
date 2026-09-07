@@ -3987,8 +3987,30 @@ let private idleRank = System.Int32.MaxValue
 /// matched across a border somewhere to walk (#142): its Work Area is empty
 /// here by construction (ADR 0041), so without the Task it would park on a Task
 /// it was priced for and never move.
+///
+/// **A body with no Task parks off the [[working ground]]** (#241, widening ADR
+/// 0022 from the Layout to the mover). The Seats and the Upgrade Work Area are
+/// the tiles the colony works *from*, and an idle body standing on one costs
+/// exactly what a clustered structure there would: the tile. W13S28's north
+/// pocket is eight tiles of Upgrade Work Area with the [[buffer]] container
+/// inside it, so its five refill tiles are working ground to the last one; two
+/// idle upgraders parked on them for 190 ticks and the hauler carrying the
+/// energy that would have un-idled them never got in — the buffer stayed empty
+/// because the bodies waiting on it were standing where its feed had to stand.
+/// So an idle body's head is the first step off that ground, and its own tile
+/// falls into the tail behind it: where there is nowhere off the ground to go,
+/// it parks exactly as before. Two things ride on that head. The goal set is
+/// taken less this tick's Reach, as every tasked candidate already is (ADR
+/// 0033) — a [[work-heavy body]] has no Flee, so a step off a safe pocket into
+/// an attacker is one nothing walks back — and the tail is ordered off the
+/// ground first, because a body shoved aside off the ground and re-housed onto
+/// it is a body that steps off again next tick, which is the very swap #241
+/// was opened about. The rule is the idle body's alone — a body with a Task it
+/// cannot reach parks on the Task's own rank and keeps its tile, because it is
+/// not the ground it is standing on that is stopping it.
 let private moveIntentFor
     (rankOf: Task -> int)
+    (idleGround: string -> Set<Pos> * Set<RoomPos>)
     (threats: Threats)
     atlas
     (creep: string)
@@ -4017,7 +4039,48 @@ let private moveIntentFor
         }
 
     match task with
-    | None -> parked idleRank
+    | None ->
+        // The room's working ground and the ground just off it: any way off
+        // runs through one of those tiles, so the nearest of them is the
+        // nearest standing room there is outside the colony's workplaces, and
+        // the goal set stays the perimeter rather than the whole room.
+        let working, offGround = idleGround room
+
+        // The tail, ordered off the working ground first — the same job the
+        // other two branches give their own tails. `arbitrate` re-houses a
+        // displaced body on the first free tile of its list, so an unordered
+        // tail puts a body shoved off the ground straight back onto it, and
+        // the two idle bodies trade the one tile off the ground every tick.
+        let off, on = beside |> List.partition (fun tile -> not (Set.contains tile working))
+
+        let tail = staying @ off @ on
+
+        // The way off, less this tick's Reach (ADR 0033) — the subtraction
+        // `areaFor` makes below, made here too because this is the branch it
+        // is hardest on: ADR 0033 gives a [[work-heavy body]] no Flee, so a
+        // step out of a safe pocket into an attacker is one nothing walks it
+        // back from. Nowhere safe off the ground is nowhere to go: it parks.
+        let stepOff =
+            if Set.contains pos working then
+                let reach = Threats.reachIn threats room
+
+                offGround
+                |> Set.filter (fun tile -> not (Set.contains (RoomPos.pos tile) reach))
+                |> Atlas.firstStepWithin atlas creep
+                |> Option.map RoomPos.pos
+            else
+                None
+
+        {
+            Creep = creep
+            Pos = at
+            Rank = idleRank
+            Candidates =
+                (match stepOff with
+                 | Some step -> step :: (tail |> List.filter ((<>) step))
+                 | None -> tail)
+                |> List.map here
+        }
     | Some task ->
         // The area less this tick's Reach (ADR 0033): a creep works from the
         // safe half of its Work Area rather than abandoning the Task because
@@ -4303,6 +4366,33 @@ let movementOf
 
     let placed = Atlas.placedCreeps atlas
 
+    // The [[working ground]] an idle body steps off (#241), and the ring of
+    // ground just outside it that any step off has to land on — one pair per
+    // room some body of ours idles in, and none at all for a tick where every
+    // body has a Task, which is the tick that must pay nothing for this rule.
+    let idleGrounds =
+        placed
+        |> List.filter (fun (name, _) ->
+            not (Map.containsKey name assigned) && not (Set.contains name tired))
+        |> List.map (fun (_, at) -> at.Room)
+        |> List.distinct
+        |> List.map (fun room ->
+            let working = Atlas.workingGroundIn atlas room
+
+            let off =
+                working
+                |> Set.toList
+                |> List.collect (Atlas.adjacentWalkableIn atlas room)
+                |> List.filter (fun tile -> not (Set.contains tile working))
+                |> Set.ofList
+                |> RoomPos.setAt room
+
+            room, (working, off))
+        |> Map.ofList
+
+    let idleGround room =
+        Map.tryFind room idleGrounds |> Option.defaultValue (Set.empty, Set.empty)
+
     let rerouted name task =
         let area = areaFor threats atlas name task
 
@@ -4322,7 +4412,14 @@ let movementOf
             placed
             |> List.filter (fun (name, _) -> not (Set.contains name tired))
             |> List.map (fun (name, at) ->
-                moveIntentFor priorityOf threats atlas name at (Map.tryFind name assigned))
+                moveIntentFor
+                    priorityOf
+                    idleGround
+                    threats
+                    atlas
+                    name
+                    at
+                    (Map.tryFind name assigned))
         Rerouted =
             placed
             |> List.choose (fun (name, _) ->

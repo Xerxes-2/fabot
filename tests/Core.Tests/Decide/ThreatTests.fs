@@ -807,6 +807,38 @@ let postLane creeps positions =
 let garrison name =
     creepWith name 0 100 [ Work; Work; Carry; Move ]
 
+/// The Seat pocket (#241): the source walled in at (10,10) with its eight
+/// neighbours open — Seats to the last one, so the whole pocket is
+/// [[working ground]] — and a plain corridor running east from (11,10).
+/// The only ground off that working ground is the corridor's first tile,
+/// (12,10), so a hostile standing down the corridor puts the one way off
+/// the ground inside its Reach while leaving the Seats themselves outside
+/// it. That is the shape the idle rule must not walk a body through.
+let seatPocket creeps =
+    { spatial
+          [ "src-a", { X = 10; Y = 10 } ]
+          (openSeats { X = 10; Y = 10 }
+           @ [ for x in 11..20 -> { X = x; Y = 10 }, Plain ]
+           @ [ { X = 10; Y = 10 }, Wall ]) with
+        TargetKinds = Map.ofList [ "src-a", Source ]
+    }
+    |> withHome (fun layer ->
+        { layer with
+            CreepPositions = Map.ofList creeps
+        })
+
+/// A colony over that pocket with the source out of the pool, so the body
+/// standing in it has no Task at all and the mover's idle rule is the only
+/// thing with anything to say to it.
+let seatPocketColony creeps positions =
+    { bareRespawn with
+        Sources = []
+        Refillables = []
+        Controller = None
+        Creeps = creeps
+        Spatial = seatPocket positions
+    }
+
 [<Tests>]
 let threatGateTests =
     testList
@@ -838,6 +870,41 @@ let threatGateTests =
                     verdicts
                     (Verdict.Unassigned("w1", IdleReason.NoneApplicable))
                     "the creep waits rather than walking into the Reach"
+            }
+
+            test "an idle body does not step off the working ground into a Reach" {
+                // #241 read against ADR 0033: the idle rule wants this body
+                // off the Seats it has no work on, and the one tile off them
+                // is inside an attacker's Reach. A [[work-heavy body]] has no
+                // Flee — "it stays and works", and its Post's rampart is its
+                // defence — so a step into the Reach is one nothing walks
+                // back, and the goal set is taken less the Reach exactly as
+                // every tasked candidate already is. Nowhere safe off the
+                // ground is nowhere to go, and it parks.
+                let standing = seatPocketColony [ garrison "a1" ] [ "a1", { X = 11; Y = 11 } ]
+
+                let movesOf colony =
+                    moveIntentsFor "a1" (decide colony Map.empty Set.empty None).Intents
+
+                Expect.equal
+                    (movesOf standing)
+                    [ MoveCreep("a1", TopRight) ]
+                    "with the corridor clear it steps off the Seat and onto (12,10)"
+
+                let raided =
+                    standing |> facing [ hostileAt "h-1" { X = 15; Y = 10 } [ Attack; Move ] ]
+
+                Expect.isTrue
+                    (Set.contains { X = 12; Y = 10 } (reachIn raided))
+                    "the one tile off the working ground is inside the Reach"
+
+                Expect.isFalse
+                    (Set.contains { X = 11; Y = 11 } (reachIn raided))
+                    "and the Seat it stands on is not — it is safe where it is"
+
+                Expect.isEmpty
+                    (movesOf raided)
+                    "so it stays on the Seat rather than walking into the attacker"
             }
 
             test "the Scoring Verdict rejects a threatened candidate as Threatened" {

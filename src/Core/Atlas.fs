@@ -1387,12 +1387,21 @@ let private upgradeAreaIn (atlas: Atlas) (room: string) : Set<Pos> =
     |> List.fold Set.union Set.empty
 
 /// The working ground of the room (ADR 0022): every projected source's Seats
-/// plus every projected controller's Upgrade Work Area — the tiles the colony
-/// works from, off-limits to the Layout's clustered ordering, since a tower or
-/// extension there eats a tile an Anchor or an upgrader stands on. Total: a
-/// room with neither kind of geometry reserves nothing (ADR 0004).
+/// plus, in the colony's own room, its controller's Upgrade Work Area — the
+/// tiles the colony works from, off-limits to the Layout's clustered ordering,
+/// since a tower or extension there eats a tile an Anchor or an upgrader
+/// stands on. The Upgrade half is the home room's alone, for the reason
+/// `standingPostsIn` splits the Dual Seats on: the colony upgrades one
+/// controller, its own, and *reserves* an [[outpost]]'s, so an outpost
+/// controller's area is ground nobody upgrades from (ADR 0042) — a set the
+/// Layout, asking only about home, never saw the width of until the mover
+/// began asking room by room (#241). Total: a room with neither kind of
+/// geometry reserves nothing (ADR 0004).
 let workingGroundIn (atlas: Atlas) (room: string) : Set<Pos> =
-    Set.union (seatUnionIn atlas room) (upgradeAreaIn atlas room)
+    if room = atlas.Home then
+        Set.union (seatUnionIn atlas room) (upgradeAreaIn atlas room)
+    else
+        seatUnionIn atlas room
 
 /// Dual Seats of the room: tiles inside both some projected source's Seats and
 /// a projected controller's Upgrade Work Area — a creep standing on one
@@ -2273,6 +2282,15 @@ let firstStep (atlas: Atlas) (creep: string) (task: Task) (goals: Set<RoomPos>) 
     match firstStepVia atlas TravelCost creep goals with
     | Some step -> Some step
     | None -> stepAcross atlas TravelCost creep task
+
+/// The same first step toward an explicit set of tiles, with no Task beside it:
+/// `firstStep`'s answer for a body that has none to cross a Seam for, which is
+/// what an idle one stepping off the [[working ground]] is (#241). `travelCost`
+/// and `travelCostWithin` stand in the same pair for the same reason — the Task
+/// buys the cross-room fallback and nothing else, so a caller whose goals are
+/// tiles of the creep's own room by construction has no use for it.
+let firstStepWithin (atlas: Atlas) (creep: string) (goals: Set<RoomPos>) : RoomPos option =
+    firstStepVia atlas TravelCost creep goals
 
 /// The first step the same body would take were no tile occupied — the
 /// traffic-blind route, otherwise priced exactly like `firstStep`. The Resolver

@@ -927,9 +927,36 @@ let heavyPinTests =
                     (Verdict.Unassigned("a1", IdleReason.NoneApplicable))
                     "and it is its body that says so, not a restock or a distance"
 
-                Expect.isEmpty
+                // The one step it does take is off the Seat it has no work
+                // on and onto the corridor tile beside it (#241): a body
+                // with no Task parks off the [[working ground]], and this
+                // body's tile is a Seat of the source the pool no longer
+                // carries. What the gate refuses is the *walk* — the width
+                // of the room, east down the corridor — and the corridor
+                // tile it steps to is where it stays.
+                Expect.equal
                     (moveIntentsFor "a1" intents)
-                    "so nothing walks it the width of the room"
+                    [ MoveCreep("a1", TopRight) ]
+                    "it steps off the Seat, and nothing walks it the width of the room"
+
+                Expect.isEmpty
+                    (moveIntentsFor
+                        "a1"
+                        (decide
+                            { colony with
+                                Spatial =
+                                    colony.Spatial
+                                    |> withHome (fun layer ->
+                                        { layer with
+                                            CreepPositions =
+                                                Map.ofList [ "a1", { X = 12; Y = 10 } ]
+                                        })
+                            }
+                            Map.empty
+                            Set.empty
+                            None)
+                            .Intents)
+                    "and standing there, off every Seat and still a room from the controller, it stays"
             }
 
             test "the same body inside the Upgrade Work Area still upgrades in place" {
