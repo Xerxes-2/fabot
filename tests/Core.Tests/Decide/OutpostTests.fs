@@ -3167,6 +3167,163 @@ let outpostSuccessionTests =
             }
         ]
 
+/// The engine's own `smallMelee`: two TOUGH, five MOVE, a RANGED_ATTACK, a
+/// WORK and an ATTACK — 1,000 hits and 40 damage at range 1, and the body
+/// nine remote raids in ten arrive as (ADR 0056,
+/// `docs/research/remote-invader-defence.md`). Written part for part rather
+/// than reduced to "something armed", because the parts are what every rule
+/// reads: the ATTACK is what makes it a [[threat]] at all (ADR 0033), and the
+/// RANGED_ATTACK beside it is what sets its [[reach]] at 3 plus the margin
+/// rather than 1 plus it — which is the whole of how much ground a raid takes.
+let private smallMelee =
+    [ Tough; Tough; Move; Move; Move; Move; RangedAttack; Work; Attack; Move ]
+
+/// The posted outpost with the hostiles the caller names standing in it (ADR
+/// 0056): `haulHome`'s two rooms, the outpost held and its container standing,
+/// one [[anchor]] garrisoning that Post and two [[hauler unit]]s on the ground
+/// beside it.
+///
+/// A **new** builder beside the outpost fixtures above and never a Threat
+/// added to one of them: every pin those carry is a quiet colony's, and a
+/// [[reach]] laid over the shared fixture would re-baseline all of them at
+/// once. Handed the hostiles rather than holding them, so the same geometry
+/// answers the quiet tick and the raided one and a case can read the two
+/// pairwise — the one hostile is the only thing that moves between them.
+///
+/// Its outpost is a field eleven tiles wide, x 20..30 and y 41..48, where
+/// `withHaulOutpost` lays one corridor — because a raid needs somewhere to run
+/// *to*: a `smallMelee` standing at (25,42) reaches five tiles around it, so
+/// every row of that field but the last is inside the Reach and the y = 48 row
+/// is the safe set [[flee]] walks the crew onto. Down a one-tile corridor
+/// every walkable tile would be inside the Reach, Flee would price as
+/// unreachable, and the case would read "nobody fled" for a reason that is
+/// this fixture's and not the colony's.
+///
+/// Held rather than neutral, as the fixtures above are: a rate moves quotas
+/// and these cases are about the Tasks.
+let private raidedOutpost (hostiles: HostileInfo list) =
+    let colony = haulHome |> withHaulOutpost (Some(reservedRoom true 4000))
+    let outpost = SpatialInfo.layerOf colony.Spatial "W1N2"
+
+    { colony with
+        Creeps = [ anchor "a-out" 0 50; hauler "h-out1" 0 100; hauler "h-out2" 0 100 ]
+        Hostiles = hostiles
+        Spatial =
+            { colony.Spatial with
+                Stores = Map.add "can-out" 1000 colony.Spatial.Stores
+            }
+            |> withNeighbour
+                "W1N2"
+                { outpost with
+                    Terrain =
+                        Map.ofList
+                            [
+                                for x in 20..30 do
+                                    for y in 41..48 -> { X = x; Y = y }, Plain
+                            ]
+                    CreepPositions =
+                        Map.ofList
+                            [
+                                "a-out", { X = 25; Y = 41 }
+                                "h-out1", { X = 24; Y = 42 }
+                                "h-out2", { X = 26; Y = 42 }
+                            ]
+                }
+    }
+
+/// The raid itself: one invader standing a tile below the Post, on the ground
+/// its crew works from. Filed under the outpost's own room, because a Reach is
+/// filed under the room the Threat stands in and a hostile carrying another
+/// room's name would take no tile here at all (ADR 0041, #138).
+let private raiders = [ hostileIn "W1N2" { X = 25; Y = 42 } smallMelee ]
+
+[<Tests>]
+let raidedOutpostTests =
+    testList
+        "an outpost with an armed hostile standing in it"
+        [
+            test "the crew flees and the garrison, which cannot, is matched to nothing at all" {
+                // What a raid costs an outpost today, before ADR 0056's
+                // guard row exists to answer it: the [[hauler unit]]s run,
+                // the [[anchor]] cannot and stays, and every Task worked
+                // from ground inside the [[reach]] is inapplicable to
+                // everyone standing there.
+                //
+                // Pairwise against the same fixture with no hostile in it,
+                // one fact apart: the quiet tick is the yardstick, so a
+                // difference below is the raid's and can be nothing else.
+                let assignmentsOf hostiles =
+                    (decide (raidedOutpost hostiles) Map.empty Set.empty None).Assignments
+
+                let quiet = assignmentsOf []
+                let raided = assignmentsOf raiders
+
+                Expect.equal
+                    (Map.tryFind "a-out" quiet)
+                    (Some(taskId (Harvest "src-out")))
+                    "the premise: on a quiet tick the garrison digs the rock it stands on"
+
+                Expect.isEmpty
+                    (quiet |> Map.filter (fun _ tid -> tid = taskId Flee))
+                    "and nobody runs from a room with nothing in it (ADR 0033)"
+
+                Expect.equal
+                    (Map.tryFind "h-out1" quiet, Map.tryFind "h-out2" quiet)
+                    (Some(taskId (Withdraw "can-out")), Some(taskId (Withdraw "can-out")))
+                    "and the crew empties the container that Post feeds"
+
+                Expect.equal
+                    (Map.tryFind "h-out1" raided, Map.tryFind "h-out2" raided)
+                    (Some(taskId Flee), Some(taskId Flee))
+                    "both haulers drop that haul for Flee: the Safety tier outranks every other"
+
+                // Neither Flee nor work: Flee is inapplicable to a
+                // work-heavy body (ADR 0033), and every Seat of its rock —
+                // all three of them, the row of field under it — lies
+                // inside the Reach, so the one row that cannot run is left
+                // holding nothing on the tile it is being killed on. That is
+                // the hole ADR 0056 casts a guard into, pinned here as the
+                // behaviour that decision is measured against.
+                Expect.equal
+                    (Map.tryFind "a-out" raided)
+                    None
+                    "and the Anchor is matched to nothing at all: it neither runs nor digs"
+            }
+
+            test "the garrison's Harvest is released Threatened rather than simply lost" {
+                // The other half of the same tick, read off the Verdicts
+                // with the assignment the quiet tick made already held: a
+                // Task whose whole Work Area is in a Reach is released
+                // under its own reason, so an operator reading the
+                // transition log tells a raid from a Task that vanished
+                // (ADR 0033). Every Seat of `src-out` — the three tiles of
+                // the row under it — is inside this raid's Reach, and the
+                // container the haul reads is on one of them.
+                let releasesOf hostiles =
+                    let held =
+                        Map.ofList
+                            [
+                                "a-out", taskId (Harvest "src-out")
+                                "h-out1", taskId (Withdraw "can-out")
+                            ]
+
+                    (decide (raidedOutpost hostiles) held Set.empty None).Verdicts
+                    |> List.choose (function
+                        | Verdict.Released(creep, task, reason) -> Some(creep, task, reason)
+                        | _ -> None)
+
+                Expect.isEmpty (releasesOf []) "the premise: a quiet tick releases nobody"
+
+                Expect.equal
+                    (releasesOf raiders)
+                    [
+                        "a-out", taskId (Harvest "src-out"), ReleaseReason.Threatened
+                        "h-out1", taskId (Withdraw "can-out"), ReleaseReason.Threatened
+                    ]
+                    "the raid takes the rock's Seats and the container's ground, and says so"
+            }
+        ]
+
 [<Tests>]
 let containerSwitchTests =
     testList

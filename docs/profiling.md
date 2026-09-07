@@ -7,13 +7,14 @@ ms/tick plus two hotspot tables (by self and by inclusive time). The raw
 
 ```sh
 npm run build
-npm run profile                               # 100 ticks, stub scenario, RCL5
-npm run profile -- 500 30                     # ticks, top-N rows per table
-npm run profile -- 100 30 --census-every 10   # move the census every 10 ticks
-npm run profile -- --scenario outpost         # the colony and its neighbours
-npm run profile -- --scenario young           # one colony at RCL1, on a 300 bank
-npm run profile -- --scenario pair            # an RCL5 mother and her child
-npm run profile -- --level 4                  # build the colony at another RCL
+npm run profile                                # 100 ticks, stub scenario, RCL5
+npm run profile -- 500 30                      # ticks, top-N rows per table
+npm run profile -- 100 30 --census-every 10    # move the census every 10 ticks
+npm run profile -- --scenario outpost          # the colony and its neighbours
+npm run profile -- --scenario young            # one colony at RCL1, on a 300 bank
+npm run profile -- --scenario pair             # an RCL5 mother and her child
+npm run profile -- --scenario outpost --raided # one raider in the first outpost
+npm run profile -- --level 4                   # build the colony at another RCL
 ```
 
 Current numbers, the live CPU history and the per-hotspot attribution are
@@ -51,6 +52,29 @@ never a budget the bot acts on (ADR 0041: CPU is measured, not budgeted).
 stays at RCL5). `--scenario pair --level 3` is a reading, not a mistake:
 at `Colony.bootstrapLevel` the mother stops projecting the child's room
 and the two run side by side sharing nothing.
+
+## `--raided`: the one flag that puts a hostile in the world
+
+`--raided` stands one armed hostile in the first outpost of the two
+scenarios that furnish one, `outpost` and `pair`; every other scenario
+refuses the flag rather than ignoring it. The body is the engine's own
+`smallMelee` (2 TOUGH, 5 MOVE, RANGED_ATTACK, WORK, ATTACK — 1,000 hits),
+which is nine remote raids in ten (ADR 0056), and it stands on the nearest
+free ground to that room's rock, the containers held back so it cannot take
+the Post an Anchor garrisons.
+
+It exists because **no other run executes `Threats.Safe`, `Flee` or the
+subtraction of a Reach out of a Work Area at all** (ADR 0033) — until this
+flag the profiler had never entered them, so their cost was unmeasured
+rather than small. The report gains a `raid` block, printed straight after
+the per-colony decide table whose ms it qualifies and above the terrain and
+observe lines, naming the room, the hostile's tile, the creeps that fled
+and the Task each creep standing in that room ended the run holding, read
+off `Memory.fabot.assignments`. A raided run that names no runner has not
+exercised those paths after all.
+
+A raided run compares only with another raided one: the Reach costs real
+ms, and reading it against a quiet baseline reads the raid as a regression.
 
 Known fictions, each named in the report: `stub` still casts ADR 0042's
 reservers (quota per _declared_ outpost, not per seen one) and they stand

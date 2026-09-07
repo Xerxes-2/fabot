@@ -30,6 +30,18 @@
 //            colony, exactly as `Main.loop` runs it, and the report
 //            prints one CPU row per colony's `decide` beside the total.
 //
+// The two scenarios that stand an outpost — `outpost` and `pair` — also
+// take `--raided`, which puts one armed hostile in the first of them: the
+// engine's own `smallMelee`, standing beside that room's rock. Until it
+// there was no hostile anywhere in this harness, so `Threats.Safe`, Flee
+// and the Reach subtraction out of every Work Area were paths the profiler
+// had never executed (ADR 0033, ADR 0056) — a raided run is the only one
+// whose ms include them, and its report names the creeps that fled. A run
+// without the flag is byte for byte the run it always was: the raid is one
+// object in one room's `FIND_HOSTILE_CREEPS` table, plus the one tile it
+// stands on in that room's claimed set so the crew is stationed beside it
+// rather than under it, and nothing else.
+//
 // Every scenario is built at a controller level, `--level N`, and
 // everything that hangs off the level is derived from it rather than
 // written down twice: the extension, tower and Storage counts off the
@@ -62,9 +74,16 @@ import path from "node:path";
 import { report as cpuReport } from "./cpu-trigger.mjs";
 
 const SCENARIOS = ["stub", "outpost", "young", "pair"];
+// The scenarios `--raided` means anything for: a raid stands in an outpost,
+// and these are the two that furnish one. Refused elsewhere rather than
+// quietly ignored — a flag that named no hostile and printed no raid would
+// have a reader comparing an ordinary run against itself and calling it the
+// cost of a raid.
+const RAIDABLE = ["outpost", "pair"];
 const USAGE =
   "usage: npm run profile -- [ticks] [top-N] [--census-every N]" +
-  " [--scenario stub|outpost|young|pair] [--level 1..8]  (positive integers)";
+  " [--scenario stub|outpost|young|pair] [--level 1..8] [--raided]" +
+  "  (positive integers)";
 
 // The controller level a scenario's colony is built at, and the one number
 // to move when it climbs: every count that follows from it — the
@@ -97,10 +116,15 @@ let level = null;
 // typed rather than the `NaN` the conversion made of it — the answer the
 // sibling `--scenario` check already gives.
 let levelArg = null;
+// A flag and not a count: ADR 0056 reads the raid the research measured,
+// which is one melee invader, and a scenario that stood five of them would
+// be profiling the 2% case as if it were the tick.
+let raided = false;
 for (let i = 2; i < process.argv.length; i++) {
   if (process.argv[i] === "--census-every")
     censusEvery = Number(process.argv[++i]);
   else if (process.argv[i] === "--scenario") scenario = process.argv[++i];
+  else if (process.argv[i] === "--raided") raided = true;
   else if (process.argv[i] === "--level") {
     levelArg = process.argv[++i];
     level = Number(levelArg);
@@ -122,6 +146,14 @@ if (
 if (!SCENARIOS.includes(scenario)) {
   console.error(
     `unknown scenario "${scenario}"; one of: ${SCENARIOS.join(", ")}\n${USAGE}`,
+  );
+  process.exit(1);
+}
+const RAIDED = raided;
+if (RAIDED && !RAIDABLE.includes(scenario)) {
+  console.error(
+    `--raided stands a hostile in an outpost and the ${scenario} scenario furnishes none; ` +
+      `one of: ${RAIDABLE.join(", ")}\n${USAGE}`,
   );
   process.exit(1);
 }
@@ -172,6 +204,11 @@ const SPAWN_ENERGY_CAPACITY = 300;
 const TOWER_CAPACITY = 1000;
 const STORAGE_CAPACITY = 1000000;
 const CONTAINER_CAPACITY = 2000;
+
+// Screeps CREEP_LIFE_TIME: a full body's life, and the ceiling the engine
+// bounds every `ticksToLive` by — ours and a raider's alike, an invader in
+// an unowned room standing there for exactly this long (ADR 0056).
+const CREEP_LIFE_TIME = 1500;
 
 // Extensions left as construction sites rather than built, in both
 // scenarios, so the Build family is in the measurement instead of pooling
@@ -1027,7 +1064,7 @@ function buildStubWorld() {
 // One stub creep, from the part list the bundle asked the spawn for. Its
 // `room` is attached by the caller once the room object exists, exactly as
 // the spawn's is.
-function stubCreep({ name, pos, parts, used, ticksToLive = 1500 }) {
+function stubCreep({ name, pos, parts, used, ticksToLive = CREEP_LIFE_TIME }) {
   return {
     id: `creep-${name}`,
     name,
@@ -1382,6 +1419,39 @@ const LIVE_CONTAINERS = {
 // work.
 const OUTPOST_RESERVATION_TICKS = 4000;
 
+// The engine's own `smallMelee`, part for part: the first creep of any raid
+// outside a sector centre, and — `createRaid` leaving `count = 1` unless
+// `Math.random() > 0.9` — nine remote raids in ten whole (ADR 0056,
+// `docs/research/remote-invader-defence.md`). 1,000 hits, 40 damage at range
+// 1, and it never flees, an ATTACK part being what keeps `findAttack.js`
+// from routing it into `flee.js`.
+//
+// Copied whole rather than reduced to "something with an ATTACK part",
+// because the parts are what the projection carries verbatim (ADR 0028) and
+// what every rule downstream reads: the ATTACK is what makes it a Threat at
+// all, and the RANGED_ATTACK beside it is what sets its Reach at 3 plus
+// `Tuning.ReachMargin` rather than 1 plus it — which is how much of the room
+// a raid actually takes, and therefore how much work the Reach subtraction
+// does on the ticks this run is measuring.
+const SMALL_MELEE = [
+  "tough",
+  "tough",
+  "move",
+  "move",
+  "move",
+  "move",
+  "ranged_attack",
+  "work",
+  "attack",
+  "move",
+];
+
+// The username the engine's NPC raiders carry. Read by the Raid log's
+// roster and by nothing that decides (ADR 0028), and spelled here for the
+// reason `COLONY_OWNER` is: a name the harness invented would be a name no
+// live report could be compared against.
+const INVADER_OWNER = "Invader";
+
 const capturesDirectory = () =>
   path.join(
     path.dirname(fileURLToPath(import.meta.url)),
@@ -1676,7 +1746,13 @@ function furnishHome({
 // stands there. Nothing owned — an outpost is a room we do not own, so no
 // spawn, no extension and no tower — and no road either: ADR 0042 declines
 // to pave one, so the colony has none to model.
-function furnishOutpost(capture, register, structure) {
+//
+// `raided` stands the raid of ADR 0056 in it: one `smallMelee` beside the
+// room's first rock. Per room and asked for by the caller rather than read
+// off the flag here, because `--raided` is one raid and this function
+// furnishes every outpost of the world — a raid in each would be profiling
+// the invasion nobody has ever seen.
+function furnishOutpost(capture, register, structure, raided = false) {
   const sources = capture.sources.map((source) =>
     register({
       id: source.id,
@@ -1704,21 +1780,61 @@ function furnishOutpost(capture, register, structure) {
       store: store({ used: 1500, capacity: CONTAINER_CAPACITY }),
     }),
   );
+  // What a creep may not be stood on here: a source and a controller
+  // are obstacles the engine will not let one share, and nothing else
+  // in the room is — a container is walkable, and standing an Anchor
+  // on one is exactly what a Post is (ADR 0020). Handed to `hireFleet`
+  // and to the crew below as one set per room, so the reserver and the
+  // Anchor the bundle stations here and the hauler crew stood beside
+  // them cannot land on one tile.
+  const occupied = new Set([
+    ...sources.map((source) => keyOf(source.pos)),
+    keyOf(capture.controller.pos),
+  ]);
+  // The raid: one invader on the nearest free ground to the room's first
+  // rock, which is where a raid ends up — `findAttack.js` chases the
+  // closest hostile creep by path, and the Anchor garrisoning that rock's
+  // Post is the closest thing this room holds.
+  //
+  // The containers are held out of the tile it may take, though a hostile
+  // stands on a container as happily as ours does: the fleet is stationed
+  // *after* this, out of this same `occupied` set, so a raider parked on
+  // the Post would push the Anchor off the one tile it can dig from and
+  // the run would time a colony that had already lost the room. Its own
+  // tile then joins the set, so the crew stands beside it rather than
+  // under it.
+  //
+  // Derived off the capture's own furniture rather than written down, for
+  // the reason every other tile in this scenario is (#144): a hand-picked
+  // coordinate is a fact about the room the harness thinks it has.
+  const hostiles = [];
+  if (raided) {
+    const pos = nearestFree(
+      capture,
+      sources[0].pos,
+      new Set([...occupied, ...containers.map((c) => keyOf(c.pos))]),
+    );
+    occupied.add(keyOf(pos));
+    hostiles.push(
+      register({
+        id: `${capture.name.toLowerCase()}-invader`,
+        owner: { username: INVADER_OWNER },
+        pos,
+        body: SMALL_MELEE.map((type) => ({ type })),
+        // The clock ADR 0056 re-clocks the stand-down to. Ungated on a
+        // hostile creep in the engine, and this raider spends all of it:
+        // `findAttack.js` suicides only where the controller has an owner,
+        // and an outpost's has none.
+        ticksToLive: CREEP_LIFE_TIME,
+      }),
+    );
+  }
   return {
     capture,
     sources,
     containers,
-    // What a creep may not be stood on here: a source and a controller
-    // are obstacles the engine will not let one share, and nothing else
-    // in the room is — a container is walkable, and standing an Anchor
-    // on one is exactly what a Post is (ADR 0020). Handed to `hireFleet`
-    // and to the crew below as one set per room, so the reserver and the
-    // Anchor the bundle stations here and the hauler crew stood beside
-    // them cannot land on one tile.
-    occupied: new Set([
-      ...sources.map((source) => keyOf(source.pos)),
-      keyOf(capture.controller.pos),
-    ]),
+    hostiles,
+    occupied,
     room: stubRoom({
       name: capture.name,
       controller,
@@ -1727,12 +1843,35 @@ function furnishOutpost(capture, register, structure) {
         108: [],
         107: containers,
         114: [],
-        103: [],
+        103: hostiles,
         106: [],
       },
     }),
   };
 }
+
+// The raid a furnished world is standing, for the report to read back: the
+// room it is in and the hostiles in it, or null where there is none. Taken
+// off the furnished rooms and never off the flag, so a world that was asked
+// for a raid and stood nobody prints no raid rather than a heading with
+// nothing under it.
+function raidOf(outpostRooms) {
+  const raided = outpostRooms.find((outpost) => outpost.hostiles.length > 0);
+
+  return raided
+    ? { room: raided.capture.name, hostiles: raided.hostiles }
+    : null;
+}
+
+// What an outpost's own line in the report says about the raid standing in
+// it: nothing at all in a quiet room, and the body and its tile in the
+// raided one — so a reader comparing two runs' ms can see in the heading
+// which of them was paying for a Reach.
+const raidLine = (outpost) =>
+  outpost.hostiles.length
+    ? `, ${plural(outpost.hostiles.length, "armed hostile")}: ${INVADER_OWNER}'s ` +
+      `smallMelee at ${outpost.hostiles.map((h) => keyOf(h.pos)).join(", ")}`
+    : "";
 
 function buildOutpostWorld() {
   const byId = new Map();
@@ -1791,9 +1930,15 @@ function buildOutpostWorld() {
   // Their controllers carry the colony's own reservation
   // (`OUTPOST_RESERVATION_TICKS`), which is what doubles those sources and
   // is the reserver row's whole reason to exist.
-  const outpostRooms = outposts.map((capture) =>
-    furnishOutpost(capture, register, structure),
+  //
+  // Under `--raided` the **first** of them holds the raid and the other is
+  // quiet: `genInvaders` rolls one room at a time, and two raids at once
+  // would price a tick this colony has never had while hiding which room's
+  // Reach the ms belong to.
+  const outpostRooms = outposts.map((capture, i) =>
+    furnishOutpost(capture, register, structure, RAIDED && i === 0),
   );
+  const raid = raidOf(outpostRooms);
 
   // --- the fleet ---------------------------------------------------------
   // Hired by the bundle itself (`hireFleet`), so its size is this level's
@@ -1900,6 +2045,7 @@ function buildOutpostWorld() {
     spawns: [spawn],
     creeps,
     byId,
+    raid,
     perturb: pavingPerturbation({
       spare,
       structures: homeFinds[107],
@@ -2006,7 +2152,8 @@ function buildOutpostWorld() {
           `  ${outpost.capture.name} outpost  ${outpost.sources.length} source` +
           `${outpost.sources.length === 1 ? "" : "s"}, controller reserved ` +
           `${OUTPOST_RESERVATION_TICKS} ticks, ` +
-          `${plural(outpost.containers.length, "container")}, vision`,
+          `${plural(outpost.containers.length, "container")}, vision` +
+          raidLine(outpost),
       ),
       `  ${plural(stationsOf(creeps, "reserver").length, "reserver")} beside the outpost ` +
         `controllers at ${stationsOf(creeps, "reserver").join(", ") || "no station"}, one per ` +
@@ -2266,9 +2413,13 @@ function buildPairWorld() {
     sourceContainers: LIVE_CONTAINERS[CHILD_ROOM],
     buffer: false,
   });
-  const outpostRooms = outposts.map((capture) =>
-    furnishOutpost(capture, register, structure),
+  // The mother's one outpost, raided under `--raided` as the `outpost`
+  // scenario's first is — what it adds here is a raid in a tick that runs
+  // two colonies, where only one of them can see the room it is in.
+  const outpostRooms = outposts.map((capture, i) =>
+    furnishOutpost(capture, register, structure, RAIDED && i === 0),
   );
+  const raid = raidOf(outpostRooms);
 
   // The crew the bundle does not hire, on the mother's side alone: one
   // hauler per outpost container, standing the far end of a round trip
@@ -2394,6 +2545,7 @@ function buildPairWorld() {
     spawns: [mother.spawn, child.spawn],
     creeps,
     byId,
+    raid,
     perturb: pavingPerturbation({
       spare,
       structures: mother.finds[107],
@@ -2447,7 +2599,8 @@ function buildPairWorld() {
         (outpost) =>
           `  ${outpost.capture.name} outpost  ${plural(outpost.sources.length, "source")}, ` +
           `controller reserved ${OUTPOST_RESERVATION_TICKS} ticks, ` +
-          `${plural(outpost.containers.length, "container")}, vision`,
+          `${plural(outpost.containers.length, "container")}, vision` +
+          raidLine(outpost),
       ),
       `  ${childCapture.name} child    ${plural(child.sources.length, "source")}, controller, ` +
         `${furnitureLine(child.furniture)}, ${plural(child.roads.length, "road")}, ` +
@@ -2677,6 +2830,61 @@ function printDecideByColony(classes, decideMs, ticks, stages) {
       .join("  ")}  ` +
       "the whole tick, for comparison (projection, Memory and intents included)",
   );
+}
+
+// The Flee Task's id, as `Decide.taskId` spells it: one Flee for the whole
+// colony, it having no target to be named after, so the id is the bare
+// word and never `flee:<something>`.
+const FLEE_TASK_ID = "flee";
+
+// What the raid actually did to the colony's decisions — read off the
+// bundle's own Memory and off nothing this harness derives: assignments
+// persist as a flat `{creepName: taskId}` hash (`Main.loop`), so the creeps
+// that ran are the rows pointing at Flee.
+//
+// This is the reading the raided run exists for. `Threats.Safe`, Flee and
+// the subtraction of the Reach out of every Work Area are paths no other
+// scenario executes at all (ADR 0033, ADR 0056), and a raided run that
+// names no runner has not executed them either — its ms would then be a
+// quiet tick's under a raid's heading, which is exactly the report a
+// harness fiction hides behind. So the creeps standing in the raided room
+// are printed one to a line with the Task each holds, the empty answer
+// included: a body left holding nothing is a work-heavy one that cannot
+// run (ADR 0033) and whose Seats are all inside the Reach — the hole ADR
+// 0056's guard row is cast into.
+function printRaid(world) {
+  if (!world.raid) return;
+  const { room, hostiles } = world.raid;
+  const assignments = globalThis.Memory?.fabot?.assignments ?? {};
+  const fled = Object.entries(assignments)
+    .filter(([, taskId]) => taskId === FLEE_TASK_ID)
+    .map(([name]) => name);
+  const standing = world.creeps.filter((creep) => creep.room.name === room);
+
+  console.log(
+    `\nraid — ${room} holds ${plural(hostiles.length, "armed hostile")}, ` +
+      `${INVADER_OWNER}'s smallMelee at ` +
+      `${hostiles.map((h) => keyOf(h.pos)).join(", ")}: these ms include ` +
+      "Threats.Safe, Flee and the Reach out of every Work Area, which no " +
+      "other scenario's do (ADR 0033, ADR 0056)",
+  );
+  console.log(
+    "  fled: " +
+      (fled.join(", ") ||
+        "nobody — no creep of ours is standing in the Reach, so this run " +
+          "measured no Flee after all"),
+  );
+  console.log(
+    `  the ${plural(standing.length, "creep")} standing in ${room}, and the ` +
+      "Task Memory.fabot.assignments holds for each after the last tick:",
+  );
+  const width = Math.max(0, ...standing.map((creep) => creep.name.length));
+  for (const creep of standing) {
+    console.log(
+      `    ${creep.name.padEnd(width)}  ` +
+        (assignments[creep.name] ?? "no Task at all: it neither ran nor worked"),
+    );
+  }
 }
 
 function printReport(classes, pooled, world, allTicks) {
@@ -3128,6 +3336,7 @@ const classes = CENSUS_EVERY
 
 printReport(classes, pooled, world, ticks.all);
 printDecideByColony(classes, decideMs, ticks, stages);
+printRaid(world);
 
 // Per room, because ADR 0041 layered the memo by room name: the number to
 // read is one read per room the bundle projected, over the whole run. Read
