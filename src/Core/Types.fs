@@ -3120,6 +3120,22 @@ type MoveIntent =
         Pos: RoomPos
         Rank: int
         Candidates: RoomPos list
+        /// The tiles this body counts as still working from: its Work Area
+        /// less this tick's Reach when it is standing inside that area, and
+        /// empty for every body that is not — a traveller, a parked one, a
+        /// body with no Task (#267). It is what tells the arbitration a
+        /// shuffle from an eviction: a body moved within this set has yielded
+        /// and the chain pays nothing, one moved out of it has been taken off
+        /// its work and the chain pays its rank's weight and the sidestep
+        /// besides — the 1 a chain scores for ending in a sidestep, so that
+        /// taking a body off its work is never merely worth walking round it
+        /// (ADR 0001). The
+        /// candidate list cannot answer that on its own — it holds the same
+        /// tiles in preference order and says nothing about which of them are
+        /// still the Work Area. It is also what tells the arbitration a body
+        /// it has already shuffled *inside* this set is finished business and
+        /// is not offered again.
+        Area: Set<RoomPos>
     }
 
 /// One colony's movement for the tick, before a tile of it is arbitrated: where

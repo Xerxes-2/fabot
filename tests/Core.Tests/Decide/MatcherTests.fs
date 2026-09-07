@@ -1791,6 +1791,162 @@ let arbitrationTests =
                     "both settle on the corridor, one behind the other, and stop"
             }
 
+            test "#267 the full pocket: an arrived body is not evicted from its Work Area" {
+                // The other half of the W13S28 jam (#241 left it, #267 fixes
+                // it): the pocket's six tiles are the whole of the Upgrade
+                // Work Area, five upgraders and the hauler feeding the buffer
+                // stand on them, and a sixth upgrader walks up the corridor.
+                // Its step is the mouth, and before this ticket the body
+                // holding the mouth could be pushed *out* of the pocket for
+                // nothing — so the two traded (20,14) and (21,14) every tick
+                // and the body on the mouth upgraded every other one.
+                let creeps = [ for n in 1..6 -> worker $"w%d{n}" 50 0 ] @ [ hauler "h" 100 0 ]
+
+                let assigned =
+                    [ for n in 1..6 -> $"w%d{n}", Upgrade "ctrl-1" ] @ [ "h", Refill "can-buf" ]
+
+                let start =
+                    Map.ofList
+                        [
+                            "h", { X = 21; Y = 15 }
+                            "w1", { X = 21; Y = 14 }
+                            "w2", { X = 22; Y = 14 }
+                            "w3", { X = 23; Y = 14 }
+                            "w4", { X = 22; Y = 15 }
+                            "w5", { X = 23; Y = 15 }
+                            "w6", { X = 20; Y = 14 }
+                        ]
+
+                let ticks = walkedTicks (pocketColony creeps) assigned 6 start
+
+                Expect.isEmpty
+                    (repeatedSwaps ticks)
+                    "no pair of bodies exchanges tiles on two consecutive ticks"
+
+                Expect.equal
+                    (List.last ticks)
+                    start
+                    "the pocket is full and everybody in it stays where it works"
+
+                Expect.isTrue
+                    (ticks |> List.forall (fun p -> range p["h"] { X = 22; Y = 15 } <= 1))
+                    "the hauler keeps the tile it feeds the buffer from"
+            }
+
+            test "#267 one tile short: the chain that shuffles a body inside its area still runs" {
+                // The pairwise half. The same pocket with (23,15) empty: the
+                // displaced body has somewhere in its own Work Area to go, so
+                // the chain costs the arbitration nothing and still happens —
+                // ADR 0001's essential rule, which prices the eviction and
+                // never the shuffle.
+                let creeps = [ for n in 1..5 -> worker $"w%d{n}" 50 0 ] @ [ hauler "h" 100 0 ]
+
+                let assigned =
+                    [ for n in 1..5 -> $"w%d{n}", Upgrade "ctrl-1" ] @ [ "h", Refill "can-buf" ]
+
+                let start =
+                    Map.ofList
+                        [
+                            "h", { X = 21; Y = 15 }
+                            "w1", { X = 21; Y = 14 }
+                            "w2", { X = 22; Y = 14 }
+                            "w3", { X = 23; Y = 14 }
+                            "w4", { X = 22; Y = 15 }
+                            "w5", { X = 20; Y = 14 }
+                        ]
+
+                let settled = walkedTicks (pocketColony creeps) assigned 1 start |> List.last
+
+                Expect.equal settled["w5"] { X = 21; Y = 14 } "the traveller takes the mouth"
+
+                Expect.notEqual
+                    settled["w1"]
+                    start["w1"]
+                    "the body holding it is displaced, exactly as it was before this ticket"
+
+                Expect.isTrue
+                    (range settled["w1"] { X = 24; Y = 17 } <= 3)
+                    "and re-housed inside the Upgrade Work Area, which costs the chain nothing"
+            }
+
+            test "#267 the free tile is not adjacent: the row shuffles up and nobody leaves" {
+                // The half of #267 the full pocket cannot show, and the case
+                // its title names: the Work Area has free tiles, just none
+                // beside the body on the mouth. Four upgraders inside it with
+                // (23,14) and (23,15) empty, and a fifth walking in on the
+                // mouth.
+                // Pricing the eviction is not enough on its own — a body an
+                // earlier chain has already shuffled aside inside its area
+                // re-initiated and was paid its rank's whole weight for being
+                // put back on the tile it never chose to leave, and three of
+                // those phantom gains in one chain bought the eviction this
+                // ticket forbids. The answer is the row stepping up: the
+                // traveller takes the mouth, every body inside moves one tile
+                // deeper into the pocket, and the free tile at the back is
+                // what the shuffle spends.
+                let creeps = [ for n in 1..5 -> worker $"w%d{n}" 50 0 ]
+                let assigned = [ for n in 1..5 -> $"w%d{n}", Upgrade "ctrl-1" ]
+
+                let start =
+                    Map.ofList
+                        [
+                            "w1", { X = 22; Y = 15 }
+                            "w2", { X = 22; Y = 14 }
+                            "w3", { X = 21; Y = 14 }
+                            "w4", { X = 20; Y = 14 }
+                            "w5", { X = 21; Y = 15 }
+                        ]
+
+                let ticks = walkedTicks (pocketColony creeps) assigned 6 start
+
+                Expect.isEmpty
+                    (repeatedSwaps ticks)
+                    "no pair of bodies exchanges tiles on two consecutive ticks"
+
+                Expect.equal
+                    (ticks |> List.skip 1 |> List.distinct |> List.length)
+                    1
+                    "the pocket settles on the first tick and nothing moves again"
+
+                let settled = List.last ticks
+
+                Expect.equal settled["w4"] { X = 21; Y = 14 } "the traveller takes the mouth"
+
+                Expect.isTrue
+                    (settled |> Map.forall (fun _ p -> range p { X = 24; Y = 17 } <= 3))
+                    "and every body it shuffled is still standing in the Upgrade Work Area"
+            }
+
+            test "#267 the free tile is not adjacent, in the mirrored pocket" {
+                // The same five bodies in the orientation the room happens not
+                // to have, for the reason #241 pins its own pair twice: ties
+                // fall to the lowest x then y, so one orientation can be right
+                // by accident. Here the free tiles at the back of the pocket
+                // sort *below* the mouth instead of above it.
+                let creeps = [ for n in 1..5 -> worker $"w%d{n}" 50 0 ]
+                let assigned = [ for n in 1..5 -> $"w%d{n}", Upgrade "ctrl-1" ]
+
+                let start =
+                    Map.ofList
+                        [
+                            "w1", { X = 18; Y = 15 }
+                            "w2", { X = 18; Y = 14 }
+                            "w3", { X = 19; Y = 14 }
+                            "w4", { X = 20; Y = 14 }
+                            "w5", { X = 19; Y = 15 }
+                        ]
+
+                let ticks = walkedTicks (pocketColonyIn mirroredPocketRoom creeps) assigned 6 start
+
+                Expect.isEmpty
+                    (repeatedSwaps ticks)
+                    "no pair of bodies exchanges tiles on two consecutive ticks"
+
+                Expect.isTrue
+                    (List.last ticks |> Map.forall (fun _ p -> range p { X = 16; Y = 17 } <= 3))
+                    "every body ends inside the Upgrade Work Area, the mouth included"
+            }
+
             test "another colony's body is an occupant this colony cannot claim" {
                 // #220: the mother's pioneer stood on (19,2) for fifteen
                 // minutes with fatigue 0, its first step the Post tile the

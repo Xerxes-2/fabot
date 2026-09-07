@@ -4762,6 +4762,9 @@ let private moveIntentFor
             Pos = at
             Rank = rank
             Candidates = staying @ beside |> List.map here
+            // A parked body has a Task it cannot reach, so it is standing
+            // where its Work Area is not (#267).
+            Area = Set.empty
         }
 
     // The detours behind a step: the ground beside this creep that also lies
@@ -4797,6 +4800,9 @@ let private moveIntentFor
             Pos = at
             Rank = idleRank
             Candidates = step :: detour step |> List.map here
+            // Walking, and toward a room it cannot even see: nowhere it
+            // stands this tick is work (#267).
+            Area = Set.empty
         }
     | None, None ->
         // The room's working ground and the ground just off it: any way off
@@ -4839,6 +4845,10 @@ let private moveIntentFor
                  | Some step -> step :: (tail |> List.filter ((<>) step))
                  | None -> tail)
                 |> List.map here
+            // A body with no Task is working from nowhere, which is the whole
+            // of #241's rule: the ground it stands on is somebody else's to
+            // work from, and shoving it off costs the chain nothing (#267).
+            Area = Set.empty
         }
     | None, Some task ->
         // The area less this tick's Reach (ADR 0033): a creep works from the
@@ -4856,6 +4866,12 @@ let private moveIntentFor
                 Pos = at
                 Rank = rankOf task
                 Candidates = pos :: (inside @ outside) |> List.map here
+                // The one body that has arrived: the tiles it may be shuffled
+                // between for nothing, and the border the arbitration charges
+                // for pushing it over (#267). The area less this tick's Reach,
+                // the same set the candidates were partitioned on — a tile the
+                // Reach took is not somewhere this body is working from.
+                Area = area
             }
         else
             match stepToward atlas creep task area |> Option.map RoomPos.pos with
@@ -4865,6 +4881,9 @@ let private moveIntentFor
                     Pos = at
                     Rank = rankOf task
                     Candidates = step :: detour step |> List.map here
+                    // A traveller has not arrived: it is standing outside its
+                    // Work Area, so nothing it is pushed off is work (#267).
+                    Area = Set.empty
                 }
             | None -> parked (rankOf task)
 
@@ -4907,9 +4926,11 @@ type private Matching =
 /// tile it stands on — and the intents are offered one at a time in a
 /// deterministic order: travellers before stayers (a stayer settled first walls
 /// off a traveller's only path), then by rank, then by name. A creep already
-/// holding its first candidate is left where it is; any other is lifted off its
-/// tile and searched for an augmenting path. A path is a chain of displacements
-/// ending on a free tile, and its `score` is the chain's **net** priority: a
+/// holding its first candidate is left where it is, and so is one an earlier
+/// chain has already shuffled to another tile of the area it works from
+/// (#267); any other is lifted off its tile and searched for an augmenting
+/// path. A path is a chain of displacements ending on a free tile, and its
+/// `score` is the chain's **net** priority: a
 /// creep landing on the candidate it asked for first adds its rank's whole
 /// weight, the chain's initiator adds the smallest weight there is for landing
 /// on a tail instead, a creep merely shuffled out of the way adds nothing, and
@@ -4917,6 +4938,25 @@ type private Matching =
 /// creep pushed off a tile it merely stands on costs nothing, which is ADR
 /// 0001's essential rule as arithmetic. Only a strictly positive chain is
 /// taken, and dropping the Map the search returned is the whole rollback.
+///
+/// **Yielding is a move inside the area, and eviction from it is priced**
+/// (#267). "Merely stands on" was read off the candidate list — a body whose
+/// head is its own tile asked for nothing and so was free to push anywhere —
+/// and that reading gave away the one thing ADR 0001 was written to protect:
+/// an arrived body could be shoved clean out of its Work Area for nothing, and
+/// walked back in next tick at the same price, which in W13S28's Upgrade
+/// pocket was a traveller and an upgrader trading the mouth every tick for as
+/// long as the scan ran. So a displaced body's landing is read against the
+/// area it arrived in (`MoveIntent.Area`): inside it the shuffle is free, as
+/// this decision's rule requires, and outside it the chain pays that body's
+/// rank's weight and the sidestep it is priced against. A body with no area is
+/// unchanged — the free shuffle it always was. The price is only half of it:
+/// the fold must also stop *reopening* a body it has already shuffled inside
+/// its own area, or that body re-initiates and is paid its rank's whole weight
+/// for landing back on the tile it never chose to leave, and three of those
+/// phantom gains in one chain buy the very eviction this priced — the same two
+/// bodies trading the same mouth for ever on a pocket whose free tile is
+/// merely not adjacent.
 let private arbitrate
     (occupants: Map<RoomPos, string>)
     (blocked: Set<RoomPos>)
@@ -4945,16 +4985,48 @@ let private arbitrate
             }
         | None -> m
 
-    // What a creep gains by standing on `tile`, and what displacing an occupant
-    // off it costs the chain. A tail tile is worth the smallest weight there
-    // is, and only to the creep the search started from: that creep asked to
-    // move and could not have the tile it asked for, and stepping aside is what
-    // empties a lane (#219).
+    // What a creep landing on `tile` is worth to the chain. A tail tile is
+    // worth the smallest weight there is, and only to the creep the search
+    // started from: that creep asked to move and could not have the tile it
+    // asked for, and stepping aside is what empties a lane (#219). For a body
+    // the chain is shuffling out of somebody's way it is worth nothing —
+    // unless the tile lies outside the Work Area it had arrived in, where it
+    // is worth *minus* its rank's weight and the sidestep above (#267). ADR
+    // 0001's rule is that a creep with slack yields, and the slack a working
+    // body has is its own area: pushed to another of its tiles it goes on
+    // working and the chain owes it nothing, pushed off the area it stops
+    // working and the chain pays for that. The charge is levied here, on the
+    // landing, because that is where the search knows where the body ended up;
+    // `cost` below is charged on the push, where it does not. A body with no
+    // area — a traveller, a parked or idle one — is landing nowhere it was
+    // working, so it is the free shuffle this rule leaves exactly as it was.
+    //
+    // The sidestep is why the charge is the weight **and one**, and it is not a
+    // fudge: a chain that ends with its initiator stepping aside onto a tail
+    // scores exactly 1, so an eviction priced at the occupant's bare weight
+    // makes taking a body off its work worth the same as walking round it as
+    // soon as the arriving body is one tier up the ladder — one tier and never
+    // one rung, `weightOfRank` above dividing the ladder's rungs back out, so
+    // one unit of push weight is one whole tier. Live that reads as the
+    // [[buffer]]'s own hauler evicted from the tile it feeds from by the sixth
+    // upgrader walking into a full pocket — the ring #241 opened on, the
+    // served displacing the server, arrived at through eviction instead of
+    // through parking. So a body is taken off its work only by a chain worth
+    // strictly more than the sidestep that is the alternative to it.
     let gain initiator (intent: MoveIntent) tile =
-        if headOf intent = Some tile then weightOfRank intent.Rank
-        elif initiator then 1
-        else 0
+        if headOf intent = Some tile then
+            weightOfRank intent.Rank
+        elif not (Set.isEmpty intent.Area) && not (Set.contains tile intent.Area) then
+            -(weightOfRank intent.Rank + 1)
+        elif initiator then
+            1
+        else
+            0
 
+    // What taking `tile` off its occupant costs the chain: the weight of a
+    // step the occupant had asked for and is being denied. A stayer is denied
+    // nothing here — it asked for the tile it is standing on, and what its
+    // displacement costs depends on where it lands, which `gain` above prices.
     let cost (occupant: MoveIntent) tile =
         if headOf occupant = Some tile && not (staying occupant) then
             weightOfRank occupant.Rank
@@ -5027,10 +5099,28 @@ let private arbitrate
                 |> Map.ofList
         }
 
+    // Whether an intent has nothing left to ask for: it is holding the tile it
+    // asked for, or — the arrived body an earlier chain has already shuffled —
+    // it is holding another tile of the area it works from. The second half is
+    // the fold's side of #267's rule. A yield inside the area is finished
+    // business, and an arrived body that re-initiated after one would collect
+    // its rank's whole weight for being put back on the tile it never chose to
+    // leave: three such phantom gains in one chain buy the eviction this
+    // ticket prices at the weight and the sidestep, which is the two-cycle
+    // surviving its own fix on a pocket with a free tile that is not adjacent.
+    let asked (intent: MoveIntent) (m: Matching) =
+        let held = Map.tryFind intent.Creep m.Tile
+
+        held = headOf intent
+        || (staying intent
+            && (match held with
+                | Some tile -> Set.contains tile intent.Area
+                | None -> false))
+
     let settled =
         (start, moveIntents |> List.sortBy (fun i -> staying i, i.Rank, i.Creep))
         ||> List.fold (fun m intent ->
-            if Map.tryFind intent.Creep m.Tile = headOf intent then
+            if asked intent m then
                 m
             else
                 match
