@@ -758,6 +758,15 @@ let quotaOf snapshot =
     let { Memo = memo } = decide snapshot Map.empty Set.empty None
     memo.HaulerQuota
 
+/// The haul this ColonyView prices, summed over its source containers — the
+/// number the quota above is the division of. A rock's own rate lives here,
+/// where the shaping rules the quota carries (#279's floor for a haul that
+/// crosses a Seam) cannot reach it, so a case about the rate reads this and a
+/// case about the crowd reads the quota.
+let haulDemandOf snapshot =
+    let { Quotas = quotas } = decide snapshot Map.empty Set.empty None
+    quotas.HaulerDemand |> List.sumBy (fun row -> row.Demand)
+
 /// The W12S28 shape (ADR 0012): a 3-wide plain field y = 9..11 from x = 8
 /// to 32, two sources embedded in wall at (10,10) and (30,10) with their
 /// built containers on the Seats (11,10) and (29,10) — two Posts, no Dual

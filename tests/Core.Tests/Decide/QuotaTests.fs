@@ -1284,6 +1284,7 @@ let haulRoundingTests =
 
                 Expect.equal (quotaOf rich) 2 "and over the 800 load the same bank casts, two"
             }
+
         ]
 
 /// The same colony at a bank the real W12S28 banks: the geometry is

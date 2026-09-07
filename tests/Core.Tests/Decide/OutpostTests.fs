@@ -3113,8 +3113,43 @@ let outpostHaulTests =
                     0
                     "the premise: without the outpost there is no haul"
 
-                Expect.equal (held (reservedRoom true 4000)) 2 "reserved, the rock ships ten a tick"
-                Expect.equal (held neutralRoom) 1 "held by nobody, it ships five and hires less"
+                // The rate is read off the demand and not off the quota: since
+                // #279 a haul that crosses a Seam is floored at two bodies, so
+                // both rocks hire two and the quota can no longer see which of
+                // them ships ten a tick. What the rate moves is the sum the
+                // quota divides, and that is what this case is about.
+                let shipped control =
+                    haulDemandOf (haulHome |> withHaulOutpost (Some control))
+
+                Expect.equal
+                    (shipped (reservedRoom true 4000))
+                    510
+                    "reserved, the rock ships ten a tick"
+
+                Expect.equal
+                    (shipped neutralRoom)
+                    255
+                    "held by nobody it ships five, and the sum the quota divides is halved with it"
+
+                Expect.equal
+                    (held (reservedRoom true 4000))
+                    2
+                    "and either way the crossing is never one body's to lose (#279)"
+
+                Expect.equal
+                    (held neutralRoom)
+                    2
+                    "including the neutral rock, whose overflow decays the same"
+
+                // #279's floor, and the premise it rests on: a crossing worth
+                // half a load or more is never one body's to lose. What a full
+                // container at home does is wait; what a full one out here does
+                // is drop the Anchor's next fifty on the floor to decay, forty
+                // tiles from the replacement. Live it was 1,170 energy-ticks
+                // against a 1,200 load — one body at 97.5% of itself.
+                Expect.isTrue
+                    (shipped (reservedRoom true 4000) * 2 >= 400)
+                    "the premise: the crossing is worth half a 400 load or more"
 
                 Expect.equal
                     (held ownedRoom)
@@ -3235,17 +3270,28 @@ let outpostHaulTests =
                         None)
                         .Memo
 
-                Expect.equal previous.HaulerQuota 2 "the premise: held, the container hires two"
+                // Read off the demand and not the quota: since #279 both rates
+                // hire two bodies across a Seam, so the quota can no longer
+                // tell a recomputed answer from a handed-back one. The sum the
+                // quota divides still halves with the rate, and that is what
+                // the memo either recomputes or wrongly keeps.
+                let shipped (memo: PlanMemo) =
+                    memo.HaulerDemand |> List.sumBy (fun row -> row.Demand)
+
+                Expect.equal
+                    (shipped previous)
+                    510
+                    "the premise: held, the container ships ten a tick"
 
                 let recalled = decide lapsed Map.empty Set.empty (Some previous)
                 let fresh = decide lapsed Map.empty Set.empty None
 
-                Expect.equal fresh.Memo.HaulerQuota 1 "the premise: lapsed, it hires one"
+                Expect.equal (shipped fresh.Memo) 255 "the premise: lapsed, it ships five"
 
                 Expect.equal
-                    recalled.Memo.HaulerQuota
-                    fresh.Memo.HaulerQuota
-                    "the stale memo recomputes rather than handing back the held rate's fleet"
+                    (shipped recalled.Memo)
+                    (shipped fresh.Memo)
+                    "the stale memo recomputes rather than handing back the held rate's haul"
 
                 Expect.equal
                     (spawnIntents recalled.Intents)

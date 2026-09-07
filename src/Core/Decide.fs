@@ -1339,10 +1339,29 @@ let private haulerDemandOf (view: ColonyView) atlas : int * HaulDemandRow list *
             |> List.length
             |> (*) view.Tuning.FerryLoads
 
+    // **A haul that crosses a Seam is never one body** (#279). The rounding
+    // above is honest about throughput and says nothing about redundancy, and
+    // at the live reading — 1,170 of demand against a 1,200 load, 97.5% of one
+    // body — the colony was one death, one detour or one Threat away from
+    // losing a source: what a full container at home does is wait, and what a
+    // full container in an [[outpost]] does is drop the [[anchor]]'s next
+    // fifty on the floor, where it decays, while the replacement walks forty
+    // tiles out. That asymmetry is the whole of the argument, so the floor is
+    // read off the rows this function already priced — a container standing in
+    // a room that is not home — and not off the declaration: a room a
+    // [[stand-down]] withdrew asks for nothing here, exactly as it asks for no
+    // reserver. #157's argument for two builders, said again for the haul.
+    let remote =
+        rows
+        |> List.filter (fun row -> row.Container.Room <> SpatialInfo.homeName view.Spatial)
+        |> List.sumBy (fun row -> row.Demand)
+
     // The colony's whole haul, rounded once (ADR 0049), and the ferry's own
     // whole bodies beside it: a lend is counted in bodies rather than in
     // tick-energy, so it is added after the division rather than inside it.
-    ceilDiv demand capacity + ferry, rows, capacity
+    let hired = ceilDiv demand capacity
+
+    (if remote * 2 >= capacity then max hired 2 else hired) + ferry, rows, capacity
 
 /// The hauler quota alone; `haulerDemandOf` is the same arithmetic with
 /// its lines kept.
