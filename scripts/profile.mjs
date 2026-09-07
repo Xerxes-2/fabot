@@ -1,6 +1,6 @@
 // npm run profile — drive the compiled loop() against a stub colony under
 // the V8 sampling profiler and print ms/tick plus a per-function hotspot
-// table. See README "Profiling" for the stub ↔ live mapping and limits.
+// table. See docs/profiling.md for the scenarios, the stub ↔ live mapping and limits.
 //
 // The stub touches only the API surface declared in src/App/Bindings.fs and
 // never the Screeps network API. The world is frozen: intents are accepted
