@@ -5384,6 +5384,17 @@ let private applicable
     let has part =
         creep.Body |> Map.tryFind part |> Option.exists (fun n -> n > 0)
 
+    // An intake — a Withdraw or a Pickup — is for a body with room to
+    // carry it: at least half its store free (live, W12S28 2026-09-07:
+    // a hauler holding 1,150 of 1,200 walked forty tiles into the north
+    // room to pick fifty off a pile while the spawn stood at eighteen
+    // energy, because the pile's lifted rung beat every Refill and a
+    // single free slot made it applicable). A body past half full is a
+    // delivery, and its intake waits until it has delivered. A standing
+    // body's one Carry is a trip's worth, so for it this is "empty" —
+    // the reading it always had.
+    let halfEmpty = creep.FreeCapacity * 2 >= creep.Energy + creep.FreeCapacity
+
     match task with
     // ADR 0024's full-store reprieve, and beside it the clause that keeps
     // ADR 0048's own Consequence reachable ("stands where it is until it
@@ -5437,7 +5448,7 @@ let private applicable
         let buffer = Set.contains storeId (Atlas.controllerContainers atlas)
 
         has Carry
-        && creep.FreeCapacity > 0
+        && halfEmpty
         && not (Atlas.workHeavy atlas creep.Name)
         && (has Work || not buffer)
         // A standing body fetches from the buffer at its feet and from
@@ -5461,7 +5472,7 @@ let private applicable
     // the pile a creep stands beside (#166), and this Task is the walk.
     | Pickup _ ->
         has Carry
-        && creep.FreeCapacity > 0
+        && halfEmpty
         && not (Atlas.workHeavy atlas creep.Name)
         && not (isStandingBody view.Tuning creep)
     // Its two body clauses are read a second time out of line by

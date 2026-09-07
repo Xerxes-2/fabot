@@ -25797,3 +25797,58 @@ let squareRingTests =
                     "read as standing traffic they switch lanes together forever — the livelock"
             }
         ]
+
+[<Tests>]
+let intakeRoomTests =
+    testList
+        "an intake needs room"
+        [
+            test "a nearly full hauler delivers before it picks up, and an emptier one picks up" {
+                // Live, W12S28 2026-09-07: a hauler holding 1,150 of 1,200
+                // walked forty tiles into the north room to pick fifty off
+                // a pile while the spawn stood at eighteen energy — the
+                // pile's lifted rung beat every Refill and one free slot
+                // made it applicable. An intake is for a body at least half
+                // empty; pairwise on the store alone, same tile, same pool.
+                let lane energy =
+                    let body = List.replicate 6 Carry @ List.replicate 3 Move
+
+                    { bareRespawn with
+                        Sources = []
+                        Controller = None
+                        Refillables = [ refillable "ext-1" 50 BuiltKind.Extension ]
+                        Creeps = [ creepWith "h" energy (300 - energy) body ]
+                        Spatial =
+                            { spatial [] [ for x in 8..18 -> { X = x; Y = 10 }, Plain ] with
+                                Stores = Map.ofList [ "pile-1", 400 ]
+                            }
+                            |> withTargets
+                                [
+                                    "pile-1", { X = 12; Y = 10 }, Dropped
+                                    "ext-1", { X = 16; Y = 10 }, Structure BuiltKind.Extension
+                                ]
+                            |> withHome (fun layer ->
+                                { layer with
+                                    CreepPositions = Map.ofList [ "h", { X = 13; Y = 10 } ]
+                                })
+                    }
+
+                let matched energy =
+                    let { Verdicts = verdicts } = decide (lane energy) Map.empty Set.empty None
+
+                    verdicts
+                    |> List.tryPick (function
+                        | Verdict.Matched("h", task, _) -> Some task
+                        | _ -> None)
+
+                Expect.equal
+                    (matched 280)
+                    (Some(taskId (Refill "ext-1")))
+                    "twenty free of three hundred: a delivery, not an intake"
+
+                Expect.equal
+                    (matched 100)
+                    (Some(taskId (Pickup "pile-1")))
+                    "two hundred free: the pile is taken first"
+            }
+        ]
