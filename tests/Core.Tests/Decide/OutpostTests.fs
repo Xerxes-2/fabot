@@ -2280,6 +2280,26 @@ let private containerSites (colony: ColonyView) =
 /// are whichever of its eight neighbours the case does.
 let private outpostSource = { X = 10; Y = 44 }
 
+/// A road that **stands** on one of the outpost's tiles, handed over in the
+/// two pieces `World.factsOf` hands one in: the id-keyed kind census, which
+/// `withOutpostGround` takes as a `Structure`, and the layer's own `Roads`,
+/// which is the half — and the only half — the walk prices (ADR 0010). A
+/// fixture laying one piece alone would be a road the projection half
+/// believes in.
+let private paved room tiles (colony: ColonyView) =
+    let layer =
+        Map.tryFind room colony.Spatial.Rooms |> Option.defaultValue RoomLayer.empty
+
+    { colony with
+        Spatial =
+            colony.Spatial
+            |> withNeighbour
+                room
+                { layer with
+                    Roads = Set.union layer.Roads (Set.ofList tiles)
+                }
+    }
+
 /// Two Seats and two ways out. `(10,45)` is a row nearer the border and
 /// its only run to it is three tiles of swamp; `(11,43)` is a row farther
 /// and its run is five of plain. Walk and proximity therefore disagree,
@@ -2478,6 +2498,88 @@ let outpostContainerTests =
                 Expect.isEmpty
                     (containerSites (served (Site BuiltKind.Container)))
                     "and a site pending there, which is a container already being built"
+            }
+
+            test "a Seat another kind's site already holds is no candidate at all" {
+                // #244, live in W13S29: the human paved the outpost by hand
+                // and his road sites landed on the two Seats this rule had
+                // picked, (28,6) and (15,28). The engine takes one
+                // construction site per tile, so the Executor asked for the
+                // container on a taken tile and was answered
+                // ERR_INVALID_TARGET once a tick, for ever — and with no
+                // container the rock is no Post, hires no Anchor and enters
+                // no income quota (ADR 0042), behind a road two workers
+                // finish at the surplus tier. So the pick moves to the next
+                // cheapest Seat rather than waiting on a site nobody
+                // promised to build.
+                let siteOn tile =
+                    northBorderColony { X = 10; Y = 38 }
+                    |> withOutpostGround
+                        "W1N2"
+                        detourGround
+                        [ "src-out", outpostSource, Source; "road-out", tile, Site BuiltKind.Road ]
+
+                Expect.equal
+                    (containerSites (siteOn { X = 11; Y = 43 }))
+                    [ "W1N2", { X = 10; Y = 45 } ]
+                    "the Seat the walk picked is taken, so the dearer Seat takes the container"
+
+                Expect.equal
+                    (containerSites (siteOn { X = 10; Y = 45 }))
+                    [ "W1N2", { X = 11; Y = 43 } ]
+                    "and a site on the Seat that lost moves nothing: one tile is subtracted, not a source"
+            }
+
+            test "a road that already stands is no obstruction, and is the best tile there is" {
+                // The half the clause must not subtract. One construction
+                // site per tile is the whole of the engine's rule: a
+                // *finished* structure holds no site, and a container on a
+                // paved Seat is the tile this rule would have chosen anyway,
+                // since the hauler that draws it arrives over the road. A
+                // built road prices the tile too, so it is laid in both
+                // pieces the shell lays one in (`paved`).
+                let colony =
+                    northBorderColony { X = 10; Y = 38 }
+                    |> withOutpostGround
+                        "W1N2"
+                        detourGround
+                        [
+                            "src-out", outpostSource, Source
+                            "road-out", { X = 11; Y = 43 }, Structure BuiltKind.Road
+                        ]
+                    |> paved "W1N2" [ { X = 11; Y = 43 } ]
+
+                Expect.equal
+                    (containerSites colony)
+                    [ "W1N2", { X = 11; Y = 43 } ]
+                    "the pick is unmoved by a road that has finished going up on it"
+            }
+
+            test "a source whose every Seat is taken plans nothing and waits" {
+                // Waiting is the answer and it is not a self-clearing one.
+                // The colony has no vocabulary for cancelling a human's
+                // site and asking the engine for a refusal once a tick is
+                // not a plan — but nothing here promises the Seat comes
+                // back either: a road site in an outpost is a plain
+                // Surplus Build with no home rung and outside the
+                // builders' budget, which is what "an ordinary outpost
+                // site keeps its travel cost" above pins, so the human's
+                // site is the only thing that ends this. Pinned as it
+                // really is: no Intent, this tick or any other.
+                let bothTaken =
+                    northBorderColony { X = 10; Y = 38 }
+                    |> withOutpostGround
+                        "W1N2"
+                        detourGround
+                        [
+                            "src-out", outpostSource, Source
+                            "road-a", { X = 11; Y = 43 }, Site BuiltKind.Road
+                            "road-b", { X = 10; Y = 45 }, Site BuiltKind.Road
+                        ]
+
+                Expect.isEmpty
+                    (containerSites bothTaken)
+                    "both Seats hold a site, so this rock is planned no container this tick"
             }
 
             test "a home container on the pick's coordinates defers nothing" {

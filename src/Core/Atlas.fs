@@ -1081,6 +1081,28 @@ let pendingContainerTilesIn (atlas: Atlas) (room: string) : Set<Pos> =
 let containerCensusIn (atlas: Atlas) (room: string) : Set<Pos> =
     Set.union (containerTilesIn atlas room) (pendingContainerTilesIn atlas room)
 
+/// Tiles of one room already taken by a construction site of some **other**
+/// kind — the tiles a container site cannot go down on today, whatever the
+/// plan wants there. The engine takes one construction site per tile, so a
+/// pick onto an occupied tile is answered ERR_INVALID_TARGET once a tick for
+/// as long as that site stands (#244, live in W13S29). **Our own sites and no
+/// one else's**: the projection's site census comes off
+/// `FIND_MY_CONSTRUCTION_SITES` (`World.seenFacts`), so this is our half of the
+/// engine's rule — a rival's site in a room nobody owns is invisible to it and
+/// would collide unseen. A **built** structure
+/// is not in it and must not be: a container site goes down on a standing
+/// road perfectly well, and on an outpost [[seat]] a road is the best tile
+/// there is. The container kind is left out because a container site is the
+/// *target* clause's business (ADR 0040) — one on a Seat is within range 1 of
+/// that Seat's source, so "must another one be built?" has already answered
+/// no before this census is asked, and answering it a second time here would
+/// turn a collision rule into a silent second target rule.
+let nonContainerSiteTilesIn (atlas: Atlas) (room: string) : Set<Pos> =
+    tilesWhereIn atlas room (function
+        | Site BuiltKind.Container -> false
+        | Site _ -> true
+        | _ -> false)
+
 /// Tiles holding a built Storage — the tile a Link footing is anchored on
 /// once the reservation has become a structure (ADR 0022).
 let storageTilesIn (atlas: Atlas) (room: string) : Set<Pos> =

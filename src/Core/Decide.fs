@@ -2622,8 +2622,31 @@ let private planLayout
 /// target rather than by tile**: a source with a container standing or pending
 /// within range 1 is served wherever the thing serving it sits, and the census
 /// is read in that source's own room, or a home container on its coordinates
-/// would defer the plan forever. There is no tile clause and there cannot be
-/// one — nothing paves an outpost. **Only into a room the colony can see.**
+/// would defer the plan forever. **And a tile clause after all** (#244). ADR
+/// 0040 keeps the two questions apart and this rule was written with only the
+/// target one, on the premise that nothing paves an outpost — but a *human*
+/// does: live in W13S29 the user laid road sites across the Seats both picks
+/// answered, and since the engine takes one construction site per tile the
+/// Executor asked for a container on an occupied tile and was answered
+/// ERR_INVALID_TARGET once a tick, for ever — no container, so no Post, no
+/// Anchor and no income, behind a road the surplus tier gives two workers
+/// hundreds of ticks to finish. So a Seat holding a site of another kind is no
+/// candidate (`Atlas.nonContainerSiteTilesIn`), the pick is the shortest walk
+/// over the Seats that are left, and a source whose every Seat is taken plans
+/// nothing and waits: asking the engine for a refusal once a tick is not a
+/// plan, and this colony has no vocabulary for cancelling a human's site.
+/// **That wait is not self-clearing**, and it must not be read as one: the
+/// Seat frees when the site on it is *built*, and nothing here builds it — a
+/// non-container site in an outpost is a plain Surplus Build with no home rung
+/// (#234) and outside the builders' budget (#157, keyed on a container site),
+/// so travel cost keeps every loaded worker at the home controller instead
+/// ("an ordinary outpost site keeps its travel cost"). A hand-laid site holds
+/// its Seat for as long as the human leaves it there, and the outage is now
+/// silent, the `-7` line having been the only thing that said so. A
+/// **standing** road is not subtracted and must not be: a container site goes
+/// down on a built road, and out here that is the best tile there is. It is a
+/// collision rule and not a target one, so ADR 0040's "by target, not by tile"
+/// is untouched. **Only into a room the colony can see.**
 /// Both halves of the rule are paid for by vision, and a blind room's empty
 /// census is a missing entry and not a "no container" (ADR 0004): planning off
 /// it would hand the Executor an Intent it can only report as `ActorMissing`,
@@ -2665,9 +2688,13 @@ let private planOutpostContainers (view: ColonyView) atlas : Intent list =
             // The pick, and with it the tie-break — the same trap the Layout's
             // own pick has: three Seats all of swamp can price identically, so
             // the lowest (X, Y) answers, exactly as every other tie in the
-            // colony answers.
-            Atlas.seatTilesOf atlas sourceId
-            |> RoomPos.inRoom room
+            // colony answers. Over the Seats a site of another kind has not
+            // already taken (#244): one construction site per tile is the
+            // engine's rule, and a pick onto a taken tile is refused every
+            // tick until that site is built.
+            Set.difference
+                (Atlas.seatTilesOf atlas sourceId |> RoomPos.inRoom room)
+                (Atlas.nonContainerSiteTilesIn atlas room)
             |> Set.toList
             |> List.choose (fun seat ->
                 Atlas.seamWalkTicks atlas room home seat |> Option.map (fun walk -> walk, seat))
