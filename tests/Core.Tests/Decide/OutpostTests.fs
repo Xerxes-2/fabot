@@ -3227,17 +3227,6 @@ let outpostSuccessionTests =
             }
         ]
 
-/// The engine's own `smallMelee`: two TOUGH, five MOVE, a RANGED_ATTACK, a
-/// WORK and an ATTACK — 1,000 hits and 40 damage at range 1, and the body
-/// nine remote raids in ten arrive as (ADR 0056,
-/// `docs/research/remote-invader-defence.md`). Written part for part rather
-/// than reduced to "something armed", because the parts are what every rule
-/// reads: the ATTACK is what makes it a [[threat]] at all (ADR 0033), and the
-/// RANGED_ATTACK beside it is what sets its [[reach]] at 3 plus the margin
-/// rather than 1 plus it — which is the whole of how much ground a raid takes.
-let private smallMelee =
-    [ Tough; Tough; Move; Move; Move; Move; RangedAttack; Work; Attack; Move ]
-
 /// The posted outpost with the hostiles the caller names standing in it (ADR
 /// 0056): `haulHome`'s two rooms, the outpost held and its container standing,
 /// one [[anchor]] garrisoning that Post and two [[hauler unit]]s on the ground

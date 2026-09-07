@@ -55,6 +55,21 @@ let upgraderPattern =
         Block = [ Work; Carry; Move ]
     }
 
+/// The guard row (ADR 0056): the melee body cast the tick a [[threat]] is seen
+/// standing in a declared [[outpost]], and never before. 750 energy, ten parts,
+/// 1,000 hits, 90 damage and 12 self-heal a tick — the body Overmind and bonzAI
+/// converged on independently, and the one melee beats ranged on arithmetic at
+/// this budget: an ATTACK part is 0.231 damage per energy counting the Move
+/// that carries it, against a RANGED_ATTACK's 0.050. One Move per non-Move
+/// part, so ADR 0003's fatigue parity holds with none of the [[anchor]]'s
+/// exemption. The block's order is the body's: TOUGH eats damage first and HEAL
+/// dies last, which is what the community's ordering is for.
+let guardPattern =
+    {
+        Name = "guard"
+        Block = [ Tough; Attack; Attack; Attack; Move; Move; Move; Move; Move; Heal ]
+    }
+
 /// The pattern table: every body the colony casts is a row here, sized by
 /// energy under the row's own sizing rule. A future pattern is one more data
 /// row plus its own quota rule, never a new code path (ADR 0006).
@@ -65,6 +80,7 @@ let patternTable =
         haulerPattern
         reserverPattern
         upgraderPattern
+        guardPattern
     ]
 
 let bodyCost body =
@@ -211,6 +227,18 @@ let private haulerBodyFor capacity =
 let private reserverBodyFor capacity =
     wholeBlockBodyFor reserverPattern.Block capacity
 
+/// The guard row's sizing rule (ADR 0056): as many whole
+/// `[Tough; Attack×3; Move×5; Heal]` blocks as capacity buys, never below one
+/// and capped at five by the engine's 50 parts — the rule the hauler and
+/// reserver rows already share, chosen for this row because the block is
+/// already at fatigue parity and a remainder spent at ADR 0003's parity would
+/// buy Carry a guard has no use for. `List.distinct` keeps the block's order,
+/// so two blocks are `[T;T; A×6; M×10; H;H]` and not a shuffle of them. What
+/// the banks buy: 300 cannot afford one block at all and the row **yields**
+/// (ADR 0050), 800 and 1,300 buy one, 1,800 two and 2,300 three.
+let private guardBodyFor capacity =
+    wholeBlockBodyFor guardPattern.Block capacity
+
 /// The upgrader row's sizing rule (ADR 0046): one Carry, and every part slot
 /// the rest of the capacity affords spent on Work/Move **pairs** — `W = M =
 /// floor((capacity - 50) / 150)`, never below one pair. The gain over the
@@ -229,7 +257,7 @@ let private upgraderBodyFor capacity =
 
 /// Body for a pattern at an energy capacity, under the row's own sizing rule
 /// (ADR 0006): the anchor row spends on Work beside its fixed Carry/Move pair,
-/// the hauler and reserver rows buy whole blocks, the upgrader row buys
+/// the hauler, reserver and guard rows buy whole blocks, the upgrader row buys
 /// Work/Move pairs beside one Carry, and every other row pads its remainder at
 /// plain fatigue parity — or, if its block holds a part that rule cannot place,
 /// is refused rather than sized into some other body. A capacity is the whole
@@ -243,6 +271,8 @@ let bodyFor pattern capacity =
         haulerBodyFor capacity
     elif pattern.Name = reserverPattern.Name then
         reserverBodyFor capacity
+    elif pattern.Name = guardPattern.Name then
+        guardBodyFor capacity
     elif pattern.Name = upgraderPattern.Name then
         upgraderBodyFor capacity
     else
@@ -1146,6 +1176,124 @@ let private upgradeDrainOf body =
 let private reserverBodyWithin claims capacity =
     reserverBodyFor (min capacity (claims * bodyCost reserverPattern.Block))
 
+/// Whether a living body was cast from the guard row: it carries an ATTACK
+/// part (ADR 0056). The same part test `findAttack.js` splits the engine's own
+/// invaders on, and the one cut no other row of this colony makes — every other
+/// row is built out of Work, Carry, Move and CLAIM — so it is asked **first**,
+/// beside `Fighter`'s place at the head of the [[body class]] ladder, and it is
+/// written here rather than beside `isHaulerBody` because the guard row's own
+/// quota below is its first reader. Read off
+/// the parts like every other row predicate (ADR 0006), so a fighting body the
+/// colony was handed rather than cast fills this row's quota exactly as one it
+/// cast does.
+let private isGuardBody (creep: CreepInfo) =
+    creep.Body |> Map.tryFind Attack |> Option.exists (fun n -> n > 0)
+
+/// The declared [[outpost]]s this colony works this tick — the rooms two rows
+/// are hired per, written once because a paraphrase would let the reserver row
+/// and the guard row disagree about which rooms are ours to work (ADR 0042, ADR
+/// 0056). A room qualifies by carrying **a controller of its own in the
+/// projection** that is not this colony's home: an outpost's declaration names
+/// its controller and a room with none is no candidate outpost at all. It must
+/// be unowned — a room somebody holds is one this colony is withdrawing from,
+/// not mining — and it must not be a [[candidate colony]]'s, whose controller
+/// carries a Claim rather than a Reserve.
+///
+/// **Declared and not posted**, which is where #131's correction overrides ADR
+/// 0042's "one reserver per posted outpost" clause: gating on a standing
+/// container deadlocks the outpost chain, since the container needs vision,
+/// vision needs a creep, and the reserver is the only creep with a reason to
+/// go. The scan set is the gate that remains, and two things narrow it, both
+/// inside `World.scanOf`: ADR 0043's stand-down, and the declaration's own
+/// geometry — its `Outpost.neighbouring` filter (#243) — a room its home shares
+/// no border with is joined by no [[seam]], so a body hired for it could never
+/// walk there, and the room is out of the scan set before anything here counts
+/// it. What *says* so is `Outpost.refused` on the [[layout record]]; what
+/// narrows the set is the filter.
+let private declaredOutposts (view: ColonyView) atlas : string list =
+    let home = view.Controller |> Option.map (fun c -> c.Id)
+    let claimed = claimTargets view |> List.map snd |> Set.ofList
+
+    view.Spatial.TargetKinds
+    |> Map.toList
+    |> List.choose (fun (id, kind) ->
+        if kind = Controller && Some id <> home then
+            Atlas.targetRoom atlas id
+        else
+            None)
+    |> List.distinct
+    |> List.filter (roomHasOwner view >> not)
+    |> List.filter (fun room -> not (Set.contains room claimed))
+
+/// The guard row's quota (ADR 0056): **0** for the whole of a colony's ordinary
+/// life, and on the ticks it is not, one guard per declared [[outpost]] a
+/// [[threat]] stands in this tick, two where the raid out-heals the guards
+/// already standing there, capped at two and summed over the outposts. A
+/// per-tick fact read off vision and nothing remembered between ticks — vision
+/// in a guarded outpost *is* the guard — so it falls to 0 the tick the room is
+/// clear; it does not decay in between, and it needs none: a cast is 1,500
+/// ticks of body and a raid is 1,500 ticks, so one cast covers one raid by
+/// construction and the survivor goes on filling the row's `Living`.
+///
+/// The second guard's arithmetic is the engine's, over the parts the projection
+/// already carries. The raid heals at `Engine.healPower` per HEAL part **over
+/// every hostile in that room** — a `smallHealer` is no Threat itself and is
+/// exactly what buys the second body — and our standing guards deal
+/// `Engine.attackPower` per ATTACK plus `Engine.rangedAttackPower` per
+/// RANGED_ATTACK. So one 750-energy guard's 90 stands against an unboosted
+/// `smallHealer`'s 60 and the count stays at one; a second healer's 120 casts
+/// the second.
+///
+/// The escalation is asked **only of a room a guard of ours already stands in**
+/// — `damage > 0` and not `healing >= damage` alone — because the damage term
+/// counts what is standing there and an empty room's is honestly zero, which
+/// every raid carrying a single HEAL part out-heals by arithmetic. Read without
+/// that conjunct the rule degenerates to "a healer in the room buys two guards"
+/// on the tick a raid is first seen: two bodies for the raid ADR 0056 prices at
+/// one, and its sentence above is written of a guard that has *arrived*. So the
+/// first body is bought against the [[threat]] and the second against a fight
+/// the colony can measure, the escalation arriving one oven later — which is the
+/// direction decision 4's two-cast bound and the [[stand-down]] behind it exist
+/// to hold. It is also what keeps a lone `smallMelee` met by an empty room at
+/// one rather than at `0 >= 0`, and a raid that heals **nothing** buys no second
+/// body whatever our damage is.
+///
+/// Vision is the whole of what this reads (ADR 0004): an outpost the colony
+/// cannot see this tick carries no hostiles and asks for no guard, which is the
+/// same zero a quiet room contributes. The [[home room]] is not in this list —
+/// a raid at home casts no guard and is the [[keep]]'s business (ADR 0034), and
+/// the spawn hold would refuse the cast anyway.
+let private guardQuota (view: ColonyView) atlas : int =
+    let parts part body =
+        body |> List.filter ((=) part) |> List.length
+
+    declaredOutposts view atlas
+    |> List.sumBy (fun room ->
+        let hostiles = view.Hostiles |> List.filter (fun h -> h.Pos.Room = room)
+
+        // ADR 0033's own Threat test, and never "a hostile": a scout or a
+        // healer alone reaches nothing, takes no ground and is no reason to
+        // buy a body.
+        if not (hostiles |> List.exists (fun h -> weaponRange h |> Option.isSome)) then
+            0
+        else
+            let healing = hostiles |> List.sumBy (fun h -> Engine.healPower * parts Heal h.Body)
+
+            let damage =
+                view.Creeps
+                |> List.filter (fun creep ->
+                    isGuardBody creep
+                    && (Atlas.creepTile atlas creep.Name
+                        |> Option.exists (fun tile -> tile.Room = room)))
+                |> List.sumBy (fun creep ->
+                    let count part =
+                        creep.Body |> Map.tryFind part |> Option.defaultValue 0
+
+                    Engine.attackPower * count Attack
+                    + Engine.rangedAttackPower * count RangedAttack)
+
+            if damage > 0 && healing >= damage then 2 else 1)
+
 /// The reserver row's quota and its sizing, which are one rule with two faces
 /// (ADR 0042, ADR 0006's law that a row arrives with its quota): one reserver
 /// per **declared** outpost, each wanting `ceil((5000 - ticks this colony
@@ -1155,29 +1303,16 @@ let private reserverBodyWithin claims capacity =
 /// one more entry, of a single block (ADR 0047), and its room leaves the
 /// reservation demands, because a controller carries one Task and a candidate
 /// colony's is the Claim; the body is the same `[Claim; Move]` either way,
-/// which is why this is one row and not two. **Declared and not posted**, which
-/// is where #131's correction overrides ADR 0042's "one reserver per posted
-/// outpost" clause: gating on a standing container deadlocks the outpost chain,
-/// since the container needs vision, vision needs a creep, and this is the only
-/// creep with a reason to go. The scan set is the gate that remains, and two
-/// things narrow it, both inside `World.scanOf`: ADR 0043's stand-down, and the
-/// declaration's own geometry — its `Outpost.neighbouring` filter (#243) — a
-/// room its home shares no border with is joined by no [[seam]], so the body
-/// this row would hire for it could never walk there, and the room is out of
-/// the scan set before anything here counts it. What *says* so is
-/// `Outpost.refused` on the [[layout record]]; what narrows the set is the
-/// filter. Beside it, the room must carry **a controller of its own in the
-/// projection**, or a CLAIM body has nothing to do there (ADR 0006). The
-/// *rooms* drop out and every cast this tick is sized at the largest
-/// demand in the list: the quota counts bodies, and which controller each
-/// finished body holds is the Matcher's, priced by travel cost. Over-buying is
-/// the safe direction (ADR 0026), and the bank truncates it anyway. **The bank
-/// must afford one block**, or the row hires nobody: a colony that cannot buy a
+/// which is why this is one row and not two. Which rooms count is
+/// `declaredOutposts`, the derivation this row shares with the guard row. The
+/// *rooms* drop out and every cast this tick is sized at the largest demand in
+/// the list: the quota counts bodies, and which controller each finished body
+/// holds is the Matcher's, priced by travel cost. Over-buying is the safe
+/// direction (ADR 0026), and the bank truncates it anyway. **The bank must
+/// afford one block**, or the row hires nobody: a colony that cannot buy a
 /// reservation does not hold one, and a row hired against a body it can never
 /// buy is an addend of the Workforce target no cast will pay off.
 let private reserverClaimsOf (view: ColonyView) atlas : int list =
-    let home = view.Controller |> Option.map (fun c -> c.Id)
-
     let heldTicks room =
         view.RoomControl
         |> Map.tryFind room
@@ -1192,24 +1327,15 @@ let private reserverClaimsOf (view: ColonyView) atlas : int list =
     // 0006), so `patternOf` reads a claimer back as a reserver and the casting
     // order, the gap and the amortization all count it as one. One block and
     // never the deficit's nine: a claim is one act by one CLAIM part, finished
-    // the tick it succeeds.
+    // the tick it succeeds. Their rooms are already out of `declaredOutposts`,
+    // which is the same fact read from the other end.
     let claims = claimTargets view
-    let claimed = claims |> List.map snd |> Set.ofList
 
     if view.Bank.Capacity < bodyCost reserverPattern.Block then
         []
     else
         let reserved =
-            view.Spatial.TargetKinds
-            |> Map.toList
-            |> List.choose (fun (id, kind) ->
-                if kind = Controller && Some id <> home then
-                    Atlas.targetRoom atlas id
-                else
-                    None)
-            |> List.distinct
-            |> List.filter (roomHasOwner view >> not)
-            |> List.filter (fun room -> not (Set.contains room claimed))
+            declaredOutposts view atlas
             |> List.map (fun room ->
                 ceilDiv (Engine.reservationCap - heldTicks room) Engine.claimLifetime |> max 1)
 
@@ -1365,11 +1491,12 @@ let private workerFloor (tasks: Task list) =
 
     if building then 2 else 1
 
-/// Workforce target (ADR 0012, ADR 0046): five addends, each a pattern row's
-/// own colony fact — reservers one per declared outpost, Anchors one per Post,
-/// haulers the throughput quota, upgraders the surplus divided by a standing
-/// body's drain, workers the income arithmetic that is left and the pioneers a
-/// nursery adds to it (ADR 0047) — floored at `Tuning.MinWorkforce` and derived
+/// Workforce target (ADR 0012, ADR 0046, ADR 0056): six addends, each a pattern
+/// row's own colony fact — reservers one per declared outpost, guards one or two
+/// per raided one, Anchors one per Post, haulers the throughput quota, upgraders
+/// the surplus divided by a standing body's drain, workers the income arithmetic
+/// that is left and the pioneers a nursery adds to it (ADR 0047) — floored at
+/// `Tuning.MinWorkforce` and derived
 /// fresh each tick. A source whose Post is provided for retires its other
 /// Seats: one heavy body drains it alone. An unposted source of the home room
 /// still contributes its Seat count, its output being spoken for by the seat
@@ -1385,12 +1512,18 @@ let private workerFloor (tasks: Task list) =
 /// what makes the container possible — arriving as `reserverClaims`, whose
 /// length is the addend and whose largest entry prices the amortization. The
 /// income and the three ground-hired rows' amortization arrive together as
-/// `surplus`, read here and by `upgraderQuota` alike.
+/// `surplus`, read here and by `upgraderQuota` alike. The guard row is an addend
+/// like the rest (ADR 0056) and is charged nowhere else: it is 0 for the whole
+/// of an ordinary life, and a guard left out of the target would have the
+/// deficit read the body it is alive as one of the generalists the income
+/// already paid for — a raid would quietly retire a worker for as long as the
+/// guard stood.
 let private workforceTarget
     (view: ColonyView)
     atlas
     (tasks: Task list)
     reserverClaims
+    guardQuota
     anchorQuota
     haulerQuota
     upgraderQuota
@@ -1455,6 +1588,7 @@ let private workforceTarget
         (unpostedSeats + incomeWorkers |> max (workerFloor tasks)) + pioneers
 
     List.length reserverClaims
+    + guardQuota
     + anchorQuota
     + haulerQuota
     + upgraderQuota
@@ -1493,32 +1627,39 @@ let private canRefill (tuning: Tuning) atlas (creep: CreepInfo) =
     && not (Atlas.workHeavy atlas creep.Name)
 
 /// The pattern row a living body was cast from, read off the parts alone (ADR
-/// 0006): a CLAIM part is the reserver row, more Work than Move is the anchor
-/// row, a standing body at or under that line is the upgrader row, no Work
-/// beside a Carry is the hauler row, and every other body is the generalist.
-/// The row is what sizes the replacement a lead prices (ADR 0026), so one rule
-/// serves every row. Order matters between the anchor and upgrader arms and
-/// nowhere else: `6W/1C/1M` satisfies both descriptions, and it is the anchor
-/// row that casts it — a body pinned to a Post by ADR 0020's Work Area is a
-/// stronger claim than standing beside the buffer. The reserver arm is what
-/// keeps ADR 0026 honest for a CLAIM body: `[Claim; Move]` has neither Work nor
-/// Carry, so before it existed a reserver's lead was priced off a worker unit.
+/// 0006): an ATTACK part is the guard row, a CLAIM part is the reserver row,
+/// more Work than Move is the anchor row, a standing body at or under that line
+/// is the upgrader row, no Work beside a Carry is the hauler row, and every
+/// other body is the generalist. The row is what sizes the replacement a lead
+/// prices (ADR 0026), so one rule serves every row. Order matters between the
+/// anchor and upgrader arms and nowhere else: `6W/1C/1M` satisfies both
+/// descriptions, and it is the anchor row that casts it — a body pinned to a
+/// Post by ADR 0020's Work Area is a stronger claim than standing beside the
+/// buffer. The reserver arm is what keeps ADR 0026 honest for a CLAIM body:
+/// `[Claim; Move]` has neither Work nor Carry, so before it existed a
+/// reserver's lead was priced off a worker unit. The guard arm is the same debt
+/// paid for a fighting body (ADR 0056): `[T; A×3; M×5; H]` has neither, so
+/// without it a guard read back as a **worker**, and the raid that cast it
+/// would go on filling the generalist row's `Living` for 1,500 ticks.
 let private patternOf (tuning: Tuning) atlas (creep: CreepInfo) =
-    if isReserverBody creep then reserverPattern
+    if isGuardBody creep then guardPattern
+    elif isReserverBody creep then reserverPattern
     elif Atlas.workHeavy atlas creep.Name then anchorPattern
     elif isStandingBody tuning creep then upgraderPattern
     elif isHaulerBody creep then haulerPattern
     else workerPattern
 
 /// The row a body **still in the oven** was bought for, read off the parts
-/// exactly as `patternOf` reads them off a living creep: the same five arms in
+/// exactly as `patternOf` reads them off a living creep: the same six arms in
 /// the same order, with `Work > Move` written out because the Atlas's own
 /// `workHeavy` set is keyed by creep name and a body being cast has none.
 let private patternOfCast (tuning: Tuning) (body: BodyPart list) =
     let count part =
         body |> List.filter ((=) part) |> List.length
 
-    if count BodyPart.Claim > 0 then
+    if count Attack > 0 then
+        guardPattern
+    elif count BodyPart.Claim > 0 then
         reserverPattern
     elif count Work > count Move then
         anchorPattern
@@ -1715,6 +1856,12 @@ let private planSpawns
         // and the largest of them is what every cast this tick carries.
         let reserverClaims = sizing.ReserverClaims
 
+        // The guard row's quota (ADR 0056): zero on every ordinary tick, and on
+        // the ticks a raid stands in a declared outpost, one or two per raided
+        // room. Read here beside the others because it is an addend of the
+        // target below and a gap of its own in the cascade.
+        let guardQuota = guardQuota view atlas
+
         // The anchor row's ceilings this tick, one per Post, read once beside
         // the quotas for the reason the reserver's demand list is (ADR 0042,
         // ADR 0053): the row's bodies are what the amortization is charged and
@@ -1741,6 +1888,7 @@ let private planSpawns
                 atlas
                 tasks
                 reserverClaims
+                guardQuota
                 anchorQuota
                 haulerQuota
                 upgraderQuota
@@ -1803,13 +1951,30 @@ let private planSpawns
         // the target has left. The reserver goes in front of all four (ADR
         // 0042): the other rows spend income, and this one decides whether the
         // income is five a tick or ten across every source of an outpost at
-        // once. Being first it is asked first, and it does not *hold* the
-        // cascade the tick the bank cannot pay for it: a row the bank cannot
-        // afford yields the tick to the rows below it (ADR 0050). Each specialist gap is
-        // that row's own unfilled quota, answered on its own terms rather than
-        // out of the deficit: an empty Post is a fact about the ground, and the
-        // row that hires for it does not stop hiring because the headcount
-        // overshot some other row's arithmetic.
+        // once. The guard goes in front of *it* (ADR 0056), behind the supply
+        // floor alone: it is zero for the whole of a colony's ordinary life,
+        // and on the ticks it is not, every tick of delay is an [[anchor]] and
+        // a [[hauler unit]] dying in a room a reserver would walk into next.
+        // Being first it is asked first, and it does not *hold* the cascade the
+        // tick the bank cannot pay for it: a row the bank cannot afford yields
+        // the tick to the rows below it (ADR 0050), which at a 300 bank is
+        // exactly what the guard row does. Each specialist gap is that row's
+        // own unfilled quota, answered on its own terms rather than out of the
+        // deficit: an empty Post is a fact about the ground, and the row that
+        // hires for it does not stop hiring because the headcount overshot some
+        // other row's arithmetic.
+        //
+        // The guard row's own `Living` is where ADR 0056's "no decay" lands: a
+        // guard that outlived its raid is still an ATTACK body in the fleet, so
+        // the next raid inside its life reads a filled row and waits no thirty
+        // ticks of oven for a body it already owns. Counted over the **fleet**
+        // against a quota derived per room, which is the reserver row's own
+        // shape one line down (ADR 0042): the row counts bodies and which room
+        // each finished body works is the Matcher's, priced by travel cost.
+        let guardLiving = living |> List.filter isGuardBody |> List.length
+
+        let guardGap = guardQuota - guardLiving - castOf guardPattern |> max 0
+
         let reserverLiving = living |> List.filter isReserverBody |> List.length
 
         let reserverGap =
@@ -1881,7 +2046,7 @@ let private planSpawns
 
         // The tick's arithmetic, written down for the `quotas` view (ADR
         // 0009: a record returned, never logged). The worker row is what
-        // the target leaves after the four specialist rows, which is how
+        // the target leaves after the five specialist rows, which is how
         // the cascade below hires it.
         let quotas: Quotas =
             let row name quota living casting =
@@ -1893,7 +2058,11 @@ let private planSpawns
                 }
 
             let specialists =
-                List.length reserverClaims + anchorQuota + haulerQuota + upgraderQuota
+                List.length reserverClaims
+                + guardQuota
+                + anchorQuota
+                + haulerQuota
+                + upgraderQuota
 
             {
                 Target = target
@@ -1903,6 +2072,7 @@ let private planSpawns
                 HaulerDemand = []
                 Rows =
                     [
+                        row "guard" guardQuota guardLiving (castOf guardPattern)
                         row
                             "reserver"
                             (List.length reserverClaims)
@@ -1915,6 +2085,7 @@ let private planSpawns
                             "worker"
                             (target - specialists |> max 0)
                             (List.length living
+                             - guardLiving
                              - reserverLiving
                              - anchorLiving
                              - haulerLiving
@@ -1945,20 +2116,27 @@ let private planSpawns
                 1
 
         // The rows expanded into the seats they are owed, in casting order: the
-        // supply floor, then reserver, Anchor, hauler, upgrader (ADR 0042, ADR
-        // 0046) and last the generalist, whose seats are whatever the
-        // whole-fleet deficit has left once every row above is counted. The
-        // deficit gates the *worker* row alone and stands in for that row's own
-        // gap: ADR 0012 hires it against whatever the target has left once the
-        // specialist rows are counted, and the whole-fleet gap less the rows
-        // above is exactly that remainder while every specialist row is at or
-        // under quota.
+        // supply floor, then guard, reserver, Anchor, hauler, upgrader (ADR
+        // 0042, ADR 0046, ADR 0056) and last the generalist, whose seats are
+        // whatever the whole-fleet deficit has left once every row above is
+        // counted. The deficit gates the *worker* row alone and stands in for
+        // that row's own gap: ADR 0012 hires it against whatever the target has
+        // left once the specialist rows are counted, and the whole-fleet gap
+        // less the rows above is exactly that remainder while every specialist
+        // row is at or under quota.
         let seats =
             List.replicate
                 supplyFloor
                 // The one row sized from `Available` (with the disaster
                 // fallback inside `castFromBank`, for the same reason).
                 (castFromBank haulerPattern (fun bank -> bodyFor haulerPattern bank.Available))
+            @ List.replicate
+                guardGap
+                // Priced at capacity like every row but the floor (ADR 0021),
+                // so a bank that cannot hold 750 casts nothing here and yields
+                // to the reserver behind it (ADR 0050): a colony that small has
+                // ADR 0043's [[stand-down]] and nothing else.
+                (castFromBank guardPattern (fun bank -> bodyFor guardPattern bank.Capacity))
             @ List.replicate
                 reserverGap
                 // Every cast at the largest outstanding demand and never at the
@@ -1988,7 +2166,8 @@ let private planSpawns
                 // it at eleven Work against the generalist's nine.
                 (castFromBank upgraderPattern (fun bank -> bodyFor upgraderPattern bank.Capacity))
             @ List.replicate
-                (deficit - (supplyFloor + reserverGap + anchorGap + haulerGap + upgraderGap)
+                (deficit
+                 - (supplyFloor + guardGap + reserverGap + anchorGap + haulerGap + upgraderGap)
                  |> max 0)
                 (castFromBank workerPattern (fun bank -> bodyFor workerPattern bank.Capacity))
 
@@ -3256,16 +3435,25 @@ let private deadlineRank = -tierRungs
 /// order is what it always was.
 let private priorityStep = 1
 
-/// Which of the four shapes a body is, as far as a [[capacity]] is concerned
+/// Which of the five shapes a body is, as far as a [[capacity]] is concerned
 /// (ADR 0052 decision 6, ADR 0006): part arithmetic, asked in the order the
 /// existing gates ask it in, because Heavy and Standing overlap on the
 /// [[anchor]]'s `6W/1C/1M` and every rule that reads both reads the heavy one
-/// first (ADR 0016 before ADR 0046).
-let private bodyClassOf (tuning: Tuning) atlas (creep: CreepInfo) : BodyClass =
+/// first (ADR 0016 before ADR 0046). `Fighter` is asked before all of them (ADR
+/// 0056): a guard's `[T; A×3; M×5; H]` carries no Work at all, so the four
+/// classes below would answer `Carrier` — the class of the bodies that shift
+/// energy, and the one a Guard's capacity must not be sharing a number with.
+/// Exported for the same reason `bodyFor` and `patternTable` are (ADR 0006): the
+/// ladder is a body fact a test reads directly, and `Fighter` answers no
+/// differently from `Carrier` in any [[capacity]] scope written so far — the
+/// Guard Task's `Fighter -> quota` is the first, and until it lands this is the
+/// only seam the head of the ladder is visible at.
+let bodyClassOf (tuning: Tuning) atlas (creep: CreepInfo) : BodyClass =
     let count part =
         creep.Body |> Map.tryFind part |> Option.defaultValue 0
 
-    if Atlas.workHeavy atlas creep.Name then Heavy
+    if isGuardBody creep then Fighter
+    elif Atlas.workHeavy atlas creep.Name then Heavy
     elif isStandingBody tuning creep then Standing
     elif count Work = 0 then Carrier
     else Light

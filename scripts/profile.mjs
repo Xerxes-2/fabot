@@ -407,6 +407,23 @@ const stationsIn = (room, grid, positions) =>
 const stationsOn = (room, grid, positions) =>
   positions.map((pos) => ({ room, grid, pos, onTile: true }));
 
+// The guard row's stations (ADR 0056): one per armed hostile standing in a
+// declared outpost, written as the raider's own tile and left to
+// `nearestFree` like every other pooled row. The raider's tile is already
+// claimed by the furnishing, so what a guard gets is the walkable ground
+// beside it — which is exactly where this row does its work, the range-1
+// ring of a threat being what an ATTACK part reaches. A world with no raid
+// in it stations none, and that is not a gap: the row's quota is zero
+// wherever no threat stands, so no body of it is ever cast there.
+const raidStations = (outpostRooms) =>
+  outpostRooms.flatMap((outpost) =>
+    stationsIn(
+      outpost.room,
+      outpost.capture,
+      outpost.hostiles.map((hostile) => hostile.pos),
+    ),
+  );
+
 // The tiles already claimed in one room, by name. One set per room and
 // never one flat set over the world: every room has the same 2,500
 // coordinates, so a reserver beside W12S27's controller at 36,44 and a
@@ -1018,6 +1035,15 @@ function buildStubWorld() {
         CONTROLLER,
         ...cluster.sites.map((site) => site.pos),
       ]),
+      // The guard row stands where a raid does (ADR 0056), and this world
+      // stands none: it models no declared outpost at all — the rooms its
+      // reservers were cast for answer as solid rock (above) — so no
+      // threat can stand in one and the row's quota is zero at every
+      // level. An empty list rather than a tile at the spawn, because
+      // unlike the reserver's this row has no honest home-room seat: a
+      // raid at home is the Keep's business (ADR 0034) and casts no guard.
+      // `hireFleet` says so if the row is ever cast here.
+      guard: [],
     },
     // One room, so one claimed-tile set: everything the colony already
     // stands on, which `taken` has collected as the room was furnished.
@@ -1257,6 +1283,20 @@ function hireFleet(world, game, loop) {
         );
       }
       const stations = stationTable[row];
+      // A row the scenario knows and has no *place* for is the same broken
+      // invariant one line up, arriving as an empty list rather than a
+      // missing key: the guard row stations one tile per armed hostile (ADR
+      // 0056), so a world with no raid in it stations none — and a body
+      // cast against such a world would be stood at `undefined`. Named
+      // rather than left to crash on the tile lookup, since the reader is
+      // again whoever just landed the row or the raid.
+      if (stations.length === 0) {
+        throw new Error(
+          `${request.spawn} cast a "${row}" body and the ${scenario} scenario stations no place ` +
+            "for that row in this world — the row's quota fired against ground the scenario " +
+            "does not model, so there is nowhere honest to stand the body",
+        );
+      }
       // The cursor is one colony's, not the world's: two colonies each
       // hire a worker row of their own, and a shared cursor would walk
       // the second colony's first body onto the first colony's second
@@ -2119,6 +2159,13 @@ function buildOutpostWorld() {
         home.controller.pos,
         ...cluster.sites.map((site) => site.pos),
       ]),
+      // The guard row beside the raid it was cast for (ADR 0056) — one
+      // station per armed hostile, in the outpost that holds it, so a
+      // `--raided` run times a body standing in a Reach and a quiet one
+      // hires none. Pooled and not place-holding: a raid that out-heals us
+      // buys a *second* guard for the same room, and both belong on the
+      // same ring.
+      guard: raidStations(outpostRooms),
     },
     // One claimed-tile set per room of the world: the home room's is what
     // furnishing it collected, each outpost's is the obstacles it holds.
@@ -2233,6 +2280,12 @@ function homeStations(furnished) {
       capture.controller.pos,
       ...cluster.sites.map((site) => site.pos),
     ]),
+    // No guard stands in a home room (ADR 0056): the row is hired per
+    // *declared outpost* a threat stands in, and a raid at home is the
+    // Keep's business (ADR 0034). A colony of this table's that works
+    // outposts overrides the key with their raids' own tiles — the `pair`
+    // scenario's mother does, below.
+    guard: [],
   };
 }
 
@@ -2475,6 +2528,11 @@ function buildPairWorld() {
       ),
     ),
   ];
+  // And the guard row beside whatever raid stands in those rooms (ADR
+  // 0056) — hers alone, for the same reason the outpost crew is: the child
+  // works no room but its own, so no threat it can see is in a declared
+  // outpost of its.
+  motherStations.guard = raidStations(outpostRooms);
   // The pioneers (ADR 0047 decision 4, #213): the mother's worker row
   // hires `Tuning.PioneerCount` bodies over its income workers for the child's
   // Upgrade and Build, and their work is in the child's room. Nothing in

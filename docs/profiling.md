@@ -102,7 +102,11 @@ Nothing about the room or the fleet is a hand-written count:
 **A row added to `Decide.patternTable` owes every scenario a `stations`
 entry** (the tile that row works from). A hire with no station makes the
 run throw, and the throw names the missing edit. This bill has come due
-twice (the reserver at #163, the upgrader at #199).
+three times (the reserver at #163, the upgrader at #199, the guard at
+#254). An entry may legitimately be **empty** — the guard row stands one
+body per armed hostile in a declared outpost (ADR 0056), so every scenario
+but a `--raided` one stations none, and a cast against such a world throws
+under its own message rather than standing the body nowhere.
 
 ## Reading a perturbed run
 

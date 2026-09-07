@@ -64,6 +64,25 @@ module Engine =
     /// RANGED_ATTACK's range: three tiles.
     let rangedRange = 3
 
+    /// ATTACK_POWER: the hits one ATTACK part takes off a creep at range 1.
+    /// The guard row's count rule prices our own damage with it (ADR 0056) —
+    /// melee is 0.231 damage per energy against ranged's 0.050, which is why
+    /// that row's block is an ATTACK block.
+    let attackPower = 30
+
+    /// RANGED_ATTACK_POWER: the hits one RANGED_ATTACK part takes off a single
+    /// target at range 1..3. Read beside `attackPower` over our own standing
+    /// guards, so a body carrying one is priced for what it can actually do
+    /// even though the row never buys one (ADR 0056).
+    let rangedAttackPower = 10
+
+    /// HEAL_POWER: the hits one HEAL part puts back at range 1 — the rate a
+    /// raid's healing is priced at, and never `RANGED_HEAL_POWER`'s 4: a
+    /// healer standing beside its own invader heals at 12, and pricing the
+    /// raid at its cheapest is the wrong direction for a count that decides
+    /// whether we fight at all (ADR 0056).
+    let healPower = 12
+
     /// The regeneration of a source in a room carrying an owner or a
     /// reservation: 3,000 energy per 300 ticks — what a continuously drained
     /// rock yields there, and the ceiling on what a body over it can take out.
@@ -2012,10 +2031,18 @@ type Task =
     /// hurt, and the Emitter issues movement for it and nothing else.
     | Flee
 
-/// The four shapes a body takes as far as a [[capacity]] is concerned (ADR 0052
-/// decision 6) — part arithmetic and never a row's name (ADR 0006), so the
+/// The five shapes a body takes as far as a [[capacity]] is concerned (ADR
+/// 0052 decision 6) — part arithmetic and never a row's name (ADR 0006), so the
 /// classes are the ones the existing gates already cut the fleet along.
 type BodyClass =
+    /// An ATTACK part (ADR 0056): the guard row's shape, and **first** in
+    /// the ladder because it is the one cut no other class makes. A guard
+    /// carries no Work and no Carry, so read through the four classes
+    /// below it would fall into `Carrier` beside the [[hauler unit]]s and
+    /// the [[reserver]] — a class whose whole meaning is "nothing a
+    /// Work-shaped capacity is dividing for" — and the one [[capacity]]
+    /// written for a guard would be answering for them too.
+    | Fighter
     /// More Work than Move (ADR 0016): the garrison's shape. Its intake is
     /// digging and its work is a [[post]], so it is the class every cap
     /// that is about standing room on a tile is written for.

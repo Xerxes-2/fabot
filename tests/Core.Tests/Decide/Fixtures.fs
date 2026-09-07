@@ -1332,6 +1332,19 @@ let hostileIn room pos body =
         Pos = RoomPos.at room pos
     }
 
+/// The engine's own `smallMelee`: two TOUGH, five MOVE, a RANGED_ATTACK, a
+/// WORK and an ATTACK — 1,000 hits and 40 damage at range 1, and the body
+/// nine remote raids in ten arrive as (ADR 0056,
+/// `docs/research/remote-invader-defence.md`). Written part for part rather
+/// than reduced to "something armed", because the parts are what every rule
+/// reads: the ATTACK is what makes it a [[threat]] at all (ADR 0033), the
+/// RANGED_ATTACK beside it is what sets its [[reach]] at 3 plus the margin
+/// rather than 1 plus it — which is the whole of how much ground a raid takes
+/// — and it carries **no HEAL**, which is what keeps the guard row's count at
+/// one against it.
+let smallMelee =
+    [ Tough; Tough; Move; Move; Move; Move; RangedAttack; Work; Attack; Move ]
+
 /// The outpost the Reserve tests hold: one room across the north border,
 /// its controller declared under the engine's own id and laid into the
 /// projection the way the shell lays one (`Outpost.place`, ADR 0041) — so

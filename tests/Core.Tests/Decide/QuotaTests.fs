@@ -122,14 +122,14 @@ let patternTableTests =
         "pattern table"
         [
             test
-                "the worker unit, the Anchor, the hauler, the reserver and the upgrader are the table's rows" {
+                "the worker unit, the Anchor, the hauler, the reserver, the upgrader and the guard are the table's rows" {
                 // The reserver joined the table the tick its quota did (ADR
                 // 0006, ADR 0042): a row arrives with the colony fact that
                 // says when it is cast, and `reserverClaimsOf` is that
                 // fact. The order here is the declaration's and not the
-                // casting order — which runs reserver, Anchor, hauler,
-                // upgrader, worker — because nothing reads this list for a
-                // sequence.
+                // casting order — which runs guard, reserver, Anchor,
+                // hauler, upgrader, worker — because nothing reads this list
+                // for a sequence.
                 //
                 // The upgrader row spent one ticket ahead of its quota (ADR
                 // 0046, #186) and is level with it again: #187 landed
@@ -139,6 +139,12 @@ let patternTableTests =
                 // Carry and Work/Move pairs for the rest — which is the
                 // table saying that a row is a name and a sizing rule
                 // before it is a block.
+                //
+                // The guard is the sixth row, and the one whose block is
+                // bought for a fight rather than for energy (ADR 0056): no
+                // Work and no Carry, its five Move there to carry the five
+                // that fight. Ten parts, 750 energy, and their order is the
+                // body's — TOUGH eats damage first, HEAL dies last.
                 Expect.equal
                     patternTable
                     [
@@ -162,8 +168,29 @@ let patternTableTests =
                             Name = "upgrader"
                             Block = [ Work; Carry; Move ]
                         }
+                        {
+                            Name = "guard"
+                            Block =
+                                [
+                                    Tough
+                                    Attack
+                                    Attack
+                                    Attack
+                                    Move
+                                    Move
+                                    Move
+                                    Move
+                                    Move
+                                    Heal
+                                ]
+                        }
                     ]
                     "every body the colony casts comes from these rows"
+
+                Expect.equal
+                    (bodyCost guardPattern.Block)
+                    750
+                    "and the guard block is the 750 energy ADR 0056's whole arithmetic is written at"
             }
 
             test "every row of the table has a sizing rule that can size it" {
@@ -343,35 +370,124 @@ let patternTableTests =
                     "twenty-four pairs and the Carry fill the body to 49 parts"
             }
 
+            // ADR 0056's own five banks, one at a time so each answer is
+            // read against exactly one other: 300 (the RCL1 bank, under one
+            // block), 800 and 1,300 (one block), 1,800 (two) and 2,300
+            // (three). The parts come back in the **block's** order — TOUGH,
+            // ATTACK, MOVE, HEAL — because that is the order damage strips
+            // them in, and a body whose HEAL came off first would lose the
+            // twelve a tick it is bought for on the first hit.
+            let guardBlock =
+                [ Tough; Attack; Attack; Attack; Move; Move; Move; Move; Move; Heal ]
+
+            let guardBlocks n =
+                List.replicate n Tough
+                @ List.replicate (3 * n) Attack
+                @ List.replicate (5 * n) Move
+                @ List.replicate n Heal
+
+            test "the guard row's one block is 90 damage, 12 self-heal and 750 energy" {
+                // The 800 bank — the first that can pay for the row at all.
+                Expect.equal
+                    (bodyFor guardPattern 800)
+                    guardBlock
+                    "one whole block, parts grouped in the block's own order"
+
+                Expect.equal
+                    (bodyCost (bodyFor guardPattern 800))
+                    750
+                    "and the remaining 50 stays banked: the row buys whole blocks"
+            }
+
+            test "a bank under one block still sizes to one block, and the row yields" {
+                // 300, the RCL1 bank. `wholeBlockBodyFor` floors at one block
+                // exactly as the hauler and reserver rows do, so what happens
+                // at this bank is **not** a smaller guard: it is a 750-energy
+                // body the bank cannot pay for, and the cascade's
+                // affordability check yields the tick to the rows behind it
+                // (ADR 0050). A colony this small has ADR 0043's stand-down
+                // and nothing else. The yielding itself is pinned at `decide`
+                // in "the guard row" below.
+                Expect.equal
+                    (bodyFor guardPattern 300)
+                    guardBlock
+                    "the block is the row's minimal cast, however poor the bank"
+            }
+
+            test "the RCL4 bank buys the same one block as the RCL2 one" {
+                // 1,300 against 800, the pair that says the row buys *whole*
+                // blocks and never spends a remainder: 550 more energy buys
+                // nothing at all, where the worker row would have padded it
+                // into Carry and Move.
+                Expect.equal
+                    (bodyFor guardPattern 1300)
+                    (bodyFor guardPattern 800)
+                    "1,300 is one block short of two, so it casts the 800 bank's body"
+            }
+
+            test "the live RCL5 bank buys two blocks" {
+                // 1,800: 180 damage, 24 self-heal, 2,000 hits — the pair of
+                // Overmind units the research says beats every small raid but
+                // the five-creep group.
+                Expect.equal
+                    (bodyFor guardPattern 1800)
+                    (guardBlocks 2)
+                    "two blocks: [T;T; A×6; M×10; H;H], TOUGH first and HEAL last"
+            }
+
+            test "an RCL6 bank buys three" {
+                // 2,300, and the last of ADR 0056's five: 2,250 spent, 270
+                // damage and 36 self-heal.
+                Expect.equal
+                    (bodyFor guardPattern 2300)
+                    (guardBlocks 3)
+                    "three blocks at 2,250 energy"
+            }
+
+            test "the guard body never exceeds the 50-part engine cap" {
+                // Ten parts a block, so five blocks fill the body exactly and
+                // an RCL8 bank's 12,900 would otherwise ask for seventeen.
+                Expect.equal
+                    (bodyFor guardPattern 12900)
+                    (guardBlocks 5)
+                    "five blocks fill the 50 parts exactly"
+            }
+
             test "a row the generalist rule cannot size is refused, not quietly rebuilt" {
                 // The fallback counts Work, Carry and Move out of a block
                 // and emits only those, so the next table row that is not
-                // one of those three — a guard, a healer — used to get a
-                // body with none of its own parts in it and no complaint
-                // from the compiler (#155). The stop names the row and the
-                // part so the fix (its own sizing rule, ADR 0006) is
-                // legible from the message alone.
-                let guard =
+                // one of those three used to get a body with none of its own
+                // parts in it and no complaint from the compiler (#155). The
+                // stop names the row and the part so the fix (its own sizing
+                // rule, ADR 0006) is legible from the message alone.
+                //
+                // A **healer** and no longer the guard this case was written
+                // with: ADR 0056 landed `guard` as a real row with a sizing
+                // rule of its own, so the row that proves the stop must be
+                // one the table still does not name. The stop is what
+                // admitted it safely — the row arrived with `guardBodyFor`
+                // beside it because this gate refuses anything else.
+                let healer =
                     {
-                        Name = "guard"
-                        Block = [ Attack; Move ]
+                        Name = "healer"
+                        Block = [ Heal; Move ]
                     }
 
                 let message =
                     try
-                        bodyFor guard 1800 |> ignore
+                        bodyFor healer 1800 |> ignore
                         "no exception"
                     with ex ->
                         ex.Message
 
                 Expect.stringContains
                     message
-                    "guard"
+                    "healer"
                     "the stop names the row that has no sizing rule"
 
                 Expect.stringContains
                     message
-                    "Attack"
+                    "Heal"
                     "and the part the generalist rule would have dropped"
             }
 
@@ -2594,6 +2710,479 @@ let reserverRowTests =
             }
         ]
 
+/// Files our own bodies into one named room's layer of the projection (ADR
+/// 0041), because the count rule asks which of our guards are standing *in that
+/// room* and a creep the projection places nowhere stands in none. The room is
+/// a parameter and not the raided one, which is what lets a case tell "the
+/// guards standing here" apart from "the guards standing anywhere".
+let private standingIn room (ours: (CreepInfo * Pos) list) (colony: ColonyView) =
+    let layer = SpatialInfo.layerOf colony.Spatial room
+
+    { colony with
+        Spatial =
+            colony.Spatial
+            |> withNeighbour
+                room
+                { layer with
+                    CreepPositions =
+                        ours |> List.map (fun (creep, pos) -> creep.Name, pos) |> Map.ofList
+                }
+    }
+
+/// The guard row's colony (ADR 0056): `reserverColony`'s W12S28 shape with its
+/// north outpost declared, posted and held at the reservation cap — so the
+/// reserver row wants exactly one block and the Anchor row is at quota — plus
+/// the hostiles the case names standing in that outpost and our own bodies
+/// standing there beside them.
+///
+/// The hostiles are a parameter and not a field of the fixture, so a case reads
+/// the quiet tick and the raided one **pairwise** off one geometry: what moves
+/// between two calls is the raid and can be nothing else.
+let private guardColony hostiles (ours: (CreepInfo * Pos) list) =
+    let colony =
+        reserverColony
+            [ northOutpost true ]
+            (surplusFleet 3 @ List.map fst ours)
+            [ "W1N2", reservedRoom true 5000 ]
+
+    { colony with Hostiles = hostiles } |> standingIn "W1N2" ours
+
+/// The engine's own `smallHealer`: five MOVE and five HEAL, 60 hits a tick at
+/// range 1 unboosted. No ATTACK and no RANGED_ATTACK, so it is a [[hostile]]
+/// the [[raid log]] records and no [[threat]] at all — and it is exactly the
+/// creep the guard row's count rule prices, one 750-energy guard's 90 damage
+/// standing against one of these and losing to two (ADR 0056). Private to this
+/// suite until a second one wants it, unlike the `smallMelee` beside it, which
+/// OutpostTests reads too.
+let private smallHealer =
+    [ Move; Move; Move; Move; Move; Heal; Heal; Heal; Heal; Heal ]
+
+/// One guard as the row would really cast it at an 800 bank: `[T; A×3; M×5; H]`,
+/// 90 damage and 12 self-heal a tick. Sized through `bodyFor` rather than
+/// written out, so the damage the count rule reads off it is the damage the row
+/// bought and never a second spelling of it.
+let private guard name =
+    creepWith name 0 0 (bodyFor guardPattern 800)
+
+/// One rock of the north outpost's three-Seat field, which is the whole of the
+/// walkable ground `northOutpost` lays: the guard stands on one Seat and the
+/// raid on the tile below the rock.
+let private outpostSeat = { X = 41; Y = 40 }
+let private raidTile = { X = 40; Y = 41 }
+
+/// The same tile of the *west* outpost's field, for the one case that asks
+/// which room a guard of ours is standing in.
+let private westSeat = { X = 21; Y = 40 }
+
+/// The `guard` row of the tick's `Quotas`, which is where the cascade writes its
+/// own arithmetic down (ADR 0009) — the quota being observability and never a
+/// number anything downstream reads.
+let private rowOf name colony =
+    (decide colony Map.empty Set.empty None).Quotas.Rows
+    |> List.tryFind (fun row -> row.Row = name)
+
+let private guardQuotaOf colony =
+    rowOf "guard" colony |> Option.map (fun row -> row.Quota)
+
+/// This tick's guard casts, by the row name every creep name carries.
+let private guardCasts intents =
+    spawnIntents intents
+    |> List.filter (fun (_, _, name: string) -> name.StartsWith "guard-")
+    |> List.map (fun (_, body, _) -> body)
+
+[<Tests>]
+let guardRowTests =
+    testList
+        "the guard row"
+        [
+            test "a clear outpost hires none, and one armed hostile in it hires one" {
+                // ADR 0056's first two banks of the count rule, pairwise on
+                // one fixture: the row is **0** for the whole of a colony's
+                // ordinary life, and 1 the tick a [[threat]] is seen standing
+                // in a declared outpost. Nothing is pre-cast and nothing is
+                // remembered — the quota is a per-tick fact read off vision.
+                Expect.equal
+                    (guardQuotaOf (guardColony [] []))
+                    (Some 0)
+                    "the premise: a quiet outpost is no reason to buy a body"
+
+                Expect.equal
+                    (guardQuotaOf (guardColony [ hostileIn "W1N2" raidTile smallMelee ] []))
+                    (Some 1)
+                    "and the lone smallMelee nine raids in ten arrive as hires exactly one"
+            }
+
+            test "a hostile that reaches nothing is no reason to hire" {
+                // The gate is ADR 0033's [[threat]] and never "a hostile": a
+                // `smallHealer` carries neither ATTACK nor RANGED_ATTACK, so
+                // it takes no ground, kills nothing and buys no body — even
+                // though its HEAL parts are exactly what the count rule
+                // prices once something armed *is* standing beside it.
+                Expect.equal
+                    (guardQuotaOf (guardColony [ hostileIn "W1N2" raidTile smallHealer ] []))
+                    (Some 0)
+                    "a lone healer is a hostile the raid log records and no threat at all"
+            }
+
+            test "a raid at home hires no guard" {
+                // This row is the [[outpost]]'s and nothing else (ADR 0056):
+                // a raid in the home room is the [[keep]]'s business (ADR
+                // 0034), and the home room is not a declared outpost. Read at
+                // (8,9), far enough from the spawn at (20,10) that the spawn
+                // hold is not what is answering — a held tick derives no
+                // quotas at all and this case would pass on the wrong reason.
+                let athome =
+                    { guardColony [] [] with
+                        Hostiles = [ hostileIn "W1N1" { X = 8; Y = 9 } smallMelee ]
+                    }
+
+                Expect.equal
+                    (guardQuotaOf athome)
+                    (Some 0)
+                    "the same raid that hires one in the outpost hires none at home"
+
+                Expect.isSome
+                    (rowOf "guard" athome)
+                    "and the cascade ran: the row is written down, it is simply zero"
+            }
+
+            test "a raid that out-heals the standing guards hires the second" {
+                // ADR 0056's count rule at the two readings the arithmetic
+                // turns on, one healer apart, with the same 90-damage guard
+                // standing in the room both times: `12 × HEAL` against
+                // `30 × ATTACK + 10 × RANGED_ATTACK`. An unboosted
+                // `smallHealer` heals 60 against our 90 and the count stays
+                // at one; a second healer's 120 is at least our 90 and casts
+                // the second body.
+                let raid healers =
+                    guardColony
+                        (hostileIn "W1N2" raidTile smallMelee
+                         :: [
+                             for i in 1..healers ->
+                                 { hostileIn "W1N2" raidTile smallHealer with
+                                     Id = $"heal-{i}"
+                                 }
+                         ])
+                        [ guard "g-1", outpostSeat ]
+
+                Expect.equal
+                    (guardQuotaOf (raid 1))
+                    (Some 1)
+                    "60 healed against 90 dealt: one guard is out-damaging the raid"
+
+                Expect.equal
+                    (guardQuotaOf (raid 2))
+                    (Some 2)
+                    "120 healed against the same 90: the raid out-heals us and the row hires a second"
+            }
+
+            test
+                "the second guard is bought against a fight we can measure, never against an empty room" {
+                // The other half of the same comparison, and the cell the
+                // rule's arithmetic actually turns on: `damage` counts the
+                // guards standing *in that room*, so on the tick a raid is
+                // first seen it is zero and every raid carrying one HEAL part
+                // would out-heal it. ADR 0056 prices that raid at one — "one
+                // 750-e guard's 90 stands against an unboosted `smallHealer`'s
+                // 60 and the count stays at one" — and its sentence is written
+                // of a guard that has *arrived*. So the escalation is asked
+                // only of a room a guard already stands in, and the tick-zero
+                // answer is one however many healers walked in with the melee.
+                // Pairwise against the cases above, which stand `g-1` first.
+                let raid healers =
+                    guardColony
+                        (hostileIn "W1N2" raidTile smallMelee
+                         :: [
+                             for i in 1..healers ->
+                                 { hostileIn "W1N2" raidTile smallHealer with
+                                     Id = $"heal-{i}"
+                                 }
+                         ])
+                        []
+
+                Expect.equal
+                    (guardQuotaOf (raid 1))
+                    (Some 1)
+                    "first contact with one healer buys the one body the ADR prices it at"
+
+                Expect.equal
+                    (guardQuotaOf (raid 2))
+                    (Some 1)
+                    "and two healers buy one too: there is no standing damage yet for them to out-heal"
+
+                Expect.equal
+                    (guardCasts (decide (raid 2) Map.empty Set.empty None).Intents |> List.length)
+                    1
+                    "so the tick spends one body's energy and not two, four idle spawns notwithstanding"
+            }
+
+            test "the count is capped at two per outpost" {
+                // The bound decision 4 rests on: two guards die, 1,500
+                // energy is spent, and the outpost falls back to ADR 0043's
+                // [[stand-down]] rather than feeding an unbounded stream of
+                // bodies into a raid we are losing. Four healers is 240
+                // against one guard's 90 and still asks for two.
+                let raid healers =
+                    guardColony
+                        (hostileIn "W1N2" raidTile smallMelee
+                         :: [
+                             for i in 1..healers ->
+                                 { hostileIn "W1N2" raidTile smallHealer with
+                                     Id = $"heal-{i}"
+                                 }
+                         ])
+                        [ guard "g-1", outpostSeat ]
+
+                Expect.equal
+                    (guardQuotaOf (raid 2))
+                    (guardQuotaOf (raid 4))
+                    "twice the healing asks for the same two bodies"
+
+                Expect.equal (guardQuotaOf (raid 4)) (Some 2) "and two is the cap"
+            }
+
+            test "the count is summed over the declared outposts" {
+                // Two rooms, so "one guard per raided outpost" can be told
+                // apart from "one guard". The second outpost is unposted, and
+                // that is deliberate: the row is hired off a *declaration*
+                // and a [[threat]], never off a standing container — an
+                // outpost whose crew is being killed before it can build one
+                // is the case that most needs the body.
+                let twoOutposts hostiles =
+                    let colony =
+                        reserverColony
+                            [ northOutpost true; westOutpost false ]
+                            (surplusFleet 3)
+                            [ "W1N2", reservedRoom true 5000; "W2N2", reservedRoom true 5000 ]
+
+                    { colony with Hostiles = hostiles }
+
+                Expect.equal
+                    (guardQuotaOf (twoOutposts [ hostileIn "W1N2" raidTile smallMelee ]))
+                    (Some 1)
+                    "the premise: one raided outpost of the two hires one"
+
+                Expect.equal
+                    (guardQuotaOf (
+                        twoOutposts
+                            [
+                                hostileIn "W1N2" raidTile smallMelee
+                                { hostileIn "W2N2" { X = 20; Y = 41 } smallMelee with
+                                    Id = "h-2"
+                                }
+                            ]
+                    ))
+                    (Some 2)
+                    "and a raid in each hires one apiece"
+            }
+
+            test "the damage the second guard is priced against is the raided room's own" {
+                // The conjunct that keeps the count room-local, in the
+                // codebase whose first hazard is room aliasing (ADR 0041): the
+                // damage term filters our guards by the room they stand in,
+                // and without it a body forty tiles away in another outpost
+                // would price a fight it is not in. Pairwise, one room apart —
+                // the same raid, the same guard, and only its tile moving.
+                let twoOutposts ours =
+                    let raid =
+                        hostileIn "W1N2" raidTile smallMelee
+                        :: [
+                            for i in 1..2 ->
+                                { hostileIn "W1N2" raidTile smallHealer with
+                                    Id = $"heal-{i}"
+                                }
+                        ]
+
+                    let colony =
+                        reserverColony
+                            [ northOutpost true; westOutpost false ]
+                            (surplusFleet 3 @ [ guard "g-1" ])
+                            [ "W1N2", reservedRoom true 5000; "W2N2", reservedRoom true 5000 ]
+
+                    { colony with Hostiles = raid } |> ours
+
+                Expect.equal
+                    (guardQuotaOf (twoOutposts (standingIn "W1N2" [ guard "g-1", outpostSeat ])))
+                    (Some 2)
+                    "the premise: 120 healed against the raided room's own 90 dealt hires the second"
+
+                Expect.equal
+                    (guardQuotaOf (twoOutposts (standingIn "W2N2" [ guard "g-1", westSeat ])))
+                    (Some 1)
+                    "the same guard standing in the other outpost prices nothing here: this room has none"
+            }
+
+            test "the row is cast in front of the reserver and reads its own body back" {
+                // The cascade slot (ADR 0056): behind the [[supply floor]]
+                // and in front of the [[reserver]]. Both gaps are open on
+                // this tick — the reservation is at its cap, so the reserver
+                // row wants one block — and the colony's four idle spawns
+                // draw the seats in order, so the *first* cast says which row
+                // was asked first. Pairwise against the quiet tick, where the
+                // reserver is the head of the cascade exactly as ADR 0042
+                // left it.
+                let castNames colony =
+                    spawnIntents (decide colony Map.empty Set.empty None).Intents
+                    |> List.map (fun (_, _, name: string) -> name.Split('-').[0])
+
+                Expect.equal
+                    (castNames (guardColony [] []) |> List.truncate 1)
+                    [ "reserver" ]
+                    "the premise: with nothing to fight, the reserver is the head of the cascade"
+
+                Expect.equal
+                    (castNames (guardColony [ hostileIn "W1N2" raidTile smallMelee ] [])
+                     |> List.truncate 2)
+                    [ "guard"; "reserver" ]
+                    "and a raid puts the guard in front of it, without displacing it"
+            }
+
+            test "the guard the row casts is the block the bank buys" {
+                // The cast itself and not the quota: at the live RCL5 bank
+                // the row buys two whole blocks, which is the body every
+                // damage number above is written in.
+                Expect.equal
+                    (guardCasts
+                        (decide
+                            (guardColony [ hostileIn "W1N2" raidTile smallMelee ] [])
+                            Map.empty
+                            Set.empty
+                            None)
+                            .Intents)
+                    [ bodyFor guardPattern 1800 ]
+                    "one cast, at the 1,800 bank `reserverColony` holds"
+            }
+
+            test "a bank that cannot afford a block yields the tick" {
+                // ADR 0050 through the new row: 750 is more than a 300 bank
+                // holds, so the row casts nothing and does not hold the
+                // cascade for the rows behind it — a colony this small has
+                // ADR 0043's stand-down and nothing else. Pairwise against
+                // 800, the first bank that can pay for the row at all, with
+                // the same raid standing in the same room.
+                let raided = guardColony [ hostileIn "W1N2" raidTile smallMelee ] []
+
+                let castsAt available capacity =
+                    { raided with
+                        Bank = bank available capacity
+                    }
+                    |> fun colony -> decide colony Map.empty Set.empty None
+                    |> fun result -> guardCasts result.Intents
+
+                Expect.equal
+                    (castsAt 800 800)
+                    [ bodyFor guardPattern 800 ]
+                    "the premise: at 800 the row buys its one block"
+
+                Expect.isEmpty (castsAt 300 300) "at 300 it buys nothing and yields the tick"
+
+                Expect.equal
+                    (guardQuotaOf { raided with Bank = bank 300 300 })
+                    (Some 1)
+                    "and the quota is unmoved: what the poor bank refuses is the cast, not the row"
+            }
+
+            test "a guard fills the guard row's Living and no other row's" {
+                // The row is read back off the parts like every other (ADR
+                // 0006), and an ATTACK part is the one cut no other row of
+                // this colony makes. Without the arm a `[T; A×3; M×5; H]`
+                // has neither Work nor Carry and falls through to the
+                // **generalist**, so a raid would quietly retire a worker for
+                // the guard's whole 1,500-tick life. Pairwise, one body
+                // apart.
+                let livingOf colony =
+                    (decide colony Map.empty Set.empty None).Quotas.Rows
+                    |> List.map (fun row -> row.Row, row.Living)
+
+                let quiet = livingOf (guardColony [] [])
+                let standing = livingOf (guardColony [] [ guard "g-1", outpostSeat ])
+
+                Expect.equal
+                    (quiet |> List.map fst)
+                    (standing |> List.map fst)
+                    "the premise: the same rows either side"
+
+                Expect.equal
+                    (List.zip quiet standing
+                     |> List.filter (fun ((_, before), (_, after)) -> before <> after)
+                     |> List.map (fun ((row, before), (_, after)) -> row, before, after))
+                    [ "guard", 0, 1 ]
+                    "one body arrives and exactly one row's Living moves — the guard's"
+            }
+
+            test "an idle survivor keeps the row filled, so the next raid casts nothing" {
+                // ADR 0056's "no decay", read at the seam it is about: a
+                // guard that outlived its raid is pooled no work, stands
+                // idle, and goes on counting in the row's `Living` — so a
+                // second raid inside its 1,500 ticks buys nothing and waits
+                // no thirty ticks of oven for a body the colony already
+                // owns.
+                let raid = [ hostileIn "W1N2" raidTile smallMelee ]
+
+                Expect.equal
+                    (guardCasts (decide (guardColony raid []) Map.empty Set.empty None).Intents
+                     |> List.length)
+                    1
+                    "the premise: with nothing standing, the raid casts one"
+
+                Expect.isEmpty
+                    (guardCasts
+                        (decide
+                            (guardColony raid [ guard "g-1", outpostSeat ])
+                            Map.empty
+                            Set.empty
+                            None)
+                            .Intents)
+                    "with the survivor standing, the same raid casts none"
+            }
+
+            test "a guard classifies Fighter, and no other row's body does" {
+                // The [[body class]] ladder's new head (ADR 0056), read the
+                // only way it is readable today: `Fighter` answers no
+                // differently from `Carrier` in every [[capacity]] scope
+                // written so far — `(=) Heavy`, `(<>) Heavy`, `(=) Standing`
+                // and "neither Heavy nor Standing" — so the Guard Task's
+                // `Fighter -> quota` is the first cap that will tell them
+                // apart, and until it lands no fixture at the `decide` seam
+                // can. Pinned here rather than left to that ticket, because
+                // what it is guarding against is the guard falling back into
+                // `Carrier` beside the [[hauler unit]]s, which is silent.
+                //
+                // Both halves of one claim, so both are asserted over one
+                // fleet: the guard is a Fighter, and every other row's body
+                // at the same bank is the class it was before the arm
+                // existed.
+                let bodies =
+                    [
+                        "guard", bodyFor guardPattern 800
+                        "anchor", bodyFor anchorPattern 800
+                        "upgrader", bodyFor upgraderPattern 800
+                        "hauler", bodyFor haulerPattern 800
+                        "reserver", bodyFor reserverPattern 800
+                        "worker", bodyFor workerPattern 800
+                    ]
+
+                let colony =
+                    { incomeColony with
+                        Creeps = bodies |> List.map (fun (name, body) -> creepWith name 0 50 body)
+                    }
+
+                let atlas = Atlas.ofView colony
+
+                Expect.equal
+                    (colony.Creeps
+                     |> List.map (fun creep -> creep.Name, bodyClassOf colony.Tuning atlas creep))
+                    [
+                        "guard", Fighter
+                        "anchor", Heavy
+                        "upgrader", Standing
+                        "hauler", Carrier
+                        "reserver", Carrier
+                        "worker", Light
+                    ]
+                    "one row's body classifies Fighter and it is the guard's"
+            }
+        ]
 
 /// The Anchor #203 met, spelled as the colony really held it: `6W/1C/1M`,
 /// standing full on a full container. One Carry and one Move, and yet
@@ -4848,15 +5437,17 @@ let quotasRecordTests =
         [
             test "the cascade writes down its rows, and they sum to the target" {
                 // Observability only (ADR 0009): the record the `observe.mjs
-                // quotas` view prints. Five rows in cascade order; the worker
-                // row is what the target leaves after the specialists, so the
-                // quotas sum to the target; the living counts partition the
-                // fleet.
+                // quotas` view prints. Six rows in cascade order — the guard
+                // at the head of them since ADR 0056, behind only the supply
+                // floor, which is a floor and not a row and so has no line
+                // here; the worker row is what the target leaves after the
+                // specialists, so the quotas sum to the target; the living
+                // counts partition the fleet.
                 let { Quotas = quotas } = decide bareRespawn Map.empty Set.empty None
 
                 Expect.equal
                     (quotas.Rows |> List.map (fun r -> r.Row))
-                    [ "reserver"; "anchor"; "hauler"; "upgrader"; "worker" ]
+                    [ "guard"; "reserver"; "anchor"; "hauler"; "upgrader"; "worker" ]
                     "one row per casting row, in the cascade's order"
 
                 Expect.equal
