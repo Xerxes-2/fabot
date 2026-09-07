@@ -12029,6 +12029,29 @@ let pickupTaskTests =
                     (Map.tryFind "h1" apart)
                     (Some(taskId (Withdraw "can-a")))
                     "a pile ten tiles off moves nothing: the container underfoot is still the flow"
+
+                // And a *full* container outranks the pile on its own tile
+                // (live, W12S28 2026-09-07): the garrison is overflowing, the
+                // 2,000 is the flow, and the pickup reflex takes the pile
+                // off the same tile for free while the body draws. Pairwise
+                // on the stock alone.
+                let full =
+                    let colony = sameTilePileColony { X = 10; Y = 10 }
+
+                    { colony with
+                        Spatial =
+                            { colony.Spatial with
+                                Stores =
+                                    Map.add "can-a" Engine.containerCapacity colony.Spatial.Stores
+                            }
+                    }
+
+                let { Assignments = brimming } = decide full Map.empty Set.empty None
+
+                Expect.equal
+                    (Map.tryFind "h1" brimming)
+                    (Some(taskId (Withdraw "can-a")))
+                    "full, the container is drawn first and the reflex takes the pile beside it"
             }
 
             test "the piled container keeps its place against every other store" {

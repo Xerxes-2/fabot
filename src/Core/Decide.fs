@@ -5102,17 +5102,27 @@ let planPool (view: ColonyView) atlas (tasks: Task list) : PooledTask list =
     // above it, is still taken first on the same tile. Source containers
     // alone (the Feeding-tier Withdraw): the buffer and the Storage are
     // sinks the haulers fill, and a full one is the flow working.
+    //
+    // The two rungs sit the other way round from the first cut (live,
+    // W12S28 2026-09-07): with the pile a rung above the full container
+    // the haulers chased fifty-energy piles off the Posts all day and
+    // never drew the 2,000 beside them, so the containers stayed full,
+    // the garrisons kept overflowing, and every pickup bred the next
+    // pile. A full container's Withdraw is the higher rung — the pickup
+    // reflex (#166) takes the pile off the same tile for free while the
+    // body draws — and a pile on a store that is *not* full keeps the one
+    // rung the decay earns it.
     let priorityOf task =
         let step =
             match task with
             | Pickup pileId ->
                 match SpatialInfo.placementOf view.Spatial pileId with
-                | Some tile when Set.contains tile drawableTiles -> -2 * priorityStep
+                | Some tile when Set.contains tile drawableTiles -> -priorityStep
                 | _ -> 0
             | Withdraw storeId when
                 tierOf task = Feeding && stored storeId >= Engine.containerCapacity
                 ->
-                -priorityStep
+                -2 * priorityStep
             | _ -> 0
 
         match task with
