@@ -13378,7 +13378,7 @@ let outpostWorkforceTests =
 /// the held ten, so every rate this list is about would price alike and
 /// each pairwise case below would be comparing a number with itself. At
 /// 600 the row casts five Work against a held rock and three against a
-/// neutral one (`anchorWorkCapOf`): the cap binds on neither and the rate
+/// neutral one (`sourceOutputOf`): the cap binds on neither and the rate
 /// is the answer, which is what these cases exist to read.
 let private midIncomeColony =
     { incomeColony with
@@ -14021,15 +14021,24 @@ let private anchorCapColony homePosts (control: (string * RoomControlInfo) list)
             ||> List.fold (fun acc (room, holder) -> Map.add room holder acc)
     }
 
-/// The one Anchor body the tick casts, off `decide`'s own Intents. The row
-/// is read off the creep name the casting step stamps, so a tick that cast
-/// some other row fails here rather than quietly asserting about a worker.
+/// The Anchor bodies the tick casts, in casting order, off `decide`'s own
+/// Intents. The row is read off the creep name the casting step stamps, so
+/// a tick that cast some other row shows as an empty list here rather than
+/// quietly asserting about a worker.
+///
+/// A list since ADR 0053, because the row no longer casts one body: a
+/// colony with two vacancies of different ceilings and two idle spawns
+/// buys the dearer first and the cheaper out of what is left.
+let private anchorCastsBy colony =
+    spawnIntents (decide colony Map.empty Set.empty None).Intents
+    |> List.filter (fun (_, _, name) -> name.StartsWith "anchor-")
+    |> List.map (fun (_, body, _) -> body)
+
+/// The one Anchor body the tick casts, for the fixtures whose bank buys
+/// exactly one.
 let private anchorCastBy colony =
-    match
-        spawnIntents (decide colony Map.empty Set.empty None).Intents
-        |> List.filter (fun (_, _, name) -> name.StartsWith "anchor-")
-    with
-    | [ (_, body, _) ] -> body
+    match anchorCastsBy colony with
+    | [ body ] -> body
     | other -> failtest $"expected exactly one Anchor SpawnCreep intent, got %A{other}"
 
 /// The colony the anchor row's **charge** is legible in, which the cast's
@@ -14050,7 +14059,12 @@ let private anchorCastBy colony =
 /// 20,400 charged at the held one: three worker places and two. One
 /// Post at 1,300 moves it by 350 against a 9,000-energy place and could
 /// not move the target at all.
-let private anchorChargeColony workers =
+/// `homePosts` keeps the colony's own two Posts in the projection, which
+/// is the arrangement ADR 0053 is about and the one the aggregate charge
+/// could not tell from any other: five Posts over two rates, charged
+/// 2 × 700 + 3 × 400 Post by Post where a quota times one ceiling charges
+/// 5 × 700.
+let private anchorChargeColony homePosts workers =
     let rocks = [ { X = 10; Y = 40 }; { X = 20; Y = 40 }; { X = 30; Y = 40 } ]
 
     let outpost =
@@ -14070,22 +14084,26 @@ let private anchorChargeColony workers =
                 [ for i in 1..3 -> anchor $"a{i}" 0 50 ]
                 @ [ for i in 1..workers -> worker $"w{i}" 0 50 ]
         }
-        |> withoutHomePosts
+        |> (if homePosts then id else withoutHomePosts)
         |> withOutpost "W1N2" outpost (rocks |> List.collect threeSeatField)
 
     { colony with
         RoomControl = Map.add "W1N2" neutralRoom colony.RoomControl
     }
 
+/// The anchor row's body under either of the two ceilings a [[reservation]]
+/// decides: five Work saturate a held rock and two a rock nobody holds, so
+/// the ceilings are six and three (ADR 0021, ADR 0042). Written once
+/// because the cast, the charge and the [[lead]] are all read against them.
+let private sixWork = [ Work; Work; Work; Work; Work; Work; Carry; Move ]
+
+let private threeWork = [ Work; Work; Work; Carry; Move ]
+
 [<Tests>]
 let anchorWorkCapTests =
     testList
         "the Anchor row's Work ceiling"
         [
-            let sixWork = [ Work; Work; Work; Work; Work; Work; Carry; Move ]
-
-            let threeWork = [ Work; Work; Work; Carry; Move ]
-
             test "the same rock caps the Anchor row at six Work reserved and three unreserved" {
                 // ADR 0021's rule, ADR 0042's number: the ceiling is a
                 // source's saturation plus one spare, and a source under no
@@ -14108,21 +14126,38 @@ let anchorWorkCapTests =
             }
 
             test "a neutral outpost Post does not shrink the ceiling the home room asks for" {
-                // The direction the fold is wrong in, pinned pairwise
+                // The direction the pairing is wrong in, pinned pairwise
                 // against the case above: the same neutral W1N2, the same
                 // rock, the same field — the colony's own two Posts are the
-                // only thing added. A cast is a body and not a posting, and
-                // travel cost pins it on whichever Post is nearest once it
-                // is alive (ADR 0021's own rejection of sizing by the Post),
-                // so the row takes the richest saturation it hires for
-                // rather than the poorest. Under-sizing an Anchor for a held
-                // rock loses four energy a tick for the body's whole life;
-                // over-sizing one for a neutral rock wastes 300 energy once
-                // in 1,500 ticks and still digs everything the rock has.
+                // only thing added, and the fleet is one worker, so all
+                // three Posts stand empty and the row is three bodies short.
+                //
+                // Every cast this tick is bought under the **dearest
+                // vacancy's** rock (ADR 0053), because a cast is a body and
+                // not a posting: travel cost pins the finished body on
+                // whichever Post is nearest once it is alive (ADR 0021's own
+                // rejection of sizing by the Post), so with several
+                // vacancies open the colony cannot steer any of these
+                // bodies and buys every one of them for the dearer rock.
+                // Under-sizing an Anchor for a held rock loses four energy a
+                // tick for the body's whole life; over-sizing one for a
+                // neutral rock wastes 300 energy once in 1,500 ticks and
+                // still digs everything the rock has.
+                //
+                // Two spawns and a 1,300 bank buy exactly one of the three:
+                // 700 for a home Post's six Work, and the 600 left cannot
+                // pay for a second six-Work body — so the second spawn
+                // yields the seat (ADR 0050) rather than spending 400 on the
+                // neutral Post's `3W/1C/1M`. Which is the whole of why the
+                // ceiling is the dearest vacancy's and not each vacancy's
+                // own: both of this colony's held Posts are a few tiles from
+                // the spawns and the neutral one is a Seam away, so a body
+                // bought for the outpost's hole lands on a held rock and
+                // digs six where the rock gives ten.
                 Expect.equal
-                    (anchorCastBy (anchorCapColony true [ "W1N2", neutralRoom ]))
-                    sixWork
-                    "the home room's held rocks keep the row at six Work whatever stands beside them"
+                    (anchorCastsBy (anchorCapColony true [ "W1N2", neutralRoom ]))
+                    [ sixWork ]
+                    "the home room's held rock keeps its own replacement at six Work, and the neutral rock beside it buys nothing"
             }
 
             test "the colony's own room is capped exactly where it always was" {
@@ -14176,7 +14211,7 @@ let anchorWorkCapTests =
                 // the fleet of 21 below has no gap at all.
                 let casts workers =
                     spawnIntents
-                        (decide (anchorChargeColony workers) Map.empty Set.empty None).Intents
+                        (decide (anchorChargeColony false workers) Map.empty Set.empty None).Intents
                     |> List.map (fun (_, _, name) -> name)
 
                 Expect.isEmpty
@@ -14190,6 +14225,57 @@ let anchorWorkCapTests =
                         "worker-"
                         "one short of it the worker row is short, which the held charge would not have hired"
                 | other -> failtest $"expected exactly one SpawnCreep intent, got %A{other}"
+            }
+
+            test "the charge is one body a Post and not the quota times one ceiling" {
+                // **ADR 0053's other half.** The test above is written on a
+                // colony whose Posts agree — three neutral rocks, one
+                // ceiling between them — where a quota times that ceiling
+                // and a sum over the Posts are the same number. This is the
+                // colony they part on: the same three neutral rocks with
+                // the colony's own two held Posts kept beside them, five
+                // Posts over two rates. Post by Post the row is charged
+                // 2 x 700 + 3 x 400 = 2,600; the quota times its richest
+                // ceiling charges 5 x 700 = 3,500, and the 900 between them
+                // is an upgrade mouth the income really feeds.
+                //
+                // At a 1,600 bank because the target is an integer: the
+                // surplus is divided into worker places of a whole body's
+                // Work drain over a lifetime (ADR 0037), which is 12,000
+                // energy here, and 900 moves the target only where it
+                // straddles one. It does here — 11 against the 10 the
+                // aggregate charge answers — and at 1,400, the bank the
+                // test above is written at, it does not.
+                //
+                // Pairwise on the outpost room's reservation alone, which
+                // is what makes the reading a pairing and not a number:
+                // held, all five Posts saturate at six Work, the two
+                // readings are the same sum by construction, and the target
+                // is 12. The arms differ by more than the charge — a held
+                // rock also pays twice the income — and it is the neutral
+                // arm that carries the discrimination.
+                let target held =
+                    let colony = anchorChargeColony true 3
+
+                    { colony with
+                        Bank = bank 1600 1600
+                        RoomControl =
+                            Map.add
+                                "W1N2"
+                                (if held then reservedRoom true 5000 else neutralRoom)
+                                colony.RoomControl
+                    }
+                    |> fun colony -> (decide colony Map.empty Set.empty None).Quotas.Target
+
+                Expect.equal
+                    (target false)
+                    11
+                    "three neutral Posts charged at their own three Work, beside two held ones charged at six"
+
+                Expect.equal
+                    (target true)
+                    12
+                    "and where every Post saturates alike the sum over them is the quota times the one ceiling"
             }
         ]
 
@@ -17748,7 +17834,7 @@ let outpostContainerTests =
 /// four — under the neutral five as well as the held ten, so the two rates
 /// would price alike and every pairwise case below would compare a number
 /// with itself. At 600 the row casts five Work against a held rock and
-/// three against a neutral one (`anchorWorkCapOf`), which digs ten and six:
+/// three against a neutral one (`sourceOutputOf`), which digs ten and six:
 /// the cap binds on neither and the rate is the answer, which is the fact
 /// these cases are about. The bank's other effect is the divisor — this
 /// row's body carries 400 here rather than 200 — and the round trips are
@@ -24574,6 +24660,116 @@ let private outpostPostColony held life =
                 }
     }
 
+/// **One [[post]] on each side of a border, over two rocks the colony
+/// prices differently**: its own room's source at (10,9) with its
+/// container standing on the Seat (10,8), and `outpostPostColony`'s
+/// outpost rock at (10,45) with its container on (10,44). An Anchor
+/// garrisons each of them, standing on the Post itself, and a hauler keeps
+/// the [[supply floor]] quiet.
+///
+/// The shape ADR 0053 is about and the one no fixture could reach before
+/// it: while the home Post is in the projection an owned room prices at
+/// the held rate, so the old colony-wide `List.max` answered six Work for
+/// *both* rocks however the outpost's controller stood — which is why the
+/// only fixture that could move the number was one that deleted the home
+/// room's Posts (`withoutHomePosts`).
+///
+/// Three dials and no others: who holds W1N2, and how long each of the two
+/// garrisons has left. The one with the shorter life is the one that goes
+/// [[expiring]] and so the one whose Post the row is casting into (ADR
+/// 0026), which is the whole of what pairs a body to a rock here.
+let private pairedPostColony held homeLife outLife =
+    { bareRespawn with
+        Controller = None
+        Refillables = []
+        Sources = [ source "src-home"; source "src-out" ]
+        Bank = bank 1800 1800
+        RoomControl =
+            Map.ofList
+                [
+                    "W1N1", ownedRoom
+                    "W1N2", (if held then reservedRoom true 5000 else neutralRoom)
+                ]
+        Creeps =
+            [
+                anchor "a-home" 0 50 |> withLife homeLife
+                anchor "a-out" 0 50 |> withLife outLife
+                hauler "h1" 0 100
+            ]
+        Spatial =
+            { SpatialInfo.empty with
+                RoomName = Some "W1N1"
+                Borders = Map.ofList [ "W1N1", plainRing; "W1N2", plainRing ]
+                TargetKinds =
+                    Map.ofList
+                        [
+                            "spawn-1", Structure BuiltKind.Spawn
+                            "src-home", Source
+                            "can-home", Structure BuiltKind.Container
+                            "src-out", Source
+                            "can-out", Structure BuiltKind.Container
+                        ]
+            }
+            |> withHome (fun layer ->
+                { layer with
+                    Terrain =
+                        Map.ofList
+                            [
+                                for x in 9..11 do
+                                    for y in 1..10 ->
+                                        { X = x; Y = y }, (if x = 10 && y = 9 then Wall else Plain)
+                            ]
+                    TargetPositions =
+                        Map.ofList
+                            [
+                                "spawn-1", { X = 10; Y = 3 }
+                                "src-home", { X = 10; Y = 9 }
+                                "can-home", { X = 10; Y = 8 }
+                            ]
+                    CreepPositions =
+                        Map.ofList [ "a-home", { X = 10; Y = 8 }; "h1", { X = 10; Y = 6 } ]
+                    Obstacles = Set.singleton { X = 10; Y = 3 }
+                })
+            |> withNeighbour
+                "W1N2"
+                { RoomLayer.empty with
+                    Terrain =
+                        Map.ofList
+                            [
+                                for x in 9..11 do
+                                    for y in 44..48 ->
+                                        { X = x; Y = y }, (if x = 10 && y = 45 then Wall else Plain)
+                            ]
+                    TargetPositions =
+                        Map.ofList [ "src-out", { X = 10; Y = 45 }; "can-out", { X = 10; Y = 44 } ]
+                    CreepPositions = Map.ofList [ "a-out", { X = 10; Y = 44 } ]
+                }
+    }
+
+/// `pairedPostColony` with the outpost's garrison never hired, so its Post
+/// stands **genuinely** empty beside a home Post whose incumbent is still
+/// standing on it.
+///
+/// Which is what makes the arrival reading discriminate at all (ADR 0026,
+/// ADR 0053 trap (i)): with both Posts garrisoned a rule that judged a
+/// vacancy by who is standing *now* finds no free Post anywhere and falls
+/// back to the richest ceiling — the same six Work arrival gives, for the
+/// wrong reason. Leave the outpost's Post empty and the two readings part:
+/// arrival counts the expiring home incumbent out and buys for its held
+/// rock, where a standing read sees only the neutral hole and buys three
+/// Work for a rock giving ten.
+let private withoutOutpostGarrison (colony: ColonyView) =
+    { colony with
+        Creeps = colony.Creeps |> List.filter (fun creep -> creep.Name <> "a-out")
+        Spatial =
+            colony.Spatial
+            |> withNeighbour
+                "W1N2"
+                { Map.find "W1N2" colony.Spatial.Rooms with
+                    CreepPositions = Map.empty
+                }
+    }
+
 /// The row each of this tick's casts was bought for, in casting order —
 /// the row name the caster writes into the creep's name (ADR 0006:
 /// observability only, and this is the observation).
@@ -25046,6 +25242,155 @@ let quotaInputTests =
                     (castRows (decide (outpostPostColony false 20) Map.empty Set.empty None).Intents)
                     [ "worker" ]
                     "an unheld one: the row casts five parts, the lead is shorter, and the incumbent still counts"
+            }
+
+            test "a vacant Post is cast into with a body sized for its own rock" {
+                // **ADR 0053's first half**, and the shape #158 filed:
+                // `anchorWorkCapOf` folded every posted source into one
+                // colony-wide `List.max`, and the colony's own owned room
+                // is in that fold at the held rate — so the ceiling was six
+                // Work in every state a colony with one posted home source
+                // can reach, and an outpost whose reservation had lapsed
+                // went on being garrisoned by `6W/1C/1M` against a rock
+                // giving five. Twelve a tick bought for a rock that gives
+                // five, for the whole of a 1,500-tick life.
+                //
+                // What pairs a body to a rock without giving a cast a role
+                // (ADR 0021, ADR 0006) is the **vacancy** it is filling:
+                // the row is casting into one empty Post, that Post seats
+                // one rock, and the rock's rate is a fact of the
+                // projection.
+                //
+                // Pairwise on the outpost's reservation alone — the same
+                // two Posts, the same two garrisons, the same 1,800 bank,
+                // and the outpost's Anchor the expiring one in both arms.
+                Expect.equal
+                    (anchorCastsBy (pairedPostColony false 1500 20))
+                    [ threeWork ]
+                    "the vacancy is on a rock nobody holds: three Work drain it as fast as it fills"
+
+                Expect.equal
+                    (anchorCastsBy (pairedPostColony true 1500 20))
+                    [ sixWork ]
+                    "reserved, the same vacancy is worth ten a tick and the row buys the six Work that dig it"
+            }
+
+            test "an ordinary home succession is not sized off an outpost's neutral rock" {
+                // Trap (i) of #158, which is why the vacancy has to be
+                // judged at **arrival** (ADR 0026) rather than by who is
+                // standing where. The colony's own Post is garrisoned by an
+                // expiring Anchor — it is still standing on it, and will be
+                // dead before a replacement could arrive — so that Post is
+                // the vacancy and its own held rock sizes the successor.
+                //
+                // Read off who is standing instead, the home Post would
+                // read as taken, the row would fall through to the
+                // outpost's Post as the only free one, and the home room's
+                // replacement would be cast at three Work against a rock
+                // giving ten: four energy a tick lost for a whole life,
+                // which is the error ADR 0042's fold existed to prevent and
+                // the reason it could not simply be narrowed.
+                //
+                // Pairwise against the arm above, on which of the two
+                // garrisons is expiring — the outpost stands unreserved in
+                // both, so the colony's cheapest rock is the neutral one in
+                // both.
+                Expect.equal
+                    (anchorCastsBy (pairedPostColony false 40 1500))
+                    [ sixWork ]
+                    "the home room's own Post is the vacancy, and its rock gives ten whatever the outpost pays"
+
+                // And again with the outpost's Post standing genuinely
+                // empty, which is the arm that makes the reading a
+                // *judgement* rather than a coincidence: with both Posts
+                // garrisoned above, a standing read finds no free Post at
+                // all and falls back to the richest ceiling, answering six
+                // Work for the wrong reason. Here it would find the
+                // outpost's hole and only that one, and cast the home
+                // room's replacement at three Work against a rock giving
+                // ten.
+                Expect.equal
+                    (anchorCastsBy (pairedPostColony false 40 1500 |> withoutOutpostGarrison))
+                    [ sixWork ]
+                    "an expiring incumbent's own Post is a vacancy even with a neutral one standing open beside it"
+            }
+
+            test
+                "a bank short of the dearest vacancy casts no Anchor rather than the cheapest one's body" {
+                // The hole a per-vacancy seat list opens in the cascade
+                // (ADR 0053's rejected option, ADR 0050's step-over): a
+                // spawn takes the first seat its bank can pay for and steps
+                // over the ones it cannot, so seats sized richest-first at
+                // *different* prices are cheapest-first at every bank
+                // between two of them.
+                //
+                // Both garrisons expiring, so both Posts read vacant — the
+                // held home rock at six Work and the neutral outpost's at
+                // three — and 600 available against an 1,800 capacity. The
+                // dearest vacancy's body costs 700 and the cheapest's 400.
+                // Sized one seat per vacancy, this tick buys the 400: a
+                // three-Work Anchor born beside the home spawn, a few tiles
+                // from the held Post it will be pinned to by travel cost
+                // and a Seam from the neutral one it was bought for, digging
+                // six a tick where the rock gives ten for the whole of a
+                // 1,500-tick life. Sized at the dearest vacancy the row
+                // yields the tick instead and buys the six Work the tick
+                // the bank holds 700.
+                //
+                // Pairwise on the bank alone, against the same fixture at
+                // its own 1,800.
+                let atBank available =
+                    let colony = pairedPostColony false 20 20
+
+                    { colony with
+                        Bank = bank available 1800
+                    }
+                    |> anchorCastsBy
+
+                Expect.equal
+                    (atBank 600)
+                    []
+                    "600 buys neither the held Post's body nor a cheaper one for a rock this cast cannot be steered to"
+
+                Expect.equal
+                    (atBank 1800)
+                    [ sixWork ]
+                    "and the same two vacancies at a bank that can pay buy the dearer of them"
+            }
+
+            test "a lead on a Post is priced at the body that Post will be cast" {
+                // #158's second half where ADR 0053 puts it: a [[lead]] is
+                // what the successor needs to stand **where this creep
+                // stands** (ADR 0026), and where an Anchor stands is its
+                // own Post — so the successor is that Post's body and not
+                // the row's largest, nor the colony's richest.
+                //
+                // Pairwise on the outpost's reservation alone, with the
+                // same 40 ticks left on the same garrison standing on the
+                // same tile a Seam away. Held, its successor is `6W/1C/1M`:
+                // eight parts, 24 ticks in the spawner and a slow crossing,
+                // a lead of 66 — so at 40 it is expiring and the row casts.
+                // Unheld, its successor is `3W/1C/1M`: five parts, 15 ticks
+                // and a faster body, a lead of 36 — and at 40 it still
+                // counts, so the tick's body goes to the generalist row.
+                //
+                // The colony's own held Post stands beside it in both arms
+                // and moves neither answer, which is the half a lead read
+                // off the colony's richest ceiling would get wrong: it
+                // would price both arms at 66 and cast a successor 30 ticks
+                // early, to stand beside the spawn reading its own Post as
+                // full (`IdleReason.NoneFree`, ADR 0026).
+                Expect.equal
+                    (castRows
+                        (decide (pairedPostColony true 1500 40) Map.empty Set.empty None).Intents)
+                    [ "anchor" ]
+                    "a held rock: the successor is eight parts and forty ticks is inside its lead"
+
+                Expect.equal
+                    (castRows
+                        (decide (pairedPostColony false 1500 40) Map.empty Set.empty None).Intents)
+                    [ "worker" ]
+                    "an unheld one: the successor is five parts, the lead is shorter, and the incumbent still counts"
             }
 
             test "a rival's room hires no reserver on the tick it is first seen held" {
