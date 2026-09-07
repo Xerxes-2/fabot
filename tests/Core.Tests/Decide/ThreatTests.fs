@@ -1307,6 +1307,44 @@ let fleeTests =
                     "a hauler under fire hauls nothing"
             }
 
+            test
+                "a Fighter does not run from its own target: an ATTACK part is inapplicable to Flee" {
+                // ADR 0056 decision 3, and ADR 0033's [[work-heavy body]]
+                // clause restated for the opposite reason: not that the body
+                // cannot run, but that it will not — a body carrying an ATTACK
+                // part does not run from the creep it was cast to kill, which
+                // is the same part test the engine's own `findAttack.js` splits
+                // its invaders on. Read off the [[body class]] and not off the
+                // row's name, so a fighting body the colony was handed answers
+                // it exactly as one the [[guard]] row cast does.
+                //
+                // Pairwise on the body and on nothing else: the same lane, the
+                // same tile two steps from the Threat, the same Reach over both
+                // of them. The **home room** on purpose — no Guard is pooled
+                // here (ADR 0056 casts none for a raid at home), so what the
+                // second reading shows is Flee's own gate refusing, and not a
+                // fight outbidding it on travel cost.
+                let assignmentOf body =
+                    (decide
+                        (laneColony [ body ] [ "c1", { X = 25; Y = 22 } ]
+                         |> facing [ hostileAt "h-1" { X = 25; Y = 20 } [ Attack; Move ] ])
+                        Map.empty
+                        Set.empty
+                        None)
+                        .Assignments
+                    |> Map.tryFind "c1"
+
+                Expect.equal
+                    (assignmentOf (creepWith "c1" 0 100 [ Carry; Carry; Move ]))
+                    (Some(taskId Flee))
+                    "the premise: a body with no ATTACK part standing there runs"
+
+                Expect.equal
+                    (assignmentOf (guard "c1"))
+                    None
+                    "and the one with an ATTACK part stands its ground: no Flee, and no other work its body admits"
+            }
+
             test "the Move Intent walks toward a safe tile, and no action is emitted" {
                 // The Threat holds the lane's north end, so every tile within
                 // three of it is hot and the safe ground is south: the creep

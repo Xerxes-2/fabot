@@ -1613,7 +1613,8 @@ let private narrowedArea (atlas: Atlas) (creep: string) (task: Task) : Set<RoomP
 /// Task from, which is what makes the action gate refuse rather than mislead.
 /// The cross-room *price* is a minimum over the Seam band (`pricedAcross`),
 /// joined where the rooms are both in hand; the *tiles* stay the creep's own
-/// room's, and a caller that wants the far room's origins asks `narrowedArea`.
+/// room's, and a caller that wants the far room's origins asks `narrowedArea`
+/// — from outside this module, `workAreaAcross` below.
 /// The mover crosses around this query rather than through it: `firstStep`
 /// answers the near side of the winning Seam when these tiles are empty, so the
 /// action and reachability gates grew no border-crossing answer of their own.
@@ -1622,6 +1623,20 @@ let workAreaFor (atlas: Atlas) (creep: string) (task: Task) : Set<RoomPos> =
         Set.empty
     else
         narrowedArea atlas creep task
+
+/// The same Work Area, narrowed for the same body, in the room the Task's own
+/// target stands in — whichever room the creep is standing in. `workAreaFor`
+/// without the in-room gate above, which is `narrowedArea` itself. Its one
+/// reader is the threat gate (ADR 0033, #147), and what it is there for is that
+/// gate's question: "is every tile this Task can be worked from inside a
+/// [[reach]]" is asked of the **target's** room and not of the creep's share of
+/// it, so asked through `workAreaFor` a creep a border away is handed the empty
+/// set by construction and the answer comes back "no" however hot that room is.
+/// A *reading* and never a licence — the permission above is untouched, nothing
+/// stands or acts on these tiles from another room, and no walk is priced over
+/// them.
+let workAreaAcross (atlas: Atlas) (creep: string) (task: Task) : Set<RoomPos> =
+    narrowedArea atlas creep task
 
 /// The controller's upgrade buffers, by id: built containers standing inside
 /// a controller's Upgrade Work Area and on no source's Seat — the Layout

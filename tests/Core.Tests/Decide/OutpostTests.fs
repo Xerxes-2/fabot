@@ -3622,12 +3622,15 @@ let private withGuards (ours: (CreepInfo * Pos) list) (colony: ColonyView) =
 /// here to the fight is a step toward the [[seam]].
 let private atSpawn = { X = 25; Y = 9 }
 
-/// The same raided outpost with a guard of ours standing **at home**, on the
-/// tile above: the [[guard]] row hires at the spawn (ADR 0056 decision 1), so
-/// this — and not `withGuards` — is where every body the colony really buys
-/// begins its life. One room and one [[seam]] from the fight, which is the whole
-/// of what the Task has to carry it over.
-let private withGuardAtHome (creep: CreepInfo) (pos: Pos) (colony: ColonyView) =
+/// The same raided outpost with one body of ours standing **at home**, on the
+/// tile the caller names — `atSpawn` above for both of its readers. The
+/// [[guard]] row hires at the spawn (ADR 0056 decision 1), so this and not
+/// `withGuards` is where every guard the colony really buys begins its life;
+/// and it is where the body #147 watched cross the [[seam]] into a raid begins
+/// its too, the two cases being one geometry and two bodies. One room and one
+/// Seam from the fight, which is the whole of what a Task has to carry a body
+/// over.
+let private withBodyAtHome (creep: CreepInfo) (pos: Pos) (colony: ColonyView) =
     { colony with
         Creeps = colony.Creeps @ [ creep ]
         Spatial =
@@ -3987,7 +3990,7 @@ let guardTaskTests =
                 // readings is the border, and the answer must not.
                 let across =
                     decide
-                        (declaredRaid raiders |> withGuardAtHome (guard "g-home") atSpawn)
+                        (declaredRaid raiders |> withBodyAtHome (guard "g-home") atSpawn)
                         Map.empty
                         (Set.singleton "g-home")
                         None
@@ -4015,6 +4018,21 @@ let guardTaskTests =
                      |> List.filter (fun (task, reason) ->
                          task = taskId (Guard "W1N2") && reason = RejectReason.Unreachable))
                     "and it is not rejected Unreachable: the ring across a Seam is priced over the Seam"
+
+                // The other gate that could refuse a body a border away, read
+                // off the same tick, and the ordering ADR 0056 decision 3
+                // names: the cross-room threat reading (#147) sits *beneath*
+                // the Safety tier, so the ring the raid laid is not read as
+                // ground the raid took. A rule that judged the tier by its
+                // ground would call every Guard threatened on every tick one
+                // existed, and the gate that sends a body into the fight would
+                // be the one thing keeping it out.
+                Expect.isEmpty
+                    (rejectionsFor "g-home" across.Verdicts
+                     |> Option.defaultValue []
+                     |> List.filter (fun (task, reason) ->
+                         task = taskId (Guard "W1N2") && reason = RejectReason.Threatened))
+                    "nor Threatened: its own ring is not ground the raid took from it"
 
                 Expect.equal
                     (moveIntentsFor "g-home" across.Intents)
@@ -4049,6 +4067,114 @@ let guardTaskTests =
                     (releasesOf [])
                     [ "g-1", taskId (Guard "W1N2"), ReleaseReason.TaskGone ]
                     "and the tick it is gone the Task is gone, not merely threatened"
+            }
+
+            test
+                "every other Task in the raided room reads Threatened, and the Guard is the one that does not" {
+                // **The acceptance ADR 0056 decision 3 is written for**, read
+                // off one verbose scoring — the one place the whole pool is
+                // judged for one body, so the exemption and the rule it is an
+                // exemption from are the same tick's answers.
+                //
+                // ADR 0033 takes every Reach out of every Work Area at
+                // applicability, and this raid's Reach covers the rock's three
+                // Seats and the container's ground with them. A Guard's Work
+                // Area is *made* of Reach tiles — the range-1 ring of the very
+                // Threat that laid them — so under that gate unamended it would
+                // be inapplicable to everyone on every tick it existed, and the
+                // one Task the row buys a body for would be the one Task no
+                // body could ever hold. So the subtraction is skipped for the
+                // **Safety tier**, both of whose areas are derived off the
+                // tick's `Threats` rather than off a target's surroundings.
+                //
+                // Flee is the other half of that tier and is refused here for
+                // the reason beside it (decision 3's first clause): the two are
+                // disjoint by [[body class]], so this one body sees one Task
+                // rejected for every gate the pool has and exactly one left.
+                let colony = declaredRaid raiders |> withGuards [ guard "g-1", beside ]
+                let decision = decide colony Map.empty (Set.singleton "g-1") None
+                let rejections = rejectionsFor "g-1" decision.Verdicts |> Option.defaultValue []
+
+                Expect.contains
+                    rejections
+                    (taskId (Harvest "src-out"), RejectReason.Threatened)
+                    "the rock's every Seat is in the Reach, so its Harvest is gone for this body"
+
+                Expect.contains
+                    rejections
+                    (taskId (Withdraw "can-out"), RejectReason.Threatened)
+                    "and so is the ground the container is drawn from"
+
+                Expect.contains
+                    rejections
+                    (taskId Flee, RejectReason.Inapplicable)
+                    "and the tier's other Task is refused the body, not the ground: a Fighter does not run"
+
+                Expect.isEmpty
+                    (rejections |> List.filter (fun (task, _) -> task = taskId (Guard "W1N2")))
+                    "the Guard is on no rejected row at all: the tier's area keeps its Reach tiles"
+
+                Expect.equal
+                    (Map.tryFind "g-1" decision.Assignments)
+                    (Some(taskId (Guard "W1N2")))
+                    "so the one body standing in a room where nothing else can be worked holds the fight"
+            }
+        ]
+
+/// The two-room shape #147 was filed on: a body of ours **at home** and a Task
+/// whose ground is a raided room across the [[seam]]. ADR 0056 decides it
+/// rather than merely touching it — the reading below is the one that must sit
+/// beneath the Safety tier, or it lands as the bug decision 3's exemption
+/// exists to prevent. The guard half of that ordering is pinned where the
+/// guard's own crossing already is, in `guardTaskTests` above: the same colony,
+/// the same raid and the same tile, read for `Threatened` beside `Unreachable`.
+[<Tests>]
+let crossSeamThreatTests =
+    testList
+        "a Task across the Seam in a raided room"
+        [
+            test "the home worker is not sent into a raid its own crew is running out of" {
+                // **#147, reproduced and fixed.** ADR 0033 makes a Task whose
+                // whole Work Area lies in a Reach inapplicable to *everyone*,
+                // and the word never reached a body standing in another room:
+                // `threatened` read the creep-relative Work Area, which is
+                // empty across a border by construction (ADR 0041), and an
+                // empty area is not "threatened" but unplaceable. So on the
+                // very tick this outpost's crew was fleeing off the rock's
+                // Seats, a worker at home was matched to that rock and walked
+                // toward the invader standing on it — a wasted crossing ending
+                // in `NoneApplicable` in a room under attack.
+                //
+                // Pairwise on the raid and on nothing else: the same worker on
+                // the same tile beside the same spawn, one hostile apart.
+                let atHome hostiles =
+                    decide
+                        (declaredRaid hostiles |> withBodyAtHome (worker "w-home" 0 50) atSpawn)
+                        Map.empty
+                        Set.empty
+                        None
+
+                let quiet = atHome []
+                let raided = atHome raiders
+
+                Expect.equal
+                    (Map.tryFind "w-home" quiet.Assignments)
+                    (Some(taskId (Withdraw "can-out")))
+                    "the premise: with the room quiet the body is offered the outpost's work and crosses for it"
+
+                Expect.equal
+                    (moveIntentsFor "w-home" quiet.Intents)
+                    [ MoveCreep("w-home", Direction.Top) ]
+                    "the premise is tight: that is a walk up the corridor toward the crossing"
+
+                Expect.equal
+                    (Map.tryFind "w-home" raided.Assignments)
+                    None
+                    "and under the raid the same Task is gone for it too: the ground is the target room's"
+
+                Expect.isEmpty
+                    (moveIntentsFor "w-home" raided.Intents)
+                    "so nothing walks it across the Seam"
             }
         ]
 

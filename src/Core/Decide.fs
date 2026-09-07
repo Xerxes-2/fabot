@@ -3327,15 +3327,44 @@ let private tooEarly (view: ColonyView) atlas (creep: CreepInfo) task (walk: Laz
     | Guard _
     | Flee -> None
 
+/// Whether a Task stands in the **Safety** tier — the two Tasks the colony
+/// ranks above every kind of work because a creep is being killed (ADR 0033,
+/// ADR 0056 decision 3): [[flee]], which walks a body to the tiles nothing
+/// reaches, and the [[guard]]'s own Task, which walks one to the tiles that
+/// reach back. The tier's membership written as a predicate, because the two
+/// rules that turn on it are asked long before `planPool` ranks anything and
+/// neither has a `Tier` in hand: the Reach subtraction is skipped for the tier
+/// (`areaFor`), and the cross-room threat reading is written beneath it
+/// (`threatened`). ADR 0056 puts both against the *tier* and not against the
+/// Task kind — Flee is already exempt in effect, its area being the safe set —
+/// so the two rules are one sentence and cannot come to disagree, and
+/// `planPool`'s own `tierOf` ranks exactly these two into `Safety`. Exhaustive
+/// on purpose: a Task added to the union is a build error here, and answering
+/// it wrongly is a body sent to a fight it is then refused.
+let private safetyTier task =
+    match task with
+    | Flee
+    | Guard _ -> true
+    | Harvest _
+    | Withdraw _
+    | Pickup _
+    | Refill _
+    | Build _
+    | Repair _
+    | Upgrade _
+    | Reserve _
+    | Claim _ -> false
+
 /// The room a Task's Work Area lies in: its target's, since the area is that
 /// target's surroundings and empty across a border (ADR 0020, ADR 0041) — so the
 /// Reach taken out of it is that room's share. None for Flee, whose area is the
 /// creep's own room's, and for a target the projection does not place. A Guard
 /// names its room outright (ADR 0056) — the Planner keyed it on one — and the
-/// case is the whole answer for a Task this function is never asked about:
-/// `areaFor` below is its only caller and it settles a Guard two cases earlier,
-/// no Reach being taken out of a Guard's area at all. The case stands because
-/// the match is exhaustive and a Task it forgot would be a build error.
+/// case is the whole answer for a Task neither caller ever asks it about: both
+/// `areaFor` and `threatened` settle the whole Safety tier on `safetyTier`
+/// before they ask, no Reach being taken out of that tier's areas at all. The
+/// case stands because the match is exhaustive and a Task it forgot would be a
+/// build error.
 let private roomOfWork atlas task =
     match task with
     | Harvest id
@@ -3355,22 +3384,45 @@ let private roomOfWork atlas task =
 /// stands in, an area of the colony's own rather than some target's
 /// surroundings. Each is the share of one room: a hostile a room away on the
 /// same coordinate takes no tile here.
+///
+/// **The subtraction is skipped for the whole Safety tier** (ADR 0056 decision
+/// 3, `safetyTier`): both of that tier's areas are derived off `Threats`
+/// themselves rather than off a target's surroundings, so taking the Reach out
+/// of them again is either a tautology (Flee's safe set is the Reach's
+/// complement already) or the end of the Task (a Guard's ring is made of Reach
+/// tiles). The exemption is the predicate and not the two kinds below it: the
+/// ground each Task stands on is derived first, and `safetyTier` alone decides
+/// whether the Reach is taken out of it — so a third Task ranked into Safety is
+/// answered for once, in the one exhaustive match, and is exempt here without
+/// this function being touched. Written against the tier and not against the
+/// [[guard]] row, so the clause generalises ADR 0033 rather than carving out
+/// one Task kind.
 let private areaFor (threats: Threats) atlas creep task : Set<RoomPos> =
-    match task with
-    | Flee ->
-        Atlas.creepRoom atlas creep
-        |> Option.map (Threats.safeIn threats)
-        |> Option.defaultValue Set.empty
-    // The [[guard]]'s ground, and the one area no Reach is taken out of (ADR
-    // 0056): it is *made* of Reach tiles, one ring around every Threat in the
-    // room the Planner keyed the Task on, so the subtraction below would empty
-    // it on every tick the Task exists. A colony fact like the safe set beside
-    // it and no target's surroundings, so the room is the Task's own and never
-    // the creep's — a body a border away is offered the same ring, and it is
-    // the price of walking there that decides whether it can have it.
-    | Guard room -> Threats.ringIn threats room
-    | _ when Map.isEmpty threats.Reach -> Atlas.workAreaFor atlas creep task
-    | _ ->
+    // The ground before any subtraction. The Safety tier's two areas are the
+    // tick's own `Threats` and every other Task's is the [[atlas]]'s.
+    let ground =
+        match task with
+        // Flee's ground: every walkable tile of the creep's own room that no
+        // Threat reaches, which is the subtraction already made and filed by
+        // the tick's colony-level derivation.
+        | Flee ->
+            Atlas.creepRoom atlas creep
+            |> Option.map (Threats.safeIn threats)
+            |> Option.defaultValue Set.empty
+        // The [[guard]]'s ground, and the one area the Reach would *empty*
+        // rather than thin (ADR 0056): it is made of Reach tiles, one ring
+        // around every Threat in the room the Planner keyed the Task on, so the
+        // subtraction would take all of it on every tick the Task exists. A
+        // colony fact like the safe set beside it and no target's surroundings,
+        // so the room is the Task's own and never the creep's — a body a border
+        // away is offered the same ring, and it is the price of walking there
+        // that decides whether it can have it.
+        | Guard room -> Threats.ringIn threats room
+        | _ -> Atlas.workAreaFor atlas creep task
+
+    if safetyTier task || Map.isEmpty threats.Reach then
+        ground
+    else
         // A Reach is one room's grid (`Threats.Reach`), so the tiles it
         // takes are matched on that room's coordinates and on no other's
         // (ADR 0052 decision 2, #138).
@@ -3379,7 +3431,7 @@ let private areaFor (threats: Threats) atlas creep task : Set<RoomPos> =
         let reach =
             room |> Option.map (Threats.reachIn threats) |> Option.defaultValue Set.empty
 
-        Atlas.workAreaFor atlas creep task
+        ground
         |> Set.filter (fun tile ->
             not (Some tile.Room = room && Set.contains (RoomPos.pos tile) reach))
 
@@ -3428,16 +3480,57 @@ let private stepToward atlas (creep: string) task (area: Set<RoomPos>) =
     | Guard room -> Atlas.firstStepToward atlas creep task room area
     | _ -> Atlas.firstStep atlas creep task area
 
-/// Whether the Reach has taken a creep's whole Work Area for a Task (ADR 0033):
-/// it had somewhere to stand and has nowhere left. That makes the Task
+/// Whether the Reach has taken the whole of a Task's Work Area (ADR 0033): it
+/// had somewhere to stand and has nowhere left. That makes the Task
 /// inapplicable to that creep — a Harvest whose only Seat is hot is no Harvest
 /// — and releases a holder under a reason of its own, so the transition log
 /// tells a raid's release from a Task that vanished. An area that was empty to
 /// begin with is not threatened: unplaceable or blocked geometry is the
-/// reachability gate's answer (ADR 0002).
+/// reachability gate's answer (ADR 0002), and a tick with no Reach anywhere
+/// takes nothing from anything.
+///
+/// **The area read is the target room's, and never the creep's share of it**
+/// (#147). Asked through `workAreaFor` — the *permission*, which is empty
+/// across a border by construction (ADR 0041) — the rule never fired for a body
+/// standing in another room: an empty area is not "threatened", it is
+/// unplaceable, so ADR 0033's "inapplicable to everyone" reached everyone
+/// except the bodies still walking. Live that is a wasted crossing and a room
+/// under attack at the end of it: a home worker was matched to an outpost
+/// Harvest whose every Seat was inside a Reach on the very tick that outpost's
+/// own crew was fleeing off them, arrived, and was released `NoneApplicable`
+/// beside the invader. So the reading is `workAreaAcross` — the same tiles
+/// narrowed for the same body, in the room the target stands in — less the
+/// Reach of *that* room, which makes it one question asked the same way
+/// whichever side of the [[seam]] the body is on.
+///
+/// **Written beneath the Safety tier, which is the whole of the ordering here**
+/// (ADR 0056 decision 3, `safetyTier`): a [[guard]]'s Work Area *is* a ring of
+/// Reach tiles, so a reading that judged that tier by its ground would call
+/// every Guard threatened on every tick one exists, and the gate that sends a
+/// body into the fight would be the one thing keeping it out. Said out loud
+/// rather than left to arithmetic: neither Safety Task has a Work Area in the
+/// [[atlas]] at all — both areas are the tick's `Threats` (`areaFor`) — so the
+/// tiles read below are empty for them today and the clause changes no answer.
+/// It is the ordering the decision names, and what keeps this rule right on the
+/// day one of those two grows an area the Atlas places.
 let private threatened (threats: Threats) atlas (creep: CreepInfo) task =
-    not (Set.isEmpty (Atlas.workAreaFor atlas creep.Name task))
-    && Set.isEmpty (areaFor threats atlas creep.Name task)
+    if safetyTier task || Map.isEmpty threats.Reach then
+        false
+    else
+        // The room's own grid and no other's (ADR 0052 decision 2, #138) — the
+        // same join `areaFor` makes, and the negation of it: nowhere left to
+        // stand is every tile of the area inside that room's Reach.
+        let room = roomOfWork atlas task
+
+        let reach =
+            room |> Option.map (Threats.reachIn threats) |> Option.defaultValue Set.empty
+
+        let area = Atlas.workAreaAcross atlas creep.Name task
+
+        not (Set.isEmpty area)
+        && area
+           |> Set.forall (fun tile ->
+               Some tile.Room = room && Set.contains (RoomPos.pos tile) reach)
 
 /// Whether the creep itself is standing where it can be hurt: its own tile
 /// inside a Reach of its own room (ADR 0033). Flee's applicability is this and
@@ -3860,10 +3953,10 @@ let planPool (view: ColonyView) atlas (tasks: Task list) : PooledTask list =
         // 0056): no other work matters while a creep is being killed. The tier
         // holds two Tasks and no ordering between them, because decision 3
         // makes them disjoint by [[body class]] — Flee inapplicable to a
-        // Fighter, a Guard applicable to nothing else — and until that clause
-        // lands (#256) a guard standing in the ring holds this Task on travel
-        // cost alone, being already inside its Work Area and one walk short of
-        // any safe tile.
+        // Fighter, a Guard applicable to nothing else — so nothing ever asks
+        // how the two compare. These are `safetyTier`'s own two kinds, and the
+        // two rules that skip the Reach for this tier read that predicate
+        // rather than this ladder, which is asked only of a pooled Task.
         | Guard _ -> Safety
         | Harvest _ -> Feeding
         // **A decision made here, because nothing else made it.** ADR 0042 and
@@ -4474,11 +4567,26 @@ let private applicable
     // cannot come to disagree with the gate.
     | Guard _ -> isGuardBody creep
     // Flee asks for no part and no energy state, only for a creep that is being
-    // shot at and can run (ADR 0033). A Work-heavy body is exempt: at four to
-    // seven ticks a step an Anchor leaving its Post neither escapes nor digs,
-    // and the answer for the Post is a rampart (ADR 0034) — which is also why
-    // the tile under one is in no Reach.
-    | Flee -> not (Atlas.workHeavy atlas creep.Name) && standsInReach threats atlas creep.Name
+    // shot at and can run (ADR 0033). Two bodies are exempt, and for opposite
+    // reasons. A Work-heavy body **cannot** run: at four to seven ticks a step
+    // an Anchor leaving its Post neither escapes nor digs, and the answer for
+    // the Post is a rampart (ADR 0034) — which is also why the tile under one
+    // is in no Reach. A `Fighter` **will not**: a body carrying an ATTACK part
+    // does not run from the creep it was cast to kill, which is the same part
+    // test the engine's own `findAttack.js` splits its invaders on (ADR 0056
+    // decision 3). Without it a guard standing on the ring is offered both
+    // Tasks of the Safety tier and kept in the fight by travel cost alone — the
+    // ring being underfoot and any safe tile a walk away — so the tick a raid
+    // steps toward it, or a second guard is refused by the room's [[capacity]],
+    // the body the colony bought to stand still walks away from the invader it
+    // was bought for. Spelled through the row predicate the [[body class]]
+    // ladder reads (`isGuardBody`), exactly as the Guard's own gate above is:
+    // the two clauses are one sentence about one class, and a fighting body the
+    // colony was handed rather than cast answers both.
+    | Flee ->
+        not (isGuardBody creep)
+        && not (Atlas.workHeavy atlas creep.Name)
+        && standsInReach threats atlas creep.Name
 
 /// The action Intent a Task asks of a creep, or None for a Task with no
 /// action: Flee is movement and nothing else (ADR 0033), and the Emitter
@@ -5606,7 +5714,10 @@ let matchCreeps
     // false for it whatever stands where; the question that keeps a body alive
     // has to be asked of the **creep**. A holder standing inside a Reach is
     // therefore denied the grace, falls through to `task-gone`, and rematches
-    // to Flee in the cascade below, exactly as it did before the grace existed.
+    // in the cascade below exactly as it did before the grace existed — to
+    // Flee, unless it is a `Fighter`, which ADR 0056 decision 3 refuses Flee on
+    // purpose: the body bought to stand in the ring is left standing where it
+    // is rather than walked out of the fight by a dark room.
     let graced (creep: CreepInfo) tid =
         if standsInReach threats atlas creep.Name then
             None
