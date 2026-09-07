@@ -89,7 +89,7 @@ let loop () =
     // declared fact travels under (`Outpost.place`, ADR 0041): it decides
     // which rooms are read at all, so the sentence a human wrote stays in
     // one place and a harness can hand the world a different one.
-    let world = World.ofGame Colony.declared
+    let world = World.ofGame Colony.declared (ObserveMemory.loadPositions ())
 
     // The colonies that run this tick: a declared home that is ours and
     // holds a spawn of ours (`Colony.living`, ADR 0047 decision 1), both
@@ -301,6 +301,21 @@ let loop () =
         ObserveMemory.saveQuotas colony.Home decision.Quotas
 
     pruneDeadCreepMemory living
+
+    // Where every creep of ours stood this tick, for next tick's
+    // `CreepInfo.Moved` (#225).
+    objectValues<ICreep> Game.creeps
+    |> Array.filter (fun c -> not c.spawning)
+    |> Array.map (fun c ->
+        c.name,
+        ({
+            Room = c.room.name
+            X = c.pos.x
+            Y = c.pos.y
+        }
+        : RoomPos))
+    |> Array.toList
+    |> ObserveMemory.savePositions
     // The Memory boundary: the assignments, all three observe channels and
     // the dead creeps' pruning, which is everything this tick persists
     // except the CPU line's own leaf — that one is written after the last

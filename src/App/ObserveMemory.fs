@@ -779,6 +779,57 @@ let private decodeCpuPhases (raw: obj) : CpuPhases option =
 /// the way `loadRaids` degrades episode by episode: the window shortens
 /// rather than vanishing, so a rollback across a wire-shape change still
 /// leaves a mean to read.
+/// Last tick's tile of every creep of ours, the fact `CreepInfo.Moved`
+/// is read against (#225). One flat leaf, rewritten every tick; a
+/// missing or malformed entry reads as "did not move", the standing
+/// answer the surcharge is conservative with.
+let loadPositions () : Map<string, RoomPos> =
+    try
+        let fabot = Memory?fabot
+        let observe = if isNull fabot then null else fabot?observe
+        let positions = if isNull observe then null else observe?positions
+
+        if isNull positions || jsTypeof positions <> "object" then
+            Map.empty
+        else
+            JS.Constructors.Object.keys positions
+            |> Seq.choose (fun name ->
+                let p = positions?(name)
+
+                if
+                    isNull p
+                    || jsTypeof p?r <> "string"
+                    || jsTypeof p?x <> "number"
+                    || jsTypeof p?y <> "number"
+                then
+                    None
+                else
+                    Some(
+                        name,
+                        ({
+                            Room = unbox<string> p?r
+                            X = unbox<int> p?x
+                            Y = unbox<int> p?y
+                        }
+                        : RoomPos)
+                    ))
+            |> Map.ofSeq
+    with _ ->
+        Map.empty
+
+let savePositions (creeps: (string * RoomPos) list) =
+    ensureObserve ()
+    let o = createEmpty<obj>
+
+    for name, tile in creeps do
+        let p = createEmpty<obj>
+        p?r <- tile.Room
+        p?x <- tile.X
+        p?y <- tile.Y
+        o?(name) <- p
+
+    Memory?fabot?observe?positions <- o
+
 let loadCpu () : CpuState =
     try
         let fabot = Memory?fabot

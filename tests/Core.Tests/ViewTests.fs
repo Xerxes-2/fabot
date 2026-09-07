@@ -128,6 +128,7 @@ let private creep name room : WorldCreep =
                 Fatigue = 0
                 Energy = 0
                 FreeCapacity = 50
+                Moved = false
                 Body = body
             }
     }

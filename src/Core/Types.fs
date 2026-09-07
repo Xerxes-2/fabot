@@ -1898,6 +1898,15 @@ type CreepInfo =
         /// the body does not have. What a creep can do is decided from
         /// what it is made of.
         Body: Map<BodyPart, int>
+        /// Whether the creep stands on a different tile from last tick —
+        /// the shell's reading of Memory's last positions, false for a
+        /// body born this tick and in every hand-built fixture. The one
+        /// reader is the occupancy surcharge (ADR 0008 as #225 amends
+        /// it): standing traffic is what a path detours around, and a
+        /// body on the move is left to the arbitrator, because two bodies
+        /// each detouring around the other's last tile switch lanes
+        /// together and never pass.
+        Moved: bool
     }
 
 /// What one room holds this tick, to everybody: the half a declaration

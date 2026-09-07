@@ -1060,6 +1060,18 @@ let ofViewRecalling (walks: WalkTable) (view: ColonyView) : Atlas =
     // nowhere else: terrain first, then roads over the passable ground
     // they discount, then obstacles over everything. The array's initial
     // -1 is the answer for every tile outside the projection.
+    // The occupancy surcharge marks **standing** traffic (ADR 0008 as
+    // #225 amends it): a body that did not move last tick, a fatigued one,
+    // and every body of another colony's. A body on the move is not
+    // marked — two travellers each pricing the other's tile switched
+    // lanes together every tick on a road ring and never passed; the
+    // arbitrator, not the price, is what settles two movers meeting.
+    let standing =
+        view.Creeps
+        |> List.filter (fun c -> not c.Moved || c.Fatigue > 0)
+        |> List.map (fun c -> c.Name)
+        |> Set.ofList
+
     let gridOf (foreign: Set<Pos>) (layer: RoomLayer) =
         let ground = Array.create tileCount -1
 
@@ -1085,7 +1097,10 @@ let ofViewRecalling (walks: WalkTable) (view: ColonyView) : Atlas =
 
         let occupied = Array.create tileCount false
 
-        layer.CreepPositions |> Map.iter (fun _ tile -> occupied.[indexOf tile] <- true)
+        layer.CreepPositions
+        |> Map.iter (fun name tile ->
+            if Set.contains name standing then
+                occupied.[indexOf tile] <- true)
 
         // The bodies this colony does not hold stand here too (#220, ADR
         // 0052 decision 1). The layer carries only its own fleet — a body

@@ -641,7 +641,7 @@ let private worldRooms (colonies: Colony list) : string list =
 /// is the rule every other declared fact travels under (`Outpost.place`,
 /// ADR 0041): it decides which rooms are read here, so a harness or a test
 /// can hand this function a world of its own.
-let ofGame (colonies: Colony list) : World =
+let ofGame (colonies: Colony list) (lastPositions: Map<string, RoomPos>) : World =
     let spawns = objectValues<ISpawn> Game.spawns
 
     // The name the engine spells us, off the controller of a room one of
@@ -706,6 +706,16 @@ let ofGame (colonies: Colony list) : World =
                                 c.body
                                 |> Array.countBy (fun p -> bodyPartOf p.``type``)
                                 |> Map.ofArray
+                            Moved =
+                                match Map.tryFind c.name lastPositions with
+                                | Some last ->
+                                    last
+                                    <> {
+                                           Room = c.room.name
+                                           X = c.pos.x
+                                           Y = c.pos.y
+                                       }
+                                | None -> false
                         }
                 }
                 : WorldCreep)

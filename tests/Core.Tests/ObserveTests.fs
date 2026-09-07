@@ -406,6 +406,7 @@ let ours name : CreepInfo =
         Fatigue = 0
         Energy = 0
         FreeCapacity = 50
+        Moved = false
         Body = Map.ofList [ Work, 1; Carry, 1; Move, 1 ]
     }
 
