@@ -178,6 +178,9 @@ let bareRespawn =
         // And nothing borrowed: this colony raises no child, so no room's
         // Upgrade and Build are hers to take (ADR 0047 decision 4).
         Borrowed = { Rooms = [] }
+        // And nothing refused: "W1N2" borders "W1N1", so the declaration
+        // this colony is cut from is one a Seam reaches (#243).
+        Refused = []
         // The numbers this bot ships with (ADR 0052 decision 5): a
         // fixture starts from them and the tests that are *about* a
         // tunable move the one field they are about.

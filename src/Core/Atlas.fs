@@ -1681,49 +1681,6 @@ let standsAtSource (atlas: Atlas) (creep: string) (sourceId: string) : bool =
         range tile source <= 1
     | _ -> false
 
-/// A room's place on the world grid, read off its name — `W12S28` is (-13, 28).
-/// West and North count outward from the origin, so they run negative (`W n` is
-/// x = -n-1, `N n` is y = -n-1) and East and South run straight up, which turns
-/// "are these two rooms neighbours, and across which border" into subtraction.
-/// None for a name outside the engine's grammar, which is unplaceable geometry
-/// like any other (ADR 0004).
-let private worldCoordsOf (roomName: string) : (int * int) option =
-    let isDigit index =
-        index < roomName.Length && roomName.[index] >= '0' && roomName.[index] <= '9'
-
-    let rec endOfDigits index =
-        if isDigit index then endOfDigits (index + 1) else index
-
-    let number start stop =
-        if stop <= start then
-            None
-        else
-            let mutable value = 0
-
-            for index in start .. stop - 1 do
-                value <- value * 10 + (int roomName.[index] - int '0')
-
-            Some value
-
-    // Outward from the origin is negative, towards it positive.
-    let axis letter outward inward value =
-        if letter = outward then Some(-value - 1)
-        elif letter = inward then Some value
-        else None
-
-    let xEnd = endOfDigits 1
-    let yEnd = endOfDigits (xEnd + 1)
-
-    if yEnd <> roomName.Length then
-        None
-    else
-        match number 1 xEnd, number (xEnd + 1) yEnd with
-        | Some x, Some y ->
-            match axis roomName.[0] 'W' 'E' x, axis roomName.[xEnd] 'N' 'S' y with
-            | Some worldX, Some worldY -> Some(worldX, worldY)
-            | _ -> None
-        | _ -> None
-
 /// The far exit row and column of a room — index 49, the outer of the two
 /// the projection's ground stops short of (ADR 0036).
 let private exitEdge = Engine.roomSide - 1
@@ -1731,10 +1688,12 @@ let private exitEdge = Engine.roomSide - 1
 /// The tile pairs the engine joins across the border two rooms share, before
 /// terrain has a say: this room's exit tile beside the tile a creep stepping
 /// onto it lands on, the same coordinate on the opposite row or column.
-/// `offset` is the neighbour's world position minus this room's, so only the
-/// four unit steps name a shared border. The four corner tiles are left out of
-/// every row and column: a corner lies on two borders at once, and the engine
-/// makes at most one landing.
+/// `offset` is the neighbour's world position minus this room's
+/// (`RoomName.offsetOf`), so only the four unit steps name a shared border —
+/// which is the tile half of the rule `RoomName.neighbouring` states over the
+/// names alone. The four corner tiles are left out of every row and column: a
+/// corner lies on two borders at once, and the engine makes at most one
+/// landing.
 let private borderPairs offset : (Pos * Pos) list =
     let alongEdge = [ 1 .. exitEdge - 1 ]
 
@@ -1754,14 +1713,14 @@ let private borderPairs offset : (Pos * Pos) list =
 /// the Matcher cannot pick one and have the engine empty it the tick a creep
 /// arrives. Deterministic (X, Y) order, total (ADR 0004).
 let seams (atlas: Atlas) (fromRoom: string) (toRoom: string) : (Pos * Pos) list =
-    match worldCoordsOf fromRoom, worldCoordsOf toRoom with
-    | Some(hereX, hereY), Some(thereX, thereY) ->
+    match RoomName.offsetOf fromRoom toRoom with
+    | Some offset ->
         let near = ringOf atlas fromRoom
         let far = ringOf atlas toRoom
 
-        borderPairs (thereX - hereX, thereY - hereY)
+        borderPairs offset
         |> List.filter (fun (here, there) -> walkableAt near here && walkableAt far there)
-    | _ -> []
+    | None -> []
 
 /// Whether a creep stands on a Seam — its room's border ring, the tile the
 /// engine put it down on the tick it crossed. Read off the coordinate alone;

@@ -222,12 +222,17 @@ let loop () =
         // plan could not serve, the trunks it could not route (#107), and the
         // container picks it deferred to a container already serving their
         // target (ADR 0040). Written every tick, empty or not, and under the
-        // home room whose Layout it is (ADR 0047).
+        // home room whose Layout it is (ADR 0047). Beside them the colony's
+        // other loss of this tick, taken off the **view** and not the memo
+        // because it is the declaration's rather than the plan's: the declared
+        // outposts this home shares no border with, which the view refused
+        // (#243).
         ObserveMemory.saveLayout
             colony.Home
             decision.Memo.UnservedFootings
             decision.Memo.UnroutedTrunks
             decision.Memo.DeferredContainers
+            view.Refused
 
         // The cascade's own numbers, for `observe.mjs quotas` (ADR 0009).
         ObserveMemory.saveQuotas colony.Home decision.Quotas

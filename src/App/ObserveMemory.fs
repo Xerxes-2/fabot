@@ -594,19 +594,27 @@ let saveQuotas (home: string) (quotas: Quotas) =
     ensureColony home
     Memory?fabot?observe?colonies?(home)?quotas <- o
 
-/// Write one colony's Layout losses — the footing targets it could not serve,
-/// the trunks it could not route and the container picks it deferred to a
-/// container already serving their target (ADR 0040) — under
-/// `observe.colonies.<home>.layout`, leaving every other leaf alone the way
-/// `saveRaids` does. Three lists in one leaf, so a reader asking what this room
-/// lost asks once (ADR 0035); written every tick, empty lists included, so
+/// Write one colony's losses this tick — the footing targets the Layout could
+/// not serve, the trunks it could not route, the container picks it deferred to
+/// a container already serving their target (ADR 0040), and the declared
+/// [[outpost]]s the colony refuses because its home shares no border with them,
+/// so no [[seam]] can join them to it (#243) — under
+/// `observe.colonies.<home>.layout`, leaving every other leaf
+/// alone the way `saveRaids` does. Four lists in one leaf, so a reader asking
+/// what this room lost asks once, which is ADR 0035's own reason for putting
+/// more than one there; written every tick, empty lists included, so
 /// `observe.mjs layout` can tell "nothing is lost" from "this bundle does not
-/// record it" (ADR 0028).
+/// record it" (ADR 0028). The fourth is the declaration's loss and not the
+/// Layout's, and it joins this channel rather than opening a fourth for one
+/// list because it shares every other property of the three: colony-level,
+/// this tick's rather than history, and with no creep for a [[verdict]] to
+/// name.
 let saveLayout
     (home: string)
     (unserved: UnservedFooting list)
     (unrouted: UnroutedTrunk list)
     (deferred: DeferredContainer list)
+    (refused: string list)
     =
     let layout = createEmpty<obj>
 
@@ -655,6 +663,12 @@ let saveLayout
             o?serving <- tileObject entry.Serving
             o)
         |> List.toArray
+
+    // Room names and nothing else: the room is the whole of what a reader
+    // can act on, since the fix is a human moving the declaration (ADR
+    // 0041's constant), and the home this leaf is filed under is the other
+    // half of the pair already.
+    layout?refused <- refused |> List.toArray
 
     ensureColony home
     Memory?fabot?observe?colonies?(home)?layout <- layout

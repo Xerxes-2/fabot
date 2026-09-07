@@ -220,10 +220,21 @@ let private noneShut = Map.empty<string, Set<string>>
 let private holdersOf world =
     World.creepColonies Tuning.defaults declared (World.living declared world) noneShut world
 
-let private viewOf world home =
-    let colony = declared |> List.find (fun colony -> colony.Home = home)
+/// One colony's view, built under whatever declaration is handed in — the
+/// one spelling of the construction this file has, so a parameter added to
+/// `ColonyView.ofWorld` is threaded through one place and the tests cannot
+/// hold two answers for how a view is built here.
+let private viewUnder colonies world home =
+    let colony = colonies |> List.find (fun colony -> colony.Home = home)
 
-    ColonyView.ofWorld Tuning.defaults declared Set.empty (holdersOf world) world colony
+    let holders =
+        World.creepColonies Tuning.defaults colonies (World.living colonies world) noneShut world
+
+    ColonyView.ofWorld Tuning.defaults colonies Set.empty holders world colony
+
+/// The same, under the live declaration, which is what almost every test
+/// below wants.
+let private viewOf world home = viewUnder declared world home
 
 /// The same world with the child's spawn pulled down: the room is still
 /// ours and still claimed, and it is a [[nursery]] again (ADR 0052
@@ -783,5 +794,160 @@ let colonyViewTests =
                     (Map.tryFind "buf-child" (viewOf pairWorld mother).Spatial.Stores)
                     (Some 400)
                     "and the one stage the lend exists at still carries it"
+            }
+        ]
+
+/// The room the declaration below reaches for and cannot: W13S27 is one
+/// step west and one step north of the mother's W12S28, which in a world
+/// with no diagonal exits is **two** rooms away. `AtlasTests`' "rooms that
+/// share no border share no band" pins the tile half of that on this very
+/// pair — `seams` over W12S28 and W13S27 is empty whatever the terrain
+/// says — so everything here follows: no Seam, no crossing price,
+/// and by ADR 0004 no Task in it that any body can ever be matched to.
+let private twoHops = "W13S27"
+
+/// The mother's declaration with that room added beside her real outpost.
+/// Two outposts and not one, so every assertion below is read against the
+/// neighbour standing beside it: a rule that refused the room would be
+/// indistinguishable from one that refused outposts.
+let private overreaching: Colony list =
+    declared
+    |> List.map (fun colony ->
+        if colony.Home <> mother then
+            colony
+        else
+            { colony with
+                Outposts =
+                    colony.Outposts
+                    @ [
+                        {
+                            RoomName = twoHops
+                            Sources = [ "src-far", { Room = twoHops; X = 5; Y = 5 } ]
+                            Controller = "ctrl-far", { Room = twoHops; X = 7; Y = 7 }
+                        }
+                    ]
+            })
+
+/// The pair world with that room in it, seen and furnished: the refusal is
+/// the declaration's own geometry and not a missing room, so the world
+/// gives the rule every reason it could have to work the room anyway.
+let private overreachingWorld =
+    { pairWorld with
+        Rooms =
+            pairWorld.Rooms
+            |> Map.add
+                twoHops
+                (snd (
+                    roomOf twoHops Ownership.Unowned [ "src-far", { X = 5; Y = 5 }, Source ]
+                    |> withSources [ "src-far" ]
+                ))
+    }
+
+[<Tests>]
+let declarationTests =
+    testList
+        "an outpost declared across a border its home has not got"
+        [
+            test "every outpost a human has declared borders the home that works it" {
+                // The invariant #243 exists for, over the live constant
+                // (ADR 0041's "declared, not discovered"): a colony's
+                // [[outpost]] is a room *neighbouring* its home, because a
+                // crossing is priced over one Seam band and there is no
+                // second hop to price. Red here rather than live, which is
+                // the whole of the ticket — a two-hop declaration is
+                // accepted by every rule downstream and worked by none of
+                // them, and the bodies bought for it stand by the spawn for
+                // their whole lives.
+                Expect.isNonEmpty Colony.declared "a declaration nobody made is nothing to check"
+
+                Expect.isNonEmpty
+                    (Colony.declared |> List.collect (fun colony -> colony.Outposts))
+                    "and one with no outposts checks nothing either"
+
+                let refused =
+                    Colony.declared
+                    |> List.collect (fun colony ->
+                        Outpost.refused colony.Home colony.Outposts
+                        |> List.map (fun room -> $"{room} is no neighbour of {colony.Home}"))
+
+                Expect.isEmpty
+                    refused
+                    $"""every declared outpost shares a border with its home: {String.concat "; " refused}"""
+            }
+
+            test "a room one axis step away is the only neighbour a name has" {
+                // The rule itself, pairwise, on names alone — the altitude
+                // that can be asked of a declaration before any terrain is
+                // read. Each false case is one a live declaration could
+                // plausibly be written as.
+                Expect.isTrue (RoomName.neighbouring mother outpost) "W12S27 is north of W12S28"
+
+                Expect.isTrue (RoomName.neighbouring mother child) "and W13S28 is west of it"
+
+                Expect.isFalse
+                    (RoomName.neighbouring mother twoHops)
+                    "a diagonal is two rooms away: the engine has no diagonal exit"
+
+                Expect.isFalse
+                    (RoomName.neighbouring mother "W12S26")
+                    "two rooms up the same column share no border either"
+
+                Expect.isFalse (RoomName.neighbouring mother mother) "and a room borders no self"
+
+                Expect.isFalse
+                    (RoomName.neighbouring mother "sim")
+                    "a name outside the engine's grammar places nothing (ADR 0004)"
+
+                // The one place the arithmetic could go wrong without a
+                // case: W0 and E0 are adjacent columns either side of the
+                // origin, so the offset is a subtraction over signed world
+                // coordinates and never over the printed numbers.
+                Expect.isTrue
+                    (RoomName.neighbouring "W0S1" "E0S1")
+                    "W0 and E0 are the two columns beside the origin"
+            }
+
+            test "a declared outpost its home does not border is refused, and said out loud" {
+                // #243's live shape: the room is declared, seen, furnished
+                // and unowned — every reason to work it that a neighbour
+                // would have — and the one thing it has not got is a Seam.
+                // Accepted, it would be projected, its rock pooled, its
+                // controller pooled as a Reserve and one reserver body
+                // hired for it per tick by the row that hires per *declared*
+                // outpost (ADR 0042), all of it for a room no body can
+                // reach. So the view refuses it, and names it: silence is
+                // what the ticket was filed against.
+                let view = viewUnder overreaching overreachingWorld mother
+
+                Expect.equal view.Refused [ twoHops ] "the refusal names the room a human declared"
+
+                Expect.isFalse
+                    (Map.containsKey twoHops view.Spatial.Rooms)
+                    "the room is not projected"
+
+                Expect.isFalse (List.contains "src-far" (idsOf view)) "its rock is not pooled"
+
+                Expect.isFalse
+                    (Map.containsKey "ctrl-far" view.Spatial.TargetKinds)
+                    "its controller is not placed, so no Reserve is pooled on it"
+
+                Expect.isFalse
+                    (Map.containsKey twoHops view.RoomControl)
+                    "and nothing of it is priced at all"
+
+                // Beside it, the outpost that does border her: the
+                // refusal is one room's and not the outpost layer's.
+                Expect.isTrue
+                    (Map.containsKey outpost view.Spatial.Rooms)
+                    "her real outpost is projected as it was"
+
+                Expect.isTrue (List.contains "src-out" (idsOf view)) "and its rock is still pooled"
+
+                // The healthy answer rides the channel too (ADR 0035): a
+                // reader has to be able to tell "nothing refused" from
+                // "this bundle does not record refusals".
+                Expect.isEmpty
+                    (viewUnder declared pairWorld mother).Refused
+                    "a declaration a Seam reaches refuses nothing, and says so"
             }
         ]

@@ -797,6 +797,9 @@ let colonyAt (capture: RoomCapture) (level: int) (bank: int) : ColonyView =
         // 1), and it raises no child, so it borrows nothing.
         Foreign = Set.empty
         Borrowed = { Rooms = [] }
+        // These fixtures declare their outposts by hand and every one of
+        // them borders its home, so nothing is refused (#243).
+        Refused = []
         // The numbers this bot ships with (ADR 0052 decision 5): a
         // fixture starts from them and the tests that are *about* a
         // tunable move the one field they are about.

@@ -497,6 +497,81 @@ module RoomPos =
         else
             None
 
+/// What a room's **name** says about where the room is, and nothing else it
+/// says: the engine's own grammar, read here so that the two questions the
+/// colony asks of a pair of names — which border they share, and whether they
+/// share one at all — are one subtraction and not two rules (ADR 0041).
+module RoomName =
+    /// A room's place on the world grid, read off its name — `W12S28` is
+    /// (-13, 28). West and North count outward from the origin, so they run
+    /// negative (`W n` is x = -n-1, `N n` is y = -n-1) and East and South run
+    /// straight up, which turns "are these two rooms neighbours, and across
+    /// which border" into subtraction. None for a name outside the engine's
+    /// grammar, which is unplaceable geometry like any other (ADR 0004).
+    let private worldCoordsOf (roomName: string) : (int * int) option =
+        let isDigit index =
+            index < roomName.Length && roomName.[index] >= '0' && roomName.[index] <= '9'
+
+        let rec endOfDigits index =
+            if isDigit index then endOfDigits (index + 1) else index
+
+        let number start stop =
+            if stop <= start then
+                None
+            else
+                let mutable value = 0
+
+                for index in start .. stop - 1 do
+                    value <- value * 10 + (int roomName.[index] - int '0')
+
+                Some value
+
+        // Outward from the origin is negative, towards it positive.
+        let axis letter outward inward value =
+            if letter = outward then Some(-value - 1)
+            elif letter = inward then Some value
+            else None
+
+        let xEnd = endOfDigits 1
+        let yEnd = endOfDigits (xEnd + 1)
+
+        if yEnd <> roomName.Length then
+            None
+        else
+            match number 1 xEnd, number (xEnd + 1) yEnd with
+            | Some x, Some y ->
+                match axis roomName.[0] 'W' 'E' x, axis roomName.[xEnd] 'N' 'S' y with
+                | Some worldX, Some worldY -> Some(worldX, worldY)
+                | _ -> None
+            | _ -> None
+
+    /// The step from one room to another on that grid — the neighbour's world
+    /// position minus this room's, which is what says *which* border they
+    /// share. None where either name is outside the grammar.
+    let offsetOf (fromRoom: string) (toRoom: string) : (int * int) option =
+        match worldCoordsOf fromRoom, worldCoordsOf toRoom with
+        | Some(hereX, hereY), Some(thereX, thereY) -> Some(thereX - hereX, thereY - hereY)
+        | _ -> None
+
+    /// Whether two rooms share a border: exactly one axis apart by one, which
+    /// is the whole of what a [[seam]] can join (ADR 0041). Screeps has no
+    /// diagonal exit, so a room a single axis step away is the only kind a
+    /// creep reaches without crossing a third room — `Atlas.borderPairs` names
+    /// tiles for those four offsets and for no other, so a pair this refuses
+    /// has an empty Seam band by construction and every cross-room price over
+    /// it is `None` (ADR 0004). The implication runs **one way only**, and the
+    /// difference is load-bearing: this reading is over names, so it can be
+    /// asked of a declaration before any terrain is read; the Seam is over
+    /// tiles, so a bordering pair whose shared column or row the engine walled
+    /// end to end is a neighbour here and has no band there — W12S27's west
+    /// column in `tests/Core.Tests/rooms/` is exactly that, and `AtlasTests`'
+    /// "a walled border is a neighbour with no band" pins it. So this answers
+    /// whether the declaration is *shaped* like one a Seam could join, never
+    /// whether one does. A room is not its own neighbour, and a name outside
+    /// the grammar neighbours nothing.
+    let neighbouring (fromRoom: string) (toRoom: string) : bool =
+        offsetOf fromRoom toRoom |> Option.exists (fun (dx, dy) -> abs dx + abs dy = 1)
+
 /// Current and maximum hit points of a repairable structure — what a
 /// kind's whole line is judged against (ADR 0010, ADR 0034).
 type HitsInfo = { Hits: int; HitsMax: int }
@@ -692,10 +767,43 @@ type Outpost =
 module Outpost =
     /// The declarations the colony works this tick: the declared list, less
     /// every room a [[stand-down]] is withholding (ADR 0043). The gate, and the
-    /// one place the set is narrowed.
+    /// one place *that* gate narrows the set — `World.scanOf` narrows it once
+    /// more beside this, on the declaration's own geometry (`neighbouring`,
+    /// #243), and the two are one clause apiece there.
     let worked (shut: Set<string>) (outposts: Outpost list) : Outpost list =
         outposts
         |> List.filter (fun outpost -> not (Set.contains outpost.RoomName shut))
+
+    /// Whether a declared outpost is one its home can work **at all**: the two
+    /// rooms share a border, so a [[seam]] joins them (`RoomName.neighbouring`,
+    /// ADR 0041). Not a gate that opens and shuts like the [[stand-down]]'s —
+    /// it is a fact about the declaration a human wrote, and it answers the
+    /// same on every tick of that declaration's life.
+    let neighbouring (home: string) (outpost: Outpost) : bool =
+        RoomName.neighbouring home outpost.RoomName
+
+    /// The declared outposts a home shares no border with, by name (#243).
+    /// ADR 0041 prices a crossing over one Seam band and no more — `walk =
+    /// min over seams (near leg + 1 + far leg)`, each leg a flood that never
+    /// leaves its room — so a room two hops out is not a badly-priced outpost
+    /// but an unpriceable one: `pricedAcross` and `haulRoundTripTicks` answer
+    /// `None` for every target in it, and by ADR 0004 unpriceable geometry
+    /// never counts against a Task. Worked anyway, such a room is projected,
+    /// pooled and hired for — ADR 0042's reserver row hires one body per
+    /// declared outpost — and every body bought for it stands beside the spawn
+    /// for its whole life with nothing to say why. So the declaration is
+    /// **refused** here rather than accepted and never worked, and the refusal
+    /// is named: `ColonyView.Refused` carries it to the colony's [[layout
+    /// record]], and the test over `Colony.declared` is what makes a human's
+    /// slip red before it is deployed. Read off the whole declaration and not
+    /// off `worked`'s survivors: a room this refuses is wrong whatever the
+    /// stand-down is doing about it this tick. Multi-hop outposts are a
+    /// feature and not a bug fix — they need a Seam join of their own — and
+    /// they are deliberately not this rule's business.
+    let refused (home: string) (outposts: Outpost list) : string list =
+        outposts
+        |> List.filter (neighbouring home >> not)
+        |> List.map (fun outpost -> outpost.RoomName)
 
     /// The rooms the shell projects this tick: the home room, and every
     /// declared outpost beside it (ADR 0041). One projection covering several
@@ -1427,10 +1535,17 @@ module World =
     and living (colonies: Colony list) (world: World) : Colony list =
         Colony.living (ownedRooms world) (spawnRooms world) colonies
 
-    /// The declaration's two narrowings and the union they make, for one
-    /// colony: the [[outpost]]s the [[stand-down]] gate leaves it (ADR 0043),
-    /// the rooms it is bootstrapping for a child of its own (ADR 0047 decision
-    /// 4), and its scan set — its home and both of those.
+    /// The declaration's narrowings and the union they make, for one colony:
+    /// the [[outpost]]s the [[stand-down]] gate leaves it (ADR 0043) and its
+    /// home shares a border with (`Outpost.neighbouring`, #243), the rooms it is
+    /// bootstrapping for a child of its own (ADR 0047 decision 4), and its scan
+    /// set — its home and both of those. The two outpost narrowings are one
+    /// clause apiece and answer different questions: the gate is this tick's
+    /// and reopens, the border is the declaration's and never does — so a
+    /// refused room leaves the scan set for good, taking its furniture, its
+    /// pooled rock, its Reserve and the reserver the row would have hired for
+    /// it (ADR 0042) with it, which is the whole of "refuse it loudly" that a
+    /// scan set can carry. What says so out loud is `ColonyView.Refused`.
     let scanOf
         (stages: Map<string, ColonyStage>)
         (unowned: Set<string>)
@@ -1438,7 +1553,9 @@ module World =
         (shut: Set<string>)
         (colony: Colony)
         : Outpost list * string list * string list =
-        let outposts = Outpost.worked shut colony.Outposts
+        let outposts =
+            Outpost.worked shut colony.Outposts
+            |> List.filter (Outpost.neighbouring colony.Home)
 
         // The two halves of what a mother projects for a child of hers, and
         // they are disjoint by construction: a room she is raising is one we
@@ -1621,6 +1738,17 @@ type ColonyView =
         /// bounded (ADR 0052 decision 7): today the Upgrade and the Build
         /// of a child it is still raising (ADR 0047 decision 4).
         Borrowed: BorrowedWork
+        /// The [[outpost]]s this colony's declaration names that its home
+        /// shares no border with, and that it therefore **refuses**
+        /// (`Outpost.refused`, #243): no [[seam]] joins them, so nothing in
+        /// them can be priced, walked to or worked, and they are out of the
+        /// scan set rather than in it unworkable. Carried on the view because
+        /// the refusal has to be *said*: it is the colony's own reading of its
+        /// declaration, it reaches the operator on the [[layout record]] beside
+        /// the plan's other losses, and the silence it replaces is what #243
+        /// was filed for. Empty is the healthy answer and rides here all the
+        /// same, as the Layout's own loss lists do (ADR 0035).
+        Refused: string list
     }
 
 [<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
@@ -1724,7 +1852,7 @@ module ColonyView =
         let home = colony.Home
         let stages = World.stages tuning colonies world
 
-        // The declaration's two narrowings and their union, off the one
+        // The declaration's narrowings and their union, off the one
         // derivation the creep adoption reads too (`World.scanOf`). Written
         // here a second time it would be a second answer free to disagree.
         let outposts, bootstrap, scanned =
@@ -1827,6 +1955,12 @@ module ColonyView =
                     |> List.map (snd >> RoomPos.at room))
                 |> Set.ofList
             Borrowed = { Rooms = bootstrap }
+            // Read off the whole declaration and not off `scanned`, which is
+            // where these rooms have just been subtracted: what the channel
+            // must name is the room a human declared and this colony cannot
+            // work, and by the time the scan set is cut the name is gone
+            // (#243).
+            Refused = Outpost.refused home colony.Outposts
         }
 
 /// A unit of work in this tick's Task pool; creeps are interchangeable

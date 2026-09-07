@@ -41,6 +41,9 @@ let snapshotWith creeps spatial =
         // room decides Tasks, and the Atlas decides none (ADR 0047
         // decision 4).
         Borrowed = { Rooms = [] }
+        // And nothing refused: the outposts these fixtures name border
+        // their home, which is what makes a Seam band to price over (#243).
+        Refused = []
         // The numbers this bot ships with (ADR 0052 decision 5): a
         // fixture starts from them and the tests that are *about* a
         // tunable move the one field they are about.
@@ -3556,6 +3559,54 @@ let seamTests =
                 Expect.isEmpty (seams atlas "W12S28" "W13S27") "a diagonal pair joins nowhere"
                 Expect.isEmpty (seams atlas "W12S28" "W12S26") "two rooms apart share no border"
                 Expect.isEmpty (seams atlas "W12S28" "W12S28") "and a room borders no self"
+            }
+
+            test "a walled border is a neighbour with no band" {
+                // The converse of the test above does **not** hold, and the
+                // pair of readings must not be mistaken for one rule at two
+                // altitudes. `RoomName.neighbouring` is over names and says
+                // a Seam *could* join these two; the band is over terrain
+                // and says whether one does. Here the shared column carries
+                // no passable tile on either side, so the names agree and
+                // the band is empty — which is what the captures already
+                // hold: `tests/Core.Tests/rooms/W12S27.room` has not one
+                // passable tile on its west column, nor W13S29 on its south
+                // row, so a declaration one axis step across either would be
+                // a neighbour this bot could still never reach (#243).
+                let atlas =
+                    bordered
+                        [
+                            // Exits on the north row of each, and nothing at
+                            // all on the column the two of them share.
+                            "W12S28", [ { X = 10; Y = 0 }, Plain ]
+                            "W13S28", [ { X = 10; Y = 0 }, Plain ]
+                        ]
+                    |> snapshotWith []
+                    |> ofView
+
+                Expect.isTrue
+                    (RoomName.neighbouring "W12S28" "W13S28")
+                    "W13S28 is one axis step west, so the names say a Seam could join them"
+
+                Expect.isEmpty
+                    (seams atlas "W12S28" "W13S28")
+                    "and the terrain says none does: the shared column is wall end to end"
+
+                // The same pair with one tile opened either side, so the
+                // empty answer above is the wall's and not the fixture's.
+                let opened =
+                    bordered
+                        [
+                            "W12S28", [ { X = 0; Y = 30 }, Plain ]
+                            "W13S28", [ { X = 49; Y = 30 }, Plain ]
+                        ]
+                    |> snapshotWith []
+                    |> ofView
+
+                Expect.equal
+                    (seams opened "W12S28" "W13S28")
+                    [ { X = 0; Y = 30 }, { X = 49; Y = 30 } ]
+                    "one passable tile either side is the whole of what a band needs"
             }
 
             test "a corner tile is on two borders at once, so it is a Seam on neither" {

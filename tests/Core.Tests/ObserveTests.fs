@@ -377,6 +377,9 @@ let quiet: ColonyView =
         // And nothing is borrowed: what one colony may take of a child's
         // room decides Tasks, and the log records what happened.
         Borrowed = { Rooms = [] }
+        // And nothing refused: the log records what happened, and a room
+        // no Seam reaches has nobody in it for anything to happen to (#243).
+        Refused = []
         // The numbers this bot ships with (ADR 0052 decision 5): a
         // fixture starts from them and the tests that are *about* a
         // tunable move the one field they are about.

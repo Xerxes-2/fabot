@@ -1159,10 +1159,16 @@ let private reserverBodyWithin claims capacity =
 /// is where #131's correction overrides ADR 0042's "one reserver per posted
 /// outpost" clause: gating on a standing container deadlocks the outpost chain,
 /// since the container needs vision, vision needs a creep, and this is the only
-/// creep with a reason to go. The scan set is the gate that remains, and ADR
-/// 0043's stand-down narrows it. Beside it, the room must carry **a controller
-/// of its own in the projection**, or a CLAIM body has nothing to do there (ADR
-/// 0006). The *rooms* drop out and every cast this tick is sized at the largest
+/// creep with a reason to go. The scan set is the gate that remains, and two
+/// things narrow it, both inside `World.scanOf`: ADR 0043's stand-down, and the
+/// declaration's own geometry — its `Outpost.neighbouring` filter (#243) — a
+/// room its home shares no border with is joined by no [[seam]], so the body
+/// this row would hire for it could never walk there, and the room is out of
+/// the scan set before anything here counts it. What *says* so is
+/// `Outpost.refused` on the [[layout record]]; what narrows the set is the
+/// filter. Beside it, the room must carry **a controller of its own in the
+/// projection**, or a CLAIM body has nothing to do there (ADR 0006). The
+/// *rooms* drop out and every cast this tick is sized at the largest
 /// demand in the list: the quota counts bodies, and which controller each
 /// finished body holds is the Matcher's, priced by travel cost. Over-buying is
 /// the safe direction (ADR 0026), and the bank truncates it anyway. **The bank

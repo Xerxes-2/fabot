@@ -21,7 +21,9 @@
 //                                  open right now, the tick a stand-down runs
 //                                  to, the deadline that tick was read off, and
 //                                  the rooms another player took, shut by no clock
-//   observe.mjs layout             what the Layout could not deliver this plan
+//   observe.mjs layout             what this colony could not deliver this tick:
+//                                  the Layout's losses, and the declared outposts
+//                                  that do not border this home
 //   observe.mjs quotas             the cascade's workforce arithmetic, row by row
 //   observe.mjs cpu                the per-tick CPU line — the tick's total,
 //                                  where it went phase by phase, how many
@@ -653,15 +655,21 @@ if (command === "console") {
   // The wire shape written by ObserveMemory.fs:
   //   { unserved: [{ x, y, kind }],
   //     unrouted: [{ source, goal, spawn? }],
-  //     deferred: [{ target, source?, pick: { x, y }, serving: { x, y } }] }
-  // Three lists in one leaf, all the Layout's own losses: the footing
+  //     deferred: [{ target, source?, pick: { x, y }, serving: { x, y } }],
+  //     refused: [roomName] }
+  // Four lists in one leaf, the colony's losses of this tick: the footing
   // targets the fold found no tile for (#77), the trunks the router found
-  // no path for (#107), and the container picks the plan gave up because
-  // something already serves their target (ADR 0040). The current plan's
-  // record, not a history: no ring, no fold, the same lists every tick
-  // under a stable census. What a list can say is three distinct answers
-  // and every one of them matters (ADR 0035). A missing leaf is a missing
-  // channel — a bundle
+  // no path for (#107), the container picks the plan gave up because
+  // something already serves their target (ADR 0040), and the declared
+  // outposts that do not border this home (#243) — that last one the
+  // declaration's loss rather than the Layout's, on this channel because it
+  // is the same kind of answer: colony-level, this tick's, and with no
+  // creep for a Verdict to name. Read off the room names alone, so it
+  // names the declarations no Seam *can* join and never asks the terrain
+  // whether one does. The current plan's record, not a history: no ring,
+  // no fold, the same lists every tick under a stable census. What a list
+  // can say is three distinct answers and every one of them matters (ADR
+  // 0035). A missing leaf is a missing channel — a bundle
   // predating it — and fails loudly, the way `raids` does, rather than
   // reporting a confident "nothing lost" off a stale deploy; an empty list
   // is the guarantee holding, one footing per target, one trunk per
@@ -689,6 +697,7 @@ if (command === "console") {
   const unserved = listOrFail("unserved");
   const unrouted = listOrFail("unrouted");
   const deferred = listOrFail("deferred");
+  const refused = listOrFail("refused");
 
   // A carrying vocabulary as it reads back: one case spells a name and
   // carries an id beside it, so a row that lost the id says so rather than
@@ -710,7 +719,7 @@ if (command === "console") {
   // `unserved` array, back when the leaf held one list; a reader of the
   // old shape wants `.unserved`.
   if (json) {
-    console.log(JSON.stringify({ unserved, unrouted, deferred }, null, 2));
+    console.log(JSON.stringify({ unserved, unrouted, deferred, refused }, null, 2));
   } else {
     console.log(`colony ${home}`);
     console.log("");
@@ -748,6 +757,27 @@ if (command === "console") {
       );
       for (const d of deferred) {
         console.log(`  ${targetOf(d)}  wanted ${tileOf(d.pick)}, served by ${tileOf(d.serving)}`);
+      }
+    }
+
+    // A row here is a room a human declared and this colony cannot work:
+    // a Seam joins orthogonal neighbours only (ADR 0041), so nothing in a
+    // room further out can be priced, walked to or worked, and the colony
+    // refuses it rather than hiring a reserver that would stand by the
+    // spawn for its whole life (#243). The fix is a human's — move the
+    // declaration in `Colony.declared`, as the outposts are always moved —
+    // and it is not the bot's to make. An empty list says every
+    // declaration is *shaped* like one a Seam could join, and no more: a
+    // bordering room the engine walled end to end has no band either, and
+    // that is a terrain question this channel does not ask.
+    if (refused.length === 0) {
+      console.log("every declared outpost borders this home");
+    } else {
+      console.log(
+        `${refused.length} declared ${refused.length === 1 ? "outpost that does" : "outposts that do"} not border ${home}:`,
+      );
+      for (const room of refused) {
+        console.log(`  ${room}  — not a neighbour of ${home}, so it is worked by nobody`);
       }
     }
   }
