@@ -45,6 +45,22 @@ let private withCreepTarget
     : Outcome =
     withTarget targetId (fun target -> withCreep name (fun creep -> act creep target))
 
+/// The same pair where the target is a creep of **ours**, and so is named
+/// rather than identified: `Game.creeps` is the hash our own bodies are
+/// addressed through everywhere else in this module, and the [[guard]]'s heal
+/// names itself (ADR 0056).
+let private withOurCreepTarget
+    (name: string)
+    (targetName: string)
+    (act: ICreep -> ICreep -> int)
+    : Outcome =
+    let target: ICreep = Game.creeps?(targetName)
+
+    if isNull (box target) then
+        ActorMissing
+    else
+        withCreep name (fun creep -> act creep target)
+
 let private execute (intent: Intent) : Outcome =
     match intent with
     | SpawnCreep(spawnName, body, creepName) ->
@@ -83,6 +99,16 @@ let private execute (intent: Intent) : Outcome =
         withCreepTarget creepName controllerId (fun c t -> c.claimController t)
     | PickupEnergy(creepName, resourceId) ->
         withCreepTarget creepName resourceId (fun c t -> c.pickup t)
+    // The [[guard]]'s two acts (ADR 0056). The hostile is a creep of somebody
+    // else's and so arrives by id, through the same `getObjectById` the [[fire
+    // reflex]]'s target does — one that died between the decision and the
+    // replay is the shared guard's ActorMissing, which is what a raid that
+    // ended mid-tick looks like. The heal names one of ours twice, actor and
+    // target, and goes through `Game.creeps` for both.
+    | AttackCreep(creepName, hostileId) ->
+        withCreepTarget creepName hostileId (fun c t -> c.attack t)
+    | HealCreep(creepName, targetName) ->
+        withOurCreepTarget creepName targetName (fun c t -> c.heal (box t))
     | MoveCreep(creepName, direction) ->
         withCreep creepName (fun c -> c.move (directionCode direction))
     | SayCreep(creepName, message) -> withCreep creepName (fun c -> c.say message)

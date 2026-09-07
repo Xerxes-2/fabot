@@ -2115,6 +2115,17 @@ type Task =
     /// target and no action: its Work Area is the tiles no Threat can
     /// hurt, and the Emitter issues movement for it and nothing else.
     | Flee
+    /// Killing what stands in a declared [[outpost]] (ADR 0056): one Task per
+    /// outpost a [[threat]] stands in, keyed on the **room** and never on the
+    /// hostile, which is ADR 0054's split applied where it was learnt — the
+    /// Planner names a place and the [[emitter]] names the target at arrival.
+    /// Keyed on the hostile, the 2% multi-creep raid would pool five Tasks and
+    /// re-match the [[guard]] between them every time one moved. Its Work Area
+    /// is the walkable range-1 ring of every Threat standing in that room — a
+    /// colony fact derived off `Threats` as [[flee]]'s safe set is, and no
+    /// target's surroundings — so it is the second Task the projection places
+    /// nothing for, and the one that acts anyway.
+    | Guard of roomName: string
 
 /// The five shapes a body takes as far as a [[capacity]] is concerned (ADR
 /// 0052 decision 6) — part arithmetic and never a row's name (ADR 0006), so the
@@ -2175,6 +2186,19 @@ type Capacity =
         /// generalists' own share of a store the standing row also drinks
         /// from, divided by the load *they* carry (#196).
         Generalists: int option
+        /// Holders that are `Fighter`, **and no holder of any other class at
+        /// all**: the [[guard]]'s share of a Guard, which ADR 0056 states as
+        /// "`Fighter -> the room's quota`, every other class 0". Both halves
+        /// ride one field because the four scopes above cannot spell "not a
+        /// Fighter" between them — `Commuters` and `Generalists` each contain
+        /// the class — and a zero written as two of them would be a number
+        /// about somebody else's crowd (the `None` scope) rather than a
+        /// refusal. The one cap written for a class rather than for a crowd,
+        /// and the second lock on a Task whose applicability already asks for
+        /// an ATTACK part: the Matcher recognises no Task kinds (ADR 0052
+        /// decision 6), so what keeps a [[hauler unit]] out of a fight has to
+        /// be sayable in numbers.
+        Fighters: int option
         /// Tiles whose standing **heavy** occupant holds a slot against
         /// `Garrisons` whatever Task it holds this tick — **every** [[post]] of
         /// the rock since #269, where #205 carried only the Posts whose
@@ -2207,6 +2231,7 @@ module Capacity =
             Commuters = None
             Standing = None
             Generalists = None
+            Fighters = None
             Garrison = Set.empty
             Exempt = Set.empty
         }
@@ -2214,6 +2239,10 @@ module Capacity =
     /// One number over every class: a Seat count, a store's stock divided
     /// by one load, one holder per controller.
     let total n = { unbounded with Total = Some n }
+
+    /// The Guard's cap (ADR 0056): that room's quota of `Fighter` bodies,
+    /// and nobody else at all.
+    let fighters n = { unbounded with Fighters = Some n }
 
     /// Whether any cap at all is set — the question that decides whether
     /// the Matcher pays for a walk over the holders (ADR 0029).
@@ -2223,6 +2252,7 @@ module Capacity =
         || capacity.Commuters.IsSome
         || capacity.Standing.IsSome
         || capacity.Generalists.IsSome
+        || capacity.Fighters.IsSome
 
 /// One entry of this tick's Task pool: the Task, where it ranks and how many
 /// bodies it admits (ADR 0052 decision 6).
@@ -2495,6 +2525,20 @@ type Intent =
     /// other four touching acts.
     | ClaimController of creepName: string * controllerId: string
     | PickupEnergy of creepName: string * resourceId: string
+    /// The melee act (ADR 0056): a body with ATTACK parts standing within
+    /// range 1 of a hostile creep deals `Engine.attackPower` a part. The
+    /// [[guard]]'s own act, and the one Intent that names a creep this colony
+    /// does not own — by id, as the [[fire reflex]]'s target is, a hostile
+    /// being no target of the projection's.
+    | AttackCreep of creepName: string * hostileId: string
+    /// The heal act (ADR 0056): a body with HEAL parts restores
+    /// `Engine.healPower` a part to a creep of ours within range 1, itself
+    /// included, and the engine settles it against the same tick's damage. The
+    /// [[guard]] heals itself every tick it holds its Task, which is what the
+    /// row's one HEAL part is for. Both creeps are named, and both by **name**
+    /// — the target is one of ours, and an Intent whose target rode implicitly
+    /// on the actor would say nothing in the Executor's own failure line.
+    | HealCreep of creepName: string * targetName: string
     | MoveCreep of creepName: string * direction: Direction
     | SayCreep of creepName: string * message: string
     | ActivateSafeMode of controllerId: string

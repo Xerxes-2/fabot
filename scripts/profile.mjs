@@ -1125,6 +1125,12 @@ function stubCreep({ name, pos, parts, used, ticksToLive = CREEP_LIFE_TIME }) {
     // the surface `Bindings.fs` declares is the only stub that cannot
     // rot this way.
     claimController: ok,
+    // The [[guard]]'s two verbs (ADR 0056), and the same bill a fourth
+    // time: the `--raided` outpost is where a Guard is pooled, so the tick
+    // a Fighter stands on an invader's ring the Executor reaches for both
+    // of these — `attack` on the hostile, `heal` on the guard itself.
+    attack: ok,
+    heal: ok,
     pickup: ok,
     move: ok,
     say: ok,

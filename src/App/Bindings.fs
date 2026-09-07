@@ -244,6 +244,14 @@ type ICreep =
     /// GCL level this account has is already spent on a room.
     abstract claimController: target: obj -> int
     abstract pickup: target: obj -> int
+    /// Hit a creep at range 1 for `ATTACK_POWER` per ATTACK part (ADR 0056).
+    /// The [[guard]]'s act, and the only one this colony aims at a body it
+    /// does not own.
+    abstract attack: target: obj -> int
+    /// Restore `HEAL_POWER` per HEAL part to a creep of ours at range 1,
+    /// itself included (ADR 0056). A different act from `attack` in the
+    /// engine, so a body carrying both parts does both in one tick.
+    abstract heal: target: obj -> int
     /// Single-step move by direction constant (TOP = 1, clockwise). The
     /// only movement API the bot uses — moveTo is forbidden (ADR 0001).
     abstract move: direction: int -> int

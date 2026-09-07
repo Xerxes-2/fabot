@@ -297,6 +297,11 @@ let taskId =
     // One Flee for the whole colony: it has no target to be identified by,
     // and every creep inside a Reach is running from the same thing.
     | Flee -> "flee"
+    // One Guard per raided room, identified by the room and never by what
+    // stands in it (ADR 0056): a raid that loses a creep, or moves one a tile,
+    // is the same fight and must be the same identity, or anti-thrash would
+    // re-match the [[guard]] mid-swing.
+    | Guard room -> $"guard:{room}"
 
 /// The **target** inside a Task id: the engine's own object id, which is
 /// everything `taskId` writes after its one colon. `None` for Flee, the one id
@@ -434,11 +439,26 @@ type Threats =
         /// than "nowhere is safe": a creep with no Reach around it is matched
         /// to no Flee.
         Safe: Map<string, Set<RoomPos>>
+        /// Per room, the walkable tiles within range 1 of a Threat standing in
+        /// it, less the tiles the Threats themselves stand on — the [[guard]]'s
+        /// Work Area (ADR 0056), and the safe set's exact opposite: Flee walks
+        /// a body to the tiles nothing reaches and a Guard walks it to the
+        /// tiles that reach *back*. Range 1 and not two, because 30 a part is
+        /// paid there and nothing is paid at range 2 and the row carries no
+        /// RANGED_ATTACK by decision. Derived here beside the Reach and
+        /// touching no [[atlas]] memo, which is ADR 0033's precedent for the
+        /// safe set pointed the other way.
+        Ring: Map<string, Set<RoomPos>>
     }
 
 /// The tick with nothing to run from: every Work Area stands whole and no
 /// creep flees. What the pipeline is handed for a quiet colony.
-let noThreats = { Reach = Map.empty; Safe = Map.empty }
+let noThreats =
+    {
+        Reach = Map.empty
+        Safe = Map.empty
+        Ring = Map.empty
+    }
 
 [<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
 module Threats =
@@ -450,6 +470,12 @@ module Threats =
     /// no Reach was derived in.
     let safeIn (threats: Threats) (room: string) : Set<RoomPos> =
         Map.tryFind room threats.Safe |> Option.defaultValue Set.empty
+
+    /// One room's range-1 ring, already joined to that room; empty for a room
+    /// no Threat stands in — which leaves that room's Guard, if one was ever
+    /// pooled for it, applicable to nobody (ADR 0004).
+    let ringIn (threats: Threats) (room: string) : Set<RoomPos> =
+        Map.tryFind room threats.Ring |> Option.defaultValue Set.empty
 
 /// This tick's Threats, off the view's hostiles and the rampart census, room by
 /// room. Each Threat reaches its weapon range plus the margin, in Chebyshev
@@ -505,12 +531,61 @@ let threatsOf (view: ColonyView) atlas : Threats =
                 if Set.isEmpty tiles then None else Some(room, tiles))
             |> Map.ofList
 
+        // The walkable ground of each room a Threat stands in, walked **once**
+        // for the two sets derived from it: the safe set is that ground less
+        // the Reach and the ring is the part of it beside a Threat, and
+        // `Atlas.walkableTilesIn` builds a 2,500-tile set per call and
+        // memoises nothing.
+        let walkable =
+            threats
+            |> List.map (fun (room, _, _) -> room)
+            |> List.distinct
+            |> List.map (fun room -> room, Atlas.walkableTilesIn atlas room)
+            |> Map.ofList
+
+        let walkableIn room =
+            Map.tryFind room walkable |> Option.defaultValue Set.empty
+
+        // The range-1 ring of every Threat in a room, walkable and less the
+        // tiles the Threats stand on — a body cannot stand where one of them
+        // already does, and with two of them adjacent each is a tile of the
+        // other's ring. Off the Threat list and not off the Reach above,
+        // because the Reach is what our own ramparts subtract from and a
+        // rampart is standing room like any other: the tile a guard fights
+        // from is the best tile it has, not one it has to flee.
+        let ring =
+            threats
+            |> List.groupBy (fun (room, _, _) -> room)
+            |> List.map (fun (room, inRoom) ->
+                let standing = inRoom |> List.map (fun (_, pos, _) -> pos) |> Set.ofList
+                let walkable = walkableIn room
+
+                let tiles =
+                    inRoom
+                    |> List.collect (fun (_, pos, _) ->
+                        [
+                            for x in pos.X - 1 .. pos.X + 1 do
+                                for y in pos.Y - 1 .. pos.Y + 1 do
+                                    let tile = { X = x; Y = y }
+
+                                    if
+                                        Set.contains tile walkable
+                                        && not (Set.contains tile standing)
+                                    then
+                                        tile
+                        ])
+                    |> Set.ofList
+
+                room, RoomPos.setAt room tiles)
+            |> Map.ofList
+
         {
             Reach = reach
             Safe =
                 reach
                 |> Map.map (fun room tiles ->
-                    Set.difference (Atlas.walkableTilesIn atlas room) tiles |> RoomPos.setAt room)
+                    Set.difference (walkableIn room) tiles |> RoomPos.setAt room)
+            Ring = ring
         }
 
 /// The source container geometry (ADR 0012): a tile within range 1 of the given
@@ -669,6 +744,70 @@ let private ferryBuffers (view: ColonyView) : Set<string> =
                 |> Option.exists (fun tile -> Set.contains tile.Room rooms)))
         |> Set.ofList
 
+/// The declared [[outpost]]s this colony works this tick — the rooms two rows
+/// are hired per, written once because a paraphrase would let the reserver row
+/// and the guard row disagree about which rooms are ours to work (ADR 0042, ADR
+/// 0056). A room qualifies by carrying **a controller of its own in the
+/// projection** that is not this colony's home: an outpost's declaration names
+/// its controller and a room with none is no candidate outpost at all. It must
+/// be unowned — a room somebody holds is one this colony is withdrawing from,
+/// not mining — and it must not be a [[candidate colony]]'s, whose controller
+/// carries a Claim rather than a Reserve.
+///
+/// **Declared and not posted**, which is where #131's correction overrides ADR
+/// 0042's "one reserver per posted outpost" clause: gating on a standing
+/// container deadlocks the outpost chain, since the container needs vision,
+/// vision needs a creep, and the reserver is the only creep with a reason to
+/// go. The scan set is the gate that remains, and two things narrow it, both
+/// inside `World.scanOf`: ADR 0043's stand-down, and the declaration's own
+/// geometry — its `Outpost.neighbouring` filter (#243) — a room its home shares
+/// no border with is joined by no [[seam]], so a body hired for it could never
+/// walk there, and the room is out of the scan set before anything here counts
+/// it. What *says* so is `Outpost.refused` on the [[layout record]]; what
+/// narrows the set is the filter.
+///
+/// Off the projection itself (`SpatialInfo.placementOf`) and not off the
+/// [[atlas]]'s join of it, which answers alike: the [[guard]]'s own Task is
+/// pooled by `planTasks`, and the Planner's first half is handed the view and
+/// no Atlas (ADR 0056 decision 2). One derivation for the two rows and the
+/// pool, or the three of them could disagree about which rooms are ours.
+let private declaredOutposts (view: ColonyView) : string list =
+    let home = view.Controller |> Option.map (fun c -> c.Id)
+    let claimed = claimTargets view |> List.map snd |> Set.ofList
+
+    view.Spatial.TargetKinds
+    |> Map.toList
+    |> List.choose (fun (id, kind) ->
+        if kind = Controller && Some id <> home then
+            SpatialInfo.placementOf view.Spatial id |> Option.map (fun tile -> tile.Room)
+        else
+            None)
+    |> List.distinct
+    |> List.filter (roomHasOwner view >> not)
+    |> List.filter (fun room -> not (Set.contains room claimed))
+
+/// The declared [[outpost]]s a [[threat]] stands in this tick (ADR 0056): the
+/// rooms the guard row hires a body for, and the rooms `planTasks` pools a
+/// Guard in. One derivation for both halves, which is decision 2's "one number
+/// computed once and read as both the row's quota and the Task's cap" stated
+/// for the rooms that number is summed over: pooled where nothing is hired, the
+/// Guard would hold a body a raided room needs elsewhere; hired where nothing
+/// is pooled, the cast body would stand idle in the oven's shadow.
+///
+/// ADR 0033's own Threat test and never "a hostile": a scout or a healer alone
+/// reaches nothing, takes no ground and is no reason to buy a body. Vision is
+/// the whole of what it reads (ADR 0004) — an outpost the colony cannot see
+/// carries no hostiles and asks for no guard, the same zero a quiet room
+/// contributes.
+let private guardedOutposts (view: ColonyView) : string list =
+    if List.isEmpty view.Hostiles then
+        []
+    else
+        declaredOutposts view
+        |> List.filter (fun room ->
+            view.Hostiles
+            |> List.exists (fun h -> h.Pos.Room = room && (weaponRange h |> Option.isSome)))
+
 /// Planner: rebuild this tick's full Task pool from the colony view. Pure and
 /// from scratch every tick — Tasks are never persisted.
 let planTasks (view: ColonyView) (threats: Threats) : Task list =
@@ -677,6 +816,14 @@ let planTasks (view: ColonyView) (threats: Threats) : Task list =
     // the ranking. No Reach, no Flee — a quiet tick's pool is the pool it
     // always was.
     let flees = if Map.isEmpty threats.Reach then [] else [ Flee ]
+
+    // One Guard per declared [[outpost]] a [[threat]] stands in (ADR 0056),
+    // keyed on the room: the same list the guard row hires against, so the body
+    // the cascade buys has a Task waiting for it and no Task waits for a body
+    // nobody bought. Beside Flee at the head of the pool — the two Tasks of the
+    // Safety tier, disjoint by [[body class]], so nothing ever asks how they
+    // order.
+    let guards = guardedOutposts view |> List.map Guard
 
     // Harvest exists for every source, drained or not (ADR 0013, revised by
     // ADR 0025): the task no longer flickers with the source's stock, because
@@ -876,6 +1023,7 @@ let planTasks (view: ColonyView) (threats: Threats) : Task list =
             storages |> List.filter (fun id -> stored id > 0) |> List.map Withdraw
 
     flees
+    @ guards
     @ harvests
     // **The piles stand before the Withdraws** (#242). Pool order is the last
     // rung of the Matcher's ladder — what it falls back to once [[priority]],
@@ -1230,47 +1378,12 @@ let private reserverBodyWithin claims capacity =
 let private isGuardBody (creep: CreepInfo) =
     creep.Body |> Map.tryFind Attack |> Option.exists (fun n -> n > 0)
 
-/// The declared [[outpost]]s this colony works this tick — the rooms two rows
-/// are hired per, written once because a paraphrase would let the reserver row
-/// and the guard row disagree about which rooms are ours to work (ADR 0042, ADR
-/// 0056). A room qualifies by carrying **a controller of its own in the
-/// projection** that is not this colony's home: an outpost's declaration names
-/// its controller and a room with none is no candidate outpost at all. It must
-/// be unowned — a room somebody holds is one this colony is withdrawing from,
-/// not mining — and it must not be a [[candidate colony]]'s, whose controller
-/// carries a Claim rather than a Reserve.
-///
-/// **Declared and not posted**, which is where #131's correction overrides ADR
-/// 0042's "one reserver per posted outpost" clause: gating on a standing
-/// container deadlocks the outpost chain, since the container needs vision,
-/// vision needs a creep, and the reserver is the only creep with a reason to
-/// go. The scan set is the gate that remains, and two things narrow it, both
-/// inside `World.scanOf`: ADR 0043's stand-down, and the declaration's own
-/// geometry — its `Outpost.neighbouring` filter (#243) — a room its home shares
-/// no border with is joined by no [[seam]], so a body hired for it could never
-/// walk there, and the room is out of the scan set before anything here counts
-/// it. What *says* so is `Outpost.refused` on the [[layout record]]; what
-/// narrows the set is the filter.
-let private declaredOutposts (view: ColonyView) atlas : string list =
-    let home = view.Controller |> Option.map (fun c -> c.Id)
-    let claimed = claimTargets view |> List.map snd |> Set.ofList
-
-    view.Spatial.TargetKinds
-    |> Map.toList
-    |> List.choose (fun (id, kind) ->
-        if kind = Controller && Some id <> home then
-            Atlas.targetRoom atlas id
-        else
-            None)
-    |> List.distinct
-    |> List.filter (roomHasOwner view >> not)
-    |> List.filter (fun room -> not (Set.contains room claimed))
-
-/// The guard row's quota (ADR 0056): **0** for the whole of a colony's ordinary
-/// life, and on the ticks it is not, one guard per declared [[outpost]] a
-/// [[threat]] stands in this tick, two where the raid out-heals the guards
-/// already standing there, capped at two and summed over the outposts. A
-/// per-tick fact read off vision and nothing remembered between ticks — vision
+/// How many guards one raided [[outpost]] wants (ADR 0056), which is **0** for
+/// the whole of a colony's ordinary life because no room is raided: one guard
+/// per declared outpost a [[threat]] stands in this tick, two where the raid
+/// out-heals the guards already standing there, capped at two and — for the
+/// row's own quota — summed over the outposts. A per-tick fact read off vision
+/// and nothing remembered between ticks — vision
 /// in a guarded outpost *is* the guard — so it falls to 0 the tick the room is
 /// clear; it does not decay in between, and it needs none: a cast is 1,500
 /// ticks of body and a raid is 1,500 ticks, so one cast covers one raid by
@@ -1304,36 +1417,37 @@ let private declaredOutposts (view: ColonyView) atlas : string list =
 /// same zero a quiet room contributes. The [[home room]] is not in this list —
 /// a raid at home casts no guard and is the [[keep]]'s business (ADR 0034), and
 /// the spawn hold would refuse the cast anyway.
-let private guardQuota (view: ColonyView) atlas : int =
+///
+/// **One room's number, and the row's quota is its sum** (ADR 0056 decision 2):
+/// the Guard pooled for that room is capped at exactly this, so the row hires
+/// what the pool admits and the Matcher counts holders against the number the
+/// Planner set, which is ADR 0052 decision 6. Asked only of a room
+/// `guardedOutposts` has already answered for — a room with no Threat in it is
+/// not one guard but none.
+let private guardsWanted (view: ColonyView) atlas (room: string) : int =
     let parts part body =
         body |> List.filter ((=) part) |> List.length
 
-    declaredOutposts view atlas
-    |> List.sumBy (fun room ->
-        let hostiles = view.Hostiles |> List.filter (fun h -> h.Pos.Room = room)
+    let hostiles = view.Hostiles |> List.filter (fun h -> h.Pos.Room = room)
+    let healing = hostiles |> List.sumBy (fun h -> Engine.healPower * parts Heal h.Body)
 
-        // ADR 0033's own Threat test, and never "a hostile": a scout or a
-        // healer alone reaches nothing, takes no ground and is no reason to
-        // buy a body.
-        if not (hostiles |> List.exists (fun h -> weaponRange h |> Option.isSome)) then
-            0
-        else
-            let healing = hostiles |> List.sumBy (fun h -> Engine.healPower * parts Heal h.Body)
+    let damage =
+        view.Creeps
+        |> List.filter (fun creep ->
+            isGuardBody creep
+            && (Atlas.creepTile atlas creep.Name |> Option.exists (fun tile -> tile.Room = room)))
+        |> List.sumBy (fun creep ->
+            let count part =
+                creep.Body |> Map.tryFind part |> Option.defaultValue 0
 
-            let damage =
-                view.Creeps
-                |> List.filter (fun creep ->
-                    isGuardBody creep
-                    && (Atlas.creepTile atlas creep.Name
-                        |> Option.exists (fun tile -> tile.Room = room)))
-                |> List.sumBy (fun creep ->
-                    let count part =
-                        creep.Body |> Map.tryFind part |> Option.defaultValue 0
+            Engine.attackPower * count Attack
+            + Engine.rangedAttackPower * count RangedAttack)
 
-                    Engine.attackPower * count Attack
-                    + Engine.rangedAttackPower * count RangedAttack)
+    if damage > 0 && healing >= damage then 2 else 1
 
-            if damage > 0 && healing >= damage then 2 else 1)
+/// The guard row's quota: `guardsWanted` over every raided outpost, summed.
+let private guardQuota (view: ColonyView) atlas : int =
+    guardedOutposts view |> List.sumBy (guardsWanted view atlas)
 
 /// The reserver row's quota and its sizing, which are one rule with two faces
 /// (ADR 0042, ADR 0006's law that a row arrives with its quota): one reserver
@@ -1353,7 +1467,7 @@ let private guardQuota (view: ColonyView) atlas : int =
 /// afford one block**, or the row hires nobody: a colony that cannot buy a
 /// reservation does not hold one, and a row hired against a body it can never
 /// buy is an addend of the Workforce target no cast will pay off.
-let private reserverClaimsOf (view: ColonyView) atlas : int list =
+let private reserverClaimsOf (view: ColonyView) : int list =
     let heldTicks room =
         view.RoomControl
         |> Map.tryFind room
@@ -1376,7 +1490,7 @@ let private reserverClaimsOf (view: ColonyView) atlas : int list =
         []
     else
         let reserved =
-            declaredOutposts view atlas
+            declaredOutposts view
             |> List.map (fun room ->
                 ceilDiv (Engine.reservationCap - heldTicks room) Engine.claimLifetime |> max 1)
 
@@ -1749,7 +1863,7 @@ type RowSizing =
 let private rowSizingOf (view: ColonyView) atlas : RowSizing =
     {
         AnchorPostCaps = postWorkCapsOf view atlas
-        ReserverClaims = reserverClaimsOf view atlas
+        ReserverClaims = reserverClaimsOf view
     }
 
 /// The largest ceiling the row's Posts ask for, and the held one where it has
@@ -3208,12 +3322,20 @@ let private tooEarly (view: ColonyView) atlas (creep: CreepInfo) task (walk: Laz
     // 0042).
     | Reserve _
     | Claim _
+    // A [[threat]] standing in a room is there to be hit the tick a guard
+    // arrives and every tick before: a fight has no restock (ADR 0056).
+    | Guard _
     | Flee -> None
 
 /// The room a Task's Work Area lies in: its target's, since the area is that
 /// target's surroundings and empty across a border (ADR 0020, ADR 0041) — so the
 /// Reach taken out of it is that room's share. None for Flee, whose area is the
-/// creep's own room's, and for a target the projection does not place.
+/// creep's own room's, and for a target the projection does not place. A Guard
+/// names its room outright (ADR 0056) — the Planner keyed it on one — and the
+/// case is the whole answer for a Task this function is never asked about:
+/// `areaFor` below is its only caller and it settles a Guard two cases earlier,
+/// no Reach being taken out of a Guard's area at all. The case stands because
+/// the match is exhaustive and a Task it forgot would be a build error.
 let private roomOfWork atlas task =
     match task with
     | Harvest id
@@ -3225,6 +3347,7 @@ let private roomOfWork atlas task =
     | Upgrade id
     | Reserve id
     | Claim id -> Atlas.targetRoom atlas id
+    | Guard room -> Some room
     | Flee -> None
 
 /// The tiles a creep may work a Task from this tick (ADR 0033): its Work Area
@@ -3238,6 +3361,14 @@ let private areaFor (threats: Threats) atlas creep task : Set<RoomPos> =
         Atlas.creepRoom atlas creep
         |> Option.map (Threats.safeIn threats)
         |> Option.defaultValue Set.empty
+    // The [[guard]]'s ground, and the one area no Reach is taken out of (ADR
+    // 0056): it is *made* of Reach tiles, one ring around every Threat in the
+    // room the Planner keyed the Task on, so the subtraction below would empty
+    // it on every tick the Task exists. A colony fact like the safe set beside
+    // it and no target's surroundings, so the room is the Task's own and never
+    // the creep's — a body a border away is offered the same ring, and it is
+    // the price of walking there that decides whether it can have it.
+    | Guard room -> Threats.ringIn threats room
     | _ when Map.isEmpty threats.Reach -> Atlas.workAreaFor atlas creep task
     | _ ->
         // A Reach is one room's grid (`Threats.Reach`), so the tiles it
@@ -3265,13 +3396,37 @@ let private areaFor (threats: Threats) atlas creep task : Set<RoomPos> =
 /// Seam join for a target in another room. The Work Area a creep is handed is
 /// empty across a border by construction (ADR 0041), so an outpost's Task ranks
 /// in the one pool through this fallback rather than a case of its own.
+///
+/// The Guard is priced off its area rather than off a target, for Flee's own
+/// reason (ADR 0056): that area is the colony's `Threats` and not a target's
+/// surroundings, so there is no unplaceable-target escape to fall back to and an
+/// empty ring is honestly nowhere to stand. It crosses a border where Flee never
+/// has to, though — the safe set is the creep's own room's, while a Guard's ring
+/// is the room the Planner keyed the Task on, which is an outpost and never the
+/// room the guard row cast the body in. So it prices through `travelCostToward`,
+/// the same Seam-band minimum every cross-room Task is ranked by, taken toward a
+/// named room's tiles instead of toward a placed target's: the walk to the fight
+/// is what decides whether a body standing at the oven can have it, exactly as an
+/// outpost's Harvest is offered to a body standing at home.
 let private travelCostOf (threats: Threats) atlas (creep: string) task =
     match task with
     | Flee -> Atlas.travelCostWithin atlas creep (areaFor threats atlas creep task)
+    | Guard room -> Atlas.travelCostToward atlas creep task room (areaFor threats atlas creep task)
     | _ ->
         match areaFor threats atlas creep task with
         | area when Set.isEmpty area -> Atlas.travelCost atlas creep task
         | area -> Atlas.travelCostWithin atlas creep area
+
+/// The mover's step toward the tiles a creep may work its Task from, and the
+/// mate of `travelCostOf` above: whatever the price crossed for, the walk has to
+/// cross for too, or a body is ranked onto a Task it is never carried to. A
+/// Guard names its own room and is stepped toward it (`firstStepToward`); every
+/// other Task derives its crossing from the target the projection places
+/// (`firstStep`).
+let private stepToward atlas (creep: string) task (area: Set<RoomPos>) =
+    match task with
+    | Guard room -> Atlas.firstStepToward atlas creep task room area
+    | _ -> Atlas.firstStep atlas creep task area
 
 /// Whether the Reach has taken a creep's whole Work Area for a Task (ADR 0033):
 /// it had somewhere to stand and has nowhere left. That makes the Task
@@ -3500,10 +3655,10 @@ let private priorityStep = 1
 /// classes below would answer `Carrier` — the class of the bodies that shift
 /// energy, and the one a Guard's capacity must not be sharing a number with.
 /// Exported for the same reason `bodyFor` and `patternTable` are (ADR 0006): the
-/// ladder is a body fact a test reads directly, and `Fighter` answers no
-/// differently from `Carrier` in any [[capacity]] scope written so far — the
-/// Guard Task's `Fighter -> quota` is the first, and until it lands this is the
-/// only seam the head of the ladder is visible at.
+/// ladder is a body fact a test reads directly. The head of the ladder is read
+/// in one [[capacity]] scope and one only — the Guard Task's `Fighter -> the
+/// room's quota, every other class 0` (`Capacity.Fighters`, ADR 0056) — so a
+/// body that stopped answering `Fighter` here would be a body no Guard admits.
 let bodyClassOf (tuning: Tuning) atlas (creep: CreepInfo) : BodyClass =
     let count part =
         creep.Body |> Map.tryFind part |> Option.defaultValue 0
@@ -3701,6 +3856,15 @@ let planPool (view: ColonyView) atlas (tasks: Task list) : PooledTask list =
     let tierOf task =
         match task with
         | Flee -> Safety
+        // Beside Flee, on Flee's own argument and with no rung of its own (ADR
+        // 0056): no other work matters while a creep is being killed. The tier
+        // holds two Tasks and no ordering between them, because decision 3
+        // makes them disjoint by [[body class]] — Flee inapplicable to a
+        // Fighter, a Guard applicable to nothing else — and until that clause
+        // lands (#256) a guard standing in the ring holds this Task on travel
+        // cost alone, being already inside its Work Area and one walk short of
+        // any safe tile.
+        | Guard _ -> Safety
         | Harvest _ -> Feeding
         // **A decision made here, because nothing else made it.** ADR 0042 and
         // #116 both fix the reserver row's *casting* order and neither says a
@@ -3944,6 +4108,15 @@ let planPool (view: ColonyView) atlas (tasks: Task list) : PooledTask list =
                     |> Option.map (fun n -> max 0 (n - posts))
                 Garrison = postTiles
             }
+        // The [[guard]]s that room wants and nobody else at all (ADR 0056):
+        // `guardsWanted` is the row's own arithmetic, read here a second time
+        // rather than restated, so the number the cascade hires against and the
+        // number the Matcher counts holders against are one number. One or two
+        // — a second body only where a guard of ours is already standing in
+        // that room and the raid out-heals it — and the class share is what
+        // keeps the [[hauler unit]]s and the workers out of a Task whose whole
+        // Work Area is a Reach.
+        | Guard room -> Capacity.fighters (guardsWanted view atlas room)
         // One holder per controller (ADR 0042, ADR 0047). A reservation is a
         // single capped number one body's CLAIM parts are sized to hold, so a
         // second body there buys nothing while the other outpost stays at five
@@ -4290,6 +4463,16 @@ let private applicable
     // The same part arithmetic, for the same reason (ADR 0047): the engine's
     // `claimController` is a CLAIM part's act, and a claimer carries nothing.
     | Claim _ -> has BodyPart.Claim
+    // The same part arithmetic once more (ADR 0006, ADR 0056): an ATTACK part
+    // is what makes a body a Fighter and the only thing that kills an invader,
+    // and a body carrying one asks for no energy state — it spends nothing. No
+    // room clause beside it: the [[work area]] is that room's ring and the
+    // walk to it is what travel cost prices, exactly as an outpost's Harvest is
+    // offered to a body standing at home. Spelled through the row predicate the
+    // [[body class]] ladder itself reads (`isGuardBody`), so "a Fighter body"
+    // is one sentence here and in `bodyClassOf` and the [[capacity]] beside it
+    // cannot come to disagree with the gate.
+    | Guard _ -> isGuardBody creep
     // Flee asks for no part and no energy state, only for a creep that is being
     // shot at and can run (ADR 0033). A Work-heavy body is exempt: at four to
     // seven ticks a step an Anchor leaving its Post neither escapes nor digs,
@@ -4327,6 +4510,11 @@ let private intentFor atlas (creep: CreepInfo) task =
     | Reserve controllerId -> Some(ReserveController(creep.Name, controllerId))
     | Claim controllerId -> Some(ClaimController(creep.Name, controllerId))
     | Flee -> None
+    // The Guard's acts are two, and neither is this function's: it names one
+    // Intent for a target the projection places, and a Guard's target is a
+    // hostile creep chosen at arrival off the colony's own facts
+    // (`guardIntents`).
+    | Guard _ -> None
 
 /// Chat-bubble glyph of a Task: the whole colony's current matching is
 /// legible in the viewer at one glyph per creep.
@@ -4342,13 +4530,94 @@ let private glyphFor =
     | Reserve _ -> "🚩"
     | Claim _ -> "🏴"
     | Flee -> "🏃"
+    | Guard _ -> "⚔️"
+
+/// The [[threat]] a [[guard]] swings at, out of the ones standing in the room
+/// its Task names and passing the caller's own gate (ADR 0056): **the one
+/// nearest a [[post]] of that room**, ties by id. That is "between the invader
+/// and the [[anchor]]" said in this colony's vocabulary and the only place the
+/// Anchor enters the geometry — the engine's own `findAttack.js` chases the
+/// closest hostile creep by path, so a guard standing on the ring of the invader
+/// nearest the Post *is* between it and everything behind it, and a tile set of
+/// ours would be a second, weaker spelling of a fact the engine already
+/// guarantees. With no Post standing, the nearest Threat to the guard — a room
+/// with no garrison in it has nothing to stand in front of, so the body fights
+/// what is closest. A Threat and never "a hostile": the healer beside an invader
+/// is what the row's count rule prices, not what its ATTACK parts are spent on.
+/// None where the room holds none, or where the projection places the guard
+/// nowhere (ADR 0004).
+///
+/// **The gate is the caller's and stands ahead of the choice**, which is where
+/// ADR 0056 decision 2's one sentence reads it behind: a Threat the swing cannot
+/// reach is not a Threat this answer is about. Ordered the other way round, a
+/// guard standing on the ring of the *second* invader of a two-creep raid is
+/// handed the one nearest the Post, finds it three tiles off, and swings at
+/// nothing while the invader beside it deals 40 a tick — 90 damage a tick
+/// forgone for a pick that moves nothing else, the mover aiming at the whole
+/// ring either way. Where the nearest-Post Threat is in reach — the 90% raid of
+/// one invader, and every case the ADR argues about — the two readings answer
+/// alike, which is why this narrows decision 2 rather than overturning it.
+let private guardTarget
+    (view: ColonyView)
+    atlas
+    (creep: CreepInfo)
+    (room: string)
+    (among: HostileInfo -> bool)
+    =
+    let posts = Atlas.postsIn atlas room
+
+    // The guard's own tile, which is only read where the room has no Post; an
+    // unplaced body prices every Threat alike and the id order answers.
+    let here =
+        Atlas.creepTile atlas creep.Name |> Option.filter (fun t -> t.Room = room)
+
+    let distance (hostile: HostileInfo) =
+        let from = RoomPos.pos hostile.Pos
+
+        if Set.isEmpty posts then
+            here
+            |> Option.map (fun tile -> range from (RoomPos.pos tile))
+            |> Option.defaultValue 0
+        else
+            posts |> Set.toList |> List.map (range from) |> List.min
+
+    view.Hostiles
+    |> List.filter (fun h -> h.Pos.Room = room && (weaponRange h |> Option.isSome) && among h)
+    |> List.sortBy (fun h -> distance h, h.Id)
+    |> List.tryHead
+
+/// The two acts of a Guard (ADR 0056), which are the Emitter's alone because
+/// neither is a Task target's: `AttackCreep` at the chosen Threat, chosen out of
+/// the ones **standing within range 1** since 30 a part is paid there and nothing
+/// is paid at range 2; and `HealCreep` on the guard itself **every tick**, a
+/// separate Intent kind so that the two do not compete for one act. No movement
+/// of its own — the mover walks the body into the ring like any other Task's
+/// Work Area, which is ADR 0033's whole argument for making a fight a Task
+/// instead of a reflex. The range is the *gate on the candidates* and not a
+/// filter on the pick, for the reason `guardTarget` above writes down.
+let private guardIntents (view: ColonyView) atlas (creep: CreepInfo) (room: string) : Intent list =
+    let inSwing (hostile: HostileInfo) =
+        Atlas.creepTile atlas creep.Name
+        |> Option.bind (fun tile -> RoomPos.range tile hostile.Pos)
+        |> Option.exists (fun r -> r <= Engine.meleeRange)
+
+    let swing =
+        guardTarget view atlas creep room inSwing
+        |> Option.map (fun hostile -> AttackCreep(creep.Name, hostile.Id))
+        |> Option.toList
+
+    swing @ [ HealCreep(creep.Name, creep.Name) ]
 
 /// Action Intent for one assigned creep: emitted when the Atlas judges the
 /// action reachable from the tick-start position, and — for Harvest alone —
 /// only while the source holds energy (ADR 0025). Anticipatory dispatch and the
 /// occupancy surcharge (ADR 0008) both price a walk high enough to land a creep
 /// a tick or two early, so the gate is what keeps the engine's
-/// ERR_NOT_ENOUGH_RESOURCES spam structurally impossible.
+/// ERR_NOT_ENOUGH_RESOURCES spam structurally impossible. The Guard is the one
+/// Task judged outside that gate: its acts reach a creep the projection places
+/// nothing for, so `Atlas.mayAct` — which asks where a Task's *target* stands —
+/// answers false for it on every tick, and the range it is really gated on is
+/// the swing `guardIntents` measures itself (ADR 0056).
 let private actionIntents
     (view: ColonyView)
     atlas
@@ -4367,15 +4636,19 @@ let private actionIntents
         | Upgrade _
         | Reserve _
         | Claim _
+        | Guard _
         | Flee -> false
 
-    if
-        Atlas.mayAct atlas creep.Name task (areaFor threats atlas creep.Name task)
-        && not drained
-    then
-        intentFor atlas creep task |> Option.toList
-    else
-        []
+    match task with
+    | Guard room -> guardIntents view atlas creep room
+    | _ ->
+        if
+            Atlas.mayAct atlas creep.Name task (areaFor threats atlas creep.Name task)
+            && not drained
+        then
+            intentFor atlas creep task |> Option.toList
+        else
+            []
 
 /// Emitter: each assigned creep's action Intent, then every assigned
 /// creep's chat bubble, both in view creep order. Judges actions from
@@ -4421,10 +4694,13 @@ let private idleRank = System.Int32.MaxValue
 /// own, when that tile is a Seam (#142). The ring is no room's ground (ADR
 /// 0036) and a creep that ends its tick on it is moved out of the room again,
 /// so "stay put" there is a bounce across the border every other tick. The Task
-/// goes to `Atlas.firstStep` beside the area, and that is what gives a creep
-/// matched across a border somewhere to walk (#142): its Work Area is empty
-/// here by construction (ADR 0041), so without the Task it would park on a Task
-/// it was priced for and never move.
+/// goes to `stepToward` beside the area, and that is what gives a creep matched
+/// across a border somewhere to walk (#142): its Work Area is empty here by
+/// construction (ADR 0041), so without the Task it would park on a Task it was
+/// priced for and never move. A [[guard]]'s area is the one that is *not* empty
+/// across that border — it is the raided room's ring, filed under that room (ADR
+/// 0056) — and it crosses through the same seam all the same, the Task naming
+/// the room the step is aimed at.
 ///
 /// **A body with no Task parks off the [[working ground]]** (#241, widening ADR
 /// 0022 from the Layout to the mover). The Seats and the Upgrade Work Area are
@@ -4582,7 +4858,7 @@ let private moveIntentFor
                 Candidates = pos :: (inside @ outside) |> List.map here
             }
         else
-            match Atlas.firstStep atlas creep task area |> Option.map RoomPos.pos with
+            match stepToward atlas creep task area |> Option.map RoomPos.pos with
             | Some step ->
                 {
                     Creep = creep
@@ -5207,6 +5483,15 @@ let matchCreeps
                 (fun c -> c <> Heavy && c <> Standing)
                 capacity.Generalists
                 (all - heavy - standingRow)
+            // The one cap that refuses a class outright rather than counting it
+            // (ADR 0056): a `Fighters` number admits that many Fighters and no
+            // body of any other class, because the scopes above cannot spell
+            // "not a Fighter" — `Commuters` and `Generalists` both contain it —
+            // and `within`'s `None` scope means "somebody else's crowd", which
+            // is the opposite of a refusal.
+            && (match capacity.Fighters with
+                | Some limit -> cls = Some Fighter && (inClass Fighter |> List.length) < limit
+                | None -> true)
 
     // The vision grace (#151): a Task leaves the pool for two opposite reasons
     // and its id alone cannot tell them apart — the target was destroyed, or

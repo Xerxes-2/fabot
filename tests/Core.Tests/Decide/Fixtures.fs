@@ -1352,6 +1352,22 @@ let hostileIn room pos body =
 let smallMelee =
     [ Tough; Tough; Move; Move; Move; Move; RangedAttack; Work; Attack; Move ]
 
+/// The engine's own `smallHealer`: five MOVE and five HEAL, 60 hits a tick at
+/// range 1 unboosted. No ATTACK and no RANGED_ATTACK, so it is a [[hostile]]
+/// the [[raid log]] records and no [[threat]] at all — no [[reach]], no ring,
+/// and no reason of its own to buy a body — and it is exactly what the guard
+/// row's count rule prices, one 750-energy guard's 90 damage standing against
+/// one of these and losing to two (ADR 0056).
+let smallHealer = [ Move; Move; Move; Move; Move; Heal; Heal; Heal; Heal; Heal ]
+
+/// One guard as the row would really cast it at an 800 bank: `[T; A×3; M×5; H]`,
+/// 90 damage and 12 self-heal a tick. Sized through `bodyFor` rather than
+/// written out, so the damage the count rule reads off it is the damage the row
+/// bought and never a second spelling of it — and so that a row which stopped
+/// casting an ATTACK part would stop standing a `Fighter` up here too.
+let guard name =
+    creepWith name 0 0 (bodyFor guardPattern 800)
+
 /// The outpost the Reserve tests hold: one room across the north border,
 /// its controller declared under the engine's own id and laid into the
 /// projection the way the shell lays one (`Outpost.place`, ADR 0041) — so

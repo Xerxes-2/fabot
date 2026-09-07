@@ -3568,6 +3568,490 @@ let raidedOutpostTests =
             }
         ]
 
+/// The raided outpost as a **declared** one: its controller projected beside
+/// the rock, at a corner of the same field. That is what makes W1N2 a declared
+/// [[outpost]] — the guard row hires per declared outpost and the Guard is
+/// pooled per declared outpost, and a room carrying no controller of its own is
+/// no candidate outpost at all (ADR 0042, ADR 0056). The builders above leave
+/// it out because their subject is the haul, and it arrives here rather than
+/// there for the reason `raidedOutpost` was cut beside them: a controller in
+/// the projection pools a Reserve, and every quiet pin above would re-baseline
+/// on it.
+let private declaredRaid hostiles =
+    let colony = raidedOutpost hostiles
+    let outpost = SpatialInfo.layerOf colony.Spatial "W1N2"
+
+    { colony with
+        Spatial =
+            { colony.Spatial with
+                TargetKinds = Map.add "ctl-out" Controller colony.Spatial.TargetKinds
+            }
+            |> withNeighbour
+                "W1N2"
+                { outpost with
+                    TargetPositions = Map.add "ctl-out" { X = 30; Y = 48 } outpost.TargetPositions
+                }
+    }
+
+/// The same raided outpost with guards of ours standing in it, each on the
+/// tile the case names: our own bodies are placed in the layer of the room they
+/// stand in (ADR 0041), and a guard the projection places nowhere stands in no
+/// room at all. Built **on top of** `declaredRaid` and never inside it, for
+/// the reason that builder was cut from the quiet fixtures in the first place:
+/// every pin above is a raid nobody answers, and this is the one that is
+/// answered.
+let private withGuards (ours: (CreepInfo * Pos) list) (colony: ColonyView) =
+    let outpost = SpatialInfo.layerOf colony.Spatial "W1N2"
+
+    { colony with
+        Creeps = colony.Creeps @ List.map fst ours
+        Spatial =
+            colony.Spatial
+            |> withNeighbour
+                "W1N2"
+                { outpost with
+                    CreepPositions =
+                        (outpost.CreepPositions, ours)
+                        ||> List.fold (fun tiles (creep, pos) -> Map.add creep.Name pos tiles)
+                }
+    }
+
+/// The tile a body the guard row casts stands on: `haulHome`'s corridor is one
+/// wide and its spawn plugs it at (25,10), so (25,9) is the one tile beside the
+/// spawn on the outpost's own side — the oven's doorstep, and every step from
+/// here to the fight is a step toward the [[seam]].
+let private atSpawn = { X = 25; Y = 9 }
+
+/// The same raided outpost with a guard of ours standing **at home**, on the
+/// tile above: the [[guard]] row hires at the spawn (ADR 0056 decision 1), so
+/// this — and not `withGuards` — is where every body the colony really buys
+/// begins its life. One room and one [[seam]] from the fight, which is the whole
+/// of what the Task has to carry it over.
+let private withGuardAtHome (creep: CreepInfo) (pos: Pos) (colony: ColonyView) =
+    { colony with
+        Creeps = colony.Creeps @ [ creep ]
+        Spatial =
+            colony.Spatial
+            |> withHome (fun layer ->
+                { layer with
+                    CreepPositions = Map.add creep.Name pos layer.CreepPositions
+                })
+    }
+
+/// A `smallHealer` of the raid's, standing well off the fight at (22,47): it is
+/// no [[threat]], so it takes no ground and adds no ring tile, and the only
+/// thing it moves is the count rule's arithmetic (ADR 0056). Each one carries
+/// an id of its own, a raid being a roster and not one creep.
+let private healers count =
+    [
+        for i in 1..count ->
+            { hostileIn "W1N2" { X = 22; Y = 47 } smallHealer with
+                Id = $"heal-{i}"
+            }
+    ]
+
+/// This tick's pool for a colony, the two Planner halves in the order `decide`
+/// runs them — what reads a Task's [[priority]] and [[capacity]] without
+/// asking who won it.
+let private pooledOf colony =
+    let atlas = Atlas.ofView colony
+    planPool colony atlas (planTasks colony (threatsOf colony atlas))
+
+let private entryFor task pool =
+    pool |> List.tryFind (fun (entry: PooledTask) -> entry.Task = task)
+
+/// The [[guard]]'s two acts, read off the tick's Intents (ADR 0056).
+let private attacksOf intents =
+    intents
+    |> List.choose (function
+        | AttackCreep(name, hostile) -> Some(name, hostile)
+        | _ -> None)
+
+let private healsOf intents =
+    intents
+    |> List.choose (function
+        | HealCreep(name, target) -> Some(name, target)
+        | _ -> None)
+
+/// The rows a verbose scoring rejected for one creep, in pool order.
+let private rejectionsFor name verdicts =
+    verdicts
+    |> List.tryPick (function
+        | Verdict.Scoring(creep, rows) when creep = name ->
+            rows
+            |> List.choose (function
+                | Candidate.Rejected(task, reason) -> Some(task, reason)
+                | Candidate.Scored _ -> None)
+            |> Some
+        | _ -> None)
+
+/// The ring tile the fixture's cases stand a guard on: south-west of the
+/// invader at (25,42), inside its range-1 ring and so inside the Work Area —
+/// and **free**, which the tiles due west and east of the invader are not. The
+/// engine puts no two bodies on one tile and the Atlas's occupancy grid cannot
+/// say that it did, so a guard stood on `h-out1`'s own (24,42) would price the
+/// two of them as one body and walk these cases over a census the live colony
+/// never sees.
+let private beside = { X = 24; Y = 43 }
+
+/// A second free ring tile of the same invader, for the cases that stand two
+/// guards up — south-east where `beside` is south-west, and `h-out2`'s (26,42)
+/// left to `h-out2`.
+let private besideToo = { X = 26; Y = 43 }
+
+[<Tests>]
+let guardTaskTests =
+    testList
+        "the Guard of a raided outpost"
+        [
+            test "the raid pools one Guard, keyed on the room and ranked with Flee" {
+                // ADR 0056 decision 2 at the Planner's seam: one Task per
+                // declared [[outpost]] a [[threat]] stands in, keyed on the
+                // **room** — `guard:W1N2` and never the invader's id, so the
+                // 2% multi-creep raid pools one Task and not five. Pairwise
+                // against the same geometry with nothing in it: what moves
+                // between the two calls is the raid.
+                let quiet = pooledOf (declaredRaid [])
+                let raided = pooledOf (declaredRaid raiders)
+
+                Expect.isNone
+                    (entryFor (Guard "W1N2") quiet)
+                    "the premise: a quiet outpost is no fight and pools none"
+
+                Expect.equal
+                    (raided
+                     |> List.map (fun entry -> taskId entry.Task)
+                     |> List.filter (fun id -> id.StartsWith "guard:")
+                     |> List.distinct)
+                    [ "guard:W1N2" ]
+                    "the raid pools exactly one, under the room's own name"
+
+                // The Safety tier's [[priority]] with no rung of its own: the
+                // two Tasks of that tier carry one number, and nothing ever
+                // asks how they order.
+                Expect.equal
+                    (raided |> entryFor (Guard "W1N2") |> Option.map (fun e -> e.Priority))
+                    (raided |> entryFor Flee |> Option.map (fun e -> e.Priority))
+                    "and it ranks exactly where Flee does — Safety, no rung"
+            }
+
+            test "the cap is the room's own quota, one guard and then two" {
+                // The [[capacity]] is decision 2's "one number computed once
+                // and read as both the row's quota and the Task's cap": the
+                // Fighter share is `guardsWanted` for that room, so the bodies
+                // the cascade hires are the bodies the Task admits. Read
+                // pairwise off the raid alone — a lone `smallMelee` against the
+                // same raid carrying two healers, with one guard of ours
+                // already standing there for the second reading to be asked of.
+                let capOf colony =
+                    pooledOf colony
+                    |> entryFor (Guard "W1N2")
+                    |> Option.map (fun entry -> entry.Capacity.Fighters)
+
+                Expect.equal
+                    (capOf (declaredRaid raiders |> withGuards [ guard "g-1", beside ]))
+                    (Some(Some 1))
+                    "a raid that heals nothing admits one Fighter"
+
+                Expect.equal
+                    (capOf (
+                        declaredRaid (raiders @ healers 2) |> withGuards [ guard "g-1", beside ]
+                    ))
+                    (Some(Some 2))
+                    "and a raid healing 120 against our standing 90 admits the second"
+            }
+
+            test "a Fighter standing in the raided room is matched to the Guard" {
+                // Acceptance, and the hole ADR 0056 was written to fill: the
+                // room the [[hauler unit]]s run out of and the [[anchor]] is
+                // killed in now has one body whose Task is the fight. Pairwise
+                // against the same guard standing in the same room with nothing
+                // to fight, which is matched to nothing at all — a guard is
+                // applicable to no other work in the pool.
+                let raided =
+                    decide
+                        (declaredRaid raiders |> withGuards [ guard "g-1", beside ])
+                        Map.empty
+                        Set.empty
+                        None
+
+                let quiet =
+                    decide
+                        (declaredRaid [] |> withGuards [ guard "g-1", beside ])
+                        Map.empty
+                        Set.empty
+                        None
+
+                Expect.equal
+                    (Map.tryFind "g-1" quiet.Assignments)
+                    None
+                    "the premise: with no raid there is no Guard, and no other Task takes a body with no Work and no Carry"
+
+                Expect.equal
+                    (Map.tryFind "g-1" raided.Assignments)
+                    (Some(taskId (Guard "W1N2")))
+                    "the raid gives it the one Task it is for"
+
+                Expect.equal
+                    (Map.tryFind "h-out1" raided.Assignments)
+                    (Some(taskId Flee))
+                    "and the crew still runs: the guard answers the raid, it does not cancel it"
+
+                Expect.contains
+                    (sayIntents raided.Intents)
+                    ("g-1", "⚔️")
+                    "the bubble carries the Guard's own glyph"
+            }
+
+            test "the Emitter swings at range 1 and heals every tick" {
+                // ADR 0056 decision 2's Emitter, pairwise on one tile: 30 a
+                // part is paid at range 1 and nothing at range 2, so the swing
+                // is gated on the range and the self-heal is not — the row's
+                // one HEAL part is spent every tick the body holds the Task,
+                // walking or fighting.
+                let intentsFrom tile =
+                    (decide
+                        (declaredRaid raiders |> withGuards [ guard "g-1", tile ])
+                        Map.empty
+                        Set.empty
+                        None)
+
+                let inSwing = intentsFrom beside
+
+                // Off the raid's ground entirely — the y = 48 row this
+                // fixture's own [[flee]] cases run onto, so the body is
+                // outside the [[reach]] and four tiles from the invader.
+                let walking = intentsFrom { X = 28; Y = 48 }
+
+                Expect.equal
+                    (attacksOf inSwing.Intents)
+                    [ "g-1", "h-1" ]
+                    "standing on the invader's ring, the guard swings at it"
+
+                Expect.equal
+                    (healsOf inSwing.Intents)
+                    [ "g-1", "g-1" ]
+                    "and heals itself in the same tick, the two being different acts"
+
+                Expect.isEmpty
+                    (attacksOf walking.Intents)
+                    "four tiles away it swings at nothing: the act is not issued out of range"
+
+                Expect.equal
+                    (healsOf walking.Intents)
+                    [ "g-1", "g-1" ]
+                    "and heals all the same — every tick, not every arrival"
+
+                Expect.equal
+                    (Map.tryFind "g-1" walking.Assignments)
+                    (Some(taskId (Guard "W1N2")))
+                    "the body still holds the Task it is walking to"
+
+                Expect.isNonEmpty
+                    (moveIntentsFor "g-1" walking.Intents)
+                    "and the mover walks it there: the Emitter issues no movement of its own"
+            }
+
+            test
+                "with two Threats the one beside the Post is the target, and with no Post the nearest" {
+                // "Between the invader and the [[anchor]]" said in this
+                // colony's vocabulary (ADR 0056): the Threat nearest a [[post]]
+                // of that room, ties by id — the engine's own `findAttack.js`
+                // chases the closest hostile by path, so the guard on that
+                // invader's ring is between it and everything behind it.
+                //
+                // Two invaders, both within range 1 of the guard at (26,43):
+                // `inv-2` at (25,42) stands a tile from the Post at (25,41),
+                // `inv-1` at (27,44) three tiles from it — and the ids run the
+                // other way, so a target chosen by id alone would name `inv-1`
+                // in every reading below.
+                let invader id pos =
+                    { hostileIn "W1N2" pos smallMelee with
+                        Id = id
+                    }
+
+                let raid =
+                    [ invader "inv-2" { X = 25; Y = 42 }; invader "inv-1" { X = 27; Y = 44 } ]
+
+                let attacksFrom tile colony =
+                    (decide (colony |> withGuards [ guard "g-1", tile ]) Map.empty Set.empty None)
+                        .Intents
+                    |> attacksOf
+
+                let posted = declaredRaid raid
+                // The same room the tick before its container stands: no
+                // container, no Post, and so nothing to stand in front of.
+                let postless = beforeHaulContainer posted
+
+                Expect.equal
+                    (attacksFrom { X = 26; Y = 43 } posted)
+                    [ "g-1", "inv-2" ]
+                    "the Post decides it, over an id order that says otherwise"
+
+                Expect.equal
+                    (attacksFrom { X = 26; Y = 43 } postless)
+                    [ "g-1", "inv-1" ]
+                    "with no Post the guard's own tile decides, and equal distances tie by id"
+
+                Expect.equal
+                    (attacksFrom beside postless)
+                    [ "g-1", "inv-2" ]
+                    "which is a distance and not the id: one tile away wins over three"
+
+                // **The range gate is on the candidates, not on the pick.**
+                // (28,44) is a ring tile of `inv-1` and three from `inv-2`, so
+                // the Threat nearest the Post is out of reach and the other one
+                // is beside the body dealing 40 a tick. Ordered the ADR's
+                // sentence literally — nearest the Post, then filtered by range
+                // — the guard would swing at nothing here for as long as it
+                // stood, which is not what "30 a part is paid at range 1" is a
+                // reason for.
+                Expect.equal
+                    (attacksFrom { X = 28; Y = 44 } posted)
+                    [ "g-1", "inv-1" ]
+                    "out of reach of the Post's own invader, the guard hits the one it can reach"
+            }
+
+            test "the cap refuses the second Fighter while the room wants one" {
+                // The [[capacity]] counted at the Matcher (ADR 0052 decision
+                // 6): the room wants one guard this tick, so the second body
+                // standing in the same ring is refused by the number the
+                // Planner set — named, so a verbose reading tells "the room is
+                // full" from "this body cannot fight".
+                let colony =
+                    declaredRaid raiders
+                    |> withGuards [ guard "g-1", beside; guard "g-2", besideToo ]
+
+                let decision = decide colony Map.empty (Set.singleton "g-2") None
+
+                Expect.equal
+                    (Map.tryFind "g-1" decision.Assignments)
+                    (Some(taskId (Guard "W1N2")))
+                    "the first Fighter takes the fight"
+
+                Expect.notEqual
+                    (Map.tryFind "g-2" decision.Assignments)
+                    (Some(taskId (Guard "W1N2")))
+                    "and the second does not hold it beside him"
+
+                Expect.contains
+                    (rejectionsFor "g-2" decision.Verdicts |> Option.defaultValue [])
+                    (taskId (Guard "W1N2"), RejectReason.CapacityFull)
+                    "the cap is what refused it, and the scoring says so"
+            }
+
+            test "a hauler and a worker are refused the fight they are standing in" {
+                // The other half of the [[capacity]] sentence — `Fighter -> the
+                // room's quota, every other class 0` — read where it is asked
+                // first: the body gate (ADR 0056's applicability clause) shuts
+                // every body with no ATTACK part out before the number is ever
+                // counted, so neither the crowd that runs from a raid nor the
+                // [[anchor]] that cannot run can be matched into it. Both
+                // classes, because both stand in this room and the acceptance
+                // names both: a [[hauler unit]] is a `Carrier`, the Anchor a
+                // `Heavy`, and the `Fighters` share admits neither.
+                let colony = declaredRaid raiders |> withGuards [ guard "g-1", beside ]
+
+                let decision = decide colony Map.empty (Set.ofList [ "h-out1"; "a-out" ]) None
+
+                Expect.contains
+                    (rejectionsFor "h-out1" decision.Verdicts |> Option.defaultValue [])
+                    (taskId (Guard "W1N2"), RejectReason.Inapplicable)
+                    "no ATTACK part, no fight"
+
+                Expect.contains
+                    (rejectionsFor "a-out" decision.Verdicts |> Option.defaultValue [])
+                    (taskId (Guard "W1N2"), RejectReason.Inapplicable)
+                    "and the work-heavy body standing on the Post is refused it too, Work being no weapon"
+
+                Expect.equal
+                    (Map.tryFind "g-1" decision.Assignments)
+                    (Some(taskId (Guard "W1N2")))
+                    "while the one body that carries one holds it"
+            }
+
+            test "the guard the row cast at home is priced across the Seam and walks it" {
+                // **The body every guard really is.** The row hires at the
+                // spawn (ADR 0056 decision 1), so the guard the colony buys
+                // begins a room and a [[seam]] away from the ring it was bought
+                // for, and decision 2 gives it "no movement of its own — the
+                // mover walks it into the Work Area like any other Task". That
+                // is a claim about the *price*: a Work Area filed under the
+                // raided room and priced over the creep's own room alone would
+                // reject this body `Unreachable` on every tick of its 1,500,
+                // and its non-decaying `Living` would suppress the next cast —
+                // 750 energy standing at the oven while the outpost is emptied.
+                //
+                // Pairwise against the same body inside the room, which is what
+                // every other case here stands: what moves between the two
+                // readings is the border, and the answer must not.
+                let across =
+                    decide
+                        (declaredRaid raiders |> withGuardAtHome (guard "g-home") atSpawn)
+                        Map.empty
+                        (Set.singleton "g-home")
+                        None
+
+                let inside =
+                    decide
+                        (declaredRaid raiders |> withGuards [ guard "g-home", beside ])
+                        Map.empty
+                        Set.empty
+                        None
+
+                Expect.equal
+                    (Map.tryFind "g-home" inside.Assignments)
+                    (Some(taskId (Guard "W1N2")))
+                    "the premise: standing on the ring, the body holds the fight"
+
+                Expect.equal
+                    (Map.tryFind "g-home" across.Assignments)
+                    (Some(taskId (Guard "W1N2")))
+                    "and a border away it holds the same fight — the walk is a price, not a refusal"
+
+                Expect.isEmpty
+                    (rejectionsFor "g-home" across.Verdicts
+                     |> Option.defaultValue []
+                     |> List.filter (fun (task, reason) ->
+                         task = taskId (Guard "W1N2") && reason = RejectReason.Unreachable))
+                    "and it is not rejected Unreachable: the ring across a Seam is priced over the Seam"
+
+                Expect.equal
+                    (moveIntentsFor "g-home" across.Intents)
+                    [ MoveCreep("g-home", Direction.Top) ]
+                    "the mover walks it there, up the corridor toward the crossing into W1N2"
+            }
+
+            test "the room clears and the Guard goes with it: the holder is released TaskGone" {
+                // The Task is a per-tick fact read off vision, exactly as the
+                // row's quota is (ADR 0056): the tick nothing armed is standing
+                // in that outpost the Guard leaves the pool, and its holder is
+                // released under the reason that says the work itself is gone
+                // rather than that a raid took its ground.
+                let held = Map.ofList [ "g-1", taskId (Guard "W1N2") ]
+
+                let releasesOf hostiles =
+                    (decide
+                        (declaredRaid hostiles |> withGuards [ guard "g-1", beside ])
+                        held
+                        Set.empty
+                        None)
+                        .Verdicts
+                    |> List.choose (function
+                        | Verdict.Released(creep, task, reason) -> Some(creep, task, reason)
+                        | _ -> None)
+
+                Expect.isEmpty
+                    (releasesOf raiders)
+                    "the premise: while the invader stands, the guard keeps the fight"
+
+                Expect.equal
+                    (releasesOf [])
+                    [ "g-1", taskId (Guard "W1N2"), ReleaseReason.TaskGone ]
+                    "and the tick it is gone the Task is gone, not merely threatened"
+            }
+        ]
+
 [<Tests>]
 let containerSwitchTests =
     testList

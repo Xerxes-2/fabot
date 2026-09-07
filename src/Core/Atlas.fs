@@ -1212,8 +1212,11 @@ let targetRoom (atlas: Atlas) (targetId: string) : string option =
 /// What a Task acts on, and the Chebyshev range its action reaches from
 /// (Screeps: harvest, withdraw, transfer and reserveController at range 1;
 /// build, repair and upgrade at range 3) — the one pair every geometry query
-/// starts from. None for a Task that acts on nothing: Flee has no target and no
-/// action (ADR 0033).
+/// starts from. None for a Task the projection places nothing for: Flee has no
+/// target and no action (ADR 0033), and a Guard's target is a hostile creep,
+/// which is no target of the projection's at all — its geometry is the colony's
+/// own `Threats` and its act is the Emitter's, so every query below gives it
+/// Flee's answer and the decision layer carries both (ADR 0056).
 let private actionOn =
     function
     | Harvest id
@@ -1225,7 +1228,8 @@ let private actionOn =
     | Build id
     | Repair id
     | Upgrade id -> Some(id, 3)
-    | Flee -> None
+    | Flee
+    | Guard _ -> None
 
 /// The [[refill cluster]] this Task *is*, if it is one (ADR 0054): a Refill
 /// whose target is the cluster's spawn is the whole ring's, and every other
@@ -1833,21 +1837,42 @@ let seamWalkTicks (atlas: Atlas) (fromRoom: string) (toRoom: string) (from: Pos)
             |> Option.map (fun own -> reached - own)
 
 /// The far leg's flood for one Task and one body, memoised colony-wide: the
-/// price, from every tile of the target's room, of stepping onto that tile
-/// and walking in to the Task's Work Area there (`floodPricedInto`). Its
-/// origin is the target, so one entry answers every creep the colony prices
-/// this Task for — ADR 0041's reason the cross-room walk is a minimum over
-/// additions rather than over floods.
-let private farFlood (atlas: Atlas) (pricing: Pricing) (creep: string) (room: string) (task: Task) =
+/// price, from every tile of the named room, of stepping onto that tile and
+/// walking in to the ground that Task is worked from there (`floodPricedInto`).
+/// Its origin is that ground and not a creep, so one entry answers every creep
+/// the colony prices this Task for — ADR 0041's reason the cross-room walk is a
+/// minimum over additions rather than over floods.
+///
+/// The origins are the caller's, for the one Task the projection places no
+/// target for: a Guard's ground is the colony's own `Threats` and no target's
+/// surroundings (ADR 0056), so it arrives here as tiles rather than as
+/// something `narrowedArea` could derive. The memo key is `(room, task, …)` all
+/// the same and still answers one flood per key, because within a tick a Task
+/// has one such ground: `farFlood` below is the only other seeder and it is
+/// reached only through `borderCrossing`, which answers `None` for a Guard.
+let private farFloodInto
+    (atlas: Atlas)
+    (pricing: Pricing)
+    (creep: string)
+    (room: string)
+    (task: Task)
+    (origins: Pos list)
+    =
     let factor = factorOf atlas creep
 
     memoised atlas.FarFloods (room, task, workHeavy atlas creep, factor, pricing) (fun () ->
-        floodPricedInto
-            (weightsOf atlas room)
-            (occupiedOf atlas room)
-            factor
-            pricing
-            (narrowedArea atlas creep task |> RoomPos.tilesIn room))
+        floodPricedInto (weightsOf atlas room) (occupiedOf atlas room) factor pricing origins)
+
+/// The same flood over the ground a Task's own target names — `narrowedArea`'s
+/// share of the target's room.
+let private farFlood (atlas: Atlas) (pricing: Pricing) (creep: string) (room: string) (task: Task) =
+    farFloodInto
+        atlas
+        pricing
+        creep
+        room
+        task
+        (narrowedArea atlas creep task |> RoomPos.tilesIn room)
 
 /// The near leg of a cross-room join, in the two shapes its callers hand it:
 /// the tick's own per-creep flood, which the join may push further, and one
@@ -1988,13 +2013,14 @@ let private joinedAcross
 
     best
 
-/// A creep's cross-room price toward a Task: the join above over this creep's
-/// own memoised flood and the Task's far leg, the one flooded out of the
-/// target and shared colony-wide, so a second creep pricing the same Task
-/// across the same border pays for no second flood (ADR 0041). The band is
-/// read before either flood is forced, a pair of rooms with no Seam having
-/// nothing to pay for (ADR 0004).
-let private pricedAcross
+/// A creep's cross-room price toward ground in another room: the join above
+/// over this creep's own memoised flood and the far leg, the one flooded out of
+/// that ground and shared colony-wide, so a second creep pricing the same Task
+/// across the same border pays for no second flood (ADR 0041). The band is read
+/// before either flood is forced, a pair of rooms with no Seam having nothing
+/// to pay for (ADR 0004). The far ground is the caller's, for the reason
+/// `farFloodInto` above carries.
+let private pricedAcrossInto
     (atlas: Atlas)
     (pricing: Pricing)
     (creep: string)
@@ -2002,12 +2028,13 @@ let private pricedAcross
     (creepRoom: string)
     (from: Pos)
     (targetRoom: string)
+    (origins: Pos list)
     : (int * Pos) option =
     match seams atlas creepRoom targetRoom with
     | [] -> None
     | band ->
         let near = flood atlas pricing creepRoom creep from
-        let far = farFlood atlas pricing creep targetRoom task
+        let far = farFloodInto atlas pricing creep targetRoom task origins
 
         joinedAcross
             atlas
@@ -2019,6 +2046,26 @@ let private pricedAcross
             band
             (Resuming near)
             (reachedIn far)
+
+/// The same price toward the ground a Task's own target names.
+let private pricedAcross
+    (atlas: Atlas)
+    (pricing: Pricing)
+    (creep: string)
+    (task: Task)
+    (creepRoom: string)
+    (from: Pos)
+    (targetRoom: string)
+    : (int * Pos) option =
+    pricedAcrossInto
+        atlas
+        pricing
+        creep
+        task
+        creepRoom
+        from
+        targetRoom
+        (narrowedArea atlas creep task |> RoomPos.tilesIn targetRoom)
 
 /// The cheapest path from a creep to a set of tiles under one pricing — the
 /// shape travel cost and the walk share, so the two can disagree on what a step
@@ -2103,6 +2150,33 @@ let travelCost (atlas: Atlas) (creep: string) (task: Task) : int option =
 /// at 0; with no target there is no unplaced-target escape.
 let travelCostWithin (atlas: Atlas) (creep: string) (area: Set<RoomPos>) : int option =
     pricedPathTo atlas TravelCost creep area
+
+/// Travel cost to an explicit set of tiles that names **its own room** — the
+/// third member of the pair above, and the one a Seam does not stop. Inside
+/// that room it is `travelCostWithin`'s answer; from outside it is the same
+/// minimum over the Seam band every cross-room Task is priced by
+/// (`pricedAcross`), taken toward the tiles the caller handed in rather than
+/// toward a target's surroundings.
+///
+/// It exists for the [[guard]] (ADR 0056), whose Work Area is the colony's own
+/// `Threats` and whose Task the projection places no target for: `travelCost`'s
+/// crossing is derived from that target, so without this a Guard would price as
+/// unreachable to every body not already standing in the raided room — which is
+/// every body the guard row casts, the spawn being at home. An unplaced creep
+/// prices at 0; a room no Seam joins, or a ring nothing reaches, has no price
+/// at all (ADR 0004).
+let travelCostToward
+    (atlas: Atlas)
+    (creep: string)
+    (task: Task)
+    (room: string)
+    (area: Set<RoomPos>)
+    : int option =
+    match Map.tryFind creep atlas.CreepAt with
+    | Some(creepRoom, from) when creepRoom <> room ->
+        pricedAcrossInto atlas TravelCost creep task creepRoom from room (RoomPos.tilesIn room area)
+        |> Option.map fst
+    | _ -> pricedPathTo atlas TravelCost creep area
 
 /// The creep's walk to a Task's Work Area (ADR 0029): the whole ticks its body
 /// needs along a cheapest path, every step floored at one tick and today's
@@ -2224,16 +2298,41 @@ let private firstStepVia
                     let _, goal = List.min reachable
                     Some(RoomPos.at room (posAt (firstStepOn near (indexOf pos) (indexOf goal))))
 
-/// The step a creep takes toward a Task whose target stands in another room:
-/// toward the near side of the Seam the price was paid at. The exit tile is the
-/// creep's *own* room's border tile, so aiming at it asks nothing of the
+/// The step toward the near side of a crossing already won: the exit tile is
+/// the creep's *own* room's border tile, so aiming at it asks nothing of the
 /// neighbour and arbitrates nothing across the Seam — ADR 0041's boundary
 /// stands exactly where it stood — and the engine puts the creep down in the
 /// neighbour at the end of the tick it steps on, from where every rule already
-/// written takes it on. The exit is the one `pricedAcross` won on, taken out of
-/// that same minimisation rather than looked for again: a second argmin agrees
-/// on every number and splits on every tie, which walks a creep to one crossing
-/// while ranking it at another. Total (ADR 0004): no crossing, no step.
+/// written takes it on. The exit is the one the price was minimised at, handed
+/// in rather than looked for again: a second argmin agrees on every number and
+/// splits on every tie, which walks a creep to one crossing while ranking it at
+/// another. Written once because the two crossings below — a Task's target's,
+/// and a named room's — differ in what they price and in nothing they walk.
+/// Total (ADR 0004): no winning crossing, no step.
+let private stepOnto
+    (atlas: Atlas)
+    (pricing: Pricing)
+    (creep: string)
+    (creepRoom: string)
+    (from: Pos)
+    (won: (int * Pos) option)
+    : RoomPos option =
+    won
+    |> Option.bind (fun (_, exitTile) ->
+        // The near side the price was taken over, origin and all
+        // (`besideExitFrom`, #175): a creep the engine parked on the
+        // ring beside the winning crossing steps onto it from there,
+        // exactly as it was priced to.
+        let approach = besideExitFrom (weightsOf atlas creepRoom) from exitTile
+
+        if List.contains from approach then
+            Some(RoomPos.at creepRoom exitTile)
+        else
+            firstStepVia atlas pricing creep (RoomPos.setAt creepRoom (Set.ofList approach)))
+
+/// The step a creep takes toward a Task whose target stands in another room:
+/// the near side of the Seam `pricedAcross` paid at, taken out of that same
+/// minimisation. Total (ADR 0004): no crossing, no step.
 let private stepAcross
     (atlas: Atlas)
     (pricing: Pricing)
@@ -2244,17 +2343,26 @@ let private stepAcross
     | None -> None
     | Some(creepRoom, from, targetRoom) ->
         pricedAcross atlas pricing creep task creepRoom from targetRoom
-        |> Option.bind (fun (_, exitTile) ->
-            // The near side the price was taken over, origin and all
-            // (`besideExitFrom`, #175): a creep the engine parked on the
-            // ring beside the winning crossing steps onto it from there,
-            // exactly as it was priced to.
-            let approach = besideExitFrom (weightsOf atlas creepRoom) from exitTile
+        |> stepOnto atlas pricing creep creepRoom from
 
-            if List.contains from approach then
-                Some(RoomPos.at creepRoom exitTile)
-            else
-                firstStepVia atlas pricing creep (RoomPos.setAt creepRoom (Set.ofList approach)))
+/// The same crossing step toward an explicit set of tiles that names its own
+/// room — `travelCostToward`'s mover, so the body walks the Seam it was priced
+/// over and no second rule decides where a [[guard]] crosses (ADR 0056). Total:
+/// a creep already in that room asks no crossing and is answered by the in-room
+/// step above it.
+let private stepToward
+    (atlas: Atlas)
+    (pricing: Pricing)
+    (creep: string)
+    (task: Task)
+    (room: string)
+    (area: Set<RoomPos>)
+    : RoomPos option =
+    match Map.tryFind creep atlas.CreepAt with
+    | Some(creepRoom, from) when creepRoom <> room ->
+        pricedAcrossInto atlas pricing creep task creepRoom from room (RoomPos.tilesIn room area)
+        |> stepOnto atlas pricing creep creepRoom from
+    | _ -> None
 
 /// The first step of a cheapest path from a creep to a set of goal tiles,
 /// priced in the creep's own cost — a slow body may detour differently than a
@@ -2319,6 +2427,24 @@ let stepTowardRoom (atlas: Atlas) (creep: string) (room: string) : RoomPos optio
                 |> RoomPos.setAt creepRoom
                 |> firstStepVia atlas TravelCost creep
     | _ -> None
+
+/// The first step toward an explicit set of tiles that names its own room:
+/// `firstStep`'s answer for a Task whose ground the projection places no target
+/// for, and so the mover half of `travelCostToward`. In the room it is the
+/// in-room step; from outside it is the near side of the Seam the price was
+/// won at. It is what walks a [[guard]] out of the home room the row cast it in
+/// and into the raided outpost (ADR 0056), which is ADR 0033's "the mover walks
+/// it into the Work Area like any other Task".
+let firstStepToward
+    (atlas: Atlas)
+    (creep: string)
+    (task: Task)
+    (room: string)
+    (goals: Set<RoomPos>)
+    : RoomPos option =
+    match firstStepVia atlas TravelCost creep goals with
+    | Some step -> Some step
+    | None -> stepToward atlas TravelCost creep task room goals
 
 /// The first step the same body would take were no tile occupied — the
 /// traffic-blind route, otherwise priced exactly like `firstStep`. The Resolver
