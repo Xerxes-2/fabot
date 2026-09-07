@@ -3744,8 +3744,10 @@ let guardTaskTests =
                 // Fighter share is `guardsWanted` for that room, so the bodies
                 // the cascade hires are the bodies the Task admits. Read
                 // pairwise off the raid alone — a lone `smallMelee` against the
-                // same raid carrying two healers, with one guard of ours
-                // already standing there for the second reading to be asked of.
+                // same raid carrying two healers, whose 120 out-heals the 90
+                // one `guardPattern` block deals (#272), with one guard of
+                // ours standing in both readings so that what moves between
+                // them is the raid and nothing of ours.
                 let capOf colony =
                     pooledOf colony
                     |> entryFor (Guard "W1N2")
@@ -3761,7 +3763,7 @@ let guardTaskTests =
                         declaredRaid (raiders @ healers 2) |> withGuards [ guard "g-1", beside ]
                     ))
                     (Some(Some 2))
-                    "and a raid healing 120 against our standing 90 admits the second"
+                    "and a raid healing 120 against the 90 one guard block deals admits the second"
             }
 
             test "a Fighter standing in the raided room is matched to the Guard" {
@@ -3941,6 +3943,65 @@ let guardTaskTests =
                     (rejectionsFor "g-2" decision.Verdicts |> Option.defaultValue [])
                     (taskId (Guard "W1N2"), RejectReason.CapacityFull)
                     "the cap is what refused it, and the scoring says so"
+            }
+
+            test "the escalation does not evict the reinforcement it just bought" {
+                // #272, ADR 0056 decision 1 as amended: the count is a
+                // function of the **raid** — the healing per tick against the
+                // damage of the body the row would cast — so it cannot retract
+                // on the arrival of the body it asked for. Read on the
+                // reproduction that found it. Priced against the guards
+                // standing there, the same two-healer raid admitted two while
+                // one guard stood and one the tick the second arrived, and the
+                // arriving body was `CapacityFull`-evicted onto a Flee whose
+                // safe set is this same room: it never left, so its own damage
+                // held the count at one and the colony had bought 750 energy
+                // of body that never issues an `AttackCreep`, for as long as
+                // it lived. Pairwise against the case above, whose raid heals
+                // nothing and where the second body is refused for good. The
+                // damage the healing is measured against is one block of the
+                // row's own body, a constant, so this holds at whatever the
+                // fixture banks.
+                let capOf colony =
+                    pooledOf colony
+                    |> entryFor (Guard "W1N2")
+                    |> Option.map (fun entry -> entry.Capacity.Fighters)
+
+                let raid = declaredRaid (raiders @ healers 2)
+
+                Expect.equal
+                    (capOf (raid |> withGuards [ guard "g-1", beside ]))
+                    (Some(Some 2))
+                    "the premise: 120 healed against the 90 one guard block deals admits two"
+
+                Expect.equal
+                    (capOf (raid |> withGuards [ guard "g-1", beside; guard "g-2", besideToo ]))
+                    (Some(Some 2))
+                    "and the second guard standing in the ring does not close the cap behind it"
+
+                let decision =
+                    decide
+                        (raid |> withGuards [ guard "g-1", beside; guard "g-2", besideToo ])
+                        Map.empty
+                        (Set.singleton "g-2")
+                        None
+
+                Expect.equal
+                    (Map.tryFind "g-1" decision.Assignments)
+                    (Some(taskId (Guard "W1N2")))
+                    "the first Fighter keeps the fight"
+
+                Expect.equal
+                    (Map.tryFind "g-2" decision.Assignments)
+                    (Some(taskId (Guard "W1N2")))
+                    "and the second holds it beside him rather than fleeing the room it is standing in"
+
+                Expect.isEmpty
+                    (rejectionsFor "g-2" decision.Verdicts
+                     |> Option.defaultValue []
+                     |> List.filter (fun (task, reason) ->
+                         task = taskId (Guard "W1N2") && reason = RejectReason.CapacityFull))
+                    "with nothing left to reject it for: the cap is the raid's number and it did not move"
             }
 
             test "a hauler and a worker are refused the fight they are standing in" {

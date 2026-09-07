@@ -65,15 +65,16 @@ module Engine =
     let rangedRange = 3
 
     /// ATTACK_POWER: the hits one ATTACK part takes off a creep at range 1.
-    /// The guard row's count rule prices our own damage with it (ADR 0056) —
-    /// melee is 0.231 damage per energy against ranged's 0.050, which is why
-    /// that row's block is an ATTACK block.
+    /// The guard row's count rule prices one block of that row's body with it
+    /// (ADR 0056, as #272 amends it) — melee is 0.231 damage per energy against
+    /// ranged's 0.050, which is why that row's block is an ATTACK block.
     let attackPower = 30
 
     /// RANGED_ATTACK_POWER: the hits one RANGED_ATTACK part takes off a single
-    /// target at range 1..3. Read beside `attackPower` over our own standing
-    /// guards, so a body carrying one is priced for what it can actually do
-    /// even though the row never buys one (ADR 0056).
+    /// target at range 1..3. Read beside `attackPower` over the guard row's own
+    /// block (ADR 0056, as #272 amends its count rule), so a block that ever
+    /// carried one would be priced for what it can actually do even though
+    /// today's buys none.
     let rangedAttackPower = 10
 
     /// HEAL_POWER: the hits one HEAL part puts back at range 1 — the rate a

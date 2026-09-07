@@ -1369,21 +1369,20 @@ let private reserverBodyWithin claims capacity =
 /// part (ADR 0056). The same part test `findAttack.js` splits the engine's own
 /// invaders on, and the one cut no other row of this colony makes — every other
 /// row is built out of Work, Carry, Move and CLAIM — so it is asked **first**,
-/// beside `Fighter`'s place at the head of the [[body class]] ladder, and it is
-/// written here rather than beside `isHaulerBody` because the guard row's own
-/// quota below is its first reader. Read off
+/// beside `Fighter`'s place at the head of the [[body class]] ladder. Read off
 /// the parts like every other row predicate (ADR 0006), so a fighting body the
 /// colony was handed rather than cast fills this row's quota exactly as one it
 /// cast does.
 let private isGuardBody (creep: CreepInfo) =
     creep.Body |> Map.tryFind Attack |> Option.exists (fun n -> n > 0)
 
-/// How many guards one raided [[outpost]] wants (ADR 0056), which is **0** for
-/// the whole of a colony's ordinary life because no room is raided: one guard
-/// per declared outpost a [[threat]] stands in this tick, two where the raid
-/// out-heals the guards already standing there, capped at two and — for the
-/// row's own quota — summed over the outposts. A per-tick fact read off vision
-/// and nothing remembered between ticks — vision
+/// How many guards one raided [[outpost]] wants (ADR 0056 decision 1, as #272
+/// amends it), which is **0** for the whole of a colony's ordinary life because
+/// no room is raided: one guard per declared outpost a [[threat]] stands in
+/// this tick, two where that raid's healing is at least the damage **one guard
+/// block** deals, capped at two and — for the row's own quota — summed over the
+/// outposts. A per-tick fact read off vision and nothing remembered between
+/// ticks — vision
 /// in a guarded outpost *is* the guard — so it falls to 0 the tick the room is
 /// clear; it does not decay in between, and it needs none: a cast is 1,500
 /// ticks of body and a raid is 1,500 ticks, so one cast covers one raid by
@@ -1392,25 +1391,31 @@ let private isGuardBody (creep: CreepInfo) =
 /// The second guard's arithmetic is the engine's, over the parts the projection
 /// already carries. The raid heals at `Engine.healPower` per HEAL part **over
 /// every hostile in that room** — a `smallHealer` is no Threat itself and is
-/// exactly what buys the second body — and our standing guards deal
-/// `Engine.attackPower` per ATTACK plus `Engine.rangedAttackPower` per
-/// RANGED_ATTACK. So one 750-energy guard's 90 stands against an unboosted
-/// `smallHealer`'s 60 and the count stays at one; a second healer's 120 casts
-/// the second.
+/// exactly what buys the second body — against `Engine.attackPower` per ATTACK
+/// plus `Engine.rangedAttackPower` per RANGED_ATTACK of **one `guardPattern`
+/// block**, the 750-energy body decision 1's every worked number is written in.
+/// So an unboosted `smallHealer`'s 60 stands against that block's 90 and the
+/// count stays at one, and a second healer's 120 buys the second body — at
+/// every bank, the block being a constant of the row and not a reading of this
+/// colony. The whole body the row would cast is deliberately *not* the term: it
+/// grows with the bank while the row's `Living` counts the body that is
+/// standing, so a survivor cast at a smaller bank would veto its own
+/// reinforcement, and the escalation decision 1 is written for would go out of
+/// reach above a 1,300 bank.
 ///
-/// The escalation is asked **only of a room a guard of ours already stands in**
-/// — `damage > 0` and not `healing >= damage` alone — because the damage term
-/// counts what is standing there and an empty room's is honestly zero, which
-/// every raid carrying a single HEAL part out-heals by arithmetic. Read without
-/// that conjunct the rule degenerates to "a healer in the room buys two guards"
-/// on the tick a raid is first seen: two bodies for the raid ADR 0056 prices at
-/// one, and its sentence above is written of a guard that has *arrived*. So the
-/// first body is bought against the [[threat]] and the second against a fight
-/// the colony can measure, the escalation arriving one oven later — which is the
-/// direction decision 4's two-cast bound and the [[stand-down]] behind it exist
-/// to hold. It is also what keeps a lone `smallMelee` met by an empty room at
-/// one rather than at `0 >= 0`, and a raid that heals **nothing** buys no second
-/// body whatever our damage is.
+/// **The count reads the raid and never our own answer to it** (#272). Priced
+/// against the guards *standing* in the room it was not monotone — 2 while one
+/// stood, 1 the tick the second arrived — so the escalation cancelled itself:
+/// the reinforcement it had just bought was `CapacityFull`-evicted on arrival,
+/// onto a [[flee]] whose safe set is that same room, where it stood for its
+/// whole life holding the count down with its own damage. Nothing about the
+/// bodies already sent enters this, which is what makes the number monotone in
+/// the raid: the row hires the second guard, the Task's cap admits it, and
+/// neither can retract while the raid is unchanged. Never a living body, for
+/// the reason ADR 0042 stopped reading the living Anchor's (#208): a quota
+/// priced off a body that stands moves when that body dies. The block is a
+/// whole 90, so the damage term is never zero and a raid that heals **nothing**
+/// buys no second body.
 ///
 /// Vision is the whole of what this reads (ADR 0004): an outpost the colony
 /// cannot see this tick carries no hostiles and asks for no guard, which is the
@@ -1424,30 +1429,24 @@ let private isGuardBody (creep: CreepInfo) =
 /// Planner set, which is ADR 0052 decision 6. Asked only of a room
 /// `guardedOutposts` has already answered for — a room with no Threat in it is
 /// not one guard but none.
-let private guardsWanted (view: ColonyView) atlas (room: string) : int =
+let private guardsWanted (view: ColonyView) (room: string) : int =
     let parts part body =
         body |> List.filter ((=) part) |> List.length
 
-    let hostiles = view.Hostiles |> List.filter (fun h -> h.Pos.Room = room)
-    let healing = hostiles |> List.sumBy (fun h -> Engine.healPower * parts Heal h.Body)
+    let healing =
+        view.Hostiles
+        |> List.filter (fun h -> h.Pos.Room = room)
+        |> List.sumBy (fun h -> Engine.healPower * parts Heal h.Body)
 
     let damage =
-        view.Creeps
-        |> List.filter (fun creep ->
-            isGuardBody creep
-            && (Atlas.creepTile atlas creep.Name |> Option.exists (fun tile -> tile.Room = room)))
-        |> List.sumBy (fun creep ->
-            let count part =
-                creep.Body |> Map.tryFind part |> Option.defaultValue 0
+        Engine.attackPower * parts Attack guardPattern.Block
+        + Engine.rangedAttackPower * parts RangedAttack guardPattern.Block
 
-            Engine.attackPower * count Attack
-            + Engine.rangedAttackPower * count RangedAttack)
-
-    if damage > 0 && healing >= damage then 2 else 1
+    if healing >= damage then 2 else 1
 
 /// The guard row's quota: `guardsWanted` over every raided outpost, summed.
-let private guardQuota (view: ColonyView) atlas : int =
-    guardedOutposts view |> List.sumBy (guardsWanted view atlas)
+let private guardQuota (view: ColonyView) : int =
+    guardedOutposts view |> List.sumBy (guardsWanted view)
 
 /// The reserver row's quota and its sizing, which are one rule with two faces
 /// (ADR 0042, ADR 0006's law that a row arrives with its quota): one reserver
@@ -2015,7 +2014,7 @@ let private planSpawns
         // the ticks a raid stands in a declared outpost, one or two per raided
         // room. Read here beside the others because it is an addend of the
         // target below and a gap of its own in the cascade.
-        let guardQuota = guardQuota view atlas
+        let guardQuota = guardQuota view
 
         // The anchor row's ceilings this tick, one per Post, read once beside
         // the quotas for the reason the reserver's demand list is (ADR 0042,
@@ -4205,11 +4204,12 @@ let planPool (view: ColonyView) atlas (tasks: Task list) : PooledTask list =
         // `guardsWanted` is the row's own arithmetic, read here a second time
         // rather than restated, so the number the cascade hires against and the
         // number the Matcher counts holders against are one number. One or two
-        // — a second body only where a guard of ours is already standing in
-        // that room and the raid out-heals it — and the class share is what
-        // keeps the [[hauler unit]]s and the workers out of a Task whose whole
-        // Work Area is a Reach.
-        | Guard room -> Capacity.fighters (guardsWanted view atlas room)
+        // — a second body where the raid out-heals the one the row would cast,
+        // and a number that reads no guard of ours, so the cap cannot shut on
+        // the arrival of the body it bought (#272) — and the class share is
+        // what keeps the [[hauler unit]]s and the workers out of a Task whose
+        // whole Work Area is a Reach.
+        | Guard room -> Capacity.fighters (guardsWanted view room)
         // One holder per controller (ADR 0042, ADR 0047). A reservation is a
         // single capped number one body's CLAIM parts are sized to hold, so a
         // second body there buys nothing while the other outpost stays at five

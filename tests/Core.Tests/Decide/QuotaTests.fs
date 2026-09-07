@@ -2702,10 +2702,11 @@ let reserverRowTests =
         ]
 
 /// Files our own bodies into one named room's layer of the projection (ADR
-/// 0041), because the count rule asks which of our guards are standing *in that
-/// room* and a creep the projection places nowhere stands in none. The room is
-/// a parameter and not the raided one, which is what lets a case tell "the
-/// guards standing here" apart from "the guards standing anywhere".
+/// 0041): a creep the projection places nowhere stands in no room at all, and
+/// the row's `Living` and the cases that stand a guard beside its raid both
+/// want it standing somewhere real — a guard that stands in the raided room is
+/// what the row's `Living`, the Task's holders and the Matcher all read, even
+/// though since #272 the count itself reads no body of ours at all.
 let private standingIn room (ours: (CreepInfo * Pos) list) (colony: ColonyView) =
     let layer = SpatialInfo.layerOf colony.Spatial room
 
@@ -2740,13 +2741,41 @@ let private guardColony hostiles (ours: (CreepInfo * Pos) list) =
 
 /// One rock of the north outpost's three-Seat field, which is the whole of the
 /// walkable ground `northOutpost` lays: the guard stands on one Seat and the
-/// raid on the tile below the rock.
+/// raid on the tile below the rock. The second Seat is for the cases that stand
+/// two guards up, the engine putting no two bodies on one tile.
 let private outpostSeat = { X = 41; Y = 40 }
+let private secondSeat = { X = 40; Y = 39 }
 let private raidTile = { X = 40; Y = 41 }
 
 /// The same tile of the *west* outpost's field, for the one case that asks
-/// which room a guard of ours is standing in.
+/// which room a body of the raid is standing in.
 let private westSeat = { X = 21; Y = 40 }
+
+/// A raid of one `smallMelee` and the healers the case names, all in the north
+/// outpost: the [[threat]] that makes the room guarded at all (ADR 0033's own
+/// test, which a healer fails), and beside it the HEAL parts the count rule
+/// prices. Each healer carries an id of its own, a raid being a roster and not
+/// one creep.
+let private raidOf healers =
+    hostileIn "W1N2" raidTile smallMelee
+    :: [
+        for i in 1..healers ->
+            { hostileIn "W1N2" raidTile smallHealer with
+                Id = $"heal-{i}"
+            }
+    ]
+
+/// The same colony at a named spawn capacity, for the one case that asks what
+/// the bank does to the count: 800 and 1,300 buy one guard block, 1,800 — the
+/// live RCL5 capacity `guardColony` itself banks — two, and 2,300 three (ADR
+/// 0056 decision 1's own table). The capacity moves and the 8,000 banked does
+/// not, keeping `reserverColony`'s own property: restraint in these cases comes
+/// from the rows, never from the bank running dry between two casts of one
+/// tick.
+let private banked capacity (colony: ColonyView) =
+    { colony with
+        Bank = bank 8000 capacity
+    }
 
 /// The `guard` row of the tick's `Quotas`, which is where the cascade writes its
 /// own arithmetic down (ADR 0009) — the quota being observability and never a
@@ -2820,74 +2849,78 @@ let guardRowTests =
                     "and the cascade ran: the row is written down, it is simply zero"
             }
 
-            test "a raid that out-heals the standing guards hires the second" {
+            test "a raid that out-heals one guard block hires the second" {
                 // ADR 0056's count rule at the two readings the arithmetic
-                // turns on, one healer apart, with the same 90-damage guard
-                // standing in the room both times: `12 × HEAL` against
-                // `30 × ATTACK + 10 × RANGED_ATTACK`. An unboosted
-                // `smallHealer` heals 60 against our 90 and the count stays
-                // at one; a second healer's 120 is at least our 90 and casts
-                // the second body.
-                let raid healers =
-                    guardColony
-                        (hostileIn "W1N2" raidTile smallMelee
-                         :: [
-                             for i in 1..healers ->
-                                 { hostileIn "W1N2" raidTile smallHealer with
-                                     Id = $"heal-{i}"
-                                 }
-                         ])
-                        [ guard "g-1", outpostSeat ]
+                // turns on, one healer apart: `12 × HEAL` over that room's
+                // hostiles against `30 × ATTACK + 10 × RANGED_ATTACK` of **one
+                // `guardPattern` block** (#272) — the 750-energy, 90-damage
+                // body decision 1's worked example is written in. So an
+                // unboosted `smallHealer`'s 60 leaves the count at one and a
+                // second healer's 120 buys the second body. No guard of ours
+                // stands in either reading: since #272 the number is the
+                // raid's and reads nothing we have already sent.
+                let raid healers = guardColony (raidOf healers) []
 
                 Expect.equal
                     (guardQuotaOf (raid 1))
                     (Some 1)
-                    "60 healed against 90 dealt: one guard is out-damaging the raid"
+                    "60 healed against the 90 one block deals: the body we would send out-damages the raid"
 
                 Expect.equal
                     (guardQuotaOf (raid 2))
                     (Some 2)
-                    "120 healed against the same 90: the raid out-heals us and the row hires a second"
+                    "120 healed against the same 90: the raid out-heals it and the row hires a second"
             }
 
-            test
-                "the second guard is bought against a fight we can measure, never against an empty room" {
-                // The other half of the same comparison, and the cell the
-                // rule's arithmetic actually turns on: `damage` counts the
-                // guards standing *in that room*, so on the tick a raid is
-                // first seen it is zero and every raid carrying one HEAL part
-                // would out-heal it. ADR 0056 prices that raid at one — "one
-                // 750-e guard's 90 stands against an unboosted `smallHealer`'s
-                // 60 and the count stays at one" — and its sentence is written
-                // of a guard that has *arrived*. So the escalation is asked
-                // only of a room a guard already stands in, and the tick-zero
-                // answer is one however many healers walked in with the melee.
-                // Pairwise against the cases above, which stand `g-1` first.
-                let raid healers =
-                    guardColony
-                        (hostileIn "W1N2" raidTile smallMelee
-                         :: [
-                             for i in 1..healers ->
-                                 { hostileIn "W1N2" raidTile smallHealer with
-                                     Id = $"heal-{i}"
-                                 }
-                         ])
-                        []
+            test "the count reads the raid and never our own answer to it" {
+                // #272, and the amendment's whole point. Priced against the
+                // guards *standing* in the room, the number was not monotone:
+                // 2 with one guard up and 1 the tick the second arrived, so
+                // the reinforcement the escalation had just bought was
+                // `CapacityFull`-evicted on arrival — onto a Flee whose safe
+                // set is that same room, so it never left, never swung, and
+                // held the count at 1 for as long as it lived. 750 energy for
+                // a body that does nothing, on exactly the two-healer raid the
+                // ADR buys it for. So the damage term is one block of the
+                // row's own body and nothing that stands, and the same raid
+                // answers the same number with none, one and two guards of
+                // ours in the room. Read at the colony's own live 1,800 bank,
+                // where a survivor cast at a poorer bank is exactly the body
+                // that must not veto its own reinforcement.
+                let standing healers ours = guardColony (raidOf healers) ours
+
+                let standing2 = standing 2
 
                 Expect.equal
-                    (guardQuotaOf (raid 1))
+                    (guardQuotaOf (standing2 []))
+                    (Some 2)
+                    "the tick the raid is seen, before anything of ours has arrived"
+
+                Expect.equal
+                    (guardQuotaOf (standing2 [ guard "g-1", outpostSeat ]))
+                    (Some 2)
+                    "the tick the first guard stands, which used to be the only tick this read 2"
+
+                Expect.equal
+                    (guardQuotaOf (standing2 [ guard "g-1", outpostSeat; guard "g-2", secondSeat ]))
+                    (Some 2)
+                    "and the tick the second stands beside it, which used to retract to 1"
+
+                Expect.equal
+                    (guardQuotaOf (standing 1 [ guard "g-1", outpostSeat ]))
+                    (guardQuotaOf (standing 1 []))
+                    "and the below-threshold reading is invariant the same way: one healer is one guard, before and after ours arrives"
+
+                Expect.equal
+                    (guardQuotaOf (standing 1 [ guard "g-1", outpostSeat ]))
                     (Some 1)
-                    "first contact with one healer buys the one body the ADR prices it at"
+                    "1, and not a second body bought against 60 of healing"
 
                 Expect.equal
-                    (guardQuotaOf (raid 2))
-                    (Some 1)
-                    "and two healers buy one too: there is no standing damage yet for them to out-heal"
-
-                Expect.equal
-                    (guardCasts (decide (raid 2) Map.empty Set.empty None).Intents |> List.length)
-                    1
-                    "so the tick spends one body's energy and not two, four idle spawns notwithstanding"
+                    (guardCasts (decide (standing2 []) Map.empty Set.empty None).Intents
+                     |> List.length)
+                    2
+                    "so the escalation is bought on the tick the raid is seen, an oven earlier than a rule reading our own bodies could"
             }
 
             test "the count is capped at two per outpost" {
@@ -2895,17 +2928,8 @@ let guardRowTests =
                 // energy is spent, and the outpost falls back to ADR 0043's
                 // [[stand-down]] rather than feeding an unbounded stream of
                 // bodies into a raid we are losing. Four healers is 240
-                // against one guard's 90 and still asks for two.
-                let raid healers =
-                    guardColony
-                        (hostileIn "W1N2" raidTile smallMelee
-                         :: [
-                             for i in 1..healers ->
-                                 { hostileIn "W1N2" raidTile smallHealer with
-                                     Id = $"heal-{i}"
-                                 }
-                         ])
-                        [ guard "g-1", outpostSeat ]
+                // against one block's 90 and still asks for two.
+                let raid healers = guardColony (raidOf healers) []
 
                 Expect.equal
                     (guardQuotaOf (raid 2))
@@ -2913,6 +2937,30 @@ let guardRowTests =
                     "twice the healing asks for the same two bodies"
 
                 Expect.equal (guardQuotaOf (raid 4)) (Some 2) "and two is the cap"
+            }
+
+            test
+                "the damage the raid is priced against is one block, so the bank does not move the count" {
+                // The other half of "the count reads the raid" (#272): the
+                // damage term is **one `guardPattern` block**, a constant of
+                // the row, and not the whole body this bank would cast. The
+                // whole body grows with the bank while the row's `Living`
+                // counts the body that is *standing*, so a guard cast at a
+                // poorer bank would veto its own reinforcement — 120 of
+                // healing against a two-block 180 reads 1 while a 90-damage
+                // survivor holds the row's `Living` at 1 and nothing is cast.
+                // It would also take ADR 0056 decision 1's own two-healer case
+                // (120 ≥ 90 → 2) out of reach at every bank above 1,300, this
+                // colony's live 1,800 included. So the same raid answers the
+                // same number across the decision's whole bank table.
+                let raid capacity =
+                    guardColony (raidOf 2) [ guard "g-1", outpostSeat ] |> banked capacity
+
+                for capacity in [ 800; 1300; 1800; 2300 ] do
+                    Expect.equal
+                        (guardQuotaOf (raid capacity))
+                        (Some 2)
+                        $"120 healed against one block's 90 hires the second at a {capacity} bank too"
             }
 
             test "the count is summed over the declared outposts" {
@@ -2950,19 +2998,23 @@ let guardRowTests =
                     "and a raid in each hires one apiece"
             }
 
-            test "the damage the second guard is priced against is the raided room's own" {
+            test "the healing the second guard is priced against is the raided room's own" {
                 // The conjunct that keeps the count room-local, in the
                 // codebase whose first hazard is room aliasing (ADR 0041): the
-                // damage term filters our guards by the room they stand in,
-                // and without it a body forty tiles away in another outpost
-                // would price a fight it is not in. Pairwise, one room apart —
-                // the same raid, the same guard, and only its tile moving.
-                let twoOutposts ours =
+                // healing term filters the raid by the room the [[threat]]
+                // stands in, and without it two healers forty tiles away in
+                // another outpost would price a fight they are not in.
+                // Pairwise, one room apart — the same melee, the same two
+                // healers, and only the healers' room moving. The other
+                // outpost holds no armed hostile of its own, so it is no
+                // guarded outpost and adds nothing to the sum from either
+                // side.
+                let twoOutposts healerRoom healerTile =
                     let raid =
                         hostileIn "W1N2" raidTile smallMelee
                         :: [
                             for i in 1..2 ->
-                                { hostileIn "W1N2" raidTile smallHealer with
+                                { hostileIn healerRoom healerTile smallHealer with
                                     Id = $"heal-{i}"
                                 }
                         ]
@@ -2970,20 +3022,20 @@ let guardRowTests =
                     let colony =
                         reserverColony
                             [ northOutpost true; westOutpost false ]
-                            (surplusFleet 3 @ [ guard "g-1" ])
+                            (surplusFleet 3)
                             [ "W1N2", reservedRoom true 5000; "W2N2", reservedRoom true 5000 ]
 
-                    { colony with Hostiles = raid } |> ours
+                    { colony with Hostiles = raid }
 
                 Expect.equal
-                    (guardQuotaOf (twoOutposts (standingIn "W1N2" [ guard "g-1", outpostSeat ])))
+                    (guardQuotaOf (twoOutposts "W1N2" raidTile))
                     (Some 2)
-                    "the premise: 120 healed against the raided room's own 90 dealt hires the second"
+                    "the premise: 120 healed in the raided room against the 90 one block deals hires the second"
 
                 Expect.equal
-                    (guardQuotaOf (twoOutposts (standingIn "W2N2" [ guard "g-1", westSeat ])))
+                    (guardQuotaOf (twoOutposts "W2N2" westSeat))
                     (Some 1)
-                    "the same guard standing in the other outpost prices nothing here: this room has none"
+                    "the same two healers standing in the other outpost price nothing here: this room's raid heals nothing"
             }
 
             test "the row is cast in front of the reserver and reads its own body back" {
