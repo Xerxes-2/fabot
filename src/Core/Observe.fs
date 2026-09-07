@@ -44,7 +44,7 @@ type ObserveState = Map<string, CreepLog>
 
 /// The per-creep ring cap: conclusion-level entries at this cap across a
 /// small colony stay well under the 2MB Memory (spec sanity: ~20 × ~20).
-let capPerCreep = 20
+let capPerCreep = 60
 
 let private creepOf =
     function
