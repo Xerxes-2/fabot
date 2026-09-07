@@ -250,10 +250,17 @@ let private rooms =
             Name = "W12S28"
             AlsoSweep = [ { X = 12; Y = 40 } ]
         }
+        // 32,2 is swept on top of the stride because the wider RCL6
+        // reservation (ADR 0055) seals it: the tile is one of three in this
+        // room — 31,1 and 33,1 are the others — that route every trunk at
+        // a horizon of five and drop src-0's spawn trunk at six. The
+        // reservation grew, #105's mechanism did the rest, and a loss the
+        // suite cannot see is a loss nobody reproduces.
         { noLosses with
             Name = "W12S27"
             PlansControllerContainer = false
-            SealedDoorsteps = [ { X = 6; Y = 18 } ]
+            AlsoSweep = [ { X = 32; Y = 2 } ]
+            SealedDoorsteps = [ { X = 6; Y = 18 }; { X = 32; Y = 2 } ]
         }
         { noLosses with Name = "W13S28" }
         // The plain tile nearest the centroid of its three sources.
@@ -838,7 +845,12 @@ let knownLossTests =
                 // them, so the source-to-spawn trunk cannot be routed and
                 // is dropped in silence. The working-ground exclusion
                 // guards Seats and the Upgrade area; nothing guards the
-                // spawn's own doorstep.
+                // spawn's own doorstep. 32,2 is the same mechanism reached
+                // from the other side: that tile routed everything until
+                // the horizon moved to RCL6 (ADR 0055) and the reservation
+                // widened by ten tiles onto its corridor out. The pin is
+                // per tile so that whichever of them a fix reaches first
+                // says so.
                 let sealed' =
                     sweep.Value
                     |> List.filter (fun case -> List.contains case.Spawn case.Room.SealedDoorsteps)
@@ -868,6 +880,146 @@ let knownLossTests =
                         case.Unrouted
                         |> List.forall (fun trunk -> trunk.Goal = TrunkGoal.Spawn case.SpawnId))
                     "and names the spawn alone: the controller's trunk is routed and paved"
+            }
+        ]
+
+// ---- the horizon, re-derived on the room that is about to reach it ------
+
+/// The colony with one Tuning field moved, which is the only way a horizon
+/// is compared against another: the constant is a human's, and a plan that
+/// read the level would break ADR 0027's determinism (ADR 0039).
+let private atHorizon horizon (colony: ColonyView) =
+    { colony with
+        Tuning =
+            { colony.Tuning with
+                HorizonLevel = horizon
+            }
+    }
+
+/// The same room with a list of extensions standing on it — filed through
+/// the shared builders, which is where a tile-shaped container has lived
+/// since ADR 0041's contract step, and made obstacles the way the shell
+/// makes a standing structure one. The tiles are the Layout's own picks
+/// rather than a person's, so the fixture stays a counterexample generator
+/// and never a table of expected values.
+let private withExtensions (tiles: Pos list) (colony: ColonyView) =
+    { colony with
+        Spatial =
+            colony.Spatial
+            |> Fixtures.withTargets (
+                tiles
+                |> List.mapi (fun index tile -> $"ext-{index}", tile, Structure BuiltKind.Extension)
+            )
+            |> Fixtures.withHome (fun layer ->
+                { layer with
+                    Obstacles = Set.union layer.Obstacles (Set.ofList tiles)
+                })
+    }
+
+/// ADR 0055's re-derivation, kept as a test rather than only as prose: the
+/// horizon moves to RCL6 **before** W12S28 gets there, and what has to hold
+/// on the far side of that move is that the room plans the ten extensions
+/// RCL6 unlocks without moving one of the thirty it already stands on.
+/// Planned from `12,40`, the tile the live spawn occupies, because a
+/// horizon is re-derived on the room it is being moved for (ADR 0039) —
+/// which is also why this list sits outside the sweep: the sweep is the
+/// general rule over every spawn, and this is the one room's arithmetic.
+[<Tests>]
+let horizonTests =
+    testList
+        "the clustered horizon at RCL6"
+        [
+            test "W12S28 at RCL6 plans forty extensions: the thirty standing, and ten more" {
+                let loaded = project (load "W12S28") { X = 12; Y = 40 } None
+                let colony = colonyOf loaded 6
+
+                let extensionsOf (view: ColonyView) =
+                    decide view Map.empty Set.empty None
+                    |> fun decision -> placementsOf decision.Intents |> tilesOfKind Extension
+
+                // The room as ADR 0039's horizon left it: thirty extensions,
+                // which is what stands in W12S28 the tick RCL6 lands.
+                let thirty = extensionsOf (colony |> atHorizon 5)
+                Expect.hasLength thirty 30 "the horizon of five sizes RCL5's whole allowance"
+
+                let forty = extensionsOf colony
+
+                Expect.hasLength
+                    forty
+                    40
+                    "the shipped horizon sizes RCL6's, so an empty room plans all forty at once"
+
+                // The ten the level adds, asked for by a room that has
+                // already built the thirty. This is the acceptance criterion
+                // and the failure the move exists to prevent: under a horizon
+                // of five this same room computes a gap of zero and asks for
+                // nothing at all, and the bank stays at 1,800.
+                let standing = colony |> withExtensions thirty
+                let ten = extensionsOf standing
+
+                Expect.hasLength ten 10 "the ten RCL6 unlocks, and only those"
+
+                Expect.isEmpty
+                    (extensionsOf (standing |> atHorizon 5))
+                    "the horizon left behind plans none of them: a room that stops growing in silence"
+
+                // And the thirty do not move. A standing structure is a
+                // target, so its tile is out of the ordering and its slot off
+                // the plan; the ten are picks the ordering had never reached.
+                Expect.equal
+                    (Set.union (Set.ofList thirty) (Set.ofList ten))
+                    (Set.ofList forty)
+                    "the thirty standing plus the ten asked for are the forty the horizon planned"
+            }
+
+            test "the ten new picks take no working ground and move no trunk" {
+                // The question ADR 0039 left for this level: W12S28's north
+                // band (rows 35–37) is spoken for by the RCL5 cluster, so does
+                // the room still have cluster space for ten more, and does the
+                // overflow tread on a Seat or on the Upgrade Work Area (ADR
+                // 0022)? It grows a ring out — north to row 34 and east to
+                // column 17 — and the working-ground exclusion is what keeps
+                // it off the ground the colony stands on. The trunks are the
+                // other half of the price: a wider reservation is a router
+                // with more tiles to dodge, and on this room it dodges none.
+                let loaded = project (load "W12S28") { X = 12; Y = 40 } None
+                let colony = colonyOf loaded 6
+                let atlas = ofView colony
+
+                let planOf (view: ColonyView) =
+                    decide view Map.empty Set.empty None
+                    |> fun decision -> placementsOf decision.Intents, decision.Memo
+
+                let placedFive, memoFive = planOf (colony |> atHorizon 5)
+                let placedSix, memoSix = planOf colony
+
+                let added =
+                    Set.difference
+                        (tilesOfKind Extension placedSix |> Set.ofList)
+                        (tilesOfKind Extension placedFive |> Set.ofList)
+
+                Expect.hasLength
+                    added
+                    10
+                    "ten tiles the wider horizon reaches and the narrower does not"
+
+                Expect.isEmpty
+                    (Set.intersect added (workingGroundIn atlas "W12S28"))
+                    "no new pick on a Seat or in the Upgrade Work Area"
+
+                Expect.equal
+                    (tilesOfKind Road placedSix |> Set.ofList)
+                    (tilesOfKind Road placedFive |> Set.ofList)
+                    "the trunks pave the same tiles under both horizons — the same set, not the same length"
+
+                Expect.equal
+                    memoSix.ServedFootings
+                    memoFive.ServedFootings
+                    "and the Link footings sit on the tiles the narrower horizon gave them"
+
+                Expect.isEmpty
+                    memoSix.UnservedFootings
+                    "no footing target goes unserved at the wider horizon"
             }
         ]
 

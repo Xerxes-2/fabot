@@ -140,9 +140,14 @@ type Tuning =
         /// here rather than at the horizon (ADR 0022): its tile never comes
         /// back once an extension takes it.
         StorageLevel: int
-        /// The Layout horizon (ADR 0011, moved to RCL5 by ADR 0039): the whole
-        /// plan is computed up to this level regardless of the current one, so
-        /// today's roads route around tomorrow's structures.
+        /// The Layout horizon (ADR 0011, moved to RCL5 by ADR 0039 and to RCL6
+        /// by ADR 0055): the whole plan is computed up to this level regardless
+        /// of the current one, so today's roads route around tomorrow's
+        /// structures. One level of lookahead, and it is moved **before** the
+        /// room reaches it: the clustered kinds are sized here and only
+        /// filtered at the current level, so a room standing at RCL6 under a
+        /// horizon of 5 computes an extension gap of zero and plans none of the
+        /// ten the engine just unlocked.
         HorizonLevel: int
         /// How many creeps the colony has building outpost container sites at
         /// once — a budget over all of them together and never a per-site
@@ -189,7 +194,7 @@ module Tuning =
             FerryLoads = 1
             SafeModeDeadline = 3
             StorageLevel = 4
-            HorizonLevel = 5
+            HorizonLevel = 6
             OutpostContainerBuilders = 2
             BootstrapLevel = 3
             TrunkSwampWeight = 3

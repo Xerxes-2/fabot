@@ -4,6 +4,8 @@
 
 > **Amended by #209**: road **sites** are placed from RCL3 up (`roadLevel`, read off the [[stage]] `Tuning.BootstrapLevel` cuts) and not below it. "Sites place all at once" and the rejection of pacing both stand — what changes is that the road kind now carries a level gate of its own, the same shape the clustered kinds already had (`storageGap level`, `towerGap level`). The reason is in both paragraphs below.
 
+> **Revised by ADR 0055**: the horizon moves to RCL6, one level again ahead of the room that is about to reach it. Re-derived ADR 0039's way: W12S28's cluster steps one ring out — north onto row 34 and east onto column 17, no working ground touched — and paves the same 25 trunk tiles as before, while W13S28 gives `13,7` back from its trunk to an extension and drops from 30 paved tiles to 29. "Truncated at RCL4" in the title, and "the horizon truncates at RCL4" in the body, are twice history.
+
 > **Revised by ADR 0039**: the horizon moves to RCL5, and the title's "truncated at RCL4" is now history. ADR 0022's refusal to move it was weighed against the ordering *before* the working ground left it; re-derived after, the ten further extensions and the second tower cost the trunks nothing — both horizons pave the same 25 tiles.
 
 > **Revised by ADR 0022**: the ordering rule now excludes the working ground (every source's Seats and the controller's Upgrade Work Area), and the RCL4 revisit this ADR asked for concluded that the clustered horizon *stays* at RCL4 — only the Storage tile and four Link footings are reserved beyond it, because those are the tiles that never come back once an extension takes them.

@@ -4712,7 +4712,10 @@ let tuningTests =
             }
 
             test "HorizonLevel is the level the clustered kinds are sized at" {
-                let colony = atLevel 5 (openRoom 6)
+                // Read at the horizon's own level, where the sizing is the
+                // whole answer: the placement filter is wide open at RCL6, so
+                // what the room asks for is what the reservation held.
+                let colony = atLevel 6 (openRoom 6)
 
                 let placed tuned =
                     let { Intents = intents } = decide tuned Map.empty Set.empty None
@@ -4722,8 +4725,18 @@ let tuningTests =
 
                 let towers, extensions = placed colony
 
-                Expect.equal towers 2 "the shipped horizon of five sizes two towers"
-                Expect.equal extensions 30 "and thirty extensions, which RCL5 unlocks in full"
+                Expect.equal towers 2 "the shipped horizon of six sizes two towers"
+                Expect.equal extensions 40 "and forty extensions, which RCL6 unlocks in full"
+
+                // The horizon left behind, one field moved (ADR 0055): the
+                // same RCL6 room under the shipped-yesterday five sizes thirty
+                // and plans none of the ten the engine unlocked. That is the
+                // failure this constant exists to prevent, and it is why the
+                // move lands before the room does.
+                Expect.equal
+                    (placed (colony |> tunedBy (fun t -> { t with HorizonLevel = 5 })))
+                    (2, 30)
+                    "a horizon of five sizes the RCL5 cluster, and an RCL6 room may place no more than it planned"
 
                 Expect.equal
                     (placed (colony |> tunedBy (fun t -> { t with HorizonLevel = 2 })))
