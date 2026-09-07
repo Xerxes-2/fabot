@@ -413,6 +413,7 @@ let private seenFacts
                     Owner = c.owner.username
                     Pos = RoomPos.at room.name (posOf c.pos)
                     Body = c.body |> Array.map (fun p -> bodyPartOf p.``type``) |> Array.toList
+                    TicksToLive = c.ticksToLive
                 }
                 : HostileInfo)
             |> Array.toList

@@ -616,6 +616,10 @@ let hostileAt id pos body : HostileInfo =
         Owner = "raider"
         Pos = RoomPos.at "" pos
         Body = body
+        // A full Invader life. The one reader is ADR 0043's clock for a raid
+        // with no core in it (#257), and a fixture that said otherwise would
+        // be making a claim about the stand-down rather than about the raid.
+        TicksToLive = Engine.creepLifetime
     }
 
 /// The same colony with the given hostiles standing in its room — in

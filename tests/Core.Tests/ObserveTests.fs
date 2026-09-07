@@ -402,6 +402,7 @@ let raider id owner pos body : HostileInfo =
         Owner = owner
         Pos = RoomPos.at raidRoom pos
         Body = body
+        TicksToLive = Engine.creepLifetime
     }
 
 /// One of ours with a full life ahead of it; immaterial but for its name.
@@ -1249,6 +1250,18 @@ let damageTests =
             }
         ]
 
+/// A hostile of the raid standing in a room other than the colony's own, with
+/// a full Invader life: what ADR 0043's clock reads for a raid with no core in
+/// it (#257). Each carries an id of its own, a raid being a roster.
+let raiderIn room i body : HostileInfo =
+    {
+        Id = $"raid-{i}"
+        Owner = "Invader"
+        Pos = RoomPos.at room { X = 25; Y = 25 }
+        Body = body
+        TicksToLive = Engine.creepLifetime
+    }
+
 /// An invader core standing in a room, with or without a collapse timer to
 /// read a deadline off. A level-0 core — the measured case on this
 /// colony's frontier — carries none.
@@ -1321,6 +1334,57 @@ let outpostTests =
     testList
         "raid fold: outpost episodes"
         [
+            test "a raid two guards cannot beat stands the room down to its own life" {
+                // #257. ADR 0043 clocked a stand-down off an invader *core*
+                // and off nothing else, so a raid of plain creeps offered no
+                // deadline at all: W13S29 stayed open through one, the rows
+                // went on hiring into it, and in three hundred ticks it took
+                // two reservers and a guard while the invaders kept full
+                // health. An Invader in a room nobody owns never suicides, so
+                // what it has left is exactly what it will spend and that is
+                // the clock.
+                //
+                // Read only for a raid the guard row's cap cannot beat, which
+                // is what keeps the withdrawal from cancelling ADR 0056 before
+                // it fights: shutting a room takes it out of the scan set, so a
+                // raid that shut it on sight would hide its own hostiles and
+                // buy no guard at all. Pairwise on the raid's size alone.
+                let raidIn hostiles =
+                    { quiet with
+                        Hostiles = hostiles |> List.mapi (raiderIn outpostRoom)
+                    }
+
+                let overwhelming = List.replicate 5 [ Attack; Attack; Attack; Move; Move; Move ]
+
+                Expect.equal
+                    (standDowns (RaidState.empty |> raidTick 100 (raidIn overwhelming)))
+                    [ outpostRoom, 100, 100, 1600, StandDownBasis.InvaderRaid ]
+                    "five attackers beat two blocks, so the room is left for the fifteen hundred they have"
+
+                Expect.isEmpty
+                    (standDowns (
+                        RaidState.empty
+                        |> raidTick
+                            100
+                            (raidIn
+                                [
+                                    [
+                                        Tough
+                                        Tough
+                                        Move
+                                        Move
+                                        Move
+                                        Move
+                                        Move
+                                        RangedAttack
+                                        Work
+                                        Attack
+                                    ]
+                                ])
+                    ))
+                    "and the lone smallMelee two blocks beat opens no stand-down: that room is a fight"
+            }
+
             test "an invader core opens a stand-down that runs to its collapse timer" {
                 // The best of ADR 0043's three deadlines, and the only one
                 // the engine hands over already absolute — the shell added

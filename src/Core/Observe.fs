@@ -477,9 +477,53 @@ let private rivalDeadlines (view: ColonyView) =
 /// 0004, `standingDown`). A room both answer for keeps the **later** of the two,
 /// which is `sight`'s rule applied inside one tick and for its reason: a
 /// stand-down may be wrong only in the direction that costs an outpost's income.
+/// The tick a room stands down to when the raid in it is one the colony has
+/// already decided not to fight (#257, ADR 0056 decision 6). ADR 0043 clocks a
+/// [[stand-down]] off an invader **core**, and a raid of plain creeps offered
+/// it no deadline at all — so W13S29 stayed open through a two-creep raid, the
+/// reserver row went on hiring one body per declared [[outpost]] and sending it
+/// into the fight, and in three hundred ticks the room took two reservers and a
+/// guard while the invaders stayed at full health.
+///
+/// **The clock is the raid's own life.** An Invader in a room nobody owns never
+/// suicides — the engine's suicide branch wants a controller owner — so what it
+/// has left is exactly what it will spend, and the longest of them is when the
+/// room is ours again. No floor and no fallback: this deadline is read, not
+/// chosen.
+///
+/// **And it is read only for a raid the guard row's cap cannot beat**, which is
+/// what keeps this from cancelling ADR 0056 before it fights. Standing a room
+/// down withdraws it from the scan set, so a raid that shut the room the tick
+/// it appeared would hide its own hostiles and no guard would ever be hired: a
+/// withdrawal and a garrison are the same room's two answers, and this is where
+/// they are told apart. The arithmetic is `guardsWanted`'s own, at the cap:
+/// two blocks' damage against the raid's armed hits, and two blocks' hits
+/// against the raid's damage less what they heal of themselves. A raid two
+/// guards beat is a fight; a raid two guards lose is a room to leave, and it is
+/// left for exactly as long as the raid has to live.
+let private raidDeadlines (view: ColonyView) =
+    let armed (h: HostileInfo) =
+        h.Body |> List.exists (fun p -> p = Attack || p = RangedAttack)
+
+    view.Hostiles
+    |> List.filter armed
+    |> List.filter (fun h -> h.Pos.Room <> SpatialInfo.homeName view.Spatial)
+    |> List.map (fun h -> h.Pos.Room)
+    |> List.distinct
+    |> List.filter (fun room -> not (Decide.guardBlocksBeat view room Engine.guardCap))
+    |> List.map (fun room ->
+        let life =
+            view.Hostiles
+            |> List.filter (fun h -> h.Pos.Room = room)
+            |> List.map (fun h -> h.TicksToLive)
+            |> List.max
+
+        room, (view.Time + life, StandDownBasis.InvaderRaid))
+
 let private deadlines (view: ColonyView) =
     (view.InvaderCores |> List.map (fun core -> core.RoomName, deadlineOf view core))
     @ rivalDeadlines view
+    @ raidDeadlines view
     |> List.groupBy fst
     |> List.map (fun (room, seen) -> room, seen |> List.map snd |> List.maxBy fst)
 

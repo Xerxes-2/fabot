@@ -89,6 +89,12 @@ module Engine =
     /// count that decides whether we fight at all (ADR 0056 as #280 amends it).
     let partHits = 100
 
+    /// The most guard blocks one raided [[outpost]] ever buys (ADR 0056
+    /// decision 1). A raid two blocks cannot beat is a room to leave rather
+    /// than a fight to lose, which is what ADR 0043's clock reads it for
+    /// (#257): the cap is where "hire another" stops and "withdraw" begins.
+    let guardCap = 2
+
     /// The regeneration of a source in a room carrying an owner or a
     /// reservation: 3,000 energy per 300 ticks — what a continuously drained
     /// rock yields there, and the ceiling on what a body over it can take out.
@@ -1438,6 +1444,12 @@ type HostileInfo =
         /// `RoomPos.range` answers None across the border instead.
         Pos: RoomPos
         Body: BodyPart list
+        /// Ticks this hostile has left. An Invader standing in a room nobody
+        /// owns never suicides — the engine's own suicide branch wants a
+        /// controller owner and an [[outpost]] has none — so what it has left
+        /// is exactly what it will spend, and this is the one deadline a raid
+        /// with no core in it offers ADR 0043's [[stand-down]] (#257).
+        TicksToLive: int
     }
 
 /// An NPC invader core standing in a room the colony works this tick (ADR
@@ -1495,6 +1507,15 @@ type StandDownBasis =
     /// lets lapse, so the hold is never the end of the core, while a player's
     /// claimer that stops coming leaves nothing behind it at all.
     | RivalReservation
+    /// A raid of plain [[invader]] creeps, clocked off the longest life among
+    /// them (#257). An Invader in a room nobody owns never suicides — the
+    /// engine's `findAttack` suicide branch wants a controller owner and an
+    /// [[outpost]] has none — so what it has left is exactly what it will
+    /// spend, and this is the one deadline a raid with no core in it offers.
+    /// Read only once the colony has stopped fighting for the room: while a
+    /// [[guard]] of ours stands there, or the episode has not yet spent the
+    /// casts ADR 0056 bounds it at, the room is a fight and not a withdrawal.
+    | InvaderRaid
 
 /// What the decision layer knows about one owned creep this tick.
 type CreepInfo =
@@ -3164,6 +3185,7 @@ let standDownBasisName =
     | StandDownBasis.Reservation -> "reservation"
     | StandDownBasis.Fallback -> "fallback"
     | StandDownBasis.RivalReservation -> "rival-reservation"
+    | StandDownBasis.InvaderRaid -> "invader-raid"
 
 /// The StandDownBasis a wire name spells, or None for a name this
 /// vocabulary does not have — a row whose basis will not read back is a
@@ -3177,6 +3199,7 @@ let standDownBasisOf =
             StandDownBasis.Reservation
             StandDownBasis.Fallback
             StandDownBasis.RivalReservation
+            StandDownBasis.InvaderRaid
         ]
 
 /// A creep's Move Intent: candidate standing tiles for next tick in preference
