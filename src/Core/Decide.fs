@@ -806,8 +806,17 @@ let planTasks (view: ColonyView) (threats: Threats) : Task list =
 
     flees
     @ harvests
-    @ withdraws
+    // **The piles stand before the Withdraws** (#242). Pool order is the last
+    // rung of the Matcher's ladder — what it falls back to once [[priority]],
+    // travel cost *and* the crowding load have all three tied, the scored key
+    // being `(rank, cost, load)` (`MatchFactor.PoolOrder`) — and of two intakes
+    // a body could take at the same rank, for the same walk, with the same
+    // crowd already on them, the decaying one is the one to take: a pile loses
+    // `ceil(amount / 1000)` a tick and a container loses nothing. The order
+    // reaches exact ties and nothing else, so it moves no pair the ladder or
+    // the flood had already separated.
     @ pickups
+    @ withdraws
     @ refills
     @ builds
     @ repairs
@@ -3301,7 +3310,9 @@ let planPool (view: ColonyView) atlas (tasks: Task list) : PooledTask list =
         // A pile is flow and not stock: it is the haul cycle's energy lying
         // where it fell — an Anchor's overflow, a death drop — so it feeds the
         // colony on the tier the containers do, and which of the two an empty
-        // carrier goes for is travel cost's call.
+        // carrier goes for is travel cost's call — for every pile but the two
+        // `priorityOf` steps up a rung, the one lying on a drawable store and
+        // the one holding half a [[hauler unit]]'s load (#216 R5, #242).
         | Pickup _ -> Feeding
         | Refill structureId ->
             let isTower =
@@ -3370,14 +3381,19 @@ let planPool (view: ColonyView) atlas (tasks: Task list) : PooledTask list =
 
     // **A [[pickup]] outbids the [[withdraw]] standing on its own tile** (live:
     // a hauler beside a full container ignored the pile on it). The two share
-    // the feeding tier and the tile, so travel cost is equal and pool order
-    // decided; what separates them is decay — a pile loses `ceil(amount /
-    // 1000)` a tick and a container loses nothing, so the energy that has to be
-    // taken first is the energy that is going away. Written as the **Pickup**
-    // stepping up a rung and conditioned on the store under it, so that it
-    // stays a claim about that one tile: a [[priority]] is a scalar the whole
-    // tier is ordered by, so whichever of the pair moves moves against every
-    // other Feeding Task in the colony. Stepping the *Withdraw* down was tried
+    // the feeding tier and the tile, so travel cost is equal and, when this was
+    // written, the pool's order decided and the container stood first in it;
+    // what separates them is decay — a pile loses `ceil(amount / 1000)` a tick
+    // and a container loses nothing, so the energy that has to be taken first
+    // is the energy that is going away. Since #242 the pool's order says that
+    // much on its own — the piles stand before the Withdraws, so the same-tile
+    // tie falls to the pile with no rung at all — and what this clause still
+    // buys is the rest of the claim: a pile lying on a drawable store outranks
+    // every *other* Feeding container in the colony, however much nearer that
+    // one is. Written as the **Pickup** stepping up a rung and conditioned on
+    // the store under it, so that it stays a claim about that one tile: a
+    // [[priority]] is a scalar the whole tier is ordered by, so whichever of
+    // the pair moves moves against every other Feeding Task in the colony. Stepping the *Withdraw* down was tried
     // first and is the bug it was meant to cure, inverted — a hundred-energy
     // overflow demoted a full container behind every other store at any
     // distance, and the engine drops that overflow only once the container is
@@ -3388,9 +3404,41 @@ let planPool (view: ColonyView) atlas (tasks: Task list) : PooledTask list =
     // are sinks the haulers fill. The two rungs sit the other way round from
     // the first cut: with the pile above the full container the haulers chased
     // fifty-energy piles all day and never drew the 2,000 beside them, so every
-    // pickup bred the next pile. **A site outranks the controller inside the
-    // surplus tier** (#234, live: 42 sites in one colony while every loaded
-    // worker upgraded). Build, Repair and Upgrade shared one rung, so travel
+    // pickup bred the next pile. **A [[pickup]] steps up where the pile is
+    // worth a trip of its own** (#242, user: "worker 和 hauler 在不满的
+    // container 和地上的能量中会优先选择前者") — the same rung as the tile
+    // rule, taken by either clause, because the two are one sentence about one
+    // pile. Where that clause is a claim about the store *under* the pile, this
+    // one is the claim to make where there is no store under it at all: half a
+    // [[hauler unit]]'s load or more lying on the ground is a whole trip, and a
+    // trip made for it takes the copy that is going away rather than the one
+    // that is not. Half a load and read off the row's own cast at this bank,
+    // never the candidate's carry — the Planner is creep-blind (ADR 0013) —
+    // which makes it the creep-blind mirror of `applicable`'s `worthTheTrip`
+    // (#232): half a load is what makes a store worth a body's trip there and
+    // what makes a pile worth one here. **The rung reaches the whole Feeding
+    // tier** and not the container Withdraws alone, a [[priority]] being one
+    // colony-wide scalar: a lifted pile outbids the spawn ring's [[refill]],
+    // the [[harvest]], the [[reserve]] and the [[claim]], the Withdraw of a
+    // tombstone or a ruin — a store that ends is rank 0 until it holds a
+    // container's worth — and the feeding-tier [[build]]s of ADR 0042 and ADR
+    // 0047, at any travel cost, a rank being settled before a price is asked.
+    // The full source container's two rungs are the only thing above it. That
+    // reach is the mechanism's price and not an oversight: the rung has to be
+    // carried by the Pickup (above), and there is no rung that separates a
+    // Task from one member of its tier and not from the rest. Every smaller
+    // pile stays on rank 0 and is ordered by distance alone, which is the whole
+    // reason the lift is not given to piles as a class: one hundred energy
+    // forty tiles off is no reason to leave the 1,500 under a body's feet.
+    // **Below a bank of 450 there is no smaller pile.** The row's cast carries
+    // `100 * (bank / 150)`, so at RCL1's 300 half a load is a hundred —
+    // `Tuning.PickupThreshold` itself — and every pile the pool holds takes the
+    // rung; the distance-only rung exists only once the cast outgrows twice the
+    // threshold, from RCL2 up. The line is the one #242 pinned, and whether a
+    // bootstrapping colony's one body should walk off its rock for a
+    // threshold-sized pile is that question's own issue and not this one's.
+    // **A site outranks the controller inside the surplus tier** (#234, live:
+    // 42 sites in one colony while every loaded worker upgraded). Build, Repair and Upgrade shared one rung, so travel
     // cost alone ordered them, and a worker that fills at the [[buffer]] is
     // already standing in the controller's Work Area: Upgrade costs it nothing
     // and never goes task-gone. What ADR 0042 and ADR 0047 lifted to Feeding
@@ -3400,9 +3448,16 @@ let planPool (view: ColonyView) atlas (tasks: Task list) : PooledTask list =
         let step =
             match task with
             | Pickup pileId ->
-                match SpatialInfo.placementOf view.Spatial pileId with
-                | Some tile when Set.contains tile drawableTiles -> -priorityStep
-                | _ -> 0
+                let overADrawableStore =
+                    SpatialInfo.placementOf view.Spatial pileId
+                    |> Option.exists (fun tile -> Set.contains tile drawableTiles)
+
+                let worthATripOfItsOwn = stored pileId * 2 >= haulerLoad
+
+                if overADrawableStore || worthATripOfItsOwn then
+                    -priorityStep
+                else
+                    0
             | Withdraw storeId when
                 tierOf task = Feeding && stored storeId >= Engine.containerCapacity
                 ->

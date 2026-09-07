@@ -3255,13 +3255,19 @@ let tombColony energy (creeps: (string * Pos) list) =
 
 /// A stocked container at (10,10) with a dropped pile the case places —
 /// on the container's own tile or ten tiles down the lane — and one empty
-/// hauler on the tile beside the container (#216 R5). The bank is 150, so
-/// a trip is 100 energy and both stores are stocked for several of them:
-/// what separates the two Tasks here is neither capacity nor travel cost,
-/// both of which tie, but the pool's own [[priority]].
+/// hauler on the tile beside the container (#216 R5). What separates the
+/// two Tasks here is neither capacity nor travel cost, both of which tie
+/// on the same tile, but the pool's own [[priority]].
+///
+/// The bank is the mother colony's 1,800, so the hauler row's cast carries
+/// 1,200 and the 150 on the ground is a fraction of a trip (#242). The
+/// number is load-bearing for the pairwise control below and not scenery:
+/// half a load or more of decaying energy carries a rung of its own, so at
+/// a bank whose row hauls 100 there is no pooled pile — the threshold is
+/// itself 100 — that the tile rule under test would be the only lift for.
 let sameTilePileColony pilePos =
     { bareRespawn with
-        Bank = bank 150 150
+        Bank = bank 1800 1800
         Sources = []
         Creeps = [ hauler "h1" 0 100 ]
         Spatial =
@@ -3279,11 +3285,213 @@ let sameTilePileColony pilePos =
                 })
     }
 
+/// A stocked container at (10,10) with the hauler standing beside it and a
+/// dropped pile five tiles down the lane (#242), each stocked by the case.
+/// The mother's 1,800 bank, so the hauler row's cast carries 1,200 and half
+/// a load is six hundred: the pile is the far Task and the near container is
+/// what travel cost hands the body unless a rung says otherwise.
+let private pileDownTheLane containerStock pileAmount =
+    { bareRespawn with
+        Bank = bank 1800 1800
+        Sources = []
+        Creeps = [ hauler "h1" 0 100 ]
+        Spatial =
+            { spatial [] crowdField with
+                Stores = Map.ofList [ "can-a", containerStock; "pile-a", pileAmount ]
+            }
+            |> withTargets
+                [
+                    "can-a", { X = 10; Y = 10 }, Structure BuiltKind.Container
+                    "pile-a", { X = 16; Y = 10 }, Dropped
+                ]
+            |> withHome (fun layer ->
+                { layer with
+                    CreepPositions = Map.ofList [ "h1", { X = 11; Y = 10 } ]
+                })
+    }
+
+/// A hungry spawn at (12,10), a half-loaded hauler on the tile beside it at
+/// (11,10), and a pile nineteen tiles down the lane (#242). No source and no
+/// store, so the pool holds the two Tasks this pairs and nothing else: the
+/// delivery half of the haul cycle against the far intake. The bank is the
+/// case's, because half the row's cast is what the pile is measured against.
+let private pileAgainstAHungrySpawn bankEnergy pileAmount =
+    { bareRespawn with
+        Bank = bank bankEnergy bankEnergy
+        Sources = []
+        Refillables = [ refillable "spawn-1" 300 BuiltKind.Spawn ]
+        Creeps = [ hauler "h1" 600 600 ]
+        Spatial =
+            { spatial [] crowdField with
+                Stores = Map.ofList [ "pile-a", pileAmount ]
+            }
+            |> withTargets
+                [
+                    "spawn-1", { X = 12; Y = 10 }, Structure BuiltKind.Spawn
+                    "pile-a", { X = 30; Y = 10 }, Dropped
+                ]
+            |> withHome (fun layer ->
+                { layer with
+                    CreepPositions = Map.ofList [ "h1", { X = 11; Y = 10 } ]
+                })
+    }
+
+/// A tombstone holding 1,500 at (12,10), an empty hauler beside it and a pile
+/// nineteen tiles down the lane, at the mother's 1,800 bank (#242). A store
+/// that *ends* is a Withdraw like any other and takes no rung of its own —
+/// only a full container's stock does — so this is the pair that reads the
+/// pile's rung against the tier's other decaying copy.
+let private pileAgainstATombstone pileAmount =
+    { bareRespawn with
+        Bank = bank 1800 1800
+        Sources = []
+        Creeps = [ hauler "h1" 0 1200 ]
+        Spatial =
+            { spatial [] crowdField with
+                Stores = Map.ofList [ "tomb-a", 1500; "pile-a", pileAmount ]
+            }
+            |> withTargets
+                [
+                    "tomb-a", { X = 12; Y = 10 }, Tombstone
+                    "pile-a", { X = 30; Y = 10 }, Dropped
+                ]
+            |> withHome (fun layer ->
+                { layer with
+                    CreepPositions = Map.ofList [ "h1", { X = 11; Y = 10 } ]
+                })
+    }
+
 [<Tests>]
 let pickupTaskTests =
     testList
         "the pile and the tombstone"
         [
+            test "a pile worth a whole trip outbids the container underfoot; a smaller one does not" {
+                // The live shape's other half (#242, user 2026-09-07):
+                // "worker 和 hauler 在不满的 container 和地上的能量中会优先
+                // 选择前者". Nothing but travel cost separates a pile from a
+                // half-full container once they are apart, and the container
+                // is the one the body is standing on, so the ground kept its
+                // energy until it decayed. A pile holding half a [[hauler
+                // unit]]'s load or more is a trip of its own, and the copy
+                // that is going away is the one to take — so it steps up the
+                // rung the pile on a drawable tile already had.
+                let matched colony =
+                    let { Verdicts = verdicts } = decide colony Map.empty Set.empty None
+
+                    verdicts
+                    |> List.tryPick (function
+                        | Verdict.Matched("h1", task, factor) -> Some(task, factor)
+                        | _ -> None)
+
+                Expect.equal
+                    (matched (pileDownTheLane 800 600))
+                    (Some(taskId (Pickup "pile-a"), MatchFactor.Rank))
+                    "half the row's load five tiles off beats eight hundred at its feet"
+
+                // The pairwise control: the same colony, the same distance,
+                // one energy under the line. A hundred energy is not a trip,
+                // and a [[priority]] is a colony-wide scalar — lifting every
+                // pile is what would send this body five tiles for a
+                // mouthful and, in the live room, forty tiles past the 1,500
+                // under its feet.
+                Expect.equal
+                    (matched (pileDownTheLane 800 599))
+                    (Some(taskId (Withdraw "can-a"), MatchFactor.TravelCost))
+                    "one under half a load: rank ties and the near store wins on price"
+
+                Expect.equal
+                    (matched (pileDownTheLane 800 100))
+                    (Some(taskId (Withdraw "can-a"), MatchFactor.TravelCost))
+                    "and a pile at the threshold is still the distance's to decide"
+
+                // Pairwise on the container's stock alone: a **full** source
+                // container is two rungs up (#216 R5) against the pile's one,
+                // because its income is going away too — the engine drops a
+                // garrison's overflow onto its tile only once it is full —
+                // and the pickup reflex takes what lies there for free while
+                // the body draws.
+                Expect.equal
+                    (matched (pileDownTheLane Engine.containerCapacity 600))
+                    (Some(taskId (Withdraw "can-a"), MatchFactor.Rank))
+                    "two thousand full outranks the whole trip on the ground"
+            }
+
+            test "the whole trip's rung is a rung over the whole feeding tier" {
+                // What the rung reaches, pinned pairwise because a rank is a
+                // colony-wide scalar and not a pairing (#242 review): the
+                // Pickup steps up against *every* Feeding Task and not the
+                // container Withdraws the ticket named, so the consequence is
+                // read here as a decision rather than met later as a surprise.
+                // Each colony below holds exactly two Tasks, and the rival is
+                // the one standing under the body's feet.
+                let matched colony =
+                    let { Verdicts = verdicts } = decide colony Map.empty Set.empty None
+
+                    verdicts
+                    |> List.tryPick (function
+                        | Verdict.Matched("h1", task, factor) -> Some(task, factor)
+                        | _ -> None)
+
+                // The delivery half of the cycle: a half-loaded hauler one
+                // step from a spawn with 300 free walks nineteen tiles for
+                // the pile instead, and no distance saves the spawn because
+                // rank is settled before a price is asked.
+                Expect.equal
+                    (matched (pileAgainstAHungrySpawn 1800 600))
+                    (Some(taskId (Pickup "pile-a"), MatchFactor.Rank))
+                    "half a load on the ground outranks the hungry spawn at the body's feet"
+
+                Expect.equal
+                    (matched (pileAgainstAHungrySpawn 1800 599))
+                    (Some(taskId (Refill "spawn-1"), MatchFactor.TravelCost))
+                    "one energy under the line the spawn is the near Task again"
+
+                // And the other copy that is going away: a tombstone is a
+                // Withdraw like any other and only a *full* container's stock
+                // carries a rung, so the pile outranks 1,500 in a store that
+                // ends outright.
+                Expect.equal
+                    (matched (pileAgainstATombstone 600))
+                    (Some(taskId (Pickup "pile-a"), MatchFactor.Rank))
+                    "and it outranks a tombstone's 1,500 one tile away"
+
+                Expect.equal
+                    (matched (pileAgainstATombstone 599))
+                    (Some(taskId (Withdraw "tomb-a"), MatchFactor.TravelCost))
+                    "which under the line is travel cost's again"
+            }
+
+            test
+                "under a bank of 450 the line is the pooling threshold and every pile takes the rung" {
+                // The line's own regime (#242 review). `haulerLoad` is
+                // `100 * (bank / 150)`, so half a load is a hundred at RCL1's
+                // bank of 300 — `Tuning.PickupThreshold` itself — and the
+                // smallest pile the pool will hold is already a whole trip
+                // for the row that bank casts. The distance-only rung the
+                // rule is written around therefore begins at RCL2, and a
+                // bootstrapping colony lifts every pile it pools. Pinned so
+                // the regime is a fact of the code and not of a fixture's
+                // bank.
+                let matched colony =
+                    let { Verdicts = verdicts } = decide colony Map.empty Set.empty None
+
+                    verdicts
+                    |> List.tryPick (function
+                        | Verdict.Matched("h1", task, factor) -> Some(task, factor)
+                        | _ -> None)
+
+                Expect.equal
+                    (matched (pileAgainstAHungrySpawn 300 100))
+                    (Some(taskId (Pickup "pile-a"), MatchFactor.Rank))
+                    "at RCL1 a threshold-sized pile nineteen tiles off takes the rung"
+
+                Expect.equal
+                    (matched (pileAgainstAHungrySpawn 550 100))
+                    (Some(taskId (Refill "spawn-1"), MatchFactor.TravelCost))
+                    "and at RCL2, where the cast has outgrown twice the threshold, it does not"
+            }
+
             test "a pile on a container's own tile is taken before the container" {
                 // The live shape (user, 2026-09-07): a hauler standing at a
                 // full container ignored the 1,859 energy lying on it. The
@@ -3306,7 +3514,9 @@ let pickupTaskTests =
                 // the same pile, ten tiles down the lane. The Withdraw is on
                 // its own tier again — the step is a claim about *this*
                 // store and never about piles in general — and travel cost
-                // says what it always said.
+                // says what it always said. A hundred and fifty is an eighth
+                // of the row's load here, so the other lift a pile can carry
+                // (#242) is not what this reads either.
                 let { Assignments = apart } =
                     decide (sameTilePileColony { X = 20; Y = 10 }) Map.empty Set.empty None
 
@@ -3640,16 +3850,26 @@ let pickupTaskTests =
                     "the Layout does not see tombstones"
             }
 
-            test "a pile ties a container: one tier, and only cost between them" {
+            test "a pile ties a container: one tier, and the tie goes to the pile" {
                 // The tier (#167): a pile is the haul cycle's own energy
                 // lying where it fell, so it feeds on the containers' tier
                 // and the choice between the two is travel cost's. Equal
                 // cost is the way to read that off one match — a rank
                 // either way would have decided it before the price was
                 // asked, and the factor says which happened.
+                //
+                // Which way an exact tie falls is the pool's order, and
+                // since #242 the piles stand in it before the Withdraws
+                // (user: "worker 和 hauler 在不满的 container 和地上的能量
+                // 中会优先选择前者"). A container keeps what it holds and a
+                // pile loses `ceil(amount / 1000)` a tick, so where nothing
+                // else separates them the decaying copy is the one to take.
+                // The bank is the mother's, so 150 on the ground is well
+                // under half the row's 1,200 load and carries no rung of
+                // its own: what this reads is pool order and nothing else.
                 let colony =
                     { bareRespawn with
-                        Bank = bank 150 150
+                        Bank = bank 1800 1800
                         Sources = []
                         Creeps = [ hauler "h1" 0 100 ]
                         Spatial =
@@ -3671,7 +3891,7 @@ let pickupTaskTests =
 
                 Expect.equal
                     verdicts
-                    [ Verdict.Matched("h1", taskId (Withdraw "can-far"), MatchFactor.PoolOrder) ]
+                    [ Verdict.Matched("h1", taskId (Pickup "pile-a"), MatchFactor.PoolOrder) ]
                     "ten tiles either way: pool order broke the tie, not rank"
             }
 
