@@ -634,23 +634,27 @@ let pinnedRoom =
                 ]
     }
 
-/// The heavy-pin colony: one creep of the test's choosing standing where
-/// the test puts it, the source the given number of ticks from its
+/// The heavy-pin colony: the creeps of the test's choosing standing where
+/// the test puts them, the source the given number of ticks from its
 /// restock, and no spawn to cast anything that would crowd the pool.
-let pinnedColony ticks (creep: CreepInfo) pos =
+let pinnedCrowd ticks (placed: (CreepInfo * Pos) list) =
     { bareRespawn with
         Spawns = []
         Refillables = []
         Sources = [ drained "src-a" ticks ]
         Controller = Some(controllerAt 2)
-        Creeps = [ creep ]
+        Creeps = placed |> List.map fst
         Spatial =
             pinnedRoom
             |> withHome (fun layer ->
                 { layer with
-                    CreepPositions = Map.ofList [ creep.Name, pos ]
+                    CreepPositions =
+                        placed |> List.map (fun (creep, pos) -> creep.Name, pos) |> Map.ofList
                 })
     }
+
+/// The same colony holding one body: the shape most of these cases take.
+let pinnedColony ticks (creep: CreepInfo) pos = pinnedCrowd ticks [ creep, pos ]
 
 [<Tests>]
 let heavyPinTests =
@@ -713,9 +717,11 @@ let heavyPinTests =
                 // Where ADR 0048 draws the line, and it is the engine's own
                 // harvest range and not a distance from the Post: a body
                 // that would have to take a step before it could dig has a
-                // walk, and a walk is what ADR 0025 judges. It waits the
-                // window out where it stands rather than being dispatched
-                // anywhere, which is the arm below.
+                // walk, and a walk is what ADR 0025 judges — on the same
+                // arithmetic and the same numbers a light body is judged
+                // on since #258. Four ticks of walk cover no part of fifty
+                // ticks of wait, so it waits the window out where it
+                // stands.
                 let colony = pinnedColony 50 (anchor "a1" 0 50) { X = 12; Y = 10 }
                 let remembered = Map.ofList [ "a1", taskId (Harvest "src-a") ]
 
@@ -738,37 +744,114 @@ let heavyPinTests =
                 Expect.isEmpty (moveIntentsFor "a1" intents) "so it holds its ground"
             }
 
-            test "a distant heavy body is not dispatched to a drained source" {
-                // The live report (#193): ADR 0025's "the walk covers the
-                // wait, so set out now" is a light body's rule. An Anchor
-                // pays four ticks a plain step, so the walk covers almost
-                // any wait, and the colony sent one across half a room —
-                // and, with the projection layered, across a border — to
-                // take a Post somebody was still standing on. It waits
-                // instead: twenty ticks beside its own source cost the
-                // colony one restock, where twenty ticks of walking cost
-                // it the walk back too.
+            test "a distant heavy body is dispatched when its walk covers the wait" {
+                // #258 retires ADR 0048's heavy arm and #193's refusal
+                // with it. What that arm cured was an Anchor walking half
+                // a room onto a Post another Anchor was standing on, and
+                // that is a **capacity** question — closed by the Post
+                // count since ADR 0024 and ADR 0051, and closed a second
+                // time for a body still walking by the pair below. What it
+                // cost was the dispatch rule itself: an Anchor pays four
+                // ticks a plain step, so twenty-four tiles of lane are a
+                // walk of ninety-six, and a rock twenty ticks from its
+                // restock has long since refilled by the time this body
+                // arrives. There is nothing to wait for.
                 let colony = pinnedColony 20 (anchor "a1" 0 50) { X = 35; Y = 10 }
+
+                let {
+                        Assignments = assignments
+                        Intents = intents
+                    } =
+                    decide colony Map.empty Set.empty None
+
+                Expect.equal
+                    (harvesters assignments "src-a")
+                    [ "a1" ]
+                    "ninety-six ticks of walking cover twenty ticks of waiting"
+
+                Expect.isNonEmpty
+                    (moveIntentsFor "a1" intents)
+                    "and the window is spent walking, not standing"
+            }
+
+            test "what refuses the same walk onto a held Post is the cap, not the restock" {
+                // The other half of the case above, and the one #193's
+                // test used to carry: with the heavy arm gone, the rule
+                // that keeps an Anchor off a Post another Anchor is
+                // standing on is the **Post count** (ADR 0024 as ADR 0051
+                // sharpened it), counted against a holder whose stay
+                // overlaps this body's arrival (ADR 0026). The same drained
+                // rock, the same ninety-six ticks of lane, one garrison
+                // added: the pair is offered and the cap refuses it, so
+                // the Verdict names crowding and never earliness.
+                let colony =
+                    pinnedCrowd
+                        50
+                        [
+                            anchor "a1" 0 50, { X = 35; Y = 10 }
+                            anchor "g1" 0 50, { X = 11; Y = 10 }
+                        ]
+
+                let remembered = Map.ofList [ "g1", taskId (Harvest "src-a") ]
+
+                let {
+                        Assignments = assignments
+                        Intents = intents
+                        Verdicts = verdicts
+                    } =
+                    decide colony remembered Set.empty None
+
+                Expect.contains
+                    verdicts
+                    (Verdict.Unassigned("a1", IdleReason.NoneFree))
+                    "the source's one Post is spoken for, which is a capacity and not a wait"
+
+                Expect.equal
+                    (harvesters assignments "src-a")
+                    [ "g1" ]
+                    "and the garrison standing on it keeps it"
+
+                Expect.isEmpty
+                    (moveIntentsFor "a1" intents)
+                    "so nothing walks the width of the room for a tile that is taken"
+            }
+
+            test "the drained rock is not taken off a heavy body half way there" {
+                // The live case (user, 2026-09-08), which is the same rule
+                // read as a release rather than as a dispatch. An Anchor
+                // ninety-odd ticks from an outpost Post had its rock dug
+                // out from under it in mid-walk; the heavy arm released it
+                // `too-early: walk 90, wait 50`, it went `none-in-time`,
+                // and the next tick it matched a home source another
+                // Anchor was standing on and walked the border back. The
+                // walk covers the wait by nearly two to one, so there is
+                // no release to start that chain.
+                let colony = pinnedColony 50 (anchor "a1" 0 50) { X = 35; Y = 10 }
+                let remembered = Map.ofList [ "a1", taskId (Harvest "src-a") ]
 
                 let {
                         Assignments = assignments
                         Verdicts = verdicts
                     } =
-                    decide colony Map.empty Set.empty None
-
-                Expect.equal (Map.tryFind "a1" assignments) None "no dispatch onto a dry rock"
+                    decide colony remembered Set.empty None
 
                 Expect.contains
                     verdicts
-                    (Verdict.Unassigned("a1", IdleReason.NoneInTime))
-                    "and the reason is the restock, not its body"
+                    (Verdict.Kept("a1", taskId (Harvest "src-a")))
+                    "a walk of ninety-six against a window of fifty is not earliness"
+
+                Expect.equal
+                    (harvesters assignments "src-a")
+                    [ "a1" ]
+                    "and it keeps the Post it is walking to"
             }
 
             test "a distant light body is dispatched exactly as ADR 0025 has it" {
                 // The pairwise rival of the case above, one body apart:
-                // the dispatch rule is untouched for everything that is
-                // not Work-heavy, and a worker whose walk covers the wait
-                // still spends the window on the road.
+                // one dispatch rule for both bodies since #258, and how
+                // many ticks a tile costs each of them is already in the
+                // walk the rule reads. A worker crosses the same lane at a
+                // tick a tile and still spends the window on the road.
                 let colony = pinnedColony 20 (worker "w1" 0 50) { X = 35; Y = 10 }
 
                 let {
@@ -897,6 +980,79 @@ let heavyPinTests =
                     intents
                     (HarvestSource("a1", "src-a"))
                     "and this is the tile the dig was waiting for"
+            }
+
+            test "the walk home is refused onto a Post another garrison is standing on" {
+                // #258's second half. ADR 0048 offers a full Work-heavy
+                // body the walk wherever the source has a Post, on the
+                // argument that a Post is a tile the arriving body has
+                // something to do on — and the Post cap that would refuse
+                // the pair is counted at arrival (ADR 0026), so a walk
+                // long enough to outlast the incumbent reads every
+                // garrisoned Post in the colony as free. Live at 204,966
+                // an Anchor that had just lost its own rock crossed a
+                // border home on exactly that reading and stood beside an
+                // Anchor with hundreds of ticks left. The offer is now the
+                // Post standing empty *this* tick.
+                let colony =
+                    pinnedCrowd
+                        0
+                        [
+                            anchor "a1" 50 0, { X = 35; Y = 10 }
+                            anchor "g1" 0 50, { X = 11; Y = 10 }
+                        ]
+
+                let {
+                        Assignments = assignments
+                        Intents = intents
+                        Verdicts = verdicts
+                    } =
+                    decide colony Map.empty Set.empty None
+
+                Expect.equal (Map.tryFind "a1" assignments) None "the manned Post is not its work"
+
+                Expect.contains
+                    verdicts
+                    (Verdict.Unassigned("a1", IdleReason.NoneApplicable))
+                    "and it is the standing room that says so, not a restock or a cap read at arrival"
+
+                Expect.isEmpty
+                    (moveIntentsFor "a1" intents)
+                    "so nothing walks it the width of the room for a tile it cannot have"
+
+                Expect.equal
+                    (harvesters assignments "src-a")
+                    [ "g1" ]
+                    "the garrison keeps its own rock throughout"
+            }
+
+            test "a light body on the same tile leaves the Post vacant, and the walk is offered" {
+                // The pairwise half, one body apart on the same tile: what
+                // holds a Post is a garrison, and ADR 0051 keeps every
+                // light body off it — one standing there is squatting the
+                // Post, not working it — so the gate reads the body
+                // exactly as `hasSpareRate` reads it (#235). The Anchor
+                // still has somewhere to go.
+                let colony =
+                    pinnedCrowd
+                        0
+                        [
+                            anchor "a1" 50 0, { X = 35; Y = 10 }
+                            worker "w1" 0 50, { X = 11; Y = 10 }
+                        ]
+
+                let {
+                        Assignments = assignments
+                        Intents = intents
+                    } =
+                    decide colony Map.empty Set.empty None
+
+                Expect.equal
+                    (Map.tryFind "a1" assignments)
+                    (Some(taskId (Harvest "src-a")))
+                    "a Post no garrison stands on is still the full body's walk home"
+
+                Expect.isNonEmpty (moveIntentsFor "a1" intents) "and it sets out for it"
             }
 
             test "with no Harvest in the pool, a heavy body outside the Work Area has nothing" {
@@ -2595,6 +2751,82 @@ let postSiteTests =
                 Expect.isNonEmpty
                     (moveIntentsFor "w" intents)
                     "so the walk onto its Post is the whole of this tick"
+            }
+
+            test "a garrison on the rock's other Post does not strand the body raising the site" {
+                // The same reprieve with #258's unmanned-Post condition on
+                // it, on the one shape where the two censuses part: a rock
+                // with a **standing** container Post and a container site
+                // Post beside it — the shape "the Anchor quota counts
+                // Posts" above declares first-class, for the whole of the
+                // window #205 exists for. Read against the standing census
+                // the rock would be occupied by the garrison on the built
+                // container, and the full body one step off its own site
+                // would lose Harvest with Build already asking for the
+                // exact tile (#205, #234) and everything else shut (ADR
+                // 0016, ADR 0046, ADR 0048) — no Task at all, for the rest
+                // of its life, with the site left unraised. The condition
+                // reads every Post, so the standing room it is walking to
+                // is its own.
+                let room =
+                    { spatial
+                          [
+                              "src-a", { X = 10; Y = 10 }
+                              "cont-1", { X = 11; Y = 10 }
+                              "can-a", { X = 9; Y = 10 }
+                          ]
+                          [
+                              { X = 8; Y = 10 }, Plain
+                              { X = 9; Y = 10 }, Plain
+                              { X = 10; Y = 10 }, Wall
+                              { X = 11; Y = 10 }, Plain
+                          ] with
+                        TargetKinds =
+                            Map.ofList
+                                [
+                                    "src-a", Source
+                                    "cont-1", Structure BuiltKind.Container
+                                    "can-a", Site BuiltKind.Container
+                                ]
+                    }
+
+                let colony =
+                    { bareRespawn with
+                        Spawns = []
+                        Refillables = []
+                        Controller = None
+                        Sources = [ source "src-a" ]
+                        ConstructionSites = [ { Id = "can-a" } ]
+                        Creeps = [ postBody "a1" 50 0; postBody "g1" 0 50 ]
+                        Spatial =
+                            room
+                            |> withHome (fun layer ->
+                                { layer with
+                                    CreepPositions =
+                                        Map.ofList
+                                            [ "a1", { X = 8; Y = 10 }; "g1", { X = 11; Y = 10 } ]
+                                })
+                    }
+
+                let {
+                        Assignments = assignments
+                        Intents = intents
+                    } =
+                    decide colony Map.empty Set.empty None
+
+                Expect.equal
+                    (Map.tryFind "a1" assignments)
+                    (Some(taskId (Harvest "src-a")))
+                    "the site Post is standing room the garrison next door is not on"
+
+                Expect.isNonEmpty
+                    (moveIntentsFor "a1" intents)
+                    "so the full body takes the step back onto the site it was cast to raise"
+
+                Expect.equal
+                    (Map.tryFind "g1" assignments)
+                    (Some(taskId (Harvest "src-a")))
+                    "and the garrison on the built container keeps its own Post"
             }
 
             test "the builder budget prices a commute, and the body on the site pays none" {

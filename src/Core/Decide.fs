@@ -2845,6 +2845,55 @@ let private hasSpareRate (view: ColonyView) atlas (sourceId: string) =
 
     sourceRateOf view atlas sourceId |> Option.forall (fun rate -> rate > dug)
 
+/// Whether a source has a [[post]] with no garrison standing on it — **whether
+/// the walk this body is about to make ends on a tile it can have** (#258). A
+/// **heavy** body alone mans a Post, because ADR 0051 keeps every other body
+/// off those tiles and one standing there is squatting the Post rather than
+/// working it — `hasSpareRate`'s reading of the bodies, and the candidate never
+/// counts against itself, the way the Matcher's own garrison count does not.
+///
+/// **Every** Post of the rock and not the standing ones alone, which is the
+/// census the clause in `applicable` that reads this already asks: the question
+/// here is standing room, and a Post whose container is still a site is a tile
+/// a body stands on and raises (#205). `hasSpareRate` reads the standing census
+/// instead because its question is the rock's *economy*, and a site is a
+/// garrison place and not yet an economy. Read here, the standing census would
+/// strand the body the walk-home clause exists for: a rock carrying a manned
+/// container Post and a site Post beside it would read occupied for a full body
+/// one step off that site, and Build asks for the exact tile (#205, #234) — so
+/// that body would hold no Task at all.
+///
+/// Read **now** and not at arrival, which is where this parts from every other
+/// count of a Post. ADR 0026 discounts a holder that will be dead when the
+/// candidate gets there — the Matcher's cap and ADR 0053's `emptyPostCaps` both
+/// take that reading, and say so — so a Post ninety ticks away reads free to
+/// any heavy body in the colony, and live at 204,966 an Anchor a border away
+/// that had just lost its own rock took the walk home on it and stood beside a
+/// garrison that outlived its arrival by hundreds of ticks (user, 2026-09-08).
+/// The discount is safe for the body a cast was aimed at, and this gate cannot
+/// tell one of those from a released squatter, so it is refused here: is there
+/// standing room, this tick, on the rock this walk ends at. The price is a full
+/// body whose incumbent is genuinely [[expiring]], which waits where it stands
+/// rather than timing its walk; the alternative is the live case above. A rock
+/// with no Post at all stays open, the same safety valve `hasSpareRate` keeps —
+/// the clause below never asks with one, having settled it a conjunct earlier.
+let private hasUnmannedPost (view: ColonyView) atlas (creep: CreepInfo) (sourceId: string) =
+    let posts = Atlas.postsOf atlas sourceId
+
+    if Set.isEmpty posts then
+        true
+    else
+        let manned =
+            view.Creeps
+            |> List.choose (fun c ->
+                if c.Name <> creep.Name && Atlas.workHeavy atlas c.Name then
+                    Atlas.creepTile atlas c.Name
+                else
+                    None)
+            |> Set.ofList
+
+        posts |> Set.exists (fun tile -> not (Set.contains tile manned))
+
 /// Whether a Work-heavy body holds a source through its empty window: the
 /// **empty-source** reprieve, which ADR 0048 widened off the container to the
 /// source's whole digging range. Named for the reprieve and not for the Post on
@@ -2872,12 +2921,26 @@ let private keepsThroughEmptyWindow atlas (creep: CreepInfo) sourceId =
 /// dry rock has no walk to cover anything and is released (ADR 0013). One
 /// exemption, ADR 0024's condition as ADR 0048 widened it: a Work-heavy body
 /// already in digging range keeps its Post through the window, a bare Dual Seat
-/// subtracted. The dispatch itself is a light body's rule (ADR 0048, narrowing
-/// ADR 0025): for a Work-heavy body a drained source is early whatever its
-/// walk, unless that exemption holds. "The walk covers the wait, so set out
-/// now" was written for a body that pays a tick a tile; an Anchor pays four to
-/// seven, so the rule dispatched one across half a room onto a Post another
-/// Anchor was standing on. Every other Task is judged at the current tick. Two
+/// subtracted. **One rule for both bodies** (#258, retiring ADR 0048's heavy
+/// arm): the walk covers the wait or it does not, and how many ticks a tile
+/// costs this body is already in the walk. ADR 0048 read the same walk as
+/// earliness for a Work-heavy body whatever its length, because "the walk
+/// covers the wait, so set out now" had dispatched an Anchor across half a room
+/// onto a Post another Anchor was standing on — a **capacity** question, which
+/// the Post count answers (ADR 0024, ADR 0051) and `applicable` below answers
+/// again, this tick and not at arrival, for a *full* body still walking. Not
+/// everywhere: a Post whose garrison holds some other Task this tick — a bare
+/// [[dual seat]]'s, upgrading through the same empty window — is counted by
+/// neither, so an empty heavy body far enough out is still dispatched onto one.
+/// That window is accepted here and not cured: the cap is where a seat rule
+/// belongs, and a heavy body with a free store must keep the walk this gate
+/// would otherwise refuse it, or no successor could ever be sent to the Post
+/// its expiring incumbent is standing on (ADR 0026). What the heavy arm had
+/// left was the release it caused: an Anchor whose outpost rock was dug out
+/// from under it mid-walk was released at ninety tiles of walk against fifty
+/// ticks of wait, went `none-in-time`, and re-matched a home rock it had no
+/// business on — twice, the vacancy it left behind casting a second Anchor
+/// (user, 2026-09-08). Every other Task is judged at the current tick. Two
 /// consequences, both ADR 0004's totality.
 let private tooEarly (view: ColonyView) atlas (creep: CreepInfo) task (walk: Lazy<int option>) =
     match task with
@@ -2890,18 +2953,13 @@ let private tooEarly (view: ColonyView) atlas (creep: CreepInfo) task (walk: Laz
         | Some ticks ->
             let wait = ticksToRestock view sourceId
 
-            // `wait = 0` became load-bearing when the heavy arm below stopped
-            // reading the walk: a stocked source is a wait of zero and every
-            // walk covers it, so without this the arm would report a heavy body
-            // as early against a wait there is not, and no Anchor would ever be
-            // dispatched to any source.
+            // A stocked source is a wait of zero, which every walk covers:
+            // the arm below answers it either way, and asking it first
+            // keeps the reprieve's Atlas joins off the pairs a stocked
+            // pool is mostly made of.
             if wait = 0 || keepsThroughEmptyWindow atlas creep sourceId then
                 None
-            // The heavy arm reports the same pair every other rejection
-            // does — the walk it would have made against the wait it does
-            // not cover for it — so the transition log reads as one gate
-            // with one reason and never as two (#88).
-            elif Atlas.workHeavy atlas creep.Name || ticks < wait then
+            elif ticks < wait then
                 Some(ticks, wait)
             else
                 None
@@ -3676,13 +3734,31 @@ let private applicable
     // So the gate is widened by a question and not by a tile: ADR 0024 asks
     // whether a body may keep *digging* where it stands, and a body still
     // walking is not digging.
+    //
+    // **And the walk has to end somewhere it can stand** (#258). ADR 0048
+    // offered it wherever the source has a Post, on the argument that a Post is
+    // a tile the arriving body has something to do on — true of the tile and
+    // not of the tick, because the Post cap that would otherwise refuse the
+    // pair is counted at arrival (ADR 0026) and a long enough walk discounts
+    // any incumbent. So a full Anchor released off its own rock read every
+    // garrisoned Post in the colony as somewhere to go, and the one live case
+    // walked a border home to stand beside another Anchor's Post while the
+    // vacancy it left cast a replacement (user, 2026-09-08). The walk is
+    // offered while a Post of that source has no garrison standing on it
+    // *now* — over the same census this clause's own Post test reads, so the
+    // rock a full body is walking to raise the site of is one it can still
+    // have (#205). The narrowing is this disjunct's alone and so is a **full**
+    // body's alone: a heavy body with a free store is offered the walk by the
+    // clause above, which is what lets a fresh Anchor be sent to the Post its
+    // expiring incumbent is still standing on (ADR 0026).
     | Harvest sourceId ->
         has Work
         && (creep.FreeCapacity > 0
             || garrisons atlas creep sourceId
             || (Atlas.workHeavy atlas creep.Name
                 && not (Set.isEmpty (Atlas.postsOf atlas sourceId))
-                && not (Atlas.mayAct atlas creep.Name task (areaFor threats atlas creep.Name task))))
+                && not (Atlas.mayAct atlas creep.Name task (areaFor threats atlas creep.Name task))
+                && hasUnmannedPost view atlas creep sourceId))
         // **Three clauses a light body answers and a garrison does not**
         // (#235), drawn at ADR 0016's ratio, which is where every other line
         // that separates the two bodies is drawn. Every one of the three is
