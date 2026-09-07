@@ -1033,10 +1033,32 @@ let planTasks (view: ColonyView) (threats: Threats) : Task list =
     // creep-blind Planner's.
     let harvests = view.Sources |> List.map (fun s -> Harvest s.Id)
 
+    // The flow's sink, as **one** Task (ADR 0054): the [[refill cluster]]
+    // — the colony's spawn and every extension of it — is pooled under the
+    // spawn's id and stands while any member of it has room, so `task-gone`
+    // fires when the whole ring is full instead of once per extension
+    // somebody else got to first.
+    //
+    // What is left over is pooled the way it always was: the towers, which
+    // are surplus-tier work and no part of the ring (ADR 0010), and the
+    // spawn-feeding structures of a colony whose Refillables hold no spawn
+    // to key a cluster — a room whose spawn has been destroyed, which the
+    // live colony has never been.
+    let cluster = RefillCluster.ofRefillables view.Refillables
+
+    let clustered =
+        cluster
+        |> Option.map (fun c -> c.Members |> Map.toList |> List.map fst |> Set.ofList)
+        |> Option.defaultValue Set.empty
+
     let refills =
-        view.Refillables
-        |> List.filter (fun r -> r.FreeCapacity > 0)
-        |> List.map (fun r -> Refill r.Id)
+        (cluster
+         |> Option.filter (fun c -> RefillCluster.free c > 0)
+         |> Option.map (fun c -> Refill c.Spawn)
+         |> Option.toList)
+        @ (view.Refillables
+           |> List.filter (fun r -> r.FreeCapacity > 0 && not (Set.contains r.Id clustered))
+           |> List.map (fun r -> Refill r.Id))
 
     let builds = view.ConstructionSites |> List.map (fun site -> Build site.Id)
 
@@ -4985,6 +5007,11 @@ let planPool (view: ColonyView) atlas (tasks: Task list) : PooledTask list =
 
     let buffers = Atlas.controllerContainers atlas
 
+    // The [[refill cluster]], off the one rule its three readers share
+    // (`RefillCluster.ofRefillables`, ADR 0054): `planTasks` pooled the
+    // spawn, this bounds it, and the Atlas lays its Work Area.
+    let cluster = RefillCluster.ofRefillables view.Refillables
+
     // The [[ferry]]'s sinks, named by the one rule three readers share
     // (`ferryBuffers`): what a mother lends a bootstrapping child is
     // written down and bounded, so the Refill `planTasks` pooled for the
@@ -5144,6 +5171,12 @@ let planPool (view: ColonyView) atlas (tasks: Task list) : PooledTask list =
             elif isTower then
                 Surplus
             else
+                // The flow, and since ADR 0054 the [[refill cluster]]
+                // arrives here through the same door rather than a case of
+                // its own: the cluster is keyed on a spawn, and a spawn is
+                // what "everything the three tests miss" has always meant.
+                // The ring it stands for is spawn-feeding to the last
+                // extension, so one tier answers for all of it.
                 Feeding
         // The switch ADR 0042 hangs a whole room on, ranked where a switch
         // belongs (#157). A standing container is what admits an outpost
@@ -5404,6 +5437,41 @@ let planPool (view: ColonyView) atlas (tasks: Task list) : PooledTask list =
             else
                 Capacity.total (ceilDiv stock haulerLoad)
         | Pickup pileId -> Capacity.total (ceilDiv (stored pileId) haulerLoad)
+        // **The [[refill cluster]] is bounded by what it can still hold**
+        // (ADR 0054, amending ADR 0029 for this one Task): as many bodies
+        // as the ring's free energy divides into loads, so a second one
+        // joins only while what stands empty exceeds what the first is
+        // carrying, and a cluster with fifty free draws one body instead of
+        // the whole loaded fleet.
+        //
+        // The bound is what makes one Task out of ten safe. Ten Tasks of
+        // capacity one apiece spread the crowd by accident — badly, at the
+        // cost of a `task-gone` release per creep per tick or two — and
+        // unbounded, one Task would gather every loaded body in the colony
+        // onto one ring and leave the [[buffer]] and the [[storage]]
+        // unvisited. Divided by the [[hauler unit]]'s load and never a
+        // candidate's own carry, for the reason every store here is: a
+        // capacity is a fact about the Task, so one sink must not answer
+        // two numbers depending on which body asked (#161).
+        //
+        // A `Total` and no per-class share: every body with a Carry part
+        // and something in it feeds the flow, which is the one sink the
+        // colony has no row of its own for.
+        //
+        // Two prices ADR 0054 records rather than removes. The number is
+        // **loads and not a rate**: a body pours one member's free capacity
+        // a tick — the engine's `transfer` takes no amount and a Refill
+        // issues one Intent — so the ring fills at fifty a tick per body
+        // and this bound sizes the crowd by how many stores it can take,
+        // not by how fast. And it only **falls**, so the tick the free
+        // energy crosses a load boundary one of the bodies aimed at the
+        // ring is released `over-capacity`, in the release fold's own
+        // creep-name order: once per load poured, where the Task per
+        // extension paid a `task-gone` per extension filled.
+        | Refill spawnId when cluster |> Option.exists (fun c -> c.Spawn = spawnId) ->
+            let free = cluster |> Option.map RefillCluster.free |> Option.defaultValue 0
+
+            Capacity.total (ceilDiv free haulerLoad)
         // The lend, bounded (#222, ADR 0052 decision 7): `Tuning.FerryLoads`
         // bodies at the child's buffer and no more, the same number the
         // hauler row was raised by, so a human retuning the lend retunes
@@ -5789,7 +5857,7 @@ let private applicable
 /// The action Intent a Task asks of a creep, or None for a Task with no
 /// action: Flee is movement and nothing else (ADR 0033), and the Emitter
 /// issues it none.
-let private intentFor (creep: CreepInfo) task =
+let private intentFor atlas (creep: CreepInfo) task =
     match task with
     | Harvest sourceId -> Some(HarvestSource(creep.Name, sourceId))
     // The same Intent for a tombstone or a ruin as for a container (#167):
@@ -5803,7 +5871,16 @@ let private intentFor (creep: CreepInfo) task =
     // twice and `decide` keeps one — this Task owns its own act, and the
     // reflex is what gives way.
     | Pickup pileId -> Some(PickupEnergy(creep.Name, pileId))
-    | Refill structureId -> Some(TransferEnergyToStructure(creep.Name, structureId))
+    // One Task, one act, and — since ADR 0054 — sometimes many structures:
+    // a [[refill cluster]]'s Refill names a place, and *which* member of it
+    // the energy lands in is settled here, at arrival, off the tile the
+    // body actually stands on (`Atlas.refillTarget`). Every other Refill
+    // resolves to its own target through the same call, so the Emitter has
+    // one line and not a branch. Nothing in range with room left issues no
+    // transfer, which is the same silence a drained Harvest keeps.
+    | Refill structureId ->
+        Atlas.refillTarget atlas creep.Name structureId
+        |> Option.map (fun target -> TransferEnergyToStructure(creep.Name, target))
     | Build siteId -> Some(BuildSite(creep.Name, siteId))
     | Repair structureId -> Some(RepairStructure(creep.Name, structureId))
     | Upgrade controllerId -> Some(UpgradeController(creep.Name, controllerId))
@@ -5861,7 +5938,7 @@ let private actionIntents
         Atlas.mayAct atlas creep.Name task (areaFor threats atlas creep.Name task)
         && not drained
     then
-        intentFor creep task |> Option.toList
+        intentFor atlas creep task |> Option.toList
     else
         []
 

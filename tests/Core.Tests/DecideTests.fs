@@ -887,7 +887,11 @@ let plannerTests =
                 Expect.equal builds [ "site-1"; "site-2" ] "one Build task per construction site"
             }
 
-            test "a structure missing energy gets a Refill task; a full structure gets none" {
+            test "the spawn and its extensions are one Refill, under the spawn's id" {
+                // ADR 0054: the ring is one place a body walks to once, so
+                // the extensions do not each carry a Task of their own —
+                // which is what let whoever filled one first evaporate a
+                // walker's Task every tick or two.
                 let snapshot =
                     { bareRespawn with
                         Refillables =
@@ -904,10 +908,65 @@ let plannerTests =
                         | Refill structureId -> Some structureId
                         | _ -> None)
 
+                Expect.equal refills [ "spawn-1" ] "the cluster is pooled once, under its spawn"
+            }
+
+            test "a full cluster is pooled at all only while some member has room" {
+                // The other end of ADR 0054's whole point: `task-gone`
+                // fires when the *ring* is full, not when the extension a
+                // body happened to be aimed at is. A full spawn beside an
+                // empty extension keeps the Task standing.
+                let cluster free =
+                    { bareRespawn with
+                        Refillables =
+                            [
+                                refillable "spawn-1" (fst free) BuiltKind.Spawn
+                                refillable "ext-1" (snd free) BuiltKind.Extension
+                            ]
+                    }
+
+                let refills snapshot =
+                    planTasks snapshot noThreats
+                    |> List.choose (function
+                        | Refill structureId -> Some structureId
+                        | _ -> None)
+
+                Expect.equal
+                    (refills (cluster (0, 50)))
+                    [ "spawn-1" ]
+                    "a full spawn with a hungry extension beside it is still a Refill"
+
+                Expect.equal
+                    (refills (cluster (0, 0)))
+                    []
+                    "the whole ring full is what takes the Refill out of the pool"
+            }
+
+            test "extensions with no spawn to key them stay one Task apiece" {
+                // The `None` arm of `RefillCluster.ofRefillables` (ADR
+                // 0054): a room whose spawn has been destroyed has no
+                // cluster, and its extensions are pooled the way every
+                // Refillable was before there was one.
+                let snapshot =
+                    { bareRespawn with
+                        Refillables =
+                            [
+                                refillable "ext-1" 50 BuiltKind.Extension
+                                refillable "ext-2" 0 BuiltKind.Extension
+                                refillable "ext-3" 50 BuiltKind.Extension
+                            ]
+                    }
+
+                let refills =
+                    planTasks snapshot noThreats
+                    |> List.choose (function
+                        | Refill structureId -> Some structureId
+                        | _ -> None)
+
                 Expect.equal
                     refills
-                    [ "spawn-1"; "ext-2" ]
-                    "only structures with free capacity need a Refill"
+                    [ "ext-1"; "ext-3" ]
+                    "only the extensions with free capacity need a Refill"
             }
 
             test "a tower missing energy gets a Refill task; a full tower gets none" {
@@ -4560,6 +4619,213 @@ let movementTests =
                     "transfer needs range 1, so the creep closes in"
 
                 Expect.isEmpty (actionIntents intents) "no transfer from range 2"
+            }
+        ]
+
+/// The [[refill cluster]] on open ground (ADR 0054): the spawn at (10,10)
+/// and two extensions south of it in the column x = 10, every structure
+/// tile an obstacle as the engine has it and a 3-wide plain band around
+/// them. The caller says how much room each of the three has left and where
+/// the bodies stand, which is the whole of what this Task's [[capacity]],
+/// its [[work area]] and the [[emitter]]'s pick turn on.
+let clusterColony (spawnFree, ext1Free, ext2Free) creeps positions =
+    let structures =
+        [
+            "spawn-1", { X = 10; Y = 10 }
+            "ext-1", { X = 10; Y = 12 }
+            "ext-2", { X = 10; Y = 14 }
+        ]
+
+    { bareRespawn with
+        Refillables =
+            [
+                refillable "spawn-1" spawnFree BuiltKind.Spawn
+                refillable "ext-1" ext1Free BuiltKind.Extension
+                refillable "ext-2" ext2Free BuiltKind.Extension
+            ]
+        Creeps = creeps
+        Spatial =
+            spatial
+                structures
+                [
+                    for x in 9..11 do
+                        for y in 9..18 -> { X = x; Y = y }, Plain
+                ]
+            |> withHome (fun layer ->
+                { layer with
+                    Obstacles = structures |> List.map snd |> Set.ofList
+                    CreepPositions = Map.ofList positions
+                })
+    }
+
+/// The creeps holding one Task this tick, by name.
+let holdersOf task assignments =
+    assignments
+    |> Map.toList
+    |> List.filter (fun (_, tid) -> tid = taskId task)
+    |> List.map fst
+
+[<Tests>]
+let refillClusterTests =
+    testList
+        "refill cluster"
+        [
+            test "the cluster admits as many bodies as its free energy divides into loads" {
+                // ADR 0054's bound, pinned pairwise at the one line it can
+                // be wrong on: the 300 bank casts a `4C/2M` hauler, so one
+                // load is 200 — a hundred of room draws one body and three
+                // hundred draws two. Two loaded carriers standing on either
+                // side of the spawn, so nothing but the cap separates them.
+                let colony free =
+                    clusterColony
+                        (free, 0, 0)
+                        [
+                            creepWith "h1" 50 0 [ Carry; Carry; Move ]
+                            creepWith "h2" 50 0 [ Carry; Carry; Move ]
+                        ]
+                        [ "h1", { X = 9; Y = 10 }; "h2", { X = 11; Y = 10 } ]
+
+                let holders free =
+                    let { Assignments = assignments } =
+                        decide (colony free) Map.empty Set.empty None
+
+                    holdersOf (Refill "spawn-1") assignments
+
+                Expect.hasLength (holders 100) 1 "one load of room admits one body"
+                Expect.hasLength (holders 300) 2 "and two loads' worth admits the second"
+            }
+
+            test "an extension filled while a body walks costs it a neighbour, not its Task" {
+                // The churn this ADR was written against, inverted (#226):
+                // the body is aimed at the ring, not at the extension that
+                // happened to be nearest, so somebody else topping that
+                // extension up leaves its assignment exactly where it was.
+                let walking free =
+                    clusterColony
+                        free
+                        [ creepWith "h1" 50 0 [ Carry; Carry; Move ] ]
+                        [ "h1", { X = 10; Y = 18 } ]
+
+                let sticky = Map.ofList [ "h1", taskId (Refill "spawn-1") ]
+
+                let {
+                        Assignments = assignments
+                        Verdicts = verdicts
+                    } =
+                    decide (walking (0, 50, 0)) sticky Set.empty None
+
+                Expect.equal
+                    (Map.tryFind "h1" assignments)
+                    (Some(taskId (Refill "spawn-1")))
+                    "the near extension is full and the far one is not: the Task stands"
+
+                Expect.isEmpty
+                    (verdicts
+                     |> List.filter (function
+                         | Verdict.Released(_, _, ReleaseReason.TaskGone) -> true
+                         | _ -> false))
+                    "nothing went away, so nothing is released"
+            }
+
+            test "the whole ring full is what takes the Task away" {
+                // The other half of the same sentence: `task-gone` still
+                // fires, once, when there is nowhere in the cluster left to
+                // pour — which is once a fill instead of once an extension.
+                let full =
+                    clusterColony
+                        (0, 0, 0)
+                        [ creepWith "h1" 50 0 [ Carry; Carry; Move ] ]
+                        [ "h1", { X = 10; Y = 18 } ]
+
+                let sticky = Map.ofList [ "h1", taskId (Refill "spawn-1") ]
+
+                let { Verdicts = verdicts } = decide full sticky Set.empty None
+
+                Expect.contains
+                    verdicts
+                    (Verdict.Released("h1", taskId (Refill "spawn-1"), ReleaseReason.TaskGone))
+                    "a cluster with no room left is no Task"
+            }
+
+            test "the arriving body pours into the member beside it that has room" {
+                // h1 at (10,13) touches ext-1 (10,12) and ext-2 (10,14)
+                // alike, so the pair moves only which of them is hungry —
+                // the [[emitter]]'s pick, made at arrival off the tile the
+                // body is standing on rather than at matching time.
+                let arrived free =
+                    clusterColony
+                        free
+                        [ creepWith "h1" 50 0 [ Carry; Carry; Move ] ]
+                        [ "h1", { X = 10; Y = 13 } ]
+
+                let { Intents = northIntents } =
+                    decide (arrived (0, 50, 0)) Map.empty Set.empty None
+
+                let { Intents = southIntents } =
+                    decide (arrived (0, 0, 50)) Map.empty Set.empty None
+
+                Expect.contains
+                    northIntents
+                    (TransferEnergyToStructure("h1", "ext-1"))
+                    "ext-2 is full, so the load goes into the extension that is not"
+
+                Expect.contains
+                    southIntents
+                    (TransferEnergyToStructure("h1", "ext-2"))
+                    "and the other way round, so it is room and not id order deciding"
+            }
+
+            test "a load the ring no longer has room for is released over-capacity" {
+                // The price ADR 0054 records rather than removes. The cap
+                // is `ceil(free / one load)` and the ring's free energy
+                // only falls, so on the tick it crosses a load boundary one
+                // of the bodies aimed at the ring is released — a body that
+                // may well be the one already standing beside a member,
+                // because the release fold walks the assignments in
+                // creep-name order and not by proximity.
+                //
+                // It is once per load *poured*, where a Task per extension
+                // paid a `task-gone` per extension filled, so the churn is
+                // bounded far below what #226 removed — but it is not zero,
+                // and this is where it is written down.
+                let colony free =
+                    clusterColony
+                        free
+                        [
+                            creepWith "h1" 50 0 [ Carry; Carry; Move ]
+                            creepWith "h2" 50 0 [ Carry; Carry; Move ]
+                        ]
+                        [ "h1", { X = 10; Y = 18 }; "h2", { X = 10; Y = 11 } ]
+
+                let sticky =
+                    Map.ofList [ "h1", taskId (Refill "spawn-1"); "h2", taskId (Refill "spawn-1") ]
+
+                let outcome free =
+                    let {
+                            Assignments = assignments
+                            Verdicts = verdicts
+                        } =
+                        decide (colony free) sticky Set.empty None
+
+                    holdersOf (Refill "spawn-1") assignments, verdicts
+
+                // Four hundred of room is two of the 300 bank's 200-energy
+                // loads, so both bodies keep what they hold.
+                Expect.equal
+                    (fst (outcome (300, 100, 0)))
+                    [ "h1"; "h2" ]
+                    "two loads' worth of room holds two bodies"
+
+                // One load poured into the ring, and the second body's load
+                // is one too many for what is left.
+                let holders, verdicts = outcome (200, 0, 0)
+
+                Expect.equal holders [ "h1" ] "one load's worth of room holds one"
+
+                Expect.contains
+                    verdicts
+                    (Verdict.Released("h2", taskId (Refill "spawn-1"), ReleaseReason.OverCapacity))
+                    "and the other is released over-capacity, though it is the one that had arrived"
             }
         ]
 

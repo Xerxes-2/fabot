@@ -447,6 +447,97 @@ type RefillableInfo =
         Kind: BuiltKind
     }
 
+/// The colony's [[refill cluster]] (ADR 0054): the colony's spawn and
+/// every extension of it, read as **one** Refill target.
+///
+/// A Refill's identity used to be the single structure, so one cluster was
+/// ten Tasks of capacity one apiece — and a loaded body matched to the
+/// nearest empty extension lost it to whoever filled that extension while
+/// it walked, was re-matched to the next, lost that one too, and spent its
+/// load on the fourth. Fifty-four of one live window's seventy-three
+/// `task-gone` releases were that churn (W13S28, t191,307–192,637), each
+/// re-match a fresh flood. As one Task the cluster is one place a body
+/// walks to once, and `task-gone` fires when the whole ring is full.
+///
+/// **The spawn is the key** because it is the member every cluster has and
+/// the door the [[hauler unit]] quota already prices its leg to (ADR 0052
+/// decision 4: "the cluster is one place and not one per spawn"). Two
+/// spawns in a room are one cluster with two doors, keyed at the **lower
+/// id**: the key is an identity and never a price, so it is taken by the
+/// one ordering that does not move with the [[layout]] — the quota
+/// resolves the same sink at the *cheapest door* and this is deliberately
+/// not that number, which it never has to be, because the Work Area below
+/// is the union of the members' rings and no walk is ever priced to the
+/// key. A colony whose Refillables hold no spawn at all makes no cluster,
+/// and its extensions stay one Task apiece (`ofRefillables`) — which is
+/// what a room whose spawn has been destroyed looks like.
+type RefillCluster =
+    {
+        /// The Task's target id: the cluster's spawn, and the id every
+        /// Assignment, [[verdict]] and [[transition log]] line names this
+        /// Refill by.
+        Spawn: string
+        /// Member id -> the energy it can still take this tick. Every
+        /// member, full ones included, so the map is the ring's membership
+        /// and not this tick's fill level. What the [[work area]] and the
+        /// [[emitter]]'s pick actually read is the **hungry** subset
+        /// (`hungry`), which is why a full member costs them nothing.
+        Members: Map<string, int>
+    }
+
+[<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
+module RefillCluster =
+    /// The cluster this colony's Refillables make, or None where no spawn
+    /// stands among them to key one (ADR 0054). Membership is by kind and
+    /// not by geometry: every spawn-feeding structure of the colony is in
+    /// the one cluster, however far the [[layout]] put it from the spawn,
+    /// and the walk is still short because the Work Area is the union of
+    /// the members' rings and the mover aims at the nearest of them.
+    ///
+    /// The spawn-feeding kinds alone (ADR 0010's own layering): a tower is
+    /// a Refillable too and is never a member — it is surplus-tier work
+    /// standing wherever the Layout put it, not part of a ring one visit
+    /// tops up, and folding it in would drag the guns onto the flow's tier.
+    ///
+    /// One rule and three readers, so it is written here and in none of
+    /// them: `Decide.planTasks` pools the spawn, `Decide.planPool`
+    /// divides the cluster's free energy into holders, and the [[atlas]]
+    /// lays the Work Area over the hungry members and picks the one an
+    /// arriving body pours into.
+    let ofRefillables (refillables: RefillableInfo list) : RefillCluster option =
+        let members =
+            refillables
+            |> List.filter (fun r -> r.Kind = BuiltKind.Spawn || r.Kind = BuiltKind.Extension)
+
+        let spawns =
+            members
+            |> List.filter (fun r -> r.Kind = BuiltKind.Spawn)
+            |> List.map (fun r -> r.Id)
+
+        match spawns with
+        | [] -> None
+        | spawns ->
+            Some
+                {
+                    Spawn = List.min spawns
+                    Members = members |> List.map (fun r -> r.Id, r.FreeCapacity) |> Map.ofList
+                }
+
+    /// The energy the whole cluster can still take: what pools the Task at
+    /// all and what its [[capacity]] divides into holders (ADR 0054).
+    let free (cluster: RefillCluster) =
+        cluster.Members |> Map.fold (fun total _ room -> total + room) 0
+
+    /// The members with room left, in id order — the structures the Work
+    /// Area is laid over and the only ones the Emitter may transfer into
+    /// (ADR 0054). A body that stopped beside a full extension has nothing
+    /// to pour and would stand there for the rest of the fill, which is
+    /// the churn this Task shape removes, re-entered through the geometry.
+    let hungry (cluster: RefillCluster) =
+        cluster.Members
+        |> Map.toList
+        |> List.choose (fun (id, room) -> if room > 0 then Some id else None)
+
 /// What the decision layer knows about one energy source this tick.
 type SourceInfo =
     {
@@ -2792,6 +2883,16 @@ type Task =
     /// Withdraw beside it: which of a pile and a container an empty
     /// carrier goes for is travel cost's call and never a rule's.
     | Pickup of pileId: string
+    /// Deliver energy into an energy-hungry structure (ADR 0010, widened
+    /// by ADR 0012 and ADR 0023): a tower, the upgrade [[buffer]], the
+    /// [[storage]], a [[ferry]]'s sink — and the flow's own sink, which
+    /// since ADR 0054 is not a structure but a **place**: the id is the
+    /// [[refill cluster]]'s spawn, and that spawn and every extension of
+    /// the colony are one Task with one [[capacity]]. Which member of the
+    /// cluster the energy actually lands in is settled at arrival by the
+    /// [[emitter]] (`Atlas.refillTarget`), off the tile the body is
+    /// standing on, so an extension somebody else filled mid-walk costs
+    /// the walker a neighbour rather than its Task.
     | Refill of structureId: string
     | Build of siteId: string
     | Repair of structureId: string
@@ -2893,7 +2994,11 @@ type BodyClass =
 type Capacity =
     {
         /// Holders of every class together. `None` is unbounded — the
-        /// Refills and the surplus work the pool is mostly made of.
+        /// *deeper* Refills (the [[buffer]]'s, the [[storage]]'s, a
+        /// [[ferry]]'s sink) and the surplus work the pool is mostly made
+        /// of. The flow's own Refill left that set in ADR 0054: the
+        /// [[refill cluster]] carries a number here, its free energy over
+        /// one [[hauler unit]] load.
         Total: int option
         /// Holders that are `Heavy`: the garrisons, who compete for
         /// standing room with each other and with nobody else (ADR 0024).

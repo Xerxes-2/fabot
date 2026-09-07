@@ -328,6 +328,22 @@ type Atlas =
             /// a per-creep one. A key set of one, so a cell rather than the
             /// table WorkAreas needs.
             mutable Buffers: Set<string> option
+            /// The colony's [[refill cluster]] as the view it was laid from
+            /// spelled it (`RefillCluster.ofRefillables`, ADR 0054): which
+            /// structures are the flow's one sink, and how much room each of
+            /// them has left this tick.
+            ///
+            /// Free capacity is not geometry, and it rides here for the
+            /// reason `Tuning` does: the Work Area memo is keyed on the Task
+            /// alone, and the cluster's area is the *hungry* members' rings —
+            /// so a number threaded through `workArea`, `mayAct`, the mover
+            /// and the Emitter is a number four call sites can disagree
+            /// about, and the disagreement would put a body beside a full
+            /// extension with nothing to pour. `None` for a colony whose
+            /// Refillables hold no spawn to key a cluster, which is the
+            /// same absence every unplaceable thing gets (ADR 0004): its
+            /// extensions are Tasks of their own and no query here fires.
+            Cluster: RefillCluster option
         }
 
 let private tileCount = Engine.roomSide * Engine.roomSide
@@ -1185,6 +1201,7 @@ let ofViewRecalling (walks: WalkTable) (view: ColonyView) : Atlas =
             |> List.map (fun creep -> creep.Name)
             |> Set.ofList
         Buffers = None
+        Cluster = RefillCluster.ofRefillables view.Refillables
     }
 
 /// The Atlas over a view with nothing recalled: a fresh spawn walk
@@ -1703,6 +1720,54 @@ let private actionOn =
     | Upgrade id -> Some(id, 3)
     | Flee -> None
 
+/// The [[refill cluster]] this Task *is*, if it is one (ADR 0054): a
+/// Refill whose target is the cluster's spawn is the whole ring's, and
+/// every other Refill — a tower's, the [[buffer]]'s, the [[storage]]'s, a
+/// [[ferry]] sink's, an extension in a colony with no spawn — is the
+/// single structure's it always was. Both halves of the pattern are
+/// load-bearing. The **id** narrows it to the one spawn the Planner pools,
+/// so a second spawn's Refill, which nothing pools, stays the ordinary
+/// shape rather than becoming a second copy of the cluster. The **kind**
+/// keeps every other Task that can name that same spawn out of it — a
+/// `Repair` on a damaged spawn is one structure's tile and not a ring's.
+let private clusterOf (atlas: Atlas) (task: Task) : RefillCluster option =
+    match task, atlas.Cluster with
+    | Refill id, Some cluster when cluster.Spawn = id -> Some cluster
+    | _ -> None
+
+/// The tiles a Task's action is measured from, beside the room they stand
+/// in: the target's own tile for every Task there is, and the **hungry**
+/// members' tiles for a [[refill cluster]] (ADR 0054) — a body is in
+/// position when it stands beside any structure of the cluster it can
+/// still pour into, which is what makes one Task out of a ring of ten.
+///
+/// Hungry and not every member, because the Work Area below is laid over
+/// these: a creep aimed at the ring's nearest edge stops beside whichever
+/// member is closest, and if the full ones counted it would stop beside
+/// one of those and stand there with a full store for the rest of the fill
+/// — the churn ADR 0054 removes, re-entered through the geometry.
+///
+/// The room is the target's throughout, and a member the projection places
+/// in another room or not at all contributes no tile (ADR 0004, ADR 0041).
+let private actionTilesOf (atlas: Atlas) (task: Task) : (string * Pos list) option =
+    match actionOn task with
+    | None -> None
+    | Some(targetId, _) ->
+        match Map.tryFind targetId atlas.TargetAt with
+        | None -> None
+        | Some(room, target) ->
+            match clusterOf atlas task with
+            | None -> Some(room, [ target ])
+            | Some cluster ->
+                Some(
+                    room,
+                    RefillCluster.hungry cluster
+                    |> List.choose (fun id ->
+                        match Map.tryFind id atlas.TargetAt with
+                        | Some(memberRoom, tile) when memberRoom = room -> Some tile
+                        | _ -> None)
+                )
+
 /// Seat tiles of a placed source: walkable (non-wall) neighbours of its
 /// tile, by terrain alone — structures and creeps do not consume Seats
 /// (ADR 0001). Read off that room's raw terrain grid and not its weight
@@ -1749,26 +1814,31 @@ let seats (atlas: Atlas) (sourceId: string) : int option =
 let private buildWorkArea (atlas: Atlas) (task: Task) : (string * Set<Pos>) option =
     match actionOn task with
     | None -> None
-    | Some(targetId, r) ->
-        match Map.tryFind targetId atlas.TargetAt with
+    | Some(_, r) ->
+        match actionTilesOf atlas task with
         | None -> None
         // The target's own room, resolved off its id (ADR 0041): an area is
         // the ground around a target, and which ground that is is settled
         // by where the target stands, never by which room the reader is
         // working in.
-        | Some(room, target) ->
+        //
+        // A union over the tiles, because a [[refill cluster]] has more
+        // than one (ADR 0054) and every other Task has exactly one — the
+        // union of a singleton being the ring this always built.
+        | Some(room, targets) ->
             let weights = weightsOf atlas room
 
             Some(
                 room,
                 Set.ofList
                     [
-                        for x in target.X - r .. target.X + r do
-                            for y in target.Y - r .. target.Y + r do
-                                let tile = { X = x; Y = y }
+                        for target in targets do
+                            for x in target.X - r .. target.X + r do
+                                for y in target.Y - r .. target.Y + r do
+                                    let tile = { X = x; Y = y }
 
-                                if walkableAt weights tile then
-                                    tile
+                                    if walkableAt weights tile then
+                                        tile
                     ]
             )
 
@@ -3120,14 +3190,75 @@ let mayAct (atlas: Atlas) (creep: string) (task: Task) (area: Set<RoomPos>) : bo
     // away from its target, and the gate opens by itself the tick the
     // engine puts it down on the far side.
     | Some _ when not (sharesRoom atlas creep task) -> false
-    | Some(targetId, actionRange) ->
-        match Map.tryFind creep atlas.CreepAt, Map.tryFind targetId atlas.TargetAt with
-        | Some(creepRoom, creepPos), Some(_, targetPos) ->
+    // The range escape is measured against every tile the action reaches
+    // from, which for a [[refill cluster]] is its hungry members and for
+    // every other Task is the one target it always was (ADR 0054).
+    | Some(_, actionRange) ->
+        match Map.tryFind creep atlas.CreepAt, actionTilesOf atlas task with
+        | Some(creepRoom, creepPos), Some(_, targetTiles) ->
             if not (walkableAt (weightsOf atlas creepRoom) creepPos) then
-                range creepPos targetPos <= actionRange
+                targetTiles |> List.exists (fun target -> range creepPos target <= actionRange)
             else
                 Set.contains (RoomPos.at creepRoom creepPos) area
         | _ -> true
+
+/// The structure a Refill's transfer actually names (ADR 0054), which for
+/// every Refill but the [[refill cluster]]'s is its target and for that one
+/// is decided **here, at arrival**: the hungry member nearest the tile the
+/// body is standing on, ties by id.
+///
+/// This is the whole of what makes a ring of ten extensions one Task. The
+/// Planner names a place and the Emitter names the structure, so an
+/// extension somebody else topped up while this body walked costs it a
+/// neighbour and not its Task — where a Task per extension cost it the
+/// Task, a `task-gone` release and a fresh flood every one or two ticks.
+///
+/// Range-bounded by the action's own reach, and total the way `mayAct` is
+/// (ADR 0004): the gate ahead of this one lets a body through either
+/// because it stands inside the hungry members' rings — in which case some
+/// member really is within reach and is the one named — or because the
+/// projection could place neither it nor its target, in which case the
+/// range query sees nothing and the cluster's **own** hungry pick answers,
+/// the spawn first. A body the gate refuses never reaches here, so the
+/// fallback is unplaceable geometry and never a creep standing too far
+/// away.
+///
+/// Takes the Refill's **structure id** and not the whole Task, so the only
+/// way to answer `None` is a cluster with nothing left to pour into — a
+/// `Task`-shaped seam would have had to answer it for a Harvest and a
+/// Build too, and the postcondition the Emitter reads would be false of
+/// the function as written. The Emitter reads that one `None` as the
+/// silence a drained Harvest keeps.
+let refillTarget (atlas: Atlas) (creep: string) (structureId: string) : string option =
+    match clusterOf atlas (Refill structureId) with
+    | None -> Some structureId
+    | Some cluster ->
+        let hungry = RefillCluster.hungry cluster
+
+        let inReach =
+            match actionOn (Refill structureId), Map.tryFind creep atlas.CreepAt with
+            | Some(_, actionRange), Some(creepRoom, creepPos) ->
+                hungry
+                |> List.choose (fun id ->
+                    match Map.tryFind id atlas.TargetAt with
+                    | Some(room, tile) when room = creepRoom && range creepPos tile <= actionRange ->
+                        Some(range creepPos tile, id)
+                    | _ -> None)
+            | _ -> []
+
+        match inReach, hungry with
+        // Nearest first and the lower id after it: a tuple's own order is
+        // the tie-break, so two members equally close resolve the way every
+        // other id-ordered rule here does.
+        | _ :: _, _ -> inReach |> List.min |> snd |> Some
+        | [], [] -> None
+        | [], first :: _ ->
+            Some(
+                if List.contains cluster.Spawn hungry then
+                    cluster.Spawn
+                else
+                    first
+            )
 
 /// First step toward a set of goal tiles under one pricing: the in-room
 /// half of `firstStep`'s contract, whose doc governs the floods, the

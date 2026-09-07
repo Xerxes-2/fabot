@@ -231,6 +231,145 @@ let workAreaTests =
             }
         ]
 
+/// A row of the [[refill cluster]] standing on open ground (ADR 0054):
+/// spawn-1 at (10,10) with two extensions east of it, every structure tile
+/// an obstacle as the engine has it, and plain everywhere else in the band.
+/// Each caller says how much room each of the three has left, which is what
+/// decides the Work Area and the Emitter's pick.
+let clusterAtlas creeps (spawnFree, ext1Free, ext2Free) =
+    let structures =
+        [
+            "spawn-1", { X = 10; Y = 10 }
+            "ext-1", { X = 14; Y = 10 }
+            "ext-2", { X = 12; Y = 10 }
+        ]
+
+    let view =
+        spatial
+            structures
+            [
+                for x in 8..16 do
+                    for y in 9..11 -> { X = x; Y = y }, Plain
+            ]
+        |> withHome (fun layer ->
+            { layer with
+                Obstacles = structures |> List.map snd |> Set.ofList
+                CreepPositions = Map.ofList creeps
+            })
+        |> snapshotWith (
+            creeps |> List.map (fun (name, _) -> creepWith name 50 [ Carry; Carry; Move ])
+        )
+
+    { view with
+        Refillables =
+            [
+                {
+                    Id = "spawn-1"
+                    FreeCapacity = spawnFree
+                    Kind = BuiltKind.Spawn
+                }
+                {
+                    Id = "ext-1"
+                    FreeCapacity = ext1Free
+                    Kind = BuiltKind.Extension
+                }
+                {
+                    Id = "ext-2"
+                    FreeCapacity = ext2Free
+                    Kind = BuiltKind.Extension
+                }
+            ]
+    }
+    |> ofView
+
+[<Tests>]
+let refillClusterTests =
+    testList
+        "atlas refill cluster"
+        [
+            test "the cluster's Work Area is the union of its hungry members' rings" {
+                // ADR 0054: the Refill's target id is the anchor, and the
+                // tiles it may be worked from are every hungry member's ring
+                // — which is what makes one Task out of a ring of ten.
+                let atlas = clusterAtlas [] (50, 50, 0)
+
+                let area = workArea atlas (Refill "spawn-1") |> tilesHome atlas
+
+                Expect.isTrue
+                    (Set.contains { X = 9; Y = 10 } area)
+                    "the anchor's own ring is in the area"
+
+                Expect.isTrue
+                    (Set.contains { X = 15; Y = 10 } area)
+                    "so is a hungry extension's, four tiles away from the anchor"
+
+                Expect.isFalse
+                    (Set.contains { X = 14; Y = 10 } area)
+                    "a hungry member's own tile is an obstacle and never a standing tile"
+
+                Expect.isFalse
+                    (Set.contains { X = 12; Y = 10 } area)
+                    "and a full member's tile is outside the area on both counts"
+            }
+
+            test "a full member contributes no tile: a body is never sent where it cannot pour" {
+                // The pairing that says the area is the *hungry* members'
+                // and not every member's. (11,10) touches ext-2 alone.
+                let hungry = clusterAtlas [] (0, 0, 50)
+                let full = clusterAtlas [] (0, 50, 0)
+
+                Expect.isTrue
+                    (Set.contains
+                        { X = 11; Y = 10 }
+                        (workArea hungry (Refill "spawn-1") |> tilesHome hungry))
+                    "ext-2 has room, so the tile beside it is a tile to work from"
+
+                Expect.isFalse
+                    (Set.contains
+                        { X = 11; Y = 10 }
+                        (workArea full (Refill "spawn-1") |> tilesHome full))
+                    "ext-2 is full, so its ring is nobody's standing room this tick"
+            }
+
+            test "refillTarget names a hungry member the body stands beside, not a full one" {
+                // w1 at (13,10) touches ext-1 (14,10) and ext-2 (12,10)
+                // alike, so the pair below moves only which of them has
+                // room — the whole of what the Emitter's pick is for.
+                let eastHungry = clusterAtlas [ "w1", { X = 13; Y = 10 } ] (0, 50, 0)
+                let westHungry = clusterAtlas [ "w1", { X = 13; Y = 10 } ] (0, 0, 50)
+
+                Expect.equal
+                    (refillTarget eastHungry "w1" "spawn-1")
+                    (Some "ext-1")
+                    "ext-2 is full, so the transfer names the extension that is not"
+
+                Expect.equal
+                    (refillTarget westHungry "w1" "spawn-1")
+                    (Some "ext-2")
+                    "and the other way round, so it is room and not id order deciding"
+            }
+
+            test "a Refill that anchors no cluster names its own target" {
+                // Every Refill but the cluster's — a tower's, the buffer's,
+                // the Storage's, a ferry sink's — resolves to the structure
+                // the Task already names, through the same call (ADR 0054).
+                let atlas = clusterAtlas [ "w1", { X = 13; Y = 10 } ] (50, 50, 50)
+
+                Expect.equal
+                    (refillTarget atlas "w1" "tower-1")
+                    (Some "tower-1")
+                    "an unclustered Refill is the single structure it always was"
+            }
+
+            test "a cluster with nothing left to pour into names nothing" {
+                let atlas = clusterAtlas [ "w1", { X = 13; Y = 10 } ] (0, 0, 0)
+
+                Expect.isNone
+                    (refillTarget atlas "w1" "spawn-1")
+                    "the whole ring full is the tick the Emitter issues no transfer"
+            }
+        ]
+
 [<Tests>]
 let seatTests =
     testList
