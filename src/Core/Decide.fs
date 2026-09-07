@@ -5357,9 +5357,14 @@ let planPool (view: ColonyView) atlas (tasks: Task list) : PooledTask list =
     // by its pile's** (#167): `ceil(stored / one drawer's load)`, the number
     // of bodies that store can actually fill. Nothing else in the pipeline
     // says it — the matching key puts cost ahead of crowding (ADR 0002), so
-    // every hauler with a free slot picks the *nearest* stocked container
+    // every hauler with room to spare picks the *nearest* stocked container
     // whatever is in it, and a container holding 400 draws five haulers
-    // while a full one on the far side of the room stands unvisited.
+    // while a full one on the far side of the room stands unvisited. #232's
+    // applicability line has since taken the widest of those bodies out of
+    // the example — an empty 1,200-carry hauler no longer applies to a
+    // store holding 400 at all — and takes nothing off this cap, which is
+    // what still thins the crowd of part-loaded haulers and 450-carry
+    // generalists the line admits.
     //
     // **The [[buffer]] divides twice, and that is #196's whole change.**
     // ADR 0019 shuts every body with no Work part out of the controller's
@@ -5554,6 +5559,8 @@ let planPool (view: ColonyView) atlas (tasks: Task list) : PooledTask list =
 /// physically be able to do it — Work-part tasks need a Work part, energy
 /// delivery needs a Carry part — and the energy state must call for it: a
 /// full creep is done harvesting; an empty creep has nothing to deliver.
+/// Not all of it is a judgement about the body: the gates below read the
+/// target's kind, its geometry and, since #232, what is standing in it.
 /// One geometric widening (ADR 0012), body-aware since ADR 0024: a full
 /// Work-heavy creep standing on a built source container keeps Harvest —
 /// the engine drops the overflow into the container underfoot, so the
@@ -5606,6 +5613,19 @@ let planPool (view: ColonyView) atlas (tasks: Task list) : PooledTask list =
 /// narrower row than the fourth's — the upgrader is at `Work = Move` and
 /// is not Work-heavy, so its own footing beside the buffer is untouched —
 /// and it is the walk it refuses and never the Task; the arm carries why.
+/// A sixth is the first to read the target's **contents** beside the body
+/// (#232): a Withdraw is applicable only to a body the store can half fill
+/// — `stock * 2 >= FreeCapacity`, the mirror of the half-empty reading the
+/// intake gate already carried, because half empty is what makes a body
+/// worth sending and half a load is what makes a store worth sending it
+/// to. Without it #161's stock [[capacity]] admits a drawer to a store
+/// holding one energy and the tier below it (ADR 0023) is never reached,
+/// so a 1,200-carry hauler stood forty-two ticks on a 200-energy container
+/// draining an Anchor's trickle. Three stores are outside it and the arm
+/// carries why: a transient one, the stock itself, and the buffer under a
+/// standing body's own feet. So this gate reads three things and not two —
+/// the body, the target's kind and geometry, and now what is standing in
+/// it.
 /// One **exception** crosses the third gate and the fourth together (#205,
 /// amending ADR 0045 and ADR 0046): a container construction site standing
 /// on the creep's own Post, under its own feet, is applicable to it
@@ -5688,8 +5708,78 @@ let private applicable
     | Withdraw storeId ->
         let buffer = Set.contains storeId (Atlas.controllerContainers atlas)
 
+        // **A Withdraw must be worth this body's trip** (#232, live W12S28
+        // 2026-09-07): the store has to hold at least half of what the body
+        // came with room for. It is the mirror of `halfEmpty` above and the
+        // second half of the same sentence — half empty is what makes a body
+        // worth sending, half a load is what makes a store worth sending it
+        // to — and like it, it is a fact about the *pair* and so belongs
+        // here and not in `capacityOf`, whose number is the Task's alone
+        // (#161, #196).
+        //
+        // What it cures is the other end of the haul cycle. A [[capacity]]
+        // of `ceil(stock / one load)` admits a drawer to any store holding
+        // one energy, and a source [[container]] holding two hundred is the
+        // nearest store to the whole hauler row; the half-full rule above
+        // then keeps the arriving body there until it has drained the
+        // Anchor's trickle up to half a load. Live: a 24C/12M hauler matched
+        // a container holding ~200 at t194,906 and was released
+        // `inapplicable` at t194,948 — forty-two ticks standing on a source
+        // to carry six hundred, while the Storage held 263,803 and the spawn
+        // stood at twenty-eight. The tier gap (ADR 0023) cannot break that
+        // by itself: a container's Withdraw outranks the stock's for as long
+        // as it is applicable at all, so the only thing that reaches the
+        // stock is a container that does not apply.
+        //
+        // Read off the body's **free** capacity and not its total, so it
+        // stays the same sentence for a part-loaded body as for an empty
+        // one, and the two clauses compose: half empty or better, and then
+        // half of *that* room standing in the store.
+        //
+        // Judged every tick against a pool rebuilt from scratch, so it
+        // gates persistence as well as entry, exactly as the [[pickup]]'s
+        // own threshold does: a store the colony drinks back under the line
+        // while a holder walks releases that holder, its walk spent for
+        // nothing. Accepted on the Pickup's reason — the alternative is the
+        // Planner reading its own assignments back — and the loss is one
+        // walk, against the forty-two ticks this line exists to end.
+        //
+        // Not carried to Pickup, which keeps the half-empty clause alone: a
+        // pile decays and a container does not, so a small pile is the one
+        // intake whose worth does not wait (#167, #216 R5).
+        //
+        // Not read out of line by `canRefill` either, unlike the two body
+        // clauses beside it (ADR 0050): the supply floor asks what a body
+        // may draw *with*, and this clause is about a store.
+        //
+        // Three stores it does not price, each for a reason the line itself
+        // gives. **A store that ends** — a tombstone or a ruin (#167,
+        // `isTransient`) — is the Pickup's exemption word for word: what is
+        // in it is going away, so its worth does not wait for a body big
+        // enough, and the only thing CONTEXT says separates it from a
+        // container is that it decays. **The stock** (ADR 0023): what this
+        // line buys is the fall to the tier below, and there is no tier
+        // below the Storage's own Withdraw — a gate that refuses there
+        // refuses the last intake in the colony, so a stock drawn down to
+        // four hundred would sit unhauled while the spawn stood empty. Read
+        // off the pooled [[priority]] the Planner set (#216 R5), which is
+        // where that ordering now lives. **The [[standing body]] at the
+        // buffer under its own feet**: the same exception #205 makes of a
+        // site on a creep's own Post — this clause prices a trip and that
+        // row makes none, it lives at that store, and ADR 0046 opens no new
+        // gate on its Withdraw. Without it a buffer holding twenty-four
+        // left an `11W/1C/11M` upgrader with no applicable Task at all.
+        let stock = view.Spatial.Stores |> Map.tryFind storeId |> Option.defaultValue 0
+
+        let worthTheTrip =
+            stock * 2 >= creep.FreeCapacity
+            || (Map.tryFind storeId view.Spatial.TargetKinds |> Option.exists isTransient)
+            || pooled.Priority >= priorityOfTier StockDraw
+            || (buffer && isStandingBody view.Tuning creep)
+
         has Carry
         && halfEmpty
+        && worthTheTrip
         && not (Atlas.workHeavy atlas creep.Name)
         && (has Work || not buffer)
         // A standing body fetches from the buffer at its feet and from

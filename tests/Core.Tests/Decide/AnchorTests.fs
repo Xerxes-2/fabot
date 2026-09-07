@@ -1899,6 +1899,55 @@ let standingBodyTests =
                     "the row drinks from the buffer at its feet, which is why it stands there"
             }
 
+            test "a buffer under the worth-the-trip line is still this row's drink" {
+                // #232 gates a Withdraw on the store holding half the
+                // asking body's free room — a line that prices a *trip*,
+                // and this row makes none: it lives at that store, and ADR
+                // 0046 opens no new gate on its Withdraw (the same
+                // exception #205 makes of a site under a creep's own feet).
+                // Without the exemption a buffer holding twenty-four left
+                // an `11W/1C/11M` upgrader with no applicable Task at all —
+                // Build, Repair and Refill are shut to it, and Upgrade
+                // needs energy it could not go and get.
+                //
+                // Pairwise on the body alone: the same twenty-four in the
+                // same buffer, and the generalist that would have to walk
+                // there is refused by the line as any walking body is.
+                let thin creep =
+                    let colony = bufferLaneColony [] [] creep
+
+                    { colony with
+                        Spatial =
+                            { colony.Spatial with
+                                Stores = Map.add "can-buf" 24 colony.Spatial.Stores
+                            }
+                    }
+
+                let assignedIn creep =
+                    let { Assignments = assignments } = decide (thin creep) Map.empty Set.empty None
+
+                    Map.tryFind (creep: CreepInfo).Name assignments
+
+                let emptyOf pattern =
+                    let body = bodyFor pattern 1800
+
+                    creepWith
+                        pattern.Name
+                        0
+                        (50 * (body |> List.filter ((=) Carry) |> List.length))
+                        body
+
+                Expect.equal
+                    (assignedIn (emptyOf upgraderPattern))
+                    (Some(taskId (Withdraw "can-buf")))
+                    "twenty-four under its feet is a trip's worth for the row that never leaves"
+
+                Expect.equal
+                    (assignedIn (emptyOf workerPattern))
+                    None
+                    "the generalist walks to that buffer, so the line prices the walk and refuses"
+            }
+
             test "under RCL3 the colony's own extension site outranks its Upgrade" {
                 // A bootstrapping room builds its bank before its
                 // controller: the site is feeding-tier while the controller

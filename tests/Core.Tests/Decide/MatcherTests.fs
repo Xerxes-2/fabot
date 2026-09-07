@@ -2974,3 +2974,228 @@ let intakeRoomTests =
                     "two hundred free: the pile is taken first"
             }
         ]
+
+[<Tests>]
+let intakeWorthTests =
+    testList
+        "an intake is worth the trip"
+        [
+            test "a container that cannot half fill the hauler is left for the stock" {
+                // Live, W12S28 2026-09-07 (#232): a 24C/12M hauler matched a
+                // source container holding ~200 at t194,906 and was released
+                // `inapplicable` forty-two ticks later, having drained the
+                // Anchor's trickle up to half a load, while the Storage held
+                // 263,803 and the spawn stood at twenty-eight energy. The
+                // Withdraw's own [[capacity]] admits a drawer to any store
+                // with one energy in it, and the tier (ADR 0023) keeps the
+                // stock behind every container that applies — so the only
+                // thing that reaches the stock is a container that does not.
+                //
+                // Pairwise on the store's stock alone: one hauler, two
+                // Withdraws, and the container is the nearer of the two at
+                // every reading, so nothing but this gate can move the match.
+                let lane stock =
+                    let body = List.replicate 24 Carry @ List.replicate 12 Move
+
+                    { bareRespawn with
+                        Sources = []
+                        Controller = None
+                        Refillables = [ refillable "ext-1" 50 BuiltKind.Extension ]
+                        Creeps = [ creepWith "h" 0 1200 body ]
+                        Spatial =
+                            { spatial [] [ for x in 8..24 -> { X = x; Y = 10 }, Plain ] with
+                                Stores = Map.ofList [ "can-src", stock; "stock-1", 263_803 ]
+                            }
+                            |> withTargets
+                                [
+                                    "ext-1", { X = 8; Y = 10 }, Structure BuiltKind.Extension
+                                    "can-src", { X = 12; Y = 10 }, Structure BuiltKind.Container
+                                    "stock-1", { X = 22; Y = 10 }, Structure BuiltKind.Storage
+                                ]
+                            |> withHome (fun layer ->
+                                { layer with
+                                    CreepPositions = Map.ofList [ "h", { X = 13; Y = 10 } ]
+                                })
+                    }
+
+                let matched stock =
+                    let { Verdicts = verdicts } = decide (lane stock) Map.empty Set.empty None
+
+                    verdicts
+                    |> List.tryPick (function
+                        | Verdict.Matched("h", task, _) -> Some task
+                        | _ -> None)
+
+                Expect.equal
+                    (matched 216)
+                    (Some(taskId (Withdraw "stock-1")))
+                    "the live reading: two hundred at its feet is not worth a twelve-hundred body's trip"
+
+                Expect.equal
+                    (matched 599)
+                    (Some(taskId (Withdraw "stock-1")))
+                    "one under half a load is still the stock's"
+
+                Expect.equal
+                    (matched 600)
+                    (Some(taskId (Withdraw "can-src")))
+                    "half the body's free capacity standing in the store is worth the trip"
+            }
+
+            test "the line is the asking body's free capacity and not one row's load" {
+                // The gate reads the pair and not the Task (#161, #196): the
+                // same store that is too thin for a twelve-hundred hauler is
+                // worth a 450-carry generalist's trip at a quarter of the
+                // stock. One store and one body here, so what the readings
+                // separate is the line itself and nothing else.
+                let lane stock =
+                    let body =
+                        List.replicate 9 Work @ List.replicate 9 Carry @ List.replicate 9 Move
+
+                    { bareRespawn with
+                        Sources = []
+                        Controller = None
+                        Refillables = []
+                        Creeps = [ creepWith "w" 0 450 body ]
+                        Spatial =
+                            { spatial [] [ for x in 8..24 -> { X = x; Y = 10 }, Plain ] with
+                                Stores = Map.ofList [ "can-src", stock ]
+                            }
+                            |> withTargets
+                                [ "can-src", { X = 12; Y = 10 }, Structure BuiltKind.Container ]
+                            |> withHome (fun layer ->
+                                { layer with
+                                    CreepPositions = Map.ofList [ "w", { X = 13; Y = 10 } ]
+                                })
+                    }
+
+                let matched stock =
+                    let { Verdicts = verdicts } = decide (lane stock) Map.empty Set.empty None
+
+                    verdicts
+                    |> List.tryPick (function
+                        | Verdict.Matched("w", task, _) -> Some task
+                        | _ -> None)
+
+                Expect.isNone (matched 224) "one under half of 450: the walk is not paid for"
+
+                Expect.equal
+                    (matched 225)
+                    (Some(taskId (Withdraw "can-src")))
+                    "half of 450 standing in the store is worth the trip"
+            }
+        ]
+
+[<Tests>]
+let intakeDecayTests =
+    testList
+        "the worth-the-trip line and the stores it is off"
+        [
+            test "a store whose energy is going away is taken by whatever body is asking" {
+                // The [[pickup]] is outside #232's line because a pile
+                // decays (#167, #216 R5) — and a tombstone and a ruin decay
+                // too, which is the only thing CONTEXT says separates them
+                // from a container. So the exemption follows the decay and
+                // not the Task's name: a hundred and fifty is not worth a
+                // 1,200-carry hauler's trip to a *container*, because the
+                // container will still be there when a smaller body asks,
+                // and it is taken off either transient store by that same
+                // hauler, because nothing will.
+                //
+                // Pairwise on the target's kind alone: one store, one body,
+                // a hundred and fifty in it at every reading.
+                let lane kind =
+                    let body = List.replicate 24 Carry @ List.replicate 12 Move
+
+                    { bareRespawn with
+                        Sources = []
+                        Controller = None
+                        Refillables = []
+                        Creeps = [ creepWith "h" 0 1200 body ]
+                        Spatial =
+                            { spatial [] [ for x in 8..18 -> { X = x; Y = 10 }, Plain ] with
+                                Stores = Map.ofList [ "store-1", 150 ]
+                            }
+                            |> withTargets [ "store-1", { X = 12; Y = 10 }, kind ]
+                            |> withHome (fun layer ->
+                                { layer with
+                                    CreepPositions = Map.ofList [ "h", { X = 16; Y = 10 } ]
+                                })
+                    }
+
+                let matched kind =
+                    let { Verdicts = verdicts } = decide (lane kind) Map.empty Set.empty None
+
+                    verdicts
+                    |> List.tryPick (function
+                        | Verdict.Matched("h", task, _) -> Some task
+                        | _ -> None)
+
+                Expect.isNone
+                    (matched (Structure BuiltKind.Container))
+                    "a container holding a hundred and fifty waits for a body it can half fill"
+
+                Expect.equal
+                    (matched Tombstone)
+                    (Some(taskId (Withdraw "store-1")))
+                    "a tombstone ends, so its hundred and fifty is drawn by the body that is asking"
+
+                Expect.equal
+                    (matched Dropped)
+                    (Some(taskId (Pickup "store-1")))
+                    "and the pile the line was never carried to is picked up by the same body"
+            }
+
+            test "the stock is the fall-through, so it is never the thing that refuses" {
+                // What the line buys is the fall to the tier below (ADR
+                // 0023), and there is no tier below the stock's own
+                // Withdraw. A Storage drawn down by a build — or a young
+                // RCL4 one — holding four hundred against a 1,200-carry
+                // hauler is the colony's last intake, and refusing it
+                // leaves the row idle with the spawn hungry and the energy
+                // in reach of nobody.
+                //
+                // Pairwise on the store's kind alone: the same four hundred
+                // in a source container is exactly the refusal #232 asked
+                // for.
+                let lane kind =
+                    let body = List.replicate 24 Carry @ List.replicate 12 Move
+
+                    { bareRespawn with
+                        Sources = []
+                        Controller = None
+                        Refillables = [ refillable "ext-1" 50 BuiltKind.Extension ]
+                        Creeps = [ creepWith "h" 0 1200 body ]
+                        Spatial =
+                            { spatial [] [ for x in 8..24 -> { X = x; Y = 10 }, Plain ] with
+                                Stores = Map.ofList [ "store-1", 400 ]
+                            }
+                            |> withTargets
+                                [
+                                    "ext-1", { X = 8; Y = 10 }, Structure BuiltKind.Extension
+                                    "store-1", { X = 12; Y = 10 }, kind
+                                ]
+                            |> withHome (fun layer ->
+                                { layer with
+                                    CreepPositions = Map.ofList [ "h", { X = 16; Y = 10 } ]
+                                })
+                    }
+
+                let matched kind =
+                    let { Verdicts = verdicts } = decide (lane kind) Map.empty Set.empty None
+
+                    verdicts
+                    |> List.tryPick (function
+                        | Verdict.Matched("h", task, _) -> Some task
+                        | _ -> None)
+
+                Expect.equal
+                    (matched (Structure BuiltKind.Storage))
+                    (Some(taskId (Withdraw "store-1")))
+                    "the deepest intake in the colony draws whatever body asks it"
+
+                Expect.isNone
+                    (matched (Structure BuiltKind.Container))
+                    "the same four hundred in a container is left for the tier below it"
+            }
+        ]
