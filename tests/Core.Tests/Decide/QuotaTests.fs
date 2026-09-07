@@ -2875,6 +2875,34 @@ let guardRowTests =
                     "120 healed against the same 90: the raid out-heals it and the row hires a second"
             }
 
+            test "two attackers and no healer at all buy the second guard" {
+                // #280, on the raid that found it: W13S29 took a `smallMelee`
+                // and a three-RANGED invader together — seventy a tick between
+                // them and nothing healing either. The rule this amends read
+                // the raid's *healing* against one block's ninety, saw none,
+                // and asked for one, which loses: a block dies in seventeen
+                // ticks under seventy against its twelve of self-heal, and
+                // needs twenty-two to chew two thousand hits.
+                //
+                // What the count compares now is the two clocks. Pairwise on
+                // the second attacker alone, which is the only thing that
+                // moves between the readings.
+                let ranged =
+                    { hostileIn "W1N2" raidTile smallRanged with
+                        Id = "ranged-1"
+                    }
+
+                Expect.equal
+                    (guardQuotaOf (guardColony (raidOf 0 @ [ ranged ]) []))
+                    (Some 2)
+                    "two armed bodies out-live one block, so the room buys the second"
+
+                Expect.equal
+                    (guardQuotaOf (guardColony (raidOf 0) []))
+                    (Some 1)
+                    "and the lone smallMelee it is drawn from still buys one"
+            }
+
             test "the count reads the raid and never our own answer to it" {
                 // #272, and the amendment's whole point. Priced against the
                 // guards *standing* in the room, the number was not monotone:

@@ -1468,11 +1468,62 @@ let private guardsWanted (view: ColonyView) (room: string) : int =
         |> List.filter (fun h -> h.Pos.Room = room)
         |> List.sumBy (fun h -> Engine.healPower * parts Heal h.Body)
 
-    let damage =
-        Engine.attackPower * parts Attack guardPattern.Block
-        + Engine.rangedAttackPower * parts RangedAttack guardPattern.Block
+    let raid = view.Hostiles |> List.filter (fun h -> h.Pos.Room = room)
 
-    if healing >= damage then 2 else 1
+    let raidDamage =
+        raid
+        |> List.sumBy (fun h ->
+            Engine.attackPower * parts Attack h.Body
+            + Engine.rangedAttackPower * parts RangedAttack h.Body)
+
+    // The hits we actually have to chew through: the raid's **armed** bodies.
+    // A healer is priced in the healing above and not here — killing it is not
+    // what ends the fight, out-damaging it is, and once the last armed body is
+    // down the healers take no ground and deal nothing. Priced at full and off
+    // the parts, because the projection carries a hostile's body and not its
+    // hits (ADR 0007's growth rule: no decision reads them yet), and
+    // over-stating what the raid can take is the safe direction here.
+    let raidHits =
+        raid
+        |> List.filter (fun h -> parts Attack h.Body + parts RangedAttack h.Body > 0)
+        |> List.sumBy (fun h -> Engine.partHits * List.length h.Body)
+
+    let block = guardPattern.Block
+
+    let ourDamage =
+        Engine.attackPower * parts Attack block
+        + Engine.rangedAttackPower * parts RangedAttack block
+
+    let ourHeal = Engine.healPower * parts Heal block
+    let ourHits = Engine.partHits * List.length block
+
+    // **Does one block win the exchange?** (#280) The rule the ADR wrote
+    // priced the raid's *healing* against our damage alone, which is right
+    // about the case the research says is 5% of raids and blind to the case
+    // that turned up first: two attackers and no healer at all. Live, a
+    // `smallMelee` beside a three-RANGED invader deals seventy a tick against
+    // our twelve of self-heal, so one block dies in seventeen ticks while
+    // needing twenty-two to kill either of them — and the old rule, seeing no
+    // healing, asked for one.
+    //
+    // So the two clocks are compared instead, cross-multiplied to stay in
+    // whole numbers: the ticks we need to kill the raid against the ticks it
+    // needs to kill one block. A raid that cannot out-damage our self-heal
+    // never kills us and asks for one however long it takes; a raid that
+    // out-heals our damage can never be killed and asks for two at once. ADR
+    // 0056's own worked example is unchanged — a lone `smallMelee`'s forty
+    // against a block's ninety still buys one.
+    let theyKillUs = raidDamage > ourHeal
+    let weKillThem = ourDamage > healing
+
+    if not theyKillUs then
+        1
+    elif not weKillThem then
+        2
+    elif raidHits * (raidDamage - ourHeal) < ourHits * (ourDamage - healing) then
+        1
+    else
+        2
 
 /// The guard row's quota: `guardsWanted` over every raided outpost, summed.
 let private guardQuota (view: ColonyView) : int =

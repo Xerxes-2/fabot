@@ -83,6 +83,12 @@ module Engine =
     /// whether we fight at all (ADR 0056).
     let healPower = 12
 
+    /// Hits a body part carries, unboosted (Screeps `BODYPART_HITS`). The
+    /// projection carries a hostile's parts and not its hits, so this is how a
+    /// raid's durability is priced — at full, which is the safe direction for a
+    /// count that decides whether we fight at all (ADR 0056 as #280 amends it).
+    let partHits = 100
+
     /// The regeneration of a source in a room carrying an owner or a
     /// reservation: 3,000 energy per 300 ticks — what a continuously drained
     /// rock yields there, and the ceiling on what a body over it can take out.

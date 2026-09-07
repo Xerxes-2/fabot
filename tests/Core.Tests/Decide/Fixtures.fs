@@ -1382,6 +1382,25 @@ let smallMelee =
 /// one of these and losing to two (ADR 0056).
 let smallHealer = [ Move; Move; Move; Move; Move; Heal; Heal; Heal; Heal; Heal ]
 
+/// The ranged half of a two-creep raid, as the engine casts it: two TOUGH,
+/// five MOVE and three RANGED_ATTACK — thirty a tick at range 1..3, and no
+/// ATTACK part, so it is the one that kites rather than closing. The body
+/// W13S29 took beside a `smallMelee` on 2026-09-08, which is the raid #280's
+/// count rule is written against.
+let smallRanged =
+    [
+        Tough
+        Tough
+        Move
+        Move
+        Move
+        Move
+        Move
+        RangedAttack
+        RangedAttack
+        RangedAttack
+    ]
+
 /// One guard as the row would really cast it at an 800 bank: `[T; A×3; M×5; H]`,
 /// 90 damage and 12 self-heal a tick. Sized through `bodyFor` rather than
 /// written out, so the damage the count rule reads off it is the damage the row
