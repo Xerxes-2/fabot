@@ -1169,6 +1169,279 @@ let heavyPinTests =
             }
         ]
 
+/// The heavy-pin room with a second container: "cont-2" on the Seat (9,10)
+/// beside "cont-1" on (11,10), so the rock carries **two** Posts and the cap
+/// admits two garrisons. One Post cannot tell a count of holders from a count
+/// of tiles apart — one body standing on its own Post satisfies both readings —
+/// so the union the Post cap takes of the two (#269) is only visible on a rock
+/// with a Post to spare.
+let twoPostRoom =
+    { spatial
+          [
+              "src-a", { X = 10; Y = 10 }
+              "cont-1", { X = 11; Y = 10 }
+              "cont-2", { X = 9; Y = 10 }
+              "ctrl-1", { X = 40; Y = 10 }
+          ]
+          (openSeats { X = 10; Y = 10 } @ [ for x in 11..39 -> { X = x; Y = 10 }, Plain ]) with
+        TargetKinds =
+            Map.ofList
+                [
+                    "src-a", Source
+                    "cont-1", Structure BuiltKind.Container
+                    "cont-2", Structure BuiltKind.Container
+                    "ctrl-1", Controller
+                ]
+    }
+
+let twoPostCrowd (placed: (CreepInfo * Pos) list) =
+    { bareRespawn with
+        Spawns = []
+        Refillables = []
+        Sources = [ source "src-a" ]
+        Controller = Some(controllerAt 2)
+        Creeps = placed |> List.map fst
+        Spatial =
+            twoPostRoom
+            |> withHome (fun layer ->
+                { layer with
+                    CreepPositions =
+                        placed |> List.map (fun (creep, pos) -> creep.Name, pos) |> Map.ofList
+                })
+    }
+
+/// The Dual Seat room with a lane out of it. `dualSeatRoom`'s source sits at
+/// (10,10) with two Seats, (11,10) inside the controller's Upgrade Work Area
+/// and so a bare [[dual seat]] — the colony's one Post with no container under
+/// it. The lane is laid along y = 9 from x = 12 to x = 31 and deliberately not
+/// along y = 10: the controller stands at (13,10), and a row through it would
+/// either wall the lane or, laid one tile lower, add a second Seat inside the
+/// controller's range and give the rock a second Post.
+let dualSeatLaneColony ticks (placed: (CreepInfo * Pos) list) =
+    { dualSeatColony with
+        Spawns = []
+        Refillables = []
+        Sources = [ drained "src-a" ticks ]
+        Creeps = placed |> List.map fst
+        Spatial =
+            dualSeatRoom
+            |> withHome (fun layer ->
+                { layer with
+                    Terrain =
+                        (layer.Terrain, [ for x in 12..31 -> { X = x; Y = 9 } ])
+                        ||> List.fold (fun acc tile -> Map.add tile Plain acc)
+                    CreepPositions =
+                        placed |> List.map (fun (creep, pos) -> creep.Name, pos) |> Map.ofList
+                })
+    }
+
+[<Tests>]
+let postGarrisonTests =
+    testList
+        "a manned Post is never vacant"
+        [
+            test "a heavy body standing on the one Post holds it while holding nothing" {
+                // #269, and the older half of it — the mechanism predates
+                // #258's widening. `Capacity.Garrisons` counted the Post's
+                // *holders*, so a rock whose garrison happened to hold no
+                // Task this tick read as an empty Post to every heavy body
+                // in the colony, and the Matcher walks its candidates in
+                // view order: the body ninety-six ticks of lane away is
+                // offered the Post first and takes it, and the body already
+                // standing on it is told `none-free` and moves off. The cap
+                // reads the tiles now, so the census answers where a body
+                // *is* rather than what it was assigned last tick.
+                let colony =
+                    pinnedCrowd
+                        0
+                        [
+                            anchor "a1" 0 50, { X = 35; Y = 10 }
+                            anchor "g1" 0 50, { X = 11; Y = 10 }
+                        ]
+
+                let {
+                        Assignments = assignments
+                        Intents = intents
+                        Verdicts = verdicts
+                    } =
+                    decide colony Map.empty Set.empty None
+
+                Expect.contains
+                    verdicts
+                    (Verdict.Unassigned("a1", IdleReason.NoneFree))
+                    "the Post is manned, and a body standing on one is what mans it"
+
+                Expect.equal
+                    (harvesters assignments "src-a")
+                    [ "g1" ]
+                    "so the rock goes to the body already on its Post"
+
+                Expect.isEmpty
+                    (moveIntentsFor "a1" intents)
+                    "and nothing crosses the room for a tile that is taken"
+            }
+
+            test "one tile off the Post it holds nothing, and the walk is offered" {
+                // The pairwise rival, one tile apart: what the census reads
+                // is the Post itself and not the ground around it (ADR
+                // 0024). The same body on (11,11) is beside the Post rather
+                // than on it, the rock reads vacant, and the distant Anchor
+                // is dispatched exactly as it was before #269 — which is
+                // also what keeps the bumped-garrison window of ADR 0048
+                // from locking the rock against its own successor.
+                let colony =
+                    pinnedCrowd
+                        0
+                        [
+                            anchor "a1" 0 50, { X = 35; Y = 10 }
+                            anchor "g1" 0 50, { X = 11; Y = 11 }
+                        ]
+
+                let {
+                        Assignments = assignments
+                        Intents = intents
+                    } =
+                    decide colony Map.empty Set.empty None
+
+                Expect.equal
+                    (harvesters assignments "src-a")
+                    [ "a1" ]
+                    "a Post with nobody standing on it is a Post the cap admits"
+
+                Expect.isNonEmpty (moveIntentsFor "a1" intents) "and the body offered it sets out"
+            }
+
+            test "the garrison of a bare Dual Seat holds its Post through an Upgrade" {
+                // The live shape #269 was filed on, and the window ADR 0025's
+                // gate names and declines to cure. A drained rock releases
+                // its Dual Seat Anchor `too-early` — the empty-window
+                // reprieve subtracts a bare Dual Seat (ADR 0048) — and the
+                // controller is two tiles away, so the released body spends
+                // the window upgrading from the very tile it will dig from
+                // in sixty ticks. Counting Harvest's holders alone, the Post
+                // read vacant for those sixty ticks and a second Anchor
+                // twenty tiles down the lane was dispatched onto it.
+                let colony =
+                    dualSeatLaneColony
+                        60
+                        [
+                            anchor "a1" 50 10, { X = 11; Y = 10 }
+                            anchor "a2" 0 50, { X = 31; Y = 9 }
+                        ]
+
+                let remembered = Map.ofList [ "a1", taskId (Harvest "src-a") ]
+
+                let {
+                        Assignments = assignments
+                        Intents = intents
+                        Verdicts = verdicts
+                    } =
+                    decide colony remembered Set.empty None
+
+                Expect.contains
+                    verdicts
+                    (Verdict.Released("a1", taskId (Harvest "src-a"), ReleaseReason.TooEarly(0, 60)))
+                    "the bare Dual Seat carries no empty-window reprieve"
+
+                Expect.equal
+                    (Map.tryFind "a1" assignments)
+                    (Some(taskId (Upgrade "ctrl-1")))
+                    "so it spends the window on the controller two tiles away"
+
+                Expect.contains
+                    verdicts
+                    (Verdict.Unassigned("a2", IdleReason.NoneFree))
+                    "and the Post it is standing on is not vacant for holding something else"
+
+                Expect.isEmpty (harvesters assignments "src-a") "the drained rock waits"
+
+                Expect.isEmpty
+                    (moveIntentsFor "a2" intents)
+                    "and nothing walks twenty tiles onto an occupied tile"
+            }
+
+            test "an expiring garrison still hands its Post on" {
+                // The half of ADR 0026 the widened census must not eat. The
+                // discount is for an incumbent that will be **dead** when
+                // the candidate arrives, and the tile census takes it at
+                // arrival like every other holder: a garrison with ten
+                // ticks left against a walk of ninety-six is not standing
+                // there when the successor lands, so the Post reads vacant
+                // and the succession the row cast for goes through. Pairwise
+                // against the first case above, one field apart.
+                let colony =
+                    pinnedCrowd
+                        0
+                        [
+                            anchor "a1" 0 50, { X = 35; Y = 10 }
+                            anchor "g1" 0 50 |> withLife 10, { X = 11; Y = 10 }
+                        ]
+
+                let { Assignments = assignments } = decide colony Map.empty Set.empty None
+
+                Expect.equal
+                    (harvesters assignments "src-a" |> List.sort)
+                    [ "a1"; "g1" ]
+                    "two Anchors against one Post for the lead's duration is the succession"
+            }
+
+            test "a rock with a Post to spare admits a second garrison" {
+                // The union, and the reason the widened census is not a sum
+                // (#269). On a standing container the garrison holds the
+                // Harvest it is standing on — ADR 0024's overflow reprieve
+                // keeps it applicable through a full store — so the holder
+                // list and the tile census name the same body. Added, that
+                // body would spend both of this rock's Posts and the second
+                // would read full while it stands empty; unioned, it counts
+                // once and the second Post hires.
+                let colony =
+                    twoPostCrowd
+                        [
+                            anchor "a1" 0 50, { X = 35; Y = 10 }
+                            anchor "g1" 0 50, { X = 11; Y = 10 }
+                        ]
+
+                let remembered = Map.ofList [ "g1", taskId (Harvest "src-a") ]
+
+                let { Assignments = assignments } = decide colony remembered Set.empty None
+
+                Expect.equal
+                    (harvesters assignments "src-a" |> List.sort)
+                    [ "a1"; "g1" ]
+                    "one body on one of two Posts is one garrison, not two"
+            }
+
+            test "both Posts manned, the third heavy body is refused" {
+                // The pairwise rival of the case above, one body apart: the
+                // widened census still counts, and a rock whose every Post
+                // carries a standing heavy body is full whatever those
+                // bodies hold.
+                let colony =
+                    twoPostCrowd
+                        [
+                            anchor "a1" 0 50, { X = 35; Y = 10 }
+                            anchor "g1" 0 50, { X = 11; Y = 10 }
+                            anchor "g2" 0 50, { X = 9; Y = 10 }
+                        ]
+
+                let {
+                        Assignments = assignments
+                        Verdicts = verdicts
+                    } =
+                    decide colony Map.empty Set.empty None
+
+                Expect.contains
+                    verdicts
+                    (Verdict.Unassigned("a1", IdleReason.NoneFree))
+                    "two Posts, two garrisons standing on them, and no third slot"
+
+                Expect.equal
+                    (harvesters assignments "src-a" |> List.sort)
+                    [ "g1"; "g2" ]
+                    "and the rock is worked by the bodies already on it"
+            }
+        ]
+
 [<Tests>]
 let anchorDigTests =
     testList

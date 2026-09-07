@@ -3154,19 +3154,23 @@ let private keepsThroughEmptyWindow atlas (creep: CreepInfo) sourceId =
 /// covers the wait, so set out now" had dispatched an Anchor across half a room
 /// onto a Post another Anchor was standing on — a **capacity** question, which
 /// the Post count answers (ADR 0024, ADR 0051) and `applicable` below answers
-/// again, this tick and not at arrival, for a *full* body still walking. Not
-/// everywhere: a Post whose garrison holds some other Task this tick — a bare
-/// [[dual seat]]'s, upgrading through the same empty window — is counted by
-/// neither, so an empty heavy body far enough out is still dispatched onto one.
-/// That window is accepted here and not cured: the cap is where a seat rule
-/// belongs, and a heavy body with a free store must keep the walk this gate
-/// would otherwise refuse it, or no successor could ever be sent to the Post
-/// its expiring incumbent is standing on (ADR 0026). What the heavy arm had
-/// left was the release it caused: an Anchor whose outpost rock was dug out
-/// from under it mid-walk was released at ninety tiles of walk against fifty
-/// ticks of wait, went `none-in-time`, and re-matched a home rock it had no
-/// business on — twice, the vacancy it left behind casting a second Anchor
-/// (user, 2026-09-08). Every other Task is judged at the current tick. Two
+/// again, this tick and not at arrival, for a *full* body still walking. The
+/// window that left — a Post whose garrison holds some *other* Task this tick,
+/// a bare [[dual seat]]'s upgrading through this same empty window, counted by
+/// neither gate, so an empty heavy body far enough out was dispatched onto it —
+/// is closed in the cap and not here (#269): the Post census the Heavy cap
+/// counts is the bodies standing on the rock's Posts unioned with the Task's
+/// own holders, so a manned Post never reads vacant. Here it stays one
+/// question about the walk, because a heavy body with a free store must keep
+/// the walk this gate would otherwise refuse it, or no successor could ever be
+/// sent to the Post its expiring incumbent is standing on (ADR 0026) — and that
+/// discount is the cap's alone to give, to an incumbent that will be **dead**
+/// on arrival and never to one that will still be standing there. What the
+/// heavy arm had left was the release it caused: an Anchor whose outpost rock
+/// was dug out from under it mid-walk was released at ninety tiles of walk
+/// against fifty ticks of wait, went `none-in-time`, and re-matched a home rock
+/// it had no business on — twice, the vacancy it left behind casting a second
+/// Anchor (user, 2026-09-08). Every other Task is judged at the current tick. Two
 /// consequences, both ADR 0004's totality.
 let private tooEarly (view: ColonyView) atlas (creep: CreepInfo) task (walk: Lazy<int option>) =
     match task with
@@ -3897,11 +3901,15 @@ let planPool (view: ColonyView) atlas (tasks: Task list) : PooledTask list =
     // narrows a heavy body's area (ADR 0020's pre-container fallback), so the
     // Seat cap is the only one; in an outpost that area is *empty*, so the
     // reachability gate rejects the pair for every heavy body. An unplaced
-    // source derives no cap (ADR 0004). Beside the numbers, the **tile**
-    // (#205): the Post whose container is still a site is held by the body
-    // *standing* on it whatever Task it holds this tick, because there the pair
-    // alternates dig and build and a cap counting assignments alone would admit
-    // a second heavy body onto it. **A Withdraw is capped by its store's
+    // source derives no cap (ADR 0004). Beside the numbers, the **tiles**
+    // (#205, widened by #269): every Post of the rock is held by the body
+    // *standing* on it whatever Task it holds this tick, over the same census
+    // the Post number is counted from. A cap that counted Harvest's own holders
+    // alone read a Post as free on every tick its garrison held something else
+    // — a build tick on a Post whose container is still a site, an Upgrade
+    // through the empty window on a bare [[dual seat]] — and dispatched a
+    // second heavy body across the room onto a tile that was never vacant
+    // (#258's accepted window). **A Withdraw is capped by its store's
     // stock** (#161), **and a Pickup by its pile's**: `ceil(stored / one
     // drawer's load)`. Nothing else in the pipeline says it — the matching key
     // puts cost ahead of crowding (ADR 0002), so a container holding 400 draws
@@ -3921,7 +3929,11 @@ let planPool (view: ColonyView) atlas (tasks: Task list) : PooledTask list =
         match task with
         | Harvest sourceId ->
             let seats = Atlas.seats atlas sourceId
-            let posts = Atlas.postsOf atlas sourceId |> Set.count
+            // One binding, read twice: the number and the tiles are the same
+            // census since #269, and a second call is a second thing to narrow
+            // later.
+            let postTiles = Atlas.postsOf atlas sourceId
+            let posts = Set.count postTiles
 
             { Capacity.unbounded with
                 Total = seats
@@ -3930,7 +3942,7 @@ let planPool (view: ColonyView) atlas (tasks: Task list) : PooledTask list =
                     seats
                     |> Option.filter (fun _ -> posts > 0)
                     |> Option.map (fun n -> max 0 (n - posts))
-                Garrison = Atlas.sitePostsOf atlas sourceId
+                Garrison = postTiles
             }
         // One holder per controller (ADR 0042, ADR 0047). A reservation is a
         // single capped number one body's CLAIM parts are sized to hold, so a
@@ -5098,26 +5110,44 @@ let matchCreeps
             else
                 None)
 
+    // Every heavy body and the tile it stands on, folded once for the tick: the
+    // Post census below asks this of every (candidate, Harvest) pair, and since
+    // #269 every posted rock carries tiles where only a rock mid-build did.
+    let heavyStanders =
+        view.Creeps
+        |> List.choose (fun c ->
+            if classOf c.Name = Some Heavy then
+                Atlas.creepTile atlas c.Name |> Option.map (fun tile -> c.Name, tile)
+            else
+                None)
+
     // The bodies standing on the Task's `Garrison` tiles, whatever Task they
-    // hold this tick (#205) — counted against the Heavy cap beside its holders.
-    // On a standing container the two sets are the same, the overflow reprieve
-    // keeping the garrison's Harvest applicable through a full store; on a site
-    // there is no overflow, the pair alternates, and a cap counting assignments
-    // alone would read the tile as free on every build tick. Counted at arrival
-    // like every other holder (ADR 0026); the candidate never counts against
-    // itself.
+    // hold this tick (#205, widened to every Post by #269) — **unioned** with
+    // the Heavy holders below rather than added to them, because on a standing
+    // container the two sets are ordinarily the same body: the overflow
+    // reprieve keeps a garrison's Harvest applicable through a full store, so
+    // it holds the Task it is standing on and a sum would spend two of the
+    // rock's Posts on one Anchor. What the tiles add is the tick the two part —
+    // a build tick on a Post whose container is still a site, an Upgrade
+    // through the empty window on a bare dual seat — where a cap counting
+    // assignments alone reads a manned Post as free. Counted at arrival like
+    // every other holder (ADR 0026), which is what keeps a succession's
+    // successor admissible; the candidate never counts against itself.
     let garrisons (candidate: CreepInfo) task arrival (tiles: Set<RoomPos>) =
         if Set.isEmpty tiles then
-            0
+            Set.empty
         else
-            view.Creeps
-            |> List.filter (fun c ->
-                c.Name <> candidate.Name
-                && classOf c.Name = Some Heavy
-                && (Atlas.creepTile atlas c.Name
-                    |> Option.exists (fun tile -> Set.contains tile tiles))
-                && overlaps candidate task arrival c.Name)
-            |> List.length
+            heavyStanders
+            |> List.choose (fun (name, tile) ->
+                if
+                    name <> candidate.Name
+                    && Set.contains tile tiles
+                    && overlaps candidate task arrival name
+                then
+                    Some name
+                else
+                    None)
+            |> Set.ofList
 
     // Holders against numbers, and nothing else (ADR 0052 decision 6): the
     // total the Task admits, the share each scope the candidate falls in
@@ -5144,9 +5174,22 @@ let matchCreeps
             let inClass wanted =
                 holders |> List.filter (fun name -> classOf name = Some wanted)
 
-            let heavy = inClass Heavy |> List.length
+            let heavyHolders = inClass Heavy
+            let heavy = List.length heavyHolders
             let standingRow = inClass Standing |> List.length
             let all = List.length holders
+
+            // The Post cap's crowd, by **name**: the heavy bodies holding this
+            // Task and the heavy bodies standing on its Posts are one crowd,
+            // and the ordinary garrison is in both lists (#269). Summed, it
+            // would spend two of a two-Post rock's slots on the one Anchor that
+            // is both, and the second Post would read full while it stands
+            // empty. Only the Heavy cap reads tiles; the class shares below
+            // stay counts of holders.
+            let garrisoned =
+                garrisons creep pooled.Task arrival.Value capacity.Garrison
+                |> Set.union (Set.ofList heavyHolders)
+                |> Set.count
 
             // A cap the candidate's own class does not fall in is not its
             // cap: the `None` scope is how a rule says "this number is
@@ -5157,10 +5200,7 @@ let matchCreeps
                 | _ -> true
 
             within (fun _ -> true) capacity.Total all
-            && within
-                ((=) Heavy)
-                capacity.Garrisons
-                (heavy + garrisons creep pooled.Task arrival.Value capacity.Garrison)
+            && within ((=) Heavy) capacity.Garrisons garrisoned
             && within ((<>) Heavy) capacity.Commuters (all - heavy)
             && within ((=) Standing) capacity.Standing standingRow
             && within

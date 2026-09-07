@@ -2176,11 +2176,18 @@ type Capacity =
         /// from, divided by the load *they* carry (#196).
         Generalists: int option
         /// Tiles whose standing **heavy** occupant holds a slot against
-        /// `Garrisons` whatever Task it holds this tick: the Post whose
-        /// container is still a site, where a cap counting Harvest's holders
-        /// alone would read the tile as free on every build tick. Counted
-        /// against that one cap and not against `Total`. Empty for every other
-        /// Task.
+        /// `Garrisons` whatever Task it holds this tick — **every** [[post]] of
+        /// the rock since #269, where #205 carried only the Posts whose
+        /// container was still a site. Standing room is a fact about where a
+        /// body is (ADR 0024), so the tile is taken while a heavy body stands
+        /// on it and free only when none does: a cap counting the Task's
+        /// holders alone reads the tile as free on every tick its occupant
+        /// happens to hold something else — a build tick on a site Post, an
+        /// Upgrade through a drained rock's window on a bare [[dual seat]].
+        /// **Unioned** with those holders and never added to them, one body
+        /// that both holds the Task and stands on its Post being one garrison
+        /// and not two. Counted against that one cap and not against `Total`.
+        /// Empty for every other Task.
         Garrison: Set<RoomPos>
         /// Tiles a candidate standing on is outside every cap above: the
         /// container site under a garrison's own feet, which the outpost

@@ -1488,6 +1488,12 @@ let postContainerTilesIn (atlas: Atlas) (room: string) : Set<Pos> =
 /// Every half is read in the source's own room (ADR 0041), and the Seat join
 /// is what keeps a neighbouring source's site out: a Post belongs to the rock
 /// it seats, not to the rock it is near.
+///
+/// Both the **number** Harvest's Post cap admits and the **tiles** it reads its
+/// garrison off (ADR 0024 as #269 widened it): a Post is taken while a heavy
+/// body stands on it, whatever that body holds this tick, so the cap's two
+/// halves are read off one census and a Post can never be full as a number
+/// while reading vacant as a tile.
 let private postsOfIn (atlas: Atlas) (sourceId: string) : (string * Set<Pos>) option =
     seatTilesIn atlas sourceId
     |> Option.map (fun (room, seats) -> room, Set.intersect seats (postsIn atlas room))
@@ -1530,21 +1536,6 @@ let standsOnPostSite (atlas: Atlas) (creep: string) (siteId: string) : bool =
     match postSiteTile atlas siteId with
     | Some tile -> creepTile atlas creep = Some tile
     | None -> false
-
-/// The named source's Posts whose container is still a site — the tiles whose
-/// garrison is read off where a body *is* and never off what it holds this
-/// tick. Harvest's Post cap is what reads it (ADR 0024): on a standing
-/// container the overflow reprieves a full store, so the garrison holds the
-/// source's one Harvest slot from arrival to death; on a site Harvest falls
-/// away while the store is full and Build takes over, and a cap counting
-/// Harvest's holders alone would read the tile as free on every build tick and
-/// admit a second heavy body onto it. Room-joined and Seat-joined like every
-/// other half of the census; total (ADR 0004).
-let sitePostsOf (atlas: Atlas) (sourceId: string) : Set<RoomPos> =
-    seatTilesIn atlas sourceId
-    |> Option.map (fun (room, seats) ->
-        Set.intersect seats (containerSitePostsIn atlas room) |> RoomPos.setAt room)
-    |> Option.defaultValue Set.empty
 
 /// Whether a creep and a Task's target stand in one room — the question every
 /// join between a creep and a target's geometry has to settle while no flood
