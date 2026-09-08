@@ -3854,12 +3854,12 @@ let guardTaskTests =
                     "the bubble carries the Guard's own glyph"
             }
 
-            test "the Emitter swings at range 1 and heals every tick" {
-                // ADR 0056 decision 2's Emitter, pairwise on one tile: 30 a
-                // part is paid at range 1 and nothing at range 2, so the swing
-                // is gated on the range and the self-heal is not — the row's
-                // one HEAL part is spent every tick the body holds the Task,
-                // walking or fighting.
+            test "the Emitter does not let self-heal suppress a melee swing" {
+                // Screeps resolves `attack` and `heal` in one fixed intent
+                // pipeline, with heal to the right: scheduling both returns OK
+                // for both calls but executes only the heal. At the decision
+                // seam, therefore, the guard swings while it is in range and
+                // self-heals only while there is no swing to suppress.
                 let intentsFrom tile =
                     (decide
                         (declaredRaid raiders |> withGuards [ guard "g-1", tile ])
@@ -3879,10 +3879,9 @@ let guardTaskTests =
                     [ "g-1", "h-1" ]
                     "standing on the invader's ring, the guard swings at it"
 
-                Expect.equal
+                Expect.isEmpty
                     (healsOf inSwing.Intents)
-                    [ "g-1", "g-1" ]
-                    "and heals itself in the same tick, the two being different acts"
+                    "a self-heal would suppress the melee swing in the engine"
 
                 Expect.isEmpty
                     (attacksOf walking.Intents)
@@ -3891,7 +3890,7 @@ let guardTaskTests =
                 Expect.equal
                     (healsOf walking.Intents)
                     [ "g-1", "g-1" ]
-                    "and heals all the same — every tick, not every arrival"
+                    "with no swing to suppress, the guard heals while it walks"
 
                 Expect.equal
                     (Map.tryFind "g-1" walking.Assignments)
