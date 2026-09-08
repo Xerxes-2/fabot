@@ -1409,8 +1409,8 @@ let private isGuardBody (creep: CreepInfo) =
 /// How many guards one raided [[outpost]] wants (ADR 0056 decision 1, as #272
 /// amends it), which is **0** for the whole of a colony's ordinary life because
 /// no room is raided: one guard per declared outpost a [[threat]] stands in
-/// this tick, two where that raid's healing is at least the damage **one guard
-/// block** deals, capped at two and — for the row's own quota — summed over the
+/// this tick, two where one guard block loses the exchange, capped at two
+/// and — for the row's own quota — summed over the
 /// outposts. A per-tick fact read off vision and nothing remembered between
 /// ticks — vision
 /// in a guarded outpost *is* the guard — so it falls to 0 the tick the room is
@@ -1418,20 +1418,10 @@ let private isGuardBody (creep: CreepInfo) =
 /// ticks of body and a raid is 1,500 ticks, so one cast covers one raid by
 /// construction and the survivor goes on filling the row's `Living`.
 ///
-/// The second guard's arithmetic is the engine's, over the parts the projection
-/// already carries. The raid heals at `Engine.healPower` per HEAL part **over
-/// every hostile in that room** — a `smallHealer` is no Threat itself and is
-/// exactly what buys the second body — against `Engine.attackPower` per ATTACK
-/// plus `Engine.rangedAttackPower` per RANGED_ATTACK of **one `guardPattern`
-/// block**, the 750-energy body decision 1's every worked number is written in.
-/// So an unboosted `smallHealer`'s 60 stands against that block's 90 and the
-/// count stays at one, and a second healer's 120 buys the second body — at
-/// every bank, the block being a constant of the row and not a reading of this
-/// colony. The whole body the row would cast is deliberately *not* the term: it
-/// grows with the bank while the row's `Living` counts the body that is
-/// standing, so a survivor cast at a smaller bank would veto its own
-/// reinforcement, and the escalation decision 1 is written for would go out of
-/// reach above a 1,300 bank.
+/// The count compares one block against the raid, independently of the bank
+/// and the guards already standing. A lone smallMelee needs one; backed by a
+/// smallHealer, its 40 damage kills our 1,000 hits in 25 ticks, before our 30
+/// net damage kills its 1,000 hits. That raid needs the second block.
 ///
 /// Whether `blocks` whole `guardPattern` blocks win the exchange against the
 /// raid standing in one room (ADR 0056 decision 1, as #280 amends it). Two
@@ -1439,8 +1429,8 @@ let private isGuardBody (creep: CreepInfo) =
 /// blocks need to chew through the raid's **armed** bodies, against the ticks
 /// the raid needs to chew through ours.
 ///
-/// A raid that cannot out-damage what our blocks heal of themselves never kills
-/// them and is beaten however long it takes; a raid that out-heals our damage
+/// Our melee blocks cannot self-heal while attacking: heal suppresses attack.
+/// Their survival uses the raid's full damage. A raid that out-heals our damage
 /// can never be killed and is not. Healers are priced in the healing and never
 /// in the hits — killing them is not what ends the fight, out-damaging them is,
 /// and the last armed body down leaves them taking no ground and dealing
@@ -1482,15 +1472,14 @@ let guardBlocksBeat (view: ColonyView) (room: string) (blocks: int) : bool =
         * (Engine.attackPower * parts Attack block
            + Engine.rangedAttackPower * parts RangedAttack block)
 
-    let ourHeal = blocks * Engine.healPower * parts Heal block
     let ourHits = blocks * Engine.partHits * List.length block
 
-    if raidDamage <= ourHeal then
+    if raidDamage = 0 then
         true
     elif ourDamage <= raidHealing then
         false
     else
-        raidHits * (raidDamage - ourHeal) < ourHits * (ourDamage - raidHealing)
+        raidHits * raidDamage < ourHits * (ourDamage - raidHealing)
 
 /// **The count reads the raid and never our own answer to it** (#272). Priced
 /// against the guards *standing* in the room it was not monotone — 2 while one
@@ -1503,8 +1492,8 @@ let guardBlocksBeat (view: ColonyView) (room: string) (blocks: int) : bool =
 /// neither can retract while the raid is unchanged. Never a living body, for
 /// the reason ADR 0042 stopped reading the living Anchor's (#208): a quota
 /// priced off a body that stands moves when that body dies. The block is a
-/// whole 90, so the damage term is never zero and a raid that heals **nothing**
-/// buys no second body.
+/// whole 90, so the damage term is never zero. A raid with enough armed
+/// bodies can buy a second guard even without healing.
 ///
 /// Vision is the whole of what this reads (ADR 0004): an outpost the colony
 /// cannot see this tick carries no hostiles and asks for no guard, which is the

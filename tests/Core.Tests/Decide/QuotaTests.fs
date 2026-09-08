@@ -2852,27 +2852,23 @@ let guardRowTests =
                     "and the cascade ran: the row is written down, it is simply zero"
             }
 
-            test "a raid that out-heals one guard block hires the second" {
-                // ADR 0056's count rule at the two readings the arithmetic
-                // turns on, one healer apart: `12 × HEAL` over that room's
-                // hostiles against `30 × ATTACK + 10 × RANGED_ATTACK` of **one
-                // `guardPattern` block** (#272) — the 750-energy, 90-damage
-                // body decision 1's worked example is written in. So an
-                // unboosted `smallHealer`'s 60 leaves the count at one and a
-                // second healer's 120 buys the second body. No guard of ours
-                // stands in either reading: since #272 the number is the
-                // raid's and reads nothing we have already sent.
+            test "a melee guard cannot count self-heal toward surviving a healer-backed raid" {
                 let raid healers = guardColony (raidOf healers) []
 
                 Expect.equal
-                    (guardQuotaOf (raid 1))
+                    (guardQuotaOf (raid 0))
                     (Some 1)
-                    "60 healed against the 90 one block deals: the body we would send out-damages the raid"
+                    "90 damage kills the lone melee before its 40 damage kills one block"
+
+                Expect.equal
+                    (guardQuotaOf (raid 1))
+                    (Some 2)
+                    "30 net damage needs 34 ticks, but without self-heal the block dies in 25"
 
                 Expect.equal
                     (guardQuotaOf (raid 2))
                     (Some 2)
-                    "120 healed against the same 90: the raid out-heals it and the row hires a second"
+                    "120 healing exceeds one block's damage and still asks for two"
             }
 
             test "two attackers and no healer at all buy the second guard" {
@@ -2880,9 +2876,9 @@ let guardRowTests =
                 // and a three-RANGED invader together — seventy a tick between
                 // them and nothing healing either. The rule this amends read
                 // the raid's *healing* against one block's ninety, saw none,
-                // and asked for one, which loses: a block dies in seventeen
-                // ticks under seventy against its twelve of self-heal, and
-                // needs twenty-two to chew two thousand hits.
+                // and asked for one, which loses: a block dies in fifteen
+                // ticks under seventy without self-heal, and
+                // needs twenty-three to chew two thousand hits.
                 //
                 // What the count compares now is the two clocks. Pairwise on
                 // the second attacker alone, which is the only thing that
@@ -2938,14 +2934,14 @@ let guardRowTests =
                     "and the tick the second stands beside it, which used to retract to 1"
 
                 Expect.equal
-                    (guardQuotaOf (standing 1 [ guard "g-1", outpostSeat ]))
-                    (guardQuotaOf (standing 1 []))
-                    "and the below-threshold reading is invariant the same way: one healer is one guard, before and after ours arrives"
+                    (guardQuotaOf (standing 0 [ guard "g-1", outpostSeat ]))
+                    (guardQuotaOf (standing 0 []))
+                    "and the below-threshold reading is invariant the same way: a lone melee is one guard, before and after ours arrives"
 
                 Expect.equal
-                    (guardQuotaOf (standing 1 [ guard "g-1", outpostSeat ]))
+                    (guardQuotaOf (standing 0 [ guard "g-1", outpostSeat ]))
                     (Some 1)
-                    "1, and not a second body bought against 60 of healing"
+                    "a lone melee still needs only one guard"
 
                 Expect.equal
                     (guardCasts (decide (standing2 []) Map.empty Set.empty None).Intents

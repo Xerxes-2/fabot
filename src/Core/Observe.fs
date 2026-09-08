@@ -498,7 +498,7 @@ let private rivalDeadlines (view: ColonyView) =
 /// withdrawal and a garrison are the same room's two answers, and this is where
 /// they are told apart. The arithmetic is `guardsWanted`'s own, at the cap:
 /// two blocks' damage against the raid's armed hits, and two blocks' hits
-/// against the raid's damage less what they heal of themselves. A raid two
+/// against the raid's full damage: melee attacks exclude self-healing. A raid two
 /// guards beat is a fight; a raid two guards lose is a room to leave, and it is
 /// left for exactly as long as the raid has to live.
 let private raidDeadlines (view: ColonyView) =

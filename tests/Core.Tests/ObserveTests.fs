@@ -1385,6 +1385,26 @@ let outpostTests =
                     "and the lone smallMelee two blocks beat opens no stand-down: that room is a fight"
             }
 
+            test "two melee blocks cannot use self-heal to win an equal exchange" {
+                let raid attacks =
+                    { quiet with
+                        Hostiles =
+                            List.replicate
+                                2
+                                (List.replicate attacks Attack @ List.replicate (10 - attacks) Move)
+                            |> List.mapi (raiderIn outpostRoom)
+                    }
+
+                Expect.isEmpty
+                    (standDowns (RaidState.empty |> raidTick 100 (raid 2)))
+                    "two blocks kill 2,000 hits before 120 damage kills them"
+
+                Expect.equal
+                    (standDowns (RaidState.empty |> raidTick 100 (raid 3)))
+                    [ outpostRoom, 100, 100, 1600, StandDownBasis.InvaderRaid ]
+                    "equal 180 damage and 2,000 hits is not a win; fictitious self-heal must not keep the room open"
+            }
+
             test "an invader core opens a stand-down that runs to its collapse timer" {
                 // The best of ADR 0043's three deadlines, and the only one
                 // the engine hands over already absolute — the shell added
