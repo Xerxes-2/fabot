@@ -2740,8 +2740,8 @@ type Intent =
     /// The heal act (ADR 0056): a body with HEAL parts restores
     /// `Engine.healPower` a part to a creep of ours within range 1, itself
     /// included, and the engine settles it against the same tick's damage. The
-    /// [[guard]] heals itself every tick it holds its Task, which is what the
-    /// row's one HEAL part is for. Both creeps are named, and both by **name**
+    /// [[guard]] heals itself while holding its Task only when it has no melee
+    /// target: heal suppresses attack in the engine. Both creeps are named, and both by **name**
     /// — the target is one of ours, and an Intent whose target rode implicitly
     /// on the actor would say nothing in the Executor's own failure line.
     | HealCreep of creepName: string * targetName: string

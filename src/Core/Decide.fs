@@ -4774,8 +4774,8 @@ let private guardTarget
 /// The two acts of a Guard (ADR 0056), which are the Emitter's alone because
 /// neither is a Task target's: `AttackCreep` at the chosen Threat, chosen out of
 /// the ones **standing within range 1** since 30 a part is paid there and nothing
-/// is paid at range 2; and `HealCreep` on the guard itself **every tick**, a
-/// separate Intent kind so that the two do not compete for one act. No movement
+/// is paid at range 2; otherwise `HealCreep` on the guard itself. The engine
+/// gives heal priority over attack, regardless of call order. No movement
 /// of its own — the mover walks the body into the ring like any other Task's
 /// Work Area, which is ADR 0033's whole argument for making a fight a Task
 /// instead of a reflex. The range is the *gate on the candidates* and not a
@@ -4791,7 +4791,9 @@ let private guardIntents (view: ColonyView) atlas (creep: CreepInfo) (room: stri
         |> Option.map (fun hostile -> AttackCreep(creep.Name, hostile.Id))
         |> Option.toList
 
-    swing @ [ HealCreep(creep.Name, creep.Name) ]
+    match swing with
+    | [] -> [ HealCreep(creep.Name, creep.Name) ]
+    | attacks -> attacks
 
 /// Action Intent for one assigned creep: emitted when the Atlas judges the
 /// action reachable from the tick-start position, and — for Harvest alone —
