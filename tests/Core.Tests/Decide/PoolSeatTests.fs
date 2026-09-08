@@ -459,6 +459,83 @@ let repairTests =
                     "at half hits the road is left alone"
             }
 
+            test "a road a quarter from destruction is a rescue: a rung of its own, one body" {
+                // The failure #284 was filed on: the surplus tier is ordered by
+                // travel cost, and the cluster always holds a road just under
+                // the trigger, so the one out on the trunk never wins. The
+                // rescue is the lift that ends the comparison.
+                let colony =
+                    bareRespawn
+                    |> withHits "road-near" BuiltKind.Road 2400 5000
+                    |> withHits "road-far" BuiltKind.Road 200 5000
+
+                let entryFor id =
+                    poolOn colony |> List.tryFind (fun entry -> entry.Task = Repair id)
+
+                let priorityOf id =
+                    entryFor id |> Option.map (fun e -> e.Priority) |> Option.defaultValue 0
+
+                Expect.isLessThan
+                    (priorityOf "road-far")
+                    (priorityOf "road-near")
+                    "the road a quarter from destruction outranks the one under the spawn"
+
+                Expect.equal
+                    (entryFor "road-far" |> Option.map (fun e -> e.Capacity.Total))
+                    (Some(Some 1))
+                    "a rescue is one body's trip"
+
+                Expect.equal
+                    (entryFor "road-near" |> Option.map (fun e -> e.Capacity.Total))
+                    (Some None)
+                    "an ordinary Repair is uncapped, as it always was"
+            }
+
+            test "the rescue budget lifts the worst and leaves the rest in the surplus" {
+                // The outpost builders' budget one Task over (#157, #266):
+                // `Tuning.RepairRescues` at a time, the most damaged first, so
+                // a colony that has let a whole trunk rot still spends most of
+                // its surplus at home.
+                let colony =
+                    bareRespawn
+                    |> withHits "road-a" BuiltKind.Road 100 5000
+                    |> withHits "road-b" BuiltKind.Road 200 5000
+                    |> withHits "road-c" BuiltKind.Road 300 5000
+
+                let lifted =
+                    poolOn colony
+                    |> List.choose (fun entry ->
+                        match entry.Task with
+                        | Repair id when entry.Capacity.Total = Some 1 -> Some id
+                        | _ -> None)
+
+                Expect.equal
+                    (List.length lifted)
+                    Tuning.defaults.RepairRescues
+                    "the budget bounds the crowd that walks out"
+
+                Expect.equal lifted [ "road-a"; "road-b" ] "the worst first, and the third waits"
+            }
+
+            test "a damaged Keep structure is no rescue" {
+                // The lift reaches the decaying kinds alone (#284): the Keep is
+                // judged against full hits and a rampart against a floor, and
+                // neither is a thing the colony is letting rot — a Storage at
+                // one hit was shot at, and the safe-mode reflex is what answers
+                // that (ADR 0034).
+                let colony = bareRespawn |> withHits "sto-1" BuiltKind.Storage 1 1_000_000
+
+                Expect.equal
+                    (poolOn colony
+                     |> List.tryPick (fun entry ->
+                         if entry.Task = Repair "sto-1" then
+                             Some entry.Capacity.Total
+                         else
+                             None))
+                    (Some None)
+                    "the Keep's Repair is the uncapped, unlifted one"
+            }
+
             test "a repaired-whole road leaves the pool" {
                 let whole = bareRespawn |> withHits "road-1" BuiltKind.Road 5000 5000
 

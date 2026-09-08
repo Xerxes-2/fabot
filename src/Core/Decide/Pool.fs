@@ -727,6 +727,52 @@ let planPool (view: ColonyView) atlas (tasks: Task list) : PooledTask list =
     let stored id =
         view.Spatial.Stores |> Map.tryFind id |> Option.defaultValue 0
 
+    // **The rescue budget** (#284): the decaying structures this colony has let
+    // fall so far below their own trigger that a repair is no longer surplus
+    // work, lifted two rungs over the rest of the tier and given one body
+    // apiece. The failure it answers is not a tie the colony loses but one it
+    // cannot ever win: the surplus tier is ordered by travel cost from where a
+    // body stands, and since a road is hungry below half its max and whole
+    // *at* half (ADR 0010), the cluster a loaded worker stands in regenerates
+    // its own supply of two-tile-away Repairs faster than anybody would walk
+    // out of it. Live at t239,65x the base cluster's roads sat in a band from
+    // 50.0% to 58% while the trunk north (2%) and every road in the outpost
+    // (8%) decayed toward destruction — and a destroyed road out there is the
+    // human's paving, which no Layout re-places.
+    //
+    // The shape is the outpost builders' budget one Task over (#157, #266): a
+    // small colony-wide number, the worst first, the rest left in the surplus
+    // where travel cost goes on keeping the row at home. **The lift reaches the
+    // decaying kinds alone** — a rampart is judged against a floor and a Keep
+    // structure against full hits, and neither is a thing the colony is letting
+    // rot. The order is the fraction of max and never the hits: a plain road
+    // and a swamp road five times its max are equally far gone at a quarter.
+    // Ties fall to the id, the way every other tie here does.
+    //
+    // **One body apiece**, because the whole of what a rescue buys is a body
+    // that walks out there at all: a second one on the same road is the crowd
+    // #157 exists to prevent, and the walk it makes is the expensive half. It
+    // needs no second visit — a worker's load repairs a hundred hits an energy,
+    // so one trip carries a road from a quarter to over the trigger and out of
+    // the pool, and the Matcher's keep holds it there until it is whole.
+    let rescued =
+        tasks
+        |> List.choose (function
+            | Repair id ->
+                match Map.tryFind id view.Spatial.TargetKinds, Map.tryFind id view.Spatial.Hits with
+                | Some(Structure kind), Some hits when
+                    wholeLine kind = Some WholeLine.Fraction
+                    && hits.HitsMax > 0
+                    && float hits.Hits <= view.Tuning.RepairRescueLine * float hits.HitsMax
+                    ->
+                    Some(float hits.Hits / float hits.HitsMax, id)
+                | _ -> None
+            | _ -> None)
+        |> List.sort
+        |> List.truncate view.Tuning.RepairRescues
+        |> List.map snd
+        |> Set.ofList
+
     // **The queue the builders' budget rations** (#266): every site the pool
     // holds in a room this colony merely mines and that no other rule already
     // feeds. The second clause is what keeps the budget's head worth having.
@@ -1045,6 +1091,10 @@ let planPool (view: ColonyView) atlas (tasks: Task list) : PooledTask list =
                 -2 * priorityStep
             | Build siteId when tierOf task = Surplus && isHomeSite view atlas siteId ->
                 -priorityStep
+            // Over the home site as well as over the Upgrade (#284): a site is
+            // work the colony chose to start, and a structure a quarter from
+            // destruction is work it has already paid for and is about to lose.
+            | Repair id when Set.contains id rescued -> -2 * priorityStep
             | _ -> 0
 
         match task with
@@ -1190,6 +1240,10 @@ let planPool (view: ColonyView) atlas (tasks: Task list) : PooledTask list =
                 Total = total
                 Exempt = exempt
             }
+        // A rescue is one body's trip (#284, `rescued`). Every other Repair is
+        // uncapped, as it always was: a road under the spawn is worked by
+        // whoever is standing over it.
+        | Repair id when Set.contains id rescued -> Capacity.total 1
         | _ -> Capacity.unbounded
 
     tasks

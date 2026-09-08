@@ -804,8 +804,12 @@ let rankTierTests =
                     [ Verdict.Matched("w1", taskId (Build "site-1"), MatchFactor.Rank) ]
                     "Build outranks the tower Refill: rank broke it, not pool order"
 
+                // An *ordinary* Repair, deliberately: a road below the rescue
+                // line has a rung of its own (#284) and would break this tie by
+                // rank, which is the one thing this test is here to say Repair
+                // does not do.
                 Expect.equal
-                    (verdictsFor (surplusColony |> withHits "road-1" BuiltKind.Road 100 5000))
+                    (verdictsFor (surplusColony |> withHits "road-1" BuiltKind.Road 2400 5000))
                     tied
                     "Repair ties the tower Refill: pool order broke it, not rank"
 

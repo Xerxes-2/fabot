@@ -117,6 +117,21 @@ type Tuning =
         /// repaired over the line. A tunable, not part of ADR 0010, and bank-
         /// and stage-blind — a fraction of the structure's own max.
         RepairTrigger: float
+        /// The **rescue line** (#284): the fraction of max hits a decaying
+        /// structure is so far below its own trigger that repairing it stops
+        /// being surplus work and becomes a rescue. Travel cost alone orders
+        /// the surplus tier, and the base cluster always holds a road two tiles
+        /// from a loaded body, so a road out on the trunk or across a Seam
+        /// loses every comparison it is in until it is destroyed — a quarter of
+        /// max is where the colony stops letting it. A fraction of the
+        /// structure's own max, like the trigger it sits under.
+        RepairRescueLine: float
+        /// How many rescues the colony runs at once (#284), the shape of the
+        /// outpost builders' budget one Task over: the most damaged structures
+        /// are lifted a rung over the rest of the surplus, one body apiece, and
+        /// the rest wait their turn. Two, so a colony that has let a whole
+        /// trunk rot still spends most of its surplus at home.
+        RepairRescues: int
         /// The rampart floor (ADR 0034): a rampart is hungry below this many
         /// hits and whole at it — the ticks the room must hold times the damage
         /// per tick. No hysteresis, one Repair visit clearing the line.
@@ -235,6 +250,8 @@ module Tuning =
         {
             MinWorkforce = 2
             RepairTrigger = 0.5
+            RepairRescueLine = 0.25
+            RepairRescues = 2
             RampartFloor = 100_000
             PickupThreshold = 100
             ReachMargin = 2
