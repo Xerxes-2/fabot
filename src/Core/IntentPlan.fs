@@ -80,3 +80,7 @@ let create (intents: Intent list) : Result<Plan, Conflict> =
 /// Read-only projection for execution and observation. There is no unchecked
 /// constructor or append: combining colonies and movement must pass create again.
 let intents (Plan intents) = intents
+
+/// Add a reflex only if its action fits the already selected turn. Failure
+/// leaves the original immutable plan available to the caller unchanged.
+let tryAdd intent plan = create (intents plan @ [ intent ])

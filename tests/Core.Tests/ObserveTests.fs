@@ -411,6 +411,7 @@ let ours name : CreepInfo =
     {
         Name = name
         TicksToLive = 500
+        Hits = { Hits = 300; HitsMax = 300 }
         Fatigue = 0
         Energy = 0
         FreeCapacity = 50

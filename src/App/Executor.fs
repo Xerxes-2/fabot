@@ -99,7 +99,8 @@ let private execute (intent: Intent) : Outcome =
         withCreepTarget creepName controllerId (fun c t -> c.claimController t)
     | PickupEnergy(creepName, resourceId) ->
         withCreepTarget creepName resourceId (fun c t -> c.pickup t)
-    // The [[guard]]'s two acts (ADR 0056). The hostile is a creep of somebody
+    // The Guard's attack and the shared self-heal reflex. The hostile belongs
+    // to somebody
     // else's and so arrives by id, through the same `getObjectById` the [[fire
     // reflex]]'s target does — one that died between the decision and the
     // replay is the shared guard's ActorMissing, which is what a raid that

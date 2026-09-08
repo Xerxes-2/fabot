@@ -231,6 +231,8 @@ type ICreep =
     abstract ticksToLive: int
     /// Fatigue points outstanding; the creep cannot move while > 0.
     abstract fatigue: int
+    abstract hits: int
+    abstract hitsMax: int
     abstract store: IStore
     abstract pos: IRoomPosition
     abstract body: IBodyPartDef[]

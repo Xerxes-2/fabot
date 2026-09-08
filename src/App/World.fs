@@ -578,6 +578,7 @@ let ofGame (colonies: Colony list) (lastPositions: Map<string, RoomPos>) : World
                             Name = c.name
                             TicksToLive = c.ticksToLive
                             Fatigue = c.fatigue
+                            Hits = { Hits = c.hits; HitsMax = c.hitsMax }
                             Energy = c.store.getUsedCapacity "energy"
                             FreeCapacity = c.store.getFreeCapacity "energy"
                             Body =

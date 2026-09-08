@@ -4077,3 +4077,103 @@ let intakeDecayTests =
                     "the same four hundred in a container is left for the tier below it"
             }
         ]
+
+[<Tests>]
+let selfHealTests =
+    let healer =
+        { creepWith "patient" 0 0 [ Move; Heal ] with
+            Hits = { Hits = 199; HitsMax = 200 }
+        }
+
+    let run creep actions =
+        let colony = { bareRespawn with Creeps = [ creep ] }
+
+        match IntentPlan.create actions with
+        | Error conflict -> failtestf "invalid fixture: %A" conflict
+        | Ok plan -> selfHeal colony plan |> IntentPlan.intents
+
+    testList
+        "self-heal reflex"
+        [
+            test "injured idle bodies heal themselves with no task or energy" {
+                let colony = { bareRespawn with Creeps = [ healer ] }
+                let result = decide colony Map.empty Set.empty None
+
+                Expect.contains
+                    result.Intents
+                    (HealCreep("patient", "patient"))
+                    "one point of damage is enough"
+
+                Expect.isOk
+                    (IntentPlan.create result.Intents)
+                    "the complete decision stays executable"
+
+                Expect.isFalse
+                    (Map.containsKey "patient" result.Assignments)
+                    "healing needs no assignment"
+            }
+            test "healthy bodies and bodies without active HEAL do nothing" {
+                for body in [ healer.Body; Map.empty; Map.ofList [ Heal, 0 ] ] do
+                    let healthy =
+                        { healer with
+                            Hits = { Hits = 200; HitsMax = 200 }
+                            Body = body
+                        }
+
+                    Expect.isEmpty (run healthy []) "full life needs no healing"
+
+                for body in [ Map.empty; Map.ofList [ Heal, 0 ]; Map.ofList [ Move, 1 ] ] do
+                    Expect.isEmpty
+                        (run { healer with Body = body } [])
+                        "destroyed or absent HEAL cannot heal"
+            }
+            test "every engine-conflicting action takes precedence over the reflex" {
+                for action in
+                    [
+                        HarvestSource("patient", "source")
+                        AttackCreep("patient", "hostile")
+                        BuildSite("patient", "site")
+                        RepairStructure("patient", "road")
+                        HealCreep("patient", "other")
+                    ] do
+                    Expect.equal
+                        (run healer [ action ])
+                        [ action ]
+                        "the reflex cannot replace or suppress a chosen act"
+            }
+            test "independent actions coexist and another creep's attack does not block healing" {
+                let selected =
+                    [
+                        UpgradeController("patient", "controller")
+                        TransferEnergyToStructure("patient", "store")
+                        WithdrawEnergyFromStructure("patient", "store")
+                        PickupEnergy("patient", "pile")
+                        ClaimController("patient", "controller")
+                        ReserveController("patient", "controller")
+                        MoveCreep("patient", Top)
+                        SayCreep("patient", "task")
+                        AttackCreep("other", "hostile")
+                    ]
+
+                Expect.equal
+                    (run healer selected)
+                    (selected @ [ HealCreep("patient", "patient") ])
+                    "read the shared compatibility rules"
+            }
+            test "the reflex is idempotent and still acts when fatigued or almost dead" {
+                let exhausted =
+                    { healer with
+                        Fatigue = 10
+                        Hits = { Hits = 1; HitsMax = 200 }
+                    }
+
+                let once = run exhausted []
+
+                Expect.equal
+                    once
+                    [ HealCreep("patient", "patient") ]
+                    "one active HEAL is enough regardless of fatigue"
+
+                Expect.equal (run exhausted once) once "never duplicate an existing self-heal"
+            }
+        ]

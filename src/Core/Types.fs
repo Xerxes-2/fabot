@@ -1529,13 +1529,15 @@ type CreepInfo =
         /// Fatigue points still to pay off; a creep with any cannot step
         /// this tick — the engine's move answers ERR_TIRED.
         Fatigue: int
+        /// Current and maximum life; self-healing reads damage independently
+        /// of the active body counts (partially damaged parts still work).
+        Hits: HitsInfo
         /// Energy currently carried.
         Energy: int
         /// Carry capacity still free (0 = full).
         FreeCapacity: int
-        /// Part count per body part; a part absent from the map is a part
-        /// the body does not have. What a creep can do is decided from
-        /// what it is made of.
+        /// Active part counts (body entries with hits > 0). Absent or zero
+        /// means the creep has no usable part of that kind.
         Body: Map<BodyPart, int>
         /// Whether the creep stands on a different tile from last tick — the
         /// shell's reading of Memory's last positions, false for a body born
@@ -2740,9 +2742,10 @@ type Intent =
     /// The heal act (ADR 0056): a body with HEAL parts restores
     /// `Engine.healPower` a part to a creep of ours within range 1, itself
     /// included, and the engine settles it against the same tick's damage. The
-    /// [[guard]] heals itself while holding its Task only when it has no melee
-    /// target: heal suppresses attack in the engine. Both creeps are named, and both by **name**
-    /// — the target is one of ours, and an Intent whose target rode implicitly
+    /// self-heal reflex emits this only for an injured creep with active HEAL
+    /// and no conflicting selected action: heal suppresses attack in the engine.
+    /// Both creeps are named, and both by **name** — the target is one of ours,
+    /// and an Intent whose target rode implicitly
     /// on the actor would say nothing in the Executor's own failure line.
     | HealCreep of creepName: string * targetName: string
     | MoveCreep of creepName: string * direction: Direction

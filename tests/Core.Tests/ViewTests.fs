@@ -125,6 +125,7 @@ let private creep name room : WorldCreep =
             {
                 Name = name
                 TicksToLive = 1500
+                Hits = { Hits = 300; HitsMax = 300 }
                 Fatigue = 0
                 Energy = 0
                 FreeCapacity = 50

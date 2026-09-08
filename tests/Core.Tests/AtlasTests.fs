@@ -61,6 +61,7 @@ let worker name =
     {
         Name = name
         TicksToLive = 1500
+        Hits = { Hits = 300; HitsMax = 300 }
         Fatigue = 0
         Energy = 0
         FreeCapacity = 50
@@ -73,6 +74,11 @@ let creepWith name energy body =
     {
         Name = name
         TicksToLive = 1500
+        Hits =
+            {
+                Hits = Engine.partHits * List.length body
+                HitsMax = Engine.partHits * List.length body
+            }
         Fatigue = 0
         Energy = energy
         FreeCapacity = 50

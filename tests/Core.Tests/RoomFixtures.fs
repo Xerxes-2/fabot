@@ -432,6 +432,11 @@ let private castCreep name (body: BodyPart list) fill : CreepInfo =
     {
         Name = name
         TicksToLive = 1500
+        Hits =
+            {
+                Hits = Engine.partHits * List.length body
+                HitsMax = Engine.partHits * List.length body
+            }
         Fatigue = 0
         Energy = carried
         FreeCapacity = capacity - carried

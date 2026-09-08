@@ -3862,7 +3862,14 @@ let guardTaskTests =
                 // self-heals only while there is no swing to suppress.
                 let intentsFrom tile =
                     (decide
-                        (declaredRaid raiders |> withGuards [ guard "g-1", tile ])
+                        (declaredRaid raiders
+                         |> withGuards
+                             [
+                                 { guard "g-1" with
+                                     Hits = { Hits = 999; HitsMax = 1000 }
+                                 },
+                                 tile
+                             ])
                         Map.empty
                         Set.empty
                         None)

@@ -4687,10 +4687,8 @@ let private intentFor atlas (creep: CreepInfo) task =
     | Reserve controllerId -> Some(ReserveController(creep.Name, controllerId))
     | Claim controllerId -> Some(ClaimController(creep.Name, controllerId))
     | Flee -> None
-    // The Guard's acts are two, and neither is this function's: it names one
-    // Intent for a target the projection places, and a Guard's target is a
-    // hostile creep chosen at arrival off the colony's own facts
-    // (`guardIntent`).
+    // The Guard's attack names a hostile chosen at arrival, rather than a
+    // placed Task target (`guardIntent`). Healing is the shared reflex's act.
     | Guard _ -> None
 
 /// Chat-bubble glyph of a Task: the whole colony's current matching is
@@ -4763,26 +4761,33 @@ let private guardTarget
     |> List.sortBy (fun h -> distance h, h.Id)
     |> List.tryHead
 
-/// The two acts of a Guard (ADR 0056), which are the Emitter's alone because
-/// neither is a Task target's: `AttackCreep` at the chosen Threat, chosen out of
-/// the ones **standing within range 1** since 30 a part is paid there and nothing
-/// is paid at range 2; otherwise `HealCreep` on the guard itself. The engine
-/// gives heal priority over attack, regardless of call order. No movement
-/// of its own — the mover walks the body into the ring like any other Task's
-/// Work Area, which is ADR 0033's whole argument for making a fight a Task
-/// instead of a reflex. The range is the *gate on the candidates* and not a
-/// filter on the pick, for the reason `guardTarget` above writes down.
-let private guardIntent (view: ColonyView) atlas (creep: CreepInfo) (room: string) : Intent =
+/// A Guard chooses one reachable melee target. Self-healing belongs to the
+/// colony-wide reflex, which reads damage and the same compatibility rules as
+/// execution. Movement remains the mover's alone.
+let private guardIntent (view: ColonyView) atlas (creep: CreepInfo) (room: string) : Intent option =
     let inSwing (hostile: HostileInfo) =
         Atlas.creepTile atlas creep.Name
         |> Option.bind (fun tile -> RoomPos.range tile hostile.Pos)
         |> Option.exists (fun r -> r <= Engine.meleeRange)
 
-    let swing =
-        guardTarget view atlas creep room inSwing
-        |> Option.map (fun hostile -> AttackCreep(creep.Name, hostile.Id))
+    guardTarget view atlas creep room inSwing
+    |> Option.map (fun hostile -> AttackCreep(creep.Name, hostile.Id))
 
-    swing |> Option.defaultValue (HealCreep(creep.Name, creep.Name))
+/// Self-preservation beside any Task or none: only damage and an active HEAL
+/// part invite a heal. Existing actions own their channels; a reflex must never
+/// suppress a swing, a harvest, construction or another chosen action.
+let selfHeal (view: ColonyView) (plan: Fabot.Core.IntentPlan.Plan) =
+    (plan, view.Creeps)
+    ||> List.fold (fun plan creep ->
+        if
+            creep.Hits.Hits < creep.Hits.HitsMax
+            && (Map.tryFind Heal creep.Body |> Option.defaultValue 0) > 0
+        then
+            match Fabot.Core.IntentPlan.tryAdd (HealCreep(creep.Name, creep.Name)) plan with
+            | Ok healed -> healed
+            | Error _ -> plan
+        else
+            plan)
 
 /// Action Intent for one assigned creep: emitted when the Atlas judges the
 /// action reachable from the tick-start position, and — for Harvest alone —
@@ -4816,7 +4821,7 @@ let private actionIntents
         | Flee -> false
 
     match task with
-    | Guard room -> [ guardIntent view atlas creep room ]
+    | Guard room -> guardIntent view atlas creep room |> Option.toList
     | _ ->
         if
             Atlas.mayAct atlas creep.Name task (areaFor threats atlas creep.Name task)
@@ -6179,14 +6184,20 @@ let decideUnarbitrated
             | PickupEnergy(name, _) -> not (Set.contains name taskPickers)
             | _ -> true)
 
+    let intents =
+        defenseIntents
+        @ spawnIntents
+        @ plan.SiteIntents
+        @ outpostSiteIntents
+        @ pickupIntents
+        @ taskIntents
+        |> Fabot.Core.IntentPlan.create
+        |> function
+            | Ok selected -> selfHeal view selected |> Fabot.Core.IntentPlan.intents
+            | Error conflict -> invalidOp $"Conflicting creep intents: %A{conflict}"
+
     {
-        Intents =
-            defenseIntents
-            @ spawnIntents
-            @ plan.SiteIntents
-            @ outpostSiteIntents
-            @ pickupIntents
-            @ taskIntents
+        Intents = intents
         Assignments = next
         Memo = plan
         Verdicts = verdicts

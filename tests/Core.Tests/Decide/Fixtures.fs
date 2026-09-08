@@ -217,6 +217,11 @@ let creepWith name energy freeCapacity body =
     {
         Name = name
         TicksToLive = 1500
+        Hits =
+            {
+                Hits = Engine.partHits * List.length body
+                HitsMax = Engine.partHits * List.length body
+            }
         Fatigue = 0
         Energy = energy
         FreeCapacity = freeCapacity
