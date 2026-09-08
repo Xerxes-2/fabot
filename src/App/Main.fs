@@ -293,11 +293,15 @@ let loop () =
     // hold, are both counted out. Every colony's Intents in colony order,
     // executed in one pass: the engine is one world and the phase is the tick's
     // whole execution cost (ADR 0047).
-    let outcomes =
-        Executor.run (
-            (decisions |> List.collect (fun (_, _, decision) -> decision.Intents))
-            @ moveIntents
-        )
+    let executionPlan =
+        (decisions |> List.collect (fun (_, _, decision) -> decision.Intents))
+        @ moveIntents
+        |> Fabot.Core.IntentPlan.create
+        |> function
+            | Ok plan -> plan
+            | Error conflict -> invalidOp $"Conflicting creep intents: %A{conflict}"
+
+    let outcomes = Executor.run executionPlan
 
     let accepted =
         outcomes

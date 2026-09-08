@@ -5,6 +5,7 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="RoomFixtures.fs" />
+    <Compile Include="IntentPlanTests.fs" />
     <Compile Include="ViewTests.fs" />
     <Compile Include="AtlasTests.fs" />
     <Compile Include="Decide/Fixtures.fs" />

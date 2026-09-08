@@ -3874,6 +3874,11 @@ let guardTaskTests =
                 // outside the [[reach]] and four tiles from the invader.
                 let walking = intentsFrom { X = 28; Y = 48 }
 
+                for decision in [ inSwing; walking ] do
+                    Expect.isOk
+                        (Fabot.Core.IntentPlan.create decision.Intents)
+                        "the complete guard turn is executable, including movement and speech"
+
                 Expect.equal
                     (attacksOf inSwing.Intents)
                     [ "g-1", "h-1" ]

@@ -3130,8 +3130,9 @@ let private planOutpostContainers (view: ColonyView) atlas : Intent list =
 /// with free carry capacity standing within pickup range of a dropped energy
 /// pile asks to pick it up — beside its assigned Task's action, since the
 /// engine's pickup conflicts with no other action. No movement, no matching, no
-/// threshold: the reflex only recaptures what is already in reach, and duplicate
-/// pickups on one pile are the engine's to settle.
+/// threshold: the reflex only recaptures what is already in reach. One target
+/// per creep, retaining the last reachable pile in Atlas order; different
+/// creeps asking for one pile are still the engine's to settle.
 ///
 /// Paired once per room the projection places a creep in, and never across two:
 /// a pickup is a range-1 act inside one room, and a pile in one room and a creep
@@ -3163,6 +3164,8 @@ let private planPickups (view: ColonyView) atlas : Intent list =
                             Some(PickupEnergy(name, pile))
                         else
                             None)
+                    |> List.tryLast
+                    |> Option.toList
                 else
                     []))
 
@@ -4687,7 +4690,7 @@ let private intentFor atlas (creep: CreepInfo) task =
     // The Guard's acts are two, and neither is this function's: it names one
     // Intent for a target the projection places, and a Guard's target is a
     // hostile creep chosen at arrival off the colony's own facts
-    // (`guardIntents`).
+    // (`guardIntent`).
     | Guard _ -> None
 
 /// Chat-bubble glyph of a Task: the whole colony's current matching is
@@ -4769,7 +4772,7 @@ let private guardTarget
 /// Work Area, which is ADR 0033's whole argument for making a fight a Task
 /// instead of a reflex. The range is the *gate on the candidates* and not a
 /// filter on the pick, for the reason `guardTarget` above writes down.
-let private guardIntents (view: ColonyView) atlas (creep: CreepInfo) (room: string) : Intent list =
+let private guardIntent (view: ColonyView) atlas (creep: CreepInfo) (room: string) : Intent =
     let inSwing (hostile: HostileInfo) =
         Atlas.creepTile atlas creep.Name
         |> Option.bind (fun tile -> RoomPos.range tile hostile.Pos)
@@ -4778,11 +4781,8 @@ let private guardIntents (view: ColonyView) atlas (creep: CreepInfo) (room: stri
     let swing =
         guardTarget view atlas creep room inSwing
         |> Option.map (fun hostile -> AttackCreep(creep.Name, hostile.Id))
-        |> Option.toList
 
-    match swing with
-    | [] -> [ HealCreep(creep.Name, creep.Name) ]
-    | attacks -> attacks
+    swing |> Option.defaultValue (HealCreep(creep.Name, creep.Name))
 
 /// Action Intent for one assigned creep: emitted when the Atlas judges the
 /// action reachable from the tick-start position, and — for Harvest alone —
@@ -4793,7 +4793,7 @@ let private guardIntents (view: ColonyView) atlas (creep: CreepInfo) (room: stri
 /// Task judged outside that gate: its acts reach a creep the projection places
 /// nothing for, so `Atlas.mayAct` — which asks where a Task's *target* stands —
 /// answers false for it on every tick, and the range it is really gated on is
-/// the swing `guardIntents` measures itself (ADR 0056).
+/// the swing `guardIntent` measures itself (ADR 0056).
 let private actionIntents
     (view: ColonyView)
     atlas
@@ -4816,7 +4816,7 @@ let private actionIntents
         | Flee -> false
 
     match task with
-    | Guard room -> guardIntents view atlas creep room
+    | Guard room -> [ guardIntent view atlas creep room ]
     | _ ->
         if
             Atlas.mayAct atlas creep.Name task (areaFor threats atlas creep.Name task)
@@ -6163,16 +6163,21 @@ let decideUnarbitrated
 
     let taskIntents = emit view atlas threats assigned
 
-    // The reflex, less what a Task already asked for: the Pickup Task's own act
-    // is a strict subset of the reflex's — both want a Carry body with room in
-    // it standing within range 1 of the pile in that pile's own room — so an
-    // arriving picker's `PickupEnergy` was going to be spelt twice. The engine
-    // executes a creep's second pickup over its first, so the duplicate cost
-    // nothing on the server; what it did cost is the accepted-[[intent]] count
-    // the CPU line is read off.
+    // A task's pickup owns this creep's channel. Otherwise the reflex picks
+    // its last reachable pile, preserving the engine's former last-write choice
+    // without emitting overwritten calls. Different creeps may still share a pile.
+    let taskPickers =
+        taskIntents
+        |> List.choose (function
+            | PickupEnergy(name, _) -> Some name
+            | _ -> None)
+        |> Set.ofList
+
     let pickupIntents =
         planPickups view atlas
-        |> List.filter (fun intent -> not (List.contains intent taskIntents))
+        |> List.filter (function
+            | PickupEnergy(name, _) -> not (Set.contains name taskPickers)
+            | _ -> true)
 
     {
         Intents =

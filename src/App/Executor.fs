@@ -123,8 +123,8 @@ let private execute (intent: Intent) : Outcome =
 /// logged here, once and uniformly; the outcome list is the seam `Main.loop`
 /// counts the engine's accepted intents off (#170), and a future sim harness
 /// reads.
-let run (intents: Intent list) : (Intent * Outcome) list =
-    intents
+let run (plan: Fabot.Core.IntentPlan.Plan) : (Intent * Outcome) list =
+    Fabot.Core.IntentPlan.intents plan
     |> List.map (fun intent ->
         let outcome = execute intent
 

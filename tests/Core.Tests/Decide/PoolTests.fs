@@ -930,6 +930,58 @@ let pickupReflexTests =
                     "the assigned task's action still goes out"
             }
 
+            test "several reachable piles produce one pickup per creep" {
+                let colony = pileColony [ worker "w1" 0 50 ] [ "w1", { X = 10; Y = 11 } ]
+
+                let colony =
+                    { colony with
+                        Spatial =
+                            { colony.Spatial with
+                                TargetKinds = Map.add "pile-2" Dropped colony.Spatial.TargetKinds
+                            }
+                            |> withHome (fun layer ->
+                                { layer with
+                                    TargetPositions =
+                                        Map.add "pile-2" { X = 11; Y = 11 } layer.TargetPositions
+                                })
+                    }
+
+                let decision = decide colony Map.empty Set.empty None
+
+                Expect.equal
+                    (pickups decision.Intents)
+                    [ "w1", "pile-2" ]
+                    "the reflex keeps the former last-write target without issuing two calls"
+
+                Expect.isOk
+                    (Fabot.Core.IntentPlan.create decision.Intents)
+                    "the entire turn is compatible"
+
+                let tasked =
+                    { colony with
+                        Spatial =
+                            { colony.Spatial with
+                                Stores = Map.ofList [ "pile-1", 150 ]
+                            }
+                    }
+
+                let decision = decide tasked Map.empty Set.empty None
+
+                Expect.equal
+                    (Map.tryFind "w1" decision.Assignments)
+                    (Some(taskId (Pickup "pile-1")))
+                    "the stocked first pile is the assigned task"
+
+                Expect.equal
+                    (pickups decision.Intents)
+                    [ "w1", "pile-1" ]
+                    "a task's target owns the channel even when the reflex would choose another pile"
+
+                Expect.isOk
+                    (Fabot.Core.IntentPlan.create decision.Intents)
+                    "task and reflex compose without overwrites"
+            }
+
             test "a pile keeps no construction site off its tile" {
                 // Layout determinism (ADR 0011): a transient pile must not
                 // perturb the ordering, so placement with and without the
