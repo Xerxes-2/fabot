@@ -3150,8 +3150,8 @@ function loadBundle(file) {
       `${path.relative(process.cwd(), file)} holds ${declarations.length} top-level ` +
         "`function decideUnarbitrated(` declarations and this harness needs exactly one to time each " +
         "colony's decide (ADR 0052's CPU row per colony). Whatever renamed or inlined it — a " +
-        "Fable or esbuild upgrade, a rename in Decide.fs — is what this probe has to be " +
-        "re-pointed at",
+        "Fable or esbuild upgrade, a rename in src/Core/Decide/Entry.fs — is what this probe " +
+        "has to be re-pointed at",
     );
   }
   globalThis.__fabotClock = () => performance.now();

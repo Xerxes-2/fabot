@@ -27,7 +27,7 @@ the **authority**.
 
 ## One issue at a time
 
-Nearly every issue lands in `src/Core/Decide.fs` and under `tests/Core.Tests/Decide/`, so
+Nearly every issue lands under `src/Core/Decide/` and `tests/Core.Tests/Decide/`, so
 parallel worktrees buy merge conflicts rather than speed. The orchestrator ships each issue
 before the next implementer starts, so every one begins from a clean, pushed `main`.
 
@@ -37,32 +37,36 @@ Parallelise *inside* an issue instead — the review lenses run at once.
 
 `tests/Core.Tests/Decide/` is split **by domain, never by issue**: an issue's tests are
 scattered across the files its behaviour belongs to, and no file is ever named after a
-ticket. Pick by what the test is about, not by what asked for it.
+ticket. Pick the domain first from the table below, then the file within it.
 
-| File | The domain it holds |
+| Domain | Files |
 |---|---|
-| `Fixtures.fs` | Snapshot builders and Decision readers shared by **more than one** suite |
-| `LayoutTests.fs` | the planner's clustered ordering, the trunks, the storage, the Link footings, and the plan memo the census signature keys |
-| `PoolTests.fs` | which Tasks a colony offers and what caps them — seats, refill cluster, stores, container Posts, piles, repairs, restock dispatch |
-| `MatcherTests.fs` | applicability, travel cost, yield arbitration, Verdicts, verbose scoring, and the Intents a decision emits — including the `decide` list, the end-to-end cases whose frozen names keep them here |
-| `QuotaTests.fs` | the cast rows, the workforce target and source output behind them, the body patterns, and the Tuning knobs |
-| `ColonyTests.fs` | the colony as a unit — stage, Claim, nursery, two colonies side by side, borrowed-room budgets |
-| `OutpostTests.fs` | rooms the colony mines but does not own — sources, containers, reservation, garrison, invader core, stand-down, and the Anchor of a Post standing in one of them |
-| `ThreatTests.fs` | what the colony sees and flees, the towers, the ramparts over the keep, the spawn hold, safe mode, the downgrade deadline |
-| `AnchorTests.fs` | the heavy body pinned to its rock — its Post, its Work ceiling, its Refill, its succession. The Anchor's own rules live here whatever room it stands in; a case whose subject is the outpost is `OutpostTests.fs` |
+| shared surface | `Fixtures.fs` — snapshot builders and Decision readers used by **more than one** domain |
+| the Layout — the planner's clustered ordering, the trunks, the storage, the Link footings, and the plan memo the census signature keys | `LayoutFixtures.fs`, then `LayoutPlacementTests.fs` (built kinds, planner, placement), `LayoutPlanTests.fs` (layout, storage, link footing, unrouted trunk), `LayoutMemoTests.fs` (census signature, plan memo), `LayoutRoomTests.fs` (room layer, the square ring) |
+| the pool — which Tasks a colony offers and what caps them | `PoolFixtures.fs`, then `PoolSeatTests.fs` (seats, refill cluster, unreachable targets, repair), `PoolPickupTests.fs` (pickup reflex, logistics), `PoolStorageTests.fs` (storage stock and draw), `PoolPostTests.fs` (container Posts, post capacity, restock dispatch), `PoolWithdrawTests.fs` (withdraw capacity, piles and tombstones) |
+| the Matcher and the Resolver — applicability, travel cost, yield arbitration, Verdicts, verbose scoring, and the Intents a decision emits | `MatcherFixtures.fs`, then `MatcherApplicabilityTests.fs`, `MatcherTravelTests.fs` (travel cost, movement, arbitration), `MatcherVerdictTests.fs` (Verdicts, chat bubbles, rank tiers, verbose scoring), `MatcherDecideTests.fs` (the `decide` list — the end-to-end cases whose frozen names keep them here — and the intake lines) |
+| the rows — the cast rows, the workforce target and source output behind them, the body patterns, and the Tuning knobs | `QuotaFixtures.fs`, then `QuotaBodyTests.fs`, `QuotaWorkforceTests.fs`, `QuotaSourceTests.fs`, `QuotaReserverTests.fs`, `QuotaGuardTests.fs`, `QuotaUpgraderTests.fs`, `QuotaTuningTests.fs` |
+| the colony as a unit — stage, Claim, nursery, two colonies side by side, borrowed-room budgets | `ColonyTests.fs` |
+| the outposts — rooms the colony mines but does not own | `OutpostFixtures.fs`, then `OutpostBorderTests.fs` (invader core, decide across a border), `OutpostDeclarationTests.fs`, `OutpostAnchorTests.fs`, `OutpostHaulTests.fs` (container, hauler quota, lead), `OutpostRaidTests.fs` (hostile, Guard, the container switch), `OutpostReserveTests.fs` (reservation, stand-down) |
+| what the colony sees and flees — the towers, the ramparts over the keep, the spawn hold, safe mode, the downgrade deadline | `ThreatTests.fs` |
+| the Anchor — the heavy body pinned to its rock. Its own rules live here whatever room it stands in; a case whose subject is the outpost is the outpost's | `AnchorFixtures.fs`, then `AnchorPinTests.fs` (anchor, heavy pin), `AnchorPostTests.fs` (occupancy, what a garrison digs, the Work ceiling), `AnchorArrivalTests.fs` (expiring creeps, capacity at arrival), `AnchorStandingTests.fs` (the standing body, its Refill, the Post it raises) |
 
-A fixture starts **private, in the suite that needs it**. It moves to `Fixtures.fs` the tick
-a second suite wants it, and not before: `Fixtures.fs` is the shared surface, so everything
-in it is a name every suite must keep working.
+Fixtures sit in three tiers, and a fixture starts at the narrowest one that holds it:
+
+- `let private` **in the test file that needs it**, where it starts;
+- `<Domain>Fixtures.fs`, `internal`, the tick a second file of the same domain wants it;
+- `Fixtures.fs`, the tick a second **domain** wants it — the shared surface, so everything
+  in it is a name every suite must keep working.
 
 Each suite keeps its own `[<Tests>] let …Tests = testList "…"` entries. There is no wrapping
 `testList` over the directory — a wrapper would prefix every test name, and the names are
-the contract `dotnet test --list-tests` is diffed on.
+the contract `dotnet test --list-tests` is diffed on. Splitting a file therefore never
+changes a test name: the `testList` blocks move whole.
 
-No file under `tests/Core.Tests/Decide/` passes 6,000 lines. Past that the file is what
-makes it expensive to edit, and it splits again along the same rule — by domain.
-`AtlasTests.fs` sits outside the directory and is over the line already; #229 left it whole
-because it is one domain, and it splits on its own ticket, not on this rule.
+No test file passes ~2,500 lines. Past that the file is what makes it expensive to edit, and
+it splits again along the same rule — by domain, with the helpers only it uses following it.
+`AtlasTests.fs` sat outside this directory and over the old 6,000-line line; it is now
+`AtlasFixtures.fs` beside eight `Atlas…Tests.fs` files, split by the query it exercises.
 
 ADRs written before #229 name `DecideTests` for what is now `tests/Core.Tests/Decide/`; they
 are dated records and stay as written, so follow the test *name* they quote, not the file.

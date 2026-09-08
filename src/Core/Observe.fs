@@ -510,7 +510,7 @@ let private raidDeadlines (view: ColonyView) =
     |> List.filter (fun h -> h.Pos.Room <> SpatialInfo.homeName view.Spatial)
     |> List.map (fun h -> h.Pos.Room)
     |> List.distinct
-    |> List.filter (fun room -> not (Decide.guardBlocksBeat view room Engine.guardCap))
+    |> List.filter (fun room -> not (Decide.Quota.guardBlocksBeat view room Engine.guardCap))
     |> List.map (fun room ->
         let life =
             view.Hostiles

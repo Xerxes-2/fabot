@@ -246,7 +246,7 @@ let spawnIntents intents =
 /// The home room's geometry, read back off a projection: the room
 /// `RoomName` names, and the one the empty name files when it names none
 /// (`SpatialInfo.homeName`). Absent geometry reads as an empty layer, never
-/// as a lookup that throws (ADR 0004). The twin of `AtlasTests.homeLayer`;
+/// as a lookup that throws (ADR 0004). The twin of `AtlasFixtures.homeLayer`;
 /// the two suites share no module, as their `spatial` funnels already do
 /// not.
 let homeLayer (spatial: SpatialInfo) : RoomLayer =

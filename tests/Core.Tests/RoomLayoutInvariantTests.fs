@@ -1,0 +1,409 @@
+/// The Layout's invariants on real terrain, the losses the sweep found,
+/// and the clustered horizon at RCL6 (ADR 0055).
+module Fabot.Core.Tests.RoomLayoutInvariantTests
+
+open Expecto
+open Fabot.Core.Types
+open Fabot.Core.Atlas
+open Fabot.Core.Decide
+open Fabot.Core.Tests.RoomFixtures
+open Fabot.Core.Tests.Decide
+open Fabot.Core.Tests.RoomInvariantFixtures
+
+[<Tests>]
+let invariantTests =
+    testList
+        "layout invariants on real terrain"
+        [
+            test "the sweep covers every room from many spawns" {
+                // The guard on the rest of this list: an invariant asserted
+                // over an empty sweep is green and says nothing.
+                let cases = sweep.Value
+
+                Expect.isGreaterThan (List.length cases) 100 "a sweep worth the name"
+
+                Expect.equal
+                    (cases |> List.map (fun case -> case.Room.Name) |> List.distinct |> List.sort)
+                    (rooms |> List.map (fun room -> room.Name) |> List.sort)
+                    "every captured room is planned"
+
+                Expect.isTrue
+                    (cases
+                     |> List.exists (fun case ->
+                         case.Room.Name = "W12S28" && case.Spawn = { X = 12; Y = 40 }))
+                    "W12S28's own spawn tile is swept"
+            }
+
+            test "every Link footing target the Layout names is served" {
+                // The #77 detector, and the invariant ADR 0035 made cheap:
+                // an unserved target is a guarantee the colony no longer
+                // has. Across every room and every spawn there is not one,
+                // so this is the strong form with no ceiling to weaken it.
+                Expect.isEmpty
+                    (violations (fun case -> not (List.isEmpty case.Unserved)))
+                    "a room whose plan is short a footing"
+            }
+
+            test "the footing target count is the rule's, never a constant" {
+                // The targets are the container picks plus the Storage
+                // (ADR 0022, ADR 0027), so sources + 2 is arithmetic the
+                // room does rather than a number written down — one
+                // container per source, one for the controller, one
+                // Storage. A three-source room holds five.
+                let miscounts (case: Case) =
+                    let containers =
+                        if case.Room.PlansControllerContainer then
+                            case.SourceCount + 1
+                        else
+                            case.SourceCount
+
+                    List.length case.Containers <> containers
+                    || List.length (tilesOfKind Storage case.Placed) <> 1
+
+                Expect.isEmpty
+                    (violations miscounts)
+                    "a room whose footing targets its sources do not explain"
+            }
+
+            test "every reserved footing is off the trunks, the targets and the others" {
+                // ADR 0036's fourth invariant, unassertable when that ADR
+                // was written and assertable now that the Layout records
+                // the tiles it reserved (#106). The search rule in full:
+                // range 1 of its target, off every tile the Layout paves,
+                // off the footings' own targets, off every other footing
+                // (ADR 0022, ADR 0027). Real terrain is what makes this
+                // worth asserting — a footing is chosen from whatever
+                // handful of tiles a target's ring leaves, and hand-built
+                // fixtures can only pose the collisions their author
+                // imagined.
+                let breaksTheRule (case: Case) =
+                    // The road plan the fold filtered on, read off the
+                    // sites: a swept colony starts with no road standing
+                    // and no road pending, so the gap the first tick asks
+                    // for is the whole plan rather than the remainder of
+                    // one.
+                    let paved = tilesOfKind Road case.Placed |> Set.ofList
+
+                    let targets =
+                        (case.Served |> List.map (fun footing -> RoomPos.pos footing.Target))
+                        @ (case.Unserved |> List.map (fun footing -> RoomPos.pos footing.Target))
+                        |> Set.ofList
+
+                    let tiles = case.Served |> List.map (fun footing -> RoomPos.pos footing.Tile)
+
+                    List.length (List.distinct tiles) <> List.length tiles
+                    || case.Served
+                       |> List.exists (fun footing ->
+                           RoomPos.range footing.Tile footing.Target <> Some 1
+                           || Set.contains (RoomPos.pos footing.Tile) paved
+                           || Set.contains (RoomPos.pos footing.Tile) targets)
+
+                Expect.isEmpty
+                    (violations breaksTheRule)
+                    "a room reserving a footing on a road, on a target or on another footing"
+            }
+
+            test "served and unserved footings partition the room's targets" {
+                // The two records are one record read two ways, so their
+                // counts sum to the targets the room actually constructs —
+                // one per planned container plus the Storage (ADR 0022,
+                // ADR 0027) — and no target is in both. Counted off the
+                // room's own arithmetic rather than off sources + 2, which
+                // #104's swamp pocket is a standing counterexample to. The
+                // containers are counted a tick on, where the road plan no
+                // longer defers them, and the Storage off this tick's
+                // sites: the two plans name the same tiles, and no
+                // container pick is ever a Storage pick — one is working
+                // ground and the ordering never offers the other (ADR
+                // 0022) — so nothing collapses between the counts.
+                let miscounts (case: Case) =
+                    let targets =
+                        (case.Served |> List.map (fun footing -> footing.Target))
+                        @ (case.Unserved |> List.map (fun footing -> footing.Target))
+
+                    List.length targets
+                    <> List.length case.Containers + List.length (tilesOfKind Storage case.Placed)
+                    || List.length (List.distinct targets) <> List.length targets
+
+                Expect.isEmpty
+                    (violations miscounts)
+                    "a room whose two footing records do not partition its targets"
+            }
+
+            test "the clustered ordering never takes working ground" {
+                // ADR 0022: a tower, extension or Storage on a Seat or an
+                // Upgrade tile eats a tile an Anchor or an upgrader stands
+                // on, and nothing they do is worth that.
+                let onWorkingGround (case: Case) =
+                    let working = workingGroundIn case.Atlas case.Room.Name
+                    clusteredTiles case.Placed |> Set.exists (fun tile -> Set.contains tile working)
+
+                Expect.isEmpty
+                    (violations onWorkingGround)
+                    "a room clustering onto ground the colony works from"
+            }
+
+            test "the trunks carry every source to the spawn and the controller" {
+                Expect.isEmpty
+                    (violations (fun case ->
+                        not (List.contains case.Spawn case.Room.SealedDoorsteps)
+                        && not (trunksCarryEverySource case)))
+                    "a source with no paved line home"
+            }
+
+            test "every tile the Layout paves is one a creep can stand on" {
+                // A trunk is a paved line, so every tile of it has to be
+                // walkable ground: a road on a wall is not a road.
+                let pavesTheImpassable (case: Case) =
+                    let walkable = walkableTilesIn case.Atlas case.Room.Name
+
+                    tilesOfKind Road case.Placed
+                    |> List.exists (fun tile -> not (Set.contains tile walkable))
+
+                Expect.isEmpty
+                    (violations pavesTheImpassable)
+                    "a room paving ground nothing can walk"
+            }
+
+            test "no tile is asked for two structures in one tick" {
+                // Ramparts are excluded by construction: one goes over
+                // every Keep structure and every Post a container stands
+                // on, so sharing a tile is what a rampart is for (ADR
+                // 0034).
+                let doubleBooked (case: Case) =
+                    let footprints =
+                        case.Placed
+                        |> List.filter (fun (_, kind) -> kind <> Rampart)
+                        |> List.map fst
+
+                    List.length (List.distinct footprints) <> List.length footprints
+
+                Expect.isEmpty
+                    (violations doubleBooked)
+                    "a room asking two structures onto one tile"
+            }
+
+            test "a level never takes a clustered tile back" {
+                // What climbing the ladder changes is only which reserved
+                // tiles the placement filter lets through, so nothing a
+                // colony was already building should move because it
+                // levelled up. The whole ladder — 1 to 2 to 3 to 4 to 5 to
+                // 8, 680 level pairs across this sweep — was checked once
+                // by hand and holds everywhere; the 2-to-4 pair is the one
+                // pinned here, because it is the one that costs a plan.
+                let shrinks (case: Case) =
+                    not (Set.isSubset case.ClusterAtRcl2 (clusteredTiles case.Placed))
+
+                Expect.isEmpty (violations shrinks) "a room dropping a clustered tile as it levels"
+            }
+
+            test "the dropped trunks the Layout records are the ones its roads show" {
+                // #107's record, pinned against an independent derivation
+                // rather than against itself. The Layout says which
+                // (source, goal) pairs it could not route; the road plan
+                // says which sources its paved tiles do not carry to which
+                // goal, and the two must name the same pairs in every case
+                // — the sealed doorstep included, which is the whole point
+                // of recording the loss instead of dropping it (#105).
+                // Compared as sets, so the invariant is about the pairs and
+                // not about the order the fold happens to accumulate them.
+                let disagrees (case: Case) =
+                    Set.ofList (unroutedByRoads case) <> Set.ofList case.Unrouted
+
+                Expect.isEmpty
+                    (violations disagrees)
+                    "a room whose dropped trunks and whose road plan tell different stories"
+            }
+
+            test "a plan recalled from its memo is the plan that was computed" {
+                // ADR 0017's guarantee, stated over rooms big enough for it
+                // to be worth something: under an unchanged census the memo
+                // hands back the same Intents and the same shortfall, tile
+                // for tile, rather than a plan that merely resembles them.
+                Expect.isEmpty
+                    (violations (fun case -> not case.RecallsIdentically))
+                    "a room whose recalled plan differs from the computed one"
+            }
+        ]
+
+[<Tests>]
+let knownLossTests =
+    testList
+        "layout losses the sweep found"
+        [
+            test "a controller in an all-swamp pocket gets no container (#104)" {
+                // W12S27's controller sits in a pocket whose 7x7 Upgrade
+                // Work Area holds no plain tile at all. The controller
+                // container must be an Upgrade tile off the road plan, and
+                // every swamp in that area is paved, so there is no
+                // candidate: the room plans no buffer, holds one fewer
+                // footing target than sources + 2, and records neither.
+                let cases = sweep.Value |> List.filter (fun case -> case.Room.Name = "W12S27")
+
+                Expect.isNonEmpty cases "W12S27 is swept"
+
+                Expect.all
+                    cases
+                    (fun case -> List.length case.Containers = case.SourceCount)
+                    "every spawn in W12S27 plans source containers and no controller container"
+
+                Expect.all
+                    cases
+                    (fun case -> List.isEmpty case.Unserved)
+                    "and the loss is invisible: a target that never existed is never unserved"
+            }
+
+            test "a sealed spawn doorstep drops a source's trunk whole (#105)" {
+                // W12S27 from 6,18: the spawn has exactly two walkable
+                // neighbours and the clustered reservation takes one of
+                // them, so the source-to-spawn trunk cannot be routed and
+                // is dropped in silence. The working-ground exclusion
+                // guards Seats and the Upgrade area; nothing guards the
+                // spawn's own doorstep. 32,2 is the same mechanism reached
+                // from the other side: that tile routed everything until
+                // the horizon moved to RCL6 (ADR 0055) and the reservation
+                // widened by ten tiles onto its corridor out. The pin is
+                // per tile so that whichever of them a fix reaches first
+                // says so.
+                let sealed' =
+                    sweep.Value
+                    |> List.filter (fun case -> List.contains case.Spawn case.Room.SealedDoorsteps)
+
+                Expect.isNonEmpty sealed' "the sealed-doorstep case is still in the sweep"
+
+                Expect.all
+                    sealed'
+                    (trunksCarryEverySource >> not)
+                    "the trunk is still dropped; delete the pin and the exclusion when #105 lands"
+
+                // And the drop is no longer silent (#107). The loss is per
+                // (source, goal), which this room is the live counterexample
+                // for: the source→spawn trunk is dropped and the
+                // source→controller trunk is routed and paved, so the record
+                // names the spawn alone. A record keyed on the source would
+                // be false here, and one that named both goals would claim a
+                // haul the colony does in fact have.
+                Expect.all
+                    sealed'
+                    (fun case -> not (List.isEmpty case.Unrouted))
+                    "the room says so on the layout record rather than only in its road plan"
+
+                Expect.all
+                    sealed'
+                    (fun case ->
+                        case.Unrouted
+                        |> List.forall (fun trunk -> trunk.Goal = TrunkGoal.Spawn case.SpawnId))
+                    "and names the spawn alone: the controller's trunk is routed and paved"
+            }
+        ]
+
+// ---- the horizon, re-derived on the room that is about to reach it ------
+
+/// ADR 0055's re-derivation, kept as a test rather than only as prose: the
+/// horizon moves to RCL6 **before** W12S28 gets there, and what has to hold
+/// on the far side of that move is that the room plans the ten extensions
+/// RCL6 unlocks without moving one of the thirty it already stands on.
+/// Planned from `12,40`, the tile the live spawn occupies, because a
+/// horizon is re-derived on the room it is being moved for (ADR 0039) —
+/// which is also why this list sits outside the sweep: the sweep is the
+/// general rule over every spawn, and this is the one room's arithmetic.
+[<Tests>]
+let horizonTests =
+    testList
+        "the clustered horizon at RCL6"
+        [
+            test "W12S28 at RCL6 plans forty extensions: the thirty standing, and ten more" {
+                let loaded = project (load "W12S28") { X = 12; Y = 40 } None
+                let colony = colonyOf loaded 6
+
+                let extensionsOf (view: ColonyView) =
+                    decide view Map.empty Set.empty None
+                    |> fun decision -> placementsOf decision.Intents |> tilesOfKind Extension
+
+                // The room as ADR 0039's horizon left it: thirty extensions,
+                // which is what stands in W12S28 the tick RCL6 lands.
+                let thirty = extensionsOf (colony |> atHorizon 5)
+                Expect.hasLength thirty 30 "the horizon of five sizes RCL5's whole allowance"
+
+                let forty = extensionsOf colony
+
+                Expect.hasLength
+                    forty
+                    40
+                    "the shipped horizon sizes RCL6's, so an empty room plans all forty at once"
+
+                // The ten the level adds, asked for by a room that has
+                // already built the thirty. This is the acceptance criterion
+                // and the failure the move exists to prevent: under a horizon
+                // of five this same room computes a gap of zero and asks for
+                // nothing at all, and the bank stays at 1,800.
+                let standing = colony |> withExtensions thirty
+                let ten = extensionsOf standing
+
+                Expect.hasLength ten 10 "the ten RCL6 unlocks, and only those"
+
+                Expect.isEmpty
+                    (extensionsOf (standing |> atHorizon 5))
+                    "the horizon left behind plans none of them: a room that stops growing in silence"
+
+                // And the thirty do not move. A standing structure is a
+                // target, so its tile is out of the ordering and its slot off
+                // the plan; the ten are picks the ordering had never reached.
+                Expect.equal
+                    (Set.union (Set.ofList thirty) (Set.ofList ten))
+                    (Set.ofList forty)
+                    "the thirty standing plus the ten asked for are the forty the horizon planned"
+            }
+
+            test "the ten new picks take no working ground and move no trunk" {
+                // The question ADR 0039 left for this level: W12S28's north
+                // band (rows 35–37) is spoken for by the RCL5 cluster, so does
+                // the room still have cluster space for ten more, and does the
+                // overflow tread on a Seat or on the Upgrade Work Area (ADR
+                // 0022)? It grows a ring out — north to row 34 and east to
+                // column 17 — and the working-ground exclusion is what keeps
+                // it off the ground the colony stands on. The trunks are the
+                // other half of the price: a wider reservation is a router
+                // with more tiles to dodge, and on this room it dodges none.
+                let loaded = project (load "W12S28") { X = 12; Y = 40 } None
+                let colony = colonyOf loaded 6
+                let atlas = ofView colony
+
+                let planOf (view: ColonyView) =
+                    decide view Map.empty Set.empty None
+                    |> fun decision -> placementsOf decision.Intents, decision.Memo
+
+                let placedFive, memoFive = planOf (colony |> atHorizon 5)
+                let placedSix, memoSix = planOf colony
+
+                let added =
+                    Set.difference
+                        (tilesOfKind Extension placedSix |> Set.ofList)
+                        (tilesOfKind Extension placedFive |> Set.ofList)
+
+                Expect.hasLength
+                    added
+                    10
+                    "ten tiles the wider horizon reaches and the narrower does not"
+
+                Expect.isEmpty
+                    (Set.intersect added (workingGroundIn atlas "W12S28"))
+                    "no new pick on a Seat or in the Upgrade Work Area"
+
+                Expect.equal
+                    (tilesOfKind Road placedSix |> Set.ofList)
+                    (tilesOfKind Road placedFive |> Set.ofList)
+                    "the trunks pave the same tiles under both horizons — the same set, not the same length"
+
+                Expect.equal
+                    memoSix.ServedFootings
+                    memoFive.ServedFootings
+                    "and the Link footings sit on the tiles the narrower horizon gave them"
+
+                Expect.isEmpty
+                    memoSix.UnservedFootings
+                    "no footing target goes unserved at the wider horizon"
+            }
+        ]
+
+// ---- the Seam bands the captured rooms hold -----------------------------

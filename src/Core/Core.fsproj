@@ -4,10 +4,32 @@
     <RootNamespace>Fabot.Core</RootNamespace>
   </PropertyGroup>
   <ItemGroup>
-    <Compile Include="Types.fs" />
+    <Compile Include="Types/Vocabulary.fs" />
+    <Compile Include="Types/Rules.fs" />
+    <Compile Include="Types/Rooms.fs" />
+    <Compile Include="Types/Geometry.fs" />
+    <Compile Include="Types/Projection.fs" />
+    <Compile Include="Types/Colonies.fs" />
+    <Compile Include="Types/Sightings.fs" />
+    <Compile Include="Types/Views.fs" />
+    <Compile Include="Types/Tasks.fs" />
+    <Compile Include="Types/Intents.fs" />
+    <Compile Include="Types/Verdicts.fs" />
     <Compile Include="IntentPlan.fs" />
+    <Compile Include="Grid.fs" />
     <Compile Include="Atlas.fs" />
-    <Compile Include="Decide.fs" />
+    <Compile Include="Decide/Bodies.fs" />
+    <Compile Include="Decide/Facts.fs" />
+    <Compile Include="Decide/Threat.fs" />
+    <Compile Include="Decide/Planner.fs" />
+    <Compile Include="Decide/Quota.fs" />
+    <Compile Include="Decide/Spawns.fs" />
+    <Compile Include="Decide/Layout.fs" />
+    <Compile Include="Decide/Pool.fs" />
+    <Compile Include="Decide/Emitter.fs" />
+    <Compile Include="Decide/Resolver.fs" />
+    <Compile Include="Decide/Matcher.fs" />
+    <Compile Include="Decide/Entry.fs" />
     <Compile Include="Observe.fs" />
   </ItemGroup>
   <ItemGroup>

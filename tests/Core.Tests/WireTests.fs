@@ -225,7 +225,7 @@ let wireVocabularyTests =
                 let tasks = casesOf<Task> ()
 
                 Expect.equal
-                    (tasks |> Array.map Decide.taskId |> Array.distinct |> Array.length)
+                    (tasks |> Array.map Decide.Facts.taskId |> Array.distinct |> Array.length)
                     (Array.length tasks)
                     "Task: no two cases share a task id"
             }

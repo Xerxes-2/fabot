@@ -476,7 +476,7 @@ let private castCreep name (body: BodyPart list) fill : CreepInfo =
 /// the RCL5 rung prices W12S28 as the one-room colony it is not — a test
 /// that needs the outpost has to add it. And the fleet pins **body
 /// sizing** at this bank and never row counts: the bodies are
-/// `Decide.bodyFor`'s own at `bank`, the counts are this fixture's (see
+/// `Decide.Bodies.bodyFor`'s own at `bank`, the counts are this fixture's (see
 /// `fleetRows`), so nothing here reproduces the [[workforce target]].
 ///
 /// `bank` is checked against the level rather than believed: extensions
@@ -629,20 +629,32 @@ let colonyAt (capture: RoomCapture) (level: int) (bank: int) : ColonyView =
     let fleetRows =
         [
             for index, (_, pos) in List.indexed sourceContainers do
-                yield $"anchor-{index}", Decide.bodyFor Decide.anchorPattern bank, pos, Exactly
+                yield
+                    $"anchor-{index}",
+                    Decide.Bodies.bodyFor Decide.Bodies.anchorPattern bank,
+                    pos,
+                    Exactly
 
             for index, _ in List.indexed sourceContainers do
-                yield $"hauler-{index}", Decide.bodyFor Decide.haulerPattern bank, spawnPos, Nearby
+                yield
+                    $"hauler-{index}",
+                    Decide.Bodies.bodyFor Decide.Bodies.haulerPattern bank,
+                    spawnPos,
+                    Nearby
 
             for index in 0..1 do
                 yield
                     $"worker-{index}",
-                    Decide.bodyFor Decide.workerPattern bank,
+                    Decide.Bodies.bodyFor Decide.Bodies.workerPattern bank,
                     controllerPos,
                     Nearby
 
             if bank >= 800 then
-                yield "upgrader-0", Decide.bodyFor Decide.upgraderPattern bank, bufferPos, Nearby
+                yield
+                    "upgrader-0",
+                    Decide.Bodies.bodyFor Decide.Bodies.upgraderPattern bank,
+                    bufferPos,
+                    Nearby
         ]
 
     // Both halves of the logistics loop, cycled over the fleet: an empty

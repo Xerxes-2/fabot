@@ -1,0 +1,385 @@
+/// The `ColonyView`: one colony's cut of the World (ADR 0052) — the rooms it
+/// works, the bodies that are its own, its bank, and the cross-colony work it
+/// may borrow. The only thing `decide` is ever handed.
+[<AutoOpen>]
+module Fabot.Core.Types.Views
+
+/// The cross-colony work one colony may take this tick, named and bounded
+/// (ADR 0052 decision 7). Borrowing is an explicit exception and never a
+/// narrowed layer: what a [[mother colony]] may do in a child's room is
+/// written down here, and everything else the room holds stays the child's.
+type BorrowedWork =
+    {
+        /// The home rooms of the children this colony carries in its projection
+        /// for a reason that is not mining them, and it is two reasons: the
+        /// children it is **raising**, whose Upgrade and Build its bodies may
+        /// cross for (ADR 0047 decision 4), and the children it has **lost**,
+        /// whose controller is a [[claim]] to make. The two are disjoint by
+        /// construction and narrow to the same three kinds, because a Claim
+        /// asks for exactly what an Upgrade does. The view carries only those
+        /// kinds for these rooms, so the mother pools no Harvest on the child's
+        /// rock and hauls none of its energy home.
+        Rooms: string list
+    }
+
+/// One colony's whole reading of this tick: its home room's projection, the
+/// rooms it works beside it, the bodies it holds, the bank it casts from and
+/// the explicit little it may take of its neighbours' (ADR 0052 decision 1).
+type ColonyView =
+    {
+        Time: int
+        /// This colony's spawns: the ones it casts from and anchors its
+        /// Layout on. A spawn standing in another colony's home is that
+        /// colony's, and whether one stands in a declared home reaches this
+        /// colony as that room's [[stage]].
+        Spawns: SpawnInfo list
+        /// The bodies this colony has in its ovens this tick: its **home
+        /// room's** `RoomFacts.Casting` alone, for the reason `Bank` is one
+        /// account — a colony casts from the spawns of the room it banks in.
+        /// Read by the casting cascade and by nothing else: a body in an oven
+        /// stands on no tile, holds no Task and answers no Verdict (ADR 0026).
+        Casting: BodyPart list list
+        /// The **tunables** this colony decides under (ADR 0052 decision 5),
+        /// arriving on the view like every other fact so that a rule reads its
+        /// colony's own and a test moves one field instead of editing the rule.
+        Tuning: Tuning
+        /// The colony's bank: its **home room's** shared spawn-energy account,
+        /// and no other room's (ADR 0052 decision 1). Every spawn it casts from
+        /// stands in that room, so one account is the whole of what it can
+        /// spend — and not a fold over the projected rooms, which would have
+        /// read a child's 300 beside a mother's 1,800.
+        Bank: RoomEnergy
+        /// Energy-hungry structures in the home room (spawn, extension,
+        /// tower), whether or not they currently have room.
+        Refillables: RefillableInfo list
+        /// The sources this colony **mines**: every room it works but the ones
+        /// it merely [[bootstrap]]s, whose rocks are the child's own (ADR 0047
+        /// decision 4), with every declared outpost rock beside them whether or
+        /// not there is vision (`Outpost.pooledSources`, ADR 0041).
+        Sources: SourceInfo list
+        /// This colony's own controller — the one it upgrades, whose downgrade
+        /// clock it runs against and whose safe mode it fires (ADR 0047
+        /// decision 1). Never a child's, which reaches the pool as a target in
+        /// a layer she projects. `None` where the projection cannot place it,
+        /// which is ADR 0004's absence and not a state.
+        Controller: ControllerInfo option
+        /// Who holds each room this colony works and has vision in this tick,
+        /// under that room's name — what a source's output per tick is priced
+        /// from (ADR 0042), and the fact a rule reads to say whether a room is
+        /// this colony's business at all. Absent for a room vision did not
+        /// answer for, per-entry as every other absence is (ADR 0004). One
+        /// entry can be a room the colony does **not** work: the [[stand-down]]
+        /// gate re-admits a room it has latched to the scan for one tick in
+        /// every `Tuning.RivalRecheck` (#165), and this is the whole of what
+        /// such a look reads. Nothing else of that room is here — no layer, no
+        /// rock, no Task — so every reader below finds it nowhere, which is why
+        /// the look moves no decision and only the next [[raid log]] is any
+        /// wiser for it.
+        RoomControl: Map<string, RoomControlInfo>
+        /// Our construction sites in every room this colony works and has
+        /// vision in: the Build pool is this list one to one, so an outpost's
+        /// site is a Task like the home room's, and a bootstrapped child's site
+        /// is the second half of what a [[pioneer]] crosses for.
+        ConstructionSites: ConstructionSiteInfo list
+        /// The creeps this colony holds this tick: the ones it cast, plus the
+        /// ones it has adopted, less the ones another colony has adopted from
+        /// it (`World.creepColonies`, ADR 0047 decision 2). In the world's own
+        /// order, so who holds a body does not move the Matcher's order.
+        Creeps: CreepInfo list
+        /// Hostile creeps standing in any room this colony works and has
+        /// vision in, each under its own room's name (ADR 0033, #201).
+        Hostiles: HostileInfo list
+        /// The invader cores standing in the rooms this colony works and can
+        /// see (ADR 0043). Its own list and not a widening of `Hostiles`: a
+        /// raider is something a creep runs from this tick, a core is something
+        /// a whole room is withheld from for thousands, and
+        /// `FIND_HOSTILE_CREEPS` can never answer with a structure.
+        InvaderCores: InvaderCoreInfo list
+        /// This colony's spatial projection: the home room and every room it
+        /// works beside it, in one projection (ADR 0041, ADR 0005). `RoomName`
+        /// is the home room and the `Rooms` keys are the scan set, so the
+        /// view's home and the rooms it works are read off the projection
+        /// rather than stored a second time beside it. Always present, possibly
+        /// empty — absence is per-entry, never per-projection (ADR 0004).
+        Spatial: SpatialInfo
+        /// Every home room a human has declared a colony for (`Colony.homes`,
+        /// ADR 0047), this colony's own included and in declaration order. The
+        /// **candidate colonies** are the ones nobody owns yet, and that second
+        /// half is read off `RoomControl` in Core: which rooms a human means to
+        /// own is declared, whether we own one is seen, and a view carries
+        /// facts rather than conclusions.
+        Declared: string list
+        /// The [[stage]] of every room that is a colony of ours this tick
+        /// (`World.stages`, ADR 0052 decision 3) — this colony's own and its
+        /// children's alike, the same map handed to every colony because a
+        /// stage is a fact about a room and not about who is looking.
+        Stages: Map<string, ColonyStage>
+        /// Where **other colonies'** creeps stand in the rooms this colony
+        /// works, each tile carrying its room (ADR 0052 decisions 1 and 2): the
+        /// bodies this colony does not hold and cannot move — in no `Creeps`
+        /// list of hers, on no tile of her layers, and in nobody's Task pool
+        /// but their own colony's.
+        Foreign: Set<RoomPos>
+        /// What this colony may take of a neighbour's, explicitly and
+        /// bounded (ADR 0052 decision 7): today the Upgrade and the Build
+        /// of a child it is still raising (ADR 0047 decision 4).
+        Borrowed: BorrowedWork
+        /// The [[outpost]]s this colony's declaration names that its home
+        /// shares no border with, and that it therefore **refuses**
+        /// (`Outpost.refused`, #243): no [[seam]] joins them, so nothing in
+        /// them can be priced, walked to or worked, and they are out of the
+        /// scan set rather than in it unworkable. Carried on the view because
+        /// the refusal has to be *said*: it is the colony's own reading of its
+        /// declaration, it reaches the operator on the [[layout record]] beside
+        /// the plan's other losses, and the silence it replaces is what #243
+        /// was filed for. Empty is the healthy answer and rides here all the
+        /// same, as the Layout's own loss lists do (ADR 0035).
+        Refused: string list
+        /// What each room this colony **works** was last seen to carry (#151):
+        /// the world's sightings, narrowed to the scan set. The narrowing is
+        /// the rule and not housekeeping — a room a [[stand-down]] withholds
+        /// leaves the scan set (ADR 0043) and leaves this map with it, so the
+        /// withdrawal that ADR spells through `task-gone` keeps working
+        /// unchanged. A withheld room is one the colony stops holding
+        /// assignments in; a dark one is a room it is still working and
+        /// cannot see this tick.
+        Sightings: Map<string, RoomSighting>
+    }
+
+[<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
+module ColonyView =
+    /// What a colony may see of a room it carries for a child of its own: the
+    /// controller its workers upgrade — or, where the child has been lost,
+    /// [[claim]] — the sites they build, and the spawn, not a target of hers at
+    /// all but the tile her [[pioneer]]s walk up to and the structure that says
+    /// a colony lives here (ADR 0047 decision 4). Both halves of
+    /// `BorrowedWork.Rooms` narrow through this one filter: a Claim asks for
+    /// exactly what an Upgrade does. Beside the kinds, at most one store: the
+    /// [[ferry]]'s sink.
+    let private borrowable (kind: TargetKind) =
+        match kind with
+        | Controller
+        | Site _
+        | Structure BuiltKind.Spawn -> true
+        | Source
+        | Dropped
+        | Tombstone
+        | Structure _ -> false
+
+    /// One bootstrapped room's facts, cut down to the borrowed work (ADR 0052
+    /// decision 7). Taken off the whole facts rather than gated when the world
+    /// is read: the world reads a room once for everybody, so what this chooses
+    /// is not what to *read* but what this colony may **carry**. What is left
+    /// is exactly ADR 0004's per-entry absence — the shape a room with no
+    /// vision arrives in — so every rule downstream already answers correctly
+    /// for it. The geometry is kept whole, being what the mother's workers walk
+    /// over. The room's hits go, so no Repair of the child's reaches her pool,
+    /// and its sources go with them. Of its stores at most one survives: **the
+    /// child's upgrade buffer, and no other store of its** — a built container
+    /// inside the child's own controller's Upgrade area and on none of its
+    /// Seats. That is what a [[ferry]] fills, so the mother has to see how much
+    /// room is left in it; a source container of the child's carried here would
+    /// be a Withdraw in her pool and the child's income hauled across the Seam.
+    let private ferrySink (stage: ColonyStage option) (facts: RoomFacts) : Set<string> =
+        let placed = facts.Layer.TargetPositions
+        let tileOf id = Map.tryFind id placed
+
+        let idsOfKind kind =
+            facts.TargetKinds
+            |> Map.toList
+            |> List.choose (fun (id, k) -> if k = kind then Some id else None)
+
+        match stage, idsOfKind Controller |> List.tryPick tileOf with
+        | Some Bootstrapping, Some controller ->
+            let sources = idsOfKind Source |> List.choose tileOf
+
+            idsOfKind (Structure BuiltKind.Container)
+            |> List.filter (fun id ->
+                match tileOf id with
+                | Some pos ->
+                    range pos controller <= 3
+                    && not (sources |> List.exists (fun s -> range pos s <= 1))
+                | None -> false)
+            |> Set.ofList
+        | _ -> Set.empty
+
+    let private borrowed (stage: ColonyStage option) (facts: RoomFacts) : RoomFacts =
+        let sink = ferrySink stage facts
+
+        let kinds =
+            facts.TargetKinds
+            |> Map.filter (fun id kind -> borrowable kind || Set.contains id sink)
+
+        { facts with
+            Layer =
+                { facts.Layer with
+                    TargetPositions =
+                        facts.Layer.TargetPositions
+                        |> Map.filter (fun id _ -> Map.containsKey id kinds)
+                }
+            TargetKinds = kinds
+            Hits = Map.empty
+            Stores = facts.Stores |> Map.filter (fun id _ -> Set.contains id sink)
+            Sources = []
+        }
+
+    /// One colony's view of this tick (ADR 0052 decision 1): the rooms it works
+    /// cut out of the `World`, the bodies it holds cut out of the world's
+    /// creeps, its own bank and controller, and the explicit little it may take
+    /// of a child's. **Pure, and that is the point of it** (ADR 0052 decision
+    /// 8): the shell reads the engine once (`World.ofGame`) and every rule
+    /// about which rooms a colony works, which creeps are its own and what it
+    /// may borrow is here, where a test can hand it a two-colony world and read
+    /// the answer back. Five facts are handed in and none is decided here: the
+    /// **tunables** (decision 5), the **declaration**, the **gate** the
+    /// [[stand-down]] derives off the previous tick's [[raid log]] (ADR 0043 —
+    /// Memory's answer, not the world's), the **holders** `World.creepColonies`
+    /// cut over every living colony's scan set at once, and the **world**
+    /// itself.
+    let ofWorld
+        (tuning: Tuning)
+        (colonies: Colony list)
+        (gate: StandDown)
+        (holders: Map<string, string>)
+        (world: World)
+        (colony: Colony)
+        : ColonyView =
+        let home = colony.Home
+        let stages = World.stages tuning colonies world
+
+        // The declaration's narrowings and their union, off the one
+        // derivation the creep adoption reads too (`World.scanOf`). Written
+        // here a second time it would be a second answer free to disagree.
+        let outposts, bootstrap, scanned =
+            World.scanOf stages (World.unownedHomes colonies world) colonies gate.Shut colony
+
+        // The scan set with each room's facts beside it, in scan order —
+        // a room the world holds nothing for reads empty (ADR 0004), and a
+        // room this colony only bootstraps reads the borrowed work alone.
+        let worked =
+            scanned
+            |> List.map (fun room ->
+                let facts = World.roomOf world room
+
+                room,
+                (if List.contains room bootstrap then
+                     borrowed (Map.tryFind room stages) facts
+                 else
+                     facts))
+
+        // This colony's bodies, and the names to cut its geometry by: a
+        // colony's fleet and its layers' occupants are one set, so the two
+        // cannot disagree about who is standing where.
+        let mine =
+            world.Creeps
+            |> List.filter (fun creep -> Map.tryFind creep.Info.Name holders = Some home)
+
+        let names = mine |> List.map (fun creep -> creep.Info.Name) |> Set.ofList
+
+        // The three id-keyed tables, merged flat across the worked rooms,
+        // because an object id is already unique across the world (ADR 0041).
+        // Deterministic under a collision that cannot happen: the fold walks
+        // the scan set in order, and one object stands in one room.
+        let mergedBy (select: RoomFacts -> Map<string, 'v>) =
+            (Map.empty, worked)
+            ||> List.fold (fun acc (_, facts) ->
+                (acc, select facts) ||> Map.fold (fun acc id value -> Map.add id value acc))
+
+        let homeFacts = World.roomOf world home
+
+        // The scan set's own control entries, and beside them the one look
+        // #165 buys a room the gate has latched on another player's ownership:
+        // whatever vision answered for that room this tick, and nothing else it
+        // holds. This is the whole of "re-admitted to the scan set only" — the
+        // room contributes no furniture, no rock, no hostile and no layer, so
+        // nothing pools there and no quota counts it while the look happens,
+        // and ADR 0043's withdrawal stands through the tick that questions it.
+        // Read off the **declaration** and never off the latch's own room
+        // names: a hand-edited `rivalHeld` leaf is a room name a human wrote,
+        // and the only rooms this colony may look into are the ones it
+        // declared. A room vision did not answer for adds no entry at all,
+        // which is ADR 0004's absence and the reason the latch survives every
+        // recheck the colony is blind on.
+        let control =
+            (worked
+             |> List.choose (fun (room, facts) ->
+                 facts.Control |> Option.map (fun control -> room, control))
+             |> Map.ofList,
+             colony.Outposts
+             |> List.filter (fun outpost -> Set.contains outpost.RoomName gate.Rechecked))
+            ||> List.fold (fun control outpost ->
+                match (World.roomOf world outpost.RoomName).Control with
+                | Some seen -> Map.add outpost.RoomName seen control
+                | None -> control)
+
+        {
+            Time = world.Time
+            Spawns = homeFacts.Spawns
+            Casting = homeFacts.Casting
+            Tuning = tuning
+            Bank = homeFacts.Energy
+            Refillables = homeFacts.Refillables
+            // Every worked room's sources but a bootstrapped child's, whose
+            // rocks are the child's to pool (ADR 0047 decision 4, #192),
+            // with the declared outpost rocks laid in beside them whether
+            // or not there is vision (ADR 0041).
+            Sources =
+                worked
+                |> List.collect (fun (_, facts) -> facts.Sources)
+                |> Outpost.pooledSources scanned outposts
+            Controller = homeFacts.Controller
+            RoomControl = control
+            ConstructionSites = worked |> List.collect (fun (_, facts) -> facts.ConstructionSites)
+            Creeps = mine |> List.map (fun creep -> creep.Info)
+            Hostiles = worked |> List.collect (fun (_, facts) -> facts.Hostiles)
+            InvaderCores = worked |> List.collect (fun (_, facts) -> facts.InvaderCores)
+            Spatial =
+                {
+                    RoomName = Some home
+                    Rooms =
+                        worked
+                        |> List.map (fun (room, facts) ->
+                            room,
+                            { facts.Layer with
+                                CreepPositions =
+                                    facts.Layer.CreepPositions
+                                    |> Map.filter (fun name _ -> Set.contains name names)
+                            })
+                        |> Map.ofList
+                    Borders =
+                        worked |> List.map (fun (room, facts) -> room, facts.Border) |> Map.ofList
+                    TargetKinds = mergedBy (fun facts -> facts.TargetKinds)
+                    Hits = mergedBy (fun facts -> facts.Hits)
+                    Stores = mergedBy (fun facts -> facts.Stores)
+                }
+                // The declared furniture goes in last, over the whole
+                // assembled projection rather than room by room inside it
+                // (`Outpost.place`, ADR 0041): a source's and a
+                // controller's id and tile do not wait for vision.
+                |> Outpost.place outposts
+            Declared = Colony.homes colonies
+            Stages = stages
+            // The bodies in these rooms that are not this colony's, each
+            // tile joined to the room it stands in (ADR 0052 decision 2): a
+            // room with none contributes nothing (ADR 0004), an empty set.
+            Foreign =
+                worked
+                |> List.collect (fun (room, facts) ->
+                    facts.Layer.CreepPositions
+                    |> Map.toList
+                    |> List.filter (fun (name, _) -> not (Set.contains name names))
+                    |> List.map (snd >> RoomPos.at room))
+                |> Set.ofList
+            Borrowed = { Rooms = bootstrap }
+            // Read off the whole declaration and not off `scanned`, which is
+            // where these rooms have just been subtracted: what the channel
+            // must name is the room a human declared and this colony cannot
+            // work, and by the time the scan set is cut the name is gone
+            // (#243).
+            Refused = Outpost.refused home colony.Outposts
+            // The world's memory of these rooms and of no others (#151):
+            // narrowed by the scan set the [[stand-down]] gate has already
+            // cut, so a withheld room's remembered census cannot hold a
+            // creep to a Task in a room the colony has withdrawn from.
+            Sightings = world.Sightings |> Map.filter (fun room _ -> List.contains room scanned)
+        }
