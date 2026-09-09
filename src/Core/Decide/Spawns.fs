@@ -175,6 +175,26 @@ let private leadOf (view: ColonyView) atlas (sizing: RowSizing) (creep: CreepInf
 let internal expiring (view: ColonyView) atlas (sizing: RowSizing) (creep: CreepInfo) =
     creep.TicksToLive <= leadOf view atlas sizing creep
 
+/// One specialist row of the spawn cascade, stated once: the name the `quotas`
+/// view files it under (ADR 0009), the pattern it casts, how many bodies it
+/// wants this tick, which living bodies answer to it, and how a seat of it is
+/// sized against the bank. The three readings a row is put to — the gap it
+/// casts for, the row it reports and the seats it takes — are each one pass
+/// over the list of these, so the casting order, the reported order and the
+/// generalist's subtraction are one order and cannot drift apart.
+///
+/// `Size` is a function of the bank and not a lookup off the pattern, for the
+/// reason `castFromBank` states where it takes one.
+type private SpecialistRow =
+    {
+        Name: string
+        Pattern: BodyPattern
+        Quota: int
+        Census: CreepInfo -> bool
+        Size: RoomEnergy -> BodyPart list
+    }
+
+
 /// The spawn Intents the Workforce target's rows are owed. The target is the
 /// quota the *generalist* row is hired against; every other row is hired against
 /// its own unfilled quota and can carry the fleet past the target. Spawning is a
@@ -317,47 +337,13 @@ let internal planSpawns
                 else
                     None
 
-        // Reserver gaps are filled before Anchor gaps, Anchor gaps before
-        // hauler gaps, hauler gaps before upgrader gaps and those before
-        // generalist gaps (ADR 0046) — and the worker row's quota is whatever
-        // the target has left. The reserver goes in front of all four (ADR
-        // 0042): the other rows spend income, and this one decides whether the
-        // income is five a tick or ten across every source of an outpost at
-        // once. The guard goes in front of *it* (ADR 0056), behind the supply
-        // floor alone: it is zero for the whole of a colony's ordinary life,
-        // and on the ticks it is not, every tick of delay is an [[anchor]] and
-        // a [[hauler unit]] dying in a room a reserver would walk into next.
-        // Being first it is asked first, and it does not *hold* the cascade the
-        // tick the bank cannot pay for it: a row the bank cannot afford yields
-        // the tick to the rows below it (ADR 0050), which at a 300 bank is
-        // exactly what the guard row does. Each specialist gap is that row's
-        // own unfilled quota, answered on its own terms rather than out of the
-        // deficit: an empty Post is a fact about the ground, and the row that
-        // hires for it does not stop hiring because the headcount overshot some
-        // other row's arithmetic.
-        //
-        // The guard row's own `Living` is where ADR 0056's "no decay" lands: a
-        // guard that outlived its raid is still an ATTACK body in the fleet, so
-        // the next raid inside its life reads a filled row and waits no thirty
-        // ticks of oven for a body it already owns. Counted over the **fleet**
-        // against a quota derived per room, which is the reserver row's own
-        // shape one line down (ADR 0042): the row counts bodies and which room
-        // each finished body works is the Matcher's, priced by travel cost.
-        let guardLiving = living |> List.filter isGuardBody |> List.length
+        // Every body the anchor row counts, as a list and not only as a
+        // number: `emptyPostCaps` below reads the tiles they stand on where the
+        // row reads their count, so the census is asked once and the two halves
+        // cannot disagree about who is manning a Post.
+        let isAnchorBody (creep: CreepInfo) = Atlas.workHeavy atlas creep.Name
 
-        let guardGap = guardQuota - guardLiving - castOf guardPattern |> max 0
-
-        let reserverLiving = living |> List.filter isReserverBody |> List.length
-
-        let reserverGap =
-            List.length reserverClaims - reserverLiving - castOf reserverPattern |> max 0
-
-        let anchorGarrison =
-            living |> List.filter (fun creep -> Atlas.workHeavy atlas creep.Name)
-
-        let anchorLiving = List.length anchorGarrison
-
-        let anchorGap = anchorQuota - anchorLiving - castOf anchorPattern |> max 0
+        let anchorGarrison = living |> List.filter isAnchorBody
 
         // **The vacancies this row is casting into, richest ceiling first**
         // (ADR 0053): every Post with nobody standing on it who will still be
@@ -398,43 +384,120 @@ let internal planSpawns
             |> List.tryHead
             |> Option.defaultValue (richestAnchorCap anchorPostCaps)
 
-        let haulerLiving = living |> List.filter isHaulerBody |> List.length
+        // Reserver gaps are filled before Anchor gaps, Anchor gaps before
+        // hauler gaps, hauler gaps before upgrader gaps and those before
+        // generalist gaps (ADR 0046) — and the worker row's quota is whatever
+        // the target has left. The reserver goes in front of all four (ADR
+        // 0042): the other rows spend income, and this one decides whether the
+        // income is five a tick or ten across every source of an outpost at
+        // once. The guard goes in front of *it* (ADR 0056), behind the supply
+        // floor alone: it is zero for the whole of a colony's ordinary life,
+        // and on the ticks it is not, every tick of delay is an [[anchor]] and
+        // a [[hauler unit]] dying in a room a reserver would walk into next.
+        // Being first it is asked first, and it does not *hold* the cascade the
+        // tick the bank cannot pay for it: a row the bank cannot afford yields
+        // the tick to the rows below it (ADR 0050), which at a 300 bank is
+        // exactly what the guard row does. Each specialist gap is that row's
+        // own unfilled quota, answered on its own terms rather than out of the
+        // deficit: an empty Post is a fact about the ground, and the row that
+        // hires for it does not stop hiring because the headcount overshot some
+        // other row's arithmetic.
+        //
+        // That order is this list's and nowhere else's: the seats are cast in
+        // it, the `quotas` view reports in it, and the worker row subtracts the
+        // sum of it. Written out three times it was three orderings kept in
+        // step by hand, and a seventh pattern was four edits the compiler could
+        // not check.
+        let rows: SpecialistRow list =
+            [
+                // The guard row's own `Living` is where ADR 0056's "no decay"
+                // lands: a guard that outlived its raid is still an ATTACK body
+                // in the fleet, so the next raid inside its life reads a filled
+                // row and waits no thirty ticks of oven for a body it already
+                // owns. Counted over the **fleet** against a quota derived per
+                // room, which is the reserver row's own shape one entry down
+                // (ADR 0042): the row counts bodies, and which room each
+                // finished body works is the Matcher's, priced by travel cost.
+                {
+                    Name = "guard"
+                    Pattern = guardPattern
+                    Quota = guardQuota
+                    Census = isGuardBody
+                    // Priced at capacity like every row but the floor (ADR
+                    // 0021), so a bank that cannot hold 750 casts nothing here
+                    // and yields to the reserver behind it (ADR 0050): a colony
+                    // that small has ADR 0043's [[stand-down]] and nothing else.
+                    Size = fun bank -> bodyFor guardPattern bank.Capacity
+                }
+                {
+                    Name = "reserver"
+                    Pattern = reserverPattern
+                    Quota = List.length reserverClaims
+                    Census = isReserverBody
+                    // Every cast at the largest outstanding demand and never at
+                    // the one standing beside it in the list: the Matcher pairs
+                    // a finished body to a controller by travel cost, so a body
+                    // sized for the room that has slipped furthest can land on
+                    // the room that has not. A positive gap is a non-empty
+                    // demand list, so the `List.max` is total inside this
+                    // sizing — and it is inside it, because `List.replicate 0`
+                    // still evaluates the element.
+                    Size = fun bank -> reserverBodyWithin (List.max reserverClaims) bank.Capacity
+                }
+                {
+                    Name = "anchor"
+                    Pattern = anchorPattern
+                    Quota = anchorQuota
+                    Census = isAnchorBody
+                    // Sized under the dearest **vacancy**'s ceiling and never a
+                    // colony-wide constant (ADR 0053): which Post the finished
+                    // body lands on is the Matcher's, so the cast carries the
+                    // saturation of the richest rock this row has a hole on.
+                    Size = fun bank -> anchorBodyFor anchorCap bank.Capacity
+                }
+                {
+                    Name = "hauler"
+                    Pattern = haulerPattern
+                    Quota = haulerQuota
+                    Census = isHaulerBody
+                    Size = fun bank -> bodyFor haulerPattern bank.Capacity
+                }
+                // Behind the three rows hired off the ground and ahead of the
+                // generalist (ADR 0046): the upgrader spends the surplus those
+                // three produce, so it is cast once they stand, and it spends it
+                // at eleven Work against the generalist's nine.
+                //
+                // Bodies and not names (ADR 0006): the row's living count is
+                // what `patternOf` reads back off the parts, so a `11W/1C/11M`
+                // the colony inherited or was handed fills this quota exactly
+                // as one it cast does. Asking `patternOf` rather than
+                // `isStandingBody` alone is what keeps the Anchor row out of
+                // it: `6W/1C/1M` answers to both descriptions and it is the
+                // anchor arm that claims it, so an Anchor at its Post never
+                // pays off an upgrader's gap.
+                {
+                    Name = "upgrader"
+                    Pattern = upgraderPattern
+                    Quota = upgraderQuota
+                    Census = fun creep -> patternOf view.Tuning atlas creep = upgraderPattern
+                    Size = fun bank -> bodyFor upgraderPattern bank.Capacity
+                }
+            ]
 
-        let haulerGap = haulerQuota - haulerLiving - castOf haulerPattern |> max 0
-
-        // Bodies and not names (ADR 0006): the row's living count is what
-        // `patternOf` reads back off the parts, so a `11W/1C/11M` the colony
-        // inherited or was handed fills this quota exactly as one it cast does.
-        // Asking `patternOf` rather than `isStandingBody` alone is what keeps
-        // the Anchor row out of it: `6W/1C/1M` answers to both descriptions and
-        // it is the anchor arm that claims it, so an Anchor at its Post never
-        // pays off an upgrader's gap.
-        let upgraderLiving =
-            living
-            |> List.filter (fun creep -> patternOf view.Tuning atlas creep = upgraderPattern)
-            |> List.length
-
-        let upgraderGap = upgraderQuota - upgraderLiving - castOf upgraderPattern |> max 0
+        // Each row's living count, what it already has in an oven (#156), and
+        // the gap those two leave against its quota — read once here, because
+        // all three readings below want all three numbers.
+        let filled =
+            rows
+            |> List.map (fun row ->
+                let alive = living |> List.filter row.Census |> List.length
+                let inOven = castOf row.Pattern
+                row, alive, inOven, row.Quota - alive - inOven |> max 0)
 
         // The tick's arithmetic, written down for the `quotas` view (ADR
-        // 0009: a record returned, never logged). The worker row is what
-        // the target leaves after the five specialist rows, which is how
-        // the cascade below hires it.
+        // 0009: a record returned, never logged).
         let quotas: Quotas =
-            let row name quota living casting =
-                {
-                    Row = name
-                    Quota = quota
-                    Living = living
-                    Casting = casting
-                }
-
-            let specialists =
-                List.length reserverClaims
-                + guardQuota
-                + anchorQuota
-                + haulerQuota
-                + upgraderQuota
+            let specialists = filled |> List.sumBy (fun (row, _, _, _) -> row.Quota)
 
             {
                 Target = target
@@ -443,26 +506,29 @@ let internal planSpawns
                 HaulerLoad = 0
                 HaulerDemand = []
                 Rows =
-                    [
-                        row "guard" guardQuota guardLiving (castOf guardPattern)
-                        row
-                            "reserver"
-                            (List.length reserverClaims)
-                            reserverLiving
-                            (castOf reserverPattern)
-                        row "anchor" anchorQuota anchorLiving (castOf anchorPattern)
-                        row "hauler" haulerQuota haulerLiving (castOf haulerPattern)
-                        row "upgrader" upgraderQuota upgraderLiving (castOf upgraderPattern)
-                        row
-                            "worker"
-                            (target - specialists |> max 0)
-                            (List.length living
-                             - guardLiving
-                             - reserverLiving
-                             - anchorLiving
-                             - haulerLiving
-                             - upgraderLiving)
-                            (castOf workerPattern)
+                    (filled
+                     |> List.map (fun (row, alive, inOven, _) ->
+                         ({
+                             Row = row.Name
+                             Quota = row.Quota
+                             Living = alive
+                             Casting = inOven
+                         }
+                         : RowQuota)))
+                    @ [
+                        // The generalist takes what the target has left after
+                        // the five specialist rows, and its living count is the
+                        // fleet less theirs — a partition only because each of
+                        // the five censuses above claims a body no other does.
+                        ({
+                            Row = "worker"
+                            Quota = target - specialists |> max 0
+                            Living =
+                                List.length living
+                                - (filled |> List.sumBy (fun (_, alive, _, _) -> alive))
+                            Casting = castOf workerPattern
+                        }
+                        : RowQuota)
                     ]
             }
 
@@ -488,60 +554,28 @@ let internal planSpawns
                 1
 
         // The rows expanded into the seats they are owed, in casting order: the
-        // supply floor, then guard, reserver, Anchor, hauler, upgrader (ADR
-        // 0042, ADR 0046, ADR 0056) and last the generalist, whose seats are
-        // whatever the whole-fleet deficit has left once every row above is
-        // counted. The deficit gates the *worker* row alone and stands in for
-        // that row's own gap: ADR 0012 hires it against whatever the target has
-        // left once the specialist rows are counted, and the whole-fleet gap
-        // less the rows above is exactly that remainder while every specialist
-        // row is at or under quota.
+        // supply floor, then the table's own order, and last the generalist,
+        // whose seats are whatever the whole-fleet deficit has left once every
+        // row above is counted. The deficit gates the *worker* row alone and
+        // stands in for that row's own gap: ADR 0012 hires it against whatever
+        // the target has left once the specialist rows are counted, and the
+        // whole-fleet gap less the rows above is exactly that remainder while
+        // every specialist row is at or under quota.
+        let specialistSeats = filled |> List.sumBy (fun (_, _, _, gap) -> gap)
+
         let seats =
             List.replicate
                 supplyFloor
                 // The one row sized from `Available` (with the disaster
                 // fallback inside `castFromBank`, for the same reason).
                 (castFromBank haulerPattern (fun bank -> bodyFor haulerPattern bank.Available))
+            @ (filled
+               |> List.collect (fun (row, _, _, gap) ->
+                   List.replicate gap (castFromBank row.Pattern row.Size)))
             @ List.replicate
-                guardGap
-                // Priced at capacity like every row but the floor (ADR 0021),
-                // so a bank that cannot hold 750 casts nothing here and yields
-                // to the reserver behind it (ADR 0050): a colony that small has
-                // ADR 0043's [[stand-down]] and nothing else.
-                (castFromBank guardPattern (fun bank -> bodyFor guardPattern bank.Capacity))
-            @ List.replicate
-                reserverGap
-                // Every cast at the largest outstanding demand and never at the
-                // one standing beside it in the list: the Matcher pairs a
-                // finished body to a controller by travel cost, so a body sized
-                // for the room that has slipped furthest can land on the room
-                // that has not. A positive gap is a non-empty demand list, so
-                // the `List.max` is total inside this sizing — and it is inside
-                // it, because `List.replicate 0` still evaluates the element.
-                (castFromBank reserverPattern (fun bank ->
-                    reserverBodyWithin (List.max reserverClaims) bank.Capacity))
-            @ List.replicate
-                anchorGap
-                // Sized under the dearest **vacancy**'s ceiling and never a
-                // colony-wide constant (ADR 0053): which Post the finished
-                // body lands on is the Matcher's, so the cast carries the
-                // saturation of the richest rock this row has a hole on.
-                (castFromBank anchorPattern (fun bank -> anchorBodyFor anchorCap bank.Capacity))
-            @ List.replicate
-                haulerGap
-                (castFromBank haulerPattern (fun bank -> bodyFor haulerPattern bank.Capacity))
-            @ List.replicate
-                upgraderGap
-                // Ahead of the generalist and behind the three rows hired off
-                // the ground (ADR 0046): the upgrader spends the surplus those
-                // three produce, so it is cast once they stand, and it spends
-                // it at eleven Work against the generalist's nine.
-                (castFromBank upgraderPattern (fun bank -> bodyFor upgraderPattern bank.Capacity))
-            @ List.replicate
-                (deficit
-                 - (supplyFloor + guardGap + reserverGap + anchorGap + haulerGap + upgraderGap)
-                 |> max 0)
+                (deficit - (supplyFloor + specialistSeats) |> max 0)
                 (castFromBank workerPattern (fun bank -> bodyFor workerPattern bank.Capacity))
+
 
         // Idle spawns draw from the colony's one bank in list order — each body
         // debits the budget the next spawn sees, so the same energy is never
