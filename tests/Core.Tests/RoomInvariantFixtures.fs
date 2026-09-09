@@ -520,12 +520,22 @@ let internal acrossFrom (near: RoomCapture) (far: RoomCapture) =
     |> AtlasFixtures.snapshotWith []
     |> ofView
 
-/// The Atlas over two captures' ground *and* their rings, with a creep
-/// standing in the near room and the far room's own sources placed under
-/// the loader's ids: the whole input a cross-room walk reads (ADR 0041).
-/// Everything geometric is the server's; the creep and the ids are the
-/// test's, and no expected value comes from either room.
-let internal walkingAcross (near: RoomCapture) (far: RoomCapture) (stand: Pos) =
+/// The Atlas over two captures' ground *and* their rings, with one body
+/// standing in the near room and the far room's own sources placed under the
+/// loader's ids: the whole input a cross-room walk reads (ADR 0041).
+/// Everything geometric is the server's; the body and the ids are the test's,
+/// and no expected value comes from either room.
+///
+/// Two things are the caller's, because they are the two things the fixtures
+/// that take this differ in: whether the far room's source tiles are obstacles,
+/// and which body is standing.
+let private twoCaptureAtlas
+    (near: RoomCapture)
+    (far: RoomCapture)
+    (stand: Pos)
+    (farObstacles: Set<Pos>)
+    body
+    =
     { SpatialInfo.empty with
         RoomName = Some near.RoomName
         Rooms =
@@ -540,13 +550,19 @@ let internal walkingAcross (near: RoomCapture) (far: RoomCapture) (stand: Pos) =
                     { RoomLayer.empty with
                         Terrain = far.Terrain
                         TargetPositions = Map.ofList far.Sources
+                        Obstacles = farObstacles
                     }
                 ]
         Borders = Map.ofList [ near.RoomName, near.Border; far.RoomName, far.Border ]
         TargetKinds = far.Sources |> List.map (fun (id, _) -> id, Source) |> Map.ofList
     }
-    |> AtlasFixtures.snapshotWith [ AtlasFixtures.worker "w" ]
+    |> AtlasFixtures.snapshotWith [ body ]
     |> ofView
+
+/// The walk's own reading of that pair: nothing in the far room is an obstacle
+/// and an ordinary worker is standing.
+let internal walkingAcross (near: RoomCapture) (far: RoomCapture) (stand: Pos) =
+    twoCaptureAtlas near far stand Set.empty (AtlasFixtures.worker "w")
 
 /// How far apart the cross-room sweep's stands are, and the file's second
 /// sampling knob beside `stride` above. Deliberately not that number and
@@ -903,28 +919,12 @@ let internal haulBody = [ Work; Move ]
 /// round trip is twice the one-way walk and nothing else. Everything
 /// geometric is still the server's.
 let internal haulingAcross (near: RoomCapture) (far: RoomCapture) (stand: Pos) =
-    { SpatialInfo.empty with
-        RoomName = Some near.RoomName
-        Rooms =
-            Map.ofList
-                [
-                    near.RoomName,
-                    { RoomLayer.empty with
-                        Terrain = near.Terrain
-                        CreepPositions = Map.ofList [ "w", stand ]
-                    }
-                    far.RoomName,
-                    { RoomLayer.empty with
-                        Terrain = far.Terrain
-                        TargetPositions = Map.ofList far.Sources
-                        Obstacles = far.Sources |> List.map snd |> Set.ofList
-                    }
-                ]
-        Borders = Map.ofList [ near.RoomName, near.Border; far.RoomName, far.Border ]
-        TargetKinds = far.Sources |> List.map (fun (id, _) -> id, Source) |> Map.ofList
-    }
-    |> AtlasFixtures.snapshotWith [ AtlasFixtures.creepWith "w" 0 haulBody ]
-    |> ofView
+    twoCaptureAtlas
+        near
+        far
+        stand
+        (far.Sources |> List.map snd |> Set.ofList)
+        (AtlasFixtures.creepWith "w" 0 haulBody)
 
 /// The creep a Verdict is about (ADR 0009): every arm names one, and the
 /// smoke tests below read the whole tick's Verdicts back through this to

@@ -1648,3 +1648,23 @@ let ferryMother stage =
 let castRows intents =
     spawnIntents intents
     |> List.map (fun (_, _, name: string) -> (name: string).Split('-') |> Array.head)
+
+/// Three loaded workers standing in the home corridor with one container site
+/// waiting across the north border, and the home room holding nothing to build.
+/// What the three of them are given is therefore a question about the outpost's
+/// site alone, which is what the concurrent-builder budget, the declaration and
+/// the tuning cases each ask of this shape from their own side.
+let crowdAtOutpostSite (colony: ColonyView) =
+    let colony =
+        colony
+        |> withNorthOutpost None
+        |> withOutpostSite { X = 10; Y = 43 }
+        |> withHomeController { X = 10; Y = 5 }
+
+    { colony with
+        Creeps = [ for name in [ "w1"; "w2"; "w3" ] -> worker name 50 0 ]
+        Spatial =
+            colony.Spatial
+            |> withCreepsAt
+                [ "w1", { X = 10; Y = 2 }; "w2", { X = 10; Y = 3 }; "w3", { X = 10; Y = 4 } ]
+    }

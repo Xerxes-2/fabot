@@ -9,6 +9,26 @@ open Fabot.Core.Tests
 open Fabot.Core.Tests.Decide.Fixtures
 open Fabot.Core.Tests.Decide.OutpostFixtures
 
+/// The colony's one creep taken out of the home room and stood in the outpost
+/// across the north border. Where a body the concurrent-builder cap has already
+/// parked out there actually is, and the only place from which the outpost's
+/// own site is the near target rather than anything at home — which is the fact
+/// every case that takes this fixture is pinning.
+let private standingInOutpost (pos: Pos) (colony: ColonyView) =
+    { colony with
+        Spatial =
+            colony.Spatial
+            |> withHome (fun layer ->
+                { layer with
+                    CreepPositions = Map.empty
+                })
+            |> withNeighbour
+                "W1N2"
+                { SpatialInfo.layerOf colony.Spatial "W1N2" with
+                    CreepPositions = Map.ofList [ "w", pos ]
+                }
+    }
+
 [<Tests>]
 let outpostTests =
     testList
@@ -580,25 +600,11 @@ let outpostTests =
                 // row, and this ticket invents none — which creep holds it
                 // is the ranking's answer, pinned in the test below.
                 let landedAt pos =
-                    let colony =
-                        northBorderColony { X = 10; Y = 38 }
-                        |> withNorthOutpost None
-                        |> withOutpostSite { X = 10; Y = 43 }
-                        |> loaded
-
-                    { colony with
-                        Spatial =
-                            colony.Spatial
-                            |> withHome (fun layer ->
-                                { layer with
-                                    CreepPositions = Map.empty
-                                })
-                            |> withNeighbour
-                                "W1N2"
-                                { SpatialInfo.layerOf colony.Spatial "W1N2" with
-                                    CreepPositions = Map.ofList [ "w", pos ]
-                                }
-                    }
+                    northBorderColony { X = 10; Y = 38 }
+                    |> withNorthOutpost None
+                    |> withOutpostSite { X = 10; Y = 43 }
+                    |> loaded
+                    |> standingInOutpost pos
 
                 let assigned = Map.ofList [ "w", taskId (Build "site-out") ]
 
@@ -699,26 +705,12 @@ let outpostTests =
                 // tier and holds it on the feeding one. What changed is
                 // that it is no longer the *only* creep that ever could.
                 let landed =
-                    let colony =
-                        northBorderColony { X = 10; Y = 38 }
-                        |> withNorthOutpost None
-                        |> withOutpostSite { X = 10; Y = 43 }
-                        |> loaded
-                        |> withHomeController { X = 10; Y = 5 }
-
-                    { colony with
-                        Spatial =
-                            colony.Spatial
-                            |> withHome (fun layer ->
-                                { layer with
-                                    CreepPositions = Map.empty
-                                })
-                            |> withNeighbour
-                                "W1N2"
-                                { SpatialInfo.layerOf colony.Spatial "W1N2" with
-                                    CreepPositions = Map.ofList [ "w", { X = 10; Y = 46 } ]
-                                }
-                    }
+                    northBorderColony { X = 10; Y = 38 }
+                    |> withNorthOutpost None
+                    |> withOutpostSite { X = 10; Y = 43 }
+                    |> loaded
+                    |> withHomeController { X = 10; Y = 5 }
+                    |> standingInOutpost { X = 10; Y = 46 }
 
                 Expect.equal
                     (matchOf landed)
@@ -937,24 +929,7 @@ let outpostTests =
                 // alone — one site standing is what makes the two numbers
                 // agree here; the test below opens a second site and reads
                 // them apart.
-                let crowd =
-                    let colony =
-                        northBorderColony { X = 10; Y = 38 }
-                        |> withNorthOutpost None
-                        |> withOutpostSite { X = 10; Y = 43 }
-                        |> withHomeController { X = 10; Y = 5 }
-
-                    { colony with
-                        Creeps = [ for name in [ "w1"; "w2"; "w3" ] -> worker name 50 0 ]
-                        Spatial =
-                            colony.Spatial
-                            |> withCreepsAt
-                                [
-                                    "w1", { X = 10; Y = 2 }
-                                    "w2", { X = 10; Y = 3 }
-                                    "w3", { X = 10; Y = 4 }
-                                ]
-                    }
+                let crowd = crowdAtOutpostSite (northBorderColony { X = 10; Y = 38 })
 
                 let { Assignments = assignments } = decideOn crowd
 
@@ -1142,25 +1117,11 @@ let outpostTests =
                 // feeds itself through the creeps standing in it and not
                 // by any rule.
                 let outThere =
-                    let colony =
-                        { (sited |> loaded) with
-                            Refillables = [ refillable "spawn-1" 300 BuiltKind.Spawn ]
-                        }
-                        |> withTarget "spawn-1" { X = 10; Y = 2 } (Structure BuiltKind.Spawn)
-
-                    { colony with
-                        Spatial =
-                            colony.Spatial
-                            |> withHome (fun layer ->
-                                { layer with
-                                    CreepPositions = Map.empty
-                                })
-                            |> withNeighbour
-                                "W1N2"
-                                { SpatialInfo.layerOf colony.Spatial "W1N2" with
-                                    CreepPositions = Map.ofList [ "w", { X = 10; Y = 44 } ]
-                                }
+                    { (sited |> loaded) with
+                        Refillables = [ refillable "spawn-1" 300 BuiltKind.Spawn ]
                     }
+                    |> withTarget "spawn-1" { X = 10; Y = 2 } (Structure BuiltKind.Spawn)
+                    |> standingInOutpost { X = 10; Y = 44 }
 
                 Expect.equal
                     (matchOf outThere)

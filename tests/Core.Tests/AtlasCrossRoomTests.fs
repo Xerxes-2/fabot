@@ -60,6 +60,26 @@ let private twoExitBothOpen =
             { X = 27; Y = 49 }, Plain
         ]
 
+/// The swamp shortcut against the plain detour, in one room and no border: the
+/// line east from (10,10) crosses (11,10) and (12,10) as swamp to a goal at
+/// (13,10), and the loop south down column 10 runs plain to a goal at
+/// (10, `loopEnd`). Priced as a road (plain 2, swamp 3) the three-step swamp
+/// line costs 8 against a five-step loop's 10; priced at the walking grid's
+/// swamp it would cost 22 and the router would pave the long way round, which
+/// is the twenty-one-tile detour W13S28 was carrying (#211). How far the loop
+/// runs is the caller's: the ratio is one step, and the pairwise cases turn on
+/// exactly that.
+let private swampShortcut loopEnd =
+    spatial
+        []
+        ([
+            { X = 10; Y = 10 }, Plain
+            { X = 11; Y = 10 }, Swamp
+            { X = 12; Y = 10 }, Swamp
+            { X = 13; Y = 10 }, Plain
+         ]
+         @ [ for y in 11..loopEnd -> { X = 10; Y = y }, Plain ])
+
 [<Tests>]
 let crossRoomTests =
     testList
@@ -1251,22 +1271,7 @@ let trunkPricingTests =
                 // priced as a walk (swamp 10) A would cost 22 and the router
                 // would pave the long way round — which is the twenty-one-
                 // tile loop W13S28 got.
-                let atlas =
-                    spatial
-                        []
-                        [
-                            { X = 10; Y = 10 }, Plain
-                            { X = 11; Y = 10 }, Swamp
-                            { X = 12; Y = 10 }, Swamp
-                            { X = 13; Y = 10 }, Plain
-                            { X = 10; Y = 11 }, Plain
-                            { X = 10; Y = 12 }, Plain
-                            { X = 10; Y = 13 }, Plain
-                            { X = 10; Y = 14 }, Plain
-                            { X = 10; Y = 15 }, Plain
-                        ]
-                    |> snapshotWith []
-                    |> ofView
+                let atlas = swampShortcut 15 |> snapshotWith [] |> ofView
 
                 let path =
                     trunkPathHome
@@ -1287,20 +1292,7 @@ let trunkPricingTests =
                 // the plain way does — the ratio is one step, which is what
                 // a 1,200-energy construction difference is worth against
                 // a permanent detour.
-                let shorterPlain =
-                    spatial
-                        []
-                        [
-                            { X = 10; Y = 10 }, Plain
-                            { X = 11; Y = 10 }, Swamp
-                            { X = 12; Y = 10 }, Swamp
-                            { X = 13; Y = 10 }, Plain
-                            { X = 10; Y = 11 }, Plain
-                            { X = 10; Y = 12 }, Plain
-                            { X = 10; Y = 13 }, Plain
-                        ]
-                    |> snapshotWith []
-                    |> ofView
+                let shorterPlain = swampShortcut 13 |> snapshotWith [] |> ofView
 
                 Expect.equal
                     (List.last (
@@ -1326,20 +1318,7 @@ let trunkPricingTests =
                 // against the loop's 10 and the router paves the long way
                 // round, which is the twenty-one-tile detour W13S28 was
                 // carrying.
-                let room =
-                    spatial
-                        []
-                        [
-                            { X = 10; Y = 10 }, Plain
-                            { X = 11; Y = 10 }, Swamp
-                            { X = 12; Y = 10 }, Swamp
-                            { X = 13; Y = 10 }, Plain
-                            { X = 10; Y = 11 }, Plain
-                            { X = 10; Y = 12 }, Plain
-                            { X = 10; Y = 13 }, Plain
-                            { X = 10; Y = 14 }, Plain
-                            { X = 10; Y = 15 }, Plain
-                        ]
+                let room = swampShortcut 15
 
                 let paved surcharge =
                     let view = snapshotWith [] room

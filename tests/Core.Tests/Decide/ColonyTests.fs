@@ -614,24 +614,7 @@ let nurseryTests =
                 // alone: the same site, on the same tier in both, capped in
                 // one and uncapped in the other. Pairwise on one fact —
                 // whether the room is ours yet.
-                let crowd colony =
-                    let colony =
-                        colony
-                        |> withNorthOutpost None
-                        |> withOutpostSite { X = 10; Y = 43 }
-                        |> withHomeController { X = 10; Y = 5 }
-
-                    { colony with
-                        Creeps = [ for name in [ "w1"; "w2"; "w3" ] -> worker name 50 0 ]
-                        Spatial =
-                            colony.Spatial
-                            |> withCreepsAt
-                                [
-                                    "w1", { X = 10; Y = 2 }
-                                    "w2", { X = 10; Y = 3 }
-                                    "w3", { X = 10; Y = 4 }
-                                ]
-                    }
+                let crowd = crowdAtOutpostSite
 
                 let held colony =
                     let { Assignments = assignments } = decideOn colony

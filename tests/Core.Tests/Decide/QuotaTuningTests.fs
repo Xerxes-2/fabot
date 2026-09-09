@@ -256,24 +256,7 @@ let tuningTests =
                 // are worth crossing for — the head of the queue is exactly as
                 // long as the crowd that could work it, so a trunk is paved
                 // outward from the crossing instead of all at once.
-                let crowd =
-                    let colony =
-                        northBorderColony { X = 10; Y = 38 }
-                        |> withNorthOutpost None
-                        |> withOutpostSite { X = 10; Y = 43 }
-                        |> withHomeController { X = 10; Y = 5 }
-
-                    { colony with
-                        Creeps = [ for name in [ "w1"; "w2"; "w3" ] -> worker name 50 0 ]
-                        Spatial =
-                            colony.Spatial
-                            |> withCreepsAt
-                                [
-                                    "w1", { X = 10; Y = 2 }
-                                    "w2", { X = 10; Y = 3 }
-                                    "w3", { X = 10; Y = 4 }
-                                ]
-                    }
+                let crowd = crowdAtOutpostSite (northBorderColony { X = 10; Y = 38 })
 
                 let tally colony =
                     (decideOn colony).Assignments
