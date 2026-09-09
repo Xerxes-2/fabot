@@ -112,6 +112,68 @@ let bodyCost body =
         | BodyPart.Claim -> 600
         | Tough -> 10)
 
+/// ADR 0046's ratio itself, over two part counts: fewer than one Carry per
+/// `StandingCarryPerWork` Work. A fact about a *body* rather than about a row
+/// — the upgrader row's `11W/1C/11M` is one, and so is the anchor row's
+/// `6W/1C/1M`.
+let internal standingRatio (tuning: Tuning) carryParts workParts =
+    carryParts * tuning.StandingCarryPerWork < workParts
+
+/// Whether a counted body is a **standing body** (ADR 0046).
+let internal standingParts (tuning: Tuning) parts =
+    standingRatio tuning (partCount parts Carry) (partCount parts Work)
+
+/// The pattern row a body was cast from, read off the parts alone (ADR 0006):
+/// an ATTACK part is the guard row, a CLAIM part is the reserver row, a
+/// Work-heavy body is the anchor row, a standing body at or under that line is
+/// the upgrader row, no Work beside a Carry is the hauler row, and every other
+/// body is the generalist. The row is what sizes the replacement a lead prices
+/// (ADR 0026), so one rule serves every row.
+///
+/// Order matters between the anchor and upgrader arms and nowhere else:
+/// `6W/1C/1M` satisfies both descriptions, and it is the anchor row that casts
+/// it — a body pinned to a Post by ADR 0020's Work Area is a stronger claim
+/// than standing beside the buffer. The reserver arm is what keeps ADR 0026
+/// honest for a CLAIM body: `[Claim; Move]` has neither Work nor Carry, so
+/// before it existed a reserver's lead was priced off a worker unit. The guard
+/// arm is the same debt paid for a fighting body (ADR 0056): `[T; A×3; M×5; H]`
+/// has neither, so without it a guard read back as a **worker**, and the raid
+/// that cast it would go on filling the generalist row's `Living` for 1,500
+/// ticks. The ATTACK test is asked first, beside `Fighter`'s place at the head
+/// of the [[body class]] ladder — it is the one cut no other row of this colony
+/// makes, every other row being built out of Work, Carry, Move and CLAIM.
+///
+/// `heavy` is the one input the two readings cannot share: the Atlas's
+/// `workHeavy` set is keyed by creep name, and a body still in the oven has
+/// none, so a cast answers the question for itself with `Work > Move` — the
+/// ratio fatigue parity forbids a worker body.
+let internal patternOfParts (tuning: Tuning) heavy parts =
+    if partCount parts Attack > 0 then
+        guardPattern
+    elif partCount parts BodyPart.Claim > 0 then
+        reserverPattern
+    elif heavy then
+        anchorPattern
+    elif standingParts tuning parts then
+        upgraderPattern
+    elif partCount parts Work = 0 && partCount parts Carry > 0 then
+        haulerPattern
+    else
+        workerPattern
+
+/// Whether a body can take energy out of a store and put it into an extension
+/// — the one capability the bank's own refilling depends on, and so the one
+/// every capacity-sized row depends on (the supply floor, ADR 0050). Not "has
+/// a Carry part": it is the body half of `Refill`'s gate and the body half of
+/// `Withdraw`'s read back together, because a body that can deliver but never
+/// draw cannot reach the storage the energy is standing in — a Carry part, no
+/// standing-body ratio (ADR 0046) and not Work-heavy (ADR 0016). `Refill`'s
+/// third conjunct, `Energy > 0`, is deliberately *not* read: that is a state a
+/// hauler passes through twice a trip. `heavy` is `patternOfParts`' own input,
+/// for its own reason.
+let internal canRefillParts (tuning: Tuning) heavy parts =
+    partCount parts Carry > 0 && not (standingParts tuning parts) && not heavy
+
 /// The Anchor row's Work ceiling (ADR 0021): the Work that saturate one source
 /// — dig its whole regeneration in the regeneration time — plus one spare. Past
 /// saturation a further Work only drains the source sooner and idles; the spare

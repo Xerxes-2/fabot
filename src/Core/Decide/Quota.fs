@@ -13,7 +13,7 @@ open Fabot.Core.Types
 /// Withdraw's cap divides its store's stock by it — so the arithmetic is
 /// written once and neither can grow a second per-part rule.
 let internal carryCapacityOf body =
-    (body |> List.filter ((=) Carry) |> List.length) * Engine.carryPartCapacity
+    partCountIn body Carry * Engine.carryPartCapacity
 
 /// Ceiling division over the quota rows' arithmetic: a quota that came out a
 /// fraction of a body hires the whole body (ADR 0012 for the hauler row, ADR
@@ -126,10 +126,8 @@ let private sourceOutputOf (view: ColonyView) atlas (sourceId: string) : int opt
         // HARVEST_POWER — the same `anchorBodyFor` triple the amortization
         // charges that Post at, so the two readings cannot drift apart.
         let dug =
-            anchorBodyFor (workCapOf rate) view.Bank.Capacity
-            |> List.filter ((=) Work)
-            |> List.length
-            |> (*) Engine.harvestPerWork
+            partCountIn (anchorBodyFor (workCapOf rate) view.Bank.Capacity) Work
+            * Engine.harvestPerWork
 
         min rate dug)
 
@@ -185,13 +183,8 @@ let internal haulerDemandOf (view: ColonyView) atlas : int * HaulDemandRow list 
     // whose room it can price, leaves the list here rather than entering the sum
     // at some default rate.
     let sourceContainers =
-        view.Spatial.TargetKinds
-        |> Map.toList
-        |> List.choose (fun (id, kind) ->
-            if kind = Structure BuiltKind.Container then
-                SpatialInfo.placementOf view.Spatial id
-            else
-                None)
+        SpatialInfo.idsOfKind view.Spatial (Structure BuiltKind.Container)
+        |> List.choose (SpatialInfo.placementOf view.Spatial)
         |> List.choose (fun container ->
             sourceContainerServes view container.Room (RoomPos.pos container)
             |> Option.bind (sourceOutputOf view atlas)
@@ -352,8 +345,7 @@ let internal reserverBodyWithin claims capacity =
 /// the parts like every other row predicate (ADR 0006), so a fighting body the
 /// colony was handed rather than cast fills this row's quota exactly as one it
 /// cast does.
-let internal isGuardBody (creep: CreepInfo) =
-    creep.Body |> Map.tryFind Attack |> Option.exists (fun n -> n > 0)
+let internal isGuardBody (creep: CreepInfo) = partCount creep.Body Attack > 0
 
 /// How many guards one raided [[outpost]] wants (ADR 0056 decision 1, as #272
 /// amends it), which is **0** for the whole of a colony's ordinary life because
@@ -393,8 +385,7 @@ let internal isGuardBody (creep: CreepInfo) =
 /// 0043's stand-down asks it of the **cap** to decide whether the room is a
 /// fight or a withdrawal (`Observe.raidDeadlines`, #257).
 let guardBlocksBeat (view: ColonyView) (room: string) (blocks: int) : bool =
-    let parts part body =
-        body |> List.filter ((=) part) |> List.length
+    let parts part body = partCountIn body part
 
     let armed (h: HostileInfo) =
         parts Attack h.Body + parts RangedAttack h.Body > 0
@@ -568,19 +559,9 @@ let internal surplusOverLifetime
 
     income * Engine.creepLifetime - amortization
 
-/// ADR 0046's ratio itself, over two part counts, written once because two
-/// readers ask it of two different shapes: `isStandingBody` of a living creep's
-/// part map, and `isStandingCast` of a body this module has just sized.
-let internal standingRatio (tuning: Tuning) carryParts workParts =
-    carryParts * tuning.StandingCarryPerWork < workParts
-
-/// Whether a body this module has sized is a standing body: the same ratio over
-/// a part list rather than over a living creep's part map.
-let private isStandingCast (tuning: Tuning) body =
-    let count part =
-        body |> List.filter ((=) part) |> List.length
-
-    standingRatio tuning (count Carry) (count Work)
+/// Whether a body this module has sized is a standing body: `standingParts`
+/// over a part list rather than over a living creep's part map.
+let private isStandingCast (tuning: Tuning) body = standingParts tuning (partsOf body)
 
 
 /// Whether a living body is a **standing body** (ADR 0046): it carries fewer
@@ -597,11 +578,7 @@ let private isStandingCast (tuning: Tuning) body =
 /// into the controller in place. Digging is not part of it — #206 left Harvest
 /// open on the reasoning that travel cost would keep the row beside its buffer,
 /// and an empty buffer leaves the row nothing else applicable at all.
-let internal isStandingBody (tuning: Tuning) (creep: CreepInfo) =
-    let count part =
-        creep.Body |> Map.tryFind part |> Option.defaultValue 0
-
-    standingRatio tuning (count Carry) (count Work)
+let internal isStandingBody (tuning: Tuning) (creep: CreepInfo) = standingParts tuning creep.Body
 
 /// What one body of the upgrader row eats per tick: every Work part of the
 /// row's cast at the richest bank, at the controller's own per-Work rate

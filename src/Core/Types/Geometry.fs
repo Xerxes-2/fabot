@@ -90,6 +90,19 @@ type Pos =
 /// `RoomPos.range` is the same measure for tiles that carry their own rooms.
 let range (a: Pos) (b: Pos) = max (abs (a.X - b.X)) (abs (a.Y - b.Y))
 
+/// The Chebyshev ball of a tile: every grid coordinate within `radius` of it —
+/// the neighbourhood `range` above is the measure of, written beside the metric
+/// it belongs to rather than open-coded as a double `for` at each of the four
+/// places that wanted one. **Unclamped**: a centre near a room edge yields
+/// coordinates off the grid, and every caller drops those through the
+/// membership test it was applying anyway, so clamping here would quietly
+/// change what a doorstep or a Reach means at a border.
+let tilesWithin (radius: int) (center: Pos) : Pos list =
+    [
+        for x in center.X - radius .. center.X + radius do
+            for y in center.Y - radius .. center.Y + radius -> { X = x; Y = y }
+    ]
+
 [<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
 module RoomPos =
     /// The grid coordinate, for indexing that room's own tables — always

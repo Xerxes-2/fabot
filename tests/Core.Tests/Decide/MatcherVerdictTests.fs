@@ -31,12 +31,7 @@ let resolverVerdictTests =
                             spatial
                                 [ "src-a", { X = 10; Y = 11 }; "site-1", { X = 15; Y = 12 } ]
                                 terrain
-                            |> withHome (fun layer ->
-                                { layer with
-                                    CreepPositions =
-                                        Map.ofList
-                                            [ "har", { X = 10; Y = 12 }; "bob", { X = 9; Y = 12 } ]
-                                })
+                            |> withCreepsAt [ "har", { X = 10; Y = 12 }; "bob", { X = 9; Y = 12 } ]
                     }
 
                 Expect.equal
@@ -56,10 +51,7 @@ let resolverVerdictTests =
                         Spatial =
 
                             spatial [ "src-a", { X = 10; Y = 10 } ] corridor
-                            |> withHome (fun layer ->
-                                { layer with
-                                    CreepPositions = Map.ofList [ "w1", { X = 10; Y = 14 } ]
-                                })
+                            |> withCreepsAt [ "w1", { X = 10; Y = 14 } ]
                     }
 
                 Expect.equal
@@ -91,15 +83,7 @@ let resolverVerdictTests =
                             spatial
                                 [ "src-a", { X = 10; Y = 10 }; "ctrl-1", { X = 10; Y = 14 } ]
                                 terrain
-                            |> withHome (fun layer ->
-                                { layer with
-                                    CreepPositions =
-                                        Map.ofList
-                                            [
-                                                "har", { X = 10; Y = 12 }
-                                                "upg", { X = 10; Y = 11 }
-                                            ]
-                                })
+                            |> withCreepsAt [ "har", { X = 10; Y = 12 }; "upg", { X = 10; Y = 11 } ]
                     }
 
                 Expect.equal
@@ -131,12 +115,7 @@ let resolverVerdictTests =
                             spatial
                                 [ "src-a", { X = 10; Y = 10 }; "ctrl-1", { X = 10; Y = 8 } ]
                                 terrain
-                            |> withHome (fun layer ->
-                                { layer with
-                                    CreepPositions =
-                                        Map.ofList
-                                            [ "h", { X = 10; Y = 13 }; "u", { X = 11; Y = 13 } ]
-                                })
+                            |> withCreepsAt [ "h", { X = 10; Y = 13 }; "u", { X = 11; Y = 13 } ]
                     }
 
                 Expect.equal
@@ -164,12 +143,7 @@ let resolverVerdictTests =
                             spatial
                                 [ "src-a", { X = 10; Y = 11 }; "site-1", { X = 15; Y = 12 } ]
                                 terrain
-                            |> withHome (fun layer ->
-                                { layer with
-                                    CreepPositions =
-                                        Map.ofList
-                                            [ "har", { X = 10; Y = 12 }; "bob", { X = 9; Y = 12 } ]
-                                })
+                            |> withCreepsAt [ "har", { X = 10; Y = 12 }; "bob", { X = 9; Y = 12 } ]
                     }
 
                 let assigned = [ "har", Harvest "src-a"; "bob", Build "site-1" ]
@@ -199,10 +173,7 @@ let resolverVerdictTests =
                         Spatial =
 
                             spatial [ "src-a", { X = 10; Y = 10 } ] corridor
-                            |> withHome (fun layer ->
-                                { layer with
-                                    CreepPositions = Map.ofList [ "w1", { X = 10; Y = 14 } ]
-                                })
+                            |> withCreepsAt [ "w1", { X = 10; Y = 14 } ]
                     }
 
                 Expect.isEmpty
@@ -230,13 +201,10 @@ let resolverVerdictTests =
                         Spatial =
 
                             spatial [ "src-a", { X = 10; Y = 10 } ] corridor
-                            |> withHome (fun layer ->
-                                { layer with
-                                    CreepPositions = Map.ofList [ "w1", { X = 10; Y = 14 } ]
-                                })
+                            |> withCreepsAt [ "w1", { X = 10; Y = 14 } ]
                     }
 
-                let { Verdicts = verdicts } = decide snapshot Map.empty Set.empty None
+                let { Verdicts = verdicts } = decideOn snapshot
 
                 Expect.equal
                     verdicts
@@ -259,7 +227,7 @@ let sayTests =
                         Creeps = [ worker "w1" 0 50 ]
                     }
 
-                let { Intents = intents } = decide snapshot Map.empty Set.empty None
+                let { Intents = intents } = decideOn snapshot
 
                 Expect.contains
                     intents
@@ -300,7 +268,7 @@ let sayTests =
                         Creeps = [ worker "w1" 50 0 ]
                     }
 
-                let { Intents = intents } = decide snapshot Map.empty Set.empty None
+                let { Intents = intents } = decideOn snapshot
                 Expect.isEmpty (sayIntents intents) "no Task, no bubble"
             }
 
@@ -317,13 +285,10 @@ let sayTests =
                         Spatial =
 
                             spatial [ "src-a", { X = 10; Y = 10 } ] corridor
-                            |> withHome (fun layer ->
-                                { layer with
-                                    CreepPositions = Map.ofList [ "w1", { X = 10; Y = 14 } ]
-                                })
+                            |> withCreepsAt [ "w1", { X = 10; Y = 14 } ]
                     }
 
-                let { Intents = intents } = decide snapshot Map.empty Set.empty None
+                let { Intents = intents } = decideOn snapshot
 
                 Expect.isEmpty (actionIntents intents) "out of range: no action Intent yet"
                 Expect.equal (sayIntents intents) [ "w1", "⛏" ] "the bubble still shows the Task"
@@ -343,7 +308,7 @@ let verdictTests =
                         Creeps = [ worker "w1" 0 50 ]
                     }
 
-                let { Verdicts = verdicts } = decide snapshot Map.empty Set.empty None
+                let { Verdicts = verdicts } = decideOn snapshot
 
                 Expect.equal
                     verdicts
@@ -359,7 +324,7 @@ let verdictTests =
                         Creeps = [ worker "w1" 50 0 ]
                     }
 
-                let { Verdicts = verdicts } = decide snapshot Map.empty Set.empty None
+                let { Verdicts = verdicts } = decideOn snapshot
 
                 Expect.equal
                     verdicts
@@ -382,7 +347,7 @@ let verdictTests =
                         Creeps = [ worker "w1" 50 0 ]
                     }
 
-                let { Verdicts = verdicts } = decide snapshot Map.empty Set.empty None
+                let { Verdicts = verdicts } = decideOn snapshot
 
                 Expect.equal
                     verdicts
@@ -399,7 +364,7 @@ let verdictTests =
                         Spatial = nearFarCorridor [ "w1", { X = 10; Y = 17 } ]
                     }
 
-                let { Verdicts = verdicts } = decide snapshot Map.empty Set.empty None
+                let { Verdicts = verdicts } = decideOn snapshot
 
                 Expect.equal
                     verdicts
@@ -414,7 +379,7 @@ let verdictTests =
                         Creeps = [ worker "w1" 0 50; worker "w2" 0 50 ]
                     }
 
-                let { Verdicts = verdicts } = decide snapshot Map.empty Set.empty None
+                let { Verdicts = verdicts } = decideOn snapshot
 
                 Expect.equal
                     verdicts
@@ -600,10 +565,7 @@ let verdictTests =
                             spatial
                                 [ "src-a", { X = 10; Y = 10 }; "ctrl-1", { X = 10; Y = 16 } ]
                                 terrain
-                            |> withHome (fun layer ->
-                                { layer with
-                                    CreepPositions = Map.ofList [ "w1", { X = 10; Y = 14 } ]
-                                })
+                            |> withCreepsAt [ "w1", { X = 10; Y = 14 } ]
                     }
 
                 let sticky = Map.ofList [ "w1", taskId (Harvest "src-a") ]
@@ -629,12 +591,7 @@ let verdictTests =
                         Spatial =
 
                             spatial [ "src-a", { X = 10; Y = 10 } ] corridor
-                            |> withHome (fun layer ->
-                                { layer with
-                                    CreepPositions =
-                                        Map.ofList
-                                            [ "w1", { X = 10; Y = 12 }; "w2", { X = 10; Y = 13 } ]
-                                })
+                            |> withCreepsAt [ "w1", { X = 10; Y = 12 }; "w2", { X = 10; Y = 13 } ]
                     }
 
                 let sticky =
@@ -660,7 +617,7 @@ let verdictTests =
                         Creeps = [ worker "w1" 0 50 ]
                     }
 
-                let { Verdicts = verdicts } = decide snapshot Map.empty Set.empty None
+                let { Verdicts = verdicts } = decideOn snapshot
 
                 Expect.equal
                     verdicts
@@ -675,7 +632,7 @@ let verdictTests =
                         Creeps = [ worker "w1" 50 0 ]
                     }
 
-                let { Verdicts = verdicts } = decide snapshot Map.empty Set.empty None
+                let { Verdicts = verdicts } = decideOn snapshot
 
                 Expect.equal
                     verdicts
@@ -702,13 +659,10 @@ let verdictTests =
                         Spatial =
 
                             spatial [ "src-a", { X = 10; Y = 10 } ] terrain
-                            |> withHome (fun layer ->
-                                { layer with
-                                    CreepPositions = Map.ofList [ "w1", { X = 10; Y = 14 } ]
-                                })
+                            |> withCreepsAt [ "w1", { X = 10; Y = 14 } ]
                     }
 
-                let { Verdicts = verdicts } = decide snapshot Map.empty Set.empty None
+                let { Verdicts = verdicts } = decideOn snapshot
 
                 Expect.equal
                     verdicts
@@ -790,8 +744,7 @@ let rankTierTests =
                 // home exactly as `isOutpostSite`'s does: absence
                 // never counts against a Task (ADR 0004). The rung's *room*
                 // is pinned where a room exists to pin it, in `OutpostTests`.
-                let verdictsFor colony =
-                    (decide colony Map.empty Set.empty None).Verdicts
+                let verdictsFor colony = (decideOn colony).Verdicts
 
                 let tied =
                     [ Verdict.Matched("w1", taskId (Refill "tower-1"), MatchFactor.PoolOrder) ]
@@ -927,12 +880,7 @@ let verboseScoringTests =
                         Spatial =
 
                             spatial [ "src-a", { X = 10; Y = 10 } ] corridor
-                            |> withHome (fun layer ->
-                                { layer with
-                                    CreepPositions =
-                                        Map.ofList
-                                            [ "w1", { X = 10; Y = 12 }; "w2", { X = 10; Y = 13 } ]
-                                })
+                            |> withCreepsAt [ "w1", { X = 10; Y = 12 }; "w2", { X = 10; Y = 13 } ]
                     }
 
                 let { Verdicts = verdicts } = decide snapshot Map.empty (Set.ofList [ "w2" ]) None
@@ -973,10 +921,7 @@ let verboseScoringTests =
                         Spatial =
 
                             spatial [ "src-a", { X = 10; Y = 10 } ] corridor
-                            |> withHome (fun layer ->
-                                { layer with
-                                    CreepPositions = Map.ofList [ "w1", { X = 10; Y = 11 } ]
-                                })
+                            |> withCreepsAt [ "w1", { X = 10; Y = 11 } ]
                     }
 
                 let sticky = Map.ofList [ "w1", taskId (Harvest "src-a") ]
@@ -1018,10 +963,7 @@ let verboseScoringTests =
                         Spatial =
 
                             spatial [ "src-a", { X = 10; Y = 10 } ] terrain
-                            |> withHome (fun layer ->
-                                { layer with
-                                    CreepPositions = Map.ofList [ "w1", { X = 10; Y = 14 } ]
-                                })
+                            |> withCreepsAt [ "w1", { X = 10; Y = 14 } ]
                     }
 
                 let { Verdicts = verdicts } = decide snapshot Map.empty (Set.ofList [ "w1" ]) None

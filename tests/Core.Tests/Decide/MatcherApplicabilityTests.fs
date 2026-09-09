@@ -42,7 +42,7 @@ let partApplicabilityTests =
                         Creeps = [ creepWith "hauler" 25 25 [ Carry; Move ] ]
                     }
 
-                let { Assignments = assignments } = decide snapshot Map.empty Set.empty None
+                let { Assignments = assignments } = decideOn snapshot
 
                 Expect.isEmpty
                     (Map.toList assignments)
@@ -60,7 +60,7 @@ let partApplicabilityTests =
                         Creeps = [ creepWith "digger" 25 25 [ Work; Move ] ]
                     }
 
-                let { Assignments = assignments } = decide snapshot Map.empty Set.empty None
+                let { Assignments = assignments } = decideOn snapshot
 
                 Expect.isEmpty
                     (Map.toList assignments)

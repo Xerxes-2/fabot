@@ -162,10 +162,7 @@ let seatTests =
                             { X = 11; Y = 10 }, Swamp
                             { X = 10; Y = 9 }, Wall
                         ]
-                    |> withHome (fun layer ->
-                        { layer with
-                            Obstacles = Set.singleton { X = 9; Y = 10 }
-                        })
+                    |> withObstacles [ { X = 9; Y = 10 } ]
                     |> snapshotWith []
                     |> ofView
 
@@ -253,10 +250,7 @@ let standingTests =
                             { X = 10; Y = 11 }, Swamp
                             { X = 11; Y = 10 }, Plain
                         ]
-                    |> withHome (fun layer ->
-                        { layer with
-                            Obstacles = Set.singleton { X = 11; Y = 10 }
-                        })
+                    |> withObstacles [ { X = 11; Y = 10 } ]
                     |> snapshotWith []
                     |> ofView
 
@@ -344,10 +338,7 @@ let standingTests =
                     spatial
                         [ "src-a", { X = 10; Y = 10 } ]
                         [ { X = 10; Y = 10 }, Wall; { X = 10; Y = 11 }, Plain ]
-                    |> withHome (fun layer ->
-                        { layer with
-                            CreepPositions = Map.ofList [ "w", { X = 10; Y = 11 } ]
-                        })
+                    |> withCreepsAt [ "w", { X = 10; Y = 11 } ]
                     |> snapshotWith [ worker "w" ]
                     |> ofView
 
@@ -363,10 +354,7 @@ let standingTests =
             test "creepTile places a projected creep, and answers nothing for the rest" {
                 let atlas =
                     spatial [] [ { X = 5; Y = 5 }, Plain ]
-                    |> withHome (fun layer ->
-                        { layer with
-                            CreepPositions = Map.ofList [ "amy", { X = 5; Y = 5 } ]
-                        })
+                    |> withCreepsAt [ "amy", { X = 5; Y = 5 } ]
                     |> snapshotWith [ worker "amy"; worker "ghost" ]
                     |> ofView
 

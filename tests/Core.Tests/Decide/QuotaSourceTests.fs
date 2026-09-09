@@ -247,7 +247,7 @@ let sourceOutputTests =
                 let blind = postedOutpostColony 6 []
 
                 Expect.isEmpty
-                    (spawnIntents (decide blind Map.empty Set.empty None).Intents)
+                    (spawnIntents (decideOn blind).Intents)
                     "no entry for W1N2: the rock's output prices at nothing and the fleet still matches"
 
                 Expect.isNonEmpty
@@ -289,7 +289,7 @@ let sourceOutputTests =
                     }
 
                 Expect.isEmpty
-                    (spawnIntents (decide halved Map.empty Set.empty None).Intents)
+                    (spawnIntents (decideOn halved).Intents)
                     "the premise: a neutral spawn room's whole target is these seven"
 
                 Expect.isNonEmpty
@@ -352,7 +352,7 @@ let sourceOutputTests =
                         RoomControl = homeControl |> Map.map (fun _ _ -> neutralRoom)
                     }
 
-                let previous = (decide midIncomeColony Map.empty Set.empty None).Memo
+                let previous = (decideOn midIncomeColony).Memo
 
                 Expect.equal
                     previous.HaulerQuota
@@ -360,7 +360,7 @@ let sourceOutputTests =
                     "the premise: held, the two home containers hire two"
 
                 let recalled = decide lapsed Map.empty Set.empty (Some previous)
-                let fresh = decide lapsed Map.empty Set.empty None
+                let fresh = decideOn lapsed
 
                 Expect.equal
                     recalled.Memo.HaulerQuota

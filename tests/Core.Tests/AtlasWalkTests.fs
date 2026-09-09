@@ -220,10 +220,7 @@ let firstStepTests =
                             { X = 11; Y = 12 }, Plain
                             { X = 11; Y = 13 }, Plain
                         ]
-                    |> withHome (fun layer ->
-                        { layer with
-                            CreepPositions = Map.ofList [ "w", { X = 10; Y = 14 } ]
-                        })
+                    |> withCreepsAt [ "w", { X = 10; Y = 14 } ]
                     |> snapshotWith [ worker "w" ]
                     |> ofView
 
@@ -250,11 +247,7 @@ let firstStepTests =
                             { X = 11; Y = 12 }, Plain
                             { X = 11; Y = 13 }, Plain
                         ]
-                    |> withHome (fun layer ->
-                        { layer with
-                            CreepPositions =
-                                Map.ofList [ "w", { X = 10; Y = 14 }; "b", { X = 10; Y = 13 } ]
-                        })
+                    |> withCreepsAt [ "w", { X = 10; Y = 14 }; "b", { X = 10; Y = 13 } ]
                     |> snapshotWith [ worker "w"; worker "b" ]
                     |> ofView
 
@@ -317,11 +310,7 @@ let firstStepIgnoringTrafficTests =
                             { X = 11; Y = 12 }, Plain
                             { X = 11; Y = 13 }, Plain
                         ]
-                    |> withHome (fun layer ->
-                        { layer with
-                            CreepPositions =
-                                Map.ofList [ "w", { X = 10; Y = 14 }; "b", { X = 10; Y = 13 } ]
-                        })
+                    |> withCreepsAt [ "w", { X = 10; Y = 14 }; "b", { X = 10; Y = 13 } ]
                     |> snapshotWith [ worker "w"; worker "b" ]
                     |> ofView
 

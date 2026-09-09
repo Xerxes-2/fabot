@@ -7,92 +7,54 @@ module Fabot.Core.Decide.Spawns
 open Fabot.Core
 open Fabot.Core.Types
 
-/// Whether a living body was cast from the hauler row: Carry parts but no Work.
-/// The worker and anchor rows both keep at least one Work, and only the hauler
-/// row casts none (ADR 0012) — so, like the anchor's Work > Move, the casting
-/// pattern is readable off the body itself (ADR 0006).
+/// Whether a living body carries a CLAIM part — the reserver row's own cut
+/// (ADR 0042), the one part no other row buys, and so the row's living census.
+/// `patternOfParts`' reserver arm is this same test; it is written here as a
+/// census over a list, where the cascade wants an arm. The cascade asks it
+/// before the comparative tests for a reason this census does not have to care
+/// about but must not contradict: `[Claim; Carry; Move]` has no Work beside a
+/// Carry, so a cascade that reached the hauler arm first would read a reserver
+/// as a hauler.
+let private isReserverBody (creep: CreepInfo) = partCount creep.Body BodyPart.Claim > 0
+
+/// Whether a living body carries Carry parts and no Work — the hauler row's
+/// own cut (ADR 0012), and `patternOfParts`' hauler arm read as a census.
 let private isHaulerBody (creep: CreepInfo) =
-    let count part =
-        creep.Body |> Map.tryFind part |> Option.defaultValue 0
+    partCount creep.Body Work = 0 && partCount creep.Body Carry > 0
 
-    count Work = 0 && count Carry > 0
+/// Whether a body still in the oven is Work-heavy — the anchor row's `Work >
+/// Move`, the ratio fatigue parity forbids a worker body (ADR 0006). The
+/// reading a living creep gets from `Atlas.workHeavy`, which a body with no
+/// name yet cannot be looked up in; it is the one input `patternOfParts` and
+/// `canRefillParts` take rather than derive, and this is the cast's answer to
+/// it.
+let private castIsHeavy parts =
+    partCount parts Work > partCount parts Move
 
-/// Whether a living body was cast from the reserver row: it carries a CLAIM
-/// part. The one part no other row buys (ADR 0042), so it identifies the row on
-/// its own and is asked before the other two — the comparative tests below would
-/// read a `[Claim; Carry; Move]` body as a hauler.
-let private isReserverBody (creep: CreepInfo) =
-    creep.Body |> Map.tryFind BodyPart.Claim |> Option.exists (fun n -> n > 0)
-
-/// Whether a living body can take energy out of a store and put it into an
-/// extension — the one capability the bank's own refilling depends on, and so
-/// the one every capacity-sized row depends on (the supply floor, ADR 0050).
-/// Not "has a Carry part". It is the body half of `Refill`'s gate and the body
-/// half of `Withdraw`'s read back together, because a body that can deliver but
-/// never draw cannot reach the storage the energy is standing in: a Carry part,
-/// no standing-body ratio (ADR 0046) and no more Work than Move (ADR 0016).
-/// `Refill`'s third conjunct, `Energy > 0`, is deliberately *not* read: that is
-/// a state a hauler passes through twice a trip.
-let private canRefill (tuning: Tuning) atlas (creep: CreepInfo) =
-    (creep.Body |> Map.tryFind Carry |> Option.exists (fun n -> n > 0))
-    && not (isStandingBody tuning creep)
-    && not (Atlas.workHeavy atlas creep.Name)
-
-/// The pattern row a living body was cast from, read off the parts alone (ADR
-/// 0006): an ATTACK part is the guard row, a CLAIM part is the reserver row,
-/// more Work than Move is the anchor row, a standing body at or under that line
-/// is the upgrader row, no Work beside a Carry is the hauler row, and every
-/// other body is the generalist. The row is what sizes the replacement a lead
-/// prices (ADR 0026), so one rule serves every row. Order matters between the
-/// anchor and upgrader arms and nowhere else: `6W/1C/1M` satisfies both
-/// descriptions, and it is the anchor row that casts it — a body pinned to a
-/// Post by ADR 0020's Work Area is a stronger claim than standing beside the
-/// buffer. The reserver arm is what keeps ADR 0026 honest for a CLAIM body:
-/// `[Claim; Move]` has neither Work nor Carry, so before it existed a
-/// reserver's lead was priced off a worker unit. The guard arm is the same debt
-/// paid for a fighting body (ADR 0056): `[T; A×3; M×5; H]` has neither, so
-/// without it a guard read back as a **worker**, and the raid that cast it
-/// would go on filling the generalist row's `Living` for 1,500 ticks.
+/// The pattern row a living body was cast from (`patternOfParts` over its part
+/// map), with the Atlas's `workHeavy` set answering the heavy question.
 let private patternOf (tuning: Tuning) atlas (creep: CreepInfo) =
-    if isGuardBody creep then guardPattern
-    elif isReserverBody creep then reserverPattern
-    elif Atlas.workHeavy atlas creep.Name then anchorPattern
-    elif isStandingBody tuning creep then upgraderPattern
-    elif isHaulerBody creep then haulerPattern
-    else workerPattern
+    patternOfParts tuning (Atlas.workHeavy atlas creep.Name) creep.Body
 
-/// The row a body **still in the oven** was bought for, read off the parts
-/// exactly as `patternOf` reads them off a living creep: the same six arms in
-/// the same order, with `Work > Move` written out because the Atlas's own
-/// `workHeavy` set is keyed by creep name and a body being cast has none.
+/// The row a body **still in the oven** was bought for: the same rule over the
+/// same counts, which is the whole point of there being one — the six arms
+/// used to be written out twice, in two representations, and only prose kept
+/// them in the same order.
 let private patternOfCast (tuning: Tuning) (body: BodyPart list) =
-    let count part =
-        body |> List.filter ((=) part) |> List.length
+    let parts = partsOf body
+    patternOfParts tuning (castIsHeavy parts) parts
 
-    if count Attack > 0 then
-        guardPattern
-    elif count BodyPart.Claim > 0 then
-        reserverPattern
-    elif count Work > count Move then
-        anchorPattern
-    elif standingRatio tuning (count Carry) (count Work) then
-        upgraderPattern
-    elif count Work = 0 && count Carry > 0 then
-        haulerPattern
-    else
-        workerPattern
+/// Whether a living body can put energy into an extension (ADR 0050).
+let private canRefill (tuning: Tuning) atlas (creep: CreepInfo) =
+    canRefillParts tuning (Atlas.workHeavy atlas creep.Name) creep.Body
 
-/// Whether a body in the oven will be able to put energy into an extension once
-/// it stands — `canRefill`'s three clauses over a body rather than over a
-/// living creep, for the supply floor's one question (ADR 0050): is there
-/// anything, alive or bought, that can break the deadlock?
+/// Whether a body in the oven will be able to put energy into an extension
+/// once it stands — `canRefillParts` over a cast rather than over a living
+/// creep, for the supply floor's one question (ADR 0050): is there anything,
+/// alive or bought, that can break the deadlock?
 let private castCanRefill (tuning: Tuning) (body: BodyPart list) =
-    let count part =
-        body |> List.filter ((=) part) |> List.length
-
-    count Carry > 0
-    && not (standingRatio tuning (count Carry) (count Work))
-    && count Work <= count Move
+    let parts = partsOf body
+    canRefillParts tuning (castIsHeavy parts) parts
 
 /// The two facts the two rows whose sizing is not the bank's answer alone read,
 /// derived once for the tick (ADR 0042): the anchor row's Work ceilings and the
@@ -238,10 +200,8 @@ let internal planSpawns
         | Some room, Some pos ->
             let reach = Threats.reachIn threats room
 
-            [
-                for x in pos.X - 1 .. pos.X + 1 do
-                    for y in pos.Y - 1 .. pos.Y + 1 -> { X = x; Y = y }
-            ]
+            RoomPos.pos pos
+            |> tilesWithin 1
             |> List.exists (fun tile -> Set.contains tile reach)
         | _ -> false
 

@@ -223,6 +223,62 @@ let matchCreeps
     // Harvest whose wait the holder's walk no longer covers releases it (ADR
     // 0025). Each failed gate names the release; a dead creep's assignment
     // drops silently.
+    // One gate cascade judges every (creep, Task) pair, for both readings of
+    // one: the fresh candidate the Matcher scores and the assignment it is
+    // deciding whether to keep. Rejected at the first gate it fails
+    // (threatened, applicable, capacity, reachable, in time) or the travel cost
+    // when none does. The two used to be written out in full a few lines apart,
+    // with prose at each promising the other ran the same gates in the same
+    // order — and the order is load-bearing twice over: which rejection a pair
+    // earns is what `IdleReason` reads below, and the two numbers bound above
+    // the capacity gate (the travel cost, which the reachability gate and the
+    // scored key both read, and the walk, which capacity counts holders at per
+    // ADR 0026 and the arrival gate spends after it) are priced at most once,
+    // and only if a gate asks.
+    //
+    // `escape` is the one gate the two readings do not share: a holder whose
+    // body is expiring is kept over capacity (ADR 0026) where a fresh candidate
+    // is refused. It is a `Lazy` for the same reason the walk beside it is —
+    // the fresh cascade must not price it, and the keep path must not price it
+    // unless the capacity gate has already failed.
+    //
+    // `RejectReason` is `ReleaseReason` less `TaskGone` (`Types/Verdicts.fs`),
+    // and `TaskGone` is answered above this cascade, where the Task is in no
+    // pool at all and no gate here can be asked about it.
+    let gate
+        (escape: Lazy<bool>)
+        acc
+        (creep: CreepInfo)
+        (pooled: PooledTask)
+        : Result<int, RejectReason> =
+        if threatened threats atlas creep pooled.Task then
+            Error RejectReason.Threatened
+        elif not (applicable view threats atlas creep pooled) then
+            Error RejectReason.Inapplicable
+        else
+            let cost = travelCostOf threats atlas creep.Name pooled.Task
+            let arrival = lazy (Atlas.walkTicks atlas creep.Name pooled.Task)
+
+            if not (hasCapacity creep acc pooled arrival) && not escape.Value then
+                Error RejectReason.CapacityFull
+            else
+                match cost with
+                | None -> Error RejectReason.Unreachable
+                | Some cost ->
+                    match tooEarly view atlas creep pooled.Task arrival with
+                    | Some(walk, wait) -> Error(RejectReason.TooEarly(walk, wait))
+                    | None -> Ok cost
+
+    // The same gate said as a release rather than as a refusal: the two unions
+    // carry the same five failures under two names, one per reading.
+    let asRelease =
+        function
+        | RejectReason.Threatened -> ReleaseReason.Threatened
+        | RejectReason.Inapplicable -> ReleaseReason.Inapplicable
+        | RejectReason.CapacityFull -> ReleaseReason.OverCapacity
+        | RejectReason.Unreachable -> ReleaseReason.Unreachable
+        | RejectReason.TooEarly(walk, wait) -> ReleaseReason.TooEarly(walk, wait)
+
     let kept, keptLoads, released =
         ((Map.empty, Map.empty, []), assignments)
         ||> Map.fold (fun (acc, loads, released) name tid ->
@@ -244,62 +300,22 @@ let matchCreeps
                 | None when Option.isSome (graced creep tid) ->
                     Map.add name tid acc, hold loads tid, released
                 | None -> release ReleaseReason.TaskGone
-                // The raid's release stands ahead of the ordinary one: a
-                // Task whose whole Work Area is in a Reach is gone for this
-                // creep however well its body fits (ADR 0033).
-                | Some pooled when threatened threats atlas creep pooled.Task ->
-                    release ReleaseReason.Threatened
-                | Some pooled when not (applicable view threats atlas creep pooled) ->
-                    release ReleaseReason.Inapplicable
+                // An expiring holder is kept over capacity where a fresh
+                // candidate would be refused (ADR 0026) — the one gate this
+                // reading does not share with the cascade below.
                 | Some pooled ->
-                    // The walk is bound one gate before it is spent, exactly as
-                    // the fresh cascade below binds it: capacity counts holders
-                    // at this holder's own arrival (ADR 0026), and the arrival
-                    // gate spends the very same number — priced at most once,
-                    // and only if one of the two asks.
-                    let cost = travelCostOf threats atlas creep.Name pooled.Task
-                    let arrival = lazy (Atlas.walkTicks atlas creep.Name pooled.Task)
+                    match gate (lazy (expiring view atlas sizing creep)) acc creep pooled with
+                    | Error reason -> release (asRelease reason)
+                    | Ok _ -> Map.add name tid acc, hold loads tid, released)
 
-                    if
-                        not (hasCapacity creep acc pooled arrival)
-                        && not (expiring view atlas sizing creep)
-                    then
-                        release ReleaseReason.OverCapacity
-                    else
-                        match cost with
-                        | None -> release ReleaseReason.Unreachable
-                        | Some _ ->
-                            match tooEarly view atlas creep pooled.Task arrival with
-                            | Some(walk, wait) -> release (ReleaseReason.TooEarly(walk, wait))
-                            | None -> Map.add name tid acc, hold loads tid, released)
-
-    // One gate cascade judges every (creep, Task) pair — rejected at the first
-    // matching gate it fails (applicable, capacity, reachable, in time) or
-    // scored on the full key when none does. Two numbers are bound above the
-    // capacity gate: the travel cost, which the reachability gate and the
-    // scored key both read, and the walk, which capacity counts holders at (ADR
-    // 0026) and the arrival gate spends after it — one number for both, priced
-    // at most once.
+    // The fresh candidate's reading of the same cascade: scored on the full key
+    // where a holder is merely kept, and with no escape from the capacity gate.
     let judge acc loads (creep: CreepInfo) (pooled: PooledTask) =
         let tid = taskId pooled.Task
 
-        if threatened threats atlas creep pooled.Task then
-            Candidate.Rejected(tid, RejectReason.Threatened)
-        elif not (applicable view threats atlas creep pooled) then
-            Candidate.Rejected(tid, RejectReason.Inapplicable)
-        else
-            let cost = travelCostOf threats atlas creep.Name pooled.Task
-            let arrival = lazy (Atlas.walkTicks atlas creep.Name pooled.Task)
-
-            if not (hasCapacity creep acc pooled arrival) then
-                Candidate.Rejected(tid, RejectReason.CapacityFull)
-            else
-                match cost with
-                | None -> Candidate.Rejected(tid, RejectReason.Unreachable)
-                | Some cost ->
-                    match tooEarly view atlas creep pooled.Task arrival with
-                    | Some(walk, wait) -> Candidate.Rejected(tid, RejectReason.TooEarly(walk, wait))
-                    | None -> Candidate.Scored(tid, pooled.Priority, cost, load loads tid)
+        match gate (lazy false) acc creep pooled with
+        | Error reason -> Candidate.Rejected(tid, reason)
+        | Ok cost -> Candidate.Scored(tid, pooled.Priority, cost, load loads tid)
 
     let assignOne (acc, loads, verdicts) (creep: CreepInfo) =
         let verdicts =

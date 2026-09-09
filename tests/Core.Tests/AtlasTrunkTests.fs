@@ -339,10 +339,7 @@ let haulRoundTripTests =
                                 if x <> 15 then
                                     { X = x; Y = 10 }, Plain
                         ]
-                    |> withHome (fun layer ->
-                        { layer with
-                            Obstacles = Set.singleton { X = 20; Y = 10 }
-                        })
+                    |> withObstacles [ { X = 20; Y = 10 } ]
                     |> snapshotWith []
                     |> ofView
 
@@ -491,10 +488,7 @@ let castWalkTicksTests =
                                 if x <> 15 then
                                     { X = x; Y = 10 }, Plain
                         ]
-                    |> withHome (fun layer ->
-                        { layer with
-                            Obstacles = Set.singleton { X = 20; Y = 10 }
-                        })
+                    |> withObstacles [ { X = 20; Y = 10 } ]
                     |> snapshotWith []
                     |> ofView
 
@@ -516,10 +510,7 @@ let castWalkTicksTests =
                     spatial
                         [ "spawn-1", { X = 20; Y = 10 } ]
                         [ for x in 10..20 -> { X = x; Y = 10 }, Plain ]
-                    |> withHome (fun layer ->
-                        { layer with
-                            Obstacles = Set.ofList [ { X = 20; Y = 10 }; { X = 19; Y = 10 } ]
-                        })
+                    |> withObstacles [ { X = 20; Y = 10 }; { X = 19; Y = 10 } ]
                     |> snapshotWith []
                     |> ofView
 
@@ -546,10 +537,7 @@ let walkRecallTests =
                 spatial
                     [ "spawn-1", { X = 20; Y = 10 } ]
                     [ for x in 10..20 -> { X = x; Y = 10 }, Plain ]
-                |> withHome (fun layer ->
-                    { layer with
-                        Obstacles = Set.singleton { X = 20; Y = 10 }
-                    })
+                |> withObstacles [ { X = 20; Y = 10 } ]
                 |> snapshotWith []
 
             let hauler = [ Carry; Carry; Move ]

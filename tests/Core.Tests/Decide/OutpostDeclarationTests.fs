@@ -114,7 +114,7 @@ let outpostTests =
                     (Some(taskId (Harvest "src-home"), MatchFactor.OnlyCandidate))
                     "the garrisoned rock is not the worker's to walk to; her own room is"
 
-                let { Assignments = assignments } = decide garrisoned Map.empty Set.empty None
+                let { Assignments = assignments } = decideOn garrisoned
 
                 Expect.equal
                     (Map.tryFind "a-out" assignments)
@@ -148,12 +148,7 @@ let outpostTests =
                         |> withNorthOutpost (Some { X = 10; Y = 46 })
 
                     { colony with
-                        Spatial =
-                            colony.Spatial
-                            |> withHome (fun layer ->
-                                { layer with
-                                    CreepPositions = Map.ofList [ "w", pos ]
-                                })
+                        Spatial = colony.Spatial |> withCreepsAt [ "w", pos ]
                     }
 
                 let assigned = Map.ofList [ "w", taskId (Harvest "src-out") ]
@@ -363,7 +358,7 @@ let outpostTests =
                     ))
                     "an outpost's pending site is a census entry of its own since #169"
 
-                let { Intents = opening } = decide sited Map.empty Set.empty None
+                let { Intents = opening } = decideOn sited
 
                 Expect.equal
                     (moveIntents opening)
@@ -685,7 +680,7 @@ let outpostTests =
                     (Some(taskId (Build "site-out"), MatchFactor.Rank))
                     "the switch outranks the sink, however much nearer the sink stands"
 
-                let { Intents = opening } = decide sited Map.empty Set.empty None
+                let { Intents = opening } = decideOn sited
 
                 Expect.equal
                     (moveIntents opening)
@@ -953,19 +948,15 @@ let outpostTests =
                         Creeps = [ for name in [ "w1"; "w2"; "w3" ] -> worker name 50 0 ]
                         Spatial =
                             colony.Spatial
-                            |> withHome (fun layer ->
-                                { layer with
-                                    CreepPositions =
-                                        Map.ofList
-                                            [
-                                                "w1", { X = 10; Y = 2 }
-                                                "w2", { X = 10; Y = 3 }
-                                                "w3", { X = 10; Y = 4 }
-                                            ]
-                                })
+                            |> withCreepsAt
+                                [
+                                    "w1", { X = 10; Y = 2 }
+                                    "w2", { X = 10; Y = 3 }
+                                    "w3", { X = 10; Y = 4 }
+                                ]
                     }
 
-                let { Assignments = assignments } = decide crowd Map.empty Set.empty None
+                let { Assignments = assignments } = decideOn crowd
 
                 Expect.equal
                     (assignments |> Map.toList |> List.map snd |> List.countBy id |> List.sort)
@@ -1206,12 +1197,7 @@ let outpostTests =
                                         (Site BuiltKind.Container)
                                         colony.Spatial.TargetKinds
                             }
-                            |> withHome (fun layer ->
-                                { layer with
-                                    CreepPositions =
-                                        Map.ofList
-                                            [ for n in 1..5 -> $"w{n}", { X = 10; Y = n + 1 } ]
-                                })
+                            |> withCreepsAt [ for n in 1..5 -> $"w{n}", { X = 10; Y = n + 1 } ]
                             |> withNeighbour
                                 "W1N2"
                                 { outpost with
@@ -1223,7 +1209,7 @@ let outpostTests =
                                 }
                     }
 
-                let { Assignments = assignments } = decide crowd Map.empty Set.empty None
+                let { Assignments = assignments } = decideOn crowd
 
                 Expect.equal
                     (assignments |> Map.toList |> List.map snd |> List.countBy id |> List.sort)
@@ -1263,11 +1249,7 @@ let outpostTests =
                             :: [ for name, _ in homeCreeps @ outpostCreeps -> worker name 50 0 ]
                         Spatial =
                             colonyOf.Spatial
-                            |> withHome (fun layer ->
-                                { layer with
-                                    CreepPositions =
-                                        Map.ofList (("w", { X = 10; Y = 4 }) :: homeCreeps)
-                                })
+                            |> withCreepsAt (("w", { X = 10; Y = 4 }) :: homeCreeps)
                             // The outpost's corridor runs the whole column
                             // here, so the coordinate the rival stands on is
                             // ground in both rooms and the case is about the
@@ -1334,10 +1316,7 @@ let outpostTests =
                         Creeps = [ worker "w" 0 50; { worker "o" 50 0 with Fatigue = 4 } ]
                         Spatial =
                             colonyOf.Spatial
-                            |> withHome (fun layer ->
-                                { layer with
-                                    CreepPositions = Map.ofList [ "w", { X = 10; Y = 4 } ]
-                                })
+                            |> withCreepsAt [ "w", { X = 10; Y = 4 } ]
                             |> withNeighbour
                                 "W1N2"
                                 { RoomLayer.empty with

@@ -534,7 +534,7 @@ let patternTableTests =
                         Creeps = [ worker "w1" 0 50 ]
                     }
 
-                let { Intents = intents } = decide snapshot Map.empty Set.empty None
+                let { Intents = intents } = decideOn snapshot
 
                 // The row by its name and not by its place in the table:
                 // the declaration order is nobody's rule (see the pattern

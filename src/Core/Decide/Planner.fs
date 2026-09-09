@@ -81,15 +81,11 @@ let internal claimTargets (view: ColonyView) : (string * string) list =
     let candidate room =
         List.contains room view.Declared && takeable room
 
-    view.Spatial.TargetKinds
-    |> Map.toList
-    |> List.choose (fun (id, kind) ->
-        if kind = Controller then
-            match SpatialInfo.placementOf view.Spatial id with
-            | Some tile when candidate tile.Room -> Some(id, tile.Room)
-            | _ -> None
-        else
-            None)
+    SpatialInfo.idsOfKind view.Spatial Controller
+    |> List.choose (fun id ->
+        match SpatialInfo.placementOf view.Spatial id with
+        | Some tile when candidate tile.Room -> Some(id, tile.Room)
+        | _ -> None)
 
 /// Whether the named room is this colony's **nursery**: a declared colony of
 /// ours that has been claimed and has no spawn of its own yet (ADR 0047
@@ -194,13 +190,10 @@ let internal declaredOutposts (view: ColonyView) : string list =
     let home = view.Controller |> Option.map (fun c -> c.Id)
     let claimed = claimTargets view |> List.map snd |> Set.ofList
 
-    view.Spatial.TargetKinds
-    |> Map.toList
-    |> List.choose (fun (id, kind) ->
-        if kind = Controller && Some id <> home then
-            SpatialInfo.placementOf view.Spatial id |> Option.map (fun tile -> tile.Room)
-        else
-            None)
+    SpatialInfo.idsOfKind view.Spatial Controller
+    |> List.filter (fun id -> Some id <> home)
+    |> List.choose (fun id ->
+        SpatialInfo.placementOf view.Spatial id |> Option.map (fun tile -> tile.Room))
     |> List.distinct
     |> List.filter (roomHasOwner view >> not)
     |> List.filter (fun room -> not (Set.contains room claimed))
@@ -279,10 +272,7 @@ let planTasks (view: ColonyView) (threats: Threats) : Task list =
     // The ids of one projected kind, in id order. The containers, the
     // Storage and the controllers are all pooled by the projection's kind
     // — never by position, never by name — so the rule is written once.
-    let idsOfKind kind =
-        view.Spatial.TargetKinds
-        |> Map.toList
-        |> List.choose (fun (id, k) -> if k = kind then Some id else None)
+    let idsOfKind kind = SpatialInfo.idsOfKind view.Spatial kind
 
     // The colony's own controller, and the controller of every child it is
     // still bootstrapping (ADR 0047 decision 4) — half of the one cross-colony
@@ -338,8 +328,7 @@ let planTasks (view: ColonyView) (threats: Threats) : Task list =
     // stores rather than energy's name: every stocked container yields a
     // Withdraw, at feeding tier beside Harvest — whether to dig or to
     // collect is travel cost's call, never a rule's.
-    let stored id =
-        view.Spatial.Stores |> Map.tryFind id |> Option.defaultValue 0
+    let stored id = SpatialInfo.storedIn view.Spatial id
 
     let containers = idsOfKind (Structure BuiltKind.Container)
     let storages = idsOfKind (Structure BuiltKind.Storage)

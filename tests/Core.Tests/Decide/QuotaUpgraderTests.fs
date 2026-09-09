@@ -1118,7 +1118,7 @@ let quotaInputTests =
                 // with a gate that arrives a tick late.
                 let castsIn control =
                     reserverColony [ northOutpost false ] (surplusFleet 2) [ "W1N2", control ]
-                    |> fun colony -> decide colony Map.empty Set.empty None
+                    |> fun colony -> decideOn colony
                     |> fun result -> reserverCasts result.Intents
 
                 Expect.equal

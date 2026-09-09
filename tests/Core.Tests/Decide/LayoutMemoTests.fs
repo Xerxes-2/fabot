@@ -301,10 +301,7 @@ let censusSignatureTests =
                                 Hits = Map.ofList [ "ext-1", { Hits = 1; HitsMax = 3000 } ]
                                 Stores = Map.ofList [ "ext-1", 50 ]
                             }
-                            |> withHome (fun layer ->
-                                { layer with
-                                    CreepPositions = Map.ofList [ "w1", { X = 20; Y = 25 } ]
-                                })
+                            |> withCreepsAt [ "w1", { X = 20; Y = 25 } ]
                             |> withTargets [ "pile-1", { X = 22; Y = 25 }, Dropped ]
                     }
 
@@ -556,7 +553,7 @@ let planMemoTests =
                     |> withTarget "ext-3" { X = 26; Y = 26 } (Structure BuiltKind.Extension)
 
                 let decision = decide perturbed Map.empty Set.empty (Some memo)
-                let fresh = decide perturbed Map.empty Set.empty None
+                let fresh = decideOn perturbed
 
                 Expect.equal
                     (placementIntents decision.Intents)
@@ -571,7 +568,7 @@ let planMemoTests =
                     trunkColony 2 |> withTarget "site-1" { X = 24; Y = 24 } (Site BuiltKind.Road)
 
                 let decision = decide perturbed Map.empty Set.empty (Some memo)
-                let fresh = decide perturbed Map.empty Set.empty None
+                let fresh = decideOn perturbed
 
                 Expect.equal
                     (placementIntents decision.Intents)
@@ -609,7 +606,7 @@ let planMemoTests =
                     "and reuses the served record with it, for a room that reserved three"
 
                 let stale = decide colony Map.empty Set.empty (Some(sentinelMemo (trunkColony 2)))
-                let memoless = decide colony Map.empty Set.empty None
+                let memoless = decideOn colony
 
                 Expect.equal
                     stale.Memo.UnservedFootings
@@ -661,7 +658,7 @@ let planMemoTests =
                     "a matching signature reuses the memo's record; nothing recomputes"
 
                 let stale = decide colony Map.empty Set.empty (Some(sentinelMemo (trunkColony 2)))
-                let memoless = decide colony Map.empty Set.empty None
+                let memoless = decideOn colony
 
                 Expect.equal
                     stale.Memo.UnroutedTrunks
@@ -723,7 +720,7 @@ let planMemoTests =
 
             test "decide without a memo emits one keyed to this census" {
                 let snapshot = trunkColony 2
-                let decision = decide snapshot Map.empty Set.empty None
+                let decision = decideOn snapshot
 
                 Expect.equal
                     decision.Memo.Signature
@@ -761,7 +758,7 @@ let planMemoTests =
                     (censusSignature lone)
                     "a creep arriving is not a census change"
 
-                let first = decide lone Map.empty Set.empty None
+                let first = decideOn lone
 
                 Expect.equal
                     first.Memo.Walks.Count
@@ -789,7 +786,7 @@ let planMemoTests =
 
                 Expect.equal
                     second.Intents
-                    (decide joined Map.empty Set.empty None).Intents
+                    (decideOn joined).Intents
                     "a recalled walk decides exactly what a fresh flood decides"
             }
 

@@ -216,7 +216,7 @@ let withdrawCapacityTests =
                             ]
                     }
 
-                let { Assignments = standing } = decide standingCrowd Map.empty Set.empty None
+                let { Assignments = standing } = decideOn standingCrowd
 
                 Expect.equal
                     (drawersOf standing "can-buf")
@@ -249,7 +249,7 @@ let pickupTaskTests =
                 // that is going away is the one to take — so it steps up the
                 // rung the pile on a drawable tile already had.
                 let matched colony =
-                    let { Verdicts = verdicts } = decide colony Map.empty Set.empty None
+                    let { Verdicts = verdicts } = decideOn colony
 
                     verdicts
                     |> List.tryPick (function
@@ -298,7 +298,7 @@ let pickupTaskTests =
                 // Each colony below holds exactly two Tasks, and the rival is
                 // the one standing under the body's feet.
                 let matched colony =
-                    let { Verdicts = verdicts } = decide colony Map.empty Set.empty None
+                    let { Verdicts = verdicts } = decideOn colony
 
                     verdicts
                     |> List.tryPick (function
@@ -346,7 +346,7 @@ let pickupTaskTests =
                 // the regime is a fact of the code and not of a fixture's
                 // bank.
                 let matched colony =
-                    let { Verdicts = verdicts } = decide colony Map.empty Set.empty None
+                    let { Verdicts = verdicts } = decideOn colony
 
                     verdicts
                     |> List.tryPick (function
@@ -413,7 +413,7 @@ let pickupTaskTests =
                             }
                     }
 
-                let { Assignments = brimming } = decide full Map.empty Set.empty None
+                let { Assignments = brimming } = decideOn full
 
                 Expect.equal
                     (Map.tryFind "h1" brimming)
@@ -451,15 +451,10 @@ let pickupTaskTests =
                                     "can-far", { X = 30; Y = 10 }, Structure BuiltKind.Container
                                     "pile-a", { X = 10; Y = 10 }, Dropped
                                 ]
-                            |> withHome (fun layer ->
-                                { layer with
-                                    CreepPositions =
-                                        Map.ofList
-                                            [ "h1", { X = 10; Y = 11 }; "h2", { X = 14; Y = 10 } ]
-                                })
+                            |> withCreepsAt [ "h1", { X = 10; Y = 11 }; "h2", { X = 14; Y = 10 } ]
                     }
 
-                let { Assignments = assignments } = decide colony Map.empty Set.empty None
+                let { Assignments = assignments } = decideOn colony
 
                 Expect.equal
                     (Map.tryFind "h1" assignments)
@@ -713,8 +708,8 @@ let pickupTaskTests =
                         2
                         (openRoom 3 |> withTargets [ "tomb-1", { X = 24; Y = 24 }, Tombstone ])
 
-                let placedWith = decide littered Map.empty Set.empty None
-                let placedWithout = decide bare Map.empty Set.empty None
+                let placedWith = decideOn littered
+                let placedWithout = decideOn bare
 
                 Expect.equal
                     (placedTiles placedWith.Intents)
@@ -753,13 +748,10 @@ let pickupTaskTests =
                                     "pile-a", { X = 10; Y = 10 }, Dropped
                                     "can-far", { X = 30; Y = 10 }, Structure BuiltKind.Container
                                 ]
-                            |> withHome (fun layer ->
-                                { layer with
-                                    CreepPositions = Map.ofList [ "h1", { X = 20; Y = 10 } ]
-                                })
+                            |> withCreepsAt [ "h1", { X = 20; Y = 10 } ]
                     }
 
-                let { Verdicts = verdicts } = decide colony Map.empty Set.empty None
+                let { Verdicts = verdicts } = decideOn colony
 
                 Expect.equal
                     verdicts
@@ -796,7 +788,7 @@ let pickupTaskTests =
                                 })
                     }
 
-                let { Verdicts = verdicts } = decide colony Map.empty Set.empty None
+                let { Verdicts = verdicts } = decideOn colony
 
                 Expect.equal
                     verdicts
@@ -831,7 +823,7 @@ let pickupTaskTests =
                         Intents = intents
                         Assignments = assignments
                     } =
-                    decide snapshot Map.empty Set.empty None
+                    decideOn snapshot
 
                 Expect.equal
                     (pickersOf assignments "pile-out")
@@ -879,10 +871,7 @@ let fullContainerTests =
                                 "src-b", { X = 27; Y = 10 }, Source
                                 "can-b", { X = 26; Y = 10 }, Structure BuiltKind.Container
                             ]
-                        |> withHome (fun layer ->
-                            { layer with
-                                CreepPositions = Map.ofList [ "h", { X = 14; Y = 10 } ]
-                            })
+                        |> withCreepsAt [ "h", { X = 14; Y = 10 } ]
 
                     { bareRespawn with
                         Sources = [ source "src-a"; source "src-b" ]

@@ -37,10 +37,7 @@ let quotaRoom spawnX =
                     "spawn-1", Structure BuiltKind.Spawn
                 ]
     }
-    |> withHome (fun layer ->
-        { layer with
-            Obstacles = Set.singleton { X = spawnX; Y = 10 }
-        })
+    |> withObstacles [ { X = spawnX; Y = 10 } ]
 
 /// The quota fixture's colony: `spawnCount` idle spawns drawing on the one
 /// 300-capacity bank holding `available` energy.
@@ -248,11 +245,7 @@ let internal leadColony life =
         Creeps = [ worker "w1" 0 50; reserver "r1" |> withLife life ]
         Spatial =
             room.Spatial
-            |> withHome (fun layer ->
-                { layer with
-                    CreepPositions =
-                        Map.ofList [ "w1", { X = 25; Y = 27 }; "r1", { X = 25; Y = 29 } ]
-                })
+            |> withCreepsAt [ "w1", { X = 25; Y = 27 }; "r1", { X = 25; Y = 29 } ]
     }
 
 /// ADR 0042's own reserver body, which a deficit of one to 1,200 ticks
@@ -341,8 +334,7 @@ let internal banked capacity (colony: ColonyView) =
 /// own arithmetic down (ADR 0009) — the quota being observability and never a
 /// number anything downstream reads.
 let internal rowOf name colony =
-    (decide colony Map.empty Set.empty None).Quotas.Rows
-    |> List.tryFind (fun row -> row.Row = name)
+    (decideOn colony).Quotas.Rows |> List.tryFind (fun row -> row.Row = name)
 
 let internal guardQuotaOf colony =
     rowOf "guard" colony |> Option.map (fun row -> row.Quota)
@@ -397,11 +389,7 @@ let internal upgraderLeadColony body life =
         Creeps = [ worker "w1" 0 50; creepWith "u1" 0 50 body |> withLife life ]
         Spatial =
             room.Spatial
-            |> withHome (fun layer ->
-                { layer with
-                    CreepPositions =
-                        Map.ofList [ "w1", { X = 25; Y = 27 }; "u1", { X = 25; Y = 29 } ]
-                })
+            |> withCreepsAt [ "w1", { X = 25; Y = 27 }; "u1", { X = 25; Y = 29 } ]
     }
 
 let internal leadCasts body life =

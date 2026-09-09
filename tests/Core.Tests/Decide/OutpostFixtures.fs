@@ -89,7 +89,7 @@ let internal twoRockColony (westContainer: (string * Pos) list) =
 /// Which Task won the one Anchor, and what separated it from its closest
 /// rival — `matchOf`'s reading for the body these cases hire (ADR 0009).
 let internal anchorMatch (colony: ColonyView) =
-    let { Verdicts = verdicts } = decide colony Map.empty Set.empty None
+    let { Verdicts = verdicts } = decideOn colony
 
     verdicts
     |> List.tryPick (function
@@ -184,7 +184,7 @@ let internal withOutpostGround room terrain placed (colony: ColonyView) =
 /// Every container site the tick asks for, room beside tile, in the order
 /// the colony emits them — the whole of what this rule adds to a Decision.
 let internal containerSites (colony: ColonyView) =
-    let { Intents = intents } = decide colony Map.empty Set.empty None
+    let { Intents = intents } = decideOn colony
 
     intents
     |> List.choose (function

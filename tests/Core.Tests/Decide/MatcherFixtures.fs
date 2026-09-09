@@ -97,10 +97,7 @@ let nearFarCorridor creepPositions =
         [
             for y in 9..21 -> { X = 10; Y = y }, (if y = 10 || y = 20 then Wall else Plain)
         ]
-    |> withHome (fun layer ->
-        { layer with
-            CreepPositions = Map.ofList creepPositions
-        })
+    |> withCreepsAt creepPositions
 
 /// The Resolver's movement Verdicts at the same seam, with the named
 /// creeps on the verbose list (ADR 0018).
@@ -140,11 +137,7 @@ let headOnSwap =
         Spatial =
 
             spatial [ "src-a", { X = 10; Y = 10 }; "src-b", { X = 10; Y = 13 } ] terrain
-            |> withHome (fun layer ->
-                { layer with
-                    CreepPositions =
-                        Map.ofList [ "wa", { X = 10; Y = 12 }; "wb", { X = 10; Y = 11 } ]
-                })
+            |> withCreepsAt [ "wa", { X = 10; Y = 12 }; "wb", { X = 10; Y = 11 } ]
     }
 
 /// The lane with an east-bound body of ours on (11,12) and whatever holds
@@ -157,14 +150,10 @@ let laneWith pocket ours foreign =
         Creeps = worker "eb" 0 50 :: ours
         Spatial =
             lane pocket
-            |> withHome (fun layer ->
-                { layer with
-                    CreepPositions =
-                        Map.ofList (
-                            ("eb", { X = 11; Y = 12 })
-                            :: (ours |> List.map (fun c -> c.Name, { X = 12; Y = 12 }))
-                        )
-                })
+            |> withCreepsAt (
+                ("eb", { X = 11; Y = 12 })
+                :: (ours |> List.map (fun c -> c.Name, { X = 12; Y = 12 }))
+            )
         Foreign =
             if foreign then
                 Set.singleton (RoomPos.at "W1N1" { X = 12; Y = 12 })
@@ -203,10 +192,7 @@ let internal pocketFacing (mirror: int -> int) =
            @ [ controller, Wall ]) with
         Stores = Map.ofList [ "can-buf", 0 ]
     }
-    |> withHome (fun layer ->
-        { layer with
-            Obstacles = Set.singleton controller
-        })
+    |> withObstacles [ controller ]
     |> withTargets
         [
             "ctrl-1", controller, Controller
@@ -227,12 +213,7 @@ let pocketColonyIn room creeps positions =
     { bareRespawn with
         Sources = []
         Creeps = creeps
-        Spatial =
-            room
-            |> withHome (fun layer ->
-                { layer with
-                    CreepPositions = Map.ofList positions
-                })
+        Spatial = room |> withCreepsAt positions
     }
 
 let pocketColony creeps positions =
@@ -287,10 +268,7 @@ let internal wallStorageRoom =
            @ [ for x in 11..18 -> { X = x; Y = 11 }, Plain ]) with
         Stores = Map.ofList [ "sto-1", 0 ]
     }
-    |> withHome (fun layer ->
-        { layer with
-            Obstacles = Set.singleton { X = 10; Y = 10 }
-        })
+    |> withObstacles [ { X = 10; Y = 10 } ]
     |> withTargets [ "sto-1", { X = 10; Y = 10 }, Structure BuiltKind.Storage ]
 
 /// The colony standing on it: no source, no controller and no placed spawn, so
@@ -300,12 +278,7 @@ let wallStorageColony creeps positions =
         Sources = []
         Controller = None
         Creeps = creeps
-        Spatial =
-            wallStorageRoom
-            |> withHome (fun layer ->
-                { layer with
-                    CreepPositions = Map.ofList positions
-                })
+        Spatial = wallStorageRoom |> withCreepsAt positions
     }
 
 /// The tier colony with the given hunger: one loaded Carry-only body
@@ -317,12 +290,7 @@ let tierColony refillables =
         Sources = []
         Refillables = refillables
         Creeps = [ creepWith "h1" 100 0 [ Carry; Carry; Move ] ]
-        Spatial =
-            tierRoom
-            |> withHome (fun layer ->
-                { layer with
-                    CreepPositions = Map.ofList [ "h1", { X = 18; Y = 10 } ]
-                })
+        Spatial = tierRoom |> withCreepsAt [ "h1", { X = 18; Y = 10 } ]
     }
 
 /// The surplus fixture: one loaded generalist and a hungry tower, in a

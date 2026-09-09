@@ -35,7 +35,7 @@ let workforceTests =
                         Spatial = fiveSeats
                     }
 
-                let { Intents = intents } = decide snapshot Map.empty Set.empty None
+                let { Intents = intents } = decideOn snapshot
 
                 Expect.hasLength
                     (spawnIntents intents)
@@ -50,7 +50,7 @@ let workforceTests =
                         Spatial = fiveSeats
                     }
 
-                let { Intents = intents } = decide snapshot Map.empty Set.empty None
+                let { Intents = intents } = decideOn snapshot
                 Expect.isEmpty (spawnIntents intents) "workforce already at target"
             }
 
@@ -64,7 +64,7 @@ let workforceTests =
                         Spatial = oneSeat
                     }
 
-                let { Intents = intents } = decide snapshot Map.empty Set.empty None
+                let { Intents = intents } = decideOn snapshot
 
                 Expect.hasLength
                     (spawnIntents intents)
@@ -79,7 +79,7 @@ let workforceTests =
                         Spatial = spatial [] []
                     }
 
-                let { Intents = intents } = decide snapshot Map.empty Set.empty None
+                let { Intents = intents } = decideOn snapshot
                 Expect.isEmpty (spawnIntents intents) "only the floor applies"
             }
         ]
@@ -187,7 +187,7 @@ let haulerTests =
                     (Some 6)
                     "three paved steps out and back: 5 ticks became 6"
 
-                let { Intents = intents } = decide snapshot Map.empty Set.empty None
+                let { Intents = intents } = decideOn snapshot
 
                 Expect.equal
                     (haulerCasts intents)
@@ -219,7 +219,7 @@ let haulerTests =
                                 })
                     }
 
-                let { Intents = intents } = decide snapshot Map.empty Set.empty None
+                let { Intents = intents } = decideOn snapshot
 
                 Expect.equal (haulerCasts intents) 0 "no container, nothing to ship"
 
@@ -247,7 +247,7 @@ let haulerTests =
                         Creeps = [ worker "w1" 0 50 ]
                     }
 
-                let { Intents = intents } = decide snapshot Map.empty Set.empty None
+                let { Intents = intents } = decideOn snapshot
 
                 match spawnIntents intents with
                 | [ (_, firstBody, firstName)
@@ -280,7 +280,7 @@ let haulerTests =
                         Creeps = []
                     }
 
-                let { Intents = intents } = decide snapshot Map.empty Set.empty None
+                let { Intents = intents } = decideOn snapshot
 
                 match spawnIntents intents with
                 | [ (_, body, creepName) ] ->
@@ -297,17 +297,14 @@ let haulerTests =
                             { haulRoom with
                                 Stores = Map.ofList [ "can-src", 500; "can-ctrl", 800 ]
                             }
-                            |> withHome (fun layer ->
-                                { layer with
-                                    CreepPositions = Map.ofList [ "h1", { X = 12; Y = 10 } ]
-                                })
+                            |> withCreepsAt [ "h1", { X = 12; Y = 10 } ]
                     }
 
                 let {
                         Intents = intents
                         Assignments = assignments
                     } =
-                    decide snapshot Map.empty Set.empty None
+                    decideOn snapshot
 
                 Expect.equal
                     (Map.tryFind "h1" assignments)
@@ -332,13 +329,10 @@ let haulerTests =
                             { haulRoom with
                                 Stores = Map.ofList [ "can-src", 500; "can-ctrl", 800 ]
                             }
-                            |> withHome (fun layer ->
-                                { layer with
-                                    CreepPositions = Map.ofList [ "h1", { X = 17; Y = 10 } ]
-                                })
+                            |> withCreepsAt [ "h1", { X = 17; Y = 10 } ]
                     }
 
-                let { Assignments = assignments } = decide snapshot Map.empty Set.empty None
+                let { Assignments = assignments } = decideOn snapshot
 
                 Expect.equal
                     (Map.tryFind "h1" assignments)
@@ -377,13 +371,10 @@ let haulerTests =
                             { haulRoom with
                                 Stores = Map.ofList [ "can-src", 500; "can-ctrl", 800 ]
                             }
-                            |> withHome (fun layer ->
-                                { layer with
-                                    CreepPositions = Map.ofList [ "w1", { X = 17; Y = 10 } ]
-                                })
+                            |> withCreepsAt [ "w1", { X = 17; Y = 10 } ]
                     }
 
-                let { Assignments = assignments } = decide snapshot Map.empty Set.empty None
+                let { Assignments = assignments } = decideOn snapshot
 
                 Expect.equal
                     (Map.tryFind "w1" assignments)
@@ -399,19 +390,14 @@ let haulerTests =
                 let snapshot =
                     { haulColony with
                         Creeps = [ hauler "h1" 0 100 ]
-                        Spatial =
-                            haulRoom
-                            |> withHome (fun layer ->
-                                { layer with
-                                    CreepPositions = Map.ofList [ "h1", { X = 17; Y = 10 } ]
-                                })
+                        Spatial = haulRoom |> withCreepsAt [ "h1", { X = 17; Y = 10 } ]
                     }
 
                 let {
                         Assignments = assignments
                         Verdicts = verdicts
                     } =
-                    decide snapshot Map.empty Set.empty None
+                    decideOn snapshot
 
                 Expect.equal (Map.tryFind "h1" assignments) None "no intake a hauler may draw from"
 
@@ -432,10 +418,7 @@ let haulerTests =
                             { haulRoom with
                                 Stores = Map.ofList [ "can-src", 500; "can-ctrl", 800 ]
                             }
-                            |> withHome (fun layer ->
-                                { layer with
-                                    CreepPositions = Map.ofList [ "h1", { X = 12; Y = 10 } ]
-                                })
+                            |> withCreepsAt [ "h1", { X = 12; Y = 10 } ]
                     }
 
                 let remembered = Map.ofList [ "h1", taskId (Withdraw "can-src") ]
@@ -601,7 +584,7 @@ let incomeWorkforceTests =
                         Creeps = incomeFleet
                     }
 
-                let { Intents = intents } = decide snapshot Map.empty Set.empty None
+                let { Intents = intents } = decideOn snapshot
                 Expect.isEmpty (spawnIntents intents) "the fleet already matches the target"
             }
 
@@ -622,7 +605,7 @@ let incomeWorkforceTests =
                         Creeps = richestIncomeFleet 1
                     }
 
-                let { Intents = intents } = decide snapshot Map.empty Set.empty None
+                let { Intents = intents } = decideOn snapshot
 
                 match spawnIntents intents with
                 | [ (_, _, creepName) ] ->
@@ -639,7 +622,7 @@ let incomeWorkforceTests =
                         Creeps = richestIncomeFleet 2
                     }
 
-                let { Intents = intents } = decide snapshot Map.empty Set.empty None
+                let { Intents = intents } = decideOn snapshot
                 Expect.isEmpty (spawnIntents intents) "the fleet already matches the target"
             }
 
@@ -654,7 +637,7 @@ let incomeWorkforceTests =
                         Creeps = richIncomeFleet 4
                     }
 
-                let { Intents = intents } = decide snapshot Map.empty Set.empty None
+                let { Intents = intents } = decideOn snapshot
                 Expect.isEmpty (spawnIntents intents) "the fleet already matches the target"
             }
 
@@ -671,7 +654,7 @@ let incomeWorkforceTests =
                         Creeps = richIncomeFleet 3
                     }
 
-                let { Intents = intents } = decide snapshot Map.empty Set.empty None
+                let { Intents = intents } = decideOn snapshot
 
                 match spawnIntents intents with
                 | [ (_, _, creepName) ] ->
@@ -715,12 +698,12 @@ let outpostWorkforceTests =
                     )
 
                 Expect.isEmpty
-                    (spawnIntents (decide atTarget Map.empty Set.empty None).Intents)
+                    (spawnIntents (decideOn atTarget).Intents)
                     "the premise: the fleet already matches the target"
 
                 Expect.equal
-                    (spawnIntents (decide withOutpostSource Map.empty Set.empty None).Intents)
-                    (spawnIntents (decide atTarget Map.empty Set.empty None).Intents)
+                    (spawnIntents (decideOn withOutpostSource).Intents)
+                    (spawnIntents (decideOn atTarget).Intents)
                     "three Seats a room away hire nobody: the same colony casts the same bodies"
             }
 
@@ -749,7 +732,7 @@ let outpostWorkforceTests =
                         })
 
                 Expect.hasLength
-                    (spawnIntents (decide atHome Map.empty Set.empty None).Intents)
+                    (spawnIntents (decideOn atHome).Intents)
                     3
                     "three Seats at home raise the target by three, and the idle spawns cast into it"
             }
@@ -785,8 +768,8 @@ let outpostWorkforceTests =
                     "the premise: (11,10) really is a Post of the home room"
 
                 Expect.equal
-                    (spawnIntents (decide colliding Map.empty Set.empty None).Intents)
-                    (spawnIntents (decide atTarget Map.empty Set.empty None).Intents)
+                    (spawnIntents (decideOn colliding).Intents)
+                    (spawnIntents (decideOn atTarget).Intents)
                     "a home container on the coordinates of an outpost Seat is no Post of that source's"
             }
 
@@ -817,12 +800,12 @@ let outpostWorkforceTests =
                     |> withOutpost "W1N2" [ "src-out", rock, Source ] (threeSeatField rock)
 
                 Expect.isNonEmpty
-                    (placementIntents (decide colony Map.empty Set.empty None).Intents)
+                    (placementIntents (decideOn colony).Intents)
                     "the premise: this colony really does place a plan to move"
 
                 Expect.equal
-                    (placementIntents (decide joined Map.empty Set.empty None).Intents)
-                    (placementIntents (decide colony Map.empty Set.empty None).Intents)
+                    (placementIntents (decideOn joined).Intents)
+                    (placementIntents (decideOn colony).Intents)
                     "the same room plans the same tiles: a source a room away is no source of its"
             }
         ]

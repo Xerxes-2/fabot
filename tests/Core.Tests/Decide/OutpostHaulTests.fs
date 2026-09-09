@@ -310,7 +310,7 @@ let outpostContainerTests =
                     |> withOutpostGround "W1N2" detourGround [ "src-out", outpostSource, Source ]
 
                 let atHome colony =
-                    let { Intents = intents } = decide colony Map.empty Set.empty None
+                    let { Intents = intents } = decideOn colony
 
                     placementIntents intents |> List.filter (fun (room, _, _) -> room = "W1N1")
 
@@ -538,7 +538,7 @@ let outpostHaulTests =
                     "the premise: held, the container ships ten a tick"
 
                 let recalled = decide lapsed Map.empty Set.empty (Some previous)
-                let fresh = decide lapsed Map.empty Set.empty None
+                let fresh = decideOn lapsed
 
                 Expect.equal (shipped fresh.Memo) 255 "the premise: lapsed, it ships five"
 
@@ -567,7 +567,7 @@ let outpostHaulTests =
                 let standing = haulHome |> withHaulOutpost (Some(reservedRoom true 4000))
                 let before = standing |> beforeHaulContainer
 
-                let previous = (decide before Map.empty Set.empty None).Memo
+                let previous = (decideOn before).Memo
 
                 Expect.equal
                     previous.HaulerQuota
@@ -575,7 +575,7 @@ let outpostHaulTests =
                     "the premise: with no container on the Seat there is no haul to hire for"
 
                 let recalled = decide standing Map.empty Set.empty (Some previous)
-                let fresh = decide standing Map.empty Set.empty None
+                let fresh = decideOn standing
 
                 Expect.equal fresh.Memo.HaulerQuota 2 "the premise: standing, it hires two"
 

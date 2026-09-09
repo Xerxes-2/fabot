@@ -134,7 +134,7 @@ let rampartTests =
                         Sources = [ source "src-a"; source "src-b"; source "src-c" ]
                     }
 
-                let { Intents = intents } = decide colony Map.empty Set.empty None
+                let { Intents = intents } = decideOn colony
 
                 Expect.equal
                     (sitesOfKind Rampart intents)
@@ -218,7 +218,7 @@ let safeModeTests =
                         Hostiles = [ hostile [ BodyPart.Claim; BodyPart.Claim; Move; Move ] ]
                     }
 
-                let { Intents = intents } = decide snapshot Map.empty Set.empty None
+                let { Intents = intents } = decideOn snapshot
                 Expect.equal (activations intents) [ "ctrl-1" ] "safe mode fires immediately"
             }
 
@@ -246,7 +246,7 @@ let safeModeTests =
                     }
 
                 let fires (colony: ColonyView) =
-                    let { Intents = intents } = decide colony Map.empty Set.empty None
+                    let { Intents = intents } = decideOn colony
                     activations intents
 
                 Expect.equal
@@ -275,7 +275,7 @@ let safeModeTests =
                         Hostiles = [ hostileAt "h-1" { X = 25; Y = 29 } [ BodyPart.Claim; Move ] ]
                     }
 
-                let { Intents = intents } = decide snapshot Map.empty Set.empty None
+                let { Intents = intents } = decideOn snapshot
                 Expect.isEmpty (activations intents) "range 4: the tap cannot land yet"
             }
 
@@ -288,7 +288,7 @@ let safeModeTests =
                         Hostiles = [ hostileAt "h-1" { X = 28; Y = 25 } [ BodyPart.Claim; Move ] ]
                     }
 
-                let { Intents = intents } = decide snapshot Map.empty Set.empty None
+                let { Intents = intents } = decideOn snapshot
                 Expect.equal (activations intents) [ "ctrl-1" ] "the deadline is now"
             }
 
@@ -305,7 +305,7 @@ let safeModeTests =
                         Hostiles = [ hostile [ Tough; Attack; RangedAttack; Heal; Move ] ]
                     }
 
-                let { Intents = intents } = decide snapshot Map.empty Set.empty None
+                let { Intents = intents } = decideOn snapshot
 
                 Expect.isEmpty
                     (activations intents)
@@ -323,7 +323,7 @@ let safeModeTests =
                         Hostiles = [ hostile [ BodyPart.Claim; Move ] ]
                     }
 
-                let { Intents = intents } = decide snapshot Map.empty Set.empty None
+                let { Intents = intents } = decideOn snapshot
                 Expect.isEmpty (activations intents) "nothing to activate with"
             }
 
@@ -338,7 +338,7 @@ let safeModeTests =
                         Hostiles = [ hostile [ BodyPart.Claim; Move ] ]
                     }
 
-                let { Intents = intents } = decide snapshot Map.empty Set.empty None
+                let { Intents = intents } = decideOn snapshot
                 Expect.isEmpty (activations intents) "the room is already protected"
             }
 
@@ -371,7 +371,7 @@ let safeModeTests =
             test "a dented Keep in an empty room holds the stock" {
                 // Damage alone is not a raid: the window between a raid
                 // leaving and a worker patching the Keep spends nothing.
-                let { Intents = intents } = decide dentedSpawn Map.empty Set.empty None
+                let { Intents = intents } = decideOn dentedSpawn
                 Expect.isEmpty (activations intents) "nobody is here to be held off"
             }
 
@@ -385,7 +385,7 @@ let safeModeTests =
                     }
                     |> facing [ hostile [ Attack; Attack; Move ] ]
 
-                let { Intents = intents } = decide snapshot Map.empty Set.empty None
+                let { Intents = intents } = decideOn snapshot
                 Expect.isEmpty (activations intents) "an intact Keep is not yet certain harm"
             }
 
@@ -397,7 +397,7 @@ let safeModeTests =
                     |> withHits "tower-1" BuiltKind.Tower 4999 5000
                     |> facing [ hostile [ Work; Work; Move ] ]
 
-                let { Intents = intents } = decide snapshot Map.empty Set.empty None
+                let { Intents = intents } = decideOn snapshot
                 Expect.equal (activations intents) [ "ctrl-1" ] "a dismantler is doing the harm"
             }
 
@@ -413,7 +413,7 @@ let safeModeTests =
                     |> withHits "ram-1" BuiltKind.Rampart 50_000 3_000_000
                     |> facing [ hostile [ Work; Move ] ]
 
-                let { Intents = intents } = decide snapshot Map.empty Set.empty None
+                let { Intents = intents } = decideOn snapshot
 
                 Expect.isEmpty
                     (activations intents)
@@ -439,15 +439,15 @@ let safeModeTests =
                             SafeModeActive = true
                         }
 
-                let { Intents = onEmpty } = decide empty Map.empty Set.empty None
-                let { Intents = onRunning } = decide running Map.empty Set.empty None
+                let { Intents = onEmpty } = decideOn empty
+                let { Intents = onRunning } = decideOn running
 
                 Expect.isEmpty (activations onEmpty) "an empty stock has nothing to spend"
                 Expect.isEmpty (activations onRunning) "already protected, whichever arm asks"
             }
 
             test "a quiet room fires nothing" {
-                let { Intents = intents } = decide bareRespawn Map.empty Set.empty None
+                let { Intents = intents } = decideOn bareRespawn
                 Expect.isEmpty (activations intents) "no hostiles, no reflex"
             }
         ]
@@ -480,7 +480,7 @@ let fireReflexTests =
                         [ "tower-1", { X = 10; Y = 40 } ]
                         [ hostileAt "h-1" { X = 20; Y = 20 } [ Attack; Move ] ]
 
-                let { Intents = intents } = decide snapshot Map.empty Set.empty None
+                let { Intents = intents } = decideOn snapshot
                 Expect.equal (shots intents) [ "tower-1", "h-1" ] "any hostile is fired on"
             }
 
@@ -493,7 +493,7 @@ let fireReflexTests =
                             hostileAt "h-near" { X = 12; Y = 38 } [ Attack; Move ]
                         ]
 
-                let { Intents = intents } = decide snapshot Map.empty Set.empty None
+                let { Intents = intents } = decideOn snapshot
                 Expect.equal (shots intents) [ "tower-1", "h-near" ] "never waste a decayed shot"
             }
 
@@ -506,7 +506,7 @@ let fireReflexTests =
                             hostileAt "h-a" { X = 10; Y = 45 } [ Attack; Move ]
                         ]
 
-                let { Intents = intents } = decide snapshot Map.empty Set.empty None
+                let { Intents = intents } = decideOn snapshot
                 Expect.equal (shots intents) [ "tower-1", "h-a" ] "same range: lowest id wins"
             }
 
@@ -519,7 +519,7 @@ let fireReflexTests =
                             hostileAt "h-b" { X = 38; Y = 12 } [ Attack; Move ]
                         ]
 
-                let { Intents = intents } = decide snapshot Map.empty Set.empty None
+                let { Intents = intents } = decideOn snapshot
 
                 Expect.equal
                     (shots intents |> List.sort)
@@ -529,7 +529,7 @@ let fireReflexTests =
 
             test "a quiet room fires no shot" {
                 let snapshot = towerColony [ "tower-1", { X = 10; Y = 40 } ] []
-                let { Intents = intents } = decide snapshot Map.empty Set.empty None
+                let { Intents = intents } = decideOn snapshot
                 Expect.isEmpty (shots intents) "no hostile, no reflex"
             }
 
@@ -542,7 +542,7 @@ let fireReflexTests =
                         Hostiles = [ hostileAt "h-1" { X = 20; Y = 20 } [ Attack; Move ] ]
                     }
 
-                let { Intents = intents } = decide snapshot Map.empty Set.empty None
+                let { Intents = intents } = decideOn snapshot
                 Expect.isEmpty (shots intents) "no tower, no shot"
 
                 Expect.equal
@@ -571,7 +571,7 @@ let downgradeDeadlineTests =
                                 }
                     }
 
-                let { Assignments = kept } = decide snapshot Map.empty Set.empty None
+                let { Assignments = kept } = decideOn snapshot
 
                 Expect.equal
                     (Map.tryFind "w1" kept)
@@ -595,7 +595,7 @@ let downgradeDeadlineTests =
                                 }
                     }
 
-                let { Assignments = kept } = decide snapshot Map.empty Set.empty None
+                let { Assignments = kept } = decideOn snapshot
 
                 Expect.equal
                     (Map.tryFind "w1" kept)
@@ -615,7 +615,7 @@ let downgradeDeadlineTests =
                                 }
                     }
 
-                let { Assignments = kept } = decide snapshot Map.empty Set.empty None
+                let { Assignments = kept } = decideOn snapshot
 
                 Expect.equal
                     (Map.tryFind "w1" kept)
@@ -630,7 +630,7 @@ let downgradeDeadlineTests =
                         Creeps = [ worker "w1" 50 0 ]
                     }
 
-                let { Assignments = kept } = decide snapshot Map.empty Set.empty None
+                let { Assignments = kept } = decideOn snapshot
 
                 Expect.equal
                     (Map.tryFind "w1" kept)
@@ -773,10 +773,7 @@ let raidLane creeps =
     spatial
         [ "src-a", { X = 25; Y = 19 } ]
         ([ { X = 25; Y = 19 }, Wall ] @ [ for y in 20..30 -> { X = 25; Y = y }, Plain ])
-    |> withHome (fun layer ->
-        { layer with
-            CreepPositions = Map.ofList creeps
-        })
+    |> withCreepsAt creeps
 
 /// A colony over the raid lane: one source, no controller and no hungry
 /// structure, so Harvest — and, while a Threat stands in it, Flee — is the
@@ -822,10 +819,7 @@ let seatPocket creeps =
            @ [ { X = 10; Y = 10 }, Wall ]) with
         TargetKinds = Map.ofList [ "src-a", Source ]
     }
-    |> withHome (fun layer ->
-        { layer with
-            CreepPositions = Map.ofList creeps
-        })
+    |> withCreepsAt creeps
 
 /// A colony over that pocket with the source out of the pool, so the body
 /// standing in it has no Task at all and the mover's idle rule is the only
@@ -884,7 +878,7 @@ let threatGateTests =
                 let standing = seatPocketColony [ garrison "a1" ] [ "a1", { X = 11; Y = 11 } ]
 
                 let movesOf colony =
-                    moveIntentsFor "a1" (decide colony Map.empty Set.empty None).Intents
+                    moveIntentsFor "a1" (decideOn colony).Intents
 
                 Expect.equal
                     (movesOf standing)
@@ -1073,10 +1067,7 @@ let hotCornerRoom =
             { X = 23; Y = 29 }, Plain
             { X = 23; Y = 28 }, Plain
         ]
-    |> withHome (fun layer ->
-        { layer with
-            CreepPositions = Map.ofList [ "u1", { X = 25; Y = 29 } ]
-        })
+    |> withCreepsAt [ "u1", { X = 25; Y = 29 } ]
 
 /// The colony over it: one loaded generalist, and Upgrade the whole pool.
 let hotCornerColony =
@@ -1105,7 +1096,7 @@ let hotCornerTests =
                         Intents = quiet
                         Assignments = before
                     } =
-                    decide hotCornerColony Map.empty Set.empty None
+                    decideOn hotCornerColony
 
                 Expect.equal
                     (Map.tryFind "u1" before)
@@ -1126,7 +1117,7 @@ let hotCornerTests =
                         Assignments = after
                         Verdicts = verdicts
                     } =
-                    decide raided Map.empty Set.empty None
+                    decideOn raided
 
                 Expect.equal
                     (Map.tryFind "u1" after)
@@ -1171,7 +1162,7 @@ let fleeTests =
                         Assignments = assignments
                         Verdicts = verdicts
                     } =
-                    decide colony Map.empty Set.empty None
+                    decideOn colony
 
                 Expect.equal (Map.tryFind "w1" assignments) (Some(taskId Flee)) "the creep runs"
 
@@ -1269,7 +1260,7 @@ let fleeTests =
                     |> facing [ hostileAt "h-1" { X = 25; Y = 20 } [ Attack; Move ] ]
 
                 let assignmentOf colony =
-                    let { Assignments = assignments } = decide colony Map.empty Set.empty None
+                    let { Assignments = assignments } = decideOn colony
                     Map.tryFind "w1" assignments
 
                 Expect.equal
@@ -1299,7 +1290,7 @@ let fleeTests =
                     }
                     |> facing [ hostileAt "h-1" { X = 25; Y = 20 } [ Attack; Move ] ]
 
-                let { Assignments = assignments } = decide colony Map.empty Set.empty None
+                let { Assignments = assignments } = decideOn colony
 
                 Expect.equal
                     (Map.tryFind "h1" assignments)
@@ -1353,7 +1344,7 @@ let fleeTests =
                     laneColony [ worker "w1" 0 100 ] [ "w1", { X = 25; Y = 22 } ]
                     |> facing [ hostileAt "h-1" { X = 25; Y = 20 } [ Attack; Move ] ]
 
-                let { Intents = intents } = decide colony Map.empty Set.empty None
+                let { Intents = intents } = decideOn colony
 
                 Expect.equal (moveIntents intents) [ "w1", Bottom ] "one step away from the Threat"
 
@@ -1371,7 +1362,7 @@ let fleeTests =
                         [ "w1", { X = 25; Y = 22 }; "w2", { X = 25; Y = 23 } ]
                     |> facing [ hostileAt "h-1" { X = 25; Y = 20 } [ Attack; Move ] ]
 
-                let { Assignments = assignments } = decide colony Map.empty Set.empty None
+                let { Assignments = assignments } = decideOn colony
 
                 Expect.equal
                     (assignments |> Map.toList |> List.sort)
@@ -1441,17 +1432,12 @@ let spawnHoldTests =
                 let staffed room =
                     { atLevel 2 room with
                         Creeps = [ worker "w1" 0 100 ]
-                        Spatial =
-                            room
-                            |> withHome (fun layer ->
-                                { layer with
-                                    CreepPositions = Map.ofList [ "w1", { X = 25; Y = 27 } ]
-                                })
+                        Spatial = room |> withCreepsAt [ "w1", { X = 25; Y = 27 } ]
                     }
 
                 let colony = staffed (openRoom 6)
 
-                let { Intents = quiet } = decide colony Map.empty Set.empty None
+                let { Intents = quiet } = decideOn colony
                 Expect.isNonEmpty (spawnIntents quiet) "a quiet colony casts its deficit"
 
                 let { Intents = beside } =
@@ -1483,7 +1469,7 @@ let spawnHoldTests =
                 // one that can least afford to be born under fire.
                 let empty = atLevel 2 (openRoom 6)
 
-                let { Intents = quiet } = decide empty Map.empty Set.empty None
+                let { Intents = quiet } = decideOn empty
 
                 Expect.isNonEmpty
                     (spawnIntents quiet)
@@ -1516,10 +1502,7 @@ let private twoRoomColony (hostiles: HostileInfo list) =
         Hostiles = hostiles
         Spatial =
             colony.Spatial
-            |> withHome (fun layer ->
-                { layer with
-                    CreepPositions = Map.ofList [ "wh", { X = 10; Y = 10 } ]
-                })
+            |> withCreepsAt [ "wh", { X = 10; Y = 10 } ]
             |> withNeighbour
                 "W1N2"
                 { RoomLayer.empty with
@@ -1659,12 +1642,7 @@ let layeredThreatTests =
                 let colony =
                     { room with
                         Creeps = [ worker "w1" 0 100 ]
-                        Spatial =
-                            room.Spatial
-                            |> withHome (fun layer ->
-                                { layer with
-                                    CreepPositions = Map.ofList [ "w1", { X = 25; Y = 27 } ]
-                                })
+                        Spatial = room.Spatial |> withCreepsAt [ "w1", { X = 25; Y = 27 } ]
                     }
 
                 let castsWith hostiles =

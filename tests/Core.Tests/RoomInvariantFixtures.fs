@@ -444,7 +444,7 @@ let internal withExtensions (tiles: Pos list) (colony: ColonyView) =
                 tiles
                 |> List.mapi (fun index tile -> $"ext-{index}", tile, Structure BuiltKind.Extension)
             )
-            |> Fixtures.withHome (fun layer ->
+            |> withHome (fun layer ->
                 { layer with
                     Obstacles = Set.union layer.Obstacles (Set.ofList tiles)
                 })
@@ -807,10 +807,7 @@ let internal declaredColony level =
 /// answers must not depend on what was asked of it before.
 let internal standingIn (capture: RoomCapture) (spawn: Pos) (creep: CreepInfo) (stand: Pos) =
     (project capture spawn None).Spatial
-    |> AtlasFixtures.withHome (fun layer ->
-        { layer with
-            CreepPositions = Map.ofList [ creep.Name, stand ]
-        })
+    |> withCreepsAt [ creep.Name, stand ]
     |> AtlasFixtures.snapshotWith [ creep ]
     |> ofView
 

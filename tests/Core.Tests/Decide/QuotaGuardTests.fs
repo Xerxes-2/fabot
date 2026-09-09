@@ -289,7 +289,7 @@ let guardRowTests =
                 // reserver is the head of the cascade exactly as ADR 0042
                 // left it.
                 let castNames colony =
-                    spawnIntents (decide colony Map.empty Set.empty None).Intents
+                    spawnIntents (decideOn colony).Intents
                     |> List.map (fun (_, _, name: string) -> name.Split('-').[0])
 
                 Expect.equal
@@ -333,7 +333,7 @@ let guardRowTests =
                     { raided with
                         Bank = bank available capacity
                     }
-                    |> fun colony -> decide colony Map.empty Set.empty None
+                    |> fun colony -> decideOn colony
                     |> fun result -> guardCasts result.Intents
 
                 Expect.equal
@@ -358,8 +358,7 @@ let guardRowTests =
                 // the guard's whole 1,500-tick life. Pairwise, one body
                 // apart.
                 let livingOf colony =
-                    (decide colony Map.empty Set.empty None).Quotas.Rows
-                    |> List.map (fun row -> row.Row, row.Living)
+                    (decideOn colony).Quotas.Rows |> List.map (fun row -> row.Row, row.Living)
 
                 let quiet = livingOf (guardColony [] [])
                 let standing = livingOf (guardColony [] [ guard "g-1", outpostSeat ])
@@ -466,7 +465,7 @@ let supplyFloorTests =
                 // the deadlock are Anchors. So falling through the cascade
                 // alone still casts nothing: the floor is the half that
                 // moves.
-                match spawnIntents (decide deadlockColony Map.empty Set.empty None).Intents with
+                match spawnIntents (decideOn deadlockColony).Intents with
                 | [ (_, body, creepName) ] ->
                     Expect.stringStarts
                         creepName
@@ -497,7 +496,7 @@ let supplyFloorTests =
                     "the premise: every body in this fleet carries a Carry part"
 
                 Expect.isNonEmpty
-                    (spawnIntents (decide deadlockColony Map.empty Set.empty None).Intents)
+                    (spawnIntents (decideOn deadlockColony).Intents)
                     "and the colony still hires a carrier, because none of them can refill one"
             }
 
@@ -519,7 +518,7 @@ let supplyFloorTests =
                         Bank = bank 1800 1800
                     }
 
-                match spawnIntents (decide full Map.empty Set.empty None).Intents with
+                match spawnIntents (decideOn full).Intents with
                 | [ (_, body, creepName) ] ->
                     Expect.stringStarts
                         creepName
@@ -547,7 +546,7 @@ let supplyFloorTests =
                         Bank = bank 1800 1800
                     }
 
-                match spawnIntents (decide withHauler Map.empty Set.empty None).Intents with
+                match spawnIntents (decideOn withHauler).Intents with
                 | [ (_, _, creepName) ] ->
                     Expect.stringStarts
                         creepName

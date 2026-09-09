@@ -248,10 +248,7 @@ let successionRoom =
     { spatial [] [ for x in 9..21 -> { X = x; Y = 10 }, (if x = 10 then Wall else Plain) ] with
         Stores = Map.ofList [ "can-src", 0 ]
     }
-    |> withHome (fun layer ->
-        { layer with
-            Obstacles = Set.singleton { X = 21; Y = 10 }
-        })
+    |> withObstacles [ { X = 21; Y = 10 } ]
     |> withTargets
         [
             "src-a", { X = 10; Y = 10 }, Source
@@ -274,11 +271,7 @@ let succession incumbent successor life =
         Creeps = [ anchor incumbent 0 50 |> withLife life; anchor successor 0 50 ]
         Spatial =
             successionRoom
-            |> withHome (fun layer ->
-                { layer with
-                    CreepPositions =
-                        Map.ofList [ incumbent, { X = 11; Y = 10 }; successor, { X = 20; Y = 10 } ]
-                })
+            |> withCreepsAt [ incumbent, { X = 11; Y = 10 }; successor, { X = 20; Y = 10 } ]
     }
 
 /// The same lane at an RCL3 bank, where the Anchor row's body is five
@@ -294,11 +287,7 @@ let rcl3Succession incumbent successor life =
         Creeps = [ rcl3Anchor incumbent |> withLife life; rcl3Anchor successor ]
         Spatial =
             successionRoom
-            |> withHome (fun layer ->
-                { layer with
-                    CreepPositions =
-                        Map.ofList [ incumbent, { X = 11; Y = 10 }; successor, { X = 20; Y = 10 } ]
-                })
+            |> withCreepsAt [ incumbent, { X = 11; Y = 10 }; successor, { X = 20; Y = 10 } ]
     }
 
 /// The creeps a tick released and why — the release fold's own output,
@@ -438,8 +427,5 @@ let internal homeRaisingColony kind (body: CreepInfo) (at: Pos) =
                 ]
             |> withTargets
                 [ "src-a", { X = 10; Y = 10 }, Source; "can-a", { X = 9; Y = 10 }, Site kind ]
-            |> withHome (fun layer ->
-                { layer with
-                    CreepPositions = Map.ofList [ body.Name, at ]
-                })
+            |> withCreepsAt [ body.Name, at ]
     }

@@ -24,12 +24,7 @@ let containerPostTests =
                 let snapshot =
                     { haulColony with
                         Creeps = [ anchor "a1" 50 0 ]
-                        Spatial =
-                            haulRoom
-                            |> withHome (fun layer ->
-                                { layer with
-                                    CreepPositions = Map.ofList [ "a1", { X = 11; Y = 10 } ]
-                                })
+                        Spatial = haulRoom |> withCreepsAt [ "a1", { X = 11; Y = 10 } ]
                     }
 
                 let remembered = Map.ofList [ "a1", taskId (Harvest "src-a") ]
@@ -66,15 +61,10 @@ let containerPostTests =
                 let snapshot =
                     { haulColony with
                         Creeps = [ anchor "a1" 50 0 ]
-                        Spatial =
-                            haulRoom
-                            |> withHome (fun layer ->
-                                { layer with
-                                    CreepPositions = Map.ofList [ "a1", { X = 11; Y = 10 } ]
-                                })
+                        Spatial = haulRoom |> withCreepsAt [ "a1", { X = 11; Y = 10 } ]
                     }
 
-                let { Assignments = assignments } = decide snapshot Map.empty Set.empty None
+                let { Assignments = assignments } = decideOn snapshot
 
                 Expect.equal
                     (Map.tryFind "a1" assignments)
@@ -92,12 +82,7 @@ let containerPostTests =
                 let snapshot =
                     { haulColony with
                         Creeps = [ worker "w1" 50 0 ]
-                        Spatial =
-                            haulRoom
-                            |> withHome (fun layer ->
-                                { layer with
-                                    CreepPositions = Map.ofList [ "w1", { X = 11; Y = 10 } ]
-                                })
+                        Spatial = haulRoom |> withCreepsAt [ "w1", { X = 11; Y = 10 } ]
                     }
 
                 let remembered = Map.ofList [ "w1", taskId (Harvest "src-a") ]
@@ -124,12 +109,7 @@ let containerPostTests =
                 let snapshot =
                     { haulColony with
                         Creeps = [ anchor "a1" 50 0 ]
-                        Spatial =
-                            haulRoom
-                            |> withHome (fun layer ->
-                                { layer with
-                                    CreepPositions = Map.ofList [ "a1", { X = 9; Y = 10 } ]
-                                })
+                        Spatial = haulRoom |> withCreepsAt [ "a1", { X = 9; Y = 10 } ]
                     }
 
                 let remembered = Map.ofList [ "a1", taskId (Harvest "src-a") ]
@@ -160,12 +140,7 @@ let containerPostTests =
                 let snapshot =
                     { haulColony with
                         Creeps = [ anchor "a1" 50 0 ]
-                        Spatial =
-                            haulRoom
-                            |> withHome (fun layer ->
-                                { layer with
-                                    CreepPositions = Map.ofList [ "a1", { X = 12; Y = 10 } ]
-                                })
+                        Spatial = haulRoom |> withCreepsAt [ "a1", { X = 12; Y = 10 } ]
                     }
 
                 let remembered = Map.ofList [ "a1", taskId (Harvest "src-a") ]
@@ -201,10 +176,7 @@ let containerPostTests =
                                     haulRoom.TargetKinds
                                     |> Map.add "can-src" (Site BuiltKind.Container)
                             }
-                            |> withHome (fun layer ->
-                                { layer with
-                                    CreepPositions = Map.ofList [ "a1", { X = 11; Y = 10 } ]
-                                })
+                            |> withCreepsAt [ "a1", { X = 11; Y = 10 } ]
                     }
 
                 let remembered = Map.ofList [ "a1", taskId (Harvest "src-a") ]
@@ -225,12 +197,7 @@ let containerPostTests =
                 let snapshot =
                     { haulColony with
                         Creeps = [ anchor "a1" 50 0 ]
-                        Spatial =
-                            haulRoom
-                            |> withHome (fun layer ->
-                                { layer with
-                                    CreepPositions = Map.ofList [ "a1", { X = 18; Y = 10 } ]
-                                })
+                        Spatial = haulRoom |> withCreepsAt [ "a1", { X = 18; Y = 10 } ]
                     }
 
                 let remembered = Map.ofList [ "a1", taskId (Harvest "src-a") ]
@@ -272,12 +239,7 @@ let postCapacityTests =
                         Creeps = [ anchor "a1" 50 0; anchor "a2" 0 50 ]
                         Spatial =
                             haulRoom
-                            |> withHome (fun layer ->
-                                { layer with
-                                    CreepPositions =
-                                        Map.ofList
-                                            [ "a1", { X = 11; Y = 10 }; "a2", { X = 12; Y = 10 } ]
-                                })
+                            |> withCreepsAt [ "a1", { X = 11; Y = 10 }; "a2", { X = 12; Y = 10 } ]
                     }
 
                 let remembered =
@@ -308,15 +270,10 @@ let postCapacityTests =
                         Creeps = [ anchor "a1" 0 50; anchor "a2" 0 50 ]
                         Spatial =
                             haulRoom
-                            |> withHome (fun layer ->
-                                { layer with
-                                    CreepPositions =
-                                        Map.ofList
-                                            [ "a1", { X = 11; Y = 10 }; "a2", { X = 12; Y = 10 } ]
-                                })
+                            |> withCreepsAt [ "a1", { X = 11; Y = 10 }; "a2", { X = 12; Y = 10 } ]
                     }
 
-                let { Assignments = assignments } = decide snapshot Map.empty Set.empty None
+                let { Assignments = assignments } = decideOn snapshot
 
                 Expect.equal
                     (harvesters assignments "src-a")
@@ -336,15 +293,10 @@ let postCapacityTests =
                         Creeps = [ worker "w1" 0 50; worker "w2" 0 50 ]
                         Spatial =
                             haulRoom
-                            |> withHome (fun layer ->
-                                { layer with
-                                    CreepPositions =
-                                        Map.ofList
-                                            [ "w1", { X = 11; Y = 10 }; "w2", { X = 9; Y = 10 } ]
-                                })
+                            |> withCreepsAt [ "w1", { X = 11; Y = 10 }; "w2", { X = 9; Y = 10 } ]
                     }
 
-                let { Assignments = assignments } = decide snapshot Map.empty Set.empty None
+                let { Assignments = assignments } = decideOn snapshot
 
                 Expect.equal
                     (harvesters assignments "src-a" |> List.length)
@@ -362,7 +314,7 @@ let postCapacityTests =
                             }
                     }
 
-                let { Assignments = both } = decide unposted Map.empty Set.empty None
+                let { Assignments = both } = decideOn unposted
 
                 Expect.equal
                     (harvesters both "src-a")
@@ -395,7 +347,7 @@ let postCapacityTests =
                                 })
                     }
 
-                let { Assignments = assignments } = decide snapshot Map.empty Set.empty None
+                let { Assignments = assignments } = decideOn snapshot
 
                 Expect.equal
                     (harvesters assignments "src-a")
@@ -419,15 +371,10 @@ let postCapacityTests =
                         Creeps = [ worker "w1" 0 50; anchor "a1" 0 50 ]
                         Spatial =
                             haulRoom
-                            |> withHome (fun layer ->
-                                { layer with
-                                    CreepPositions =
-                                        Map.ofList
-                                            [ "w1", { X = 9; Y = 10 }; "a1", { X = 12; Y = 10 } ]
-                                })
+                            |> withCreepsAt [ "w1", { X = 9; Y = 10 }; "a1", { X = 12; Y = 10 } ]
                     }
 
-                let { Assignments = assignments } = decide snapshot Map.empty Set.empty None
+                let { Assignments = assignments } = decideOn snapshot
 
                 Expect.equal
                     (harvesters assignments "src-a")
@@ -445,12 +392,7 @@ let postCapacityTests =
                         Creeps = [ worker "w1" 0 50; worker "w2" 0 50 ]
                         Spatial =
                             haulRoom
-                            |> withHome (fun layer ->
-                                { layer with
-                                    CreepPositions =
-                                        Map.ofList
-                                            [ "w1", { X = 9; Y = 10 }; "w2", { X = 11; Y = 10 } ]
-                                })
+                            |> withCreepsAt [ "w1", { X = 9; Y = 10 }; "w2", { X = 11; Y = 10 } ]
                     }
 
                 let remembered =
@@ -482,15 +424,10 @@ let postCapacityTests =
                             { haulRoom with
                                 TargetKinds = haulRoom.TargetKinds |> Map.remove "can-src"
                             }
-                            |> withHome (fun layer ->
-                                { layer with
-                                    CreepPositions =
-                                        Map.ofList
-                                            [ "a1", { X = 11; Y = 10 }; "a2", { X = 9; Y = 10 } ]
-                                })
+                            |> withCreepsAt [ "a1", { X = 11; Y = 10 }; "a2", { X = 9; Y = 10 } ]
                     }
 
-                let { Assignments = assignments } = decide snapshot Map.empty Set.empty None
+                let { Assignments = assignments } = decideOn snapshot
 
                 Expect.equal
                     (harvesters assignments "src-a")
@@ -514,7 +451,7 @@ let restockTests =
                         Assignments = assignments
                         Intents = intents
                     } =
-                    decide snapshot Map.empty Set.empty None
+                    decideOn snapshot
 
                 Expect.equal
                     (harvesters assignments "src-a")
@@ -537,7 +474,7 @@ let restockTests =
                         Assignments = assignments
                         Intents = intents
                     } =
-                    decide snapshot Map.empty Set.empty None
+                    decideOn snapshot
 
                 Expect.equal (Map.tryFind "w1" assignments) None "four ticks do not cover five"
 
@@ -558,15 +495,10 @@ let restockTests =
 
                 let snapshot =
                     { snapshot with
-                        Spatial =
-                            snapshot.Spatial
-                            |> withHome (fun layer ->
-                                { layer with
-                                    Roads = Set.singleton { X = 14; Y = 10 }
-                                })
+                        Spatial = snapshot.Spatial |> withRoads [ { X = 14; Y = 10 } ]
                     }
 
-                let { Assignments = assignments } = decide snapshot Map.empty Set.empty None
+                let { Assignments = assignments } = decideOn snapshot
 
                 Expect.equal
                     (harvesters assignments "src-a")
@@ -584,12 +516,7 @@ let restockTests =
 
                 let snapshot =
                     { snapshot with
-                        Spatial =
-                            snapshot.Spatial
-                            |> withHome (fun layer ->
-                                { layer with
-                                    Obstacles = Set.singleton { X = 16; Y = 10 }
-                                })
+                        Spatial = snapshot.Spatial |> withObstacles [ { X = 16; Y = 10 } ]
                     }
 
                 let { Verdicts = verdicts } = decide snapshot Map.empty (Set.ofList [ "w1" ]) None
@@ -656,7 +583,7 @@ let restockTests =
                 // is simply too far from a source that is not ready yet.
                 let snapshot = restockAt "w1" { X = 15; Y = 10 } 60
 
-                let { Verdicts = verdicts } = decide snapshot Map.empty Set.empty None
+                let { Verdicts = verdicts } = decideOn snapshot
 
                 Expect.equal
                     verdicts
@@ -713,12 +640,7 @@ let restockTests =
                     { haulColony with
                         Sources = [ drained "src-a" 60 ]
                         Creeps = [ anchor "a1" 50 0 ]
-                        Spatial =
-                            haulRoom
-                            |> withHome (fun layer ->
-                                { layer with
-                                    CreepPositions = Map.ofList [ "a1", { X = 11; Y = 10 } ]
-                                })
+                        Spatial = haulRoom |> withCreepsAt [ "a1", { X = 11; Y = 10 } ]
                     }
 
                 let remembered = Map.ofList [ "a1", taskId (Harvest "src-a") ]
@@ -753,12 +675,7 @@ let restockTests =
                     { haulColony with
                         Sources = [ drained "src-a" 60 ]
                         Creeps = [ anchor "a1" 20 30 ]
-                        Spatial =
-                            haulRoom
-                            |> withHome (fun layer ->
-                                { layer with
-                                    CreepPositions = Map.ofList [ "a1", { X = 11; Y = 10 } ]
-                                })
+                        Spatial = haulRoom |> withCreepsAt [ "a1", { X = 11; Y = 10 } ]
                     }
 
                 let remembered = Map.ofList [ "a1", taskId (Harvest "src-a") ]
@@ -793,12 +710,7 @@ let restockTests =
                     { haulColony with
                         Sources = [ drained "src-a" 1 ]
                         Creeps = [ anchor "a1" 50 0 ]
-                        Spatial =
-                            haulRoom
-                            |> withHome (fun layer ->
-                                { layer with
-                                    CreepPositions = Map.ofList [ "a1", { X = 11; Y = 10 } ]
-                                })
+                        Spatial = haulRoom |> withCreepsAt [ "a1", { X = 11; Y = 10 } ]
                     }
 
                 let remembered = Map.ofList [ "a1", taskId (Harvest "src-a") ]
@@ -830,12 +742,7 @@ let restockTests =
                     { dualSeatColony with
                         Sources = [ drained "src-a" 60 ]
                         Creeps = [ anchor "a1" 50 10 ]
-                        Spatial =
-                            dualSeatRoom
-                            |> withHome (fun layer ->
-                                { layer with
-                                    CreepPositions = Map.ofList [ "a1", { X = 11; Y = 10 } ]
-                                })
+                        Spatial = dualSeatRoom |> withCreepsAt [ "a1", { X = 11; Y = 10 } ]
                     }
 
                 let remembered = Map.ofList [ "a1", taskId (Harvest "src-a") ]
@@ -875,11 +782,7 @@ let restockTests =
 
                     { snapshot with
                         Spatial =
-                            snapshot.Spatial
-                            |> withHome (fun layer ->
-                                { layer with
-                                    Roads = Set.ofList [ for x in 11..21 -> { X = x; Y = 10 } ]
-                                })
+                            snapshot.Spatial |> withRoads [ for x in 11..21 -> { X = x; Y = 10 } ]
                     }
 
                 let { Assignments = assignments } =
@@ -930,7 +833,7 @@ let restockTests =
                         else
                             snapshot
 
-                    let { Assignments = assignments } = decide snapshot Map.empty Set.empty None
+                    let { Assignments = assignments } = decideOn snapshot
                     Map.tryFind "w1" assignments
 
                 for ticks in [ 3; 4; 5; 6; 9; 12 ] do

@@ -35,10 +35,7 @@ let workAreaForTests =
                                 "cont-1", Structure BuiltKind.Container
                             ]
                 }
-                |> withHome (fun layer ->
-                    { layer with
-                        CreepPositions = Map.ofList creeps
-                    })
+                |> withCreepsAt creeps
 
             let anchor name =
                 creepWith name 0 [ Work; Work; Carry; Move ]
@@ -90,10 +87,7 @@ let workAreaForTests =
                           ] with
                         TargetKinds = Map.ofList [ "src-a", Source ]
                     }
-                    |> withHome (fun layer ->
-                        { layer with
-                            CreepPositions = Map.ofList [ "a", { X = 10; Y = 11 } ]
-                        })
+                    |> withCreepsAt [ "a", { X = 10; Y = 11 } ]
                     |> snapshotWith [ anchor "a" ]
                     |> ofView
 
@@ -190,10 +184,7 @@ let mayActTests =
                     spatial
                         [ "src-a", { X = 10; Y = 10 }; "ctrl-1", { X = 20; Y = 20 } ]
                         [ for y in 11..15 -> { X = 10; Y = y }, Plain ]
-                    |> withHome (fun layer ->
-                        { layer with
-                            CreepPositions = Map.ofList [ "w", creepPos ]
-                        })
+                    |> withCreepsAt [ "w", creepPos ]
                     |> snapshotWith [ worker "w" ]
                     |> ofView
 
@@ -215,10 +206,7 @@ let mayActTests =
                     spatial
                         [ "road-1", { X = 10; Y = 10 } ]
                         [ for y in 10..15 -> { X = 10; Y = y }, Plain ]
-                    |> withHome (fun layer ->
-                        { layer with
-                            CreepPositions = Map.ofList [ "w", creepPos ]
-                        })
+                    |> withCreepsAt [ "w", creepPos ]
                     |> snapshotWith [ worker "w" ]
                     |> ofView
 
@@ -250,10 +238,7 @@ let mayActTests =
                         TargetKinds =
                             Map.ofList [ "src-a", Source; "cont-1", Structure BuiltKind.Container ]
                     }
-                    |> withHome (fun layer ->
-                        { layer with
-                            CreepPositions = Map.ofList [ "a", creepPos ]
-                        })
+                    |> withCreepsAt [ "a", creepPos ]
                     |> snapshotWith [ creepWith "a" 0 [ Work; Work; Carry; Move ] ]
                     |> ofView
 
@@ -336,10 +321,7 @@ let dualSeatTests =
                           [ { X = 9; Y = 10 }, Plain; { X = 11; Y = 10 }, Plain ] with
                         TargetKinds = Map.ofList [ "src-a", Source; "ctrl-1", Controller ]
                     }
-                    |> withHome (fun layer ->
-                        { layer with
-                            Obstacles = Set.singleton { X = 11; Y = 10 }
-                        })
+                    |> withObstacles [ { X = 11; Y = 10 } ]
                     |> snapshotWith []
                     |> ofView
 
@@ -695,10 +677,7 @@ let consistencyTests =
                             { X = 20; Y = 20 }, Plain
                             { X = 21; Y = 20 }, Plain
                         ]
-                    |> withHome (fun layer ->
-                        { layer with
-                            Obstacles = Set.singleton { X = 11; Y = 12 }
-                        })
+                    |> withObstacles [ { X = 11; Y = 12 } ]
 
                 let standing =
                     (homeLayer projection).Terrain
@@ -717,10 +696,7 @@ let consistencyTests =
                 for pos in standing do
                     let atlas =
                         projection
-                        |> withHome (fun layer ->
-                            { layer with
-                                CreepPositions = Map.ofList [ "w", pos ]
-                            })
+                        |> withCreepsAt [ "w", pos ]
                         |> snapshotWith [ worker "w" ]
                         |> ofView
 
@@ -761,10 +737,7 @@ let consistencyTests =
                             { X = 11; Y = 10 }, Swamp
                             { X = 10; Y = 9 }, Wall
                         ]
-                    |> withHome (fun layer ->
-                        { layer with
-                            Obstacles = Set.singleton { X = 9; Y = 10 }
-                        })
+                    |> withObstacles [ { X = 9; Y = 10 } ]
                     |> snapshotWith []
                     |> ofView
 

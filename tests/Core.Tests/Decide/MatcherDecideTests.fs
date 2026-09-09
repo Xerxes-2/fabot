@@ -25,7 +25,7 @@ let tests =
                         Intents = intents
                         Assignments = assignments
                     } =
-                    decide snapshot Map.empty Set.empty None
+                    decideOn snapshot
 
                 Expect.contains intents (HarvestSource("w1", "src-a")) "empty creep goes harvesting"
 
@@ -36,7 +36,7 @@ let tests =
             }
 
             test "bare respawn yields exactly one spawn Intent" {
-                let { Intents = intents } = decide bareRespawn Map.empty Set.empty None
+                let { Intents = intents } = decideOn bareRespawn
 
                 match spawnIntents intents with
                 | [ (spawnName, body, creepName) ] ->
@@ -47,7 +47,7 @@ let tests =
             }
 
             test "spawn Intent body is affordable at bare-respawn energy" {
-                let { Intents = intents } = decide bareRespawn Map.empty Set.empty None
+                let { Intents = intents } = decideOn bareRespawn
 
                 for (_, body, _) in spawnIntents intents do
                     Expect.isLessThanOrEqual
@@ -59,7 +59,7 @@ let tests =
             test "no spawn Intent when energy is below a worker body cost" {
                 let snapshot = { bareRespawn with Bank = bank 100 300 }
 
-                let { Intents = intents } = decide snapshot Map.empty Set.empty None
+                let { Intents = intents } = decideOn snapshot
                 Expect.isEmpty (spawnIntents intents) "cannot afford a worker"
             }
 
@@ -69,7 +69,7 @@ let tests =
                         Spawns = [ { spawn with IsSpawning = true } ]
                     }
 
-                let { Intents = intents } = decide snapshot Map.empty Set.empty None
+                let { Intents = intents } = decideOn snapshot
                 Expect.isEmpty (spawnIntents intents) "spawn is busy"
             }
 
@@ -99,7 +99,7 @@ let tests =
                         Spatial = threeSeats
                     }
 
-                let { Intents = intents } = decide snapshot Map.empty Set.empty None
+                let { Intents = intents } = decideOn snapshot
 
                 match spawnIntents intents with
                 | [ (spawnName, _, _) ] ->
@@ -133,7 +133,7 @@ let tests =
                         Spatial = threeSeats
                     }
 
-                let { Intents = intents } = decide snapshot Map.empty Set.empty None
+                let { Intents = intents } = decideOn snapshot
 
                 Expect.equal
                     (spawnIntents intents |> List.map (fun (name, _, _) -> name))
@@ -155,7 +155,7 @@ let tests =
                         Bank = bank 550 550
                     }
 
-                let { Intents = intents } = decide snapshot Map.empty Set.empty None
+                let { Intents = intents } = decideOn snapshot
 
                 Expect.equal
                     (spawnIntents intents |> List.map (fun (name, body, _) -> name, body))
@@ -170,7 +170,7 @@ let tests =
                         Creeps = [ worker "worker-1" 0 50 ]
                     }
 
-                let { Intents = intents } = decide snapshot Map.empty Set.empty None
+                let { Intents = intents } = decideOn snapshot
 
                 match spawnIntents intents with
                 | [ (_, body, _) ] ->
@@ -187,7 +187,7 @@ let tests =
                         Creeps = [ worker "worker-1" 0 50 ]
                     }
 
-                let { Intents = intents } = decide snapshot Map.empty Set.empty None
+                let { Intents = intents } = decideOn snapshot
 
                 match spawnIntents intents with
                 | [ (_, body, _) ] ->
@@ -205,7 +205,7 @@ let tests =
                         Creeps = [ worker "worker-1" 0 50 ]
                     }
 
-                let { Intents = intents } = decide snapshot Map.empty Set.empty None
+                let { Intents = intents } = decideOn snapshot
 
                 Expect.isEmpty
                     (spawnIntents intents)
@@ -215,7 +215,7 @@ let tests =
             test "with zero creeps a minimal body is spawned from available energy" {
                 let snapshot = { bareRespawn with Bank = bank 250 550 }
 
-                let { Intents = intents } = decide snapshot Map.empty Set.empty None
+                let { Intents = intents } = decideOn snapshot
 
                 match spawnIntents intents with
                 | [ (_, body, _) ] ->
@@ -229,7 +229,7 @@ let tests =
             test "with zero creeps and unaffordable minimal body, no spawn Intent" {
                 let snapshot = { bareRespawn with Bank = bank 150 550 }
 
-                let { Intents = intents } = decide snapshot Map.empty Set.empty None
+                let { Intents = intents } = decideOn snapshot
                 Expect.isEmpty (spawnIntents intents) "even the fallback needs its unit cost"
             }
 
@@ -239,7 +239,7 @@ let tests =
                         Creeps = [ worker "worker-1" 0 50 ]
                     }
 
-                let { Intents = intents } = decide snapshot Map.empty Set.empty None
+                let { Intents = intents } = decideOn snapshot
                 Expect.hasLength (spawnIntents intents) 1 "a lone worker cannot keep the loop going"
             }
 
@@ -249,7 +249,7 @@ let tests =
                         Creeps = [ worker "worker-1" 0 50; worker "worker-2" 0 50 ]
                     }
 
-                let { Intents = intents } = decide snapshot Map.empty Set.empty None
+                let { Intents = intents } = decideOn snapshot
                 Expect.isEmpty (spawnIntents intents) "workforce already at minimum"
             }
 
@@ -259,7 +259,7 @@ let tests =
                         Creeps = [ worker "w1" 0 50; worker "w2" 0 50 ]
                     }
 
-                let { Assignments = assignments } = decide snapshot Map.empty Set.empty None
+                let { Assignments = assignments } = decideOn snapshot
                 let assigned = assignments |> Map.toList |> List.map snd |> List.sort
 
                 Expect.equal
@@ -369,7 +369,7 @@ let tests =
                         Intents = intents
                         Assignments = kept
                     } =
-                    decide snapshot Map.empty Set.empty None
+                    decideOn snapshot
 
                 Expect.equal
                     (Map.tryFind "w1" kept)
@@ -432,7 +432,7 @@ let tests =
                         Creeps = [ worker "w1" 50 0 ]
                     }
 
-                let { Assignments = kept } = decide snapshot Map.empty Set.empty None
+                let { Assignments = kept } = decideOn snapshot
 
                 Expect.equal
                     (Map.tryFind "w1" kept)
@@ -535,7 +535,7 @@ let tests =
                         Creeps = [ worker "w1" 50 0 ]
                     }
 
-                let { Assignments = kept } = decide snapshot Map.empty Set.empty None
+                let { Assignments = kept } = decideOn snapshot
 
                 Expect.equal
                     (Map.tryFind "w1" kept)
@@ -579,10 +579,7 @@ let intakeRoomTests =
                                     "pile-1", { X = 12; Y = 10 }, Dropped
                                     "ext-1", { X = 16; Y = 10 }, Structure BuiltKind.Extension
                                 ]
-                            |> withHome (fun layer ->
-                                { layer with
-                                    CreepPositions = Map.ofList [ "h", { X = 13; Y = 10 } ]
-                                })
+                            |> withCreepsAt [ "h", { X = 13; Y = 10 } ]
                     }
 
                 let matched energy =
@@ -642,10 +639,7 @@ let intakeWorthTests =
                                     "can-src", { X = 12; Y = 10 }, Structure BuiltKind.Container
                                     "stock-1", { X = 22; Y = 10 }, Structure BuiltKind.Storage
                                 ]
-                            |> withHome (fun layer ->
-                                { layer with
-                                    CreepPositions = Map.ofList [ "h", { X = 13; Y = 10 } ]
-                                })
+                            |> withCreepsAt [ "h", { X = 13; Y = 10 } ]
                     }
 
                 let matched stock =
@@ -693,10 +687,7 @@ let intakeWorthTests =
                             }
                             |> withTargets
                                 [ "can-src", { X = 12; Y = 10 }, Structure BuiltKind.Container ]
-                            |> withHome (fun layer ->
-                                { layer with
-                                    CreepPositions = Map.ofList [ "w", { X = 13; Y = 10 } ]
-                                })
+                            |> withCreepsAt [ "w", { X = 13; Y = 10 } ]
                     }
 
                 let matched stock =
@@ -747,10 +738,7 @@ let intakeDecayTests =
                                 Stores = Map.ofList [ "store-1", 150 ]
                             }
                             |> withTargets [ "store-1", { X = 12; Y = 10 }, kind ]
-                            |> withHome (fun layer ->
-                                { layer with
-                                    CreepPositions = Map.ofList [ "h", { X = 16; Y = 10 } ]
-                                })
+                            |> withCreepsAt [ "h", { X = 16; Y = 10 } ]
                     }
 
                 let matched kind =
@@ -805,10 +793,7 @@ let intakeDecayTests =
                                     "ext-1", { X = 8; Y = 10 }, Structure BuiltKind.Extension
                                     "store-1", { X = 12; Y = 10 }, kind
                                 ]
-                            |> withHome (fun layer ->
-                                { layer with
-                                    CreepPositions = Map.ofList [ "h", { X = 16; Y = 10 } ]
-                                })
+                            |> withCreepsAt [ "h", { X = 16; Y = 10 } ]
                     }
 
                 let matched kind =
@@ -849,7 +834,7 @@ let selfHealTests =
         [
             test "injured idle bodies heal themselves with no task or energy" {
                 let colony = { bareRespawn with Creeps = [ healer ] }
-                let result = decide colony Map.empty Set.empty None
+                let result = decideOn colony
 
                 Expect.contains
                     result.Intents

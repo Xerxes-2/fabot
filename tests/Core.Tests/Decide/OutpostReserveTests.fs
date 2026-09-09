@@ -155,7 +155,7 @@ let reserveTests =
                         ])
                     "the premise: every Task but Reserve and Flee is in the pool"
 
-                let { Assignments = assignments } = decide colony Map.empty Set.empty None
+                let { Assignments = assignments } = decideOn colony
 
                 Expect.isEmpty
                     (Map.toList assignments)
@@ -184,7 +184,7 @@ let reserveTests =
                         Assignments = assignments
                         Verdicts = verdicts
                     } =
-                    decide raided Map.empty Set.empty None
+                    decideOn raided
 
                 Expect.equal
                     (Map.tryFind "r1" assignments)
@@ -215,7 +215,7 @@ let reserveTests =
                     twoOutpostColony
                         [ reserver "r1", { X = 5; Y = 26 }; reserver "r2", { X = 6; Y = 26 } ]
 
-                let { Assignments = assignments } = decide colony Map.empty Set.empty None
+                let { Assignments = assignments } = decideOn colony
 
                 Expect.equal
                     (assignments |> Map.toList |> List.map snd |> List.sort)
@@ -276,7 +276,7 @@ let reserveTests =
                     { colony with
                         RoomControl = colony.RoomControl |> Map.add "W2N1" control
                     }
-                    |> fun colony -> decide colony Map.empty Set.empty None
+                    |> fun colony -> decideOn colony
                     |> fun result -> Map.tryFind "r1" result.Assignments
 
                 Expect.equal
@@ -321,7 +321,7 @@ let standDownGateTests =
                     "the premise: worked, the room's furniture is in the pool"
 
                 Expect.equal
-                    (reserverCasts (decide both Map.empty Set.empty None).Intents)
+                    (reserverCasts (decideOn both).Intents)
                     [ oneBlock; oneBlock ]
                     "and worked, it is one of two outposts each hiring its own reserver"
 
@@ -330,7 +330,7 @@ let standDownGateTests =
                     "shut, no Task in the pool names the room — its rock, its controller and its container are gone with it"
 
                 Expect.equal
-                    (reserverCasts (decide shut Map.empty Set.empty None).Intents)
+                    (reserverCasts (decideOn shut).Intents)
                     [ oneBlock ]
                     "and the one cast left is the other outpost's: nothing is built for a room nothing can enter"
 
@@ -587,8 +587,8 @@ let standDownGateTests =
                         RoomControl = Map.add "W1N2" rivalRoom shut.RoomControl
                     }
 
-                let withoutLook = decide shut Map.empty Set.empty None
-                let withLook = decide looked Map.empty Set.empty None
+                let withoutLook = decideOn shut
+                let withLook = decideOn looked
 
                 Expect.isNonEmpty
                     withoutLook.Verdicts

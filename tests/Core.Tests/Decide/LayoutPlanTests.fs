@@ -125,7 +125,7 @@ let layoutTests =
 
                 let colony = atLevel 3 (openRoom 6 |> withTargets [ "src-a", sourcePos, Source ])
 
-                let { Intents = intents } = decide colony Map.empty Set.empty None
+                let { Intents = intents } = decideOn colony
 
                 let seats =
                     Set.ofList
@@ -154,7 +154,7 @@ let layoutTests =
                 let colony =
                     atLevel 3 (openRoom 6 |> withTargets [ "ctrl-1", controllerPos, Controller ])
 
-                let { Intents = intents } = decide colony Map.empty Set.empty None
+                let { Intents = intents } = decideOn colony
 
                 let upgradeArea =
                     Set.ofList
@@ -193,15 +193,12 @@ let layoutTests =
                     { colony with
                         Spatial =
                             colony.Spatial
-                            |> withHome (fun layer ->
-                                { layer with
-                                    Roads = Set.singleton { X = 33; Y = 27 }
-                                })
+                            |> withRoads [ { X = 33; Y = 27 } ]
                             |> withTargets
                                 [ "road-site-1", { X = 34; Y = 24 }, Site BuiltKind.Road ]
                     }
 
-                let { Intents = intents } = decide snapshot Map.empty Set.empty None
+                let { Intents = intents } = decideOn snapshot
 
                 Expect.isEmpty
                     (sitesOfKind Road intents)
@@ -212,7 +209,7 @@ let layoutTests =
                 // Roads stand from the road gate up (#209), so the level that
                 // has a trunk to seat the container beside is RCL3.
                 let colony = withRoadsBuilt (trunkColony 3)
-                let { Intents = intents } = decide colony Map.empty Set.empty None
+                let { Intents = intents } = decideOn colony
 
                 let sourceContainers =
                     sitesOfKind Container intents
@@ -354,7 +351,7 @@ let layoutTests =
                 // stands are the plan's own and the containers are read
                 // beside a real road census (#209).
                 let colony = withRoadsBuilt (trunkColony 3)
-                let planned = decide colony Map.empty Set.empty None
+                let planned = decideOn colony
 
                 let standing =
                     match sitesOfKind Container planned.Intents with
@@ -370,7 +367,7 @@ let layoutTests =
                         Spatial = colony.Spatial |> withTargets standing
                     }
 
-                let { Intents = intents } = decide snapshot Map.empty Set.empty None
+                let { Intents = intents } = decideOn snapshot
 
                 Expect.isEmpty
                     (sitesOfKind Container intents)
@@ -389,7 +386,7 @@ let layoutTests =
                 // thing serving it sits, so no second site drops beside it.
                 let srcPos = { X = 15; Y = 25 }
                 let colony = withRoadsBuilt (trunkColony 4)
-                let planned = decide colony Map.empty Set.empty None
+                let planned = decideOn colony
 
                 let pick =
                     sitesOfKind Container planned.Intents
@@ -406,7 +403,7 @@ let layoutTests =
                             |> withTargets [ "can-old", orphan, Structure BuiltKind.Container ]
                     }
 
-                let after = decide offPick Map.empty Set.empty None
+                let after = decideOn offPick
 
                 Expect.isEmpty
                     (sitesOfKind Container after.Intents
@@ -446,7 +443,7 @@ let layoutTests =
                     "one Post, on the Seat the container actually stands on"
 
                 Expect.equal
-                    (decide built Map.empty Set.empty None).Memo.HaulerQuota
+                    (decideOn built).Memo.HaulerQuota
                     1
                     "the hauler row is sized for one source container — the orphan's own term"
             }
@@ -466,7 +463,7 @@ let layoutTests =
                             |> withTargets [ "can-site-old", orphan, Site BuiltKind.Container ]
                     }
 
-                let after = decide offPick Map.empty Set.empty None
+                let after = decideOn offPick
 
                 Expect.isEmpty
                     (sitesOfKind Container after.Intents
@@ -483,7 +480,7 @@ let layoutTests =
             test "a container anywhere in the Work Area serves the controller (#74)" {
                 let controllerPos = { X = 35; Y = 25 }
                 let colony = withRoadsBuilt (trunkColony 4)
-                let planned = decide colony Map.empty Set.empty None
+                let planned = decideOn colony
 
                 let pick =
                     sitesOfKind Container planned.Intents
@@ -506,7 +503,7 @@ let layoutTests =
                             |> withTargets [ "can-ctrl", orphan, Structure BuiltKind.Container ]
                     }
 
-                let after = decide offPick Map.empty Set.empty None
+                let after = decideOn offPick
 
                 Expect.isEmpty
                     (sitesOfKind Container after.Intents
@@ -530,7 +527,7 @@ let layoutTests =
                 // container stands on, so nothing is lost and the record
                 // stays empty (ADR 0040).
                 let colony = withRoadsBuilt (trunkColony 4)
-                let planned = decide colony Map.empty Set.empty None
+                let planned = decideOn colony
 
                 let standing =
                     sitesOfKind Container planned.Intents
@@ -622,7 +619,7 @@ let layoutTests =
                     }
 
                 let plan (view: ColonyView) =
-                    placementIntents (decide view Map.empty Set.empty None).Intents
+                    placementIntents (decideOn view).Intents
 
                 Expect.equal
                     (plan elsewhere)
@@ -684,7 +681,7 @@ let layoutTests =
                     }
 
                 let extensions (view: ColonyView) =
-                    sitesOfKind Extension (decide view Map.empty Set.empty None).Intents
+                    sitesOfKind Extension (decideOn view).Intents
 
                 Expect.hasLength (extensions colony) 5 "the premise: RCL2's whole allowance"
 
@@ -795,7 +792,7 @@ let storageTests =
                 // while both container picks draw only from working ground —
                 // the Seats and the Upgrade Work Area.
                 let colony = withRoadsBuilt (trunkColony 4)
-                let { Intents = intents } = decide colony Map.empty Set.empty None
+                let { Intents = intents } = decideOn colony
 
                 let storage = sitesOfKind Storage intents |> Set.ofList
                 let containers = sitesOfKind Container intents |> Set.ofList
@@ -859,7 +856,7 @@ let storageTests =
                                 [ "can-a", { X = 16; Y = 24 }, Structure BuiltKind.Container ]
                     }
 
-                let planned = decide colony Map.empty Set.empty None
+                let planned = decideOn colony
 
                 Expect.isGreaterThan
                     planned.Memo.HaulerQuota
@@ -882,7 +879,7 @@ let storageTests =
                             |> withTargets [ "sto-1", storageTile, Structure BuiltKind.Storage ]
                     }
 
-                let built = decide standing Map.empty Set.empty None
+                let built = decideOn standing
 
                 Expect.equal
                     built.Memo.HaulerQuota
@@ -1058,7 +1055,7 @@ let linkFootingTests =
                                  "ctrl-1", { X = 30; Y = 25 }, Controller
                              ])
 
-                let { Intents = intents } = decide colony Map.empty Set.empty None
+                let { Intents = intents } = decideOn colony
 
                 Expect.isFalse
                     (List.contains { X = 24; Y = 23 } (placedTiles intents))
@@ -1226,7 +1223,7 @@ let unroutedTrunkTests =
                 // round (#105), and a record keyed on the source alone
                 // would be false in both.
                 let colony = severedControllerColony 4
-                let { Memo = memo; Intents = intents } = decide colony Map.empty Set.empty None
+                let { Memo = memo; Intents = intents } = decideOn colony
 
                 Expect.equal
                     memo.UnroutedTrunks

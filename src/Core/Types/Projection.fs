@@ -170,3 +170,20 @@ module SpatialInfo =
         spatial.Rooms
         |> Map.tryPick (fun room (layer: RoomLayer) ->
             Map.tryFind id layer.TargetPositions |> Option.map (RoomPos.at room))
+
+    /// The ids the projection files under one kind, in id order. The
+    /// containers, the Storage and the controllers are all pooled by the
+    /// projection's kind — never by position, never by name — so the walk is
+    /// written here once, beside the kind census it reads. It had been a local
+    /// helper of one pool with the promise in its comment, and two other
+    /// modules re-derived it anyway.
+    let idsOfKind (spatial: SpatialInfo) (kind: TargetKind) : string list =
+        spatial.TargetKinds
+        |> Map.toList
+        |> List.choose (fun (id, k) -> if k = kind then Some id else None)
+
+    /// What one store holds this tick, and 0 for a target the projection
+    /// carries no store for — the reading its three readers each want and each
+    /// used to spell for itself.
+    let storedIn (spatial: SpatialInfo) (id: string) : int =
+        spatial.Stores |> Map.tryFind id |> Option.defaultValue 0

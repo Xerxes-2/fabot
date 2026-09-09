@@ -26,7 +26,7 @@ let tuningTests =
                     }
 
                 Expect.isEmpty
-                    (castRows (decide colony Map.empty Set.empty None).Intents)
+                    (castRows (decideOn colony).Intents)
                     "two bodies is the shipped floor, and a colony at its floor casts nothing"
 
                 Expect.equal
@@ -139,7 +139,7 @@ let tuningTests =
                     }
 
                 Expect.equal
-                    (castRows (decide colony Map.empty Set.empty None).Intents)
+                    (castRows (decideOn colony).Intents)
                     [ "worker" ]
                     "one Carry per two Work is under the shipped four, so the body can refill and the floor is quiet"
 
@@ -183,7 +183,7 @@ let tuningTests =
                     }
 
                 Expect.isEmpty
-                    (activations (decide claimer Map.empty Set.empty None).Intents)
+                    (activations (decideOn claimer).Intents)
                     "range four is outside the shipped deadline of three: the towers get their window"
 
                 Expect.equal
@@ -202,7 +202,7 @@ let tuningTests =
                 let colony = atLevel 5 (openRoom 6)
 
                 Expect.hasLength
-                    (sitesOfKind Storage (decide colony Map.empty Set.empty None).Intents)
+                    (sitesOfKind Storage (decideOn colony).Intents)
                     1
                     "the shipped four is at or under RCL5, so the Storage's pick is held and placed"
 
@@ -225,7 +225,7 @@ let tuningTests =
                 let colony = atLevel 6 (openRoom 6)
 
                 let placed tuned =
-                    let { Intents = intents } = decide tuned Map.empty Set.empty None
+                    let { Intents = intents } = decideOn tuned
 
                     List.length (sitesOfKind Tower intents),
                     List.length (sitesOfKind Extension intents)
@@ -268,20 +268,16 @@ let tuningTests =
                         Creeps = [ for name in [ "w1"; "w2"; "w3" ] -> worker name 50 0 ]
                         Spatial =
                             colony.Spatial
-                            |> withHome (fun layer ->
-                                { layer with
-                                    CreepPositions =
-                                        Map.ofList
-                                            [
-                                                "w1", { X = 10; Y = 2 }
-                                                "w2", { X = 10; Y = 3 }
-                                                "w3", { X = 10; Y = 4 }
-                                            ]
-                                })
+                            |> withCreepsAt
+                                [
+                                    "w1", { X = 10; Y = 2 }
+                                    "w2", { X = 10; Y = 3 }
+                                    "w3", { X = 10; Y = 4 }
+                                ]
                     }
 
                 let tally colony =
-                    (decide colony Map.empty Set.empty None).Assignments
+                    (decideOn colony).Assignments
                     |> Map.toList
                     |> List.map snd
                     |> List.countBy id
@@ -401,7 +397,7 @@ let quotasRecordTests =
                 // here; the worker row is what the target leaves after the
                 // specialists, so the quotas sum to the target; the living
                 // counts partition the fleet.
-                let { Quotas = quotas } = decide bareRespawn Map.empty Set.empty None
+                let { Quotas = quotas } = decideOn bareRespawn
 
                 Expect.equal
                     (quotas.Rows |> List.map (fun r -> r.Row))

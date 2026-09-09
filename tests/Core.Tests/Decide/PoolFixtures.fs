@@ -78,10 +78,7 @@ let pileColony creeps positions =
                   ] with
                 TargetKinds = Map.ofList [ "pile-1", Dropped ]
             }
-            |> withHome (fun layer ->
-                { layer with
-                    CreepPositions = Map.ofList positions
-                })
+            |> withCreepsAt positions
     }
 
 /// The same colony with a second room's layer beside its own (ADR 0041):
@@ -153,12 +150,7 @@ let stockColony refillables stores =
         Sources = []
         Refillables = refillables
         Creeps = [ creepWith "h1" 100 0 [ Carry; Carry; Move ] ]
-        Spatial =
-            { stockRoom with Stores = stores }
-            |> withHome (fun layer ->
-                { layer with
-                    CreepPositions = Map.ofList [ "h1", { X = 16; Y = 10 } ]
-                })
+        Spatial = { stockRoom with Stores = stores } |> withCreepsAt [ "h1", { X = 16; Y = 10 } ]
     }
 
 /// The draw fixture: a two-row plain corridor, y = 10..11, x = 8..22, with
@@ -180,10 +172,7 @@ let drawRoom =
         ]
 
     spatial [] lane
-    |> withHome (fun layer ->
-        { layer with
-            Obstacles = Set.ofList [ { X = 17; Y = 11 }; { X = 22; Y = 10 } ]
-        })
+    |> withObstacles [ { X = 17; Y = 11 }; { X = 22; Y = 10 } ]
     |> withTargets
         [
             "src-a", { X = 8; Y = 10 }, Source
@@ -201,12 +190,7 @@ let drawColony stores (creep: CreepInfo) pos =
         Sources = [ source "src-a" ]
         Refillables = [ refillable "spawn-1" 0 BuiltKind.Spawn ]
         Creeps = [ creep ]
-        Spatial =
-            { drawRoom with Stores = stores }
-            |> withHome (fun layer ->
-                { layer with
-                    CreepPositions = Map.ofList [ creep.Name, pos ]
-                })
+        Spatial = { drawRoom with Stores = stores } |> withCreepsAt [ creep.Name, pos ]
     }
 
 /// The restock dispatch corridor: a one-tile lane y = 10 from x = 9 to
@@ -227,12 +211,7 @@ let restockAt name pos ticks =
     { bareRespawn with
         Sources = [ drained "src-a" ticks ]
         Creeps = [ worker name 0 50 ]
-        Spatial =
-            restockRoom
-            |> withHome (fun layer ->
-                { layer with
-                    CreepPositions = Map.ofList [ name, pos ]
-                })
+        Spatial = restockRoom |> withCreepsAt [ name, pos ]
     }
 
 let crowdRoom nearStock farStock =
@@ -256,12 +235,7 @@ let crowdColony nearStock farStock (creeps: (string * Pos) list) =
         Bank = bank 600 600
         Sources = []
         Creeps = [ for name, _ in creeps -> hauler name 0 100 ]
-        Spatial =
-            crowdRoom nearStock farStock
-            |> withHome (fun layer ->
-                { layer with
-                    CreepPositions = Map.ofList creeps
-                })
+        Spatial = crowdRoom nearStock farStock |> withCreepsAt creeps
     }
 
 /// Three empty haulers abreast, one step from the near store's Work Area
@@ -358,10 +332,7 @@ let tombColony energy (creeps: (string * Pos) list) =
                 Stores = Map.ofList [ "tomb-1", energy ]
             }
             |> withTargets [ "tomb-1", { X = 10; Y = 10 }, Tombstone ]
-            |> withHome (fun layer ->
-                { layer with
-                    CreepPositions = Map.ofList creeps
-                })
+            |> withCreepsAt creeps
     }
 
 /// A stocked container at (10,10) with a dropped pile the case places —
@@ -390,10 +361,7 @@ let sameTilePileColony pilePos =
                     "can-a", { X = 10; Y = 10 }, Structure BuiltKind.Container
                     "pile-a", pilePos, Dropped
                 ]
-            |> withHome (fun layer ->
-                { layer with
-                    CreepPositions = Map.ofList [ "h1", { X = 10; Y = 11 } ]
-                })
+            |> withCreepsAt [ "h1", { X = 10; Y = 11 } ]
     }
 
 /// A stocked container at (10,10) with the hauler standing beside it and a
@@ -415,10 +383,7 @@ let internal pileDownTheLane containerStock pileAmount =
                     "can-a", { X = 10; Y = 10 }, Structure BuiltKind.Container
                     "pile-a", { X = 16; Y = 10 }, Dropped
                 ]
-            |> withHome (fun layer ->
-                { layer with
-                    CreepPositions = Map.ofList [ "h1", { X = 11; Y = 10 } ]
-                })
+            |> withCreepsAt [ "h1", { X = 11; Y = 10 } ]
     }
 
 /// A hungry spawn at (12,10), a half-loaded hauler on the tile beside it at
@@ -441,10 +406,7 @@ let internal pileAgainstAHungrySpawn bankEnergy pileAmount =
                     "spawn-1", { X = 12; Y = 10 }, Structure BuiltKind.Spawn
                     "pile-a", { X = 30; Y = 10 }, Dropped
                 ]
-            |> withHome (fun layer ->
-                { layer with
-                    CreepPositions = Map.ofList [ "h1", { X = 11; Y = 10 } ]
-                })
+            |> withCreepsAt [ "h1", { X = 11; Y = 10 } ]
     }
 
 /// A tombstone holding 1,500 at (12,10), an empty hauler beside it and a pile
@@ -466,8 +428,5 @@ let internal pileAgainstATombstone pileAmount =
                     "tomb-a", { X = 12; Y = 10 }, Tombstone
                     "pile-a", { X = 30; Y = 10 }, Dropped
                 ]
-            |> withHome (fun layer ->
-                { layer with
-                    CreepPositions = Map.ofList [ "h1", { X = 11; Y = 10 } ]
-                })
+            |> withCreepsAt [ "h1", { X = 11; Y = 10 } ]
     }

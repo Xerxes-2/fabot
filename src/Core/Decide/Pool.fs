@@ -285,6 +285,24 @@ let private roomOfWork atlas task =
     | Guard room -> Some room
     | Flee -> None
 
+/// The Reach standing on a Task's own room, or None when the question does not
+/// arise at all — the Safety tier, which `safetyTier` exempts whole (ADR 0056
+/// decision 3), and a tick with no Reach anywhere. A Reach is one room's grid
+/// (`Threats.Reach`), so the tiles it takes are matched on that room's
+/// coordinates and on no other's (ADR 0052 decision 2, #138) — and the room is
+/// the **Task's** and never the creep's, a body a border away being judged
+/// against the ground it is walking to. The join is written here once because
+/// its two readers make it in opposite polarity: `areaFor` thins an area by it
+/// and `threatened` asks whether it has taken the area whole, and two copies of
+/// a room-scoping rule is exactly how #138 came back.
+let private reachOnWork (threats: Threats) atlas task =
+    if safetyTier task || Map.isEmpty threats.Reach then
+        None
+    else
+        let room = roomOfWork atlas task
+
+        Some(room, room |> Option.map (Threats.reachIn threats) |> Option.defaultValue Set.empty)
+
 /// The tiles a creep may work a Task from this tick (ADR 0033): its Work Area
 /// less its room's Reach — and for Flee, the safe set of the room the creep
 /// stands in, an area of the colony's own rather than some target's
@@ -326,20 +344,20 @@ let internal areaFor (threats: Threats) atlas creep task : Set<RoomPos> =
         | Guard room -> Threats.ringIn threats room
         | _ -> Atlas.workAreaFor atlas creep task
 
-    if safetyTier task || Map.isEmpty threats.Reach then
-        ground
-    else
-        // A Reach is one room's grid (`Threats.Reach`), so the tiles it
-        // takes are matched on that room's coordinates and on no other's
-        // (ADR 0052 decision 2, #138).
-        let room = roomOfWork atlas task
-
-        let reach =
-            room |> Option.map (Threats.reachIn threats) |> Option.defaultValue Set.empty
-
+    match reachOnWork threats atlas task with
+    | None -> ground
+    | Some(room, reach) ->
         ground
         |> Set.filter (fun tile ->
             not (Some tile.Room = room && Set.contains (RoomPos.pos tile) reach))
+
+/// Whether a creep may act on a Task from the tile it is standing on this tick
+/// — `Atlas.mayAct` over the ground `areaFor` has just thinned (ADR 0033).
+/// The two are one question and are asked together at every site that asks
+/// either, so they are joined here: written apart, each of the four callers
+/// derived the Work Area a second time to put the pair back together.
+let internal mayActNow (threats: Threats) atlas (creep: string) task =
+    Atlas.mayAct atlas creep task (areaFor threats atlas creep task)
 
 /// The travel cost of a Task for a creep, priced over the tiles it may actually
 /// work from this tick (ADR 0033): the safe set for Flee, and every other
@@ -420,17 +438,11 @@ let internal stepToward atlas (creep: string) task (area: Set<RoomPos>) =
 /// It is the ordering the decision names, and what keeps this rule right on the
 /// day one of those two grows an area the Atlas places.
 let internal threatened (threats: Threats) atlas (creep: CreepInfo) task =
-    if safetyTier task || Map.isEmpty threats.Reach then
-        false
-    else
-        // The room's own grid and no other's (ADR 0052 decision 2, #138) — the
-        // same join `areaFor` makes, and the negation of it: nowhere left to
-        // stand is every tile of the area inside that room's Reach.
-        let room = roomOfWork atlas task
-
-        let reach =
-            room |> Option.map (Threats.reachIn threats) |> Option.defaultValue Set.empty
-
+    // The negation of the join `areaFor` makes: nowhere left to stand is every
+    // tile of the area inside that room's Reach.
+    match reachOnWork threats atlas task with
+    | None -> false
+    | Some(room, reach) ->
         let area = Atlas.workAreaAcross atlas creep.Name task
 
         not (Set.isEmpty area)
@@ -448,6 +460,19 @@ let internal standsInReach (threats: Threats) atlas (creep: string) =
     match Atlas.creepTile atlas creep with
     | Some tile -> Set.contains (RoomPos.pos tile) (Threats.reachIn threats tile.Room)
     | None -> false
+
+/// Whether the room a construction site stands in satisfies a rule — the room
+/// join every site predicate below makes, and ADR 0004's totality with it: an
+/// unplaced site names no room and answers **false**, the ordinary surplus
+/// Build it has always been. Read off the projection and not off the
+/// declaration (ADR 0041), exactly as the Reserve pool's room join is, so a
+/// room a stand-down drops from the scan set (ADR 0043) leaves this reading
+/// with it. Written once because the totality is one decision: spelled out at
+/// each site, one of the five had come to route an unplaced site through the
+/// sentinel room name `""` instead, and answered right only because no colony
+/// borrows a room called that.
+let private siteRoomIs atlas (rule: string -> bool) siteId =
+    Atlas.targetRoom atlas siteId |> Option.exists rule
 
 /// Whether a construction site stands in a room this colony **mines** — an
 /// [[outpost]]'s, and so a site the outpost builders' budget may ration rather
@@ -469,15 +494,17 @@ let internal standsInReach (threats: Threats) atlas (creep: string) =
 /// no room, answers false, and is the ordinary surplus Build it has always
 /// been.
 let private isOutpostSite (view: ColonyView) atlas siteId =
-    Atlas.targetRoom atlas siteId
-    |> Option.exists (fun room ->
-        room <> SpatialInfo.homeName view.Spatial
-        // A borrowed room's site is the child's own and not an outpost's (user
-        // decision 2026-09-07): it neither draws the outpost builders' budget
-        // nor dilutes it — the nursery's and the bootstrapping child's sites
-        // reach the pool by their own rules, and the budget is spread over the
-        // sites of rooms the colony *mines*.
-        && not (List.contains room view.Borrowed.Rooms))
+    siteRoomIs
+        atlas
+        (fun room ->
+            room <> SpatialInfo.homeName view.Spatial
+            // A borrowed room's site is the child's own and not an outpost's (user
+            // decision 2026-09-07): it neither draws the outpost builders' budget
+            // nor dilutes it — the nursery's and the bootstrapping child's sites
+            // reach the pool by their own rules, and the budget is spread over the
+            // sites of rooms the colony *mines*.
+            && not (List.contains room view.Borrowed.Rooms))
+        siteId
 
 /// Whether a construction site stands in a **nursery** — a room this colony has
 /// claimed and not yet stood a spawn in (ADR 0047 decision 4). `isOutpostSite`'s
@@ -486,7 +513,7 @@ let private isOutpostSite (view: ColonyView) atlas siteId =
 /// a nursery **every** site is feeding-tier outright, where in an outpost only
 /// the builders' budget's own head is. Total the same way (ADR 0004).
 let private isNurserySite (view: ColonyView) atlas siteId =
-    Atlas.targetRoom atlas siteId |> Option.exists (isNurseryRoom view)
+    siteRoomIs atlas (isNurseryRoom view) siteId
 
 /// Whether a room is **bootstrapping** as seen from this colony's tick: a child
 /// of ours running its own spawn (the mother's reading), or this colony's own
@@ -505,7 +532,7 @@ let private isBootstrappingRoom (view: ColonyView) room =
 /// before the controller, for the child's own workers and for the pioneers
 /// alike.
 let private isBootstrappingSite (view: ColonyView) atlas siteId =
-    Atlas.targetRoom atlas siteId |> Option.exists (isBootstrappingRoom view)
+    siteRoomIs atlas (isBootstrappingRoom view) siteId
 
 /// Whether any site stands in the room of the named controller — the
 /// borrowed Upgrade's other half: while the child has sites, its
@@ -542,6 +569,10 @@ let private isFeedingSite (view: ColonyView) atlas (fed: Set<string>) siteId =
 /// that is the point: the sites and the controller stand a few tiles apart. The
 /// room join is `isOutpostSite`'s (ADR 0041), and total (ADR 0004)
 /// resolved toward home.
+///
+/// `Option.forall` and not `siteRoomIs`' `Option.exists`, which is why this one
+/// of the five does not reach through that helper: its totality resolves the
+/// other way, an unplaced site reading as **home** rather than as elsewhere.
 let private isHomeSite (view: ColonyView) atlas siteId =
     Atlas.targetRoom atlas siteId
     |> Option.forall (fun room -> room = SpatialInfo.homeName view.Spatial)
@@ -659,13 +690,10 @@ let internal priorityStep = 1
 /// room's quota, every other class 0` (`Capacity.Fighters`, ADR 0056) — so a
 /// body that stopped answering `Fighter` here would be a body no Guard admits.
 let bodyClassOf (tuning: Tuning) atlas (creep: CreepInfo) : BodyClass =
-    let count part =
-        creep.Body |> Map.tryFind part |> Option.defaultValue 0
-
     if isGuardBody creep then Fighter
     elif Atlas.workHeavy atlas creep.Name then Heavy
     elif isStandingBody tuning creep then Standing
-    elif count Work = 0 then Carrier
+    elif partCount creep.Body Work = 0 then Carrier
     else Light
 
 /// Planner, second half: this tick's pool with each entry's [[priority]] and
@@ -724,8 +752,7 @@ let planPool (view: ColonyView) atlas (tasks: Task list) : PooledTask list =
             |> List.mapi (fun i id -> id, budget / n + (if i < budget % n then 1 else 0)))
         |> Map.ofList
 
-    let stored id =
-        view.Spatial.Stores |> Map.tryFind id |> Option.defaultValue 0
+    let stored id = SpatialInfo.storedIn view.Spatial id
 
     // **The rescue budget** (#284): the decaying structures this colony has let
     // fall so far below their own trigger that a repair is no longer surplus
@@ -1136,7 +1163,7 @@ let planPool (view: ColonyView) atlas (tasks: Task list) : PooledTask list =
     // the pile-on the cap is here for. So the store answers both numbers and
     // each class is counted against its own, with deliberately no `Total`.
     let isBorrowedSite siteId =
-        isBootstrapRoom view (Atlas.targetRoom atlas siteId |> Option.defaultValue "")
+        siteRoomIs atlas (isBootstrapRoom view) siteId
 
     let capacityOf task =
         match task with

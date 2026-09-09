@@ -435,7 +435,7 @@ let roomTests =
 
                 let atlas =
                     home
-                    |> withOutpost "W2N1" outpost
+                    |> withNeighbour "W2N1" outpost
                     |> snapshotWith [ worker "w-home"; worker "w-out" ]
                     |> ofView
 
@@ -496,7 +496,10 @@ let roomTests =
                     }
 
                 let atlas =
-                    home |> withOutpost "W2N1" outpost |> snapshotWith [ worker "w-home" ] |> ofView
+                    home
+                    |> withNeighbour "W2N1" outpost
+                    |> snapshotWith [ worker "w-home" ]
+                    |> ofView
 
                 Expect.isNonEmpty
                     (workArea atlas (Harvest "src-out") |> tilesIn "W2N1")
@@ -578,7 +581,7 @@ let roomTests =
 
                 let atlas =
                     home
-                    |> withOutpost "W2N1" outpost
+                    |> withNeighbour "W2N1" outpost
                     |> snapshotWith [ worker "w-home"; worker "w-out" ]
                     |> ofView
 
@@ -615,7 +618,7 @@ let roomTests =
                 for label, spatial in
                     [
                         "a room with no layer at all", home
-                        "a room named and empty", home |> withOutpost "W3N1" RoomLayer.empty
+                        "a room named and empty", home |> withNeighbour "W3N1" RoomLayer.empty
                     ] do
                     let atlas = spatial |> snapshotWith [ worker "w-home" ] |> ofView
 
@@ -684,7 +687,10 @@ let roomTests =
                     }
 
                 let atlas =
-                    home |> withOutpost "W2N1" outpost |> snapshotWith [ worker "w-home" ] |> ofView
+                    home
+                    |> withNeighbour "W2N1" outpost
+                    |> snapshotWith [ worker "w-home" ]
+                    |> ofView
 
                 Expect.isTrue
                     (Set.contains
@@ -753,7 +759,7 @@ let roomTests =
                                 [ "src-out", { X = 10; Y = 11 }; "can-out", { X = 10; Y = 10 } ]
                     }
 
-                let atlas = home |> withOutpost "W2N1" outpost |> snapshotWith [] |> ofView
+                let atlas = home |> withNeighbour "W2N1" outpost |> snapshotWith [] |> ofView
 
                 Expect.equal
                     (postsIn atlas (atlasHome atlas))
@@ -795,7 +801,7 @@ let roomTests =
                                 [ "src-out", { X = 10; Y = 10 }; "ctrl-out", { X = 10; Y = 12 } ]
                     }
 
-                let atlas = home |> withOutpost "W2N1" outpost |> snapshotWith [] |> ofView
+                let atlas = home |> withNeighbour "W2N1" outpost |> snapshotWith [] |> ofView
 
                 Expect.isTrue
                     (Set.contains { X = 10; Y = 11 } (seatTilesOf atlas "src-out" |> tilesIn "W2N1"))
@@ -840,7 +846,7 @@ let roomTests =
                         TargetPositions = Map.ofList [ "pile-out", { X = 10; Y = 10 } ]
                     }
 
-                let atlas = home |> withOutpost "W2N1" outpost |> snapshotWith [] |> ofView
+                let atlas = home |> withNeighbour "W2N1" outpost |> snapshotWith [] |> ofView
 
                 Expect.equal
                     (droppedEnergyIn atlas "W1N1")
@@ -882,7 +888,7 @@ let roomTests =
 
                 let atlas =
                     home
-                    |> withOutpost "W2N1" outpost
+                    |> withNeighbour "W2N1" outpost
                     |> snapshotWith
                         [ worker "b-home"; worker "w-out"; worker "a-home"; worker "ghost" ]
                     |> ofView

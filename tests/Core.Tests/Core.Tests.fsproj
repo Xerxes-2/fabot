@@ -4,6 +4,7 @@
     <IsPackable>false</IsPackable>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="SpatialFixtures.fs" />
     <Compile Include="RoomFixtures.fs" />
     <Compile Include="IntentPlanTests.fs" />
     <Compile Include="ViewTests.fs" />

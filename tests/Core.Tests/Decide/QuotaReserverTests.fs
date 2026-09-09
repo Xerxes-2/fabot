@@ -75,7 +75,7 @@ let reserverRowTests =
                     let fleet = surplusFleet (if posted then 3 else 2)
 
                     reserverColony [ northOutpost posted ] fleet [ "W1N2", reservedRoom true 5000 ]
-                    |> fun colony -> decide colony Map.empty Set.empty None
+                    |> fun colony -> decideOn colony
                     |> fun result -> spawnIntents result.Intents
 
                 for posted in [ true; false ] do
@@ -126,7 +126,7 @@ let reserverRowTests =
                             else
                                 []
                     }
-                    |> fun colony -> decide colony Map.empty Set.empty None
+                    |> fun colony -> decideOn colony
                     |> fun result -> reserverCasts result.Intents
 
                 Expect.equal
@@ -173,7 +173,7 @@ let reserverRowTests =
                     { colony with
                         Declared = [ SpatialInfo.homeName colony.Spatial; "W1N2" ]
                     }
-                    |> fun colony -> decide colony Map.empty Set.empty None
+                    |> fun colony -> decideOn colony
                     |> fun result -> reserverCasts result.Intents
 
                 Expect.equal
@@ -224,7 +224,7 @@ let reserverRowTests =
                         [ "W1N2", reservedRoom true 5000; "W2N2", reservedRoom true 5000 ]
 
                 Expect.equal
-                    (reserverCasts (decide colony Map.empty Set.empty None).Intents)
+                    (reserverCasts (decideOn colony).Intents)
                     [ oneBlock; oneBlock ]
                     "one body per declared outpost, and the four idle spawns cast no third"
 
@@ -235,7 +235,7 @@ let reserverRowTests =
                         [ "W1N2", reservedRoom true 5000; "W2N2", reservedRoom true 5000 ]
 
                 Expect.equal
-                    (reserverCasts (decide half Map.empty Set.empty None).Intents)
+                    (reserverCasts (decideOn half).Intents)
                     [ oneBlock; oneBlock ]
                     "and the one still waiting for its container is hired for just the same"
             }
@@ -258,7 +258,7 @@ let reserverRowTests =
                     { colony with
                         Bank = bank capacity capacity
                     }
-                    |> fun colony -> decide colony Map.empty Set.empty None
+                    |> fun colony -> decideOn colony
                     |> fun result -> result.Intents
 
                 Expect.isEmpty
@@ -297,12 +297,7 @@ let reserverRowTests =
                     let colony = colonyWith [ reserver "r1" |> withLife life ]
 
                     { colony with
-                        Spatial =
-                            colony.Spatial
-                            |> withHome (fun layer ->
-                                { layer with
-                                    CreepPositions = Map.ofList [ "r1", { X = 22; Y = 10 } ]
-                                })
+                        Spatial = colony.Spatial |> withCreepsAt [ "r1", { X = 22; Y = 10 } ]
                     }
 
                 Expect.isEmpty
@@ -339,7 +334,7 @@ let reserverRowTests =
                         [ anchor "a1" 0 50; anchor "a2" 0 50; worker "w1" 0 50 ]
                         [ "W1N2", reservedRoom true 5000 ]
 
-                match spawnIntents (decide colony Map.empty Set.empty None).Intents with
+                match spawnIntents (decideOn colony).Intents with
                 | [ (_, firstBody, firstName)
                     (_, _, secondName)
                     (_, _, thirdName)
@@ -364,7 +359,7 @@ let reserverRowTests =
                         [ northOutpost true ]
                         (surplusFleet 3)
                         [ "W1N2", reservedRoom true held ]
-                    |> fun colony -> decide colony Map.empty Set.empty None
+                    |> fun colony -> decideOn colony
                     |> fun result -> reserverCasts result.Intents
 
                 Expect.equal (castFor 5000) [ oneBlock ] "at the cap the deficit is zero: the floor"
@@ -395,7 +390,7 @@ let reserverRowTests =
                     { colony with
                         Bank = bank 8000 capacity
                     }
-                    |> fun colony -> decide colony Map.empty Set.empty None
+                    |> fun colony -> decideOn colony
                     |> fun result -> reserverCasts result.Intents
 
                 Expect.equal
@@ -430,7 +425,7 @@ let reserverRowTests =
                     let colony = reserverColony [ northOutpost true ] (surplusFleet 3) control
 
                     { colony with Bank = bank 8000 8000 }
-                    |> fun colony -> decide colony Map.empty Set.empty None
+                    |> fun colony -> decideOn colony
                     |> fun result -> reserverCasts result.Intents
 
                 let nineBlocks = List.replicate 9 BodyPart.Claim @ List.replicate 9 Move
@@ -558,7 +553,7 @@ let reserverRowTests =
                         reserverColony [ northOutpost false ] (surplusFleet 2) [ "W1N2", control ]
 
                     { colony with Bank = bank 8000 8000 }
-                    |> fun colony -> decide colony Map.empty Set.empty None
+                    |> fun colony -> decideOn colony
                     |> fun result -> reserverCasts result.Intents
 
                 Expect.equal

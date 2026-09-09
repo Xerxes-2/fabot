@@ -16,25 +16,25 @@ let pickupReflexTests =
         [
             test "an adjacent creep with free capacity picks up" {
                 let snapshot = pileColony [ worker "w1" 0 50 ] [ "w1", { X = 10; Y = 11 } ]
-                let { Intents = intents } = decide snapshot Map.empty Set.empty None
+                let { Intents = intents } = decideOn snapshot
                 Expect.equal (pickups intents) [ "w1", "pile-1" ] "in reach and hungry: pick up"
             }
 
             test "a creep standing on the pile picks up" {
                 let snapshot = pileColony [ worker "w1" 0 50 ] [ "w1", { X = 10; Y = 10 } ]
-                let { Intents = intents } = decide snapshot Map.empty Set.empty None
+                let { Intents = intents } = decideOn snapshot
                 Expect.equal (pickups intents) [ "w1", "pile-1" ] "range 0 is within reach"
             }
 
             test "a full creep leaves the pile alone" {
                 let snapshot = pileColony [ worker "w1" 50 0 ] [ "w1", { X = 10; Y = 11 } ]
-                let { Intents = intents } = decide snapshot Map.empty Set.empty None
+                let { Intents = intents } = decideOn snapshot
                 Expect.isEmpty (pickups intents) "no free capacity, nothing to gain"
             }
 
             test "a pile out of reach draws nobody — the reflex never moves a creep" {
                 let snapshot = pileColony [ worker "w1" 0 50 ] [ "w1", { X = 10; Y = 13 } ]
-                let { Intents = intents } = decide snapshot Map.empty Set.empty None
+                let { Intents = intents } = decideOn snapshot
                 Expect.isEmpty (pickups intents) "range 3: recapture only what is in reach"
             }
 
@@ -44,7 +44,7 @@ let pickupReflexTests =
                         [ worker "w1" 0 50; worker "w2" 0 50 ]
                         [ "w1", { X = 10; Y = 11 }; "w2", { X = 9; Y = 10 } ]
 
-                let { Intents = intents } = decide snapshot Map.empty Set.empty None
+                let { Intents = intents } = decideOn snapshot
 
                 Expect.equal
                     (pickups intents |> List.sort)
@@ -75,7 +75,7 @@ let pickupReflexTests =
                                 })
                     }
 
-                let { Intents = intents } = decide withSource Map.empty Set.empty None
+                let { Intents = intents } = decideOn withSource
 
                 Expect.equal (pickups intents) [ "w1", "pile-1" ] "the reflex fires"
 
@@ -101,7 +101,7 @@ let pickupReflexTests =
                                 })
                     }
 
-                let decision = decide colony Map.empty Set.empty None
+                let decision = decideOn colony
 
                 Expect.equal
                     (pickups decision.Intents)
@@ -120,7 +120,7 @@ let pickupReflexTests =
                             }
                     }
 
-                let decision = decide tasked Map.empty Set.empty None
+                let decision = decideOn tasked
 
                 Expect.equal
                     (Map.tryFind "w1" decision.Assignments)
@@ -146,8 +146,8 @@ let pickupReflexTests =
                 let strewn =
                     atLevel 2 (openRoom 3 |> withTargets [ "pile-1", { X = 24; Y = 24 }, Dropped ])
 
-                let placedWith = decide strewn Map.empty Set.empty None
-                let placedWithout = decide bare Map.empty Set.empty None
+                let placedWith = decideOn strewn
+                let placedWithout = decideOn bare
 
                 Expect.equal
                     (placedTiles placedWith.Intents)
@@ -169,7 +169,7 @@ let pickupReflexTests =
                         [ "pile-out", { X = 10; Y = 10 } ]
                         [ "w-out", { X = 10; Y = 10 } ]
 
-                let { Intents = intents } = decide snapshot Map.empty Set.empty None
+                let { Intents = intents } = decideOn snapshot
 
                 Expect.equal
                     (pickups intents)
@@ -186,7 +186,7 @@ let pickupReflexTests =
                     pileColony [ worker "w-out" 0 50 ] []
                     |> withPileRoom "W1N2" [] [ "w-out", { X = 10; Y = 10 } ]
 
-                let { Intents = intents } = decide snapshot Map.empty Set.empty None
+                let { Intents = intents } = decideOn snapshot
                 Expect.isEmpty (pickups intents) "same coordinate, different room, no reach"
             }
 
@@ -200,7 +200,7 @@ let pickupReflexTests =
                         [ "pile-out", { X = 10; Y = 10 } ]
                         [ "w-out", { X = 9; Y = 10 } ]
 
-                let { Intents = intents } = decide snapshot Map.empty Set.empty None
+                let { Intents = intents } = decideOn snapshot
 
                 Expect.equal
                     (pickups intents |> List.sort)
@@ -218,7 +218,7 @@ let pickupReflexTests =
                         Creeps = [ worker "w1" 0 50; worker "ghost" 0 50 ]
                     }
 
-                let { Intents = intents } = decide snapshot Map.empty Set.empty None
+                let { Intents = intents } = decideOn snapshot
                 Expect.equal (pickups intents) [ "w1", "pile-1" ] "the unplaced creep picks nothing"
             }
         ]
@@ -290,10 +290,7 @@ let logisticsTests =
                             { haulRoom with
                                 TargetKinds = haulRoom.TargetKinds |> Map.remove "can-src"
                             }
-                            |> withHome (fun layer ->
-                                { layer with
-                                    CreepPositions = Map.ofList [ "w1", pos ]
-                                })
+                            |> withCreepsAt [ "w1", pos ]
                     }
 
                 let near = decide (colonyAt { X = 15; Y = 10 }) Map.empty Set.empty None
@@ -325,15 +322,10 @@ let logisticsTests =
                 let snapshot =
                     { haulColony with
                         Creeps = [ anchor "a1" 0 50 ]
-                        Spatial =
-                            haulRoom
-                            |> withHome (fun layer ->
-                                { layer with
-                                    CreepPositions = Map.ofList [ "a1", { X = 15; Y = 10 } ]
-                                })
+                        Spatial = haulRoom |> withCreepsAt [ "a1", { X = 15; Y = 10 } ]
                     }
 
-                let { Assignments = assignments } = decide snapshot Map.empty Set.empty None
+                let { Assignments = assignments } = decideOn snapshot
 
                 Expect.equal
                     (Map.tryFind "a1" assignments)
@@ -347,12 +339,7 @@ let logisticsTests =
                 let snapshot =
                     { haulColony with
                         Creeps = [ anchor "a1" 0 50 ]
-                        Spatial =
-                            haulRoom
-                            |> withHome (fun layer ->
-                                { layer with
-                                    CreepPositions = Map.ofList [ "a1", { X = 15; Y = 10 } ]
-                                })
+                        Spatial = haulRoom |> withCreepsAt [ "a1", { X = 15; Y = 10 } ]
                     }
 
                 let remembered = Map.ofList [ "a1", taskId (Withdraw "can-ctrl") ]
@@ -386,12 +373,7 @@ let logisticsTests =
                 let snapshot =
                     { haulColony with
                         Creeps = [ worker "w1" 50 0 ]
-                        Spatial =
-                            haulRoom
-                            |> withHome (fun layer ->
-                                { layer with
-                                    CreepPositions = Map.ofList [ "w1", { X = 17; Y = 10 } ]
-                                })
+                        Spatial = haulRoom |> withCreepsAt [ "w1", { X = 17; Y = 10 } ]
                     }
 
                 let remembered = Map.ofList [ "w1", taskId (Withdraw "can-ctrl") ]
@@ -421,12 +403,7 @@ let logisticsTests =
                 let snapshot =
                     { haulColony with
                         Creeps = [ worker "w1" 0 50 ]
-                        Spatial =
-                            haulRoom
-                            |> withHome (fun layer ->
-                                { layer with
-                                    CreepPositions = Map.ofList [ "w1", { X = 17; Y = 10 } ]
-                                })
+                        Spatial = haulRoom |> withCreepsAt [ "w1", { X = 17; Y = 10 } ]
                     }
 
                 let remembered = Map.ofList [ "w1", taskId (Upgrade "ctrl-1") ]
@@ -458,7 +435,7 @@ let logisticsTests =
                                 [ "spawn-1", { X = 14; Y = 10 }, Structure BuiltKind.Spawn ]
                     }
 
-                let { Assignments = assignments } = decide snapshot Map.empty Set.empty None
+                let { Assignments = assignments } = decideOn snapshot
 
                 Expect.equal
                     (Map.tryFind "w1" assignments)
@@ -474,15 +451,10 @@ let logisticsTests =
                 let snapshot =
                     { haulColony with
                         Creeps = [ creepWith "h1" 100 0 [ Carry; Carry; Move ] ]
-                        Spatial =
-                            haulRoom
-                            |> withHome (fun layer ->
-                                { layer with
-                                    CreepPositions = Map.ofList [ "h1", { X = 15; Y = 10 } ]
-                                })
+                        Spatial = haulRoom |> withCreepsAt [ "h1", { X = 15; Y = 10 } ]
                     }
 
-                let { Assignments = assignments } = decide snapshot Map.empty Set.empty None
+                let { Assignments = assignments } = decideOn snapshot
 
                 Expect.equal
                     (Map.tryFind "h1" assignments)
@@ -494,15 +466,10 @@ let logisticsTests =
                 let snapshot =
                     { haulColony with
                         Creeps = [ worker "w1" 0 50 ]
-                        Spatial =
-                            haulRoom
-                            |> withHome (fun layer ->
-                                { layer with
-                                    CreepPositions = Map.ofList [ "w1", { X = 17; Y = 10 } ]
-                                })
+                        Spatial = haulRoom |> withCreepsAt [ "w1", { X = 17; Y = 10 } ]
                     }
 
-                let { Intents = intents } = decide snapshot Map.empty Set.empty None
+                let { Intents = intents } = decideOn snapshot
 
                 Expect.contains
                     intents

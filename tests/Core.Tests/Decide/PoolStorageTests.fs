@@ -88,7 +88,7 @@ let stockTests =
                         Assignments = assignments
                         Verdicts = verdicts
                     } =
-                    decide colony Map.empty Set.empty None
+                    decideOn colony
 
                 Expect.equal
                     (Map.tryFind "h1" assignments)
@@ -256,7 +256,7 @@ let stockDrawTests =
                         Sources = []
                     }
 
-                let { Verdicts = verdicts } = decide colony Map.empty Set.empty None
+                let { Verdicts = verdicts } = decideOn colony
 
                 Expect.equal
                     verdicts
@@ -280,7 +280,7 @@ let stockDrawTests =
                         Creeps = [ creepWith "h1" 50 50 [ Carry; Carry; Move ] ]
                     }
 
-                let { Verdicts = verdicts } = decide colony Map.empty Set.empty None
+                let { Verdicts = verdicts } = decideOn colony
 
                 Expect.equal
                     verdicts
@@ -309,7 +309,7 @@ let stockDrawTests =
                 Expect.contains (withdrawTasks tasks) "sto-1" "the stock is an intake this tick"
                 Expect.contains (refillTasks tasks) "sto-1" "and a sink on the very same tick"
 
-                let { Verdicts = verdicts } = decide colony Map.empty Set.empty None
+                let { Verdicts = verdicts } = decideOn colony
 
                 Expect.equal
                     verdicts

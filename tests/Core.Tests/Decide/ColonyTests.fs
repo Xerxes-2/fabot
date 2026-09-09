@@ -603,20 +603,16 @@ let nurseryTests =
                         Creeps = [ for name in [ "w1"; "w2"; "w3" ] -> worker name 50 0 ]
                         Spatial =
                             colony.Spatial
-                            |> withHome (fun layer ->
-                                { layer with
-                                    CreepPositions =
-                                        Map.ofList
-                                            [
-                                                "w1", { X = 10; Y = 2 }
-                                                "w2", { X = 10; Y = 3 }
-                                                "w3", { X = 10; Y = 4 }
-                                            ]
-                                })
+                            |> withCreepsAt
+                                [
+                                    "w1", { X = 10; Y = 2 }
+                                    "w2", { X = 10; Y = 3 }
+                                    "w3", { X = 10; Y = 4 }
+                                ]
                     }
 
                 let held colony =
-                    let { Assignments = assignments } = decide colony Map.empty Set.empty None
+                    let { Assignments = assignments } = decideOn colony
 
                     assignments |> Map.toList |> List.map snd |> List.countBy id |> List.sort
 
@@ -901,7 +897,7 @@ let nurseryTests =
                     |> control
 
                 let held colony =
-                    let { Assignments = assignments } = decide colony Map.empty Set.empty None
+                    let { Assignments = assignments } = decideOn colony
 
                     assignments |> Map.toList |> List.map snd |> List.countBy id |> List.sort
 
@@ -1031,12 +1027,7 @@ let private motherColony (creeps: (string * Pos) list) =
 
     { colony with
         Creeps = creeps |> List.map (fun (name, _) -> worker name 0 50)
-        Spatial =
-            colony.Spatial
-            |> withHome (fun layer ->
-                { layer with
-                    CreepPositions = Map.ofList creeps
-                })
+        Spatial = colony.Spatial |> withCreepsAt creeps
     }
 
 /// The child: the north room run as a home of its own, with its own rock
@@ -1070,7 +1061,7 @@ let private childColony (creeps: (string * Pos) list) =
 /// it is not in the fold that writes a status Verdict per living creep, so
 /// the colony decides nothing about it and holds nothing of it.
 let private matchedTask name (colony: ColonyView) =
-    (decide colony Map.empty Set.empty None).Verdicts
+    (decideOn colony).Verdicts
     |> List.tryPick (function
         | Verdict.Matched(creep, task, _) when creep = name -> Some task
         | _ -> None)
@@ -1313,7 +1304,7 @@ let bootstrapTests =
                     }
 
                 let assignmentOf colony =
-                    let { Assignments = assignments } = decide colony Map.empty Set.empty None
+                    let { Assignments = assignments } = decideOn colony
                     Map.tryFind "w" assignments
 
                 Expect.equal
@@ -1399,7 +1390,7 @@ let bootstrapTests =
                                 })
                     }
 
-                let { Assignments = assignments } = decide crowd Map.empty Set.empty None
+                let { Assignments = assignments } = decideOn crowd
 
                 let on task =
                     assignments
@@ -2001,7 +1992,7 @@ let colonyStageTests =
                 // under it: the trunks are planned whole either way and
                 // what the stage decides is whether they reach the ground.
                 let roads colony =
-                    let { Intents = intents } = decide colony Map.empty Set.empty None
+                    let { Intents = intents } = decideOn colony
                     sitesOfKind Road intents
 
                 Expect.isNonEmpty
@@ -2292,7 +2283,7 @@ let borrowedRoomBudgetTests =
                         |> westward
                         |> control
 
-                    let { Assignments = assignments } = decide colony Map.empty Set.empty None
+                    let { Assignments = assignments } = decideOn colony
 
                     assignments
                     |> Map.toList

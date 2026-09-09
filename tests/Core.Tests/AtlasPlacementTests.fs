@@ -57,10 +57,7 @@ let placementQueryTests =
                                     "site-1", Site BuiltKind.Extension
                                 ]
                     }
-                    |> withHome (fun layer ->
-                        { layer with
-                            CreepPositions = Map.ofList [ "w", { X = 10; Y = 10 } ]
-                        })
+                    |> withCreepsAt [ "w", { X = 10; Y = 10 } ]
                     |> snapshotWith [ worker "w" ]
                     |> ofView
 
@@ -192,10 +189,7 @@ let placementQueryTests =
                 // stop maintaining the road it just built (ADR 0011).
                 let atlas =
                     spatial [] [ { X = 10; Y = 10 }, Swamp ]
-                    |> withHome (fun layer ->
-                        { layer with
-                            Roads = Set.singleton { X = 10; Y = 10 }
-                        })
+                    |> withRoads [ { X = 10; Y = 10 } ]
                     |> snapshotWith []
                     |> ofView
 
@@ -287,10 +281,7 @@ let placementQueryTests =
                         Hits = Map.ofList [ "cont-1", { Hits = 100; HitsMax = 250000 } ]
                         Stores = Map.ofList [ "cont-1", 800 ]
                     }
-                    |> withHome (fun layer ->
-                        { layer with
-                            CreepPositions = Map.ofList [ "w", { X = 7; Y = 7 } ]
-                        })
+                    |> withCreepsAt [ "w", { X = 7; Y = 7 } ]
                     |> snapshotWith [ worker "w" ]
                     |> ofView
 
@@ -319,10 +310,7 @@ let placementQueryTests =
                         TargetKinds = Map.ofList [ "cont-1", Structure BuiltKind.Container ]
                         Hits = Map.ofList [ "cont-1", { Hits = 100; HitsMax = 250000 } ]
                     }
-                    |> withHome (fun layer ->
-                        { layer with
-                            CreepPositions = Map.ofList [ "w", { X = 10; Y = 10 } ]
-                        })
+                    |> withCreepsAt [ "w", { X = 10; Y = 10 } ]
                     |> snapshotWith [ worker "w" ]
                     |> ofView
 

@@ -21,6 +21,27 @@ type BodyPart =
     | Claim
     | Tough
 
+/// A body's parts counted by kind — the shape a living creep already carries
+/// in `CreepInfo.Body`, so one rule reads a body still in the oven and a
+/// living creep alike (ADR 0006). Two spellings of "how many of this part" is
+/// how a rule written for both drifts: the row predicates in `Decide.Bodies`
+/// were six arms each in two representations, kept in step by hand.
+let partsOf (body: BodyPart list) : Map<BodyPart, int> = body |> List.countBy id |> Map.ofList
+
+/// How many of one part a counted body holds — 0 for one it has none of,
+/// which is the reading every body rule wants: a body with no CLAIM is a body
+/// with zero of them, not a body the question does not arise for.
+let partCount (parts: Map<BodyPart, int>) part =
+    parts |> Map.tryFind part |> Option.defaultValue 0
+
+/// How many of one part a body still in the oven holds, counted off the list
+/// itself. `partsOf` is for the rules that ask about several parts and want
+/// one pass; this is for the ones that ask about a single part, where counting
+/// a map into existence to read one key out of it is the more expensive
+/// spelling of the same answer.
+let partCountIn (body: BodyPart list) part =
+    body |> List.filter ((=) part) |> List.length
+
 /// The engine's own numbers (ADR 0052 decision 5), each named for the server
 /// constant it spells. A number belongs here when changing it would be a **lie
 /// about the server**, and in `Tuning` below when changing it would be a

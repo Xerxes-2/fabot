@@ -243,29 +243,6 @@ let spawnIntents intents =
         | SpawnCreep(s, b, c) -> Some(s, b, c)
         | _ -> None)
 
-/// The home room's geometry, read back off a projection: the room
-/// `RoomName` names, and the one the empty name files when it names none
-/// (`SpatialInfo.homeName`). Absent geometry reads as an empty layer, never
-/// as a lookup that throws (ADR 0004). The twin of `AtlasFixtures.homeLayer`;
-/// the two suites share no module, as their `spatial` funnels already do
-/// not.
-let homeLayer (spatial: SpatialInfo) : RoomLayer =
-    SpatialInfo.layerOf spatial (SpatialInfo.homeName spatial)
-
-/// The same projection with the home room's layer changed. Since ADR 0041's
-/// contract step the tile-shaped containers live under a room name and
-/// nowhere else, so a test that used to copy-update the projection itself
-/// — `{ colony.Spatial with CreepPositions = … }` — reaches through this
-/// instead. It merges into whatever layer is already there, so composing it
-/// with `withTargets` and `withOutpost` is order-blind. Apply it after
-/// `RoomName` is final: the home name is resolved when it runs, and a
-/// projection layered then renamed leaves its geometry filed under the old
-/// name.
-let withHome (change: RoomLayer -> RoomLayer) (spatial: SpatialInfo) : SpatialInfo =
-    { spatial with
-        Rooms = Map.add (SpatialInfo.homeName spatial) (change (homeLayer spatial)) spatial.Rooms
-    }
-
 /// Synthetic open room: every tile within `radius` of (25,25) is Plain,
 /// with the spawn structure "spawn-1" standing at the centre.
 let openRoom radius =
@@ -440,27 +417,6 @@ let withOutpost room targets tiles (colony: ColonyView) =
             }
     }
 
-/// Spatial projection holding exactly the given terrain tiles and target
-/// positions; absent tiles are outside the projection (impassable). No
-/// creep positions and no obstacles — movement tests add those on top. It
-/// files them through `withHome` and inherits its ordering rule, which
-/// bites hardest here because this funnel starts from `SpatialInfo.empty`:
-/// the home name it resolves is the empty one, so a projection built by
-/// this and *then* given a `RoomName` carries its geometry under the empty
-/// name while `RoomName` says another, and every reader that asks by
-/// *room* — the weight grid, the census signature, the hauler quota —
-/// answers off `RoomLayer.empty`. The target-keyed queries still find it,
-/// because `SpatialInfo.placementOf` scans every layer, which is what
-/// makes the mistake quiet. Name the room first, then build: `openRoom` is
-/// what that looks like.
-let spatial targets tiles =
-    SpatialInfo.empty
-    |> withHome (fun layer ->
-        { layer with
-            Terrain = Map.ofList tiles
-            TargetPositions = Map.ofList targets
-        })
-
 /// The 8 tiles around a position, all Plain: an open-ground source site.
 let openSeats pos =
     [
@@ -503,6 +459,17 @@ let stepFrom (pos: Pos) direction =
     | BottomLeft -> { X = pos.X - 1; Y = pos.Y + 1 }
     | Left -> { pos with X = pos.X - 1 }
     | TopLeft -> { X = pos.X - 1; Y = pos.Y - 1 }
+
+/// One tick of `decide` over a colony that remembers nothing: no prior
+/// assignments, nobody owed verbose scoring, no plan memo. That is the whole
+/// of what all but a handful of this suite's `decide` calls pass, and it is
+/// three arguments of noise at each of them — beside `poolOn` and `resolveOn`,
+/// which run the two seams below it the same way.
+let decideOn colony = decide colony Map.empty Set.empty None
+
+/// The same tick with remembered assignments — the one argument a keep-path
+/// test varies.
+let decideFrom assigned colony = decide colony assigned Set.empty None
 
 /// This tick's pool with its priorities and capacities, over the
 /// snapshot's own Atlas — what the Matcher and the mover are both handed
@@ -588,10 +555,7 @@ let tierRoom =
     { spatial [] corridor with
         Stores = Map.ofList [ "can-ctrl", 800 ]
     }
-    |> withHome (fun layer ->
-        { layer with
-            Obstacles = Set.ofList [ { X = 11; Y = 10 }; { X = 14; Y = 10 }; { X = 20; Y = 10 } ]
-        })
+    |> withObstacles [ { X = 11; Y = 10 }; { X = 14; Y = 10 }; { X = 20; Y = 10 } ]
     |> withTargets
         [
             "spawn-1", { X = 11; Y = 10 }, Structure BuiltKind.Spawn
@@ -692,10 +656,7 @@ let haulRoom =
     { spatial [] [ for x in 9..21 -> { X = x; Y = 10 }, (if x = 10 then Wall else Plain) ] with
         Stores = Map.ofList [ "can-src", 0; "can-ctrl", 800 ]
     }
-    |> withHome (fun layer ->
-        { layer with
-            Obstacles = Set.singleton { X = 20; Y = 10 }
-        })
+    |> withObstacles [ { X = 20; Y = 10 } ]
     |> withTargets
         [
             "src-a", { X = 10; Y = 10 }, Source
@@ -754,17 +715,14 @@ let pileTaskColony amount (creeps: (string * Pos) list) =
                 Stores = Map.ofList [ "pile-a", amount ]
             }
             |> withTargets [ "pile-a", { X = 10; Y = 10 }, Dropped ]
-            |> withHome (fun layer ->
-                { layer with
-                    CreepPositions = Map.ofList creeps
-                })
+            |> withCreepsAt creeps
     }
 
 /// The hauler quota this ColonyView decides, read off the plan memo `decide`
 /// returns — the quota's only seam, since the rule itself is private to
 /// that pipeline.
 let quotaOf snapshot =
-    let { Memo = memo } = decide snapshot Map.empty Set.empty None
+    let { Memo = memo } = decideOn snapshot
     memo.HaulerQuota
 
 /// The haul this ColonyView prices, summed over its source containers — the
@@ -773,7 +731,7 @@ let quotaOf snapshot =
 /// crosses a Seam) cannot reach it, so a case about the rate reads this and a
 /// case about the crowd reads the quota.
 let haulDemandOf snapshot =
-    let { Quotas = quotas } = decide snapshot Map.empty Set.empty None
+    let { Quotas = quotas } = decideOn snapshot
     quotas.HaulerDemand |> List.sumBy (fun row -> row.Demand)
 
 /// The W12S28 shape (ADR 0012): a 3-wide plain field y = 9..11 from x = 8
@@ -805,10 +763,7 @@ let incomeRoom =
                     "spawn-1", Structure BuiltKind.Spawn
                 ]
     }
-    |> withHome (fun layer ->
-        { layer with
-            Obstacles = Set.singleton { X = 20; Y = 10 }
-        })
+    |> withObstacles [ { X = 20; Y = 10 } ]
 
 /// The W12S28 colony: four idle spawns on the one 300-capacity bank with
 /// energy to spare — restraint must come from the target, never from the
@@ -979,7 +934,7 @@ let postedOutpostColony workers (control: (string * RoomControlInfo) list) =
 /// colony with two vacancies of different ceilings and two idle spawns
 /// buys the dearer first and the cheaper out of what is left.
 let anchorCastsBy colony =
-    spawnIntents (decide colony Map.empty Set.empty None).Intents
+    spawnIntents (decideOn colony).Intents
     |> List.filter (fun (_, _, name) -> name.StartsWith "anchor-")
     |> List.map (fun (_, body, _) -> body)
 
@@ -1010,15 +965,6 @@ let facingBody pos body =
 /// must not leave (ADR 0041).
 let corridor x y0 y1 =
     [ for y in y0..y1 -> { X = x; Y = y }, Plain ]
-
-/// The same projection with a second room's layer beside the colony's own,
-/// under that room's name — the shape an outpost arrives in, and the only
-/// one there is since the tile-shaped containers moved under a room name
-/// (ADR 0041).
-let withNeighbour room layer (spatial: SpatialInfo) =
-    { spatial with
-        Rooms = Map.add room layer spatial.Rooms
-    }
 
 /// A plain border ring. The Seam query reads the border layer and nothing
 /// else (ADR 0041), so a projection without one answers an empty band and
@@ -1167,16 +1113,13 @@ let threeLoadedAtHome (colony: ColonyView) =
         Creeps = [ for name in [ "w1"; "w2"; "w3" ] -> worker name 50 0 ]
         Spatial =
             colony.Spatial
-            |> withHome (fun layer ->
-                { layer with
-                    CreepPositions = Map.ofList [ for i in 1..3 -> $"w{i}", { X = 10; Y = i + 1 } ]
-                })
+            |> withCreepsAt [ for i in 1..3 -> $"w{i}", { X = 10; Y = i + 1 } ]
     }
 
 /// What each Task in the colony holds this tick, by Task — the whole tally, so
 /// a budget that admitted one body too many or one too few fails either way.
 let heldBy (colony: ColonyView) =
-    let { Assignments = assignments } = decide colony Map.empty Set.empty None
+    let { Assignments = assignments } = decideOn colony
 
     assignments |> Map.toList |> List.map snd |> List.countBy id |> List.sort
 
@@ -1184,13 +1127,13 @@ let heldBy (colony: ColonyView) =
 /// walk table whose identity is not a decision, and these three are the
 /// whole of what leaves the colony.
 let outcomeOf (colony: ColonyView) =
-    let decision = decide colony Map.empty Set.empty None
+    let decision = decideOn colony
     decision.Intents, decision.Assignments, decision.Verdicts
 
 /// Which Task won the one worker, and what separated it from its closest
 /// rival (ADR 0009's Matched Verdict).
 let matchOf (colony: ColonyView) =
-    let { Verdicts = verdicts } = decide colony Map.empty Set.empty None
+    let { Verdicts = verdicts } = decideOn colony
 
     verdicts
     |> List.tryPick (function
@@ -1250,8 +1193,7 @@ let withHungryExtension (pos: Pos) (colony: ColonyView) =
 /// them — the row a spawn Intent came from, which is the whole of what the
 /// cases below read.
 let castNames (colony: ColonyView) =
-    spawnIntents (decide colony Map.empty Set.empty None).Intents
-    |> List.map (fun (_, _, name) -> name)
+    spawnIntents (decideOn colony).Intents |> List.map (fun (_, _, name) -> name)
 
 /// The switch's home half: the same corridor down column 25 of W1N1 with
 /// the spawn at (25,10), and one home source in the rock beside it at
@@ -1599,10 +1541,7 @@ let bufferLane =
             "ctrl-1", { X = 10; Y = 10 }, Controller
             "can-buf", { X = 13; Y = 10 }, Structure BuiltKind.Container
         ]
-    |> withHome (fun layer ->
-        { layer with
-            Obstacles = Set.singleton { X = 10; Y = 10 }
-        })
+    |> withObstacles [ { X = 10; Y = 10 } ]
 
 /// The lane with one creep on the buffer's doorstep and the given
 /// furniture wherever the case wants it — (15,10), a step out, for ADR
@@ -1622,10 +1561,7 @@ let bufferLaneColony furniture sites creep =
         Spatial =
             bufferLane
             |> withTargets furniture
-            |> withHome (fun layer ->
-                { layer with
-                    CreepPositions = Map.ofList [ (creep: CreepInfo).Name, { X = 14; Y = 10 } ]
-                })
+            |> withCreepsAt [ (creep: CreepInfo).Name, { X = 14; Y = 10 } ]
     }
 
 /// The same lane with the flow standing in it: a spawn of the colony's own

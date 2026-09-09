@@ -120,16 +120,13 @@ let internal terrainWeight terrain =
 /// except Move and except empty Carry generates fatigue — the engine
 /// loads Carry parts 50 energy apiece, and the empty ones ride free.
 let internal fatigueFactorOf (creep: CreepInfo) : FatigueFactor =
-    let count part =
-        creep.Body |> Map.tryFind part |> Option.defaultValue 0
-
-    let carry = count Carry
+    let carry = partCount creep.Body Carry
     let loadedCarry = min carry ((creep.Energy + 49) / 50)
     let parts = creep.Body |> Map.toList |> List.sumBy snd
 
     {
-        FatigueParts = parts - count Move - (carry - loadedCarry)
-        MoveParts = count Move
+        FatigueParts = parts - partCount creep.Body Move - (carry - loadedCarry)
+        MoveParts = partCount creep.Body Move
     }
 
 /// The fatigue factor of a body list carrying nothing — the shape a body
@@ -137,12 +134,26 @@ let internal fatigueFactorOf (creep: CreepInfo) : FatigueFactor =
 /// creep; this one reads a body the projection carries no creep for: the
 /// hauler quota's candidate (ADR 0012) and a lead's replacement (ADR 0026).
 let internal emptyFactorOf (body: BodyPart list) : FatigueFactor =
-    let count part =
-        body |> List.filter ((=) part) |> List.length
+    let parts = partsOf body
+    let moves = partCount parts Move
 
     {
-        FatigueParts = List.length body - count Move - count Carry
-        MoveParts = count Move
+        FatigueParts = List.length body - moves - partCount parts Carry
+        MoveParts = moves
+    }
+
+/// The fatigue factor of the same body carrying a full load — every part but
+/// Move generating fatigue, the empty Carry's free ride spent. Beside
+/// `emptyFactorOf` because the two are one body's two journeys (ADR 0029) and
+/// a round trip prices both; written apart from it, the loaded half lived
+/// inside `Atlas.haulRoundTripTicks` and no reader of this file could see that
+/// the pair existed.
+let internal loadedFactorOf (body: BodyPart list) : FatigueFactor =
+    let moves = partCountIn body Move
+
+    {
+        FatigueParts = List.length body - moves
+        MoveParts = moves
     }
 
 /// Cost units the body needs to step onto a tile of the given terrain weight

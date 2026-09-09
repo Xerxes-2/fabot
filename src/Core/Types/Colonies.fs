@@ -466,6 +466,24 @@ module Colony =
                 else
                     Bootstrapping)
 
+    /// The declared children of this colony a further rule picks out: a colony
+    /// this one is the mother of, that is not this one, and that this one does
+    /// not already work as an [[outpost]] — the three clauses `bootstrapping`
+    /// and `reclaiming` share whole, written once because they are one
+    /// sentence ("a child of mine, not an outpost, not me") and the two rules
+    /// differ only in what they then ask of the room. An outpost is worked and
+    /// not raised, so a room in both lists is the outpost list's.
+    let private childrenWhere (colonies: Colony list) (rule: string -> bool) (colony: Colony) =
+        let worked = colony.Outposts |> List.map (fun outpost -> outpost.RoomName)
+
+        colonies
+        |> List.filter (fun child ->
+            child.Mother = Some colony.Home
+            && child.Home <> colony.Home
+            && not (List.contains child.Home worked)
+            && rule child.Home)
+        |> List.map (fun child -> child.Home)
+
     /// The rooms one colony **bootstraps** this tick (ADR 0047 decision 4): the
     /// homes of the colonies it is the [[mother colony]] of, while those
     /// colonies are not yet `Independent`. The mother projects each of them
@@ -491,16 +509,9 @@ module Colony =
         (colonies: Colony list)
         (colony: Colony)
         : string list =
-        let worked = colony.Outposts |> List.map (fun outpost -> outpost.RoomName)
-
-        colonies
-        |> List.filter (fun child ->
-            child.Mother = Some colony.Home
-            && child.Home <> colony.Home
-            && not (List.contains child.Home worked)
-            && (Map.tryFind child.Home stages
-                |> Option.exists (fun stage -> stage <> Independent)))
-        |> List.map (fun child -> child.Home)
+        colony
+        |> childrenWhere colonies (fun home ->
+            Map.tryFind home stages |> Option.exists (fun stage -> stage <> Independent))
 
     /// The declared children of this colony that have stopped being ours, and
     /// are nobody else's either: the second half of what a mother projects for
@@ -513,15 +524,7 @@ module Colony =
     /// somebody else holds is ADR 0043's business, and a room with no control
     /// entry is one nothing looked into, which classifies nothing (ADR 0004).
     let reclaiming (unowned: Set<string>) (colonies: Colony list) (colony: Colony) : string list =
-        let worked = colony.Outposts |> List.map (fun outpost -> outpost.RoomName)
-
-        colonies
-        |> List.filter (fun child ->
-            child.Mother = Some colony.Home
-            && child.Home <> colony.Home
-            && not (List.contains child.Home worked)
-            && Set.contains child.Home unowned)
-        |> List.map (fun child -> child.Home)
+        colony |> childrenWhere colonies (fun home -> Set.contains home unowned)
 
     /// The rooms one colony projects this tick: its home and its worked
     /// [[outpost]]s (`Outpost.roomsProjected`), and beside them the rooms it

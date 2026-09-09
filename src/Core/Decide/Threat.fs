@@ -107,14 +107,9 @@ let threatsOf (view: ColonyView) atlas : Threats =
                     |> List.collect (fun (_, pos, weapon) ->
                         let r = weapon + view.Tuning.ReachMargin
 
-                        [
-                            for x in pos.X - r .. pos.X + r do
-                                for y in pos.Y - r .. pos.Y + r do
-                                    let tile = { X = x; Y = y }
-
-                                    if not (Set.contains tile ramparts) then
-                                        tile
-                        ])
+                        pos
+                        |> tilesWithin r
+                        |> List.filter (fun tile -> not (Set.contains tile ramparts)))
                     |> Set.ofList
 
                 // Nothing left to run from once our own ramparts have taken
@@ -155,17 +150,10 @@ let threatsOf (view: ColonyView) atlas : Threats =
                 let tiles =
                     inRoom
                     |> List.collect (fun (_, pos, _) ->
-                        [
-                            for x in pos.X - 1 .. pos.X + 1 do
-                                for y in pos.Y - 1 .. pos.Y + 1 do
-                                    let tile = { X = x; Y = y }
-
-                                    if
-                                        Set.contains tile walkable
-                                        && not (Set.contains tile standing)
-                                    then
-                                        tile
-                        ])
+                        pos
+                        |> tilesWithin 1
+                        |> List.filter (fun tile ->
+                            Set.contains tile walkable && not (Set.contains tile standing)))
                     |> Set.ofList
 
                 room, RoomPos.setAt room tiles)

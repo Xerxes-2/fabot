@@ -138,45 +138,6 @@ let trunkPathHome (atlas: Atlas) (avoid: Set<Pos>) (origin: Pos) (goals: Set<Pos
 /// in since #216 R3 (ADR 0052 decision 2).
 let at room (tile: Pos) = RoomPos.at room tile
 
-/// The home room's geometry, read back off a projection: the room
-/// `RoomName` names, and the one the empty name files when it names none
-/// (`SpatialInfo.homeName`). Absent geometry reads as an empty layer, never
-/// as a lookup that throws (ADR 0004).
-let homeLayer (spatial: SpatialInfo) : RoomLayer =
-    SpatialInfo.layerOf spatial (SpatialInfo.homeName spatial)
-
-/// The same projection with the home room's layer changed. Since ADR 0041's
-/// contract step the tile-shaped containers live under a room name and
-/// nowhere else, so a test that used to copy-update the projection itself
-/// — `{ spatial … with CreepPositions = … }` — reaches through this
-/// instead. It merges into whatever layer is already there, so composing it
-/// with the target funnels below is order-blind. Apply it after `RoomName`
-/// is final: the home name is resolved when it runs, and a projection
-/// layered then renamed leaves its geometry filed under the old name.
-let withHome (change: RoomLayer -> RoomLayer) (spatial: SpatialInfo) : SpatialInfo =
-    { spatial with
-        Rooms = Map.add (SpatialInfo.homeName spatial) (change (homeLayer spatial)) spatial.Rooms
-    }
-
-/// Projection with the given target positions and terrain tiles; no creeps,
-/// no obstacles — tests layer those on top. It files them through
-/// `withHome` and inherits its ordering rule, which bites hardest here
-/// because this funnel starts from `SpatialInfo.empty`: the home name it
-/// resolves is the empty one, so a projection built by this and *then*
-/// given a `RoomName` carries its geometry under the empty name while
-/// `RoomName` says another, and every reader that asks by *room* — the
-/// weight grid, the census signature, the hauler quota — answers off
-/// `RoomLayer.empty`. The target-keyed queries still find it, because
-/// `SpatialInfo.placementOf` scans every layer, which is what makes the
-/// mistake quiet. Name the room first, then build.
-let spatial targets tiles =
-    SpatialInfo.empty
-    |> withHome (fun layer ->
-        { layer with
-            Terrain = Map.ofList tiles
-            TargetPositions = Map.ofList targets
-        })
-
 /// `mayAct` over a Task's own Work Area — the tiles the decision layer
 /// hands it on a tick with nothing taken out of one (ADR 0033).
 let mayActFor atlas creep task =
@@ -259,10 +220,7 @@ let corridor creeps =
             { X = 11; Y = 14 }, Plain
             { X = 10; Y = 15 }, Plain
         ]
-    |> withHome (fun layer ->
-        { layer with
-            CreepPositions = Map.ofList creeps
-        })
+    |> withCreepsAt creeps
 
 /// Source at (10,10) whose only Seat is at (10,11) with the given terrain
 /// and roads; the creep "w" stands one step below on plain — the cost is
@@ -351,10 +309,7 @@ let plainCorridor creeps =
     spatial
         [ "src-a", { X = 10; Y = 10 } ]
         [ for x in 10..17 -> { X = x; Y = 10 }, (if x = 10 then Wall else Plain) ]
-    |> withHome (fun layer ->
-        { layer with
-            CreepPositions = Map.ofList creeps
-        })
+    |> withCreepsAt creeps
 
 /// A varied room for the walk's floor property: 15 × 15 of mixed terrain
 /// with scattered single walls — spaced four apart, so no two touch and
@@ -423,10 +378,7 @@ let internal storeRingRoom =
                     "spawn-1", Structure BuiltKind.Spawn
                 ]
     }
-    |> withHome (fun layer ->
-        { layer with
-            Obstacles = Set.ofList [ { X = 20; Y = 10 }; { X = 30; Y = 10 } ]
-        })
+    |> withObstacles [ { X = 20; Y = 10 }; { X = 30; Y = 10 } ]
 
 /// The same room seen by a colony whose spawn is a [[refill cluster]] member:
 /// the cluster is read off the view's Refillables (ADR 0054), so the spawn's
@@ -487,17 +439,6 @@ let internal northExit terrain =
         "W12S27", [ { X = 10; Y = 49 }, Plain ]
     ]
 
-/// A projection carrying two rooms: the colony's own, filed by `withHome`
-/// under the name the projection gives it, and the outpost added beside it
-/// under its own (ADR 0041). It adds an entry and never replaces the map,
-/// so the home room's geometry survives an outpost joining after it — the
-/// two rooms arrive exactly as the shell's projection and an outpost's
-/// will.
-let internal withOutpost (room: string) (layer: RoomLayer) (spatial: SpatialInfo) =
-    { spatial with
-        Rooms = Map.add room layer spatial.Rooms
-    }
-
 /// A straight line of Plain ground, for geometry that has to differ
 /// between two rooms in a way a reader can count.
 let internal plainLine tiles =
@@ -535,7 +476,7 @@ let internal pinnedTwoRooms homeCreeps outCreeps =
         { pinnedLayer with
             CreepPositions = Map.ofList homeCreeps
         })
-    |> withOutpost
+    |> withNeighbour
         "W2N1"
         { pinnedLayer with
             TargetPositions =
@@ -568,7 +509,7 @@ let internal northOfSnapshot
         TargetKinds = Map.ofList kinds
     }
     |> withHome (fun _ -> home)
-    |> withOutpost "W1N2" outpost
+    |> withNeighbour "W1N2" outpost
     |> snapshotWith creeps
 
 let internal northOf (home: RoomLayer) homeRing (outpost: RoomLayer) outpostRing kinds creeps =
@@ -743,8 +684,8 @@ let internal chainOfThree
         TargetKinds = Map.ofList kinds
     }
     |> withHome (fun _ -> home)
-    |> withOutpost "W1N2" middle
-    |> withOutpost "W1N3" far
+    |> withNeighbour "W1N2" middle
+    |> withNeighbour "W1N3" far
     |> snapshotWith creeps
     |> ofView
 
@@ -776,9 +717,9 @@ let internal chainOfFour
         TargetKinds = Map.ofList kinds
     }
     |> withHome (fun _ -> home)
-    |> withOutpost "W1N2" first
-    |> withOutpost "W1N3" second
-    |> withOutpost "W1N4" far
+    |> withNeighbour "W1N2" first
+    |> withNeighbour "W1N3" second
+    |> withNeighbour "W1N4" far
     |> snapshotWith creeps
     |> ofView
 

@@ -30,12 +30,7 @@ let expiringTests =
                         Creeps =
                             List.truncate (List.length incomeFleet - 1) incomeFleet
                             @ [ worker "w19" 0 50 |> withLife life ]
-                        Spatial =
-                            incomeRoom
-                            |> withHome (fun layer ->
-                                { layer with
-                                    CreepPositions = Map.ofList [ "w19", { X = 12; Y = 10 } ]
-                                })
+                        Spatial = incomeRoom |> withCreepsAt [ "w19", { X = 12; Y = 10 } ]
                     }
 
                 let casts life =
@@ -64,15 +59,10 @@ let expiringTests =
                             // disarmed (ADR 0050): an Anchor alone can
                             // refill no extension.
                             Creeps = [ anchor "a1" 0 50 |> withLife life; worker "w1" 0 50 ]
-                            Spatial =
-                                successionRoom
-                                |> withHome (fun layer ->
-                                    { layer with
-                                        CreepPositions = Map.ofList [ "a1", { X = 11; Y = 10 } ]
-                                    })
+                            Spatial = successionRoom |> withCreepsAt [ "a1", { X = 11; Y = 10 } ]
                         }
 
-                    let { Intents = intents } = decide snapshot Map.empty Set.empty None
+                    let { Intents = intents } = decideOn snapshot
                     spawnIntents intents
 
                 match casts 1500 with
@@ -107,12 +97,7 @@ let expiringTests =
                                     creep)
                         Spatial =
                             incomeRoom
-                            |> withHome (fun layer ->
-                                { layer with
-                                    CreepPositions =
-                                        Map.ofList
-                                            [ "a1", { X = 11; Y = 10 }; "h1", { X = 29; Y = 10 } ]
-                                })
+                            |> withCreepsAt [ "a1", { X = 11; Y = 10 }; "h1", { X = 29; Y = 10 } ]
                     }
 
                 let casts life =
@@ -159,7 +144,7 @@ let expiringTests =
                                 ]
                         }
 
-                    let { Intents = intents } = decide snapshot Map.empty Set.empty None
+                    let { Intents = intents } = decideOn snapshot
                     spawnIntents intents |> List.map (fun (_, _, creepName) -> creepName)
 
                 match casts 67 with

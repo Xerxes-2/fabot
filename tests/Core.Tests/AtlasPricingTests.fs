@@ -113,11 +113,7 @@ let roadPricingTests =
                 // 10 being the same price as stepping into swamp (ADR 0010).
                 let atlas =
                     seatPriced Plain Set.empty
-                    |> withHome (fun layer ->
-                        { layer with
-                            CreepPositions =
-                                Map.ofList [ "w", { X = 10; Y = 12 }; "b", { X = 10; Y = 11 } ]
-                        })
+                    |> withCreepsAt [ "w", { X = 10; Y = 12 }; "b", { X = 10; Y = 11 } ]
                     |> snapshotWith [ worker "w"; worker "b" ]
                     |> ofView
 

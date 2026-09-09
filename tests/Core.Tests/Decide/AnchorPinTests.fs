@@ -40,17 +40,14 @@ let anchorTests =
                                             "cont-1", Structure BuiltKind.Container
                                         ]
                             }
-                            |> withHome (fun layer ->
-                                { layer with
-                                    CreepPositions = Map.ofList [ "a1", { X = 10; Y = 11 } ]
-                                })
+                            |> withCreepsAt [ "a1", { X = 10; Y = 11 } ]
                     }
 
                 let {
                         Intents = intents
                         Verdicts = verdicts
                     } =
-                    decide snapshot Map.empty Set.empty None
+                    decideOn snapshot
 
                 Expect.isEmpty
                     (actionIntents intents
@@ -102,10 +99,7 @@ let anchorTests =
                                     "cont-1", Structure BuiltKind.Container
                                 ]
                     }
-                    |> withHome (fun layer ->
-                        { layer with
-                            CreepPositions = Map.ofList [ "a1", { X = 10; Y = 11 } ]
-                        })
+                    |> withCreepsAt [ "a1", { X = 10; Y = 11 } ]
 
                 let full =
                     { dualSeatColony with
@@ -117,7 +111,7 @@ let anchorTests =
                         Intents = intents
                         Verdicts = verdicts
                     } =
-                    decide full Map.empty Set.empty None
+                    decideOn full
 
                 Expect.contains
                     verdicts
@@ -138,12 +132,7 @@ let anchorTests =
                 // window's reprieve is written for (ADR 0024).
                 let arrived =
                     { full with
-                        Spatial =
-                            full.Spatial
-                            |> withHome (fun layer ->
-                                { layer with
-                                    CreepPositions = Map.ofList [ "a1", { X = 9; Y = 10 } ]
-                                })
+                        Spatial = full.Spatial |> withCreepsAt [ "a1", { X = 9; Y = 10 } ]
                     }
 
                 let remembered = Map.ofList [ "a1", taskId (Harvest "src-a") ]
@@ -168,7 +157,7 @@ let anchorTests =
                         Creeps = [ worker "w1" 0 50 ]
                     }
 
-                let { Intents = intents } = decide snapshot Map.empty Set.empty None
+                let { Intents = intents } = decideOn snapshot
 
                 match spawnIntents intents with
                 | [ (_, body, creepName) ] ->
@@ -200,7 +189,7 @@ let anchorTests =
                                 })
                     }
 
-                let { Intents = intents } = decide snapshot Map.empty Set.empty None
+                let { Intents = intents } = decideOn snapshot
 
                 match spawnIntents intents with
                 | [ (_, body, creepName) ] ->
@@ -234,7 +223,7 @@ let anchorTests =
                                 })
                     }
 
-                let { Intents = intents } = decide snapshot Map.empty Set.empty None
+                let { Intents = intents } = decideOn snapshot
 
                 match spawnIntents intents with
                 | [ (_, body, creepName) ] ->
@@ -257,7 +246,7 @@ let anchorTests =
                         Creeps = [ worker "w1" 0 50 ]
                     }
 
-                let { Intents = intents } = decide snapshot Map.empty Set.empty None
+                let { Intents = intents } = decideOn snapshot
 
                 match spawnIntents intents with
                 | [ (_, body, creepName) ] ->
@@ -277,7 +266,7 @@ let anchorTests =
                         Creeps = [ worker "w1" 0 50 ]
                     }
 
-                let { Intents = intents } = decide snapshot Map.empty Set.empty None
+                let { Intents = intents } = decideOn snapshot
 
                 Expect.isEmpty (spawnIntents intents) "650 does not buy 6W1C1M"
             }
@@ -309,7 +298,7 @@ let anchorTests =
                                 })
                     }
 
-                let { Intents = intents } = decide snapshot Map.empty Set.empty None
+                let { Intents = intents } = decideOn snapshot
 
                 match spawnIntents intents with
                 | [ (_, _, creepName) ] ->
@@ -327,7 +316,7 @@ let anchorTests =
                         Creeps = [ anchor "a1" 0 50; worker "w1" 0 50 ]
                     }
 
-                let { Intents = intents } = decide snapshot Map.empty Set.empty None
+                let { Intents = intents } = decideOn snapshot
 
                 match spawnIntents intents with
                 | [ (_, _, creepName) ] ->
@@ -365,7 +354,7 @@ let anchorTests =
                         Spatial = threeSeatRoom
                     }
 
-                let { Intents = intents } = decide snapshot Map.empty Set.empty None
+                let { Intents = intents } = decideOn snapshot
 
                 match spawnIntents intents with
                 | [ (_, firstBody, firstName); (_, _, secondName) ] ->
@@ -392,7 +381,7 @@ let anchorTests =
                         Spatial = threeSeatRoom
                     }
 
-                let { Intents = intents } = decide snapshot Map.empty Set.empty None
+                let { Intents = intents } = decideOn snapshot
 
                 Expect.hasLength
                     (spawnIntents intents)
@@ -404,19 +393,14 @@ let anchorTests =
                 let snapshot =
                     { dualSeatColony with
                         Creeps = [ anchor "a1" 0 50 ]
-                        Spatial =
-                            dualSeatRoom
-                            |> withHome (fun layer ->
-                                { layer with
-                                    CreepPositions = Map.ofList [ "a1", { X = 11; Y = 10 } ]
-                                })
+                        Spatial = dualSeatRoom |> withCreepsAt [ "a1", { X = 11; Y = 10 } ]
                     }
 
                 let {
                         Intents = intents
                         Assignments = assignments
                     } =
-                    decide snapshot Map.empty Set.empty None
+                    decideOn snapshot
 
                 Expect.equal
                     (Map.tryFind "a1" assignments)
@@ -431,19 +415,14 @@ let anchorTests =
                 let snapshot =
                     { dualSeatColony with
                         Creeps = [ anchor "a1" 50 0 ]
-                        Spatial =
-                            dualSeatRoom
-                            |> withHome (fun layer ->
-                                { layer with
-                                    CreepPositions = Map.ofList [ "a1", { X = 11; Y = 10 } ]
-                                })
+                        Spatial = dualSeatRoom |> withCreepsAt [ "a1", { X = 11; Y = 10 } ]
                     }
 
                 let {
                         Intents = intents
                         Assignments = assignments
                     } =
-                    decide snapshot Map.empty Set.empty None
+                    decideOn snapshot
 
                 Expect.equal
                     (Map.tryFind "a1" assignments)
@@ -463,12 +442,7 @@ let anchorTests =
                 let snapshot =
                     { dualSeatColony with
                         Creeps = [ anchor "a1" 50 0 ]
-                        Spatial =
-                            dualSeatRoom
-                            |> withHome (fun layer ->
-                                { layer with
-                                    CreepPositions = Map.ofList [ "a1", { X = 11; Y = 10 } ]
-                                })
+                        Spatial = dualSeatRoom |> withCreepsAt [ "a1", { X = 11; Y = 10 } ]
                     }
 
                 let remembered = Map.ofList [ "a1", taskId (Harvest "src-a") ]
@@ -506,15 +480,10 @@ let anchorTests =
                         Creeps = [ anchor "a1" 50 0; worker "g1" 50 0 ]
                         Spatial =
                             corridorEast [ "site-1", { X = 31; Y = 10 } ]
-                            |> withHome (fun layer ->
-                                { layer with
-                                    CreepPositions =
-                                        Map.ofList
-                                            [ "a1", { X = 11; Y = 10 }; "g1", { X = 29; Y = 10 } ]
-                                })
+                            |> withCreepsAt [ "a1", { X = 11; Y = 10 }; "g1", { X = 29; Y = 10 } ]
                     }
 
-                let { Assignments = assignments } = decide snapshot Map.empty Set.empty None
+                let { Assignments = assignments } = decideOn snapshot
 
                 Expect.equal
                     (Map.tryFind "g1" assignments)
@@ -550,13 +519,10 @@ let anchorTests =
                         Creeps = [ anchor "a1" 50 0 ]
                         Spatial =
                             corridorEast [ "site-1", { X = 12; Y = 10 } ]
-                            |> withHome (fun layer ->
-                                { layer with
-                                    CreepPositions = Map.ofList [ "a1", { X = 11; Y = 10 } ]
-                                })
+                            |> withCreepsAt [ "a1", { X = 11; Y = 10 } ]
                     }
 
-                let { Assignments = assignments } = decide snapshot Map.empty Set.empty None
+                let { Assignments = assignments } = decideOn snapshot
 
                 Expect.equal
                     (Map.tryFind "a1" assignments)
@@ -571,15 +537,10 @@ let anchorTests =
                         Creeps = [ anchor "a1" 0 50; worker "g1" 50 0 ]
                         Spatial =
                             corridorEast [ "spawn-1", { X = 31; Y = 10 } ]
-                            |> withHome (fun layer ->
-                                { layer with
-                                    CreepPositions =
-                                        Map.ofList
-                                            [ "a1", { X = 11; Y = 10 }; "g1", { X = 30; Y = 10 } ]
-                                })
+                            |> withCreepsAt [ "a1", { X = 11; Y = 10 }; "g1", { X = 30; Y = 10 } ]
                     }
 
-                let { Assignments = assignments } = decide snapshot Map.empty Set.empty None
+                let { Assignments = assignments } = decideOn snapshot
 
                 Expect.equal
                     (Map.tryFind "g1" assignments)
@@ -594,7 +555,7 @@ let anchorTests =
 
             test "the disaster fallback still spawns bare worker units beside a Dual Seat" {
                 let snapshot = { dualSeatColony with Creeps = [] }
-                let { Intents = intents } = decide snapshot Map.empty Set.empty None
+                let { Intents = intents } = decideOn snapshot
 
                 match spawnIntents intents with
                 | (_, body, creepName) :: _ ->
@@ -724,7 +685,7 @@ let heavyPinTests =
                         Assignments = assignments
                         Intents = intents
                     } =
-                    decide colony Map.empty Set.empty None
+                    decideOn colony
 
                 Expect.equal
                     (harvesters assignments "src-a")
@@ -820,7 +781,7 @@ let heavyPinTests =
                         Assignments = assignments
                         Intents = intents
                     } =
-                    decide colony Map.empty Set.empty None
+                    decideOn colony
 
                 Expect.equal
                     (harvesters assignments "src-a")
@@ -897,7 +858,7 @@ let heavyPinTests =
                         Assignments = assignments
                         Intents = intents
                     } =
-                    decide colony Map.empty Set.empty None
+                    decideOn colony
 
                 Expect.equal
                     (Map.tryFind "a1" assignments)
@@ -969,7 +930,7 @@ let heavyPinTests =
                         Intents = intents
                         Verdicts = verdicts
                     } =
-                    decide colony Map.empty Set.empty None
+                    decideOn colony
 
                 Expect.equal (Map.tryFind "a1" assignments) None "the manned Post is not its work"
 
@@ -1007,7 +968,7 @@ let heavyPinTests =
                         Assignments = assignments
                         Intents = intents
                     } =
-                    decide colony Map.empty Set.empty None
+                    decideOn colony
 
                 Expect.equal
                     (Map.tryFind "a1" assignments)
@@ -1033,7 +994,7 @@ let heavyPinTests =
                         Intents = intents
                         Verdicts = verdicts
                     } =
-                    decide colony Map.empty Set.empty None
+                    decideOn colony
 
                 Expect.equal
                     (Map.tryFind "a1" assignments)
@@ -1067,12 +1028,7 @@ let heavyPinTests =
                         (decide
                             { colony with
                                 Spatial =
-                                    colony.Spatial
-                                    |> withHome (fun layer ->
-                                        { layer with
-                                            CreepPositions =
-                                                Map.ofList [ "a1", { X = 12; Y = 10 } ]
-                                        })
+                                    colony.Spatial |> withCreepsAt [ "a1", { X = 12; Y = 10 } ]
                             }
                             Map.empty
                             Set.empty
@@ -1093,12 +1049,7 @@ let heavyPinTests =
                         (decide
                             { colony with
                                 Spatial =
-                                    colony.Spatial
-                                    |> withHome (fun layer ->
-                                        { layer with
-                                            CreepPositions =
-                                                Map.ofList [ "a1", { X = 13; Y = 10 } ]
-                                        })
+                                    colony.Spatial |> withCreepsAt [ "a1", { X = 13; Y = 10 } ]
                             }
                             Map.empty
                             Set.empty
@@ -1124,7 +1075,7 @@ let heavyPinTests =
                         Assignments = assignments
                         Intents = intents
                     } =
-                    decide colony Map.empty Set.empty None
+                    decideOn colony
 
                 Expect.equal
                     (Map.tryFind "a1" assignments)
@@ -1150,7 +1101,7 @@ let heavyPinTests =
                         Assignments = assignments
                         Intents = intents
                     } =
-                    decide colony Map.empty Set.empty None
+                    decideOn colony
 
                 Expect.equal
                     (Map.tryFind "w1" assignments)

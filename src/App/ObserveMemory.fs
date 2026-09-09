@@ -17,6 +17,44 @@ open Fabot.Core.Observe
 // added without its wire name fails a test rather than decoding silently.
 let private partOf = reverseOf partName allBodyParts
 
+// A wire array read row by row: an absent leaf is the empty list and a row
+// that will not decode costs its own row and no more (ADR 0028). Bad state is
+// discarded rather than repaired, and the discard is one row and never the
+// whole channel — the discipline six leaves used to re-apply by hand, each one
+// `try`/`with` away from getting it wrong. A decoder says "not this row" by
+// answering None or by throwing; both read the same from here.
+//
+// The **absent** leaf is where this widens what the six sites used to do, and
+// deliberately. Four of them guarded no nulls at all: `unbox` is erased by
+// Fable, so a missing `episodes` key walked an `undefined`, threw, and hit the
+// enclosing `try` — which discarded the whole `RaidState`, `Outposts` and
+// `Living` and `Hits` along with it, and the whole of a creep's log for a
+// missing `log` key. That is precisely the failure ADR 0028 is written against
+// and precisely what `loadRaids`' own doc-comment says does not happen, so the
+// guard here is the rule those comments already claimed.
+let private rowsOf (decode: obj -> 'a option) (raw: obj) : 'a list =
+    if isNull raw then
+        []
+    else
+        raw
+        |> unbox<obj[]>
+        |> Array.choose (fun row ->
+            try
+                decode row
+            with _ ->
+                None)
+        |> Array.toList
+
+// A keyed wire object built out of pairs: the shape every flat leaf of this
+// bundle writes its map as, so a reader of `Memory` finds one spelling.
+let private hashOf (encode: 'v -> obj) (entries: seq<string * 'v>) : obj =
+    let o = createEmpty<obj>
+
+    for key, value in entries do
+        o?(key) <- encode value
+
+    o
+
 // A reason's numbers sit on the row that names it, beside the reason
 // rather than inside it, so a bare tag adds no fields; a row naming a
 // reason that needs numbers and carrying none is dropped the way a row
@@ -167,15 +205,13 @@ let private decodeCreepLog creep (raw: obj) : CreepLog =
     {
         Entries =
             raw?log
-            |> unbox<obj[]>
-            |> Array.choose (fun e ->
+            |> rowsOf (fun e ->
                 tryVerdict e?v
                 |> Option.map (fun verdict ->
                     {
                         Tick = unbox<int> e?t
                         Verdict = verdict
                     }))
-            |> Array.toList
         LastTask =
             if isNull raw?lastTask then
                 None
@@ -186,7 +222,7 @@ let private decodeCreepLog creep (raw: obj) : CreepLog =
                 None
             else
                 tryVerdict raw?lastScoring
-        LastMove = raw?lastMove |> unbox<obj[]> |> Array.choose tryVerdict |> Array.toList
+        LastMove = raw?lastMove |> rowsOf tryVerdict
     }
 
 // One raid episode on the wire: the window, the roster as an array of rows
@@ -365,14 +401,34 @@ let private ensureColony (home: string) =
     if jsTypeof colonies?(home) <> "object" || isNull colonies?(home) then
         colonies?(home) <- createEmpty<obj>
 
+// One flat leaf of `Memory.fabot.observe` as it stands, or null when the
+// subtree or the leaf is absent — the descent every reader below used to spell
+// out for itself. Null is what they all degrade from, so an absent leaf reads
+// as empty and is rebuilt from this tick on.
+let private observeLeaf (leaf: string) : obj =
+    let fabot = Memory?fabot
+    let observe = if isNull fabot then null else fabot?observe
+
+    if isNull observe then null else observe?(leaf)
+
+// Write one flat leaf, leaving the rest of the observe subtree alone — unless
+// the subtree itself is not an object, in which case the bad state is replaced.
+let private writeObserveLeaf (leaf: string) (value: obj) =
+    ensureObserve ()
+    Memory?fabot?observe?(leaf) <- value
+
+// Write one leaf of one colony's own subtree, leaving every other colony's
+// leaves and every flat leaf alone (ADR 0047).
+let private writeColonyLeaf (home: string) (leaf: string) (value: obj) =
+    ensureColony home
+    Memory?fabot?observe?colonies?(home)?(leaf) <- value
+
 // One colony's leaf as it stands in Memory, or null when the subtree, the
 // colony or the leaf is absent — a colony this bundle has not written for
 // yet (ADR 0047). Null is what every reader below already degrades from,
 // so an absent leaf reads as empty and is rebuilt from this tick on.
 let private colonyLeaf (home: string) (leaf: string) : obj =
-    let fabot = Memory?fabot
-    let observe = if isNull fabot then null else fabot?observe
-    let colonies = if isNull observe then null else observe?colonies
+    let colonies = observeLeaf "colonies"
     let colony = if isNull colonies then null else colonies?(home)
 
     if isNull colony then null else colony?(leaf)
@@ -383,9 +439,7 @@ let private colonyLeaf (home: string) (leaf: string) : obj =
 /// redeploy; absent or malformed means off.
 let loadVerbose () : Set<string> =
     try
-        let fabot = Memory?fabot
-        let observe = if isNull fabot then null else fabot?observe
-        let verbose = if isNull observe then null else observe?verbose
+        let verbose = observeLeaf "verbose"
 
         if isNull verbose || not (JS.Constructors.Array.isArray verbose) then
             Set.empty
@@ -408,9 +462,7 @@ let loadVerbose () : Set<string> =
 /// rather than as amnesia (ADR 0028).
 let load () : ObserveState =
     try
-        let fabot = Memory?fabot
-        let observe = if isNull fabot then null else fabot?observe
-        let creeps = if isNull observe then null else observe?creeps
+        let creeps = observeLeaf "creeps"
 
         if isNull creeps then
             Map.empty
@@ -429,13 +481,7 @@ let load () : ObserveState =
 /// leaving the rest of the observe subtree alone — unless the subtree
 /// itself is not an object, in which case the bad state is replaced.
 let save (state: ObserveState) =
-    let creeps = createEmpty<obj>
-
-    for KeyValue(name, log) in state do
-        creeps?(name) <- encodeCreepLog log
-
-    ensureObserve ()
-    Memory?fabot?observe?creeps <- creeps
+    state |> Map.toSeq |> hashOf encodeCreepLog |> writeObserveLeaf "creeps"
 
 /// The named colony's prior Raid log, or empty when its subtree is absent
 /// or unreadable. An episode that will not decode costs that episode
@@ -452,31 +498,12 @@ let loadRaids (home: string) : RaidState =
             RaidState.empty
         else
             {
-                Episodes =
-                    raids?episodes
-                    |> unbox<obj[]>
-                    |> Array.choose (fun raw ->
-                        try
-                            Some(decodeEpisode raw)
-                        with _ ->
-                            None)
-                    |> Array.toList
+                Episodes = raids?episodes |> rowsOf (decodeEpisode >> Some)
                 // The outpost family's ring (ADR 0043), absent from a
                 // bundle that predates it — and an empty ring is what
                 // that says. Degraded row by row: a stand-down that will
                 // not decode costs its own room's gate and no other.
-                Outposts =
-                    if isNull raids?outposts then
-                        []
-                    else
-                        raids?outposts
-                        |> unbox<obj[]>
-                        |> Array.choose (fun raw ->
-                            try
-                                Some(decodeOutpost raw)
-                            with _ ->
-                                None)
-                        |> Array.toList
+                Outposts = raids?outposts |> rowsOf (decodeOutpost >> Some)
                 // The clockless withdrawal's memory (ADR 0043): the rooms last
                 // seen **owned** by another player — a rival's reservation is a
                 // clocked row of `outposts` since #165 — each against the tick
@@ -516,22 +543,10 @@ let saveRaids (home: string) (state: RaidState) =
     // Room name to the tick the gate shut on: the clockless withdrawal
     // has no window, expiry or basis to carry, so a row shape would be a
     // name with three empty fields beside the one date it keeps.
-    let rivals = createEmpty<obj>
-
-    for KeyValue(room, tick) in state.RivalHeld do
-        rivals?(room) <- tick
-
-    raids?rivalHeld <- rivals
+    raids?rivalHeld <- state.RivalHeld |> Map.toSeq |> hashOf box
     raids?living <- state.Living |> Set.toArray
-
-    let hits = createEmpty<obj>
-
-    for KeyValue(id, value) in state.Hits do
-        hits?(id) <- value
-
-    raids?hits <- hits
-    ensureColony home
-    Memory?fabot?observe?colonies?(home)?raids <- raids
+    raids?hits <- state.Hits |> Map.toSeq |> hashOf box
+    writeColonyLeaf home "raids" raids
 
 /// One tile as a wire object; the deferral rows carry two of them, and a
 /// tile named `x`/`y` twice over would say which is which nowhere. The
@@ -594,8 +609,7 @@ let saveQuotas (home: string) (quotas: Quotas) =
             r)
         |> List.toArray
 
-    ensureColony home
-    Memory?fabot?observe?colonies?(home)?quotas <- o
+    writeColonyLeaf home "quotas" o
 
 /// Write one colony's losses this tick — the footing targets the Layout could
 /// not serve, the trunks it could not route, the container picks it deferred to
@@ -673,8 +687,7 @@ let saveLayout
     // half of the pair already.
     layout?refused <- refused |> List.toArray
 
-    ensureColony home
-    Memory?fabot?observe?colonies?(home)?layout <- layout
+    writeColonyLeaf home "layout" layout
 
 /// The phase split off one CPU row, or `None` when the row carries none.
 /// Absent and malformed answer alike: a row that predates the split has no
@@ -708,9 +721,7 @@ let private decodeCpuPhases (raw: obj) : CpuPhases option =
 /// malformed entry reads as "did not move", the conservative answer.
 let loadPositions () : Map<string, RoomPos> =
     try
-        let fabot = Memory?fabot
-        let observe = if isNull fabot then null else fabot?observe
-        let positions = if isNull observe then null else observe?positions
+        let positions = observeLeaf "positions"
 
         if isNull positions || jsTypeof positions <> "object" then
             Map.empty
@@ -741,17 +752,14 @@ let loadPositions () : Map<string, RoomPos> =
         Map.empty
 
 let savePositions (creeps: (string * RoomPos) list) =
-    ensureObserve ()
-    let o = createEmpty<obj>
-
-    for name, tile in creeps do
+    creeps
+    |> hashOf (fun (tile: RoomPos) ->
         let p = createEmpty<obj>
         p?r <- tile.Room
         p?x <- tile.X
         p?y <- tile.Y
-        o?(name) <- p
-
-    Memory?fabot?observe?positions <- o
+        p)
+    |> writeObserveLeaf "positions"
 
 /// The prior CPU line, or empty when the leaf is absent or unreadable — a
 /// discarded line costs the ticks it held and nothing else. A row that
@@ -759,9 +767,7 @@ let savePositions (creeps: (string * RoomPos) list) =
 /// rather than vanishing.
 let loadCpu () : CpuState =
     try
-        let fabot = Memory?fabot
-        let observe = if isNull fabot then null else fabot?observe
-        let cpu = if isNull observe then null else observe?cpu
+        let cpu = observeLeaf "cpu"
 
         if isNull cpu then
             CpuState.empty
@@ -769,27 +775,22 @@ let loadCpu () : CpuState =
             {
                 Ticks =
                     cpu?ticks
-                    |> unbox<obj[]>
-                    |> Array.choose (fun raw ->
-                        try
-                            // The wire types are checked rather than assumed,
-                            // which is what makes the row-by-row degradation
-                            // above real: `unbox` is erased by Fable, so
-                            // without the check a row of a foreign shape is not
-                            // rejected but built, and then crowds out the
-                            // window ADR 0041's mean is read off.
-                            if jsTypeof raw?t = "number" && jsTypeof raw?ms = "number" then
-                                Some
-                                    {
-                                        Tick = unbox<int> raw?t
-                                        Ms = unbox<float> raw?ms
-                                        Phases = decodeCpuPhases raw
-                                    }
-                            else
-                                None
-                        with _ ->
+                    |> rowsOf (fun raw ->
+                        // The wire types are checked rather than assumed, which
+                        // is what makes `rowsOf`'s degradation real here:
+                        // `unbox` is erased by Fable, so without the check a
+                        // row of a foreign shape is not rejected but built, and
+                        // then crowds out the window ADR 0041's mean is read
+                        // off.
+                        if jsTypeof raw?t = "number" && jsTypeof raw?ms = "number" then
+                            Some
+                                {
+                                    Tick = unbox<int> raw?t
+                                    Ms = unbox<float> raw?ms
+                                    Phases = decodeCpuPhases raw
+                                }
+                        else
                             None)
-                    |> Array.toList
             }
     with _ ->
         CpuState.empty
@@ -823,5 +824,4 @@ let saveCpu (state: CpuState) =
             o)
         |> List.toArray
 
-    ensureObserve ()
-    Memory?fabot?observe?cpu <- cpu
+    writeObserveLeaf "cpu" cpu

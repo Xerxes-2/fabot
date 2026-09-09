@@ -318,11 +318,7 @@ let ofViewRecalling (walks: WalkTable) (view: ColonyView) : Atlas =
         HeavyAreas = System.Collections.Generic.Dictionary()
         Heavy =
             view.Creeps
-            |> List.filter (fun creep ->
-                let count part =
-                    creep.Body |> Map.tryFind part |> Option.defaultValue 0
-
-                count Work > count Move)
+            |> List.filter (fun creep -> partCount creep.Body Work > partCount creep.Body Move)
             |> List.map (fun creep -> creep.Name)
             |> Set.ofList
         Buffers = None
@@ -794,16 +790,10 @@ let private buildWorkArea (atlas: Atlas) (task: Task) : (string * Set<Pos>) opti
 
             Some(
                 room,
-                Set.ofList
-                    [
-                        for target in targets do
-                            for x in target.X - r .. target.X + r do
-                                for y in target.Y - r .. target.Y + r do
-                                    let tile = { X = x; Y = y }
-
-                                    if walkableAt weights tile then
-                                        tile
-                    ]
+                targets
+                |> List.collect (tilesWithin r)
+                |> List.filter (walkableAt weights)
+                |> Set.ofList
             )
 
 /// Build-once-per-tick over one of the Atlas's mutable tables: the shape
@@ -1327,14 +1317,26 @@ let private besideExitFrom (grid: int[]) (origin: Pos) (tile: Pos) : Pos list =
 /// asked of three tile sets and the near leg's arrival is the same arithmetic
 /// however the far leg is joined. Unreachable is an absence and never a number
 /// (ADR 0004).
-let private nearestReached (reached: Pos -> int) (tiles: Pos list) : int option =
+///
+/// The tile comes back beside the price, because the readers that walk a body
+/// rather than price it need to know **which** goal won: of equally cheap goals
+/// the lowest tile wins, and `List.min` over the pair settles that tie the same
+/// way everywhere it is asked. A second argmin written out elsewhere agrees on
+/// every number and splits on every tie, which is how a body comes to be walked
+/// toward one goal and ranked at another.
+let private cheapestReached (reached: Pos -> int) (tiles: Pos list) : (int * Pos) option =
     tiles
     |> List.choose (fun tile ->
         let d = reached tile
-        if d = unreached then None else Some d)
+        if d = unreached then None else Some(d, tile))
     |> function
         | [] -> None
-        | costs -> Some(List.min costs)
+        | reachable -> Some(List.min reachable)
+
+/// The price alone, for the readers that arrive at a set and never name which
+/// tile they arrived on.
+let private nearestReached (reached: Pos -> int) (tiles: Pos list) : int option =
+    cheapestReached reached tiles |> Option.map fst
 
 /// What this body pays to step onto an exit tile, priced by the same rule every
 /// other step is (ADR 0029's walk, travel cost's units) — the narrowing of ADR
@@ -1968,15 +1970,9 @@ let private firstStepVia
         else
             let near = flood atlas pricing room creep pos
 
-            goals
-            |> List.choose (fun goal ->
-                let d = reachedBy near goal
-                if d = unreached then None else Some(d, goal))
-            |> function
-                | [] -> None
-                | reachable ->
-                    let _, goal = List.min reachable
-                    Some(RoomPos.at room (posAt (firstStepOn near (indexOf pos) (indexOf goal))))
+            cheapestReached (reachedBy near) goals
+            |> Option.map (fun (_, goal) ->
+                RoomPos.at room (posAt (firstStepOn near (indexOf pos) (indexOf goal))))
 
 /// The step toward the near side of a crossing already won: the exit tile is
 /// the creep's *own* room's border tile, so aiming at it asks nothing of the
@@ -2176,9 +2172,6 @@ let haulRoundTripTicks
     (container: RoomPos)
     (sink: RoomPos)
     : int option =
-    let count part =
-        body |> List.filter ((=) part) |> List.length
-
     let fromRoom = container.Room
     let sinkRoom = sink.Room
     let from = RoomPos.pos container
@@ -2211,13 +2204,7 @@ let haulRoundTripTicks
                     |> Option.map fst
             | _ -> None
 
-    let loaded =
-        legTicks
-            {
-                FatigueParts = List.length body - count Move
-                MoveParts = count Move
-            }
-
+    let loaded = legTicks (loadedFactorOf body)
     let empty = legTicks (emptyFactorOf body)
 
     match loaded, empty with
@@ -2373,20 +2360,15 @@ let trunkPath
     let dist, parents =
         floodFrom weights noTraffic (stepTable (stepUnits planningFactor)) origin
 
-    goals
-    |> List.choose (fun goal ->
-        let d = dist.[indexOf goal]
-        if d = unreached then None else Some(d, goal))
-    |> function
-        | [] -> []
-        | reachable ->
-            let _, goal = List.min reachable
-            let originIndex = indexOf origin
+    match cheapestReached (fun goal -> dist.[indexOf goal]) goals with
+    | None -> []
+    | Some(_, goal) ->
+        let originIndex = indexOf origin
 
-            let rec walk index acc =
-                if index = originIndex then
-                    acc
-                else
-                    walk parents.[index] (RoomPos.at room (posAt index) :: acc)
+        let rec walk index acc =
+            if index = originIndex then
+                acc
+            else
+                walk parents.[index] (RoomPos.at room (posAt index) :: acc)
 
-            walk (indexOf goal) []
+        walk (indexOf goal) []

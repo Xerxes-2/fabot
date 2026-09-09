@@ -30,7 +30,7 @@ let invaderCoreTests =
                 // outpost source in the pool. A quiet fixture would make
                 // the equality vacuous, so the premise is asserted first.
                 let colony = postedOutpostColony 19 [ "W1N2", reservedRoom true 4000 ]
-                let untroubled = decide colony Map.empty Set.empty None
+                let untroubled = decideOn colony
 
                 Expect.isNonEmpty
                     untroubled.Verdicts
@@ -217,7 +217,7 @@ let neighbouringRoomTests =
                         Assignments = assignments
                         Intents = intents
                     } =
-                    decide snapshot Map.empty Set.empty None
+                    decideOn snapshot
 
                 Expect.equal
                     (Map.tryFind "w-home" assignments)

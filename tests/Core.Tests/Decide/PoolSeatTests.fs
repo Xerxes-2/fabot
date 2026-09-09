@@ -30,7 +30,7 @@ let seatTests =
                         Intents = intents
                         Assignments = assignments
                     } =
-                    decide snapshot Map.empty Set.empty None
+                    decideOn snapshot
 
                 Expect.hasLength
                     (harvesters assignments "src-a")
@@ -58,7 +58,7 @@ let seatTests =
 
                     }
 
-                let { Assignments = assignments } = decide snapshot Map.empty Set.empty None
+                let { Assignments = assignments } = decideOn snapshot
 
                 Expect.hasLength (harvesters assignments "src-a") 1 "the one Seat is filled"
 
@@ -79,7 +79,7 @@ let seatTests =
 
                     }
 
-                let { Assignments = assignments } = decide snapshot Map.empty Set.empty None
+                let { Assignments = assignments } = decideOn snapshot
 
                 Expect.hasLength (harvesters assignments "src-a") 1 "the one Seat is filled"
 
@@ -106,7 +106,7 @@ let seatTests =
 
                     }
 
-                let { Assignments = assignments } = decide snapshot Map.empty Set.empty None
+                let { Assignments = assignments } = decideOn snapshot
 
                 Expect.hasLength
                     (harvesters assignments "src-a")
@@ -144,7 +144,7 @@ let seatTests =
                         Creeps = [ worker "w1" 0 50; worker "w2" 0 50; worker "w3" 0 50 ]
                     }
 
-                let { Assignments = assignments } = decide snapshot Map.empty Set.empty None
+                let { Assignments = assignments } = decideOn snapshot
 
                 Expect.hasLength
                     (harvesters assignments "src-a")
@@ -341,12 +341,7 @@ let unreachableTests =
                         Spatial =
 
                             spatial [ "src-a", { X = 10; Y = 10 } ] terrain
-                            |> withHome (fun layer ->
-                                { layer with
-                                    CreepPositions =
-                                        Map.ofList
-                                            [ "w1", { X = 20; Y = 20 }; "w2", { X = 10; Y = 12 } ]
-                                })
+                            |> withCreepsAt [ "w1", { X = 20; Y = 20 }; "w2", { X = 10; Y = 12 } ]
                     }
 
                 let sticky = Map.ofList [ "w1", (taskId (Harvest "src-a")) ]
@@ -373,10 +368,7 @@ let unreachableTests =
                         Spatial =
 
                             spatial [ "src-a", { X = 10; Y = 10 } ] terrain
-                            |> withHome (fun layer ->
-                                { layer with
-                                    CreepPositions = Map.ofList [ "w1", { X = 20; Y = 20 } ]
-                                })
+                            |> withCreepsAt [ "w1", { X = 20; Y = 20 } ]
                     }
 
                 let sticky = Map.ofList [ "w1", (taskId (Harvest "src-a")) ]
@@ -405,10 +397,7 @@ let unreachableTests =
                         Spatial =
 
                             spatial [ "ctrl-1", { X = 10; Y = 10 } ] [ { X = 20; Y = 20 }, Plain ]
-                            |> withHome (fun layer ->
-                                { layer with
-                                    CreepPositions = Map.ofList [ "w1", { X = 20; Y = 20 } ]
-                                })
+                            |> withCreepsAt [ "w1", { X = 20; Y = 20 } ]
                     }
 
                 let sticky = Map.ofList [ "w1", (taskId (Upgrade "ctrl-1")) ]
@@ -672,7 +661,7 @@ let repairTests =
                         Intents = intents
                         Assignments = assignments
                     } =
-                    decide snapshot Map.empty Set.empty None
+                    decideOn snapshot
 
                 Expect.equal
                     (Map.tryFind "w1" assignments)
@@ -699,7 +688,7 @@ let repairTests =
                     }
                     |> withHits "road-1" BuiltKind.Road 100 5000
 
-                let { Verdicts = verdicts } = decide snapshot Map.empty Set.empty None
+                let { Verdicts = verdicts } = decideOn snapshot
 
                 Expect.equal
                     verdicts
@@ -718,7 +707,7 @@ let repairTests =
                     }
                     |> withHits "road-1" BuiltKind.Road 100 5000
 
-                let { Verdicts = verdicts } = decide snapshot Map.empty Set.empty None
+                let { Verdicts = verdicts } = decideOn snapshot
 
                 Expect.equal
                     verdicts
@@ -760,7 +749,7 @@ let repairTests =
                     }
                     |> withHits "cont-1" BuiltKind.Container 100 250000
 
-                let { Verdicts = verdicts } = decide snapshot Map.empty Set.empty None
+                let { Verdicts = verdicts } = decideOn snapshot
 
                 Expect.equal
                     verdicts
@@ -782,7 +771,7 @@ let repairTests =
                         Intents = intents
                         Assignments = assignments
                     } =
-                    decide snapshot Map.empty Set.empty None
+                    decideOn snapshot
 
                 Expect.equal
                     (Map.tryFind "w1" assignments)

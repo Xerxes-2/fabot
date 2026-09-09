@@ -63,7 +63,7 @@ let pocketColony level =
 /// below the road gate it stands none (#209) and the premise is empty:
 /// every caller that needs a road under its container asks from RCL3 up.
 let withRoadsBuilt colony =
-    let { Intents = intents } = decide colony Map.empty Set.empty None
+    let { Intents = intents } = decideOn colony
 
     { colony with
         Spatial =
@@ -130,7 +130,7 @@ let crossedRoom =
 /// them would drift from the one `buildSpatial` really builds, and the
 /// tests would stay green describing a room the bot never sees.
 let withPlanPending colony =
-    let { Intents = intents } = decide colony Map.empty Set.empty None
+    let { Intents = intents } = decideOn colony
 
     let sites =
         placementIntents intents
@@ -244,12 +244,7 @@ let internal homeGridOf (snapshot: ColonyView) =
 let staffedColony creeps positions colony =
     { colony with
         Creeps = creeps
-        Spatial =
-            colony.Spatial
-            |> withHome (fun layer ->
-                { layer with
-                    CreepPositions = Map.ofList positions
-                })
+        Spatial = colony.Spatial |> withCreepsAt positions
     }
 
 /// A memo whose site Intents are a sentinel no computation would produce:

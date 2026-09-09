@@ -232,11 +232,7 @@ let standingBodyTests =
                                     "sto-1", { X = 18; Y = 10 }, Structure BuiltKind.Storage
                                     "pile-1", { X = 18; Y = 11 }, Dropped
                                 ]
-                            |> withHome (fun layer ->
-                                { layer with
-                                    CreepPositions =
-                                        Map.ofList [ (creep: CreepInfo).Name, { X = 14; Y = 10 } ]
-                                })
+                            |> withCreepsAt [ (creep: CreepInfo).Name, { X = 14; Y = 10 } ]
                     }
 
                 let empty pattern =
@@ -292,10 +288,7 @@ let standingBodyTests =
                            @ [ { X = 12; Y = 10 }, Plain; { X = 13; Y = 10 }, Plain ]) with
                         TargetKinds = Map.ofList [ "src-a", Source ]
                     }
-                    |> withHome (fun layer ->
-                        { layer with
-                            CreepPositions = Map.ofList [ "anchor", { X = 11; Y = 10 } ]
-                        })
+                    |> withCreepsAt [ "anchor", { X = 11; Y = 10 } ]
 
                 let colony sites targets =
                     { bareRespawn with
@@ -692,19 +685,14 @@ let postSiteTests =
                         Creeps = [ postBody "a1" 50 0; postBody "g1" 0 50 ]
                         Spatial =
                             room
-                            |> withHome (fun layer ->
-                                { layer with
-                                    CreepPositions =
-                                        Map.ofList
-                                            [ "a1", { X = 8; Y = 10 }; "g1", { X = 11; Y = 10 } ]
-                                })
+                            |> withCreepsAt [ "a1", { X = 8; Y = 10 }; "g1", { X = 11; Y = 10 } ]
                     }
 
                 let {
                         Assignments = assignments
                         Intents = intents
                     } =
-                    decide colony Map.empty Set.empty None
+                    decideOn colony
 
                 Expect.equal
                     (Map.tryFind "a1" assignments)

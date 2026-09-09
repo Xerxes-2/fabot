@@ -65,13 +65,10 @@ let travelCostTests =
                             spatial
                                 [ "src-swamp", { X = 10; Y = 12 }; "src-plain", { X = 10; Y = 20 } ]
                                 corridor
-                            |> withHome (fun layer ->
-                                { layer with
-                                    CreepPositions = Map.ofList [ "w1", { X = 10; Y = 15 } ]
-                                })
+                            |> withCreepsAt [ "w1", { X = 10; Y = 15 } ]
                     }
 
-                let { Assignments = assignments } = decide snapshot Map.empty Set.empty None
+                let { Assignments = assignments } = decideOn snapshot
 
                 Expect.equal
                     (Map.tryFind "w1" assignments)
@@ -102,7 +99,7 @@ let travelCostTests =
                                 })
                     }
 
-                let { Assignments = assignments } = decide snapshot Map.empty Set.empty None
+                let { Assignments = assignments } = decideOn snapshot
 
                 Expect.equal
                     (Map.tryFind "w1" assignments)
@@ -139,7 +136,7 @@ let travelCostTests =
                         Spatial = nearFarCorridor []
                     }
 
-                let { Assignments = assignments } = decide snapshot Map.empty Set.empty None
+                let { Assignments = assignments } = decideOn snapshot
 
                 Expect.equal
                     (Map.tryFind "w1" assignments)
@@ -171,13 +168,10 @@ let travelCostTests =
                             spatial
                                 [ "src-a", { X = 10; Y = 10 }; "ctrl-1", { X = 10; Y = 16 } ]
                                 terrain
-                            |> withHome (fun layer ->
-                                { layer with
-                                    CreepPositions = Map.ofList [ "w1", { X = 10; Y = 14 } ]
-                                })
+                            |> withCreepsAt [ "w1", { X = 10; Y = 14 } ]
                     }
 
-                let { Assignments = assignments } = decide snapshot Map.empty Set.empty None
+                let { Assignments = assignments } = decideOn snapshot
 
                 Expect.equal
                     (Map.tryFind "w1" assignments)
@@ -216,18 +210,11 @@ let travelCostTests =
                             spatial
                                 [ "src-near", { X = 10; Y = 10 }; "src-far", { X = 10; Y = 23 } ]
                                 terrain
-                            |> withHome (fun layer ->
-                                { layer with
-                                    CreepPositions =
-                                        Map.ofList
-                                            [
-                                                "mule", { X = 10; Y = 13 }
-                                                "runner", { X = 11; Y = 13 }
-                                            ]
-                                })
+                            |> withCreepsAt
+                                [ "mule", { X = 10; Y = 13 }; "runner", { X = 11; Y = 13 } ]
                     }
 
-                let { Assignments = assignments } = decide snapshot Map.empty Set.empty None
+                let { Assignments = assignments } = decideOn snapshot
 
                 Expect.equal
                     (Map.tryFind "mule" assignments)
@@ -259,13 +246,10 @@ let movementTests =
                         Spatial =
 
                             spatial [ "src-a", { X = 10; Y = 10 } ] corridor
-                            |> withHome (fun layer ->
-                                { layer with
-                                    CreepPositions = Map.ofList [ "w1", { X = 10; Y = 14 } ]
-                                })
+                            |> withCreepsAt [ "w1", { X = 10; Y = 14 } ]
                     }
 
-                let { Intents = intents } = decide snapshot Map.empty Set.empty None
+                let { Intents = intents } = decideOn snapshot
 
                 Expect.equal
                     (moveIntents intents)
@@ -283,13 +267,10 @@ let movementTests =
                         Spatial =
 
                             spatial [ "src-a", { X = 10; Y = 10 } ] (openSeats { X = 10; Y = 10 })
-                            |> withHome (fun layer ->
-                                { layer with
-                                    CreepPositions = Map.ofList [ "w1", { X = 10; Y = 11 } ]
-                                })
+                            |> withCreepsAt [ "w1", { X = 10; Y = 11 } ]
                     }
 
-                let { Intents = intents } = decide snapshot Map.empty Set.empty None
+                let { Intents = intents } = decideOn snapshot
 
                 Expect.contains intents (HarvestSource("w1", "src-a")) "seated creep harvests"
 
@@ -318,13 +299,10 @@ let movementTests =
                         Spatial =
 
                             spatial [ "src-a", { X = 10; Y = 10 } ] terrain
-                            |> withHome (fun layer ->
-                                { layer with
-                                    CreepPositions = Map.ofList [ "w1", { X = 10; Y = 14 } ]
-                                })
+                            |> withCreepsAt [ "w1", { X = 10; Y = 14 } ]
                     }
 
-                let { Intents = intents } = decide snapshot Map.empty Set.empty None
+                let { Intents = intents } = decideOn snapshot
 
                 Expect.equal
                     (moveIntents intents)
@@ -378,7 +356,7 @@ let movementTests =
                                 })
                     }
 
-                let { Intents = intents } = decide snapshot Map.empty Set.empty None
+                let { Intents = intents } = decideOn snapshot
 
                 Expect.equal
                     (moveIntents intents)
@@ -411,7 +389,7 @@ let movementTests =
                                 })
                     }
 
-                let { Intents = intents } = decide snapshot Map.empty Set.empty None
+                let { Intents = intents } = decideOn snapshot
 
                 Expect.contains
                     intents
@@ -437,13 +415,10 @@ let movementTests =
                             spatial
                                 [ "src-a", { X = 10; Y = 10 } ]
                                 [ { X = 10; Y = 11 }, Plain; { X = 10; Y = 14 }, Plain ]
-                            |> withHome (fun layer ->
-                                { layer with
-                                    CreepPositions = Map.ofList [ "w1", { X = 10; Y = 14 } ]
-                                })
+                            |> withCreepsAt [ "w1", { X = 10; Y = 14 } ]
                     }
 
-                let { Intents = intents } = decide snapshot Map.empty Set.empty None
+                let { Intents = intents } = decideOn snapshot
 
                 Expect.isEmpty (moveIntents intents) "no path: standing still beats oscillating"
                 Expect.isEmpty (actionIntents intents) "and the target is out of range"
@@ -459,13 +434,10 @@ let movementTests =
                             spatial
                                 [ "site-1", { X = 10; Y = 10 } ]
                                 [ for y in 10..13 -> { X = 10; Y = y }, Plain ]
-                            |> withHome (fun layer ->
-                                { layer with
-                                    CreepPositions = Map.ofList [ "w1", { X = 10; Y = 13 } ]
-                                })
+                            |> withCreepsAt [ "w1", { X = 10; Y = 13 } ]
                     }
 
-                let { Intents = intents } = decide snapshot Map.empty Set.empty None
+                let { Intents = intents } = decideOn snapshot
 
                 Expect.contains intents (BuildSite("w1", "site-1")) "range 3 is close enough"
                 Expect.isEmpty (moveIntents intents) "no reason to walk closer"
@@ -488,7 +460,7 @@ let movementTests =
                                 })
                     }
 
-                let { Intents = intents } = decide snapshot Map.empty Set.empty None
+                let { Intents = intents } = decideOn snapshot
 
                 Expect.equal
                     (moveIntents intents)
@@ -529,15 +501,7 @@ let arbitrationTests =
                             spatial
                                 [ "src-a", { X = 10; Y = 10 }; "ctrl-1", { X = 10; Y = 14 } ]
                                 terrain
-                            |> withHome (fun layer ->
-                                { layer with
-                                    CreepPositions =
-                                        Map.ofList
-                                            [
-                                                "har", { X = 10; Y = 12 }
-                                                "upg", { X = 10; Y = 11 }
-                                            ]
-                                })
+                            |> withCreepsAt [ "har", { X = 10; Y = 12 }; "upg", { X = 10; Y = 11 } ]
                     }
 
                 let assigned = [ "har", Harvest "src-a"; "upg", Upgrade "ctrl-1" ]
@@ -617,12 +581,7 @@ let arbitrationTests =
                         Spatial =
 
                             spatial [ "src-a", { X = 10; Y = 10 } ] terrain
-                            |> withHome (fun layer ->
-                                { layer with
-                                    CreepPositions =
-                                        Map.ofList
-                                            [ "w1", { X = 10; Y = 13 }; "w2", { X = 10; Y = 12 } ]
-                                })
+                            |> withCreepsAt [ "w1", { X = 10; Y = 13 }; "w2", { X = 10; Y = 12 } ]
                     }
 
                 let moves = resolveOn snapshot [ "w1", Harvest "src-a" ] |> moveIntents
@@ -660,12 +619,7 @@ let arbitrationTests =
                             spatial
                                 [ "src-a", { X = 10; Y = 10 }; "ctrl-1", { X = 10; Y = 8 } ]
                                 terrain
-                            |> withHome (fun layer ->
-                                { layer with
-                                    CreepPositions =
-                                        Map.ofList
-                                            [ "h", { X = 10; Y = 13 }; "u", { X = 11; Y = 13 } ]
-                                })
+                            |> withCreepsAt [ "h", { X = 10; Y = 13 }; "u", { X = 11; Y = 13 } ]
                     }
 
                 let moves =
@@ -697,12 +651,7 @@ let arbitrationTests =
                         Spatial =
 
                             spatial [ "src-a", { X = 10; Y = 10 } ] terrain
-                            |> withHome (fun layer ->
-                                { layer with
-                                    CreepPositions =
-                                        Map.ofList
-                                            [ "h1", { X = 10; Y = 11 }; "h2", { X = 9; Y = 12 } ]
-                                })
+                            |> withCreepsAt [ "h1", { X = 10; Y = 11 }; "h2", { X = 9; Y = 12 } ]
                     }
 
                 let assigned = [ "h1", Harvest "src-a"; "h2", Harvest "src-a" ]
@@ -736,12 +685,7 @@ let arbitrationTests =
                             spatial
                                 [ "src-a", { X = 10; Y = 11 }; "site-1", { X = 15; Y = 12 } ]
                                 terrain
-                            |> withHome (fun layer ->
-                                { layer with
-                                    CreepPositions =
-                                        Map.ofList
-                                            [ "har", { X = 10; Y = 12 }; "bob", { X = 9; Y = 12 } ]
-                                })
+                            |> withCreepsAt [ "har", { X = 10; Y = 12 }; "bob", { X = 9; Y = 12 } ]
                     }
 
                 let assigned = [ "har", Harvest "src-a"; "bob", Build "site-1" ]
@@ -775,12 +719,7 @@ let arbitrationTests =
                             spatial
                                 [ "src-a", { X = 10; Y = 11 }; "site-1", { X = 15; Y = 12 } ]
                                 terrain
-                            |> withHome (fun layer ->
-                                { layer with
-                                    CreepPositions =
-                                        Map.ofList
-                                            [ "har", { X = 10; Y = 12 }; "bob", { X = 9; Y = 12 } ]
-                                })
+                            |> withCreepsAt [ "har", { X = 10; Y = 12 }; "bob", { X = 9; Y = 12 } ]
                     }
 
                 let assigned = [ "har", Harvest "src-a"; "bob", Build "site-1" ]
@@ -809,10 +748,7 @@ let arbitrationTests =
                         Spatial =
 
                             spatial [ "src-a", { X = 10; Y = 10 } ] corridor
-                            |> withHome (fun layer ->
-                                { layer with
-                                    CreepPositions = Map.ofList [ "w1", { X = 10; Y = 14 } ]
-                                })
+                            |> withCreepsAt [ "w1", { X = 10; Y = 14 } ]
                     }
 
                 Expect.isEmpty
@@ -840,12 +776,7 @@ let arbitrationTests =
                             spatial
                                 [ "src-a", { X = 10; Y = 11 }; "site-1", { X = 15; Y = 12 } ]
                                 terrain
-                            |> withHome (fun layer ->
-                                { layer with
-                                    CreepPositions =
-                                        Map.ofList
-                                            [ "har", { X = 10; Y = 12 }; "bob", { X = 9; Y = 12 } ]
-                                })
+                            |> withCreepsAt [ "har", { X = 10; Y = 12 }; "bob", { X = 9; Y = 12 } ]
                     }
 
                 let assigned = [ "har", Harvest "src-a"; "bob", Build "site-1" ]
@@ -884,12 +815,7 @@ let arbitrationTests =
                             spatial
                                 [ "src-a", { X = 11; Y = 12 }; "ctrl-1", { X = 13; Y = 12 } ]
                                 terrain
-                            |> withHome (fun layer ->
-                                { layer with
-                                    CreepPositions =
-                                        Map.ofList
-                                            [ "har", { X = 9; Y = 12 }; "upg", { X = 10; Y = 12 } ]
-                                })
+                            |> withCreepsAt [ "har", { X = 9; Y = 12 }; "upg", { X = 10; Y = 12 } ]
                     }
 
                 let assigned = [ "har", Harvest "src-a"; "upg", Upgrade "ctrl-1" ]
@@ -943,12 +869,7 @@ let arbitrationTests =
                         Sources = [ source "src-w"; source "src-e" ]
                         Controller = None
                         Creeps = [ worker "aa" 0 50; worker "bb" 0 50; worker "cc" 0 50 ]
-                        Spatial =
-                            lane false
-                            |> withHome (fun layer ->
-                                { layer with
-                                    CreepPositions = Map.ofList positions
-                                })
+                        Spatial = lane false |> withCreepsAt positions
                     }
 
                 let places =
@@ -1595,12 +1516,7 @@ let arbitrationTests =
                         Sources = [ source "src-w"; source "src-e" ]
                         Controller = None
                         Creeps = [ worker "an" 0 50 ]
-                        Spatial =
-                            lane false
-                            |> withHome (fun layer ->
-                                { layer with
-                                    CreepPositions = Map.ofList [ "an", { X = 12; Y = 12 } ]
-                                })
+                        Spatial = lane false |> withCreepsAt [ "an", { X = 12; Y = 12 } ]
                         Foreign = Set.singleton (RoomPos.at "W1N1" { X = 11; Y = 12 })
                     }
 

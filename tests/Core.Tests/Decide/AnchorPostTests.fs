@@ -39,7 +39,7 @@ let postGarrisonTests =
                         Intents = intents
                         Verdicts = verdicts
                     } =
-                    decide colony Map.empty Set.empty None
+                    decideOn colony
 
                 Expect.contains
                     verdicts
@@ -76,7 +76,7 @@ let postGarrisonTests =
                         Assignments = assignments
                         Intents = intents
                     } =
-                    decide colony Map.empty Set.empty None
+                    decideOn colony
 
                 Expect.equal
                     (harvesters assignments "src-a")
@@ -152,7 +152,7 @@ let postGarrisonTests =
                             anchor "g1" 0 50 |> withLife 10, { X = 11; Y = 10 }
                         ]
 
-                let { Assignments = assignments } = decide colony Map.empty Set.empty None
+                let { Assignments = assignments } = decideOn colony
 
                 Expect.equal
                     (harvesters assignments "src-a" |> List.sort)
@@ -203,7 +203,7 @@ let postGarrisonTests =
                         Assignments = assignments
                         Verdicts = verdicts
                     } =
-                    decide colony Map.empty Set.empty None
+                    decideOn colony
 
                 Expect.contains
                     verdicts
@@ -292,7 +292,7 @@ let anchorDigTests =
                     "the same haul: what the garrison digs is what either room's rock ships"
 
                 Expect.isEmpty
-                    (spawnIntents (decide neutralised Map.empty Set.empty None).Intents)
+                    (spawnIntents (decideOn neutralised).Intents)
                     "and the same fleet is the whole target, held or not"
             }
 
@@ -316,7 +316,7 @@ let anchorDigTests =
                     }
 
                 Expect.isEmpty
-                    (spawnIntents (decide neutralised Map.empty Set.empty None).Intents)
+                    (spawnIntents (decideOn neutralised).Intents)
                     "the premise: at five a tick these four are the whole target"
 
                 Expect.isNonEmpty
@@ -499,7 +499,7 @@ let anchorWorkCapTests =
                                 (if held then reservedRoom true 5000 else neutralRoom)
                                 colony.RoomControl
                     }
-                    |> fun colony -> (decide colony Map.empty Set.empty None).Quotas.Target
+                    |> fun colony -> (decideOn colony).Quotas.Target
 
                 Expect.equal
                     (target false)

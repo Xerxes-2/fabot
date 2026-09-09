@@ -549,7 +549,7 @@ let placementTests =
                         Controller = Some(controllerAt 2)
                     }
 
-                let { Intents = intents } = decide snapshot Map.empty Set.empty None
+                let { Intents = intents } = decideOn snapshot
                 Expect.isEmpty (placementIntents intents) "nothing to plan around"
             }
         ]

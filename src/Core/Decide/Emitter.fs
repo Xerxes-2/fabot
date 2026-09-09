@@ -43,8 +43,16 @@ let internal applicable
     =
     let task = pooled.Task
 
-    let has part =
-        creep.Body |> Map.tryFind part |> Option.exists (fun n -> n > 0)
+    let has part = partCount creep.Body part > 0
+
+    // The two body facts this whole cascade is written against, read once for
+    // the creep rather than at each of the eight and seven clauses that ask
+    // them: whether the body stands beside its buffer (ADR 0046) and whether it
+    // is the Work-heavy one pinned to a Post (ADR 0016, ADR 0048). Both are
+    // this tick's and neither depends on the Task, so a clause that asks twice
+    // in one conjunction was asking the Atlas twice for one answer.
+    let standing = isStandingBody view.Tuning creep
+    let heavy = Atlas.workHeavy atlas creep.Name
 
     // An intake — a Withdraw, a Pickup or, since #235, a Harvest — is for a body
     // with room to carry it: at least half its store free (live: a hauler holding
@@ -91,9 +99,9 @@ let internal applicable
         has Work
         && (creep.FreeCapacity > 0
             || garrisons atlas creep sourceId
-            || (Atlas.workHeavy atlas creep.Name
+            || (heavy
                 && not (Set.isEmpty (Atlas.postsOf atlas sourceId))
-                && not (Atlas.mayAct atlas creep.Name task (areaFor threats atlas creep.Name task))
+                && not (mayActNow threats atlas creep.Name task)
                 && hasUnmannedPost view atlas creep sourceId))
         // **Three clauses a light body answers and a garrison does not**
         // (#235), drawn at ADR 0016's ratio, which is where every other line
@@ -136,10 +144,9 @@ let internal applicable
         // not be at the rock at all, and the release is the point of them —
         // #235's case (b) is a light body squatting the Seat the outpost's own
         // Anchor needs the tick it stands up.
-        && (Atlas.workHeavy atlas creep.Name
-            || ((halfEmpty
-                 || Atlas.mayAct atlas creep.Name task (areaFor threats atlas creep.Name task))
-                && not (isStandingBody view.Tuning creep)
+        && (heavy
+            || ((halfEmpty || mayActNow threats atlas creep.Name task)
+                && not standing
                 && hasSpareRate view atlas sourceId))
     // The body half of this gate — a Carry part and ADR 0016's comparative
     // clause — is read a second time out of line by `canRefill`, the supply
@@ -175,39 +182,35 @@ let internal applicable
         // body]] at the buffer under its own feet**: the same exception #205
         // makes of a site on a creep's own Post — this clause prices a trip and
         // that row makes none.
-        let stock = view.Spatial.Stores |> Map.tryFind storeId |> Option.defaultValue 0
+        let stock = SpatialInfo.storedIn view.Spatial storeId
 
         let worthTheTrip =
             stock * 2 >= creep.FreeCapacity
             || (Map.tryFind storeId view.Spatial.TargetKinds |> Option.exists isTransient)
             || pooled.Priority >= priorityOfTier StockDraw
-            || (buffer && isStandingBody view.Tuning creep)
+            || (buffer && standing)
 
         has Carry
         && halfEmpty
         && worthTheTrip
-        && not (Atlas.workHeavy atlas creep.Name)
+        && not heavy
         && (has Work || not buffer)
         // A standing body fetches from the buffer at its feet and from nowhere
         // else (#206, ADR 0046): its one Carry is one trip's worth, and a trip
         // to the Storage — or across a Seam to a pile — is the commute the row
         // was shaped to never make.
-        && (buffer || not (isStandingBody view.Tuning creep))
+        && (buffer || not standing)
     // The Withdraw gate without its one target-shaped clause: a Carry part,
     // room to put the energy, and ADR 0016's comparative gate — a Work-heavy
     // body's intake is digging, and picking a pile up off the ground is no more
     // its work than drawing a container is. The buffer clause has no
     // counterpart here: ADR 0019 shuts a Work-less body out of the
     // *controller's* container, and a pile is nobody's buffer.
-    | Pickup _ ->
-        has Carry
-        && halfEmpty
-        && not (Atlas.workHeavy atlas creep.Name)
-        && not (isStandingBody view.Tuning creep)
+    | Pickup _ -> has Carry && halfEmpty && not heavy && not standing
     // Its two body clauses are read a second time out of line by
     // `canRefill`, beside Withdraw's (ADR 0050) — the Energy clause is not,
     // being a state and not a fact about the body.
-    | Refill _ -> has Carry && creep.Energy > 0 && not (isStandingBody view.Tuning creep)
+    | Refill _ -> has Carry && creep.Energy > 0 && not standing
     // The body gate on Build (#157, widened to every Build by #234), here for
     // the same reason ADR 0016's Withdraw gate is: the ladder lifts a site over
     // the Task that was pinning the body, and a rank the whole colony shares is
@@ -227,12 +230,11 @@ let internal applicable
     | Build siteId ->
         has Work
         && creep.Energy > 0
-        && (Atlas.standsOnPostSite atlas creep.Name siteId
-            || (not (isStandingBody view.Tuning creep) && not (Atlas.workHeavy atlas creep.Name)))
+        && (Atlas.standsOnPostSite atlas creep.Name siteId || (not standing && not heavy))
     // Repair leaves Upgrade's arm with ADR 0046's gate (a delivery, and a
     // standing body's Carry is one trip's worth), and the two stay
     // otherwise identical: a Work part and something to spend.
-    | Repair _ -> has Work && creep.Energy > 0 && not (isStandingBody view.Tuning creep)
+    | Repair _ -> has Work && creep.Energy > 0 && not standing
     // The one Task the whole row exists for, and so the one place the standing
     // gate must not appear (ADR 0046): a standing body spends its Work into the
     // controller from where it stands. And the sixth gate, which is that
@@ -246,13 +248,12 @@ let internal applicable
     | Upgrade _ ->
         has Work
         && creep.Energy > 0
-        && (not (Atlas.workHeavy atlas creep.Name)
-            || Atlas.mayAct atlas creep.Name task (areaFor threats atlas creep.Name task))
+        && (not heavy || mayActNow threats atlas creep.Name task)
         // A standing body holds no commuting body (ADR 0046) and the borrowed
         // Upgrade is a commute across the Seam (#213): the lift that sends the
         // pioneers must not send the home upgraders after them. Their own
         // controller stays the one Task the row exists for, ungated.
-        && not (pooled.Borrowed && isStandingBody view.Tuning creep)
+        && not (pooled.Borrowed && standing)
     // Part arithmetic and nothing else (ADR 0006): a reservation is pushed up
     // by CLAIM parts, so a body without one can no more reserve than a
     // Work-less one can dig, and a body with one asks for no energy state.
@@ -287,10 +288,7 @@ let internal applicable
     // ladder reads (`isGuardBody`), exactly as the Guard's own gate above is:
     // the two clauses are one sentence about one class, and a fighting body the
     // colony was handed rather than cast answers both.
-    | Flee ->
-        not (isGuardBody creep)
-        && not (Atlas.workHeavy atlas creep.Name)
-        && standsInReach threats atlas creep.Name
+    | Flee -> not (isGuardBody creep) && not heavy && standsInReach threats atlas creep.Name
 
 /// The action Intent a Task asks of a creep, or None for a Task with no
 /// action: Flee is movement and nothing else (ADR 0033), and the Emitter
@@ -458,10 +456,7 @@ let private actionIntents
     match task with
     | Guard room -> guardIntent view atlas creep room |> Option.toList
     | _ ->
-        if
-            Atlas.mayAct atlas creep.Name task (areaFor threats atlas creep.Name task)
-            && not drained
-        then
+        if mayActNow threats atlas creep.Name task && not drained then
             intentFor atlas creep task |> Option.toList
         else
             []

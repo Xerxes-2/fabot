@@ -77,7 +77,7 @@ let arbitrationInjectiveTests =
                             Creeps = names |> List.map (fun name -> Fixtures.worker name 0 50)
                             Spatial =
                                 Fixtures.lane pocket
-                                |> Fixtures.withHome (fun layer ->
+                                |> withHome (fun layer ->
                                     { layer with
                                         CreepPositions = List.zip names places |> Map.ofList
                                     })
