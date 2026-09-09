@@ -179,10 +179,10 @@ let internal ferryBuffers (view: ColonyView) : Set<string> =
 /// vision needs a creep, and the reserver is the only creep with a reason to
 /// go. The scan set is the gate that remains, and two things narrow it, both
 /// inside `World.scanOf`: ADR 0043's stand-down, and the declaration's own
-/// geometry — its `Outpost.neighbouring` filter (#243) — a room its home shares
-/// no border with is joined by no [[seam]], so a body hired for it could never
-/// walk there, and the room is out of the scan set before anything here counts
-/// it. What *says* so is `Outpost.refused` on the [[layout record]]; what
+/// geometry — its `Outpost.withinHopBudget` filter (#243, ADR 0058) — a room further
+/// from its home than `Tuning.MaxHops` crossings is joined by no chain of
+/// [[seam]]s, so a body hired for it could never walk there, and the room is
+/// out of the scan set before anything here counts it. What *says* so is `Outpost.refused` on the [[layout record]]; what
 /// narrows the set is the filter.
 ///
 /// Off the projection itself (`SpatialInfo.placementOf`) and not off the

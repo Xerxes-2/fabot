@@ -1016,3 +1016,98 @@ let heavyPinJoinTests =
                     "a creep the projection places nowhere stands on nothing (ADR 0004)"
             }
         ]
+
+[<Tests>]
+let routeTests =
+    testList
+        "room routes"
+        [
+            test "the name grid steps four ways, in the order that breaks a tie" {
+                // The route search's whole tie-break, so it is pinned before
+                // anything reads it: north, east, south, west, off the world
+                // coordinates the names spell (W12S28 is (-13, 28)).
+                Expect.equal
+                    (RoomName.adjacent "W12S28")
+                    [ "W12S27"; "W11S28"; "W12S29"; "W13S28" ]
+                    "north, east, south, west"
+
+                Expect.isEmpty
+                    (RoomName.adjacent "nowhere")
+                    "a name outside the grammar steps nowhere"
+            }
+
+            test "hopsBetween is the grid distance and never the walk" {
+                Expect.equal (RoomName.hopsBetween "W13S28" "W15S29") (Some 3) "two west, one south"
+                Expect.equal (RoomName.hopsBetween "W13S28" "W13S28") (Some 0) "a room and itself"
+
+                Expect.equal
+                    (RoomName.hopsBetween "W13S28" "W14S29")
+                    (Some 2)
+                    "a diagonal is two hops"
+
+                Expect.equal (RoomName.hopsBetween "W13S28" "nowhere") None "outside the grammar"
+            }
+
+            test "transitBetween is the rectangle's interior, and it is empty for a neighbour" {
+                // What decides which rooms are projected as transit layers:
+                // every room a shortest chain could pass through, both ends
+                // left out.
+                Expect.equal
+                    (RoomName.transitBetween "W13S28" "W15S29" |> List.sort)
+                    [ "W13S29"; "W14S28"; "W14S29"; "W15S28" ]
+                    "the four interior rooms of the 3x2 rectangle"
+
+                Expect.isEmpty
+                    (RoomName.transitBetween "W13S28" "W13S29")
+                    "a one-hop outpost projects no transit room at all, which is today's world"
+
+                Expect.equal
+                    (RoomName.transitBetween "W13S28" "W14S29" |> List.sort)
+                    [ "W13S29"; "W14S28" ]
+                    "a diagonal's two corners"
+            }
+
+            test "routeBy crosses the fewest borders the links allow" {
+                // `linked` is total here: every grid neighbour is joined, so
+                // the search is measuring its own breadth and its tie-break.
+                let anywhere _ _ = true
+
+                Expect.equal
+                    (RoomName.routeBy anywhere 3 "W13S28" "W15S29")
+                    (Some [ "W13S28"; "W13S29"; "W14S29"; "W15S29" ])
+                    "three hops, the tie falling south before west by adjacent's order"
+
+                Expect.equal
+                    (RoomName.routeBy anywhere 3 "W13S28" "W13S28")
+                    (Some [ "W13S28" ])
+                    "a room and itself is a chain of one and crosses nothing"
+
+                Expect.equal
+                    (RoomName.routeBy anywhere 3 "W13S28" "W13S29")
+                    (Some [ "W13S28"; "W13S29" ])
+                    "a neighbour is the one-hop chain the Seam model already priced"
+            }
+
+            test "the hop budget is a wall and an unlinked room is not walked through" {
+                let anywhere _ _ = true
+
+                Expect.equal
+                    (RoomName.routeBy anywhere 2 "W13S28" "W15S29")
+                    None
+                    "three hops under a budget of two is no route at all (ADR 0004)"
+
+                // W13S29's border is walled end to end, so the only chain to
+                // W14S29 is the one through W14S28.
+                let notThrough room = fun a b -> a <> room && b <> room
+
+                Expect.equal
+                    (RoomName.routeBy (notThrough "W13S29") 3 "W13S28" "W14S29")
+                    (Some [ "W13S28"; "W14S28"; "W14S29" ])
+                    "the search takes the other corner"
+
+                Expect.equal
+                    (RoomName.routeBy (fun _ _ -> false) 3 "W13S28" "W13S29")
+                    None
+                    "a room joined to nothing reaches nothing, neighbour or not"
+            }
+        ]

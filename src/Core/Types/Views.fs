@@ -251,7 +251,14 @@ module ColonyView =
         // derivation the creep adoption reads too (`World.scanOf`). Written
         // here a second time it would be a second answer free to disagree.
         let outposts, bootstrap, scanned =
-            World.scanOf stages (World.unownedHomes colonies world) colonies gate.Shut colony
+            World.scanOf
+                tuning.MaxHops
+                stages
+                (World.unownedHomes colonies world)
+                colonies
+                gate.Shut
+                world
+                colony
 
         // The scan set with each room's facts beside it, in scan order —
         // a room the world holds nothing for reads empty (ADR 0004), and a
@@ -376,7 +383,7 @@ module ColonyView =
             // must name is the room a human declared and this colony cannot
             // work, and by the time the scan set is cut the name is gone
             // (#243).
-            Refused = Outpost.refused home colony.Outposts
+            Refused = Outpost.refused (World.linked world) tuning.MaxHops home colony.Outposts
             // The world's memory of these rooms and of no others (#151):
             // narrowed by the scan set the [[stand-down]] gate has already
             // cut, so a withheld room's remembered census cannot hold a

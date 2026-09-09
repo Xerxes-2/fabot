@@ -80,7 +80,7 @@ let loop () =
     // vision did not answer for this tick still says when it was last looked
     // into and what stood in it then.
     let world =
-        World.ofGame Colony.declared (ObserveMemory.loadPositions ())
+        World.ofGame Tuning.defaults.MaxHops Colony.declared (ObserveMemory.loadPositions ())
         |> World.recalling sightings
 
     sightings <- world.Sightings

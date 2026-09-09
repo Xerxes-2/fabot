@@ -390,9 +390,37 @@ module World =
     and living (colonies: Colony list) (world: World) : Colony list =
         Colony.living (ownedRooms world) (spawnRooms world) colonies
 
+    /// Whether a creep could step from one room into the other: the [[world]]'s
+    /// own reading of a [[seam]] band, off the border maps it holds per room
+    /// and before any [[atlas]] grid exists (ADR 0058). The Atlas answers the
+    /// same question off its ring grids (`Atlas.seams`); both go through
+    /// `Seam.joinedBy`, so the scan set and the price cannot disagree about
+    /// which rooms are joined.
+    ///
+    /// A room the world holds no facts for is joined to nothing, which is what
+    /// keeps the route search inside the rooms `Outpost.roomsProjected` put
+    /// there: `World.ofGame` reads terrain for every declared and transit room
+    /// whether or not there is vision (ADR 0031, ADR 0041), so what this can
+    /// see is exactly what a walk could use.
+    let linked (world: World) (fromRoom: string) (toRoom: string) : bool =
+        // A ring tile the world carries whose terrain is not wall — the same
+        // answer `terrainWeight` gives the Atlas's grid, which is -1 for wall
+        // and positive for everything else. Each room's ring is resolved once
+        // and read forty-eight times, never looked up per tile.
+        let walkableIn (border: Map<Pos, Terrain>) tile =
+            match Map.tryFind tile border with
+            | Some terrain -> terrain <> Wall
+            | None -> false
+
+        Seam.joinedBy
+            (walkableIn (roomOf world fromRoom).Border)
+            (walkableIn (roomOf world toRoom).Border)
+            fromRoom
+            toRoom
+
     /// The declaration's narrowings and the union they make, for one colony:
     /// the [[outpost]]s the [[stand-down]] gate leaves it (ADR 0043) and its
-    /// home shares a border with (`Outpost.neighbouring`, #243), the rooms it is
+    /// home reaches inside the hop budget (`Outpost.withinHopBudget`, ADR 0058), the rooms it is
     /// bootstrapping for a child of its own (ADR 0047 decision 4), and its scan
     /// set — its home and both of those. The two outpost narrowings are one
     /// clause apiece and answer different questions: the gate is this tick's
@@ -402,15 +430,17 @@ module World =
     /// it (ADR 0042) with it, which is the whole of "refuse it loudly" that a
     /// scan set can carry. What says so out loud is `ColonyView.Refused`.
     let scanOf
+        (maxHops: int)
         (stages: Map<string, ColonyStage>)
         (unowned: Set<string>)
         (colonies: Colony list)
         (shut: Set<string>)
+        (world: World)
         (colony: Colony)
         : Outpost list * string list * string list =
         let outposts =
             Outpost.worked shut colony.Outposts
-            |> List.filter (Outpost.neighbouring colony.Home)
+            |> List.filter (Outpost.routable (linked world) maxHops colony.Home)
 
         // The two halves of what a mother projects for a child of hers, and
         // they are disjoint by construction: a room she is raising is one we
@@ -443,7 +473,14 @@ module World =
         (colony: Colony)
         : string list =
         let _, _, scanned =
-            scanOf (stages tuning colonies world) (unownedHomes colonies world) colonies shut colony
+            scanOf
+                tuning.MaxHops
+                (stages tuning colonies world)
+                (unownedHomes colonies world)
+                colonies
+                shut
+                world
+                colony
 
         scanned
 

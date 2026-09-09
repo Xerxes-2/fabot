@@ -196,6 +196,16 @@ type Tuning =
         /// is read** (ADR 0052 decision 3). Three, the level a colony can
         /// defend and feed itself at.
         BootstrapLevel: int
+        /// How many [[seam]]s one cross-room walk may cross (ADR 0058): the
+        /// hop budget a declared [[outpost]] has to sit inside, and the depth
+        /// the route search stops at. Three, which is what reaches the rooms
+        /// beyond the ring of five this colony's one-hop model could name —
+        /// a number a human moves in a commit, exactly as the Layout's horizon
+        /// is (ADR 0039), because every hop past the first is a transit room
+        /// projected and a flood chained onto the price. One would be the
+        /// model before this ADR; there is no upper bound in the arithmetic,
+        /// only in the CPU, which is why the bound is written down.
+        MaxHops: int
         /// What a swamp tile costs a **trunk** (ADR 0011 as #211 amends it):
         /// three against plain's two, where a walking creep pays
         /// `Engine.swampWeight`, ten. Once paved a swamp tile walks at what a
@@ -263,6 +273,7 @@ module Tuning =
             HorizonLevel = 6
             OutpostBuilders = 2
             BootstrapLevel = 3
+            MaxHops = 3
             TrunkSwampWeight = 3
             StandDownFallback = 2500
             RivalRecheck = 5000

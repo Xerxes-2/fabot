@@ -177,6 +177,32 @@ module RoomName =
                 | _ -> None
             | _ -> None
 
+    /// The name a world-grid position spells — `worldCoordsOf` read backwards,
+    /// with the same convention: an outward axis counts from -1, so x = -13 is
+    /// `W12`. Private, because a coordinate pair is this module's own currency
+    /// and what leaves it is always a name.
+    let private nameOfCoords (x: int) (y: int) : string =
+        let axis outward inward value =
+            if value < 0 then
+                outward + string (-value - 1)
+            else
+                inward + string value
+
+        axis "W" "E" x + axis "N" "S" y
+
+    /// The four rooms a name grid puts next to this one, in a fixed order —
+    /// north, east, south, west — whatever terrain has to say about them. The
+    /// order is the route search's tie-break and nothing else: two chains of
+    /// the same length are the same price to a walk that has not been priced
+    /// yet, and a search that broke the tie on the heap's whim would answer a
+    /// different room on two ticks that read the same world.
+    let adjacent (roomName: string) : string list =
+        match worldCoordsOf roomName with
+        | Some(x, y) ->
+            [ 0, -1; 1, 0; 0, 1; -1, 0 ]
+            |> List.map (fun (dx, dy) -> nameOfCoords (x + dx) (y + dy))
+        | None -> []
+
     /// The step from one room to another on that grid — the neighbour's world
     /// position minus this room's, which is what says *which* border they
     /// share. None where either name is outside the grammar.
@@ -190,8 +216,12 @@ module RoomName =
     /// diagonal exit, so a room a single axis step away is the only kind a
     /// creep reaches without crossing a third room — `Atlas.borderPairs` names
     /// tiles for those four offsets and for no other, so a pair this refuses
-    /// has an empty Seam band by construction and every cross-room price over
-    /// it is `None` (ADR 0004). The implication runs **one way only**, and the
+    /// has an empty Seam band by construction. That an empty band once meant an
+    /// unpriceable pair is ADR 0058's business now and no longer this
+    /// predicate's: a walk crosses a **chain** of Seams, so a pair with no band
+    /// of its own may still be joined through the rooms between them, and what
+    /// this answers is one Seam and never the walk. The implication runs
+    /// **one way only**, and the
     /// difference is load-bearing: this reading is over names, so it can be
     /// asked of a declaration before any terrain is read; the Seam is over
     /// tiles, so a bordering pair whose shared column or row the engine walled
@@ -203,3 +233,191 @@ module RoomName =
     /// the grammar neighbours nothing.
     let neighbouring (fromRoom: string) (toRoom: string) : bool =
         offsetOf fromRoom toRoom |> Option.exists (fun (dx, dy) -> abs dx + abs dy = 1)
+
+    /// The fewest [[seam]]s a walk between two rooms could possibly cross: the
+    /// grid distance between the names, one crossing per border (ADR 0058).
+    /// A floor and never the route — terrain can only make a walk longer, and
+    /// only `Atlas.route` says whether one exists at all — but a floor is what
+    /// a hop budget is asked against, and it is answerable off the names
+    /// alone, which is what lets a declaration be judged before any terrain is
+    /// read. Zero for a room and itself. None outside the grammar.
+    let hopsBetween (fromRoom: string) (toRoom: string) : int option =
+        offsetOf fromRoom toRoom |> Option.map (fun (dx, dy) -> abs dx + abs dy)
+
+    /// Every room a walk of the fewest possible hops could pass through, the
+    /// two ends excluded: the interior of the name-grid rectangle the two
+    /// names span (ADR 0058). A room in that rectangle lies on some monotone
+    /// path between them and a room outside it lies on none, so this is the
+    /// exact set — no smaller one covers every shortest chain, and a larger
+    /// one projects a room no shortest walk can use.
+    ///
+    /// This is what decides which **transit rooms** enter the projection, and
+    /// it is deliberately answered off the names: the route itself needs the
+    /// rooms' terrain, the terrain needs them projected, and the circle is cut
+    /// here, by the one question the names can answer on their own. A detour
+    /// around a walled border therefore lies outside what this projects and is
+    /// not found — the route is `None`, the declaration is refused loudly
+    /// (`ColonyView.Refused`), and widening this set is what would buy it.
+    let transitBetween (fromRoom: string) (toRoom: string) : string list =
+        match worldCoordsOf fromRoom, worldCoordsOf toRoom with
+        | Some(fromX, fromY), Some(toX, toY) ->
+            [
+                for x in min fromX toX .. max fromX toX do
+                    for y in min fromY toY .. max fromY toY do
+                        let name = nameOfCoords x y
+
+                        if name <> fromRoom && name <> toRoom then
+                            yield name
+            ]
+        | _ -> []
+
+    /// The chain of rooms a walk crosses, ends included, or `None` where the
+    /// hop budget or the terrain leaves none (ADR 0058): a breadth-first search
+    /// over the name grid, `linked` deciding which of the four steps out of a
+    /// room a creep can actually take, stopped at `maxHops` crossings.
+    ///
+    /// `linked` is the caller's because the two askers answer it differently
+    /// and must not: the Atlas reads a Seam band off two rooms' border rings
+    /// (`Atlas.route`), and a room the projection does not carry is joined to
+    /// nothing — which is what keeps this search inside the rooms
+    /// `transitBetween` put there rather than wandering the sector. Breadth
+    /// first, so the chain that comes back crosses the fewest borders any
+    /// chain could; `RoomName.adjacent`'s fixed order breaks the ties, so the
+    /// answer is a function of the world and not of the search.
+    let routeBy
+        (linked: string -> string -> bool)
+        (maxHops: int)
+        (fromRoom: string)
+        (toRoom: string)
+        : string list option =
+        if fromRoom = toRoom then
+            Some [ fromRoom ]
+        elif maxHops < 1 then
+            None
+        else
+            // The chain is carried on the queue reversed, so extending it is a
+            // cons: the rooms are at most `maxHops` and the reverse is paid
+            // once, on the one chain that wins.
+            let rec search (frontier: (string * string list) list) (seen: Set<string>) =
+                match frontier with
+                | [] -> None
+                | _ ->
+                    // The chain's length and not its hop count: a chain of
+                    // n rooms crosses n-1 borders, and this guards *before*
+                    // the frontier is expanded, so the step about to be taken
+                    // is the one being budgeted for.
+                    let chainLength = List.length (snd (List.head frontier))
+
+                    if chainLength > maxHops then
+                        None
+                    else
+                        // The goal first, and off one `linked` where expanding
+                        // the whole frontier would pay for four apiece: a
+                        // one-hop route is what every declaration in force asks
+                        // for, and it is asked several times a tick by every
+                        // reader of the scan set.
+                        let arrived =
+                            frontier
+                            |> List.tryPick (fun (room, chain) ->
+                                if List.contains toRoom (adjacent room) && linked room toRoom then
+                                    Some(List.rev (toRoom :: chain))
+                                else
+                                    None)
+
+                        match arrived with
+                        | Some chain -> Some chain
+                        | None ->
+
+                            let steps =
+                                [
+                                    for room, chain in frontier do
+                                        for next in adjacent room do
+                                            if not (Set.contains next seen) && linked room next then
+                                                yield next, next :: chain
+                                ]
+
+                            match steps |> List.tryFind (fun (room, _) -> room = toRoom) with
+                            | Some(_, chain) -> Some(List.rev chain)
+                            | None ->
+                                // One room enters the frontier once, under the
+                                // first chain that reached it: a second chain of
+                                // the same length is a tie this search has already
+                                // broken, and a longer one can only lose.
+                                let fresh =
+                                    steps
+                                    |> List.fold
+                                        (fun (kept, taken) (room, chain) ->
+                                            if Set.contains room taken then
+                                                kept, taken
+                                            else
+                                                (room, chain) :: kept, Set.add room taken)
+                                        ([], seen)
+
+                                search (List.rev (fst fresh)) (snd fresh)
+
+            search [ fromRoom, [ fromRoom ] ] (Set.singleton fromRoom)
+
+/// The border two rooms share, as tiles — the half of a [[seam]] that
+/// `RoomName` answers over names alone (ADR 0041). Written here rather than
+/// beside the [[atlas]]'s own grids because two readers ask it and they hold
+/// their terrain differently: the Atlas over the ring grids it lays per tick,
+/// and the scan set over the [[world]]'s own border maps, before any grid
+/// exists (ADR 0058). One definition, so the two cannot disagree about which
+/// pair of rooms a creep can walk between.
+module Seam =
+    /// The far exit row and column of a room — index 49, the outer of the two
+    /// the projection's ground stops short of (ADR 0036).
+    let exitEdge = Engine.roomSide - 1
+
+    /// The tile pairs the engine joins across the border two rooms share,
+    /// before terrain has a say: this room's exit tile beside the tile a creep
+    /// stepping onto it lands on, the same coordinate on the opposite row or
+    /// column. `offset` is the neighbour's world position minus this room's
+    /// (`RoomName.offsetOf`), so only the four unit steps name a shared border
+    /// — which is the tile half of the rule `RoomName.neighbouring` states over
+    /// the names alone. The four corner tiles are left out of every row and
+    /// column: a corner lies on two borders at once, and the engine makes at
+    /// most one landing.
+    let pairsAcross offset : (Pos * Pos) list =
+        let alongEdge = [ 1 .. exitEdge - 1 ]
+
+        match offset with
+        | 0, -1 -> [ for x in alongEdge -> { X = x; Y = 0 }, { X = x; Y = exitEdge } ]
+        | 0, 1 -> [ for x in alongEdge -> { X = x; Y = exitEdge }, { X = x; Y = 0 } ]
+        | -1, 0 -> [ for y in alongEdge -> { X = 0; Y = y }, { X = exitEdge; Y = y } ]
+        | 1, 0 -> [ for y in alongEdge -> { X = exitEdge; Y = y }, { X = 0; Y = y } ]
+        | _ -> []
+
+    /// The Seam band joining two rooms: the passable exit-tile pairs, each the
+    /// first room's border tile beside the tile it lands a creep on in the
+    /// second. `walkable` is the caller's reading of one room's border ring —
+    /// a tile the ring carries and whose terrain is not wall. Deterministic
+    /// (X, Y) order, total (ADR 0004).
+    let bandBy
+        (nearWalkable: Pos -> bool)
+        (farWalkable: Pos -> bool)
+        (fromRoom: string)
+        (toRoom: string)
+        : (Pos * Pos) list =
+        match RoomName.offsetOf fromRoom toRoom with
+        | Some offset ->
+            pairsAcross offset
+            |> List.filter (fun (here, there) -> nearWalkable here && farWalkable there)
+        | None -> []
+
+    /// Whether *any* crossing joins the two rooms — the band's existence
+    /// without the band. What a route search asks at every edge it considers
+    /// (ADR 0058), and it short-circuits on the first passable pair, where
+    /// `bandBy` would build all forty-eight and then be asked if the list is
+    /// empty.
+    let joinedBy
+        (nearWalkable: Pos -> bool)
+        (farWalkable: Pos -> bool)
+        (fromRoom: string)
+        (toRoom: string)
+        : bool =
+        match RoomName.offsetOf fromRoom toRoom with
+        | Some offset ->
+            pairsAcross offset
+            |> List.exists (fun (here, there) -> nearWalkable here && farWalkable there)
+        | None -> false

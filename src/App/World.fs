@@ -484,12 +484,26 @@ let private factsOf (ours: string option) (spawns: SpawnInfo list) (roomName: st
 /// [[stand-down]]'s withheld outpost with one of our creeps still walking out
 /// of it — costs the full `seenFacts` sweep; it is bounded by the rooms our own
 /// bodies stand in, since vision is what `Game.rooms` is.
-let private worldRooms (colonies: Colony list) (seen: string list) : string list =
+let private worldRooms (maxHops: int) (colonies: Colony list) (seen: string list) : string list =
     let declared =
         colonies
         |> List.filter (fun colony -> List.contains colony.Home seen)
+        // The colony's own projection set and not the declaration read a
+        // second time: it is home, the outposts and the transit rooms a chain
+        // to one of them crosses (ADR 0058), and a room the view will project
+        // is a room the world has to hold terrain for. Terrain is what a
+        // transit room is for and terrain is free of vision (`terrainOf`), so
+        // the marginal cost of one here is a memo read.
+        //
+        // Narrowed by the hop budget exactly as `World.scanOf` narrows it, and
+        // for a reason the budget's own rule gives: a declaration past it is
+        // refused, so no view projects that room — and reading the transit
+        // rectangle of one anyway would drag every room between here and a
+        // mis-declaration into the world for nobody to use.
         |> List.collect (fun colony ->
-            colony.Home :: (colony.Outposts |> List.map (fun outpost -> outpost.RoomName)))
+            colony.Outposts
+            |> List.filter (Outpost.withinHopBudget maxHops colony.Home)
+            |> fun outposts -> Outpost.roomsProjected outposts colony.Home)
 
     seen @ declared |> List.distinct
 
@@ -498,7 +512,7 @@ let private worldRooms (colonies: Colony list) (seen: string list) : string list
 /// bot reads `Game`. The declaration is handed in rather than read off the
 /// constant (ADR 0041), so a harness or a test can hand this function a world
 /// of its own.
-let ofGame (colonies: Colony list) (lastPositions: Map<string, RoomPos>) : World =
+let ofGame (maxHops: int) (colonies: Colony list) (lastPositions: Map<string, RoomPos>) : World =
     let spawns = objectValues<ISpawn> Game.spawns
 
     // The name the engine spells us, off the controller of a room one of
@@ -538,7 +552,7 @@ let ofGame (colonies: Colony list) (lastPositions: Map<string, RoomPos>) : World
     let seen = objectEntries Game.rooms |> Array.map fst |> Array.toList
 
     let rooms =
-        worldRooms colonies seen
+        worldRooms maxHops colonies seen
         |> List.map (fun roomName ->
             roomName,
             factsOf ours (Map.tryFind roomName spawnsByRoom |> Option.defaultValue []) roomName)

@@ -1417,3 +1417,169 @@ let trunkPricingTests =
                     "however far past it the field is moved"
             }
         ]
+
+[<Tests>]
+let multiHopTests =
+    testList
+        "atlas multi-hop walk"
+        [
+            test "a walk over two borders is the same three terms, twice" {
+                // The worked example of ADR 0058, countable a tile at a time
+                // and read against the one-hop example above, which it
+                // extends by exactly one room. The creep stands at (25,10)
+                // of W1N1's corridor and the source at (25,40) of W1N3's,
+                // two rooms north:
+                //
+                //   W1N1  nine steps up to (25,1), one onto the exit (25,0)
+                //   W1N2  landed free on (25,49), one step onto (25,48),
+                //         forty-seven down the corridor to (25,1), one onto
+                //         the exit (25,0)
+                //   W1N3  landed free on (25,49), one step onto (25,48),
+                //         seven more to (25,41), the source's Work Area
+                //
+                // Ten, forty-nine and eight: sixty-seven tiles stepped onto,
+                // each one tick at fatigue parity. Two landings charged
+                // nothing, which is the convention the one-hop join states
+                // and this one inherits unchanged.
+                let atlas =
+                    chainOfThree
+                        (corridorHome [ "w", { X = 25; Y = 10 } ])
+                        [ { X = 25; Y = 0 }, Plain ]
+                        [ { X = 25; Y = 0 }, Plain; { X = 25; Y = 49 }, Plain ]
+                        corridorTransit
+                        [ { X = 25; Y = 49 }, Plain ]
+                        corridorOutpost
+                        [ "src-out", Source ]
+                        [ worker "w" ]
+
+                Expect.equal
+                    (route atlas "W1N1" "W1N3")
+                    (Some [ "W1N1"; "W1N2"; "W1N3" ])
+                    "the chain crosses the transit room, which is the only way through"
+
+                Expect.equal
+                    (walkTicks atlas "w" (Harvest "src-out"))
+                    (Some 67)
+                    "ten, forty-nine and eight"
+
+                Expect.equal
+                    (travelCost atlas "w" (Harvest "src-out"))
+                    (Some 134)
+                    "and the same chain in the ranking price's units — two a plain step"
+            }
+
+            test "the far leg is the chain's, so a creep further back pays only its own tiles" {
+                // The property the whole memo rests on: what the chain
+                // answers does not depend on the creep, so a body four tiles
+                // further from the first border pays four ticks more and not
+                // a tile besides — over two borders exactly as over one.
+                let atlas =
+                    chainOfThree
+                        (corridorHome [ "w", { X = 25; Y = 10 }; "w-back", { X = 25; Y = 14 } ])
+                        [ { X = 25; Y = 0 }, Plain ]
+                        [ { X = 25; Y = 0 }, Plain; { X = 25; Y = 49 }, Plain ]
+                        corridorTransit
+                        [ { X = 25; Y = 49 }, Plain ]
+                        corridorOutpost
+                        [ "src-out", Source ]
+                        [ worker "w"; worker "w-back" ]
+
+                Expect.equal
+                    (walkTicks atlas "w-back" (Harvest "src-out"))
+                    (Some 71)
+                    "four tiles further back is four ticks dearer, both hops unchanged"
+            }
+
+            test "a creep standing in the transit room prices the hop it has left" {
+                // A body mid-chain is not a special case: it asks the same
+                // question from where it stands, and the route from the
+                // transit room is one hop. Counted: one step onto (25,48)
+                // is behind it, so from (25,20) it walks nineteen to (25,1),
+                // one onto the exit, then eight in the far room.
+                let atlas =
+                    chainOfThree
+                        (corridorHome [])
+                        [ { X = 25; Y = 0 }, Plain ]
+                        [ { X = 25; Y = 0 }, Plain; { X = 25; Y = 49 }, Plain ]
+                        { corridorTransit with
+                            CreepPositions = Map.ofList [ "mid", { X = 25; Y = 20 } ]
+                        }
+                        [ { X = 25; Y = 49 }, Plain ]
+                        corridorOutpost
+                        [ "src-out", Source ]
+                        [ worker "mid" ]
+
+                Expect.equal
+                    (walkTicks atlas "mid" (Harvest "src-out"))
+                    (Some 28)
+                    "nineteen up the transit room, the exit, and eight in the far one"
+            }
+
+            test "three crossings is the budget, and it prices" {
+                // `Tuning.MaxHops` is three, so this is the longest chain the
+                // colony will ever join — worth a worked example of its own,
+                // because a fold is exactly where an off-by-one lives and two
+                // hops cannot tell a fold that runs `n-1` times from one that
+                // runs twice. Ten in W1N1, forty-nine in each of the two
+                // transit rooms, eight in the last: 10 + 49 + 49 + 8.
+                let plainCorridorRing = [ { X = 25; Y = 0 }, Plain; { X = 25; Y = 49 }, Plain ]
+
+                let atlas =
+                    chainOfFour
+                        (corridorHome [ "w", { X = 25; Y = 10 } ])
+                        [ { X = 25; Y = 0 }, Plain ]
+                        plainCorridorRing
+                        corridorTransit
+                        plainCorridorRing
+                        corridorTransit
+                        [ { X = 25; Y = 49 }, Plain ]
+                        corridorOutpost
+                        [ "src-out", Source ]
+                        [ worker "w" ]
+
+                Expect.equal
+                    (route atlas "W1N1" "W1N4")
+                    (Some [ "W1N1"; "W1N2"; "W1N3"; "W1N4" ])
+                    "three crossings, two transit rooms"
+
+                Expect.equal
+                    (walkTicks atlas "w" (Harvest "src-out"))
+                    (Some 116)
+                    "ten, forty-nine, forty-nine and eight"
+
+                Expect.equal
+                    (travelCost atlas "w" (Harvest "src-out"))
+                    (Some 232)
+                    "and the same chain at two units a plain step"
+            }
+
+            test "a chain longer than the hop budget is no chain at all" {
+                // The budget is the wall, and it is the declaration's own
+                // rule read at the tile level: three rooms is two hops and
+                // inside it, so this pins the shape rather than the number —
+                // the far room is simply not joined when the search may not
+                // reach it.
+                let atlas =
+                    chainOfThree
+                        (corridorHome [ "w", { X = 25; Y = 10 } ])
+                        [ { X = 25; Y = 0 }, Plain ]
+                        // The middle room's north border is walled end to
+                        // end, so there is no second crossing to make.
+                        [ { X = 25; Y = 49 }, Plain ]
+                        corridorTransit
+                        [ { X = 25; Y = 49 }, Plain ]
+                        corridorOutpost
+                        [ "src-out", Source ]
+                        [ worker "w" ]
+
+                Expect.equal
+                    (route atlas "W1N1" "W1N3")
+                    None
+                    "no band out of the transit room, no chain"
+
+                Expect.equal
+                    (walkTicks atlas "w" (Harvest "src-out"))
+                    None
+                    "and an unpriceable target is an absence, never a number (ADR 0004)"
+            }
+        ]

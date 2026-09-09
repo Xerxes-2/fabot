@@ -714,3 +714,77 @@ let internal roundTripOf atlas =
         haulerBody
         (at "W1N2" { X = 25; Y = 41 })
         (at "W1N1" { X = 25; Y = 10 })
+
+/// A projection carrying three rooms in a north-south line, rings and all:
+/// W1N1 (the colony's own) at world (-2,-2), W1N2 at (-2,-3) and W1N3 at
+/// (-2,-4), so the chain runs north a room at a time and each crossing pairs
+/// y=0 here with y=49 there. The middle room is a **transit** room — it holds
+/// terrain and a border ring and nothing else, which is exactly what ADR 0058
+/// projects one for.
+let internal chainOfThree
+    (home: RoomLayer)
+    homeRing
+    middleRing
+    (middle: RoomLayer)
+    farRing
+    (far: RoomLayer)
+    kinds
+    creeps
+    =
+    { SpatialInfo.empty with
+        RoomName = Some "W1N1"
+        Borders =
+            Map.ofList
+                [
+                    "W1N1", Map.ofList homeRing
+                    "W1N2", Map.ofList middleRing
+                    "W1N3", Map.ofList farRing
+                ]
+        TargetKinds = Map.ofList kinds
+    }
+    |> withHome (fun _ -> home)
+    |> withOutpost "W1N2" middle
+    |> withOutpost "W1N3" far
+    |> snapshotWith creeps
+    |> ofView
+
+/// A projection carrying four rooms in the same north-south line — W1N1 through
+/// W1N4 — so a chain three crossings long can be priced at `Tuning.MaxHops`'
+/// own budget and not one hop inside it.
+let internal chainOfFour
+    (home: RoomLayer)
+    homeRing
+    firstRing
+    (first: RoomLayer)
+    secondRing
+    (second: RoomLayer)
+    farRing
+    (far: RoomLayer)
+    kinds
+    creeps
+    =
+    { SpatialInfo.empty with
+        RoomName = Some "W1N1"
+        Borders =
+            Map.ofList
+                [
+                    "W1N1", Map.ofList homeRing
+                    "W1N2", Map.ofList firstRing
+                    "W1N3", Map.ofList secondRing
+                    "W1N4", Map.ofList farRing
+                ]
+        TargetKinds = Map.ofList kinds
+    }
+    |> withHome (fun _ -> home)
+    |> withOutpost "W1N2" first
+    |> withOutpost "W1N3" second
+    |> withOutpost "W1N4" far
+    |> snapshotWith creeps
+    |> ofView
+
+/// The same plain corridor down column 25 the cross-room cases use, with no
+/// creep and no target in it: the shape a room a walk only passes through has.
+let internal corridorTransit =
+    { RoomLayer.empty with
+        Terrain = Map.ofList (plainLine [ for y in 1..48 -> { X = 25; Y = y } ])
+    }

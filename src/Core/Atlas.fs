@@ -81,23 +81,33 @@ type Atlas =
             /// one. Each is a seeded, unadvanced `Flood` that each reader
             /// pushes out only as far as the tile it asks about.
             Floods: Map<string, Map<Pos * FatigueFactor * Pricing, Lazy<Flood>>>
-            /// Memoised flood *into* a Task's ground — the far leg of a
-            /// cross-room walk (ADR 0041). Its origin is the target and not a
-            /// creep, which is why it is a table beside Floods: one flood
-            /// answers every creep in the colony pricing that Task, the
-            /// arithmetic ADR 0041 rests its cost argument on. Distances only;
-            /// nothing steps along a far leg.
-            FarFloods:
-                System.Collections.Generic.Dictionary<
-                    string * Task * bool * FatigueFactor * Pricing,
-                    int[]
-                 >
             /// Memoised flood *into* a Seam band — the walk out of every tile
             /// of one room onto the crossings joining it to a named neighbour
             /// (ADR 0042's container pick). One flood per ordered room pair,
             /// however many tiles are read off it, so the Seats of every source
             /// share one answer.
             SeamWalks: System.Collections.Generic.Dictionary<string * string, int[]>
+            /// Memoised far leg per **chain** of rooms — `FarFloods` with the
+            /// room replaced by the route the walk crosses (ADR 0058). A
+            /// chain of one room is the one-hop far leg the join has always
+            /// read, keyed the same way beside the same Task, body and
+            /// pricing; a longer chain is that flood with a hop's seeds
+            /// folded on per further room. One table and not two, because a
+            /// reader that had to know which it wanted would be a reader that
+            /// could ask for the wrong one.
+            FarFields:
+                System.Collections.Generic.Dictionary<
+                    string list * Task * bool * FatigueFactor * Pricing,
+                    int[]
+                 >
+            /// Memoised room chain per ordered room pair — the rooms a walk
+            /// between them crosses, ends included (ADR 0058). Answered off
+            /// the border rings alone, so it is settled before any flood is
+            /// forced and a pair with no chain costs the tick one search and
+            /// no grid. `None` is an answer and is memoised as one: a pair
+            /// beyond the hop budget is asked about once per creep that
+            /// prices toward it.
+            Routes: System.Collections.Generic.Dictionary<string * string, string list option>
             /// Memoised traffic-blind cast walk out of a spawner's tile, per
             /// (spawner tile, fatigue factor, goal's room), for bodies the view
             /// does not carry: a lead prices a replacement not yet cast (ADR
@@ -300,8 +310,9 @@ let ofViewRecalling (walks: WalkTable) (view: ColonyView) : Atlas =
 
                     Map.add room laid table)
                 Map.empty
-        FarFloods = System.Collections.Generic.Dictionary()
         SeamWalks = System.Collections.Generic.Dictionary()
+        Routes = System.Collections.Generic.Dictionary()
+        FarFields = System.Collections.Generic.Dictionary()
         Walks = walks
         WorkAreas = System.Collections.Generic.Dictionary()
         HeavyAreas = System.Collections.Generic.Dictionary()
@@ -1234,28 +1245,14 @@ let standsAtSource (atlas: Atlas) (creep: string) (sourceId: string) : bool =
         range tile source <= 1
     | _ -> false
 
-/// The far exit row and column of a room — index 49, the outer of the two
-/// the projection's ground stops short of (ADR 0036).
-let private exitEdge = Engine.roomSide - 1
-
-/// The tile pairs the engine joins across the border two rooms share, before
-/// terrain has a say: this room's exit tile beside the tile a creep stepping
-/// onto it lands on, the same coordinate on the opposite row or column.
-/// `offset` is the neighbour's world position minus this room's
-/// (`RoomName.offsetOf`), so only the four unit steps name a shared border —
-/// which is the tile half of the rule `RoomName.neighbouring` states over the
-/// names alone. The four corner tiles are left out of every row and column: a
-/// corner lies on two borders at once, and the engine makes at most one
-/// landing.
-let private borderPairs offset : (Pos * Pos) list =
-    let alongEdge = [ 1 .. exitEdge - 1 ]
-
-    match offset with
-    | 0, -1 -> [ for x in alongEdge -> { X = x; Y = 0 }, { X = x; Y = exitEdge } ]
-    | 0, 1 -> [ for x in alongEdge -> { X = x; Y = exitEdge }, { X = x; Y = 0 } ]
-    | -1, 0 -> [ for y in alongEdge -> { X = 0; Y = y }, { X = exitEdge; Y = y } ]
-    | 1, 0 -> [ for y in alongEdge -> { X = exitEdge; Y = y }, { X = 0; Y = y } ]
-    | _ -> []
+/// How the Atlas reads a border ring: off the grid it lays per room, where
+/// `terrainWeight` has already given wall -1 and every other terrain a
+/// positive weight. The other reading of the same question is the [[world]]'s
+/// (`World.linked`), off the border map itself before any grid exists — one
+/// `Seam` module answers both so they cannot disagree (ADR 0058).
+let private ringWalkable (atlas: Atlas) (room: string) : Pos -> bool =
+    let ring = ringOf atlas room
+    fun tile -> walkableAt ring tile
 
 /// The Seam band joining two rooms: the passable exit-tile pairs, each this
 /// room's border tile beside the tile it lands a creep on in the neighbour (ADR
@@ -1266,21 +1263,39 @@ let private borderPairs offset : (Pos * Pos) list =
 /// the Matcher cannot pick one and have the engine empty it the tick a creep
 /// arrives. Deterministic (X, Y) order, total (ADR 0004).
 let seams (atlas: Atlas) (fromRoom: string) (toRoom: string) : (Pos * Pos) list =
-    match RoomName.offsetOf fromRoom toRoom with
-    | Some offset ->
-        let near = ringOf atlas fromRoom
-        let far = ringOf atlas toRoom
+    Seam.bandBy (ringWalkable atlas fromRoom) (ringWalkable atlas toRoom) fromRoom toRoom
 
-        borderPairs offset
-        |> List.filter (fun (here, there) -> walkableAt near here && walkableAt far there)
-    | None -> []
+/// The rooms a walk from one room to another crosses, ends included, or `None`
+/// where the projection joins them by no chain inside the hop budget (ADR
+/// 0058). The Seam model's one-hop answer generalised: `seams` says which of
+/// two rooms' four grid neighbours a creep can actually step into, and
+/// `RoomName.routeBy` walks that relation breadth first out to
+/// `Tuning.MaxHops`.
+///
+/// Two rooms with a band between them answer `[from; to]`, which is every
+/// chain this bot could name before this ADR — so a one-hop price is the same
+/// price, joined over the same band, and the whole of what multi-hop adds is
+/// the chains that used to be `None`. A room the projection does not carry has
+/// no ring, `seams` gives it an empty band, and it is joined to nothing: the
+/// search therefore stays inside the rooms `RoomName.transitBetween` put in
+/// the world and cannot wander the sector on a tick that memoised a long
+/// chain. Memoised per ordered pair, `None` included (ADR 0004: the absence is
+/// the answer, and it is answered once).
+let route (atlas: Atlas) (fromRoom: string) (toRoom: string) : string list option =
+    memoised atlas.Routes (fromRoom, toRoom) (fun () ->
+        RoomName.routeBy
+            (fun here there ->
+                Seam.joinedBy (ringWalkable atlas here) (ringWalkable atlas there) here there)
+            atlas.Tuning.MaxHops
+            fromRoom
+            toRoom)
 
 /// Whether a creep stands on a Seam — its room's border ring, the tile the
 /// engine put it down on the tick it crossed. Read off the coordinate alone;
 /// total (ADR 0004).
 let standsOnSeam (atlas: Atlas) (creep: string) : bool =
     match Map.tryFind creep atlas.CreepAt with
-    | Some(_, pos) -> pos.X = 0 || pos.X = exitEdge || pos.Y = 0 || pos.Y = exitEdge
+    | Some(_, pos) -> pos.X = 0 || pos.X = Seam.exitEdge || pos.Y = 0 || pos.Y = Seam.exitEdge
     | None -> false
 
 /// The tiles of a room's own ground next to one of its exit tiles — the only
@@ -1385,43 +1400,151 @@ let seamWalkTicks (atlas: Atlas) (fromRoom: string) (toRoom: string) (from: Pos)
             entryCost (weightsOf atlas fromRoom) traffic stepPrices from
             |> Option.map (fun own -> reached - own)
 
-/// The far leg's flood for one Task and one body, memoised colony-wide: the
-/// price, from every tile of the named room, of stepping onto that tile and
-/// walking in to the ground that Task is worked from there (`floodPricedInto`).
-/// Its origin is that ground and not a creep, so one entry answers every creep
-/// the colony prices this Task for — ADR 0041's reason the cross-room walk is a
-/// minimum over additions rather than over floods.
+/// One crossing of a chain, named by the room it leaves (ADR 0058). The Seam
+/// band a hop is joined over is `seams From To`, so a pair's first tile is
+/// always `From`'s and its second `To`'s — which is what lets a fold say only
+/// which room its field is over and have every selector follow from that.
+type private Hop = { From: string; To: string }
+
+/// The chain as the hops it crosses, in the order a walk crosses them.
+let private hopsAlong (chain: string list) : Hop list =
+    chain
+    |> List.pairwise
+    |> List.map (fun (here, there) -> { From = here; To = there })
+
+/// A cost field over one room's ground carried across a Seam onto the other
+/// room's: every tile the crossing puts a creep beside, seeded at what it costs
+/// to be standing on it (ADR 0058). The whole of what multi-hop adds to ADR
+/// 0041's arithmetic, and it is `joinedAcross`'s three terms again, charged to
+/// the same tiles — the field's own side, the exit tile, and the tile the far
+/// side is entered on.
 ///
-/// The origins are the caller's, for the one Task the projection places no
-/// target for: a Guard's ground is the colony's own `Threats` and no target's
-/// surroundings (ADR 0056), so it arrives here as tiles rather than as
-/// something `narrowedArea` could derive. The memo key is `(room, task, …)` all
-/// the same and still answers one flood per key, because within a tick a Task
-/// has one such ground: `farFlood` below is the only other seeder and it is
-/// reached only through `borderCrossing`, which answers `None` for a Guard.
-let private farFloodInto
+/// Which way the hop is crossed is **read off `fieldRoom`** and never passed:
+/// the field is over one of the hop's two rooms, the seeds go to the other, and
+/// each side's tile of a Seam pair follows from which end of the hop it is. That
+/// is what makes one function serve a chain built backwards from a Task's ground
+/// and one built forwards from a spawn — they differ in nothing but which end
+/// the field starts at (ADR 0030). The exit's own price belongs to `Hop.From`
+/// whichever way the field runs: it is the tile the creep steps **onto**, and
+/// the landing it is put down on afterwards costs nothing, which is the
+/// convention `joinedAcross` states in full. The room the seeds are for comes
+/// back beside them, because the fold's next step is over that room and
+/// deriving it twice is how the two could disagree.
+let private carriedAcross
+    (atlas: Atlas)
+    (factor: FatigueFactor)
+    (pricing: Pricing)
+    (hop: Hop)
+    (fieldRoom: string)
+    (field: Pos -> int)
+    : string * (Pos * int) list =
+    let forwards = fieldRoom = hop.From
+    let seedRoom = if forwards then hop.To else hop.From
+    let fieldTileOf = if forwards then fst else snd
+    let seedTileOf = if forwards then snd else fst
+    let fieldGround = weightsOf atlas fieldRoom
+    let seedGround = weightsOf atlas seedRoom
+
+    // The seed room's own traffic, read the way `floodPricedInto` reads it: the
+    // crowd is priced in a transit room exactly as it is in the room a Task
+    // stands in, or in neither, and which of the two is the pricing's to say
+    // (ADR 0029, ADR 0030) and never this hop's. The step table is the same
+    // table either way — it is a function of the body and the pricing alone.
+    let stepPrices, traffic = pricingOf (occupiedOf atlas seedRoom) factor pricing
+
+    let seeds =
+        seams atlas hop.From hop.To
+        |> List.collect (fun pair ->
+            match
+                exitPrice atlas stepPrices hop.From (fst pair),
+                nearestReached field (besideExit fieldGround (fieldTileOf pair))
+            with
+            | Some crossing, Some onward ->
+                besideExit seedGround (seedTileOf pair)
+                |> List.choose (fun tile ->
+                    entryCost seedGround traffic stepPrices tile
+                    |> Option.map (fun entry -> tile, onward + crossing + entry))
+            | _ -> [])
+
+    seedRoom, seeds
+
+/// A field carried the length of a chain, hop by hop: each crossing seeds the
+/// next room's ground and a single-room flood settles it (ADR 0058). The one
+/// fold, whichever end the chain is walked from — `chainedInto` hands it the
+/// hops reversed and a field over the last room, `castAlong` hands it the same
+/// hops in order and a field over the first, and neither knows anything the
+/// other does not.
+///
+/// So a three-hop field is three single-room floods laid end to end and never a
+/// flood over three rooms: ADR 0041's "no flood ever leaves its room" is as
+/// literally true of a chain as of one crossing. Unreachable stays an absence
+/// throughout (ADR 0004) — a hop whose band the terrain leaves empty seeds
+/// nothing, and a field nothing seeded reaches no tile, so what the join asks
+/// for is `None` rather than a number with a gap in it.
+let private foldChain
+    (atlas: Atlas)
+    (factor: FatigueFactor)
+    (pricing: Pricing)
+    (start: string * int[])
+    (hops: Hop list)
+    : int[] =
+    hops
+    |> List.fold
+        (fun (fieldRoom, field) hop ->
+            let seedRoom, seeds =
+                carriedAcross atlas factor pricing hop fieldRoom (reachedIn field)
+
+            let stepPrices, traffic = pricingOf (occupiedOf atlas seedRoom) factor pricing
+
+            let settled =
+                floodFromAllSeeded (weightsOf atlas seedRoom) traffic stepPrices seeds
+                |> drained
+                |> fst
+
+            seedRoom, settled)
+        start
+    |> snd
+
+/// The far leg over a whole chain of rooms: today's flood into the Task's own
+/// ground in the last room, carried **back** across each Seam of the chain in
+/// turn (ADR 0058). What comes back is a field over the **first** room of the
+/// chain, which is the room `joinedAcross` joins the creep's own near leg to —
+/// so the join is handed exactly what it was handed before and does not know
+/// how many borders are behind the number.
+///
+/// A chain of one room is `floodPricedInto` and nothing else, which is every
+/// walk this bot priced before ADR 0058: there are no hops, the fold runs zero
+/// times, and the array is the same array.
+let private chainedInto
+    (atlas: Atlas)
+    (factor: FatigueFactor)
+    (pricing: Pricing)
+    (chain: string list)
+    (origins: Pos list)
+    : int[] =
+    match List.rev chain with
+    | [] -> Array.create tileCount unreached
+    | last :: _ ->
+        let target =
+            floodPricedInto (weightsOf atlas last) (occupiedOf atlas last) factor pricing origins
+
+        foldChain atlas factor pricing (last, target) (hopsAlong chain |> List.rev)
+
+/// The same chain memoised colony-wide for one Task and one body — the shape
+/// every per-creep price reads it in, and the reason a second creep pricing the
+/// same Task across the same rooms pays for no second chain.
+let private farFieldAlong
     (atlas: Atlas)
     (pricing: Pricing)
     (creep: string)
-    (room: string)
     (task: Task)
+    (chain: string list)
     (origins: Pos list)
-    =
+    : int[] =
     let factor = factorOf atlas creep
 
-    memoised atlas.FarFloods (room, task, workHeavy atlas creep, factor, pricing) (fun () ->
-        floodPricedInto (weightsOf atlas room) (occupiedOf atlas room) factor pricing origins)
-
-/// The same flood over the ground a Task's own target names — `narrowedArea`'s
-/// share of the target's room.
-let private farFlood (atlas: Atlas) (pricing: Pricing) (creep: string) (room: string) (task: Task) =
-    farFloodInto
-        atlas
-        pricing
-        creep
-        room
-        task
-        (narrowedArea atlas creep task |> RoomPos.tilesIn room)
+    memoised atlas.FarFields (chain, task, workHeavy atlas creep, factor, pricing) (fun () ->
+        chainedInto atlas factor pricing chain origins)
 
 /// The near leg of a cross-room join, in the two shapes its callers hand it:
 /// the tick's own per-creep flood, which the join may push further, and one
@@ -1476,7 +1599,7 @@ let private boundOn (leg: NearLeg) (tiles: Pos list) : int =
 /// priced toward a Task (`pricedAcross`) and the hauler quota's round trip
 /// (`haulRoundTripTicks`) differ in nothing but which two floods they hand it,
 /// and a lead's cast walk folds the same three terms into the seeds of one
-/// flood (`castAcross`), so a change here is a change there. What the two
+/// flood (`castAlong`), so a change here is a change there. What the two
 /// floods owe is fixed: the near one is `fromRoom`'s and charges every tile it
 /// enters, the far one is run *into* its goals with each goal seeded at its own
 /// entry cost (`floodPricedInto`), and a far leg flooded the ordinary way round
@@ -1563,12 +1686,17 @@ let private joinedAcross
     best
 
 /// A creep's cross-room price toward ground in another room: the join above
-/// over this creep's own memoised flood and the far leg, the one flooded out of
-/// that ground and shared colony-wide, so a second creep pricing the same Task
-/// across the same border pays for no second flood (ADR 0041). The band is read
-/// before either flood is forced, a pair of rooms with no Seam having nothing
-/// to pay for (ADR 0004). The far ground is the caller's, for the reason
-/// `farFloodInto` above carries.
+/// over this creep's own memoised flood and the far leg, the one carried back
+/// along the route and shared colony-wide, so a second creep pricing the same
+/// Task across the same rooms pays for no second flood (ADR 0041, ADR 0058).
+/// The route is read before either flood is forced, a pair of rooms with no
+/// chain having nothing to pay for (ADR 0004). The far ground is the caller's,
+/// for the reason `farFieldAlong` above carries.
+///
+/// The join is handed the **next** room of the chain and the band into it, not
+/// the target and its own band: what the far leg answers is a field over that
+/// next room, whatever is behind it. A one-hop route makes the two the same
+/// room and this is the call it always was.
 let private pricedAcrossInto
     (atlas: Atlas)
     (pricing: Pricing)
@@ -1579,22 +1707,25 @@ let private pricedAcrossInto
     (targetRoom: string)
     (origins: Pos list)
     : (int * Pos) option =
-    match seams atlas creepRoom targetRoom with
-    | [] -> None
-    | band ->
-        let near = flood atlas pricing creepRoom creep from
-        let far = farFloodInto atlas pricing creep targetRoom task origins
+    match route atlas creepRoom targetRoom with
+    | Some(_ :: (next :: _ as onward)) ->
+        match seams atlas creepRoom next with
+        | [] -> None
+        | band ->
+            let near = flood atlas pricing creepRoom creep from
+            let far = farFieldAlong atlas pricing creep task onward origins
 
-        joinedAcross
-            atlas
-            pricing
-            (factorOf atlas creep)
-            creepRoom
-            from
-            targetRoom
-            band
-            (Resuming near)
-            (reachedIn far)
+            joinedAcross
+                atlas
+                pricing
+                (factorOf atlas creep)
+                creepRoom
+                from
+                next
+                band
+                (Resuming near)
+                (reachedIn far)
+    | _ -> None
 
 /// The same price toward the ground a Task's own target names.
 let private pricedAcross
@@ -1955,27 +2086,36 @@ let firstStepWithin (atlas: Atlas) (creep: string) (goals: Set<RoomPos>) : RoomP
 let stepTowardRoom (atlas: Atlas) (creep: string) (room: string) : RoomPos option =
     match Map.tryFind creep atlas.CreepAt with
     | Some(creepRoom, from) when creepRoom <> room ->
-        match seams atlas creepRoom room with
-        | [] -> None
-        | band ->
-            let ground = weightsOf atlas creepRoom
-            let exits = band |> List.map fst
+        // The **next** room of the chain and not the goal (ADR 0058): what a
+        // creep crossing toward a room two hops out can aim at is the border
+        // it reaches first, and the hop after that is the same question asked
+        // again from the room it lands in.
+        match route atlas creepRoom room |> Option.bind (List.tryItem 1) with
+        | None -> None
+        | Some next ->
 
-            // Standing beside a crossing already: step onto it, exactly as
-            // `stepAcross` does for the exit it priced. The band's own (X, Y)
-            // order settles a body standing beside two of them.
-            let beside =
-                exits
-                |> List.tryFind (fun exit -> List.contains from (besideExitFrom ground from exit))
+            match seams atlas creepRoom next with
+            | [] -> None
+            | band ->
+                let ground = weightsOf atlas creepRoom
+                let exits = band |> List.map fst
 
-            match beside with
-            | Some exit -> Some(RoomPos.at creepRoom exit)
-            | None ->
-                exits
-                |> List.collect (besideExit ground)
-                |> Set.ofList
-                |> RoomPos.setAt creepRoom
-                |> firstStepVia atlas TravelCost creep
+                // Standing beside a crossing already: step onto it, exactly as
+                // `stepAcross` does for the exit it priced. The band's own (X, Y)
+                // order settles a body standing beside two of them.
+                let beside =
+                    exits
+                    |> List.tryFind (fun exit ->
+                        List.contains from (besideExitFrom ground from exit))
+
+                match beside with
+                | Some exit -> Some(RoomPos.at creepRoom exit)
+                | None ->
+                    exits
+                    |> List.collect (besideExit ground)
+                    |> Set.ofList
+                    |> RoomPos.setAt creepRoom
+                    |> firstStepVia atlas TravelCost creep
     | _ -> None
 
 /// The first step toward an explicit set of tiles that names its own room:
@@ -2050,23 +2190,26 @@ let haulRoundTripTicks
             let dist, _ = walkFloodFrom weights factor from
             nearestReached (reachedIn dist) goals
         else
-            match seams atlas fromRoom sinkRoom with
-            | [] -> None
-            | band ->
-                let near, _ = walkFloodFrom weights factor from
-                let far = floodPricedInto (weightsOf atlas sinkRoom) noTraffic factor Walk goals
+            match route atlas fromRoom sinkRoom with
+            | Some(_ :: (next :: _ as onward)) ->
+                match seams atlas fromRoom next with
+                | [] -> None
+                | band ->
+                    let near, _ = walkFloodFrom weights factor from
+                    let far = chainedInto atlas factor Walk onward goals
 
-                joinedAcross
-                    atlas
-                    Walk
-                    factor
-                    fromRoom
-                    from
-                    sinkRoom
-                    band
-                    (Drained near)
-                    (reachedIn far)
-                |> Option.map fst
+                    joinedAcross
+                        atlas
+                        Walk
+                        factor
+                        fromRoom
+                        from
+                        next
+                        band
+                        (Drained near)
+                        (reachedIn far)
+                    |> Option.map fst
+            | _ -> None
 
     let loaded =
         legTicks
@@ -2092,32 +2235,20 @@ let haulRoundTripTicks
 /// and `expiring` asks for a lead per creep twice a tick. Seeded from the band
 /// instead, the flood does not depend on the goal at all, which is what lets
 /// the answer go in the walk table under the census (ADR 0032).
-let private castAcross
+///
+/// Carried the length of the chain since ADR 0058, and by the same fold the
+/// far leg is carried back along — a lead to a room three hops out is three
+/// seedings and three floods, and the walk table holds the last of them.
+let private castAlong
     (atlas: Atlas)
     (factor: FatigueFactor)
     (near: int[])
-    (band: (Pos * Pos) list)
-    (goalRoom: string)
+    (chain: string list)
     : int[] =
-    let weights = weightsOf atlas goalRoom
-    let homeGround = weightsOf atlas atlas.Home
-    let stepPrices, traffic = pricingOf noTraffic factor Walk
-
-    band
-    |> List.collect (fun (exitTile, landing) ->
-        match
-            nearestReached (reachedIn near) (besideExit homeGround exitTile),
-            exitPrice atlas stepPrices atlas.Home exitTile
-        with
-        | Some approach, Some crossing ->
-            besideExit weights landing
-            |> List.choose (fun tile ->
-                entryCost weights traffic stepPrices tile
-                |> Option.map (fun cost -> tile, approach + crossing + cost))
-        | _ -> [])
-    |> floodFromAllSeeded weights traffic stepPrices
-    |> drained
-    |> fst
+    match chain with
+    | []
+    | [ _ ] -> Array.create tileCount unreached
+    | first :: _ -> foldChain atlas factor Walk (first, near) (hopsAlong chain)
 
 /// The walk in whole ticks a freshly cast body needs to stand on a tile (ADR
 /// 0026) — the half of a lead that is paid after the spawner is done. Keyed on
@@ -2136,7 +2267,7 @@ let private castAcross
 /// so a lead that could only price home tiles left ADR 0026's succession
 /// switched off for exactly those creeps. A goal across a border is the minimum
 /// over the Seam band, the one join every cross-room price is read off (ADR
-/// 0030), through `castAcross` for the reason written there.
+/// 0030), through `castAlong` for the reason written there.
 let castWalkTicks
     (atlas: Atlas)
     (body: BodyPart list)
@@ -2176,10 +2307,10 @@ let castWalkTicks
         match atlas.Walks.TryGetValue((spawn, factor, goalRoom)) with
         | true, table -> arrival table
         | _ ->
-            match seams atlas atlas.Home goalRoom with
-            | [] -> None
-            | band ->
-                let table = castAcross atlas factor (near ()) band goalRoom
+            match route atlas atlas.Home goalRoom with
+            | None -> None
+            | Some chain ->
+                let table = castAlong atlas factor (near ()) chain
                 atlas.Walks.[(spawn, factor, goalRoom)] <- table
                 arrival table
 

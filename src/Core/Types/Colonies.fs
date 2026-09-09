@@ -33,8 +33,8 @@ module Outpost =
     /// The declarations the colony works this tick: the declared list, less
     /// every room a [[stand-down]] is withholding (ADR 0043). The gate, and the
     /// one place *that* gate narrows the set — `World.scanOf` narrows it once
-    /// more beside this, on the declaration's own geometry (`neighbouring`,
-    /// #243), and the two are one clause apiece there. The gate's other half
+    /// more beside this, on the declaration's own geometry (`withinHopBudget`,
+    /// #243, ADR 0058), and the two are one clause apiece there. The gate's other half
     /// (`StandDown.Rechecked`, #165) never reaches here: a room it re-admits to
     /// the scan is still withheld from the work, so a room this drops stays
     /// dropped whatever tick the recheck falls on.
@@ -43,34 +43,67 @@ module Outpost =
         |> List.filter (fun outpost -> not (Set.contains outpost.RoomName shut))
 
     /// Whether a declared outpost is one its home can work **at all**: the two
-    /// rooms share a border, so a [[seam]] joins them (`RoomName.neighbouring`,
-    /// ADR 0041). Not a gate that opens and shuts like the [[stand-down]]'s —
-    /// it is a fact about the declaration a human wrote, and it answers the
-    /// same on every tick of that declaration's life.
-    let neighbouring (home: string) (outpost: Outpost) : bool =
-        RoomName.neighbouring home outpost.RoomName
+    /// rooms are inside the hop budget, so a chain of [[seam]]s could join them
+    /// (`RoomName.hopsBetween`, ADR 0058). Not a gate that opens and shuts like
+    /// the [[stand-down]]'s — it is a fact about the declaration a human wrote
+    /// and the constant they wrote it under, and it answers the same on every
+    /// tick of that declaration's life.
+    ///
+    /// Read off the **names**, as `RoomName.neighbouring` was before it and for
+    /// the same reason: this is asked while the scan set is being built, which
+    /// is before there is a projection to read terrain off. So it answers
+    /// whether the declaration is *shaped* like one a route could join, never
+    /// whether one does — a room inside the budget that every chain to is
+    /// walled is priced at `None` by `Atlas.route` and is the case #259 is
+    /// open on, one hop out and now three.
+    let withinHopBudget (maxHops: int) (home: string) (outpost: Outpost) : bool =
+        RoomName.hopsBetween home outpost.RoomName
+        |> Option.exists (fun hops -> hops >= 1 && hops <= maxHops)
 
-    /// The declared outposts a home shares no border with, by name (#243).
-    /// ADR 0041 prices a crossing over one Seam band and no more — `walk =
-    /// min over seams (near leg + 1 + far leg)`, each leg a flood that never
-    /// leaves its room — so a room two hops out is not a badly-priced outpost
-    /// but an unpriceable one: `pricedAcross` and `haulRoundTripTicks` answer
-    /// `None` for every target in it, and by ADR 0004 unpriceable geometry
-    /// never counts against a Task. Worked anyway, such a room is projected,
-    /// pooled and hired for — ADR 0042's reserver row hires one body per
-    /// declared outpost — and every body bought for it stands beside the spawn
-    /// for its whole life with nothing to say why. So the declaration is
-    /// **refused** here rather than accepted and never worked, and the refusal
-    /// is named: `ColonyView.Refused` carries it to the colony's [[layout
-    /// record]], and the test over `Colony.declared` is what makes a human's
-    /// slip red before it is deployed. Read off the whole declaration and not
-    /// off `worked`'s survivors: a room this refuses is wrong whatever the
-    /// stand-down is doing about it this tick. Multi-hop outposts are a
-    /// feature and not a bug fix — they need a Seam join of their own — and
-    /// they are deliberately not this rule's business.
-    let refused (home: string) (outposts: Outpost list) : string list =
+    /// Whether a chain actually joins the two — the same question one room
+    /// further down (#259, ADR 0058). `withinHopBudget` above answers off the
+    /// names and so can be asked of a declaration with no terrain read at all;
+    /// this one asks `linked` per border and so answers whether a creep could
+    /// really walk there. The budget is inside it: `RoomName.routeBy` searches
+    /// no deeper, so a room this accepts is one `Atlas.route` will price.
+    ///
+    /// The two are not the same test and the difference is the whole of #259: a
+    /// room three hops out whose every chain the engine walled is *shaped* like
+    /// a declaration and is not one, and refusing it on the names alone would
+    /// leave it projected, pooled and hired for by a row that hires per
+    /// declared outpost — #243's silent failure, one budget further out.
+    let routable
+        (linked: string -> string -> bool)
+        (maxHops: int)
+        (home: string)
+        (outpost: Outpost)
+        : bool =
+        withinHopBudget maxHops home outpost
+        && RoomName.routeBy linked maxHops home outpost.RoomName |> Option.isSome
+
+    /// The declared outposts outside the hop budget, by name (#243, ADR 0058).
+    /// A walk is priced over a chain of at most `Tuning.MaxHops` Seams, each
+    /// leg a flood that never leaves its room, so a room further out than that
+    /// is not a badly-priced outpost but an unpriceable one: `pricedAcross` and
+    /// `haulRoundTripTicks` answer `None` for every target in it, and by ADR
+    /// 0004 unpriceable geometry never counts against a Task. Worked anyway,
+    /// such a room is projected, pooled and hired for — ADR 0042's reserver row
+    /// hires one body per declared outpost — and every body bought for it
+    /// stands beside the spawn for its whole life with nothing to say why. So
+    /// the declaration is **refused** here rather than accepted and never
+    /// worked, and the refusal is named: `ColonyView.Refused` carries it to the
+    /// colony's [[layout record]], and the test over `Colony.declared` is what
+    /// makes a human's slip red before it is deployed. Read off the whole
+    /// declaration and not off `worked`'s survivors: a room this refuses is
+    /// wrong whatever the stand-down is doing about it this tick.
+    let refused
+        (linked: string -> string -> bool)
+        (maxHops: int)
+        (home: string)
+        (outposts: Outpost list)
+        : string list =
         outposts
-        |> List.filter (neighbouring home >> not)
+        |> List.filter (routable linked maxHops home >> not)
         |> List.map (fun outpost -> outpost.RoomName)
 
     /// The rooms the shell projects this tick: the home room, and every
@@ -80,7 +113,20 @@ module Outpost =
     /// off the constant, so the stand-down gate (ADR 0043) has exactly one
     /// place to narrow the set.
     let roomsProjected (outposts: Outpost list) (home: string) : string list =
-        home :: (outposts |> List.map (fun outpost -> outpost.RoomName))
+        home
+        :: (outposts
+            |> List.collect (fun outpost ->
+                // The outpost, and every room a shortest walk to it could
+                // cross (ADR 0058). A **transit** room is projected for its
+                // terrain and for nothing else: no furniture is laid in it
+                // (`furnitureOf` reads the declaration, which names none),
+                // nothing is pooled there and no row hires for it, so what it
+                // adds is a walking grid and a border ring — which is exactly
+                // what `Atlas.route` needs to find a chain through it, and
+                // what the chain's own flood needs to cross it. For a
+                // one-hop outpost this is empty and the set is the one every
+                // tick before ADR 0058 projected.
+                outpost.RoomName :: RoomName.transitBetween home outpost.RoomName))
         |> List.distinct
 
     /// One declaration as projection entries: the controller and then the

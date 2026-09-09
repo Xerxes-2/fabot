@@ -29,6 +29,21 @@ let private ground =
                 for y in 1..10 -> { X = x; Y = y }, Plain
         ]
 
+/// The border ring every room in a real world carries, because terrain is read
+/// for every projected room whether or not there is vision (ADR 0031, ADR 0041)
+/// — so a fixture room without one models a world the shell cannot produce, and
+/// since ADR 0058 the scan set reads it: a room joined to nothing by its ring
+/// is a room no chain reaches.
+let private ring =
+    Map.ofList
+        [
+            for i in 0 .. Seam.exitEdge do
+                yield { X = i; Y = 0 }, Plain
+                yield { X = i; Y = Seam.exitEdge }, Plain
+                yield { X = 0; Y = i }, Plain
+                yield { X = Seam.exitEdge; Y = i }, Plain
+        ]
+
 let private control owner : RoomControlInfo =
     {
         Owner = owner
@@ -46,9 +61,29 @@ let private roomOf name owner (targets: (string * Pos * TargetKind) list) =
                 Terrain = ground
                 TargetPositions = targets |> List.map (fun (id, pos, _) -> id, pos) |> Map.ofList
             }
+        Border = ring
         TargetKinds = targets |> List.map (fun (id, _, kind) -> id, kind) |> Map.ofList
         Control = Some(control owner)
     }
+
+/// A declared room the colony cannot see, as the **shell** builds one: terrain
+/// and a border ring, and not one fact vision pays for (`World.factsOf`'s
+/// blind branch, ADR 0004, ADR 0031). Removing the room from the world
+/// entirely would model a state `World.ofGame` cannot produce — every declared
+/// room is read for terrain whether or not `Game.rooms` answers for it — and
+/// since ADR 0058 the difference is load-bearing: the scan set reads the ring
+/// to know which rooms a chain can cross.
+let private unseen name (rooms: Map<string, RoomFacts>) =
+    rooms
+    |> Map.add
+        name
+        { RoomFacts.empty with
+            Layer =
+                { RoomLayer.empty with
+                    Terrain = ground
+                }
+            Border = ring
+        }
 
 /// The room as a colony of ours runs it: its controller at the given
 /// level, a spawn of ours standing in it, and its bank — the three facts a
@@ -818,7 +853,7 @@ let colonyViewTests =
                 // reads (#151).
                 let blind =
                     { pairWorld with
-                        Rooms = Map.remove outpost pairWorld.Rooms
+                        Rooms = unseen outpost pairWorld.Rooms
                     }
 
                 let view = viewOf blind mother
@@ -847,7 +882,7 @@ let colonyViewTests =
                 // does (#148).
                 let blind =
                     { pairWorld with
-                        Rooms = Map.remove outpost pairWorld.Rooms
+                        Rooms = unseen outpost pairWorld.Rooms
                     }
 
                 let view = viewOf blind mother
@@ -976,14 +1011,14 @@ let colonyViewTests =
             }
         ]
 
-/// The room the declaration below reaches for and cannot: W13S27 is one
-/// step west and one step north of the mother's W12S28, which in a world
-/// with no diagonal exits is **two** rooms away. `AtlasTests`' "rooms that
-/// share no border share no band" pins the tile half of that on this very
-/// pair — `seams` over W12S28 and W13S27 is empty whatever the terrain
-/// says — so everything here follows: no Seam, no crossing price,
-/// and by ADR 0004 no Task in it that any body can ever be matched to.
-let private twoHops = "W13S27"
+/// The room the declaration below reaches for and cannot: W16S28 is four
+/// steps west of the mother's W12S28, one past `Tuning.MaxHops` (ADR 0058).
+/// A room the hop budget refuses has no chain to price over — `Atlas.route`
+/// answers `None` for it whatever the terrain says — so everything here
+/// follows: no route, no crossing price, and by ADR 0004 no Task in it that
+/// any body can ever be matched to. One past the budget and not ten, so what
+/// the test pins is the boundary rather than a far-away room.
+let private tooFar = "W16S28"
 
 /// The mother's declaration with that room added beside her real outpost.
 /// Two outposts and not one, so every assertion below is read against the
@@ -1000,9 +1035,9 @@ let private overreaching: Colony list =
                     colony.Outposts
                     @ [
                         {
-                            RoomName = twoHops
-                            Sources = [ "src-far", { Room = twoHops; X = 5; Y = 5 } ]
-                            Controller = "ctrl-far", { Room = twoHops; X = 7; Y = 7 }
+                            RoomName = tooFar
+                            Sources = [ "src-far", { Room = tooFar; X = 5; Y = 5 } ]
+                            Controller = "ctrl-far", { Room = tooFar; X = 7; Y = 7 }
                         }
                     ]
             })
@@ -1015,9 +1050,9 @@ let private overreachingWorld =
         Rooms =
             pairWorld.Rooms
             |> Map.add
-                twoHops
+                tooFar
                 (snd (
-                    roomOf twoHops Ownership.Unowned [ "src-far", { X = 5; Y = 5 }, Source ]
+                    roomOf tooFar Ownership.Unowned [ "src-far", { X = 5; Y = 5 }, Source ]
                     |> withSources [ "src-far" ]
                 ))
     }
@@ -1027,16 +1062,16 @@ let declarationTests =
     testList
         "an outpost declared across a border its home has not got"
         [
-            test "every outpost a human has declared borders the home that works it" {
+            test "every outpost a human has declared is inside the hop budget" {
                 // The invariant #243 exists for, over the live constant
-                // (ADR 0041's "declared, not discovered"): a colony's
-                // [[outpost]] is a room *neighbouring* its home, because a
-                // crossing is priced over one Seam band and there is no
-                // second hop to price. Red here rather than live, which is
-                // the whole of the ticket — a two-hop declaration is
-                // accepted by every rule downstream and worked by none of
-                // them, and the bodies bought for it stand by the spawn for
-                // their whole lives.
+                // (ADR 0041's "declared, not discovered") and now at ADR
+                // 0058's altitude: a colony's [[outpost]] is a room its home
+                // reaches in at most `Tuning.MaxHops` crossings, because that
+                // is how long a chain the price is joined over. Red here
+                // rather than live, which is the whole of the ticket — a
+                // declaration past the budget is accepted by every rule
+                // downstream and worked by none of them, and the bodies
+                // bought for it stand by the spawn for their whole lives.
                 Expect.isNonEmpty Colony.declared "a declaration nobody made is nothing to check"
 
                 Expect.isNonEmpty
@@ -1046,12 +1081,16 @@ let declarationTests =
                 let refused =
                     Colony.declared
                     |> List.collect (fun colony ->
-                        Outpost.refused colony.Home colony.Outposts
-                        |> List.map (fun room -> $"{room} is no neighbour of {colony.Home}"))
+                        colony.Outposts
+                        |> List.filter (
+                            Outpost.withinHopBudget Tuning.defaults.MaxHops colony.Home >> not
+                        )
+                        |> List.map (fun outpost -> outpost.RoomName)
+                        |> List.map (fun room -> $"{room} is out of {colony.Home}'s reach"))
 
                 Expect.isEmpty
                     refused
-                    $"""every declared outpost shares a border with its home: {String.concat "; " refused}"""
+                    $"""every declared outpost is inside the hop budget: {String.concat "; " refused}"""
             }
 
             test "a room one axis step away is the only neighbour a name has" {
@@ -1064,7 +1103,7 @@ let declarationTests =
                 Expect.isTrue (RoomName.neighbouring mother child) "and W13S28 is west of it"
 
                 Expect.isFalse
-                    (RoomName.neighbouring mother twoHops)
+                    (RoomName.neighbouring mother "W13S27")
                     "a diagonal is two rooms away: the engine has no diagonal exit"
 
                 Expect.isFalse
@@ -1086,22 +1125,60 @@ let declarationTests =
                     "W0 and E0 are the two columns beside the origin"
             }
 
-            test "a declared outpost its home does not border is refused, and said out loud" {
-                // #243's live shape: the room is declared, seen, furnished
-                // and unowned — every reason to work it that a neighbour
-                // would have — and the one thing it has not got is a Seam.
+            test "a declared outpost inside the budget that no chain reaches is refused too" {
+                // #259, and the case ADR 0058 would have reopened #243 with:
+                // the room is two hops out, so the **names** say it is a
+                // declaration a route could join — and the terrain says
+                // otherwise, because the rooms between it and home carry no
+                // border a creep can cross. Refused on the walk and not on the
+                // arithmetic, which is the difference `Outpost.routable` exists
+                // for: accepted, it would be projected, its rock pooled, and a
+                // reserver hired for it every tick by the row that hires per
+                // declared outpost, for a room no body can reach.
+                let walledIn =
+                    { overreachingWorld with
+                        Rooms =
+                            overreachingWorld.Rooms
+                            |> Map.map (fun name facts ->
+                                if name = mother || name = child then
+                                    facts
+                                else
+                                    { facts with Border = Map.empty })
+                    }
+
+                let view = viewUnder overreaching walledIn mother
+
+                Expect.isTrue
+                    (List.contains tooFar view.Refused)
+                    "the room past the budget is refused on the names, as it was"
+
+                Expect.isFalse
+                    (Map.containsKey outpost view.Spatial.Rooms)
+                    "and the one inside it whose ring nothing can cross is out of the scan set"
+
+                Expect.isTrue
+                    (List.contains outpost view.Refused)
+                    "named on the layout record rather than dropped in silence"
+            }
+
+            test "a declared outpost past the hop budget is refused, and said out loud" {
+                // #243's live shape at ADR 0058's altitude: the room is
+                // declared, seen, furnished and unowned — every reason to
+                // work it that a room inside the budget would have — and the
+                // one thing it has not got is a chain short enough to price.
                 // Accepted, it would be projected, its rock pooled, its
                 // controller pooled as a Reserve and one reserver body
                 // hired for it per tick by the row that hires per *declared*
                 // outpost (ADR 0042), all of it for a room no body can
                 // reach. So the view refuses it, and names it: silence is
-                // what the ticket was filed against.
+                // what the ticket was filed against. What moved with ADR 0058
+                // is where the line falls, never that there is one.
                 let view = viewUnder overreaching overreachingWorld mother
 
-                Expect.equal view.Refused [ twoHops ] "the refusal names the room a human declared"
+                Expect.equal view.Refused [ tooFar ] "the refusal names the room a human declared"
 
                 Expect.isFalse
-                    (Map.containsKey twoHops view.Spatial.Rooms)
+                    (Map.containsKey tooFar view.Spatial.Rooms)
                     "the room is not projected"
 
                 Expect.isFalse (List.contains "src-far" (idsOf view)) "its rock is not pooled"
@@ -1111,7 +1188,7 @@ let declarationTests =
                     "its controller is not placed, so no Reserve is pooled on it"
 
                 Expect.isFalse
-                    (Map.containsKey twoHops view.RoomControl)
+                    (Map.containsKey tooFar view.RoomControl)
                     "and nothing of it is priced at all"
 
                 // Beside it, the outpost that does border her: the
