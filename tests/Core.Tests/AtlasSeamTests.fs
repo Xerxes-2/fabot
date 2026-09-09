@@ -6,6 +6,13 @@ open Fabot.Core.Types
 open Fabot.Core.Atlas
 open Fabot.Core.Tests.AtlasFixtures
 
+/// The column both rooms of every fixture below are built on: x = 10, y = 10
+/// down to 17, plain and walkable. What each case varies is the ring between
+/// the two rooms and what is filed in them — never the ground, because a Seam
+/// is a fact about the ring and the two columns it joins.
+let private seamColumn =
+    Map.ofList (plainLine [ for y in 10..17 -> { X = 10; Y = y } ])
+
 [<Tests>]
 let seamTests =
     testList
@@ -420,8 +427,7 @@ let roomTests =
                     }
                     |> withHome (fun layer ->
                         { layer with
-                            Terrain =
-                                Map.ofList (plainLine [ for y in 10..17 -> { X = 10; Y = y } ])
+                            Terrain = seamColumn
                             TargetPositions = Map.ofList [ "src-home", { X = 10; Y = 18 } ]
                             CreepPositions = Map.ofList [ "w-home", { X = 10; Y = 10 } ]
                         })
@@ -484,14 +490,13 @@ let roomTests =
                     }
                     |> withHome (fun layer ->
                         { layer with
-                            Terrain =
-                                Map.ofList (plainLine [ for y in 10..17 -> { X = 10; Y = y } ])
+                            Terrain = seamColumn
                             CreepPositions = Map.ofList [ "w-home", { X = 10; Y = 10 } ]
                         })
 
                 let outpost =
                     { RoomLayer.empty with
-                        Terrain = Map.ofList (plainLine [ for y in 10..17 -> { X = 10; Y = y } ])
+                        Terrain = seamColumn
                         TargetPositions = Map.ofList [ "src-out", { X = 10; Y = 18 } ]
                     }
 
@@ -567,15 +572,14 @@ let roomTests =
                     }
                     |> withHome (fun layer ->
                         { layer with
-                            Terrain =
-                                Map.ofList (plainLine [ for y in 10..17 -> { X = 10; Y = y } ])
+                            Terrain = seamColumn
                             TargetPositions = Map.ofList [ "src-home", { X = 10; Y = 18 } ]
                             CreepPositions = Map.ofList [ "w-home", { X = 10; Y = 10 } ]
                         })
 
                 let outpost =
                     { RoomLayer.empty with
-                        Terrain = Map.ofList (plainLine [ for y in 10..17 -> { X = 10; Y = y } ])
+                        Terrain = seamColumn
                         CreepPositions = Map.ofList [ "w-out", { X = 10; Y = 13 } ]
                     }
 
@@ -610,8 +614,7 @@ let roomTests =
                     }
                     |> withHome (fun layer ->
                         { layer with
-                            Terrain =
-                                Map.ofList (plainLine [ for y in 10..17 -> { X = 10; Y = y } ])
+                            Terrain = seamColumn
                             CreepPositions = Map.ofList [ "w-home", { X = 10; Y = 10 } ]
                         })
 
@@ -835,14 +838,13 @@ let roomTests =
                     }
                     |> withHome (fun layer ->
                         { layer with
-                            Terrain =
-                                Map.ofList (plainLine [ for y in 10..17 -> { X = 10; Y = y } ])
+                            Terrain = seamColumn
                             TargetPositions = Map.ofList [ "pile-home", { X = 10; Y = 10 } ]
                         })
 
                 let outpost =
                     { RoomLayer.empty with
-                        Terrain = Map.ofList (plainLine [ for y in 10..17 -> { X = 10; Y = y } ])
+                        Terrain = seamColumn
                         TargetPositions = Map.ofList [ "pile-out", { X = 10; Y = 10 } ]
                     }
 
@@ -873,8 +875,7 @@ let roomTests =
                     }
                     |> withHome (fun layer ->
                         { layer with
-                            Terrain =
-                                Map.ofList (plainLine [ for y in 10..17 -> { X = 10; Y = y } ])
+                            Terrain = seamColumn
                             CreepPositions =
                                 Map.ofList
                                     [ "b-home", { X = 10; Y = 12 }; "a-home", { X = 10; Y = 10 } ]
@@ -882,7 +883,7 @@ let roomTests =
 
                 let outpost =
                     { RoomLayer.empty with
-                        Terrain = Map.ofList (plainLine [ for y in 10..17 -> { X = 10; Y = y } ])
+                        Terrain = seamColumn
                         CreepPositions = Map.ofList [ "w-out", { X = 10; Y = 10 } ]
                     }
 
