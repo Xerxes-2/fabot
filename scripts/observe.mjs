@@ -6,12 +6,7 @@
 // the server's clock, because shut-or-open has no answer without it, and
 // it fails on that read alone where the others cannot.
 //
-// Config via .env (loaded by `node --env-file-if-exists=.env`), same as
-// upload.mjs:
-//   SCREEPS_TOKEN   - auth token (required)
-//   SCREEPS_API_URL - API base, default https://screeps.com/season (seasonal server)
-//   SCREEPS_SHARD   - shard for Memory reads; when unset and the server
-//                     has exactly one shard, that shard is used
+// The server connection and its .env config are `screeps-api.mjs`'s.
 //
 // Usage:
 //   observe.mjs tasks              every creep's current Task with its Verdict reason
@@ -44,13 +39,8 @@
 // colony under `Memory.fabot.observe.colonies` — this script cannot see
 // `Colony.declared`, so "first" is the first home the bot wrote a leaf for,
 // which is declaration order because the loop writes in it.
-import { ScreepsHttpClient } from "screeps-api";
+import { connect, fail } from "./screeps-api.mjs";
 import { report as cpuReport } from "./cpu-trigger.mjs";
-
-const fail = (msg) => {
-  console.error(msg);
-  process.exit(1);
-};
 
 const usage =
   "usage: observe.mjs tasks [--json] | timeline <creep> [--json] | " +
@@ -109,24 +99,7 @@ if (rawArgs.includes("--colony")) {
   }
 }
 
-const token = process.env.SCREEPS_TOKEN;
-if (!token) {
-  fail("SCREEPS_TOKEN is not set. Copy .env.example to .env and fill in your token.");
-}
-const url = (process.env.SCREEPS_API_URL ?? "https://screeps.com/season").replace(/\/$/, "") + "/";
-const api = new ScreepsHttpClient({ token, url });
-
-let shard = process.env.SCREEPS_SHARD;
-if (!shard) {
-  const info = await api.req("GET", "/api/game/shards/info", {}).catch((err) => {
-    fail(`shard lookup failed: ${err.message ?? err}`);
-  });
-  const shards = (info.shards ?? []).map((s) => s.name);
-  if (shards.length !== 1) {
-    fail(`server has shards [${shards.join(", ")}]; set SCREEPS_SHARD to pick one.`);
-  }
-  shard = shards[0];
-}
+const { api, shard } = await connect();
 
 const memoryGet = async (path) => {
   const res = await api.userMemoryGet(path, shard).catch((err) => {

@@ -284,6 +284,30 @@ function store({ used = 0, capacity = 0 } = {}) {
 
 const ok = () => 0;
 
+// The registry every stub world keeps: the map `Game.getObjectById` answers
+// from, the `register` that files an object under its id on the way through,
+// and the `structure` that stamps the defaults every furnished structure
+// shares — damaged but standing, so a Repair has something to want.
+function worldRegistry() {
+  const byId = new Map();
+  const register = (obj) => {
+    byId.set(obj.id, obj);
+    return obj;
+  };
+  const structure = (id, structureType, pos, extra = {}) =>
+    register({
+      id,
+      structureType,
+      pos,
+      hits: 4000,
+      hitsMax: 5000,
+      store: store(),
+      ...extra,
+    });
+
+  return { byId, register, structure };
+}
+
 // The username this colony holds its rooms under. One name for the whole
 // harness, because `World.ofGame` reads it once off a spawn room's
 // controller and then decides whose every reservation is by comparing
@@ -819,11 +843,7 @@ function buildStubGrid() {
 }
 
 function buildStubWorld() {
-  const byId = new Map();
-  const register = (obj) => {
-    byId.set(obj.id, obj);
-    return obj;
-  };
+  const { byId, register, structure } = worldRegistry();
 
   const grid = buildStubGrid();
 
@@ -854,17 +874,6 @@ function buildStubWorld() {
     pos: CONTROLLER,
     activateSafeMode: ok,
   });
-
-  const structure = (id, structureType, pos, extra = {}) =>
-    register({
-      id,
-      structureType,
-      pos,
-      hits: 4000,
-      hitsMax: 5000,
-      store: store(),
-      ...extra,
-    });
 
   // Every tile something of the colony's already stands on. Claimed in the
   // order the room is furnished — the fixed points, then the level's
@@ -1922,21 +1931,7 @@ const raidLine = (outpost) =>
     : "";
 
 function buildOutpostWorld() {
-  const byId = new Map();
-  const register = (obj) => {
-    byId.set(obj.id, obj);
-    return obj;
-  };
-  const structure = (id, structureType, pos, extra = {}) =>
-    register({
-      id,
-      structureType,
-      pos,
-      hits: 4000,
-      hitsMax: 5000,
-      store: store(),
-      ...extra,
-    });
+  const { byId, register, structure } = worldRegistry();
 
   const home = loadCapture(HOME_ROOM);
   const outposts = OUTPOST_ROOMS.map(loadCapture);
@@ -2310,21 +2305,7 @@ function homeStations(furnished) {
 // half of the same rung — the room its Layout has *finished*, buffer and
 // all — and the two are meant to differ there.)
 function buildYoungWorld() {
-  const byId = new Map();
-  const register = (obj) => {
-    byId.set(obj.id, obj);
-    return obj;
-  };
-  const structure = (id, structureType, pos, extra = {}) =>
-    register({
-      id,
-      structureType,
-      pos,
-      hits: 4000,
-      hitsMax: 5000,
-      store: store(),
-      ...extra,
-    });
+  const { byId, register, structure } = worldRegistry();
 
   const capture = loadCapture(CHILD_ROOM);
   const home = furnishHome({
@@ -2430,21 +2411,7 @@ function buildYoungWorld() {
 // while it is under `Tuning.BootstrapLevel` (#192), and the report prices
 // each colony's `decide` on its own row.
 function buildPairWorld() {
-  const byId = new Map();
-  const register = (obj) => {
-    byId.set(obj.id, obj);
-    return obj;
-  };
-  const structure = (id, structureType, pos, extra = {}) =>
-    register({
-      id,
-      structureType,
-      pos,
-      hits: 4000,
-      hitsMax: 5000,
-      store: store(),
-      ...extra,
-    });
+  const { byId, register, structure } = worldRegistry();
 
   const motherCapture = loadCapture(HOME_ROOM);
   const childCapture = loadCapture(CHILD_ROOM);

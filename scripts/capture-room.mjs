@@ -2,12 +2,8 @@
 // (ADR 0036): terrain plus the room's furniture — sources, controller,
 // mineral — written as reviewable text under `tests/Core.Tests/rooms/`.
 // The API is an authoring tool, never a test dependency: the suite loads
-// the committed file and calls nothing. Config via .env (loaded by
-// `node --env-file-if-exists=.env`), same as observe.mjs:
-//   SCREEPS_TOKEN   - auth token (required)
-//   SCREEPS_API_URL - API base, default https://screeps.com/season (seasonal server)
-//   SCREEPS_SHARD   - shard to capture from; when unset and the server
-//                     has exactly one shard, that shard is used
+// the committed file and calls nothing. The server connection and its .env
+// config are `screeps-api.mjs`'s.
 //
 // Usage:
 //   capture-room.mjs <room>          capture into tests/Core.Tests/rooms/<room>.room
@@ -21,12 +17,7 @@
 // nobody can review.
 import { writeFileSync, existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
-import { ScreepsHttpClient } from "screeps-api";
-
-const fail = (msg) => {
-  console.error(msg);
-  process.exit(1);
-};
+import { connect, fail } from "./screeps-api.mjs";
 
 const usage = "usage: capture-room.mjs <room> [--force]";
 
@@ -39,24 +30,7 @@ if (!room || rest.length > 0) fail(usage);
 // as an empty terrain response three requests later.
 if (!/^[WE]\d+[NS]\d+$/.test(room)) fail(`"${room}" is not a room name (e.g. W12S28)`);
 
-const token = process.env.SCREEPS_TOKEN;
-if (!token) {
-  fail("SCREEPS_TOKEN is not set. Copy .env.example to .env and fill in your token.");
-}
-const url = (process.env.SCREEPS_API_URL ?? "https://screeps.com/season").replace(/\/$/, "") + "/";
-const api = new ScreepsHttpClient({ token, url });
-
-let shard = process.env.SCREEPS_SHARD;
-if (!shard) {
-  const info = await api.req("GET", "/api/game/shards/info", {}).catch((err) => {
-    fail(`shard lookup failed: ${err.message ?? err}`);
-  });
-  const shards = (info.shards ?? []).map((s) => s.name);
-  if (shards.length !== 1) {
-    fail(`server has shards [${shards.join(", ")}]; set SCREEPS_SHARD to pick one.`);
-  }
-  shard = shards[0];
-}
+const { api, shard, url } = await connect();
 
 const path = join(outDir, `${room}.room`);
 if (existsSync(path) && !force) {
