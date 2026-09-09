@@ -454,6 +454,25 @@ let buildableTilesIn (atlas: Atlas) (room: string) : Pos list =
 let private targetsOfKind (atlas: Atlas) (kind: TargetKind) : string list =
     Map.tryFind kind atlas.KindIds |> Option.defaultValue []
 
+/// The tile an id stands on **in the named room**: None for an id the
+/// projection places in another room or does not place at all (ADR 0004). The
+/// room half is not a nicety — a `Pos` carries no room (ADR 0041), so every
+/// census that unions tiles has to drop the other rooms' before it unions, and
+/// that is the whole of what its readers ask `TargetAt`.
+let private tileIn (atlas: Atlas) (room: string) (id: string) : Pos option =
+    match Map.tryFind id atlas.TargetAt with
+    | Some(where, tile) when where = room -> Some tile
+    | _ -> None
+
+/// One room's tiles stamped with their room, and empty for geometry the
+/// projection places nowhere (ADR 0004) — the tail every `…In` census wears on
+/// its way out of the Atlas, because a caller outside holds no room to stamp
+/// a bare `Pos` with.
+let private stamped (tiles: (string * Set<Pos>) option) : Set<RoomPos> =
+    tiles
+    |> Option.map (fun (room, grid) -> RoomPos.setAt room grid)
+    |> Option.defaultValue Set.empty
+
 /// Placed targets of one kind in one named room: id and tile, in id order.
 /// One of the joins between the flat kind census and the layered positions,
 /// with the room named rather than searched (ADR 0041): its readers are the
@@ -472,35 +491,20 @@ let private placedOfKindIn
         Map.tryFind id layer.TargetPositions
         |> Option.map (fun pos -> id, RoomPos.at room pos))
 
-// The six counts below are one half of the Layout's gap rule — `allowed at RCL
-// - built - pending` — and the allowance is a fact about one room's controller,
-// so the census subtracted from it has to be one room's too.
+// The two counts below are one half of the Layout's gap rule — `allowed at RCL
+// - built - pending` — and the allowance is a fact about one room's
+// controller, so the census subtracted from it has to be one room's too. One
+// pair over the kind rather than a pair per kind, so one gap rule sizes every
+// kind the ordering picks for (ADR 0022) and a fourth clustered kind is a
+// caller's argument rather than two more exports.
 
-/// Extensions already standing in the named room.
-let builtExtensionsIn (atlas: Atlas) (room: string) : int =
-    placedOfKindIn atlas room (Structure BuiltKind.Extension) |> List.length
+/// Structures of one kind already standing in the named room.
+let builtIn (atlas: Atlas) (room: string) (kind: BuiltKind) : int =
+    placedOfKindIn atlas room (Structure kind) |> List.length
 
-/// Extension construction sites already placed in the named room.
-let pendingExtensionsIn (atlas: Atlas) (room: string) : int =
-    placedOfKindIn atlas room (Site BuiltKind.Extension) |> List.length
-
-/// Towers already standing in the named room.
-let builtTowersIn (atlas: Atlas) (room: string) : int =
-    placedOfKindIn atlas room (Structure BuiltKind.Tower) |> List.length
-
-/// Tower construction sites already placed in the named room.
-let pendingTowersIn (atlas: Atlas) (room: string) : int =
-    placedOfKindIn atlas room (Site BuiltKind.Tower) |> List.length
-
-/// Storages already standing in the named room — at most one, but counted
-/// the way the tower and the extensions are so one gap rule sizes every
-/// kind the ordering picks for (ADR 0022).
-let builtStoragesIn (atlas: Atlas) (room: string) : int =
-    placedOfKindIn atlas room (Structure BuiltKind.Storage) |> List.length
-
-/// Storage construction sites already placed in the named room.
-let pendingStoragesIn (atlas: Atlas) (room: string) : int =
-    placedOfKindIn atlas room (Site BuiltKind.Storage) |> List.length
+/// Construction sites of one kind already placed in the named room.
+let pendingIn (atlas: Atlas) (room: string) (kind: BuiltKind) : int =
+    placedOfKindIn atlas room (Site kind) |> List.length
 
 /// Towers standing in the colony's own room: id and tile, in id order — the
 /// fire reflex's whole view of a tower (ADR 0014): no store is projected, a
@@ -549,7 +553,7 @@ let pendingRoadTilesIn (atlas: Atlas) (room: string) : Set<Pos> =
 /// Tiles of one room holding a built container — the container census's
 /// standing half (ADR 0012): a built container keeps a plan from re-dropping
 /// its site.
-let containerTilesIn (atlas: Atlas) (room: string) : Set<Pos> =
+let private containerTilesIn (atlas: Atlas) (room: string) : Set<Pos> =
     tilesOfKindIn atlas room (Structure BuiltKind.Container)
 
 /// Tiles of one room holding a container construction site — the census's
@@ -737,14 +741,7 @@ let private actionTilesOf (atlas: Atlas) (task: Task) : (string * Pos list) opti
             match clusterOf atlas task with
             | None -> Some(room, [ target ])
             | Some cluster ->
-                Some(
-                    room,
-                    RefillCluster.hungry cluster
-                    |> List.choose (fun id ->
-                        match Map.tryFind id atlas.TargetAt with
-                        | Some(memberRoom, tile) when memberRoom = room -> Some tile
-                        | _ -> None)
-                )
+                Some(room, RefillCluster.hungry cluster |> List.choose (tileIn atlas room))
 
 /// Seat tiles of a placed source: walkable (non-wall) neighbours of its tile,
 /// by terrain alone — structures and creeps do not consume Seats (ADR 0001).
@@ -761,9 +758,7 @@ let private seatTilesIn (atlas: Atlas) (sourceId: string) : (string * Set<Pos>) 
     |> Option.map (fun (room, pos) -> room, seatTiles (groundOf atlas room) pos)
 
 let seatTilesOf (atlas: Atlas) (sourceId: string) : Set<RoomPos> =
-    seatTilesIn atlas sourceId
-    |> Option.map (fun (room, tiles) -> RoomPos.setAt room tiles)
-    |> Option.defaultValue Set.empty
+    seatTilesIn atlas sourceId |> stamped
 
 /// Seats of a source: its Seat tile count. None for a source the
 /// projection does not place: no capacity is derivable, and unpriceable
@@ -826,10 +821,7 @@ let private areaOf (atlas: Atlas) (task: Task) =
     memoised atlas.WorkAreas task (fun () ->
         let tiles = buildWorkArea atlas task
 
-        tiles,
-        (match tiles with
-         | Some(room, grid) -> RoomPos.setAt room grid
-         | None -> Set.empty))
+        tiles, stamped tiles)
 
 /// The area as its room and that room's grid tiles: what every reader
 /// *inside* the Atlas takes, so the join is never paid inside a per-creep
@@ -848,10 +840,8 @@ let private seatUnionIn (atlas: Atlas) (room: string) : Set<Pos> =
     let ground = groundOf atlas room
 
     targetsOfKind atlas Source
-    |> List.choose (fun id ->
-        match Map.tryFind id atlas.TargetAt with
-        | Some(where, pos) when where = room -> Some(seatTiles ground pos)
-        | _ -> None)
+    |> List.choose (tileIn atlas room)
+    |> List.map (seatTiles ground)
     |> List.fold Set.union Set.empty
 
 /// Every controller of one room's Upgrade Work Area, unioned — the tiles a
@@ -859,10 +849,7 @@ let private seatUnionIn (atlas: Atlas) (room: string) : Set<Pos> =
 /// room for the same reason the Seat union is one room's.
 let private upgradeAreaIn (atlas: Atlas) (room: string) : Set<Pos> =
     targetsOfKind atlas Controller
-    |> List.filter (fun id ->
-        match Map.tryFind id atlas.TargetAt with
-        | Some(where, _) -> where = room
-        | None -> false)
+    |> List.filter (tileIn atlas room >> Option.isSome)
     |> List.map (fun id ->
         match areaTilesOf atlas (Upgrade id) with
         | Some(_, tiles) -> tiles
@@ -908,10 +895,7 @@ let private storeTilesIn (atlas: Atlas) (room: string) : Set<Pos> =
         | Some cluster ->
             cluster.Members
             |> Map.toList
-            |> List.choose (fun (id, _) ->
-                match Map.tryFind id atlas.TargetAt with
-                | Some(where, tile) when where = room -> Some tile
-                | _ -> None)
+            |> List.choose (fst >> tileIn atlas room)
             |> Set.ofList
 
     Set.unionMany [ containerTilesIn atlas room; storageTilesIn atlas room; clusterTiles ]
@@ -1037,19 +1021,15 @@ let private postsOfIn (atlas: Atlas) (sourceId: string) : (string * Set<Pos>) op
     seatTilesIn atlas sourceId
     |> Option.map (fun (room, seats) -> room, Set.intersect seats (postsIn atlas room))
 
-let postsOf (atlas: Atlas) (sourceId: string) : Set<RoomPos> =
-    postsOfIn atlas sourceId
-    |> Option.map (fun (room, tiles) -> RoomPos.setAt room tiles)
-    |> Option.defaultValue Set.empty
+let postsOf (atlas: Atlas) (sourceId: string) : Set<RoomPos> = postsOfIn atlas sourceId |> stamped
 
 /// The **standing** Posts of one source: `postsOf` above less the Seats whose
 /// container is still a site — the switch that admits a source into the quotas
 /// (ADR 0042).
 let standingPostsOf (atlas: Atlas) (sourceId: string) : Set<RoomPos> =
     seatTilesIn atlas sourceId
-    |> Option.map (fun (room, seats) ->
-        Set.intersect seats (standingPostsIn atlas room) |> RoomPos.setAt room)
-    |> Option.defaultValue Set.empty
+    |> Option.map (fun (room, seats) -> room, Set.intersect seats (standingPostsIn atlas room))
+    |> stamped
 
 /// The tile of a container construction site standing on a [[post]] — the one
 /// site a body may build from under its own feet (amending ADR 0045 and ADR
@@ -2054,9 +2034,8 @@ let private stepToward
 /// filed under another room name leaves the creep-aware Work Area empty, and
 /// the step is then toward the near side of the winning Seam.
 let firstStep (atlas: Atlas) (creep: string) (task: Task) (goals: Set<RoomPos>) : RoomPos option =
-    match firstStepVia atlas TravelCost creep goals with
-    | Some step -> Some step
-    | None -> stepAcross atlas TravelCost creep task
+    firstStepVia atlas TravelCost creep goals
+    |> Option.orElseWith (fun () -> stepAcross atlas TravelCost creep task)
 
 /// The same first step toward an explicit set of tiles, with no Task beside it:
 /// `firstStep`'s answer for a body that has none to cross a Seam for, which is
@@ -2128,9 +2107,8 @@ let firstStepToward
     (room: string)
     (goals: Set<RoomPos>)
     : RoomPos option =
-    match firstStepVia atlas TravelCost creep goals with
-    | Some step -> Some step
-    | None -> stepToward atlas TravelCost creep task room goals
+    firstStepVia atlas TravelCost creep goals
+    |> Option.orElseWith (fun () -> stepToward atlas TravelCost creep task room goals)
 
 /// The first step the same body would take were no tile occupied — the
 /// traffic-blind route, otherwise priced exactly like `firstStep`. The Resolver
@@ -2145,9 +2123,8 @@ let firstStepIgnoringTraffic
     (task: Task)
     (goals: Set<RoomPos>)
     : RoomPos option =
-    match firstStepVia atlas Baseline creep goals with
-    | Some step -> Some step
-    | None -> stepAcross atlas Baseline creep task
+    firstStepVia atlas Baseline creep goals
+    |> Option.orElseWith (fun () -> stepAcross atlas Baseline creep task)
 
 /// Round-trip haul cost in whole ticks for a body between a container's tile
 /// and a sink structure's tile (ADR 0012): the leg out prices every Carry part
@@ -2360,7 +2337,7 @@ let trunkPath
     let dist, parents =
         floodFrom weights noTraffic (stepTable (stepUnits planningFactor)) origin
 
-    match cheapestReached (fun goal -> dist.[indexOf goal]) goals with
+    match cheapestReached (reachedIn dist) goals with
     | None -> []
     | Some(_, goal) ->
         let originIndex = indexOf origin

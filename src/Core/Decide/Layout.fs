@@ -214,30 +214,22 @@ let internal planLayout
             |> List.sortBy (fun tile -> range tile spawnPos, tile.X, tile.Y)
 
         // A kind's still-open gap at a level: its allowance there minus the
-        // projection's censuses of standing and pending structures. Judged
-        // at the level the kind is reserved for it sizes the reservation;
-        // at the current level it sizes the placement.
-        let gapAt allowanceOf built pending level =
-            allowanceOf level - built - pending |> max 0
+        // projection's censuses of standing and pending structures of that
+        // kind. Judged at the level the kind is reserved for it sizes the
+        // reservation; at the current level it sizes the placement.
+        //
+        // The room being planned, and no other (#140): the allowance is this
+        // controller's, so what is subtracted from it is this room's census —
+        // a neighbour's site counted here is a site this room never places.
+        let gapAt allowanceOf kind level =
+            allowanceOf level
+            - Atlas.builtIn atlas room kind
+            - Atlas.pendingIn atlas room kind
+            |> max 0
 
-        // The room being planned, and no other (#140): the allowance is
-        // this controller's, so what is subtracted from it is this room's
-        // census — a neighbour's site counted here is a site this room
-        // never places.
-        let storageGap =
-            gapAt
-                storageAllowance
-                (Atlas.builtStoragesIn atlas room)
-                (Atlas.pendingStoragesIn atlas room)
-
-        let towerGap =
-            gapAt towerAllowance (Atlas.builtTowersIn atlas room) (Atlas.pendingTowersIn atlas room)
-
-        let extensionGap =
-            gapAt
-                extensionAllowance
-                (Atlas.builtExtensionsIn atlas room)
-                (Atlas.pendingExtensionsIn atlas room)
+        let storageGap = gapAt storageAllowance BuiltKind.Storage
+        let towerGap = gapAt towerAllowance BuiltKind.Tower
+        let extensionGap = gapAt extensionAllowance BuiltKind.Extension
 
         // The still-unclaimed slots, Storage first and tower next: a built or
         // pending structure keeps its tile out of the ordering (it is a target)

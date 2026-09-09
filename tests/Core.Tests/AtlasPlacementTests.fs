@@ -364,10 +364,13 @@ let placementQueryTests =
                     |> snapshotWith []
                     |> ofView
 
-                Expect.equal (builtExtensionsIn atlas "W1N1") 2 "only standing extensions are built"
+                Expect.equal
+                    (builtIn atlas "W1N1" BuiltKind.Extension)
+                    2
+                    "only standing extensions are built"
 
                 Expect.equal
-                    (pendingExtensionsIn atlas "W1N1")
+                    (pendingIn atlas "W1N1" BuiltKind.Extension)
                     1
                     "only sites that will become extensions are pending"
             }
@@ -435,22 +438,25 @@ let placementQueryTests =
                     |> ofView
 
                 Expect.equal
-                    (builtExtensionsIn atlas "W1N1", pendingExtensionsIn atlas "W1N1")
+                    (builtIn atlas "W1N1" BuiltKind.Extension,
+                     pendingIn atlas "W1N1" BuiltKind.Extension)
                     (1, 1)
                     "home counts its own extension and its own site, and neither of the child's"
 
                 Expect.equal
-                    (builtExtensionsIn atlas "W2N1", pendingExtensionsIn atlas "W2N1")
+                    (builtIn atlas "W2N1" BuiltKind.Extension,
+                     pendingIn atlas "W2N1" BuiltKind.Extension)
                     (1, 1)
                     "and the child's counts are the child's, off the layer they are filed in"
 
                 Expect.equal
-                    (builtTowersIn atlas "W1N1", pendingTowersIn atlas "W1N1")
+                    (builtIn atlas "W1N1" BuiltKind.Tower, pendingIn atlas "W1N1" BuiltKind.Tower)
                     (0, 0)
                     "the tower census is the named room's too"
 
                 Expect.equal
-                    (builtStoragesIn atlas "W1N1", pendingStoragesIn atlas "W1N1")
+                    (builtIn atlas "W1N1" BuiltKind.Storage,
+                     pendingIn atlas "W1N1" BuiltKind.Storage)
                     (0, 0)
                     "and so is the Storage's"
             }
