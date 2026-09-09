@@ -89,7 +89,7 @@ let standingBodyTests =
 
                 let assignedFor creep =
                     let { Assignments = assignments } =
-                        decide (dented (bufferLaneColony road [] creep)) Map.empty Set.empty None
+                        decideOn (dented (bufferLaneColony road [] creep))
 
                     Map.tryFind (creep: CreepInfo).Name assignments
 
@@ -145,7 +145,7 @@ let standingBodyTests =
                     }
 
                 let assignedIn creep =
-                    let { Assignments = assignments } = decide (thin creep) Map.empty Set.empty None
+                    let { Assignments = assignments } = decideOn (thin creep)
 
                     Map.tryFind (creep: CreepInfo).Name assignments
 
@@ -193,7 +193,7 @@ let standingBodyTests =
                     |> withLevel level
 
                 let matched level =
-                    let { Verdicts = verdicts } = decide (lane level) Map.empty Set.empty None
+                    let { Verdicts = verdicts } = decideOn (lane level)
 
                     verdicts
                     |> List.tryPick (function
@@ -249,7 +249,7 @@ let standingBodyTests =
                             Assignments = assignments
                             Verdicts = verdicts
                         } =
-                        decide (colony creep) Map.empty Set.empty None
+                        decideOn (colony creep)
 
                     Map.tryFind creep.Name assignments, verdicts
 
@@ -302,8 +302,7 @@ let standingBodyTests =
                     }
 
                 let assignedWith sites targets =
-                    let { Assignments = assignments } =
-                        decide (colony sites targets) Map.empty Set.empty None
+                    let { Assignments = assignments } = decideOn (colony sites targets)
 
                     Map.tryFind "anchor" assignments
 
@@ -501,11 +500,9 @@ let postSiteTests =
                         Intents = intents
                         Verdicts = verdicts
                     } =
-                    decide
-                        (raisingColony BuiltKind.Container (postBody "w" 0 50) { X = 10; Y = 47 })
-                        Map.empty
-                        Set.empty
-                        None
+                    decideOn (
+                        raisingColony BuiltKind.Container (postBody "w" 0 50) { X = 10; Y = 47 }
+                    )
 
                 Expect.equal
                     (verdicts
@@ -615,11 +612,9 @@ let postSiteTests =
                         Intents = intents
                         Verdicts = verdicts
                     } =
-                    decide
-                        (raisingColony BuiltKind.Container (postBody "w" 50 0) { X = 10; Y = 47 })
-                        Map.empty
-                        Set.empty
-                        None
+                    decideOn (
+                        raisingColony BuiltKind.Container (postBody "w" 50 0) { X = 10; Y = 47 }
+                    )
 
                 Expect.equal
                     (verdicts
@@ -739,7 +734,7 @@ let postSiteTests =
                         | Verdict.Matched(who, task, _) when who = name -> Some task
                         | _ -> None)
 
-                let { Verdicts = verdicts } = decide (crowd []) held Set.empty None
+                let { Verdicts = verdicts } = decideFrom held (crowd [])
 
                 Expect.equal
                     (matchedOf "a" verdicts)
@@ -750,7 +745,7 @@ let postSiteTests =
                 // budget was written for is capped exactly as #157 had it,
                 // so a third loaded worker still waits at home.
                 let { Verdicts = withThird } =
-                    decide (crowd [ worker "w3" 50 0, { X = 10; Y = 4 } ]) held Set.empty None
+                    decideFrom held (crowd [ worker "w3" 50 0, { X = 10; Y = 4 } ])
 
                 Expect.isNone
                     (matchedOf "w3" withThird)
@@ -777,7 +772,7 @@ let postSiteTests =
                         ]
                         []
 
-                let { Assignments = building } = decide (pair 50 0) Map.empty Set.empty None
+                let { Assignments = building } = decideOn (pair 50 0)
 
                 Expect.equal
                     (Map.tryFind "a" building)
@@ -791,7 +786,7 @@ let postSiteTests =
 
                 // Pairwise on the incumbent's store alone: empty, it holds
                 // the Harvest itself and the cap answers as it always did.
-                let { Assignments = digging } = decide (pair 0 50) Map.empty Set.empty None
+                let { Assignments = digging } = decideOn (pair 0 50)
 
                 Expect.equal
                     (Map.tryFind "a" digging)

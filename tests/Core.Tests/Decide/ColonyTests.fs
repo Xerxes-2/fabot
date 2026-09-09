@@ -187,11 +187,7 @@ let claimTests =
                         Intents = intents
                         Verdicts = verdicts
                     } =
-                    decide
-                        (candidateColony [ reserver "r1", { X = 10; Y = 44 } ])
-                        Map.empty
-                        Set.empty
-                        None
+                    decideOn (candidateColony [ reserver "r1", { X = 10; Y = 44 } ])
 
                 Expect.equal
                     (Map.tryFind "r1" assignments)
@@ -232,11 +228,7 @@ let claimTests =
                         Assignments = assignments
                         Intents = intents
                     } =
-                    decide
-                        (candidateColony [ worker "w1" 0 50, { X = 10; Y = 44 } ])
-                        Map.empty
-                        Set.empty
-                        None
+                    decideOn (candidateColony [ worker "w1" 0 50, { X = 10; Y = 44 } ])
 
                 Expect.isEmpty
                     (Map.toList assignments)
@@ -258,12 +250,10 @@ let claimTests =
                 // claimer in the colony to the nearest one. Two bodies on
                 // one tile, so nothing but the cap can separate them.
                 let { Assignments = assignments } =
-                    decide
-                        (candidateColony
-                            [ reserver "r1", { X = 10; Y = 44 }; reserver "r2", { X = 10; Y = 43 } ])
-                        Map.empty
-                        Set.empty
-                        None
+                    decideOn (
+                        candidateColony
+                            [ reserver "r1", { X = 10; Y = 44 }; reserver "r2", { X = 10; Y = 43 } ]
+                    )
 
                 Expect.equal
                     (assignments
@@ -485,8 +475,7 @@ let nurseryTests =
                 // what the cases below read is a difference and never a
                 // floor.
                 let casts colony fleet =
-                    spawnIntents
-                        (decide { colony with Creeps = fleet } Map.empty Set.empty None).Intents
+                    spawnIntents (decideOn { colony with Creeps = fleet }).Intents
 
                 let short fleet =
                     List.truncate (List.length fleet - 1) fleet
@@ -2054,7 +2043,7 @@ let colonyStageTests =
                     |> atStage stage
 
                 let matched stage =
-                    let { Verdicts = verdicts } = decide (lane stage) Map.empty Set.empty None
+                    let { Verdicts = verdicts } = decideOn (lane stage)
 
                     verdicts
                     |> List.tryPick (function
@@ -2131,8 +2120,7 @@ let colonyStageTests =
                 // predicate on the `Nursery` reading and drop her target
                 // by three.
                 let casts colony fleet =
-                    spawnIntents
-                        (decide { colony with Creeps = fleet } Map.empty Set.empty None).Intents
+                    spawnIntents (decideOn { colony with Creeps = fleet }).Intents
 
                 let short fleet =
                     List.truncate (List.length fleet - 1) fleet
@@ -2174,8 +2162,7 @@ let colonyStageTests =
                 // window on a tick no human touched, and drop her fleet by
                 // three against ADR 0047's flat addend.
                 let casts colony fleet =
-                    spawnIntents
-                        (decide { colony with Creeps = fleet } Map.empty Set.empty None).Intents
+                    spawnIntents (decideOn { colony with Creeps = fleet }).Intents
 
                 let short fleet =
                     List.truncate (List.length fleet - 1) fleet

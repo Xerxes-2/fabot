@@ -34,8 +34,7 @@ let expiringTests =
                     }
 
                 let casts life =
-                    let { Intents = intents } =
-                        decide (fleetWithLastWorker life) Map.empty Set.empty None
+                    let { Intents = intents } = decideOn (fleetWithLastWorker life)
 
                     spawnIntents intents
 
@@ -101,7 +100,7 @@ let expiringTests =
                     }
 
                 let casts life =
-                    let { Intents = intents } = decide (fleetAtPosts life) Map.empty Set.empty None
+                    let { Intents = intents } = decideOn (fleetAtPosts life)
 
                     spawnIntents intents |> List.map (fun (_, _, creepName) -> creepName)
 
@@ -180,7 +179,7 @@ let expiringTests =
                             Assignments = assignments
                             Verdicts = verdicts
                         } =
-                        decide (succession incumbent successor 5) remembered Set.empty None
+                        decideFrom remembered (succession incumbent successor 5)
 
                     Expect.isEmpty
                         (releases verdicts)
@@ -209,8 +208,7 @@ let arrivalCapacityTests =
                 // the successor leaves now instead of after the death.
                 let remembered = Map.ofList [ "a1", taskId (Harvest "src-a") ]
 
-                let { Assignments = assignments } =
-                    decide (succession "a1" "a2" 5) remembered Set.empty None
+                let { Assignments = assignments } = decideFrom remembered (succession "a1" "a2" 5)
 
                 Expect.equal
                     (harvesters assignments "src-a")
@@ -229,7 +227,7 @@ let arrivalCapacityTests =
                         Assignments = assignments
                         Verdicts = verdicts
                     } =
-                    decide (succession "a1" "a2" 1500) remembered Set.empty None
+                    decideFrom remembered (succession "a1" "a2" 1500)
 
                 Expect.equal
                     (harvesters assignments "src-a")
@@ -263,7 +261,7 @@ let arrivalCapacityTests =
                             Assignments = assignments
                             Verdicts = verdicts
                         } =
-                        decide (rcl3Succession "a1" "a2" life) remembered Set.empty None
+                        decideFrom remembered (rcl3Succession "a1" "a2" life)
 
                     harvesters assignments "src-a", releases verdicts, verdicts
 
@@ -310,7 +308,7 @@ let arrivalCapacityTests =
                             Assignments = assignments
                             Verdicts = verdicts
                         } =
-                        decide (succession post far 35) remembered Set.empty None
+                        decideFrom remembered (succession post far 35)
 
                     Expect.isEmpty
                         (releases verdicts)

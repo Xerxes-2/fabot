@@ -109,8 +109,7 @@ let upgraderQuotaTests =
         "the upgrader row's quota"
         [
             let casts colony fleet =
-                spawnIntents
-                    (decide { colony with Creeps = fleet } Map.empty Set.empty None).Intents
+                spawnIntents (decideOn { colony with Creeps = fleet }).Intents
 
             test "a built buffer hires the standing row out of the surplus" {
                 // ADR 0046's whole arithmetic at the live bank, and the
@@ -904,17 +903,17 @@ let quotaInputTests =
                 // with the difference coming out of the Storage every tick
                 // of both lives.
                 Expect.equal
-                    (castRows (decide (upgraderBandColony 2) Map.empty Set.empty None).Intents)
+                    (castRows (decideOn (upgraderBandColony 2)).Intents)
                     [ "upgrader" ]
                     "two upgraders standing and the row is a body short"
 
                 Expect.equal
-                    (castRows (decide (upgraderBandColony 3) Map.empty Set.empty None).Intents)
+                    (castRows (decideOn (upgraderBandColony 3)).Intents)
                     [ "worker" ]
                     "three, and the row is full: the surplus pays for three mouths and three bodies"
 
                 Expect.isEmpty
-                    (castRows (decide (upgraderBandColony 4) Map.empty Set.empty None).Intents)
+                    (castRows (decideOn (upgraderBandColony 4)).Intents)
                     "and four is over every row's quota, so nothing is cast at all"
             }
 
@@ -943,12 +942,12 @@ let quotaInputTests =
                 // spawn reading its own Post as full, which is the
                 // `IdleReason.NoneFree` ADR 0026 names as the symptom.
                 Expect.equal
-                    (castRows (decide (outpostPostColony true 20) Map.empty Set.empty None).Intents)
+                    (castRows (decideOn (outpostPostColony true 20)).Intents)
                     [ "anchor" ]
                     "a held rock: the row casts an eight-part body and twenty ticks is inside its lead"
 
                 Expect.equal
-                    (castRows (decide (outpostPostColony false 20) Map.empty Set.empty None).Intents)
+                    (castRows (decideOn (outpostPostColony false 20)).Intents)
                     [ "worker" ]
                     "an unheld one: the row casts five parts, the lead is shorter, and the incumbent still counts"
             }
@@ -1090,14 +1089,12 @@ let quotaInputTests =
                 // early, to stand beside the spawn reading its own Post as
                 // full (`IdleReason.NoneFree`, ADR 0026).
                 Expect.equal
-                    (castRows
-                        (decide (pairedPostColony true 1500 40) Map.empty Set.empty None).Intents)
+                    (castRows (decideOn (pairedPostColony true 1500 40)).Intents)
                     [ "anchor" ]
                     "a held rock: the successor is eight parts and forty ticks is inside its lead"
 
                 Expect.equal
-                    (castRows
-                        (decide (pairedPostColony false 1500 40) Map.empty Set.empty None).Intents)
+                    (castRows (decideOn (pairedPostColony false 1500 40)).Intents)
                     [ "worker" ]
                     "an unheld one: the successor is five parts, the lead is shorter, and the incumbent still counts"
             }
@@ -1157,7 +1154,7 @@ let quotaInputTests =
                     }
 
                 Expect.equal
-                    (castRows (decide (colony []) Map.empty Set.empty None).Intents |> List.head)
+                    (castRows (decideOn (colony [])).Intents |> List.head)
                     "anchor"
                     "an empty Post and nothing bought for it: the Anchor row is a body short"
 
@@ -1188,10 +1185,7 @@ let quotaInputTests =
                     }
 
                 Expect.equal
-                    (castRows
-                        (decide (colony [ [ Carry; Carry; Move ] ]) Map.empty Set.empty None)
-                            .Intents
-                     |> List.head)
+                    (castRows (decideOn (colony [ [ Carry; Carry; Move ] ])).Intents |> List.head)
                     "anchor"
                     "a hauler in the oven pays off no Anchor gap"
             }

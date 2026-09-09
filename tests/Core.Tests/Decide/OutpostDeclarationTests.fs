@@ -157,7 +157,7 @@ let outpostTests =
                         Intents = opening
                         Assignments = assignments
                     } =
-                    decide (colonyAt { X = 10; Y = 2 }) Map.empty Set.empty None
+                    decideOn (colonyAt { X = 10; Y = 2 })
 
                 Expect.equal
                     (Map.tryFind "w" assignments)
@@ -183,7 +183,7 @@ let outpostTests =
                     if List.length walked > 10 then
                         failtest "the creep never reached a crossing"
                     else
-                        let { Intents = intents } = decide (colonyAt pos) assigned Set.empty None
+                        let { Intents = intents } = decideFrom assigned (colonyAt pos)
 
                         match moveIntents intents with
                         | [ _, direction ] ->
@@ -265,7 +265,7 @@ let outpostTests =
                             Intents = intents
                             Verdicts = verdicts
                         } =
-                        decide landed assigned Set.empty None
+                        decideFrom assigned landed
 
                     Expect.equal
                         intents
@@ -283,7 +283,7 @@ let outpostTests =
                     if List.length walked > 10 then
                         failtest "the creep never started digging"
                     else
-                        let { Intents = intents } = decide (landedAt pos) assigned Set.empty None
+                        let { Intents = intents } = decideFrom assigned (landedAt pos)
 
                         match actionIntents intents, moveIntents intents with
                         | [ HarvestSource("w", "src-out") ], [] -> List.rev walked, pos
@@ -431,14 +431,14 @@ let outpostTests =
                     }
 
                 let verdictsAt tick =
-                    (decide (darkSince tick) assignments Set.empty None).Verdicts
+                    (decideFrom assignments (darkSince tick)).Verdicts
 
                 // Pairwise on the grace and on nothing else: one room, one
                 // creep, one held Task, and the only thing that moves
                 // between the three readings is the tick the room was last
                 // seen at.
                 Expect.contains
-                    (decide sited assignments Set.empty None).Verdicts
+                    (decideFrom assignments sited).Verdicts
                     (Verdict.Kept("w", held))
                     "the premise, with the room in view: the site stands and the worker keeps the Build it is crossing for"
 
@@ -476,7 +476,7 @@ let outpostTests =
                         Intents = waiting
                         Assignments = next
                     } =
-                    decide (darkSince 999) assignments Set.empty None
+                    decideFrom assignments (darkSince 999)
 
                 Expect.equal
                     (Map.tryFind "w" next)
@@ -534,7 +534,7 @@ let outpostTests =
                         Intents = intents
                         Verdicts = verdicts
                     } =
-                    decide backWithSite assignments Set.empty None
+                    decideFrom assignments backWithSite
 
                 Expect.contains
                     verdicts
@@ -560,7 +560,7 @@ let outpostTests =
                     }
 
                 Expect.contains
-                    (decide backWithout assignments Set.empty None).Verdicts
+                    (decideFrom assignments backWithout).Verdicts
                     (Verdict.Released("w", held, ReleaseReason.TaskGone))
                     "and a site that finished or was cancelled while we watched releases on the tick it went"
             }
@@ -606,7 +606,7 @@ let outpostTests =
                         Intents = landing
                         Verdicts = verdicts
                     } =
-                    decide (landedAt { X = 9; Y = 49 }) assigned Set.empty None
+                    decideFrom assigned (landedAt { X = 9; Y = 49 })
 
                 Expect.equal
                     landing
@@ -622,7 +622,7 @@ let outpostTests =
                     if List.length walked > 10 then
                         failtest "the creep never started building"
                     else
-                        let { Intents = intents } = decide (landedAt pos) assigned Set.empty None
+                        let { Intents = intents } = decideFrom assigned (landedAt pos)
 
                         match actionIntents intents, moveIntents intents with
                         | [ BuildSite("w", "site-out") ], [] -> List.rev walked, pos
@@ -1021,7 +1021,7 @@ let outpostTests =
                                 Intents = intents
                                 Assignments = next
                             } =
-                            decide (colonyAt room pos carrying) assigned Set.empty None
+                            decideFrom assigned (colonyAt room pos carrying)
 
                         let step state acted =
                             drive state next (acted :: trail) (ticks - 1)
@@ -1100,7 +1100,7 @@ let outpostTests =
                     "and the Anchor beside it has no such Task at all: it spends its Carry where it stands"
 
                 Expect.isEmpty
-                    (moveIntents (decide (sited anchor) Map.empty Set.empty None).Intents)
+                    (moveIntents (decideOn (sited anchor)).Intents)
                     "and takes no step toward a border it would spend hundreds of ticks crossing"
             }
 
@@ -1273,7 +1273,7 @@ let outpostTests =
                             Intents = intents
                             Verdicts = verdicts
                         } =
-                        decide (colony homeCreeps outpostCreeps) assigned Set.empty None
+                        decideFrom assigned (colony homeCreeps outpostCreeps)
 
                     moveIntents intents,
                     verdicts
@@ -1330,7 +1330,7 @@ let outpostTests =
                         Intents = intents
                         Verdicts = verdicts
                     } =
-                    decide colony (Map.ofList [ "w", taskId (Harvest "src-home") ]) Set.empty None
+                    decideFrom (Map.ofList [ "w", taskId (Harvest "src-home") ]) colony
 
                 Expect.equal
                     (moveIntents intents)
@@ -1394,11 +1394,7 @@ let outpostTests =
                     }
 
                 let { Intents = parked } =
-                    decide
-                        (colonyWith [ worker "a" 50 0 ] [ "a", { X = 9; Y = 49 } ])
-                        Map.empty
-                        Set.empty
-                        None
+                    decideOn (colonyWith [ worker "a" 50 0 ] [ "a", { X = 9; Y = 49 } ])
 
                 Expect.equal
                     (moveIntents parked)
@@ -1465,7 +1461,7 @@ let outpostTests =
                     }
 
                 let { Intents = intents } =
-                    decide colony (Map.ofList [ "t", taskId (Harvest "src-out") ]) Set.empty None
+                    decideFrom (Map.ofList [ "t", taskId (Harvest "src-out") ]) colony
 
                 Expect.equal
                     (moveIntents intents)

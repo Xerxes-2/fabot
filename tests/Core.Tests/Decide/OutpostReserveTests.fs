@@ -59,11 +59,7 @@ let reserveTests =
                         Intents = intents
                         Verdicts = verdicts
                     } =
-                    decide
-                        (reserveColony [ reserver "r1", { X = 10; Y = 44 } ])
-                        Map.empty
-                        Set.empty
-                        None
+                    decideOn (reserveColony [ reserver "r1", { X = 10; Y = 44 } ])
 
                 Expect.equal
                     (Map.tryFind "r1" assignments)
@@ -95,11 +91,7 @@ let reserveTests =
                         Assignments = assignments
                         Intents = intents
                     } =
-                    decide
-                        (reserveColony [ worker "w1" 0 50, { X = 10; Y = 44 } ])
-                        Map.empty
-                        Set.empty
-                        None
+                    decideOn (reserveColony [ worker "w1" 0 50, { X = 10; Y = 44 } ])
 
                 Expect.isEmpty
                     (Map.toList assignments)
@@ -470,7 +462,7 @@ let standDownGateTests =
                     "on the expiry itself its rock, its controller and its container are in the pool again"
 
                 Expect.equal
-                    (reserverCasts (decide (atTick 900) Map.empty Set.empty None).Intents)
+                    (reserverCasts (decideOn (atTick 900)).Intents)
                     [ oneBlock; oneBlock ]
                     "and the row hires for it again, the tick it may be entered"
             }
@@ -562,7 +554,7 @@ let standDownGateTests =
                     "on the tick that hold ends its rock, its controller and its container are pooled again"
 
                 Expect.equal
-                    (reserverCasts (decide (atTick 4100) Map.empty Set.empty None).Intents)
+                    (reserverCasts (decideOn (atTick 4100)).Intents)
                     [ oneBlock; oneBlock ]
                     "and the row hires for it again, no look having been needed"
             }
@@ -625,7 +617,7 @@ let standDownGateTests =
                 let assignments = Map.ofList [ "w-out", held ]
 
                 let verdictsWith shut =
-                    (decide (colonyWith shut) assignments Set.empty None).Verdicts
+                    (decideFrom assignments (colonyWith shut)).Verdicts
 
                 Expect.contains
                     (verdictsWith Set.empty)

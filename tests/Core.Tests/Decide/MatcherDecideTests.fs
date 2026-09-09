@@ -275,7 +275,7 @@ let tests =
                     }
 
                 let { Assignments = assignments } =
-                    decide snapshot (Map.ofList [ "w1", (taskId (Harvest "src-a")) ]) Set.empty None
+                    decideFrom (Map.ofList [ "w1", (taskId (Harvest "src-a")) ]) snapshot
 
                 Expect.equal
                     (Map.tryFind "w1" assignments)
@@ -296,7 +296,7 @@ let tests =
                         Creeps = [ worker "worker-1" 0 50 ]
                     }
 
-                let { Assignments = kept } = decide snapshot assignments Set.empty None
+                let { Assignments = kept } = decideFrom assignments snapshot
                 Expect.equal kept assignments "assignments survive the tick"
             }
 
@@ -312,7 +312,7 @@ let tests =
                         Intents = intents
                         Assignments = kept
                     } =
-                    decide snapshot assignments Set.empty None
+                    decideFrom assignments snapshot
 
                 Expect.equal
                     (Map.tryFind "w1" kept)
@@ -336,7 +336,7 @@ let tests =
                         Intents = intents
                         Assignments = kept
                     } =
-                    decide snapshot (Map.ofList [ "w1", (taskId (Harvest "src-a")) ]) Set.empty None
+                    decideFrom (Map.ofList [ "w1", (taskId (Harvest "src-a")) ]) snapshot
 
                 Expect.equal
                     (Map.tryFind "w1" kept)
@@ -415,7 +415,7 @@ let tests =
                         Intents = intents
                         Assignments = kept
                     } =
-                    decide snapshot (Map.ofList [ "w1", (taskId (Harvest "src-a")) ]) Set.empty None
+                    decideFrom (Map.ofList [ "w1", (taskId (Harvest "src-a")) ]) snapshot
 
                 Expect.equal
                     (Map.tryFind "w1" kept)
@@ -474,7 +474,7 @@ let tests =
                         Intents = intents
                         Assignments = kept
                     } =
-                    decide snapshot (Map.ofList [ "w1", (taskId (Harvest "src-a")) ]) Set.empty None
+                    decideFrom (Map.ofList [ "w1", (taskId (Harvest "src-a")) ]) snapshot
 
                 Expect.isEmpty (Map.toList kept) "no applicable task"
 
@@ -498,7 +498,7 @@ let tests =
                         Intents = intents
                         Assignments = kept
                     } =
-                    decide snapshot (Map.ofList [ "w1", (taskId (Harvest "src-a")) ]) Set.empty None
+                    decideFrom (Map.ofList [ "w1", (taskId (Harvest "src-a")) ]) snapshot
 
                 Expect.equal
                     (Map.tryFind "w1" kept)
@@ -516,7 +516,7 @@ let tests =
                     }
 
                 let { Assignments = kept } =
-                    decide snapshot (Map.ofList [ "w1", (taskId (Build "site-1")) ]) Set.empty None
+                    decideFrom (Map.ofList [ "w1", (taskId (Build "site-1")) ]) snapshot
 
                 match Map.tryFind "w1" kept with
                 | Some tid ->
@@ -545,7 +545,7 @@ let tests =
 
             test "assignments of dead creeps are dropped" {
                 let assignments = Map.ofList [ "ghost", "task-a" ]
-                let { Assignments = kept } = decide bareRespawn assignments Set.empty None
+                let { Assignments = kept } = decideFrom assignments bareRespawn
                 Expect.isEmpty (Map.toList kept) "dead creep's assignment is released"
             }
         ]
@@ -583,7 +583,7 @@ let intakeRoomTests =
                     }
 
                 let matched energy =
-                    let { Verdicts = verdicts } = decide (lane energy) Map.empty Set.empty None
+                    let { Verdicts = verdicts } = decideOn (lane energy)
 
                     verdicts
                     |> List.tryPick (function
@@ -643,7 +643,7 @@ let intakeWorthTests =
                     }
 
                 let matched stock =
-                    let { Verdicts = verdicts } = decide (lane stock) Map.empty Set.empty None
+                    let { Verdicts = verdicts } = decideOn (lane stock)
 
                     verdicts
                     |> List.tryPick (function
@@ -691,7 +691,7 @@ let intakeWorthTests =
                     }
 
                 let matched stock =
-                    let { Verdicts = verdicts } = decide (lane stock) Map.empty Set.empty None
+                    let { Verdicts = verdicts } = decideOn (lane stock)
 
                     verdicts
                     |> List.tryPick (function
@@ -742,7 +742,7 @@ let intakeDecayTests =
                     }
 
                 let matched kind =
-                    let { Verdicts = verdicts } = decide (lane kind) Map.empty Set.empty None
+                    let { Verdicts = verdicts } = decideOn (lane kind)
 
                     verdicts
                     |> List.tryPick (function
@@ -797,7 +797,7 @@ let intakeDecayTests =
                     }
 
                 let matched kind =
-                    let { Verdicts = verdicts } = decide (lane kind) Map.empty Set.empty None
+                    let { Verdicts = verdicts } = decideOn (lane kind)
 
                     verdicts
                     |> List.tryPick (function

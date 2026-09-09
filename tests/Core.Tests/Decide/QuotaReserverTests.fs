@@ -31,7 +31,7 @@ let reserverLeadTests =
                 // spawner and the same 3 of walking, a lead of 63. Every
                 // life between the two is where the rows disagree.
                 let casts life =
-                    spawnIntents (decide (leadColony life) Map.empty Set.empty None).Intents
+                    spawnIntents (decideOn (leadColony life)).Intents
 
                 Expect.isEmpty
                     (casts 30)
@@ -301,11 +301,11 @@ let reserverRowTests =
                     }
 
                 Expect.isEmpty
-                    (reserverCasts (decide (placed 1500) Map.empty Set.empty None).Intents)
+                    (reserverCasts (decideOn (placed 1500)).Intents)
                     "a reserver with a life ahead of it is the row's one body"
 
                 Expect.equal
-                    (reserverCasts (decide (placed 5) Map.empty Set.empty None).Intents)
+                    (reserverCasts (decideOn (placed 5)).Intents)
                     [ oneBlock ]
                     "inside its lead it is already outside the count, so the successor is cast"
             }
@@ -465,9 +465,7 @@ let reserverRowTests =
                 let fiveBlocks = List.replicate 5 BodyPart.Claim @ List.replicate 5 Move
 
                 Expect.equal
-                    (reserverCasts
-                        (decide { colony with Bank = bank 8000 8000 } Map.empty Set.empty None)
-                            .Intents)
+                    (reserverCasts (decideOn { colony with Bank = bank 8000 8000 }).Intents)
                     [ fiveBlocks; fiveBlocks ]
                     "the room standing at its cap is cast the five blocks the slipped room asked for"
             }
@@ -512,7 +510,7 @@ let reserverRowTests =
                             (fleetOf workers)
                             [ "W1N2", neutralRoom ]
 
-                    decide { colony with Bank = bank 40000 8000 } Map.empty Set.empty None
+                    decideOn { colony with Bank = bank 40000 8000 }
 
                 Expect.equal
                     (atFleet 1).Memo.HaulerQuota

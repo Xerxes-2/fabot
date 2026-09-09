@@ -40,11 +40,7 @@ let stockTests =
                 // 0023). The tier above the buffer is already pinned by the
                 // rank-tier tests, so this one step completes the sequence.
                 let { Verdicts = verdicts } =
-                    decide
-                        (stockColony [] (Map.ofList [ "can-ctrl", 800; "sto-1", 0 ]))
-                        Map.empty
-                        Set.empty
-                        None
+                    decideOn (stockColony [] (Map.ofList [ "can-ctrl", 800; "sto-1", 0 ]))
 
                 Expect.equal
                     verdicts
@@ -56,13 +52,11 @@ let stockTests =
                 // The buffer is brimming, so the tower is the stock's one
                 // rival and the factor is evidence about that pair alone.
                 let { Verdicts = verdicts } =
-                    decide
-                        (stockColony
+                    decideOn (
+                        stockColony
                             [ refillable "tower-1" 500 BuiltKind.Tower ]
-                            (Map.ofList [ "can-ctrl", 2000; "sto-1", 0 ]))
-                        Map.empty
-                        Set.empty
-                        None
+                            (Map.ofList [ "can-ctrl", 2000; "sto-1", 0 ])
+                    )
 
                 Expect.equal
                     verdicts
@@ -216,14 +210,12 @@ let stockDrawTests =
                 // motivating case, a stock that wins every travel-cost
                 // contest and must still lose.
                 let drawFrom pos =
-                    decide
-                        (drawColony
+                    decideOn (
+                        drawColony
                             (Map.ofList [ "can-src", 500; "can-ctrl", 800; "sto-1", 500 ])
                             (creepWith "h1" 0 100 [ Carry; Carry; Move ])
-                            pos)
-                        Map.empty
-                        Set.empty
-                        None
+                            pos
+                    )
 
                 let equidistant = drawFrom { X = 13; Y = 10 }
 
@@ -334,13 +326,10 @@ let stockDrawTests =
                         Assignments = assignments
                         Verdicts = verdicts
                     } =
-                    decide
+                    decideOn
                         { colony with
                             Refillables = [ refillable "spawn-1" 50 BuiltKind.Spawn ]
                         }
-                        Map.empty
-                        Set.empty
-                        None
 
                 Expect.equal
                     (Map.tryFind "h1" assignments)
@@ -371,11 +360,9 @@ let stockDrawTests =
                 let beside = { X = 16; Y = 10 }
 
                 let empty =
-                    decide
-                        (drawColony stores (creepWith "h1" 0 100 [ Carry; Carry; Move ]) beside)
-                        Map.empty
-                        Set.empty
-                        None
+                    decideOn (
+                        drawColony stores (creepWith "h1" 0 100 [ Carry; Carry; Move ]) beside
+                    )
 
                 Expect.equal
                     (Map.tryFind "h1" empty.Assignments)
@@ -410,14 +397,12 @@ let stockDrawTests =
                 // the honest state; the stock holds energy the colony has
                 // nowhere to put.
                 let idleOn stores =
-                    decide
-                        (drawColony
+                    decideOn (
+                        drawColony
                             stores
                             (creepWith "h1" 0 100 [ Carry; Carry; Move ])
-                            { X = 16; Y = 10 })
-                        Map.empty
-                        Set.empty
-                        None
+                            { X = 16; Y = 10 }
+                    )
 
                 let withRoom = idleOn (Map.ofList [ "can-src", 0; "can-ctrl", 2000; "sto-1", 500 ])
 
@@ -454,14 +439,14 @@ let stockDrawTests =
                         Sources = []
                     }
 
-                let worked = decide (colonyFor (worker "w1" 0 50)) Map.empty Set.empty None
+                let worked = decideOn (colonyFor (worker "w1" 0 50))
 
                 Expect.equal
                     worked.Verdicts
                     [ Verdict.Matched("w1", taskId (Withdraw "sto-1"), MatchFactor.OnlyCandidate) ]
                     "a Work part is neither a bar to the stock nor a ticket to it"
 
-                let heavy = decide (colonyFor (anchor "a1" 0 50)) Map.empty Set.empty None
+                let heavy = decideOn (colonyFor (anchor "a1" 0 50))
 
                 Expect.equal
                     (Map.tryFind "a1" heavy.Assignments)
@@ -488,14 +473,14 @@ let stockDrawTests =
 
                 let remembered = Map.ofList [ "h1", taskId (Withdraw "sto-1") ]
 
-                let hungry = decide (colonyWithBuffer 800) remembered Set.empty None
+                let hungry = decideFrom remembered (colonyWithBuffer 800)
 
                 Expect.contains
                     hungry.Verdicts
                     (Verdict.Kept("h1", taskId (Withdraw "sto-1")))
                     "while one sink still has room the trip stands"
 
-                let filled = decide (colonyWithBuffer 2000) remembered Set.empty None
+                let filled = decideFrom remembered (colonyWithBuffer 2000)
 
                 Expect.contains
                     filled.Verdicts

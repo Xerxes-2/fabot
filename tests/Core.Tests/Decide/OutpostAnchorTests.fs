@@ -95,7 +95,7 @@ let heavyPinAcrossTests =
                         Intents = intents
                         Verdicts = verdicts
                     } =
-                    decide colony remembered Set.empty None
+                    decideFrom remembered colony
 
                 Expect.contains
                     verdicts
@@ -127,7 +127,7 @@ let heavyPinAcrossTests =
                         Assignments = assignments
                         Verdicts = verdicts
                     } =
-                    decide colony remembered Set.empty None
+                    decideFrom remembered colony
 
                 Expect.contains
                     verdicts

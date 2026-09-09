@@ -251,7 +251,7 @@ let sayTests =
                             "w3", (taskId (Upgrade "ctrl-1"))
                         ]
 
-                let { Intents = intents } = decide snapshot sticky Set.empty None
+                let { Intents = intents } = decideFrom sticky snapshot
 
                 Expect.equal
                     (sayIntents intents)
@@ -399,7 +399,7 @@ let verdictTests =
                     }
 
                 let sticky = Map.ofList [ "w1", taskId (Harvest "src-far") ]
-                let { Verdicts = verdicts } = decide snapshot sticky Set.empty None
+                let { Verdicts = verdicts } = decideFrom sticky snapshot
 
                 Expect.equal
                     verdicts
@@ -418,7 +418,7 @@ let verdictTests =
                     }
 
                 let sticky = Map.ofList [ "w1", taskId (Refill "spawn-1") ]
-                let { Verdicts = verdicts } = decide snapshot sticky Set.empty None
+                let { Verdicts = verdicts } = decideFrom sticky snapshot
 
                 Expect.contains
                     verdicts
@@ -464,12 +464,12 @@ let verdictTests =
                     }
 
                 Expect.contains
-                    (decide (seenAt snapshot.Time) sticky Set.empty None).Verdicts
+                    (decideFrom sticky (seenAt snapshot.Time)).Verdicts
                     (Verdict.Released("w1", held, ReleaseReason.TaskGone))
                     "seen this tick, the target stands and the Task is gone all the same: released, as it always was"
 
                 Expect.contains
-                    (decide (seenAt (snapshot.Time - 1)) sticky Set.empty None).Verdicts
+                    (decideFrom sticky (seenAt (snapshot.Time - 1))).Verdicts
                     (Verdict.Kept("w1", held))
                     "and one tick of blindness later, the same disappearance is a room we cannot see and the holder is kept"
             }
@@ -491,7 +491,7 @@ let verdictTests =
                     }
 
                 let sticky = Map.ofList [ "w1", taskId (Harvest "src-a") ]
-                let { Verdicts = verdicts } = decide snapshot sticky Set.empty None
+                let { Verdicts = verdicts } = decideFrom sticky snapshot
 
                 Expect.contains
                     verdicts
@@ -511,7 +511,7 @@ let verdictTests =
                     }
 
                 let sticky = Map.ofList [ "w1", taskId (Harvest "src-a") ]
-                let { Verdicts = verdicts } = decide snapshot sticky Set.empty None
+                let { Verdicts = verdicts } = decideFrom sticky snapshot
 
                 Expect.equal
                     verdicts
@@ -533,7 +533,7 @@ let verdictTests =
                     }
 
                 let sticky = Map.ofList [ "hauler", taskId (Harvest "src-a") ]
-                let { Verdicts = verdicts } = decide snapshot sticky Set.empty None
+                let { Verdicts = verdicts } = decideFrom sticky snapshot
 
                 Expect.contains
                     verdicts
@@ -569,7 +569,7 @@ let verdictTests =
                     }
 
                 let sticky = Map.ofList [ "w1", taskId (Harvest "src-a") ]
-                let { Verdicts = verdicts } = decide snapshot sticky Set.empty None
+                let { Verdicts = verdicts } = decideFrom sticky snapshot
 
                 Expect.contains
                     verdicts
@@ -597,7 +597,7 @@ let verdictTests =
                 let sticky =
                     Map.ofList [ "w1", taskId (Harvest "src-a"); "w2", taskId (Harvest "src-a") ]
 
-                let { Verdicts = verdicts } = decide snapshot sticky Set.empty None
+                let { Verdicts = verdicts } = decideFrom sticky snapshot
 
                 Expect.equal
                     verdicts
@@ -684,7 +684,7 @@ let verdictTests =
                         Assignments = assignments
                         Verdicts = verdicts
                     } =
-                    decide snapshot sticky Set.empty None
+                    decideFrom sticky snapshot
 
                 Expect.isEmpty (Map.toList assignments) "the dead creep's assignment is dropped"
                 Expect.isEmpty verdicts "Verdicts attribute to living creeps only"
@@ -707,16 +707,14 @@ let rankTierTests =
                 let fullSpawn = refillable "spawn-1" 0 BuiltKind.Spawn
                 let hungryTower = refillable "tower-1" 500 BuiltKind.Tower
 
-                let feeding =
-                    decide (tierColony [ hungrySpawn; hungryTower ]) Map.empty Set.empty None
+                let feeding = decideOn (tierColony [ hungrySpawn; hungryTower ])
 
                 Expect.equal
                     feeding.Verdicts
                     [ Verdict.Matched("h1", taskId (Refill "spawn-1"), MatchFactor.Rank) ]
                     "the colony feeds its own reproduction first: rank decided"
 
-                let surplus =
-                    decide (tierColony [ fullSpawn; hungryTower ]) Map.empty Set.empty None
+                let surplus = decideOn (tierColony [ fullSpawn; hungryTower ])
 
                 Expect.equal
                     surplus.Verdicts

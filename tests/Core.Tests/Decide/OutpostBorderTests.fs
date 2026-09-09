@@ -63,8 +63,7 @@ let invaderCoreTests =
                     |> List.sortBy fst
 
                 let unchangedWith label cores =
-                    let threatened =
-                        decide { colony with InvaderCores = cores } Map.empty Set.empty None
+                    let threatened = decideOn { colony with InvaderCores = cores }
 
                     Expect.equal
                         { threatened with
@@ -138,7 +137,7 @@ let invaderCoreTests =
                 // exist yet (#134 opens the episode, #136 gates on it).
                 let withControl control cores =
                     let colony = postedOutpostColony 19 [ "W1N2", control ]
-                    decide { colony with InvaderCores = cores } Map.empty Set.empty None
+                    decideOn { colony with InvaderCores = cores }
 
                 let frontier =
                     withControl
@@ -263,7 +262,7 @@ let neighbouringRoomTests =
                 let assigned = Map.ofList [ "w-home", "harvest:src-home" ]
 
                 let { Intents = alone } =
-                    decide (colony [ worker "w-home" 0 50 ] RoomLayer.empty) assigned Set.empty None
+                    decideFrom assigned (colony [ worker "w-home" 0 50 ] RoomLayer.empty)
 
                 let neighbour =
                     { RoomLayer.empty with

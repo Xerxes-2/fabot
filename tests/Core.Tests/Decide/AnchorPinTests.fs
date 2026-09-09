@@ -141,7 +141,7 @@ let anchorTests =
                         Intents = intents
                         Verdicts = verdicts
                     } =
-                    decide arrived remembered Set.empty None
+                    decideFrom remembered arrived
 
                 Expect.contains
                     verdicts
@@ -446,7 +446,7 @@ let anchorTests =
                     }
 
                 let remembered = Map.ofList [ "a1", taskId (Harvest "src-a") ]
-                let { Assignments = assignments } = decide snapshot remembered Set.empty None
+                let { Assignments = assignments } = decideFrom remembered snapshot
 
                 Expect.equal
                     (Map.tryFind "a1" assignments)
@@ -590,7 +590,7 @@ let heavyPinTests =
                         Assignments = assignments
                         Verdicts = verdicts
                     } =
-                    decide colony remembered Set.empty None
+                    decideFrom remembered colony
 
                 Expect.contains
                     verdicts
@@ -616,7 +616,7 @@ let heavyPinTests =
                         Assignments = assignments
                         Verdicts = verdicts
                     } =
-                    decide colony remembered Set.empty None
+                    decideFrom remembered colony
 
                 Expect.contains
                     verdicts
@@ -642,7 +642,7 @@ let heavyPinTests =
                         Intents = intents
                         Verdicts = verdicts
                     } =
-                    decide colony remembered Set.empty None
+                    decideFrom remembered colony
 
                 Expect.contains
                     verdicts
@@ -722,7 +722,7 @@ let heavyPinTests =
                         Intents = intents
                         Verdicts = verdicts
                     } =
-                    decide colony remembered Set.empty None
+                    decideFrom remembered colony
 
                 Expect.contains
                     verdicts
@@ -756,7 +756,7 @@ let heavyPinTests =
                         Assignments = assignments
                         Verdicts = verdicts
                     } =
-                    decide colony remembered Set.empty None
+                    decideFrom remembered colony
 
                 Expect.contains
                     verdicts
@@ -811,7 +811,7 @@ let heavyPinTests =
                         Intents = intents
                         Verdicts = verdicts
                     } =
-                    decide colony remembered Set.empty None
+                    decideFrom remembered colony
 
                 Expect.contains
                     verdicts
@@ -890,7 +890,7 @@ let heavyPinTests =
                         Intents = intents
                         Verdicts = verdicts
                     } =
-                    decide colony remembered Set.empty None
+                    decideFrom remembered colony
 
                 Expect.contains
                     verdicts

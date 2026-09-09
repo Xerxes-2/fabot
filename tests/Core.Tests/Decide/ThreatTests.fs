@@ -50,7 +50,7 @@ let rampartTests =
                 // containers because a work-heavy body cannot flee its Post.
                 // Not the extensions, not the room at large — the equality
                 // is what says no rampart lands anywhere else.
-                let { Intents = intents } = decide (atLevel 4 keepRoom) Map.empty Set.empty None
+                let { Intents = intents } = decideOn (atLevel 4 keepRoom)
 
                 Expect.equal
                     (sitesOfKind Rampart intents)
@@ -64,7 +64,7 @@ let rampartTests =
                 // footprint — walkable, blocking nothing, taking no tile from
                 // the Post it covers — so it is placed there regardless,
                 // while the cluster still keeps off (ADR 0034 revising 0022).
-                let { Intents = intents } = decide (atLevel 4 keepRoom) Map.empty Set.empty None
+                let { Intents = intents } = decideOn (atLevel 4 keepRoom)
                 let seats = Set.ofList [ { X = 21; Y = 25 }; { X = 29; Y = 25 } ]
 
                 Expect.isTrue
@@ -85,7 +85,7 @@ let rampartTests =
                         TargetKinds = Map.add "sto-1" (Site BuiltKind.Storage) keepRoom.TargetKinds
                     }
 
-                let { Intents = intents } = decide (atLevel 4 pending) Map.empty Set.empty None
+                let { Intents = intents } = decideOn (atLevel 4 pending)
 
                 Expect.equal
                     (sitesOfKind Rampart intents)
@@ -104,10 +104,9 @@ let rampartTests =
                 let pending =
                     keepRoom |> withTargets [ "ram-1", { X = 24; Y = 24 }, Site BuiltKind.Rampart ]
 
-                let { Intents = afterStanding } =
-                    decide (atLevel 4 standing) Map.empty Set.empty None
+                let { Intents = afterStanding } = decideOn (atLevel 4 standing)
 
-                let { Intents = afterPending } = decide (atLevel 4 pending) Map.empty Set.empty None
+                let { Intents = afterPending } = decideOn (atLevel 4 pending)
 
                 Expect.equal
                     (sitesOfKind Rampart afterStanding)
@@ -157,7 +156,7 @@ let rampartTests =
                     keepRoom
                     |> withTargets [ "con-far", { X = 25; Y = 29 }, Structure BuiltKind.Container ]
 
-                let { Intents = intents } = decide (atLevel 4 room) Map.empty Set.empty None
+                let { Intents = intents } = decideOn (atLevel 4 room)
 
                 Expect.equal
                     (sitesOfKind Rampart intents)
@@ -173,8 +172,7 @@ let rampartTests =
                 // 100,000-hit floor and buy its extensions too (ADR 0034 as
                 // #214 amends it, ADR 0047's own line for "bootstrapped").
                 let at level =
-                    let { Intents = intents } =
-                        decide (atLevel level keepRoom) Map.empty Set.empty None
+                    let { Intents = intents } = decideOn (atLevel level keepRoom)
 
                     sitesOfKind Rampart intents
 
@@ -349,11 +347,7 @@ let safeModeTests =
                 // the tower is the dismantler test below.
                 let fires snapshot =
                     let { Intents = intents } =
-                        decide
-                            (snapshot |> facing [ hostile [ Tough; Attack; Move ] ])
-                            Map.empty
-                            Set.empty
-                            None
+                        decideOn (snapshot |> facing [ hostile [ Tough; Attack; Move ] ])
 
                     activations intents
 
@@ -851,7 +845,7 @@ let threatGateTests =
                         Assignments = kept
                         Verdicts = verdicts
                     } =
-                    decide colony (Map.ofList [ "w1", taskId (Harvest "src-a") ]) Set.empty None
+                    decideFrom (Map.ofList [ "w1", taskId (Harvest "src-a") ]) colony
 
                 Expect.contains
                     verdicts
@@ -941,7 +935,7 @@ let threatGateTests =
                         Assignments = kept
                         Verdicts = verdicts
                     } =
-                    decide ramparted (Map.ofList [ "a1", taskId (Harvest "src-a") ]) Set.empty None
+                    decideFrom (Map.ofList [ "a1", taskId (Harvest "src-a") ]) ramparted
 
                 Expect.equal
                     (Map.tryFind "a1" kept)
@@ -967,7 +961,7 @@ let threatGateTests =
                         Assignments = kept
                         Verdicts = verdicts
                     } =
-                    decide colony (Map.ofList [ "a1", taskId (Harvest "src-a") ]) Set.empty None
+                    decideFrom (Map.ofList [ "a1", taskId (Harvest "src-a") ]) colony
 
                 Expect.contains
                     verdicts
@@ -1008,7 +1002,7 @@ let threatGateTests =
                         Intents = intents
                         Assignments = kept
                     } =
-                    decide colony (Map.ofList [ "a1", taskId (Harvest "src-a") ]) Set.empty None
+                    decideFrom (Map.ofList [ "a1", taskId (Harvest "src-a") ]) colony
 
                 Expect.equal
                     (Map.tryFind "a1" kept)
@@ -1044,7 +1038,7 @@ let threatGateTests =
                     |> facing [ hostileAt "h-1" { X = 25; Y = 22 } [ Attack; Move ] ]
 
                 let { Verdicts = verdicts } =
-                    decide colony (Map.ofList [ "w1", taskId (Harvest "src-a") ]) Set.empty None
+                    decideFrom (Map.ofList [ "w1", taskId (Harvest "src-a") ]) colony
 
                 Expect.contains
                     verdicts
@@ -1206,7 +1200,7 @@ let fleeTests =
                     |> facing hostiles
 
                 Expect.contains
-                    (decide (dark []) (Map.ofList [ "w1", held ]) Set.empty None).Verdicts
+                    (decideFrom (Map.ofList [ "w1", held ]) (dark [])).Verdicts
                     (Verdict.Kept("w1", held))
                     "the premise, with nothing shooting: the grace holds the assignment through the dark tick"
 
@@ -1384,7 +1378,7 @@ let fleeTests =
                         Assignments = assignments
                         Verdicts = verdicts
                     } =
-                    decide colony (Map.ofList [ "w1", taskId Flee ]) Set.empty None
+                    decideFrom (Map.ofList [ "w1", taskId Flee ]) colony
 
                 Expect.contains
                     verdicts
@@ -1408,7 +1402,7 @@ let fleeTests =
                         Assignments = assignments
                         Verdicts = verdicts
                     } =
-                    decide colony (Map.ofList [ "w1", taskId Flee ]) Set.empty None
+                    decideFrom (Map.ofList [ "w1", taskId Flee ]) colony
 
                 Expect.contains
                     verdicts
@@ -1441,22 +1435,18 @@ let spawnHoldTests =
                 Expect.isNonEmpty (spawnIntents quiet) "a quiet colony casts its deficit"
 
                 let { Intents = beside } =
-                    decide
-                        (colony |> facing [ hostileAt "h-1" { X = 25; Y = 29 } [ Attack; Move ] ])
-                        Map.empty
-                        Set.empty
-                        None
+                    decideOn (
+                        colony |> facing [ hostileAt "h-1" { X = 25; Y = 29 } [ Attack; Move ] ]
+                    )
 
                 Expect.isEmpty
                     (spawnIntents beside)
                     "the doorstep is in the Reach: nothing is cast into it"
 
                 let { Intents = across } =
-                    decide
-                        (colony |> facing [ hostileAt "h-1" { X = 31; Y = 31 } [ Attack; Move ] ])
-                        Map.empty
-                        Set.empty
-                        None
+                    decideOn (
+                        colony |> facing [ hostileAt "h-1" { X = 31; Y = 31 } [ Attack; Move ] ]
+                    )
 
                 Expect.isNonEmpty
                     (spawnIntents across)
@@ -1476,11 +1466,9 @@ let spawnHoldTests =
                     "an empty colony casts from whatever is banked"
 
                 let { Intents = raided } =
-                    decide
-                        (empty |> facing [ hostileAt "h-1" { X = 25; Y = 29 } [ Attack; Move ] ])
-                        Map.empty
-                        Set.empty
-                        None
+                    decideOn (
+                        empty |> facing [ hostileAt "h-1" { X = 25; Y = 29 } [ Attack; Move ] ]
+                    )
 
                 Expect.isEmpty (spawnIntents raided) "and holds while the doorstep is hot"
             }
@@ -1646,8 +1634,7 @@ let layeredThreatTests =
                     }
 
                 let castsWith hostiles =
-                    let { Intents = intents } =
-                        decide { colony with Hostiles = hostiles } Map.empty Set.empty None
+                    let { Intents = intents } = decideOn { colony with Hostiles = hostiles }
 
                     spawnIntents intents
 
@@ -1677,8 +1664,7 @@ let layeredThreatTests =
                         [ "wh", taskId (Harvest "src-home"); "wo", taskId (Harvest "src-out") ]
 
                 let releasesWith hostiles =
-                    let { Verdicts = verdicts } =
-                        decide (twoRoomColony hostiles) held Set.empty None
+                    let { Verdicts = verdicts } = decideFrom held (twoRoomColony hostiles)
 
                     verdicts
                     |> List.choose (function
@@ -1727,8 +1713,7 @@ let layeredThreatTests =
                         ]
 
                 let activationsWith hostiles =
-                    let { Intents = intents } =
-                        decide { colony with Hostiles = hostiles } Map.empty Set.empty None
+                    let { Intents = intents } = decideOn { colony with Hostiles = hostiles }
 
                     activations intents
 
@@ -1769,8 +1754,7 @@ let layeredThreatTests =
                         ]
 
                 let activationsWith hostiles =
-                    let { Intents = intents } =
-                        decide { colony with Hostiles = hostiles } Map.empty Set.empty None
+                    let { Intents = intents } = decideOn { colony with Hostiles = hostiles }
 
                     activations intents
 
@@ -1811,8 +1795,7 @@ let layeredThreatTests =
                         ]
 
                 let shotsWith hostiles =
-                    let { Intents = intents } =
-                        decide { colony with Hostiles = hostiles } Map.empty Set.empty None
+                    let { Intents = intents } = decideOn { colony with Hostiles = hostiles }
 
                     shots intents
 

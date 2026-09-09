@@ -16,7 +16,7 @@ let layoutTests =
         "layout"
         [
             test "RCL2 places the extension gap and no tower — and not one road" {
-                let { Intents = intents } = decide (trunkColony 2) Map.empty Set.empty None
+                let { Intents = intents } = decideOn (trunkColony 2)
 
                 Expect.isEmpty (sitesOfKind Tower intents) "no tower below RCL3"
 
@@ -37,7 +37,7 @@ let layoutTests =
             }
 
             test "the same fixture at RCL3 places every trunk road" {
-                let { Intents = intents } = decide (trunkColony 3) Map.empty Set.empty None
+                let { Intents = intents } = decideOn (trunkColony 3)
                 let roads = sitesOfKind Road intents |> Set.ofList
 
                 Expect.isTrue
@@ -61,7 +61,7 @@ let layoutTests =
             }
 
             test "the same fixture at RCL3 adds the tower and extensions 6-10 at once" {
-                let { Intents = intents } = decide (trunkColony 3) Map.empty Set.empty None
+                let { Intents = intents } = decideOn (trunkColony 3)
 
                 // (24,24) is the ordering's first free tile and the Storage's
                 // reservation (ADR 0022); the tower takes the one after it,
@@ -82,8 +82,8 @@ let layoutTests =
             }
 
             test "the same ColonyView recomputes to the identical site set" {
-                let first = decide (trunkColony 2) Map.empty Set.empty None
-                let second = decide (trunkColony 2) Map.empty Set.empty None
+                let first = decideOn (trunkColony 2)
+                let second = decideOn (trunkColony 2)
 
                 Expect.equal
                     (placementIntents first.Intents)
@@ -97,8 +97,8 @@ let layoutTests =
                 // nothing of it reaches the ground, so the road *sites* are
                 // the same at every level the gate lets through and this
                 // pair is RCL3 against the horizon's own RCL4.
-                let rcl3 = decide (trunkColony 3) Map.empty Set.empty None
-                let rcl4 = decide (trunkColony 4) Map.empty Set.empty None
+                let rcl3 = decideOn (trunkColony 3)
+                let rcl4 = decideOn (trunkColony 4)
                 let roads = sitesOfKind Road rcl3.Intents |> Set.ofList
 
                 // Read off the horizon's own level, where the whole
@@ -106,7 +106,7 @@ let layoutTests =
                 // twenty extensions RCL5 and RCL6 add included (ADR 0039, ADR
                 // 0055). Below it the check only ever saw the part the level
                 // had placed, so this level moves with the horizon.
-                let cluster = clusterTiles (decide (trunkColony 6) Map.empty Set.empty None).Intents
+                let cluster = clusterTiles (decideOn (trunkColony 6)).Intents
 
                 Expect.equal
                     (sitesOfKind Road rcl4.Intents |> Set.ofList)
@@ -176,7 +176,7 @@ let layoutTests =
             test "without a source only the Work Area swamps are paved, never plain" {
                 // At the road gate, the stage the sites reach the ground from
                 // (#209): below it the answer is empty whatever the plan is.
-                let { Intents = intents } = decide (noSourceColony 3) Map.empty Set.empty None
+                let { Intents = intents } = decideOn (noSourceColony 3)
 
                 Expect.equal
                     (sitesOfKind Road intents |> Set.ofList)
@@ -230,7 +230,7 @@ let layoutTests =
                 // the road gate, where there is a road site to collide with —
                 // below it none is placed and the clause has nothing to say
                 // (#209).
-                let { Intents = intents } = decide (trunkColony 3) Map.empty Set.empty None
+                let { Intents = intents } = decideOn (trunkColony 3)
                 let roads = sitesOfKind Road intents |> Set.ofList
 
                 for tile in sitesOfKind Container intents do
@@ -242,7 +242,7 @@ let layoutTests =
             test "the controller container lands in the Work Area beside a trunk" {
                 // At the road gate: the trunk it is judged against is a road
                 // site, and those are placed from RCL3 up (#209).
-                let { Intents = intents } = decide (trunkColony 3) Map.empty Set.empty None
+                let { Intents = intents } = decideOn (trunkColony 3)
                 let controllerPos = { X = 35; Y = 25 }
 
                 let controllerContainers =
@@ -274,7 +274,7 @@ let layoutTests =
                 // in this fixture, so what the containers coexist with is
                 // the empty placement and not a built road — the standing
                 // road's own case is the RCL3 tests below.
-                let { Intents = intents } = decide (trunkColony 1) Map.empty Set.empty None
+                let { Intents = intents } = decideOn (trunkColony 1)
 
                 Expect.isEmpty (sitesOfKind Road intents) "the premise: RCL1 places no road"
 
@@ -294,10 +294,10 @@ let layoutTests =
                 // the road gap, so a road site would be asked for on top
                 // of it and the engine would refuse it every tick until
                 // the container finished.
-                let rcl1 = decide (trunkColony 1) Map.empty Set.empty None
+                let rcl1 = decideOn (trunkColony 1)
 
                 let trunkRoads =
-                    decide (trunkColony 3) Map.empty Set.empty None
+                    decideOn (trunkColony 3)
                     |> fun result -> sitesOfKind Road result.Intents |> Set.ofList
 
                 let onTrunk =
@@ -316,13 +316,10 @@ let layoutTests =
                 let colony = trunkColony 3
 
                 let { Intents = intents } =
-                    decide
+                    decideOn
                         { colony with
                             Spatial = colony.Spatial |> withTargets pending
                         }
-                        Map.empty
-                        Set.empty
-                        None
 
                 let roads = sitesOfKind Road intents |> Set.ofList
 
@@ -337,8 +334,7 @@ let layoutTests =
                 // From the road gate up, where `withRoadsBuilt` has a road
                 // set to stand (#209): below it the plan places none and
                 // the fixture would carry an empty premise.
-                let { Intents = intents } =
-                    decide (withRoadsBuilt (pocketColony 3)) Map.empty Set.empty None
+                let { Intents = intents } = decideOn (withRoadsBuilt (pocketColony 3))
 
                 Expect.contains
                     (sitesOfKind Container intents)
@@ -534,13 +530,10 @@ let layoutTests =
                     |> List.mapi (fun i tile -> $"can-{i}", tile, Structure BuiltKind.Container)
 
                 let after =
-                    decide
+                    decideOn
                         { colony with
                             Spatial = colony.Spatial |> withTargets standing
                         }
-                        Map.empty
-                        Set.empty
-                        None
 
                 Expect.isEmpty (sitesOfKind Container after.Intents) "nothing re-drops"
 
@@ -706,7 +699,7 @@ let storageTests =
                 // The cluster's nearest same-colour tile is the Storage's at
                 // every level (ADR 0022) — the tower and the extensions take
                 // the picks after it.
-                let { Intents = intents } = decide (atLevel 4 (openRoom 3)) Map.empty Set.empty None
+                let { Intents = intents } = decideOn (atLevel 4 (openRoom 3))
 
                 Expect.equal
                     (sitesOfKind Storage intents)
@@ -729,7 +722,7 @@ let storageTests =
                 // The reservation is level-blind (ADR 0022): once an extension
                 // takes that tile it never comes back, so it is held from the
                 // first tick, levels before the engine allows the Storage.
-                let { Intents = intents } = decide (atLevel 3 (openRoom 3)) Map.empty Set.empty None
+                let { Intents = intents } = decideOn (atLevel 3 (openRoom 3))
 
                 Expect.isEmpty
                     (sitesOfKind Storage intents)
@@ -747,7 +740,7 @@ let storageTests =
                     openRoom 3
                     |> withTargets [ "sto-1", { X = 24; Y = 24 }, Structure BuiltKind.Storage ]
 
-                let { Intents = intents } = decide (atLevel 4 standing) Map.empty Set.empty None
+                let { Intents = intents } = decideOn (atLevel 4 standing)
 
                 Expect.isEmpty
                     (sitesOfKind Storage intents)
@@ -771,7 +764,7 @@ let storageTests =
                     openRoom 3
                     |> withTargets [ "sto-site", { X = 24; Y = 24 }, Site BuiltKind.Storage ]
 
-                let { Intents = intents } = decide (atLevel 4 pending) Map.empty Set.empty None
+                let { Intents = intents } = decideOn (atLevel 4 pending)
 
                 Expect.isEmpty
                     (sitesOfKind Storage intents)
@@ -814,7 +807,7 @@ let storageTests =
                 // Storage leaves the ordering and frees its slot at once, so
                 // the tower and every extension keep the picks they had
                 // while the tile was only reserved (ADR 0022).
-                let planned = decide (atLevel 4 (openRoom 3)) Map.empty Set.empty None
+                let planned = decideOn (atLevel 4 (openRoom 3))
 
                 let storageTile =
                     match sitesOfKind Storage planned.Intents with
@@ -822,14 +815,12 @@ let storageTests =
                     | other -> failtest $"expected one planned Storage, got %A{other}"
 
                 let built =
-                    decide
-                        (atLevel
+                    decideOn (
+                        atLevel
                             4
                             (openRoom 3
-                             |> withTargets [ "sto-1", storageTile, Structure BuiltKind.Storage ]))
-                        Map.empty
-                        Set.empty
-                        None
+                             |> withTargets [ "sto-1", storageTile, Structure BuiltKind.Storage ])
+                    )
 
                 Expect.equal
                     (sitesOfKind Tower built.Intents)
@@ -904,7 +895,7 @@ let linkFootingTests =
                 // absence: it is what the Layout channel says while ADR
                 // 0022 and ADR 0027's one-footing-per-target still holds
                 // (#77, ADR 0035).
-                let { Memo = memo } = decide (atLevel 4 footingRoom) Map.empty Set.empty None
+                let { Memo = memo } = decideOn (atLevel 4 footingRoom)
 
                 Expect.isEmpty memo.UnservedFootings "both footings stand; nothing is lost"
             }
@@ -916,7 +907,7 @@ let linkFootingTests =
                 // tiles would leave the target-to-tile pairing to be
                 // rederived by hand — the second derivation the record
                 // exists to remove (ADR 0035).
-                let { Memo = memo } = decide (atLevel 4 footingRoom) Map.empty Set.empty None
+                let { Memo = memo } = decideOn (atLevel 4 footingRoom)
 
                 Expect.equal
                     memo.ServedFootings
@@ -949,7 +940,7 @@ let linkFootingTests =
                 // — the shortfall says which guarantee went and the served
                 // record says which tiles the rest hold — and no target is
                 // in both, because the fold visits each exactly once.
-                let { Memo = memo } = decide (sealedPocketColony 4) Map.empty Set.empty None
+                let { Memo = memo } = decideOn (sealedPocketColony 4)
 
                 let served = memo.ServedFootings |> List.map (fun footing -> footing.Target)
                 let unserved = memo.UnservedFootings |> List.map (fun footing -> footing.Target)
@@ -973,7 +964,7 @@ let linkFootingTests =
                 // three targets are absent from the list, which is the
                 // other half of the claim: the fold still reserves
                 // everything it can, and only what it cannot is recorded.
-                let { Memo = memo } = decide (sealedPocketColony 4) Map.empty Set.empty None
+                let { Memo = memo } = decideOn (sealedPocketColony 4)
 
                 Expect.equal
                     memo.UnservedFootings
@@ -991,7 +982,7 @@ let linkFootingTests =
                 // fold reserves everything it still can, which is the other
                 // half of the claim above and cannot be read off a list
                 // that only ever names losses.
-                let { Memo = control } = decide (pocketColony 4) Map.empty Set.empty None
+                let { Memo = control } = decideOn (pocketColony 4)
 
                 Expect.isEmpty
                     control.UnservedFootings
@@ -1006,8 +997,7 @@ let linkFootingTests =
                 // is a built kind with no placeable counterpart, so the
                 // Layout emits no site for one at any level (ADR 0022).
                 for level in 1..8 do
-                    let { Intents = intents } =
-                        decide (atLevel level footingRoom) Map.empty Set.empty None
+                    let { Intents = intents } = decideOn (atLevel level footingRoom)
 
                     Expect.isEmpty
                         (placedTiles intents
@@ -1020,7 +1010,7 @@ let linkFootingTests =
                 // beside the source container. The footing wins it, so the
                 // cluster takes the next tile instead — the allowance still
                 // fills, it just reaches one ring wider.
-                let { Intents = intents } = decide (atLevel 3 footingRoom) Map.empty Set.empty None
+                let { Intents = intents } = decideOn (atLevel 3 footingRoom)
 
                 Expect.hasLength
                     (sitesOfKind Extension intents)
@@ -1078,7 +1068,7 @@ let linkFootingTests =
                     |> withTargets [ "can-a", { X = 24; Y = 23 }, Structure BuiltKind.Container ]
                     |> withStanding "sto-1" { X = 24; Y = 24 } (Structure BuiltKind.Storage)
 
-                let { Intents = intents } = decide (atLevel 4 built) Map.empty Set.empty None
+                let { Intents = intents } = decideOn (atLevel 4 built)
 
                 Expect.isNonEmpty (sitesOfKind Extension intents) "the cluster still fills"
 
@@ -1102,7 +1092,7 @@ let linkFootingTests =
                         ]
 
                 let planOf colony =
-                    let { Intents = intents } = decide (atLevel 4 colony) Map.empty Set.empty None
+                    let { Intents = intents } = decideOn (atLevel 4 colony)
                     intents
 
                 let planned = planOf room
@@ -1150,8 +1140,8 @@ let linkFootingTests =
                 let linked =
                     room |> withStanding "link-1" { X = 23; Y = 23 } (Structure BuiltKind.Link)
 
-                let before = decide (atLevel 4 room) Map.empty Set.empty None
-                let after = decide (atLevel 4 linked) Map.empty Set.empty None
+                let before = decideOn (atLevel 4 room)
+                let after = decideOn (atLevel 4 linked)
 
                 Expect.isFalse
                     (List.contains { X = 23; Y = 23 } (placedTiles after.Intents))
@@ -1171,7 +1161,7 @@ let linkFootingTests =
                 // drawn-in tile is still ground no trunk was allowed to
                 // cross. ADR 0011's precedence survives the push: a road
                 // never sits where a structure will.
-                let { Intents = intents } = decide (atLevel 4 crossedRoom) Map.empty Set.empty None
+                let { Intents = intents } = decideOn (atLevel 4 crossedRoom)
 
                 Expect.isNonEmpty (sitesOfKind Road intents) "the trunks are paved"
 
@@ -1190,8 +1180,7 @@ let linkFootingTests =
                 // take a footing the moment the cluster is placed, and the
                 // Layout emits a road on the tile it had been reserving
                 // since level 0, orphaning the roads it just moved off.
-                let { Intents = intents } =
-                    decide (withPlanPending (atLevel 4 crossedRoom)) Map.empty Set.empty None
+                let { Intents = intents } = decideOn (withPlanPending (atLevel 4 crossedRoom))
 
                 Expect.isEmpty
                     (placementIntents intents)
@@ -1209,7 +1198,7 @@ let unroutedTrunkTests =
                 // record is empty — and empty is an answer rather than an
                 // absence, exactly as it is for the footing shortfall it
                 // rides beside (#107, ADR 0035).
-                let { Memo = memo } = decide (trunkColony 4) Map.empty Set.empty None
+                let { Memo = memo } = decideOn (trunkColony 4)
 
                 Expect.isEmpty memo.UnroutedTrunks "both trunks route; nothing is lost"
             }
@@ -1249,7 +1238,7 @@ let unroutedTrunkTests =
                 // entry of its own. The spawn carries its id because the
                 // spawn list is a list (RCL7 adds a second one), where the
                 // Upgrade Work Area is the controller's alone.
-                let { Memo = memo } = decide (enclosedSourceColony 4) Map.empty Set.empty None
+                let { Memo = memo } = decideOn (enclosedSourceColony 4)
 
                 Expect.equal
                     memo.UnroutedTrunks
@@ -1268,7 +1257,7 @@ let unroutedTrunkTests =
                 // The open source is the control: sealing one source costs
                 // exactly that source's trunks, and the same room with the
                 // pocket's Seat open loses nothing at all.
-                let { Memo = control } = decide (pocketColony 4) Map.empty Set.empty None
+                let { Memo = control } = decideOn (pocketColony 4)
 
                 Expect.isEmpty control.UnroutedTrunks "unsealed, every source reaches every goal"
             }

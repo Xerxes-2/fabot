@@ -77,7 +77,7 @@ let partApplicabilityTests =
                     }
 
                 let remembered = Map.ofList [ "hauler", taskId (Harvest "src-a") ]
-                let { Assignments = assignments } = decide snapshot remembered Set.empty None
+                let { Assignments = assignments } = decideFrom remembered snapshot
 
                 Expect.isEmpty
                     (Map.toList assignments)
@@ -96,13 +96,11 @@ let harvestApplicabilityTests =
             test "a light body walks to a source only while it is at least half empty" {
                 let matchedAt energy free =
                     let { Assignments = assignments } =
-                        decide
-                            (sourceColony
+                        decideOn (
+                            sourceColony
                                 loneSourceRoom
-                                [ lightWorker "w" energy free, { X = 13; Y = 10 } ])
-                            Map.empty
-                            Set.empty
-                            None
+                                [ lightWorker "w" energy free, { X = 13; Y = 10 } ]
+                        )
 
                     Map.tryFind "w" assignments
 
@@ -128,11 +126,7 @@ let harvestApplicabilityTests =
             test "a standing body is not matched to a source, and a light body still is" {
                 let idleOf (body: CreepInfo) =
                     let { Verdicts = verdicts } =
-                        decide
-                            (sourceColony loneSourceRoom [ body, { X = 13; Y = 10 } ])
-                            Map.empty
-                            Set.empty
-                            None
+                        decideOn (sourceColony loneSourceRoom [ body, { X = 13; Y = 10 } ])
 
                     verdicts
 
@@ -164,13 +158,11 @@ let harvestApplicabilityTests =
             test "a light body is refused a source its garrison already drains" {
                 let matchedWith bodies =
                     let { Assignments = assignments } =
-                        decide
-                            (sourceColony
+                        decideOn (
+                            sourceColony
                                 postedSourceRoom
-                                ((lightWorker "w" 0 450, { X = 13; Y = 10 }) :: bodies))
-                            Map.empty
-                            Set.empty
-                            None
+                                ((lightWorker "w" 0 450, { X = 13; Y = 10 }) :: bodies)
+                        )
 
                     Map.tryFind "w" assignments
 
@@ -191,16 +183,14 @@ let harvestApplicabilityTests =
             test "a light body still digs a rock its garrison only half drains" {
                 let matchedBeside garrison =
                     let { Assignments = assignments } =
-                        decide
-                            (sourceColony
+                        decideOn (
+                            sourceColony
                                 postedSourceRoom
                                 [
                                     lightWorker "w" 0 450, { X = 13; Y = 10 }
                                     creepWith "a1" 0 50 garrison, { X = 11; Y = 10 }
-                                ])
-                            Map.empty
-                            Set.empty
-                            None
+                                ]
+                        )
 
                     Map.tryFind "w" assignments
 
@@ -225,7 +215,7 @@ let harvestApplicabilityTests =
                     let colony = sourceColony loneSourceRoom [ lightWorker "w" 226 224, pos ]
 
                     let { Verdicts = verdicts } =
-                        decide colony (Map.ofList [ "w", taskId (Harvest "src-a") ]) Set.empty None
+                        decideFrom (Map.ofList [ "w", taskId (Harvest "src-a") ]) colony
 
                     verdicts
 
@@ -253,16 +243,14 @@ let harvestApplicabilityTests =
             test "a garrison raising a container site does not close its rock" {
                 let matchedOn room =
                     let { Assignments = assignments } =
-                        decide
-                            (sourceColony
+                        decideOn (
+                            sourceColony
                                 room
                                 [
                                     lightWorker "w" 0 450, { X = 13; Y = 10 }
                                     creepWith "a1" 0 50 sixWork, { X = 11; Y = 10 }
-                                ])
-                            Map.empty
-                            Set.empty
-                            None
+                                ]
+                        )
 
                     Map.tryFind "w" assignments
 

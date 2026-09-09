@@ -30,8 +30,7 @@ let travelCostTests =
                 let near: SourceInfo = source "src-near"
 
                 for sources in [ [ far; near ]; [ near; far ] ] do
-                    let { Assignments = assignments } =
-                        decide (snapshotWith sources) Map.empty Set.empty None
+                    let { Assignments = assignments } = decideOn (snapshotWith sources)
 
                     Expect.equal
                         (Map.tryFind "w1" assignments)
@@ -118,7 +117,7 @@ let travelCostTests =
                     }
 
                 let sticky = Map.ofList [ "w1", (taskId (Harvest "src-far")) ]
-                let { Assignments = assignments } = decide snapshot sticky Set.empty None
+                let { Assignments = assignments } = decideFrom sticky snapshot
 
                 Expect.equal
                     (Map.tryFind "w1" assignments)
@@ -548,7 +547,7 @@ let arbitrationTests =
                         Intents = intents
                         Assignments = next
                     } =
-                    decide headOnSwap sticky Set.empty None
+                    decideFrom sticky headOnSwap
 
                 Expect.equal next sticky "the Matcher keeps both remembered assignments"
 

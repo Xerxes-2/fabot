@@ -129,7 +129,7 @@ let seatTests =
                     Map.ofList
                         [ "w1", (taskId (Harvest "src-a")); "w2", (taskId (Harvest "src-a")) ]
 
-                let { Assignments = assignments } = decide snapshot stale Set.empty None
+                let { Assignments = assignments } = decideFrom stale snapshot
 
                 Expect.equal
                     (harvesters assignments "src-a")
@@ -174,8 +174,7 @@ let refillClusterTests =
                         [ "h1", { X = 9; Y = 10 }; "h2", { X = 11; Y = 10 } ]
 
                 let holders free =
-                    let { Assignments = assignments } =
-                        decide (colony free) Map.empty Set.empty None
+                    let { Assignments = assignments } = decideOn (colony free)
 
                     holdersOf (Refill "spawn-1") assignments
 
@@ -200,7 +199,7 @@ let refillClusterTests =
                         Assignments = assignments
                         Verdicts = verdicts
                     } =
-                    decide (walking (0, 50, 0)) sticky Set.empty None
+                    decideFrom sticky (walking (0, 50, 0))
 
                 Expect.equal
                     (Map.tryFind "h1" assignments)
@@ -227,7 +226,7 @@ let refillClusterTests =
 
                 let sticky = Map.ofList [ "h1", taskId (Refill "spawn-1") ]
 
-                let { Verdicts = verdicts } = decide full sticky Set.empty None
+                let { Verdicts = verdicts } = decideFrom sticky full
 
                 Expect.contains
                     verdicts
@@ -246,11 +245,9 @@ let refillClusterTests =
                         [ creepWith "h1" 50 0 [ Carry; Carry; Move ] ]
                         [ "h1", { X = 10; Y = 13 } ]
 
-                let { Intents = northIntents } =
-                    decide (arrived (0, 50, 0)) Map.empty Set.empty None
+                let { Intents = northIntents } = decideOn (arrived (0, 50, 0))
 
-                let { Intents = southIntents } =
-                    decide (arrived (0, 0, 50)) Map.empty Set.empty None
+                let { Intents = southIntents } = decideOn (arrived (0, 0, 50))
 
                 Expect.contains
                     northIntents
@@ -293,7 +290,7 @@ let refillClusterTests =
                             Assignments = assignments
                             Verdicts = verdicts
                         } =
-                        decide (colony free) sticky Set.empty None
+                        decideFrom sticky (colony free)
 
                     holdersOf (Refill "spawn-1") assignments, verdicts
 
@@ -345,7 +342,7 @@ let unreachableTests =
                     }
 
                 let sticky = Map.ofList [ "w1", (taskId (Harvest "src-a")) ]
-                let { Assignments = assignments } = decide snapshot sticky Set.empty None
+                let { Assignments = assignments } = decideFrom sticky snapshot
 
                 Expect.equal
                     (harvesters assignments "src-a")
@@ -377,7 +374,7 @@ let unreachableTests =
                         Intents = intents
                         Assignments = assignments
                     } =
-                    decide snapshot sticky Set.empty None
+                    decideFrom sticky snapshot
 
                 Expect.equal
                     (Map.tryFind "w1" assignments)
@@ -401,7 +398,7 @@ let unreachableTests =
                     }
 
                 let sticky = Map.ofList [ "w1", (taskId (Upgrade "ctrl-1")) ]
-                let { Assignments = assignments } = decide snapshot sticky Set.empty None
+                let { Assignments = assignments } = decideFrom sticky snapshot
 
                 Expect.equal (Map.tryFind "w1" assignments) None "no Work Area means no assignment"
             }
@@ -420,7 +417,7 @@ let unreachableTests =
                     }
 
                 let sticky = Map.ofList [ "w1", (taskId (Harvest "src-a")) ]
-                let { Assignments = assignments } = decide snapshot sticky Set.empty None
+                let { Assignments = assignments } = decideFrom sticky snapshot
 
                 Expect.equal
                     (Map.tryFind "w1" assignments)
@@ -803,7 +800,7 @@ let repairTests =
                         Verdicts = verdicts
                         Assignments = assignments
                     } =
-                    decide snapshot remembered Set.empty None
+                    decideFrom remembered snapshot
 
                 Expect.contains
                     verdicts

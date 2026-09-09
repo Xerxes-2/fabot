@@ -674,7 +674,7 @@ let planMemoTests =
             test "a level-up invalidates the memo" {
                 let memo = sentinelMemo (trunkColony 2)
                 let decision = decide (trunkColony 3) Map.empty Set.empty (Some memo)
-                let fresh = decide (trunkColony 3) Map.empty Set.empty None
+                let fresh = decideOn (trunkColony 3)
 
                 Expect.equal
                     (placementIntents decision.Intents)
@@ -710,7 +710,7 @@ let planMemoTests =
                     "the memo's quota opens a hauler gap the casting order fills first"
 
                 let stale = decide (trunkColony 3) Map.empty Set.empty (Some memo)
-                let fresh = decide (trunkColony 3) Map.empty Set.empty None
+                let fresh = decideOn (trunkColony 3)
 
                 Expect.equal
                     (castNames stale)
@@ -797,7 +797,7 @@ let planMemoTests =
                 // the memo does not have.
                 let staffed = staffedColony [ worker "w1" 0 50 ] [ "w1", { X = 22; Y = 25 } ]
 
-                let first = decide (staffed (trunkColony 2)) Map.empty Set.empty None
+                let first = decideOn (staffed (trunkColony 2))
 
                 let levelled =
                     decide (staffed (trunkColony 3)) Map.empty Set.empty (Some first.Memo)

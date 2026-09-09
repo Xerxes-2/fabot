@@ -25,8 +25,7 @@ let withdrawCapacityTests =
                 // far store is 1,800 and not a full 2,000: a full source
                 // container is lifted a rung of its own (its overflow is
                 // going to the ground), and this test is about the cap.
-                let { Assignments = split } =
-                    decide (crowdColony 400 1800 crowdOfThree) Map.empty Set.empty None
+                let { Assignments = split } = decideOn (crowdColony 400 1800 crowdOfThree)
 
                 Expect.equal
                     (drawersOf split "can-near")
@@ -43,8 +42,7 @@ let withdrawCapacityTests =
                 // Travel cost still says near for all three, and now the
                 // capacity lets it — so the split above is the stock's
                 // doing and not the geometry's.
-                let { Assignments = whole } =
-                    decide (crowdColony 2000 2000 crowdOfThree) Map.empty Set.empty None
+                let { Assignments = whole } = decideOn (crowdColony 2000 2000 crowdOfThree)
 
                 Expect.equal
                     (drawersOf whole "can-near")
@@ -60,11 +58,7 @@ let withdrawCapacityTests =
                 // energy nobody would be sent for.
                 let seatsAt stock =
                     let { Assignments = assignments } =
-                        decide
-                            (crowdColony stock 1800 (List.truncate 2 crowdOfThree))
-                            Map.empty
-                            Set.empty
-                            None
+                        decideOn (crowdColony stock 1800 (List.truncate 2 crowdOfThree))
 
                     drawersOf assignments "can-near"
 
@@ -140,15 +134,14 @@ let withdrawCapacityTests =
                 // number and not an exemption: a real stock divides into
                 // hundreds of trips, so the cap is there and is never the
                 // thing that binds.
-                let { Assignments = thin } = decide (stockCrowdColony 400) Map.empty Set.empty None
+                let { Assignments = thin } = decideOn (stockCrowdColony 400)
 
                 Expect.equal
                     (drawersOf thin "sto-c")
                     [ "h1" ]
                     "a stock holding one trip's worth admits one hauler"
 
-                let { Assignments = full } =
-                    decide (stockCrowdColony 130000) Map.empty Set.empty None
+                let { Assignments = full } = decideOn (stockCrowdColony 130000)
 
                 Expect.equal
                     (drawersOf full "sto-c")
@@ -165,8 +158,7 @@ let withdrawCapacityTests =
                 // reads `ceil(900 / 1200)` = one seat and sends the second
                 // upgrader back to a rock while the energy it came to
                 // spend stands beside it (#161).
-                let { Assignments = split } =
-                    decide (bufferCrowdColony 900) Map.empty Set.empty None
+                let { Assignments = split } = decideOn (bufferCrowdColony 900)
 
                 Expect.equal
                     (drawersOf split "can-buf")
@@ -184,8 +176,7 @@ let withdrawCapacityTests =
 
                 // The pairwise control: nothing changed but the buffer's
                 // stock, three loads instead of two.
-                let { Assignments = whole } =
-                    decide (bufferCrowdColony 1350) Map.empty Set.empty None
+                let { Assignments = whole } = decideOn (bufferCrowdColony 1350)
 
                 Expect.equal
                     (drawersOf whole "can-buf")
@@ -223,8 +214,7 @@ let withdrawCapacityTests =
                     [ "w1"; "w2"; "w3" ]
                     "fifty energy a trip divides 400 into eight seats, so the row that lives there all drinks"
 
-                let { Assignments = generalists } =
-                    decide (bufferCrowdColony 400) Map.empty Set.empty None
+                let { Assignments = generalists } = decideOn (bufferCrowdColony 400)
 
                 Expect.equal
                     (drawersOf generalists "can-buf")
@@ -374,8 +364,7 @@ let pickupTaskTests =
                 // container loses nothing, so the copy that is going away is
                 // the one to take (ADR 0052 decision 6, the [[priority]]
                 // ladder's own rung of slack).
-                let { Assignments = together } =
-                    decide (sameTilePileColony { X = 10; Y = 10 }) Map.empty Set.empty None
+                let { Assignments = together } = decideOn (sameTilePileColony { X = 10; Y = 10 })
 
                 Expect.equal
                     (Map.tryFind "h1" together)
@@ -389,8 +378,7 @@ let pickupTaskTests =
                 // says what it always said. A hundred and fifty is an eighth
                 // of the row's load here, so the other lift a pile can carry
                 // (#242) is not what this reads either.
-                let { Assignments = apart } =
-                    decide (sameTilePileColony { X = 20; Y = 10 }) Map.empty Set.empty None
+                let { Assignments = apart } = decideOn (sameTilePileColony { X = 20; Y = 10 })
 
                 Expect.equal
                     (Map.tryFind "h1" apart)
@@ -476,12 +464,7 @@ let pickupTaskTests =
                 // drop at W13S28 36,21 with nobody near enough for the
                 // reflex ever to reach it. A pile at or over the threshold
                 // is a Task and gets walked to.
-                let walk =
-                    decide
-                        (pileTaskColony 150 [ "h1", { X = 20; Y = 10 } ])
-                        Map.empty
-                        Set.empty
-                        None
+                let walk = decideOn (pileTaskColony 150 [ "h1", { X = 20; Y = 10 } ])
 
                 Expect.equal
                     (Map.tryFind "h1" walk.Assignments)
@@ -498,8 +481,7 @@ let pickupTaskTests =
 
                 // The pairwise control: the same creep on the same tile
                 // with the same everything, and 80 energy on the ground.
-                let small =
-                    decide (pileTaskColony 80 [ "h1", { X = 20; Y = 10 } ]) Map.empty Set.empty None
+                let small = decideOn (pileTaskColony 80 [ "h1", { X = 20; Y = 10 } ])
 
                 Expect.equal
                     (Map.tryFind "h1" small.Assignments)
@@ -513,11 +495,7 @@ let pickupTaskTests =
                 // walk made for the pile alone.
                 let assignmentAt amount =
                     let { Assignments = assignments } =
-                        decide
-                            (pileTaskColony amount [ "h1", { X = 20; Y = 10 } ])
-                            Map.empty
-                            Set.empty
-                            None
+                        decideOn (pileTaskColony amount [ "h1", { X = 20; Y = 10 } ])
 
                     Map.tryFind "h1" assignments
 
@@ -543,11 +521,7 @@ let pickupTaskTests =
                         Intents = intents
                         Assignments = assignments
                     } =
-                    decide
-                        (pileTaskColony 150 [ "h1", { X = 10; Y = 11 } ])
-                        Map.empty
-                        Set.empty
-                        None
+                    decideOn (pileTaskColony 150 [ "h1", { X = 10; Y = 11 } ])
 
                 Expect.equal
                     (Map.tryFind "h1" assignments)
@@ -577,11 +551,9 @@ let pickupTaskTests =
                 // it — which is why the assertion is both names and not a
                 // count.
                 let { Intents = intents } =
-                    decide
-                        (pileTaskColony 100 [ "h1", { X = 10; Y = 11 }; "h2", { X = 11; Y = 10 } ])
-                        Map.empty
-                        Set.empty
-                        None
+                    decideOn (
+                        pileTaskColony 100 [ "h1", { X = 10; Y = 11 }; "h2", { X = 11; Y = 10 } ]
+                    )
 
                 Expect.equal
                     (pickups intents |> List.sort)
@@ -600,16 +572,14 @@ let pickupTaskTests =
                 // walk already spent bought nothing.
                 let held = Map.ofList [ "h1", taskId (Pickup "pile-a") ]
 
-                let standing =
-                    decide (pileTaskColony 100 [ "h1", { X = 20; Y = 10 } ]) held Set.empty None
+                let standing = decideFrom held (pileTaskColony 100 [ "h1", { X = 20; Y = 10 } ])
 
                 Expect.contains
                     standing.Verdicts
                     (Verdict.Kept("h1", taskId (Pickup "pile-a")))
                     "at the line the walk stands"
 
-                let decayed =
-                    decide (pileTaskColony 99 [ "h1", { X = 20; Y = 10 } ]) held Set.empty None
+                let decayed = decideFrom held (pileTaskColony 99 [ "h1", { X = 20; Y = 10 } ])
 
                 Expect.contains
                     decayed.Verdicts
@@ -622,8 +592,7 @@ let pickupTaskTests =
                 // `ceil(150 / 100)` is two bodies, and travel cost cannot
                 // thin the crowd because all three stand one step from the
                 // pile's Work Area.
-                let { Assignments = split } =
-                    decide (pileTaskColony 150 crowdOfThree) Map.empty Set.empty None
+                let { Assignments = split } = decideOn (pileTaskColony 150 crowdOfThree)
 
                 Expect.equal
                     (pickersOf split "pile-a")
@@ -632,8 +601,7 @@ let pickupTaskTests =
 
                 // The pairwise control: the same three creeps on the same
                 // tiles, nothing changed but the amount.
-                let { Assignments = whole } =
-                    decide (pileTaskColony 300 crowdOfThree) Map.empty Set.empty None
+                let { Assignments = whole } = decideOn (pileTaskColony 300 crowdOfThree)
 
                 Expect.equal
                     (pickersOf whole "pile-a")
@@ -653,13 +621,11 @@ let pickupTaskTests =
                         Creeps = [ creepWith "a1" 0 50 body ]
                     }
 
-                let { Assignments = heavy } =
-                    decide (bodied [ Work; Work; Carry; Move ]) Map.empty Set.empty None
+                let { Assignments = heavy } = decideOn (bodied [ Work; Work; Carry; Move ])
 
                 Expect.equal (Map.tryFind "a1" heavy) None "more Work than Move: no Pickup"
 
-                let { Assignments = balanced } =
-                    decide (bodied [ Work; Work; Carry; Move; Move ]) Map.empty Set.empty None
+                let { Assignments = balanced } = decideOn (bodied [ Work; Work; Carry; Move; Move ])
 
                 Expect.equal
                     (Map.tryFind "a1" balanced)
@@ -676,7 +642,7 @@ let pickupTaskTests =
                         Intents = intents
                         Assignments = assignments
                     } =
-                    decide (tombColony 408 [ "h1", { X = 11; Y = 10 } ]) Map.empty Set.empty None
+                    decideOn (tombColony 408 [ "h1", { X = 11; Y = 10 } ])
 
                 Expect.equal
                     (Map.tryFind "h1" assignments)
@@ -690,8 +656,7 @@ let pickupTaskTests =
 
                 // The pairwise control: the same tombstone on the same
                 // tile, drawn dry.
-                let { Assignments = spent } =
-                    decide (tombColony 0 [ "h1", { X = 11; Y = 10 } ]) Map.empty Set.empty None
+                let { Assignments = spent } = decideOn (tombColony 0 [ "h1", { X = 11; Y = 10 } ])
 
                 Expect.equal (Map.tryFind "h1" spent) None "an empty store is no Task"
             }
@@ -882,7 +847,7 @@ let fullContainerTests =
                     }
 
                 let matched stockB =
-                    let { Verdicts = verdicts } = decide (lane stockB) Map.empty Set.empty None
+                    let { Verdicts = verdicts } = decideOn (lane stockB)
 
                     verdicts
                     |> List.tryPick (function

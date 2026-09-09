@@ -111,7 +111,7 @@ let postGarrisonTests =
                         Intents = intents
                         Verdicts = verdicts
                     } =
-                    decide colony remembered Set.empty None
+                    decideFrom remembered colony
 
                 Expect.contains
                     verdicts
@@ -178,7 +178,7 @@ let postGarrisonTests =
 
                 let remembered = Map.ofList [ "g1", taskId (Harvest "src-a") ]
 
-                let { Assignments = assignments } = decide colony remembered Set.empty None
+                let { Assignments = assignments } = decideFrom remembered colony
 
                 Expect.equal
                     (harvesters assignments "src-a" |> List.sort)
@@ -444,8 +444,7 @@ let anchorWorkCapTests =
                 // at the held ceiling the target is 21 instead of 22, and
                 // the fleet of 21 below has no gap at all.
                 let casts workers =
-                    spawnIntents
-                        (decide (anchorChargeColony false workers) Map.empty Set.empty None).Intents
+                    spawnIntents (decideOn (anchorChargeColony false workers)).Intents
                     |> List.map (fun (_, _, name) -> name)
 
                 Expect.isEmpty

@@ -353,7 +353,7 @@ let placementTests =
         "placement"
         [
             test "RCL2 on open terrain places 5 extensions checkerboard, nearest first" {
-                let { Intents = intents } = decide (atLevel 2 (openRoom 3)) Map.empty Set.empty None
+                let { Intents = intents } = decideOn (atLevel 2 (openRoom 3))
 
                 // The nearest checkerboard tile (24,24) is the Storage's pick
                 // and (24,26) and (26,24) are the two towers' — reservations,
@@ -390,7 +390,7 @@ let placementTests =
                 // The room is a ring wider than the fixtures beside it because
                 // thirty extensions, two towers, the Storage and the footings
                 // want more same-colour tiles than `openRoom 3` has.
-                let { Intents = intents } = decide (atLevel 5 (openRoom 5)) Map.empty Set.empty None
+                let { Intents = intents } = decideOn (atLevel 5 (openRoom 5))
 
                 Expect.hasLength
                     (sitesOfKind Extension intents)
@@ -413,7 +413,7 @@ let placementTests =
                 // the room reaches the level and not after. A ring wider again
                 // than the RCL5 fixture: forty extensions, two towers, the
                 // Storage and the footings want the tiles.
-                let { Intents = intents } = decide (atLevel 6 (openRoom 6)) Map.empty Set.empty None
+                let { Intents = intents } = decideOn (atLevel 6 (openRoom 6))
 
                 Expect.hasLength
                     (sitesOfKind Extension intents)
@@ -431,7 +431,7 @@ let placementTests =
                 // tiles and no fortieth of its own, so the ten RCL6 unlocks
                 // are picks the ordering had not reached rather than a
                 // reshuffle of the thirty already standing.
-                let { Intents = below } = decide (atLevel 5 (openRoom 6)) Map.empty Set.empty None
+                let { Intents = below } = decideOn (atLevel 5 (openRoom 6))
 
                 Expect.isTrue
                     (Set.isSubset
@@ -446,7 +446,7 @@ let placementTests =
             }
 
             test "below RCL2 no placement Intents are emitted" {
-                let { Intents = intents } = decide (atLevel 1 (openRoom 3)) Map.empty Set.empty None
+                let { Intents = intents } = decideOn (atLevel 1 (openRoom 3))
 
                 Expect.isEmpty
                     (placementIntents intents)
@@ -463,7 +463,7 @@ let placementTests =
                             Terrain = Map.add { X = 24; Y = 24 } Wall layer.Terrain
                         })
 
-                let { Intents = intents } = decide (atLevel 2 holed) Map.empty Set.empty None
+                let { Intents = intents } = decideOn (atLevel 2 holed)
 
                 Expect.isFalse
                     (List.contains { X = 24; Y = 24 } (placedTiles intents))
@@ -480,7 +480,7 @@ let placementTests =
                     openRoom 3
                     |> withTargets [ "rock-1", { X = 24; Y = 24 }, Structure BuiltKind.Other ]
 
-                let { Intents = intents } = decide (atLevel 2 blocked) Map.empty Set.empty None
+                let { Intents = intents } = decideOn (atLevel 2 blocked)
 
                 Expect.isFalse
                     (List.contains { X = 24; Y = 24 } (placedTiles intents))
@@ -503,7 +503,7 @@ let placementTests =
                             "site-2", { X = 26; Y = 26 }, Site BuiltKind.Extension
                         ]
 
-                let { Intents = intents } = decide (atLevel 2 room) Map.empty Set.empty None
+                let { Intents = intents } = decideOn (atLevel 2 room)
 
                 Expect.hasLength (sitesOfKind Extension intents) 1 "only the shortfall is placed"
             }
@@ -517,7 +517,7 @@ let placementTests =
                                 $"ext-{i}", { X = 22 + i; Y = 22 }, Structure BuiltKind.Extension
                         ]
 
-                let { Intents = intents } = decide (atLevel 2 room) Map.empty Set.empty None
+                let { Intents = intents } = decideOn (atLevel 2 room)
                 Expect.isEmpty (sitesOfKind Extension intents) "allowance already used up"
             }
 
@@ -526,7 +526,7 @@ let placementTests =
                 // Placement projection would have offered to a site.
                 let room = openRoom 3 |> withTargets [ "ctrl-1", { X = 24; Y = 24 }, Controller ]
 
-                let { Intents = intents } = decide (atLevel 2 room) Map.empty Set.empty None
+                let { Intents = intents } = decideOn (atLevel 2 room)
 
                 Expect.isFalse
                     (List.contains { X = 24; Y = 24 } (placedTiles intents))

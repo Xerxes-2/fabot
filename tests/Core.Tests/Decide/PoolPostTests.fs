@@ -34,7 +34,7 @@ let containerPostTests =
                         Assignments = assignments
                         Verdicts = verdicts
                     } =
-                    decide snapshot remembered Set.empty None
+                    decideFrom remembered snapshot
 
                 Expect.equal
                     (Map.tryFind "a1" assignments)
@@ -86,7 +86,7 @@ let containerPostTests =
                     }
 
                 let remembered = Map.ofList [ "w1", taskId (Harvest "src-a") ]
-                let { Verdicts = verdicts } = decide snapshot remembered Set.empty None
+                let { Verdicts = verdicts } = decideFrom remembered snapshot
 
                 Expect.contains
                     verdicts
@@ -118,7 +118,7 @@ let containerPostTests =
                         Intents = intents
                         Verdicts = verdicts
                     } =
-                    decide snapshot remembered Set.empty None
+                    decideFrom remembered snapshot
 
                 Expect.contains
                     verdicts
@@ -149,7 +149,7 @@ let containerPostTests =
                         Intents = intents
                         Verdicts = verdicts
                     } =
-                    decide snapshot remembered Set.empty None
+                    decideFrom remembered snapshot
 
                 Expect.contains
                     verdicts
@@ -180,7 +180,7 @@ let containerPostTests =
                     }
 
                 let remembered = Map.ofList [ "a1", taskId (Harvest "src-a") ]
-                let { Verdicts = verdicts } = decide snapshot remembered Set.empty None
+                let { Verdicts = verdicts } = decideFrom remembered snapshot
 
                 Expect.contains
                     verdicts
@@ -206,7 +206,7 @@ let containerPostTests =
                         Intents = intents
                         Verdicts = verdicts
                     } =
-                    decide snapshot remembered Set.empty None
+                    decideFrom remembered snapshot
 
                 Expect.contains
                     verdicts
@@ -249,7 +249,7 @@ let postCapacityTests =
                         Assignments = assignments
                         Verdicts = verdicts
                     } =
-                    decide snapshot remembered Set.empty None
+                    decideFrom remembered snapshot
 
                 Expect.contains
                     verdicts
@@ -398,7 +398,7 @@ let postCapacityTests =
                 let remembered =
                     Map.ofList [ "w1", taskId (Harvest "src-a"); "w2", taskId (Harvest "src-a") ]
 
-                let { Verdicts = verdicts } = decide snapshot remembered Set.empty None
+                let { Verdicts = verdicts } = decideFrom remembered snapshot
 
                 Expect.contains
                     verdicts
@@ -603,7 +603,7 @@ let restockTests =
                         Assignments = assignments
                         Verdicts = verdicts
                     } =
-                    decide snapshot remembered Set.empty None
+                    decideFrom remembered snapshot
 
                 Expect.contains
                     verdicts
@@ -624,7 +624,7 @@ let restockTests =
                 let snapshot = restockAt "w1" { X = 15; Y = 10 } 60
                 let remembered = Map.ofList [ "w1", taskId (Harvest "src-a") ]
 
-                let { Verdicts = verdicts } = decide snapshot remembered Set.empty None
+                let { Verdicts = verdicts } = decideFrom remembered snapshot
 
                 Expect.contains
                     verdicts
@@ -650,7 +650,7 @@ let restockTests =
                         Intents = intents
                         Verdicts = verdicts
                     } =
-                    decide snapshot remembered Set.empty None
+                    decideFrom remembered snapshot
 
                 Expect.contains
                     verdicts
@@ -685,7 +685,7 @@ let restockTests =
                         Intents = intents
                         Verdicts = verdicts
                     } =
-                    decide snapshot remembered Set.empty None
+                    decideFrom remembered snapshot
 
                 Expect.contains
                     verdicts
@@ -714,7 +714,7 @@ let restockTests =
                     }
 
                 let remembered = Map.ofList [ "a1", taskId (Harvest "src-a") ]
-                let { Intents = intents } = decide snapshot remembered Set.empty None
+                let { Intents = intents } = decideFrom remembered snapshot
 
                 Expect.isEmpty
                     (actionIntents intents)
@@ -725,7 +725,7 @@ let restockTests =
                         Sources = [ source "src-a" ]
                     }
 
-                let { Intents = intents } = decide restocked remembered Set.empty None
+                let { Intents = intents } = decideFrom remembered restocked
 
                 Expect.contains
                     (actionIntents intents)
@@ -752,7 +752,7 @@ let restockTests =
                         Intents = intents
                         Verdicts = verdicts
                     } =
-                    decide snapshot remembered Set.empty None
+                    decideFrom remembered snapshot
 
                 Expect.contains
                     verdicts
@@ -785,16 +785,14 @@ let restockTests =
                             snapshot.Spatial |> withRoads [ for x in 11..21 -> { X = x; Y = 10 } ]
                     }
 
-                let { Assignments = assignments } =
-                    decide (pavedAt { X = 19; Y = 10 } 8) Map.empty Set.empty None
+                let { Assignments = assignments } = decideOn (pavedAt { X = 19; Y = 10 } 8)
 
                 Expect.equal
                     (harvesters assignments "src-a")
                     [ "w1" ]
                     "the walk equals the wait: it leaves now and arrives as the energy does"
 
-                let { Assignments = assignments } =
-                    decide (pavedAt { X = 19; Y = 10 } 9) Map.empty Set.empty None
+                let { Assignments = assignments } = decideOn (pavedAt { X = 19; Y = 10 } 9)
 
                 Expect.equal
                     (Map.tryFind "w1" assignments)

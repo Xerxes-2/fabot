@@ -80,7 +80,7 @@ let raidedOutpostTests =
                                 "h-out1", taskId (Withdraw "can-out")
                             ]
 
-                    (decide (raidedOutpost hostiles) held Set.empty None).Verdicts
+                    (decideFrom held (raidedOutpost hostiles)).Verdicts
                     |> List.choose (function
                         | Verdict.Released(creep, task, reason) -> Some(creep, task, reason)
                         | _ -> None)

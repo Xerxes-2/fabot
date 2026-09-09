@@ -293,7 +293,7 @@ let logisticsTests =
                             |> withCreepsAt [ "w1", pos ]
                     }
 
-                let near = decide (colonyAt { X = 15; Y = 10 }) Map.empty Set.empty None
+                let near = decideOn (colonyAt { X = 15; Y = 10 })
 
                 Expect.equal
                     (Map.tryFind "w1" near.Assignments)
@@ -305,7 +305,7 @@ let logisticsTests =
                     (Verdict.Matched("w1", taskId (Withdraw "can-ctrl"), MatchFactor.TravelCost))
                     "the match speaks its Verdict: travel cost decided"
 
-                let far = decide (colonyAt { X = 12; Y = 10 }) Map.empty Set.empty None
+                let far = decideOn (colonyAt { X = 12; Y = 10 })
 
                 Expect.equal
                     (Map.tryFind "w1" far.Assignments)
@@ -348,7 +348,7 @@ let logisticsTests =
                         Assignments = assignments
                         Verdicts = verdicts
                     } =
-                    decide snapshot remembered Set.empty None
+                    decideFrom remembered snapshot
 
                 Expect.contains
                     verdicts
@@ -382,7 +382,7 @@ let logisticsTests =
                         Assignments = assignments
                         Verdicts = verdicts
                     } =
-                    decide snapshot remembered Set.empty None
+                    decideFrom remembered snapshot
 
                 Expect.contains
                     verdicts
@@ -407,7 +407,7 @@ let logisticsTests =
                     }
 
                 let remembered = Map.ofList [ "w1", taskId (Upgrade "ctrl-1") ]
-                let { Assignments = assignments } = decide snapshot remembered Set.empty None
+                let { Assignments = assignments } = decideFrom remembered snapshot
 
                 Expect.equal
                     (Map.tryFind "w1" assignments)

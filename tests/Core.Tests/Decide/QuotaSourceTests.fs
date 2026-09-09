@@ -384,8 +384,7 @@ let rowGapTests =
             // one body, so the list this returns is either empty or names
             // the row whose gap was answered first.
             let casts colony fleet =
-                spawnIntents
-                    (decide { colony with Creeps = fleet } Map.empty Set.empty None).Intents
+                spawnIntents (decideOn { colony with Creeps = fleet }).Intents
 
             // The premise every case below rests on, asserted where it is
             // used rather than assumed: at `switchUnposted`'s target of

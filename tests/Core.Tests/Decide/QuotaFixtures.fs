@@ -393,7 +393,7 @@ let internal upgraderLeadColony body life =
     }
 
 let internal leadCasts body life =
-    spawnIntents (decide (upgraderLeadColony body life) Map.empty Set.empty None).Intents
+    spawnIntents (decideOn (upgraderLeadColony body life)).Intents
 
 /// The buffer colony at the live RCL5 bank (ADR 0046): the W12S28
 /// corridor — a 3-wide plain field y = 9..11 from x = 8 to 32, the two

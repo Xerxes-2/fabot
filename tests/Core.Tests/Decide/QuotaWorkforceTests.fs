@@ -104,13 +104,10 @@ let haulerTests =
                 // floor's premise (ADR 0050) and nothing else: it is not a
                 // hauler, so the row this case counts is untouched.
                 let decideAt spawnX =
-                    decide
+                    decideOn
                         { quotaColony spawnX 5 1500 with
                             Creeps = [ anchor "a1" 0 50; worker "w1" 0 50 ]
                         }
-                        Map.empty
-                        Set.empty
-                        None
 
                 let near = decideAt 20
                 let far = decideAt 39
@@ -427,7 +424,7 @@ let haulerTests =
                         Assignments = assignments
                         Verdicts = verdicts
                     } =
-                    decide snapshot remembered Set.empty None
+                    decideFrom remembered snapshot
 
                 Expect.contains
                     verdicts

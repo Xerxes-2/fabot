@@ -158,8 +158,7 @@ let guardRowTests =
                     "a lone melee still needs only one guard"
 
                 Expect.equal
-                    (guardCasts (decide (standing2 []) Map.empty Set.empty None).Intents
-                     |> List.length)
+                    (guardCasts (decideOn (standing2 [])).Intents |> List.length)
                     2
                     "so the escalation is bought on the tick the raid is seen, an oven earlier than a rule reading our own bodies could"
             }
@@ -386,8 +385,7 @@ let guardRowTests =
                 let raid = [ hostileIn "W1N2" raidTile smallMelee ]
 
                 Expect.equal
-                    (guardCasts (decide (guardColony raid []) Map.empty Set.empty None).Intents
-                     |> List.length)
+                    (guardCasts (decideOn (guardColony raid [])).Intents |> List.length)
                     1
                     "the premise: with nothing standing, the raid casts one"
 
@@ -561,11 +559,7 @@ let supplyFloorTests =
                 // minimal worker unit from what is banked, because
                 // time-to-first-creep outranks every row including this
                 // one. Same colony, same 361, and only the fleet moves.
-                match
-                    spawnIntents
-                        (decide { deadlockColony with Creeps = [] } Map.empty Set.empty None)
-                            .Intents
-                with
+                match spawnIntents (decideOn { deadlockColony with Creeps = [] }).Intents with
                 | [ (_, body, creepName) ] ->
                     Expect.stringStarts
                         creepName

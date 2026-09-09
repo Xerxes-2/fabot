@@ -157,8 +157,7 @@ let tuningTests =
 
             test "PioneerCount is the crowd a mother lends a child" {
                 let casts colony fleet =
-                    spawnIntents
-                        (decide { colony with Creeps = fleet } Map.empty Set.empty None).Intents
+                    spawnIntents (decideOn { colony with Creeps = fleet }).Intents
 
                 let pioneers = [ for i in 1..3 -> worker $"p{i}" 0 50 ]
                 let nursery = asNursery switchHome
@@ -369,8 +368,7 @@ let tuningTests =
                 let held = taskId (Refill "spawn-1")
                 let sticky = Map.ofList [ "w1", held ]
 
-                let verdictsOf colony =
-                    (decide colony sticky Set.empty None).Verdicts
+                let verdictsOf colony = (decideFrom sticky colony).Verdicts
 
                 Expect.contains
                     (verdictsOf (dark |> tunedBy (fun t -> { t with VisionGrace = 100 })))
