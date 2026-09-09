@@ -1679,6 +1679,36 @@ let private joinedAcross
 /// the target and its own band: what the far leg answers is a field over that
 /// next room, whatever is behind it. A one-hop route makes the two the same
 /// room and this is the call it always was.
+/// The prelude both cross-room joins wear: the route to the far room, the next
+/// hop along it, the Seam band between here and *that hop* — never the target,
+/// which is the one thing about `joinedAcross`' contract a second call site can
+/// get wrong — and the join over the two legs. Each missing piece is an absence
+/// of its own (ADR 0004): no route joins nothing, and neither does an empty
+/// band.
+///
+/// The legs arrive as functions of what the prelude found rather than as values,
+/// for two reasons that are both the callers': neither leg may be flooded before
+/// there is a band to join it on, and the far leg is a fold along the chain the
+/// route named. Which bound the near leg carries stays the caller's too — a walk
+/// hands over a flood settled whole (`Drained`), a price one it can go on
+/// relaxing (`Resuming`).
+let private joinedAlong
+    (atlas: Atlas)
+    (pricing: Pricing)
+    (factor: FatigueFactor)
+    (fromRoom: string)
+    (from: Pos)
+    (toRoom: string)
+    (near: unit -> NearLeg)
+    (far: string list -> Pos -> int)
+    : (int * Pos) option =
+    match route atlas fromRoom toRoom with
+    | Some(_ :: (next :: _ as onward)) ->
+        match seams atlas fromRoom next with
+        | [] -> None
+        | band -> joinedAcross atlas pricing factor fromRoom from next band (near ()) (far onward)
+    | _ -> None
+
 let private pricedAcrossInto
     (atlas: Atlas)
     (pricing: Pricing)
@@ -1689,25 +1719,15 @@ let private pricedAcrossInto
     (targetRoom: string)
     (origins: Pos list)
     : (int * Pos) option =
-    match route atlas creepRoom targetRoom with
-    | Some(_ :: (next :: _ as onward)) ->
-        match seams atlas creepRoom next with
-        | [] -> None
-        | band ->
-            let near = flood atlas pricing creepRoom creep from
-            let far = farFieldAlong atlas pricing creep task onward origins
-
-            joinedAcross
-                atlas
-                pricing
-                (factorOf atlas creep)
-                creepRoom
-                from
-                next
-                band
-                (Resuming near)
-                (reachedIn far)
-    | _ -> None
+    joinedAlong
+        atlas
+        pricing
+        (factorOf atlas creep)
+        creepRoom
+        from
+        targetRoom
+        (fun () -> Resuming(flood atlas pricing creepRoom creep from))
+        (fun onward -> reachedIn (farFieldAlong atlas pricing creep task onward origins))
 
 /// The same price toward the ground a Task's own target names.
 let private pricedAcross
@@ -2160,26 +2180,16 @@ let haulRoundTripTicks
             let dist, _ = walkFloodFrom weights factor from
             nearestReached (reachedIn dist) goals
         else
-            match route atlas fromRoom sinkRoom with
-            | Some(_ :: (next :: _ as onward)) ->
-                match seams atlas fromRoom next with
-                | [] -> None
-                | band ->
-                    let near, _ = walkFloodFrom weights factor from
-                    let far = chainedInto atlas factor Walk onward goals
-
-                    joinedAcross
-                        atlas
-                        Walk
-                        factor
-                        fromRoom
-                        from
-                        next
-                        band
-                        (Drained near)
-                        (reachedIn far)
-                    |> Option.map fst
-            | _ -> None
+            joinedAlong
+                atlas
+                Walk
+                factor
+                fromRoom
+                from
+                sinkRoom
+                (fun () -> Drained(fst (walkFloodFrom weights factor from)))
+                (fun onward -> reachedIn (chainedInto atlas factor Walk onward goals))
+            |> Option.map fst
 
     let loaded = legTicks (loadedFactorOf body)
     let empty = legTicks (emptyFactorOf body)
