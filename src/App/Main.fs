@@ -267,18 +267,7 @@ let loop () =
 
     // Where every creep of ours stood this tick, for next tick's
     // `CreepInfo.Moved` (#225).
-    objectValues<ICreep> Game.creeps
-    |> Array.filter (fun c -> not c.spawning)
-    |> Array.map (fun c ->
-        c.name,
-        ({
-            Room = c.room.name
-            X = c.pos.x
-            Y = c.pos.y
-        }
-        : RoomPos))
-    |> Array.toList
-    |> ObserveMemory.savePositions
+    World.positions () |> ObserveMemory.savePositions
     // The Memory boundary: the assignments, all three observe channels and the
     // dead creeps' pruning, which is everything this tick persists except the
     // CPU line's own leaf — written after the last reading, so it is the single

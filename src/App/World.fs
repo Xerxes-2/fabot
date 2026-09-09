@@ -17,6 +17,11 @@ let private terrainAt (terrain: ITerrain) x y =
 
 let private posOf (p: IRoomPosition) : Pos = { X = p.x; Y = p.y }
 
+/// The tile a creep stands on, room and all — the one reading of an engine
+/// creep's position, since a `Pos` carries no room (ADR 0041) and a creep's own
+/// room is the only room its coordinates mean anything in.
+let private tileOf (c: ICreep) : RoomPos = RoomPos.at c.room.name (posOf c.pos)
+
 /// Classify an engine part-type string into the Core's body vocabulary:
 /// the reverse of the Core's one part-name table. The engine's part set is
 /// closed, so Tough is an unreachable fallback that keeps it total.
@@ -117,6 +122,8 @@ let private seenFacts
     (ours: string option)
     (terrain: RoomTerrain)
     (spawns: SpawnInfo list)
+    (standing: ICreep list)
+    (casting: ICreep list)
     (room: IRoom)
     : RoomFacts =
     // Each structure and site is classified once here and carried beside
@@ -194,19 +201,15 @@ let private seenFacts
                                 tombstones |> Array.map (fun r -> r.id, posOf r.pos)
                             ]
                     )
-                // This room's creeps, not the world's: `Game.creeps` is every
-                // creep we own wherever it stands, and a layer keyed by room
-                // name may only hold the tiles of the room it is filed under
-                // (ADR 0041). Without this scope a creep standing elsewhere
-                // would be filed here under that room's coordinates — a phantom
+                // This room's creeps, not the world's — the scope rides on the
+                // argument, `ofGame` having grouped the one sweep by room. A
+                // layer keyed by room name may hold only the tiles of the room
+                // it is filed under (ADR 0041): a creep standing elsewhere
+                // filed here under that room's coordinates is a phantom
                 // occupant the Resolver arbitrates against (ADR 0001). A creep
                 // the projection cannot place is ADR 0004's absence, which is
                 // what `Atlas.placedCreeps` already answers.
-                CreepPositions =
-                    objectValues<ICreep> Game.creeps
-                    |> Array.filter (fun c -> not c.spawning && c.room.name = room.name)
-                    |> Array.map (fun c -> c.name, posOf c.pos)
-                    |> Map.ofArray
+                CreepPositions = standing |> List.map (fun c -> c.name, posOf c.pos) |> Map.ofList
                 // Structures a creep cannot stand on block their tile; the
                 // kinds it can are the Core's own predicate (Screeps
                 // OBSTACLE_OBJECT_TYPES).
@@ -358,11 +361,9 @@ let private seenFacts
         Spawns = spawns
         // The bodies still gestating in this room's ovens (#156).
         Casting =
-            objectValues<ICreep> Game.creeps
-            |> Array.filter (fun c -> c.spawning && c.room.name = room.name)
-            |> Array.map (fun c ->
+            casting
+            |> List.map (fun c ->
                 c.body |> Array.map (fun p -> bodyPartOf p.``type``) |> Array.toList)
-            |> Array.toList
         Refillables =
             mine
             |> Array.filter (fun (_, kind) -> isRefillable kind)
@@ -411,6 +412,8 @@ let private seenFacts
                 {
                     Id = c.id
                     Owner = c.owner.username
+                    // The room being scanned and not the creep's own field: a
+                    // hostile is found *in* this room, which is what places it.
                     Pos = RoomPos.at room.name (posOf c.pos)
                     Body = c.body |> Array.map (fun p -> bodyPartOf p.``type``) |> Array.toList
                     TicksToLive = c.ticksToLive
@@ -454,7 +457,13 @@ let private roomSeen (roomName: string) : IRoom option =
 /// entry by entry until vision returns (ADR 0004) rather than a "blind" state
 /// anything models: unplaced geometry is unpriceable, enters no Task and blocks
 /// no action.
-let private factsOf (ours: string option) (spawns: SpawnInfo list) (roomName: string) : RoomFacts =
+let private factsOf
+    (ours: string option)
+    (spawns: SpawnInfo list)
+    (standing: ICreep list)
+    (casting: ICreep list)
+    (roomName: string)
+    : RoomFacts =
     let terrain = terrainOf roomName
 
     match roomSeen roomName with
@@ -470,7 +479,7 @@ let private factsOf (ours: string option) (spawns: SpawnInfo list) (roomName: st
             // from the same sweep as the seen half.
             Spawns = spawns
         }
-    | Some room -> seenFacts ours terrain spawns room
+    | Some room -> seenFacts ours terrain spawns standing casting room
 
 /// The rooms the world holds facts for this tick: every room the engine
 /// answered `Game.rooms` with — which is every room we can see — and, beside
@@ -545,6 +554,28 @@ let ofGame (maxHops: int) (colonies: Colony list) (lastPositions: Map<string, Ro
         |> List.map (fun (room, entries) -> room, entries |> List.map snd)
         |> Map.ofList
 
+    // Every creep we own, swept once for the tick and grouped by the room it
+    // stands in, the standing apart from the still-gestating (#156) — two facts
+    // a room is asked for and one traversal for both. The scope is ADR 0041's:
+    // a layer keyed by room name may hold only the tiles of the room it is
+    // filed under, and an argument states that where a predicate at each
+    // reader would only promise it. `List.groupBy` keeps the engine's own
+    // order within a room, which `World.creepColonies` reads (ADR 0047
+    // decision 2).
+    let standing, casting =
+        objectValues<ICreep> Game.creeps
+        |> Array.toList
+        |> List.partition (fun c -> not c.spawning)
+
+    let byRoom (creeps: ICreep list) =
+        creeps |> List.groupBy (fun c -> c.room.name) |> Map.ofList
+
+    let standingByRoom = byRoom standing
+    let castingByRoom = byRoom casting
+
+    let inRoom (grouped: Map<string, ICreep list>) roomName =
+        Map.tryFind roomName grouped |> Option.defaultValue []
+
     // The rooms vision answered for this tick — `Game.rooms` is exactly that
     // (`roomSeen`) — read once and used twice: it decides which rooms the
     // world holds facts for, and which of them this tick may stamp a sighting
@@ -555,7 +586,12 @@ let ofGame (maxHops: int) (colonies: Colony list) (lastPositions: Map<string, Ro
         worldRooms maxHops colonies seen
         |> List.map (fun roomName ->
             roomName,
-            factsOf ours (Map.tryFind roomName spawnsByRoom |> Option.defaultValue []) roomName)
+            factsOf
+                ours
+                (Map.tryFind roomName spawnsByRoom |> Option.defaultValue [])
+                (inRoom standingByRoom roomName)
+                (inRoom castingByRoom roomName)
+                roomName)
 
     {
         Time = Game.time
@@ -582,9 +618,8 @@ let ofGame (maxHops: int) (colonies: Colony list) (lastPositions: Map<string, Ro
         // own order — whose each of these is this tick is
         // `World.creepColonies`' answer (ADR 0047 decision 2).
         Creeps =
-            objectValues<ICreep> Game.creeps
-            |> Array.filter (fun c -> not c.spawning)
-            |> Array.map (fun c ->
+            standing
+            |> List.map (fun c ->
                 {
                     Room = c.room.name
                     Info =
@@ -612,16 +647,20 @@ let ofGame (maxHops: int) (colonies: Colony list) (lastPositions: Map<string, Ro
                                 |> Map.ofArray
                             Moved =
                                 match Map.tryFind c.name lastPositions with
-                                | Some last ->
-                                    last
-                                    <> {
-                                           Room = c.room.name
-                                           X = c.pos.x
-                                           Y = c.pos.y
-                                       }
+                                | Some last -> last <> tileOf c
                                 | None -> false
                         }
                 }
                 : WorldCreep)
-            |> Array.toList
     }
+
+/// Where every creep of ours stands this tick, for next tick's
+/// `CreepInfo.Moved` (#225). Here and not at the Memory boundary that writes it
+/// because this module is the only code that reads the game's objects: the same
+/// sweep and the same gestating filter `ofGame`'s own `Creeps` uses, so the two
+/// ends of that loop cannot part.
+let positions () : (string * RoomPos) list =
+    objectValues<ICreep> Game.creeps
+    |> Array.filter (fun c -> not c.spawning)
+    |> Array.map (fun c -> c.name, tileOf c)
+    |> Array.toList
