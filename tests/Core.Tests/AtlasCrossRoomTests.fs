@@ -7,6 +7,59 @@ open Fabot.Core.Types
 open Fabot.Core.Atlas
 open Fabot.Core.Tests.AtlasFixtures
 
+/// Two exits north, and the near one is the wrong one: the creep at (25,10)
+/// reaches (25,0) in nine steps and (27,0) in ten, but the outpost's column
+/// below (25,49) is swamp all the way down while the one below (27,49) is
+/// plain. The minimum is over the whole band — 10 + 1 + 8 against 9 + 1 + 36 —
+/// which is the arithmetic ADR 0041 pays a Seam band for, and it is #142's trap
+/// for the mover besides: one that minimised its near leg again would walk the
+/// creep up column 25 to a crossing the price was never paid at. The far ring
+/// is the caller's, because walling a crossing off is how both the price and
+/// the step are shown falling back to the other one.
+let private twoExitAcross farRing =
+    let home =
+        { RoomLayer.empty with
+            Terrain =
+                Map.ofList (
+                    plainLine
+                        [
+                            for y in 1..10 -> { X = 25; Y = y }
+                            for x in 26..27 -> { X = x; Y = 10 }
+                            for y in 1..9 -> { X = 27; Y = y }
+                        ]
+                )
+            CreepPositions = Map.ofList [ "w", { X = 25; Y = 10 } ]
+        }
+
+    let outpost =
+        { RoomLayer.empty with
+            Terrain =
+                Map.ofList
+                    [
+                        for x in 25..27 -> { X = x; Y = 41 }, Plain
+                        for y in 42..48 -> { X = 25; Y = y }, Swamp
+                        for y in 42..48 -> { X = 27; Y = y }, Plain
+                    ]
+            TargetPositions = Map.ofList [ "src-out", { X = 26; Y = 40 } ]
+        }
+
+    northOf
+        home
+        [ { X = 25; Y = 0 }, Plain; { X = 26; Y = 0 }, Wall; { X = 27; Y = 0 }, Plain ]
+        outpost
+        farRing
+        [ "src-out", Source ]
+        [ worker "w" ]
+
+/// Both crossings open — the fixture the two prices and the step are pinned on.
+let private twoExitBothOpen =
+    twoExitAcross
+        [
+            { X = 25; Y = 49 }, Plain
+            { X = 26; Y = 49 }, Wall
+            { X = 27; Y = 49 }, Plain
+        ]
+
 [<Tests>]
 let crossRoomTests =
     testList
@@ -93,52 +146,11 @@ let crossRoomTests =
                 // while the one below (27,49) is plain. The minimum is over
                 // the whole band — 10 + 1 + 8 against 9 + 1 + 36 — which is
                 // the arithmetic ADR 0041 pays a Seam band for.
-                let home =
-                    { RoomLayer.empty with
-                        Terrain =
-                            Map.ofList (
-                                plainLine
-                                    [
-                                        for y in 1..10 -> { X = 25; Y = y }
-                                        for x in 26..27 -> { X = x; Y = 10 }
-                                        for y in 1..9 -> { X = 27; Y = y }
-                                    ]
-                            )
-                        CreepPositions = Map.ofList [ "w", { X = 25; Y = 10 } ]
-                    }
-
-                let outpost =
-                    { RoomLayer.empty with
-                        Terrain =
-                            Map.ofList
-                                [
-                                    for x in 25..27 -> { X = x; Y = 41 }, Plain
-                                    for y in 42..48 -> { X = 25; Y = y }, Swamp
-                                    for y in 42..48 -> { X = 27; Y = y }, Plain
-                                ]
-                        TargetPositions = Map.ofList [ "src-out", { X = 26; Y = 40 } ]
-                    }
-
-                let across farRing =
-                    northOf
-                        home
-                        [
-                            { X = 25; Y = 0 }, Plain
-                            { X = 26; Y = 0 }, Wall
-                            { X = 27; Y = 0 }, Plain
-                        ]
-                        outpost
-                        farRing
-                        [ "src-out", Source ]
-                        [ worker "w" ]
-
-                let bothOpen =
-                    across
-                        [
-                            { X = 25; Y = 49 }, Plain
-                            { X = 26; Y = 49 }, Wall
-                            { X = 27; Y = 49 }, Plain
-                        ]
+                // The two-exit border this file states once, up top: the two
+                // tests that stand on it are the price's and the mover's, and
+                // agreeing on the ground is the whole of what they compare.
+                let across = twoExitAcross
+                let bothOpen = twoExitBothOpen
 
                 Expect.hasLength (seams bothOpen "W1N1" "W1N2") 2 "the premise: two crossings"
 
@@ -789,52 +801,11 @@ let crossRoomStepTests =
                 // second minimisation — would walk the creep up column 25
                 // to a crossing it was never priced at, and the two answers
                 // would agree on every number and split on this one.
-                let home =
-                    { RoomLayer.empty with
-                        Terrain =
-                            Map.ofList (
-                                plainLine
-                                    [
-                                        for y in 1..10 -> { X = 25; Y = y }
-                                        for x in 26..27 -> { X = x; Y = 10 }
-                                        for y in 1..9 -> { X = 27; Y = y }
-                                    ]
-                            )
-                        CreepPositions = Map.ofList [ "w", { X = 25; Y = 10 } ]
-                    }
-
-                let outpost =
-                    { RoomLayer.empty with
-                        Terrain =
-                            Map.ofList
-                                [
-                                    for x in 25..27 -> { X = x; Y = 41 }, Plain
-                                    for y in 42..48 -> { X = 25; Y = y }, Swamp
-                                    for y in 42..48 -> { X = 27; Y = y }, Plain
-                                ]
-                        TargetPositions = Map.ofList [ "src-out", { X = 26; Y = 40 } ]
-                    }
-
-                let across farRing =
-                    northOf
-                        home
-                        [
-                            { X = 25; Y = 0 }, Plain
-                            { X = 26; Y = 0 }, Wall
-                            { X = 27; Y = 0 }, Plain
-                        ]
-                        outpost
-                        farRing
-                        [ "src-out", Source ]
-                        [ worker "w" ]
-
-                let bothOpen =
-                    across
-                        [
-                            { X = 25; Y = 49 }, Plain
-                            { X = 26; Y = 49 }, Wall
-                            { X = 27; Y = 49 }, Plain
-                        ]
+                // The two-exit border this file states once, up top: the two
+                // tests that stand on it are the price's and the mover's, and
+                // agreeing on the ground is the whole of what they compare.
+                let across = twoExitAcross
+                let bothOpen = twoExitBothOpen
 
                 Expect.equal
                     (walkTicks bothOpen "w" (Harvest "src-out"))

@@ -43,6 +43,39 @@ let private candidateColony (creeps: (CreepInfo * Pos) list) =
         Declared = [ SpatialInfo.homeName colony.Spatial; "W1N2" ]
     }
 
+/// A second [[outpost]] west of home: a container site in W2N1, the border ring
+/// that joins the two rooms, home's own western corridor made plain, and a
+/// crowd of four loaded workers standing in it. Where the crowd stands is the
+/// caller's — W2N1 lies west of W1N1, so the Seam to it is home's x = 0 edge,
+/// and whether the crowd stands *beside* that edge or one tile off it is the
+/// fact one of the two testLists that take this is about and the other is not.
+let private withWestOutpost (crowdX: int) (colony: ColonyView) =
+    let west =
+        { RoomLayer.empty with
+            Terrain = Map.ofList [ for x in 45..49 -> { X = x; Y = 2 }, Plain ]
+            TargetPositions = Map.ofList [ "site-west", { X = 48; Y = 2 } ]
+        }
+
+    { colony with
+        ConstructionSites = colony.ConstructionSites @ [ { Id = "site-west" } ]
+        Creeps = [ for i in 1..4 -> worker $"w{i}" 50 0 ]
+        Spatial =
+            { colony.Spatial with
+                Borders = Map.add "W2N1" plainRing colony.Spatial.Borders
+                TargetKinds =
+                    Map.add "site-west" (Site BuiltKind.Container) colony.Spatial.TargetKinds
+            }
+            |> withNeighbour "W2N1" west
+            |> withHome (fun layer ->
+                { layer with
+                    Terrain =
+                        (layer.Terrain, [ for x in 0..10 -> { X = x; Y = 2 } ])
+                        ||> List.fold (fun acc pos -> Map.add pos Plain acc)
+                    CreepPositions =
+                        Map.ofList [ for i in 1..4 -> $"w{i}", { X = crowdX + i; Y = 2 } ]
+                })
+    }
+
 [<Tests>]
 let claimTests =
     testList
@@ -847,36 +880,7 @@ let nurseryTests =
                 // room is ours yet. The west site is the near one, so the
                 // budget it carries is read off how many of the four
                 // workers stop there before the rest walk on.
-                let twoOutposts (colony: ColonyView) =
-                    let west =
-                        { RoomLayer.empty with
-                            Terrain = Map.ofList [ for x in 45..49 -> { X = x; Y = 2 }, Plain ]
-                            TargetPositions = Map.ofList [ "site-west", { X = 48; Y = 2 } ]
-                        }
-
-                    { colony with
-                        ConstructionSites = colony.ConstructionSites @ [ { Id = "site-west" } ]
-                        Creeps = [ for i in 1..4 -> worker $"w{i}" 50 0 ]
-                        Spatial =
-                            { colony.Spatial with
-                                Borders = Map.add "W2N1" plainRing colony.Spatial.Borders
-                                TargetKinds =
-                                    Map.add
-                                        "site-west"
-                                        (Site BuiltKind.Container)
-                                        colony.Spatial.TargetKinds
-                            }
-                            |> withNeighbour "W2N1" west
-                            |> withHome (fun layer ->
-                                { layer with
-                                    Terrain =
-                                        (layer.Terrain, [ for x in 0..10 -> { X = x; Y = 2 } ])
-                                        ||> List.fold (fun acc pos -> Map.add pos Plain acc)
-                                    CreepPositions =
-                                        Map.ofList
-                                            [ for i in 1..4 -> $"w{i}", { X = 2 + i; Y = 2 } ]
-                                })
-                    }
+                let twoOutposts = withWestOutpost 2
 
                 let sites control =
                     northBorderColony { X = 10; Y = 38 }
@@ -1097,6 +1101,19 @@ let private claimedChild =
 
 let private raisingMother = withNorthSpawn claimedChild
 
+/// The same child once its own spawn *stands*: every fact `raisingMother` has
+/// but the human's spawn site, which is a `ConstructionSite` and so a Build in
+/// the child's room. The cases below are about what a raised child's room is
+/// worked for once nothing in it is being built, so they cannot read the pair
+/// above and state this rung for themselves.
+let private raisedChild =
+    northBorderColony { X = 10; Y = 38 }
+    |> withNorthOutpost None
+    |> withNorthController { X = 10; Y = 45 }
+    |> withHomeController { X = 10; Y = 5 }
+    |> asNursery
+    |> withNorthSpawn
+
 /// The one worker moved out of the home corridor into the child's room —
 /// where a [[pioneer]] that has crossed the [[seam]] actually stands, and
 /// the only place from which the child's Upgrade is the near one.
@@ -1243,14 +1260,7 @@ let bootstrapTests =
                 // Read without the site, so the pool holds exactly the two
                 // Upgrades and the Matched factor names that one
                 // comparison rather than reporting on some third candidate.
-                let twoUpgrades =
-                    northBorderColony { X = 10; Y = 38 }
-                    |> withNorthOutpost None
-                    |> withNorthController { X = 10; Y = 45 }
-                    |> withHomeController { X = 10; Y = 5 }
-                    |> asNursery
-                    |> withNorthSpawn
-                    |> loaded
+                let twoUpgrades = raisedChild |> loaded
 
                 Expect.equal
                     (matchOf twoUpgrades)
@@ -1271,15 +1281,7 @@ let bootstrapTests =
                 // on the room's flag alone. The mother's own controller is
                 // not under safe mode in either case.
                 let childUnder (safe: bool) =
-                    let colony =
-                        northBorderColony { X = 10; Y = 38 }
-                        |> withNorthOutpost None
-                        |> withNorthController { X = 10; Y = 45 }
-                        |> withHomeController { X = 10; Y = 5 }
-                        |> asNursery
-                        |> withNorthSpawn
-                        |> loaded
-                        |> standingNorth { X = 10; Y = 44 }
+                    let colony = raisedChild |> loaded |> standingNorth { X = 10; Y = 44 }
 
                     { colony with
                         RoomControl =
@@ -1330,12 +1332,7 @@ let bootstrapTests =
                     }
 
                 let withSite =
-                    northBorderColony { X = 10; Y = 38 }
-                    |> withNorthOutpost None
-                    |> withNorthController { X = 10; Y = 45 }
-                    |> withHomeController { X = 10; Y = 5 }
-                    |> asNursery
-                    |> withNorthSpawn
+                    raisedChild
                     |> withNorthSite "site-ext" BuiltKind.Extension { X = 12; Y = 44 }
                     |> loaded
 
@@ -1354,13 +1351,7 @@ let bootstrapTests =
                 let names = [ "w"; "w2"; "w3"; "w4" ]
 
                 let crowd =
-                    let colony =
-                        northBorderColony { X = 10; Y = 38 }
-                        |> withNorthOutpost None
-                        |> withNorthController { X = 10; Y = 45 }
-                        |> withHomeController { X = 10; Y = 5 }
-                        |> asNursery
-                        |> withNorthSpawn
+                    let colony = raisedChild
 
                     { colony with
                         Creeps = names |> List.map (fun name -> worker name 50 0)
@@ -1401,13 +1392,7 @@ let bootstrapTests =
                 // commuting body, so the borrowed Upgrade is inapplicable to
                 // it and its own controller stays the one Task it exists
                 // for. Same room as above, the body the only thing moved.
-                let standing =
-                    northBorderColony { X = 10; Y = 38 }
-                    |> withNorthOutpost None
-                    |> withNorthController { X = 10; Y = 45 }
-                    |> withHomeController { X = 10; Y = 5 }
-                    |> asNursery
-                    |> withNorthSpawn
+                let standing = raisedChild
 
                 let upgrader =
                     { standing with
@@ -1444,15 +1429,7 @@ let bootstrapTests =
                 // carry `deadlineRank`, the ranks would tie and travel cost
                 // would keep the body where it stands — so this case is
                 // exactly the mutation the narrowing exists to fail.
-                let twoUpgrades =
-                    northBorderColony { X = 10; Y = 38 }
-                    |> withNorthOutpost None
-                    |> withNorthController { X = 10; Y = 45 }
-                    |> withHomeController { X = 10; Y = 5 }
-                    |> asNursery
-                    |> withNorthSpawn
-                    |> loaded
-                    |> standingNorth { X = 10; Y = 44 }
+                let twoUpgrades = raisedChild |> loaded |> standingNorth { X = 10; Y = 44 }
 
                 // Level 2's full timer is 10,000 and the deadline is half of
                 // it, so 4,000 is inside and 20,000 — `controllerAt`'s own —
@@ -2228,39 +2205,7 @@ let borrowedRoomBudgetTests =
                 // split the budget of two, one apiece; claimed as a nursery
                 // the north site is the child's own, so the west site has
                 // the whole budget — two builders, where it had one.
-                let westward (colony: ColonyView) =
-                    let west =
-                        { RoomLayer.empty with
-                            Terrain = Map.ofList [ for x in 45..49 -> { X = x; Y = 2 }, Plain ]
-                            TargetPositions = Map.ofList [ "site-west", { X = 48; Y = 2 } ]
-                        }
-
-                    { colony with
-                        ConstructionSites = colony.ConstructionSites @ [ { Id = "site-west" } ]
-                        Creeps = [ for i in 1..4 -> worker $"w{i}" 50 0 ]
-                        Spatial =
-                            { colony.Spatial with
-                                Borders = Map.add "W2N1" plainRing colony.Spatial.Borders
-                                TargetKinds =
-                                    Map.add
-                                        "site-west"
-                                        (Site BuiltKind.Container)
-                                        colony.Spatial.TargetKinds
-                            }
-                            |> withNeighbour "W2N1" west
-                            |> withHome (fun layer ->
-                                { layer with
-                                    Terrain =
-                                        (layer.Terrain, [ for x in 0..10 -> { X = x; Y = 2 } ])
-                                        ||> List.fold (fun acc pos -> Map.add pos Plain acc)
-                                    // W2N1 lies west of W1N1, so the Seam to it is
-                                    // the home room's x = 0 edge: the crowd stands
-                                    // beside it.
-                                    CreepPositions =
-                                        Map.ofList
-                                            [ for i in 1..4 -> $"w{i}", { X = 1 + i; Y = 2 } ]
-                                })
-                    }
+                let westward = withWestOutpost 1
 
                 let westBuilders control =
                     let colony =

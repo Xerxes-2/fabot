@@ -672,20 +672,7 @@ let arbitrationTests =
                 // builder's only path runs through the seated harvester's
                 // tile — it must not stand idle while a swap (or an in-area
                 // shuffle by the harvester) would let it pass.
-                let terrain = [ for x in 8..15 -> { X = x; Y = 12 }, Plain ]
-
-                let snapshot =
-                    { bareRespawn with
-                        Sources = [ source "src-a" ]
-                        ConstructionSites = [ { Id = "site-1" } ]
-                        Creeps = [ worker "har" 0 50; worker "bob" 50 0 ]
-                        Spatial =
-
-                            spatial
-                                [ "src-a", { X = 10; Y = 11 }; "site-1", { X = 15; Y = 12 } ]
-                                terrain
-                            |> withCreepsAt [ "har", { X = 10; Y = 12 }; "bob", { X = 9; Y = 12 } ]
-                    }
+                let snapshot = blockedLane [ 12 ] (worker "har" 0 50)
 
                 let assigned = [ "har", Harvest "src-a"; "bob", Build "site-1" ]
                 let moves = resolveOn snapshot assigned |> moveIntents
@@ -706,20 +693,7 @@ let arbitrationTests =
                 // with ERR_TIRED, so the Resolver issues none — neither to
                 // the harvester nor to the builder whose only path runs
                 // through its blocked tile.
-                let terrain = [ for x in 8..15 -> { X = x; Y = 12 }, Plain ]
-
-                let snapshot =
-                    { bareRespawn with
-                        Sources = [ source "src-a" ]
-                        ConstructionSites = [ { Id = "site-1" } ]
-                        Creeps = [ { worker "har" 0 50 with Fatigue = 4 }; worker "bob" 50 0 ]
-                        Spatial =
-
-                            spatial
-                                [ "src-a", { X = 10; Y = 11 }; "site-1", { X = 15; Y = 12 } ]
-                                terrain
-                            |> withCreepsAt [ "har", { X = 10; Y = 12 }; "bob", { X = 9; Y = 12 } ]
-                    }
+                let snapshot = blockedLane [ 12 ] { worker "har" 0 50 with Fatigue = 4 }
 
                 let assigned = [ "har", Harvest "src-a"; "bob", Build "site-1" ]
 
@@ -761,22 +735,7 @@ let arbitrationTests =
                 // prices that tile dearer for the standing creep, so the
                 // builder sidesteps into the lane instead of displacing the
                 // Seat.
-                let terrain =
-                    [ for x in 8..15 -> { X = x; Y = 12 }, Plain ]
-                    @ [ for x in 8..15 -> { X = x; Y = 13 }, Plain ]
-
-                let snapshot =
-                    { bareRespawn with
-                        Sources = [ source "src-a" ]
-                        ConstructionSites = [ { Id = "site-1" } ]
-                        Creeps = [ worker "har" 0 50; worker "bob" 50 0 ]
-                        Spatial =
-
-                            spatial
-                                [ "src-a", { X = 10; Y = 11 }; "site-1", { X = 15; Y = 12 } ]
-                                terrain
-                            |> withCreepsAt [ "har", { X = 10; Y = 12 }; "bob", { X = 9; Y = 12 } ]
-                    }
+                let snapshot = blockedLane [ 12; 13 ] (worker "har" 0 50)
 
                 let assigned = [ "har", Harvest "src-a"; "bob", Build "site-1" ]
 

@@ -7,6 +7,22 @@ open Fabot.Core.Types
 open Fabot.Core.Atlas
 open Fabot.Core.Tests.AtlasFixtures
 
+/// Corridor y = 10, x = 10..20, walled off either side: the container tile at
+/// (10,10) and the spawn structure standing at (20,10), an obstacle — so the
+/// one tile a body can be born on is (19,10), nine steps from the far end.
+/// The roads and the standing bodies are the two things a walk over it is
+/// priced against, and the two testLists below vary one each.
+let private corridorWith roads creeps =
+    spatial [ "spawn-1", { X = 20; Y = 10 } ] [ for x in 10..20 -> { X = x; Y = 10 }, Plain ]
+    |> withHome (fun layer ->
+        { layer with
+            Obstacles = Set.singleton { X = 20; Y = 10 }
+            Roads = roads
+            CreepPositions = Map.ofList creeps
+        })
+    |> snapshotWith []
+    |> ofView
+
 [<Tests>]
 let trunkPathTests =
     testList
@@ -231,22 +247,6 @@ let haulRoundTripTests =
     testList
         "atlas haulRoundTripTicks"
         [
-            // Corridor y = 10, x = 10..20: the container tile at (10,10),
-            // the spawn structure standing at (20,10) — nine steps to the
-            // one spawn-adjacent goal, (19,10).
-            let corridorWith roads creeps =
-                spatial
-                    [ "spawn-1", { X = 20; Y = 10 } ]
-                    [ for x in 10..20 -> { X = x; Y = 10 }, Plain ]
-                |> withHome (fun layer ->
-                    { layer with
-                        Obstacles = Set.singleton { X = 20; Y = 10 }
-                        Roads = roads
-                        CreepPositions = Map.ofList creeps
-                    })
-                |> snapshotWith []
-                |> ofView
-
             // Both tiles are the colony's own room's, and these fixtures
             // file it under the empty name (`SpatialInfo.homeName`): since
             // #149 the two rooms ride on the API, because a `Pos` names
@@ -355,23 +355,6 @@ let castWalkTicksTests =
     testList
         "atlas castWalkTicks"
         [
-            // Corridor y = 10, x = 10..20: the spawn structure standing at
-            // (20,10) — an obstacle, so the one tile a replacement can be
-            // born on is (19,10) — and the tile it must reach nine steps
-            // further on at (10,10).
-            let corridorWith roads creeps =
-                spatial
-                    [ "spawn-1", { X = 20; Y = 10 } ]
-                    [ for x in 10..20 -> { X = x; Y = 10 }, Plain ]
-                |> withHome (fun layer ->
-                    { layer with
-                        Obstacles = Set.singleton { X = 20; Y = 10 }
-                        Roads = roads
-                        CreepPositions = Map.ofList creeps
-                    })
-                |> snapshotWith []
-                |> ofView
-
             /// The Anchor row's shape empty: four Work and a Carry over one
             /// Move, so a plain step costs 8 units.
             let anchorBody = [ Work; Work; Work; Work; Carry; Move ]

@@ -306,3 +306,29 @@ let surplusColony =
         Refillables = [ refillable "tower-1" 500 BuiltKind.Tower ]
         Creeps = [ worker "w1" 50 0 ]
     }
+
+/// The one-lane corridor a Seat sits in the middle of: y = 12 from x = 8 to 15,
+/// the source at (10,11) seating `har` on (10,12), the site at the far end at
+/// (15,12), and `bob` queued behind the Seat at (9,12). Its only path to the
+/// site runs through the tile `har` stands on, which is the whole of what the
+/// cases over this corridor are about.
+///
+/// Two things vary and no more. **Which rows exist**: one lane leaves `bob`
+/// nothing to sidestep into, two give it the parallel lane the occupancy
+/// surcharge prices it into (ADR 0008). And **`har` itself**: a fatigued Seat
+/// blocks its tile for the tick where a rested one can be shuffled off it (ADR
+/// 0001), so who ends up standing down is a fact about that body.
+let blockedLane (rows: int list) har =
+    { bareRespawn with
+        Sources = [ source "src-a" ]
+        ConstructionSites = [ { Id = "site-1" } ]
+        Creeps = [ har; worker "bob" 50 0 ]
+        Spatial =
+            spatial
+                [ "src-a", { X = 10; Y = 11 }; "site-1", { X = 15; Y = 12 } ]
+                [
+                    for y in rows do
+                        for x in 8..15 -> { X = x; Y = y }, Plain
+                ]
+            |> withCreepsAt [ "har", { X = 10; Y = 12 }; "bob", { X = 9; Y = 12 } ]
+    }

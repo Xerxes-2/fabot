@@ -6,6 +6,30 @@ open Fabot.Core.Types
 open Fabot.Core.Atlas
 open Fabot.Core.Tests.AtlasFixtures
 
+/// Two lanes to one source: the straight lane at x = 10 running from (10,14) up
+/// to the Seat at (10,11), and a parallel one at x = 11 that reaches the same
+/// Seat in as many steps. Everything is plain but the two mid-lane tiles, whose
+/// terrain the caller names, and the bodies standing are the caller's too —
+/// which is the whole of what the cases below vary. Swamp in the lane bends the
+/// step out of it; so does a body parked in it, and that second bend is the
+/// occupancy surcharge's alone (ADR 0008).
+let private twoLaneAtlas midTerrain creeps =
+    spatial
+        [ "src-a", { X = 10; Y = 10 } ]
+        [
+            { X = 10; Y = 10 }, Wall
+            { X = 10; Y = 11 }, Plain
+            { X = 10; Y = 12 }, midTerrain
+            { X = 10; Y = 13 }, midTerrain
+            { X = 10; Y = 14 }, Plain
+            { X = 11; Y = 11 }, Plain
+            { X = 11; Y = 12 }, Plain
+            { X = 11; Y = 13 }, Plain
+        ]
+    |> withCreepsAt creeps
+    |> snapshotWith (creeps |> List.map (fst >> worker))
+    |> ofView
+
 [<Tests>]
 let walkTests =
     testList
@@ -207,22 +231,7 @@ let firstStepTests =
             test "the first step follows the cheapest path, detouring around swamp" {
                 // Straight lane x = 10 is swamp; the lane at x = 11 is plain
                 // and reaches a Seat in as many steps.
-                let atlas =
-                    spatial
-                        [ "src-a", { X = 10; Y = 10 } ]
-                        [
-                            { X = 10; Y = 10 }, Wall
-                            { X = 10; Y = 11 }, Plain
-                            { X = 10; Y = 12 }, Swamp
-                            { X = 10; Y = 13 }, Swamp
-                            { X = 10; Y = 14 }, Plain
-                            { X = 11; Y = 11 }, Plain
-                            { X = 11; Y = 12 }, Plain
-                            { X = 11; Y = 13 }, Plain
-                        ]
-                    |> withCreepsAt [ "w", { X = 10; Y = 14 } ]
-                    |> snapshotWith [ worker "w" ]
-                    |> ofView
+                let atlas = twoLaneAtlas Swamp [ "w", { X = 10; Y = 14 } ]
 
                 Expect.equal
                     (firstStepFor atlas "w" (Harvest "src-a"))
@@ -234,22 +243,7 @@ let firstStepTests =
                 // Same shape as the swamp detour, but on all-plain ground
                 // with a creep parked mid-lane: the occupancy surcharge
                 // sends the first step into the free lane at x = 11.
-                let atlas =
-                    spatial
-                        [ "src-a", { X = 10; Y = 10 } ]
-                        [
-                            { X = 10; Y = 10 }, Wall
-                            { X = 10; Y = 11 }, Plain
-                            { X = 10; Y = 12 }, Plain
-                            { X = 10; Y = 13 }, Plain
-                            { X = 10; Y = 14 }, Plain
-                            { X = 11; Y = 11 }, Plain
-                            { X = 11; Y = 12 }, Plain
-                            { X = 11; Y = 13 }, Plain
-                        ]
-                    |> withCreepsAt [ "w", { X = 10; Y = 14 }; "b", { X = 10; Y = 13 } ]
-                    |> snapshotWith [ worker "w"; worker "b" ]
-                    |> ofView
+                let atlas = twoLaneAtlas Plain [ "w", { X = 10; Y = 14 }; "b", { X = 10; Y = 13 } ]
 
                 Expect.equal
                     (firstStepFor atlas "w" (Harvest "src-a"))
@@ -297,22 +291,7 @@ let firstStepIgnoringTrafficTests =
                 // today's crowd priced in and once without. A creep parked
                 // mid-lane bends the priced step into the parallel lane;
                 // the blind step walks straight at it.
-                let atlas =
-                    spatial
-                        [ "src-a", { X = 10; Y = 10 } ]
-                        [
-                            { X = 10; Y = 10 }, Wall
-                            { X = 10; Y = 11 }, Plain
-                            { X = 10; Y = 12 }, Plain
-                            { X = 10; Y = 13 }, Plain
-                            { X = 10; Y = 14 }, Plain
-                            { X = 11; Y = 11 }, Plain
-                            { X = 11; Y = 12 }, Plain
-                            { X = 11; Y = 13 }, Plain
-                        ]
-                    |> withCreepsAt [ "w", { X = 10; Y = 14 }; "b", { X = 10; Y = 13 } ]
-                    |> snapshotWith [ worker "w"; worker "b" ]
-                    |> ofView
+                let atlas = twoLaneAtlas Plain [ "w", { X = 10; Y = 14 }; "b", { X = 10; Y = 13 } ]
 
                 Expect.equal
                     (firstStepFor atlas "w" (Harvest "src-a"))

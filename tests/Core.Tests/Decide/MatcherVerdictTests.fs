@@ -19,20 +19,7 @@ let resolverVerdictTests =
                 // The one-lane corridor with a fatigued seated harvester: har
                 // sits arbitration out with its tile blocked, and bob — whose
                 // only path runs through that tile — stands down for the tick.
-                let terrain = [ for x in 8..15 -> { X = x; Y = 12 }, Plain ]
-
-                let snapshot =
-                    { bareRespawn with
-                        Sources = [ source "src-a" ]
-                        ConstructionSites = [ { Id = "site-1" } ]
-                        Creeps = [ { worker "har" 0 50 with Fatigue = 4 }; worker "bob" 50 0 ]
-                        Spatial =
-
-                            spatial
-                                [ "src-a", { X = 10; Y = 11 }; "site-1", { X = 15; Y = 12 } ]
-                                terrain
-                            |> withCreepsAt [ "har", { X = 10; Y = 12 }; "bob", { X = 9; Y = 12 } ]
-                    }
+                let snapshot = blockedLane [ 12 ] { worker "har" 0 50 with Fatigue = 4 }
 
                 Expect.equal
                     (resolveVerdictsOn snapshot [ "har", Harvest "src-a"; "bob", Build "site-1" ])
@@ -129,22 +116,7 @@ let resolverVerdictTests =
                 // through the seated harvester's tile, and the surcharge
                 // sends it into the parallel lane instead. Nobody yields —
                 // the detour is a pricing event, not an arbitration one.
-                let terrain =
-                    [ for x in 8..15 -> { X = x; Y = 12 }, Plain ]
-                    @ [ for x in 8..15 -> { X = x; Y = 13 }, Plain ]
-
-                let snapshot =
-                    { bareRespawn with
-                        Sources = [ source "src-a" ]
-                        ConstructionSites = [ { Id = "site-1" } ]
-                        Creeps = [ worker "har" 0 50; worker "bob" 50 0 ]
-                        Spatial =
-
-                            spatial
-                                [ "src-a", { X = 10; Y = 11 }; "site-1", { X = 15; Y = 12 } ]
-                                terrain
-                            |> withCreepsAt [ "har", { X = 10; Y = 12 }; "bob", { X = 9; Y = 12 } ]
-                    }
+                let snapshot = blockedLane [ 12; 13 ] (worker "har" 0 50)
 
                 let assigned = [ "har", Harvest "src-a"; "bob", Build "site-1" ]
 

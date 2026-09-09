@@ -6,6 +6,16 @@ open Fabot.Core.Types
 open Fabot.Core.Atlas
 open Fabot.Core.Tests.AtlasFixtures
 
+/// Every tile of a room but its exit ring, plain — the widest ground a room
+/// can have. What an edge case answers here is the checked index and never a
+/// hole in the terrain, which is the whole point of standing the cases on it.
+let private wholeRoomPlain =
+    Map.ofList
+        [
+            for x in 1..48 do
+                for y in 1..48 -> { X = x; Y = y }, Plain
+        ]
+
 [<Tests>]
 let workAreaTests =
     testList
@@ -189,12 +199,7 @@ let seatTests =
                     }
                     |> withHome (fun layer ->
                         { layer with
-                            Terrain =
-                                Map.ofList
-                                    [
-                                        for x in 1..48 do
-                                            for y in 1..48 -> { X = x; Y = y }, Plain
-                                    ]
+                            Terrain = wholeRoomPlain
                             TargetPositions =
                                 Map.ofList
                                     [
@@ -273,15 +278,7 @@ let standingTests =
                     { SpatialInfo.empty with
                         RoomName = Some "W1N1"
                     }
-                    |> withHome (fun layer ->
-                        { layer with
-                            Terrain =
-                                Map.ofList
-                                    [
-                                        for x in 1..48 do
-                                            for y in 1..48 -> { X = x; Y = y }, Plain
-                                    ]
-                        })
+                    |> withHome (fun layer -> { layer with Terrain = wholeRoomPlain })
                     |> snapshotWith []
                     |> ofView
 
