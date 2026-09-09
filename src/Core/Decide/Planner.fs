@@ -155,9 +155,31 @@ let internal ferryBuffers (view: ColonyView) : Set<string> =
         // that room out of a Refill it could never be filled through.
         |> List.filter (fun id ->
             Map.tryFind id view.Spatial.TargetKinds = Some(Structure BuiltKind.Container)
-            && (SpatialInfo.placementOf view.Spatial id
-                |> Option.exists (fun tile -> Set.contains tile.Room rooms)))
+            && (SpatialInfo.roomOf view.Spatial id
+                |> Option.exists (fun room -> Set.contains room rooms)))
         |> Set.ofList
+
+/// The controllers this colony may hold a [[reserve]] on: every controller the
+/// projection carries that is not this colony's home, stands in no room somebody
+/// owns, and is no [[candidate colony]]'s — whose controller carries a Claim
+/// rather than a Reserve (ADR 0047). The engine refuses `reserveController` on
+/// an owned room, so an owned room's controller is one this colony is
+/// withdrawing from rather than mining.
+///
+/// **Ids and not rooms**, because a controller the projection does not place
+/// names no room and is still ours to reserve (ADR 0004) — it is the Reserve
+/// pool that reads it that way, while `declaredOutposts` takes the rooms and
+/// loses the unplaced one. One scan for both, or the rows and the pool could
+/// disagree about which rooms are ours to work.
+let private reservableControllers (view: ColonyView) : string list =
+    let home = view.Controller |> Option.map (fun c -> c.Id)
+    let claimed = claimTargets view |> List.map fst |> Set.ofList
+
+    SpatialInfo.idsOfKind view.Spatial Controller
+    |> List.filter (fun id ->
+        Some id <> home
+        && not (Set.contains id claimed)
+        && not (SpatialInfo.roomOf view.Spatial id |> Option.exists (roomHasOwner view)))
 
 /// The declared [[outpost]]s this colony works this tick — the rooms two rows
 /// are hired per, written once because a paraphrase would let the reserver row
@@ -186,17 +208,14 @@ let internal ferryBuffers (view: ColonyView) : Set<string> =
 /// pooled by `planTasks`, and the Planner's first half is handed the view and
 /// no Atlas (ADR 0056 decision 2). One derivation for the two rows and the
 /// pool, or the three of them could disagree about which rooms are ours.
+///
+/// The derivation itself is `reservableControllers`: the two rows want its
+/// rooms and the Reserve pool wants its ids, and that difference is all the
+/// difference there is between them.
 let internal declaredOutposts (view: ColonyView) : string list =
-    let home = view.Controller |> Option.map (fun c -> c.Id)
-    let claimed = claimTargets view |> List.map snd |> Set.ofList
-
-    SpatialInfo.idsOfKind view.Spatial Controller
-    |> List.filter (fun id -> Some id <> home)
-    |> List.choose (fun id ->
-        SpatialInfo.placementOf view.Spatial id |> Option.map (fun tile -> tile.Room))
+    reservableControllers view
+    |> List.choose (SpatialInfo.roomOf view.Spatial)
     |> List.distinct
-    |> List.filter (roomHasOwner view >> not)
-    |> List.filter (fun room -> not (Set.contains room claimed))
 
 /// The declared [[outpost]]s a [[threat]] stands in this tick (ADR 0056): the
 /// rooms the guard row hires a body for, and the rooms `planTasks` pools a
@@ -288,9 +307,7 @@ let planTasks (view: ColonyView) (threats: Threats) : Task list =
         let children =
             idsOfKind Controller
             |> List.filter (fun id ->
-                SpatialInfo.placementOf view.Spatial id
-                |> Option.map (fun tile -> tile.Room)
-                |> Option.exists (isBootstrapRoom view))
+                SpatialInfo.roomOf view.Spatial id |> Option.exists (isBootstrapRoom view))
 
         own @ children |> List.map Upgrade
 
@@ -310,19 +327,7 @@ let planTasks (view: ColonyView) (threats: Threats) : Task list =
     // the same `roomHasOwner` the reserver row drops the room with, since the
     // engine refuses reserveController on any owned room. A controller the
     // projection does not place names no room and stays pooled (ADR 0004).
-    let reserves =
-        let home = view.Controller |> Option.map (fun c -> c.Id)
-        let claimed = claimTargets view |> List.map fst |> Set.ofList
-
-        let inAnOwnedRoom id =
-            SpatialInfo.placementOf view.Spatial id
-            |> Option.map (fun tile -> tile.Room)
-            |> Option.exists (roomHasOwner view)
-
-        idsOfKind Controller
-        |> List.filter (fun id ->
-            Some id <> home && not (inAnOwnedRoom id) && not (Set.contains id claimed))
-        |> List.map Reserve
+    let reserves = reservableControllers view |> List.map Reserve
 
     // The haul cycle's intake (ADR 0012), shaped over the projection's
     // stores rather than energy's name: every stocked container yields a
@@ -353,8 +358,8 @@ let planTasks (view: ColonyView) (threats: Threats) : Task list =
     let borrowedRooms = Set.ofList view.Borrowed.Rooms
 
     let inABorrowedRoom id =
-        SpatialInfo.placementOf view.Spatial id
-        |> Option.exists (fun tile -> Set.contains tile.Room borrowedRooms)
+        SpatialInfo.roomOf view.Spatial id
+        |> Option.exists (fun room -> Set.contains room borrowedRooms)
 
     let withdraws =
         containers @ tombstones

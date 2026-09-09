@@ -96,16 +96,25 @@ let private moveIntentFor
     // with ground beside it to walk onto.
     let staying = if onSeam then [] else [ pos ]
 
-    let parked rank =
+    // Every branch below decides three things and no more: the rank it pushes
+    // at, the tiles it will accept in the order it wants them tried, and the
+    // Work Area the arbitration charges a push out of (#267). Which body, which
+    // tile, and the room every candidate is stamped with (#145) are the same in
+    // all of them, so they are stated here once — a branch cannot forget the
+    // stamp.
+    let intent rank (candidates: Pos list) area =
         {
             Creep = creep
             Pos = at
             Rank = rank
-            Candidates = staying @ beside |> List.map here
-            // A parked body has a Task it cannot reach, so it is standing
-            // where its Work Area is not (#267).
-            Area = Set.empty
+            Candidates = candidates |> List.map here
+            Area = area
         }
+
+    // A parked body has a Task it cannot reach, so it is standing where its
+    // Work Area is not.
+    let parked rank =
+        intent rank (staying @ beside) Set.empty
 
     // The detours behind a step: the ground beside this creep that also lies
     // beside the step it asked for — a way *around* the tile it wanted and
@@ -135,15 +144,9 @@ let private moveIntentFor
 
     match crossingStep, task with
     | Some step, _ ->
-        {
-            Creep = creep
-            Pos = at
-            Rank = idleRank
-            Candidates = step :: detour step |> List.map here
-            // Walking, and toward a room it cannot even see: nowhere it
-            // stands this tick is work (#267).
-            Area = Set.empty
-        }
+        // Walking, and toward a room it cannot even see: nowhere it stands this
+        // tick is work (#267).
+        intent idleRank (step :: detour step) Set.empty
     | None, None ->
         // The room's [[idle ground]] and the ground just off it: any way off runs
         // through one of those tiles, so the nearest of them is the nearest
@@ -177,20 +180,15 @@ let private moveIntentFor
             else
                 None
 
-        {
-            Creep = creep
-            Pos = at
-            Rank = idleRank
-            Candidates =
-                (match stepOff with
-                 | Some step -> step :: (tail |> List.filter ((<>) step))
-                 | None -> tail)
-                |> List.map here
-            // A body with no Task is working from nowhere, which is the whole
-            // of #241's rule: the ground it stands on is somebody else's to
-            // work from, and shoving it off costs the chain nothing (#267).
-            Area = Set.empty
-        }
+        // A body with no Task is working from nowhere, which is the whole of
+        // #241's rule: the ground it stands on is somebody else's to work from,
+        // and shoving it off costs the chain nothing (#267).
+        intent
+            idleRank
+            (match stepOff with
+             | Some step -> step :: (tail |> List.filter ((<>) step))
+             | None -> tail)
+            Set.empty
     | None, Some task ->
         // The area less this tick's Reach (ADR 0033): a creep works from the
         // safe half of its Work Area rather than abandoning the Task because
@@ -202,30 +200,18 @@ let private moveIntentFor
             let inside, outside =
                 beside |> List.partition (fun tile -> Set.contains (here tile) area)
 
-            {
-                Creep = creep
-                Pos = at
-                Rank = rankOf task
-                Candidates = pos :: (inside @ outside) |> List.map here
-                // The one body that has arrived: the tiles it may be shuffled
-                // between for nothing, and the border the arbitration charges
-                // for pushing it over (#267). The area less this tick's Reach,
-                // the same set the candidates were partitioned on — a tile the
-                // Reach took is not somewhere this body is working from.
-                Area = area
-            }
+            // The one body that has arrived: the tiles it may be shuffled
+            // between for nothing, and the border the arbitration charges for
+            // pushing it over (#267). The area less this tick's Reach, the same
+            // set the candidates were partitioned on — a tile the Reach took is
+            // not somewhere this body is working from.
+            intent (rankOf task) (pos :: (inside @ outside)) area
         else
             match stepToward atlas creep task area |> Option.map RoomPos.pos with
             | Some step ->
-                {
-                    Creep = creep
-                    Pos = at
-                    Rank = rankOf task
-                    Candidates = step :: detour step |> List.map here
-                    // A traveller has not arrived: it is standing outside its
-                    // Work Area, so nothing it is pushed off is work (#267).
-                    Area = Set.empty
-                }
+                // A traveller has not arrived: it is standing outside its Work
+                // Area, so nothing it is pushed off is work (#267).
+                intent (rankOf task) (step :: detour step) Set.empty
             | None -> parked (rankOf task)
 
 /// The push a rank carries into the arbitration's arithmetic. `Rank` stays the

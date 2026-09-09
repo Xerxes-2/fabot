@@ -171,6 +171,15 @@ module SpatialInfo =
         |> Map.tryPick (fun room (layer: RoomLayer) ->
             Map.tryFind id layer.TargetPositions |> Option.map (RoomPos.at room))
 
+    /// The room the projection files a target id under, and None for a target it
+    /// does not place (ADR 0004). `placementOf` with the tile dropped, which is
+    /// what most of its callers wanted: the projection-side twin of the
+    /// Atlas's `targetRoom`, so "which room is this id in" is one named join on
+    /// both sides of the Atlas boundary rather than a lambda re-typed at each
+    /// site.
+    let roomOf (spatial: SpatialInfo) (id: string) : string option =
+        placementOf spatial id |> Option.map (fun tile -> tile.Room)
+
     /// The ids the projection files under one kind, in id order. The
     /// containers, the Storage and the controllers are all pooled by the
     /// projection's kind — never by position, never by name — so the walk is

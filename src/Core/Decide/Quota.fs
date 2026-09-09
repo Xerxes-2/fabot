@@ -325,10 +325,7 @@ let private haulerQuota (view: ColonyView) atlas : int =
 /// What one body of this shape drinks a tick standing at a controller: its Work
 /// parts at the rate above.
 let private upgradeDrainOf body =
-    body
-    |> List.sumBy (function
-        | Work -> Engine.upgradeDrainPerWork
-        | _ -> 0)
+    partCountIn body Work * Engine.upgradeDrainPerWork
 
 /// The reserver row's body for one outpost (ADR 0042): the deficit sizing and
 /// the bank truncation, whichever asks for less, never below one block. The
@@ -559,11 +556,6 @@ let internal surplusOverLifetime
 
     income * Engine.creepLifetime - amortization
 
-/// Whether a body this module has sized is a standing body: `standingParts`
-/// over a part list rather than over a living creep's part map.
-let private isStandingCast (tuning: Tuning) body = standingParts tuning (partsOf body)
-
-
 /// Whether a living body is a **standing body** (ADR 0046): it carries fewer
 /// than one Carry part per four Work — `Carry * 4 < Work`. Part arithmetic and
 /// nothing else, like every other row-reading predicate here (ADR 0006), and a
@@ -608,7 +600,7 @@ let internal upgraderQuota (view: ColonyView) atlas surplus =
 
     if
         Set.isEmpty (Atlas.controllerContainers atlas)
-        || not (isStandingCast view.Tuning (bodyFor upgraderPattern capacity))
+        || not (standingParts view.Tuning (partsOf (bodyFor upgraderPattern capacity)))
     then
         0
     else

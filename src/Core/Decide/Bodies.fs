@@ -112,16 +112,12 @@ let bodyCost body =
         | BodyPart.Claim -> 600
         | Tough -> 10)
 
-/// ADR 0046's ratio itself, over two part counts: fewer than one Carry per
-/// `StandingCarryPerWork` Work. A fact about a *body* rather than about a row
-/// — the upgrader row's `11W/1C/11M` is one, and so is the anchor row's
-/// `6W/1C/1M`.
-let internal standingRatio (tuning: Tuning) carryParts workParts =
-    carryParts * tuning.StandingCarryPerWork < workParts
-
-/// Whether a counted body is a **standing body** (ADR 0046).
+/// Whether a counted body is a **standing body** (ADR 0046): fewer than one
+/// Carry per `StandingCarryPerWork` Work. A fact about a *body* rather than
+/// about a row — the upgrader row's `11W/1C/11M` is one, and so is the anchor
+/// row's `6W/1C/1M`.
 let internal standingParts (tuning: Tuning) parts =
-    standingRatio tuning (partCount parts Carry) (partCount parts Work)
+    partCount parts Carry * tuning.StandingCarryPerWork < partCount parts Work
 
 /// The pattern row a body was cast from, read off the parts alone (ADR 0006):
 /// an ATTACK part is the guard row, a CLAIM part is the reserver row, a
@@ -229,9 +225,6 @@ let private parityBodyFor (pattern: BodyPattern) capacity =
     let carryCost = bodyCost [ Carry ]
     let moveCost = bodyCost [ Move ]
 
-    let blockCount part =
-        block |> List.filter ((=) part) |> List.length
-
     let repeats =
         capacity / bodyCost block |> max 1 |> min (Engine.maxBodyParts / blockSize)
 
@@ -250,9 +243,9 @@ let private parityBodyFor (pattern: BodyPattern) capacity =
 
     let work, carry, move =
         pad
-            (repeats * blockCount Work)
-            (repeats * blockCount Carry)
-            (repeats * blockCount Move)
+            (repeats * partCountIn block Work)
+            (repeats * partCountIn block Carry)
+            (repeats * partCountIn block Move)
             (capacity - repeats * bodyCost block)
             (Engine.maxBodyParts - repeats * blockSize)
 
@@ -283,9 +276,7 @@ let private wholeBlockBodyFor (block: BodyPart list) capacity =
 
     block
     |> List.distinct
-    |> List.collect (fun part ->
-        let perBlock = block |> List.filter ((=) part) |> List.length
-        List.replicate (repeats * perBlock) part)
+    |> List.collect (fun part -> List.replicate (repeats * partCountIn block part) part)
 
 /// The hauler row's sizing rule (ADR 0012): as many whole [Carry; Carry; Move]
 /// blocks as capacity buys (never below one), and nothing else. The row's
