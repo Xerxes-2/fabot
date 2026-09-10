@@ -1464,7 +1464,7 @@ let outpostTests =
             }
 
             test
-                "the declared outposts are ADR 0042's north room and the survey's south one, so the shells scan four rooms" {
+                "the declared outposts are ADR 0042's north room, the survey's south one and the third colony's room two hops east" {
                 // #124 landed this constant empty and pinned the emptiness,
                 // because ADR 0041 ships the capability to project a
                 // neighbour and deliberately no behaviour. ADR 0042 fills
@@ -1483,15 +1483,16 @@ let outpostTests =
                 //
                 // Which ids and which tiles is a claim about the committed
                 // captures rather than about this list, so it is pinned
-                // where the captures are read (`RoomInvariantTests`) and
+                // where the captures are read (`RoomOutpostTests`, whose
+                // first case reads every outpost of this same constant) and
                 // never retyped here — two literals of the same ids would
                 // agree with each other and with nothing else.
                 let outposts = Colony.outpostsOf Colony.declared "W12S28"
 
                 Expect.equal
                     (Colony.homes Colony.declared)
-                    [ "W12S28"; "W13S28" ]
-                    "two colonies are declared: the room this bot has always run, and the candidate (ADR 0047)"
+                    [ "W12S28"; "W13S28"; "W15S28" ]
+                    "three colonies are declared: the room this bot has always run, the one it raised, and today's candidate (ADR 0047)"
 
                 Expect.equal
                     (outposts |> List.map (fun outpost -> outpost.RoomName))
@@ -1506,8 +1507,21 @@ let outpostTests =
                 Expect.equal
                     (Colony.outpostsOf Colony.declared "W13S28"
                      |> List.map (fun outpost -> outpost.RoomName))
-                    [ "W13S29" ]
-                    "and the second colony works its south outpost, declared off the 2026-09-07 survey"
+                    [ "W13S29"; "W15S28" ]
+                    "and the second colony works its south outpost off the 2026-09-07 survey, and the third colony's room off the 2026-09-10 one"
+
+                // The declaration ADR 0058 made writable, read at the
+                // altitude that says what it costs: W15S28 is **two** hops
+                // east, so the room a shortest chain crosses joins the
+                // projection beside it as a transit room — terrain and a
+                // border ring, no furniture, nothing pooled, no row hiring
+                // for it. #243 would have refused this declaration outright,
+                // and the difference between the two answers is one line of
+                // `Outpost.roomsProjected`.
+                Expect.equal
+                    (Outpost.roomsProjected (Colony.outpostsOf Colony.declared "W13S28") "W13S28")
+                    [ "W13S28"; "W13S29"; "W15S28"; "W14S28" ]
+                    "the home, its one-hop outpost, the two-hop one, and the transit room between them"
 
                 Expect.isEmpty
                     (Colony.outpostsOf Colony.declared "W1N1")

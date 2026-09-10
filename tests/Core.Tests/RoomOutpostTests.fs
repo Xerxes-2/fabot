@@ -15,6 +15,102 @@ let outpostDeclarationTests =
     testList
         "the declared outposts against their captures"
         [
+            test
+                "every outpost the live declaration names is its capture's, whichever colony declares it" {
+                // The test above reads `Outpost.adr0042`, which is the pair
+                // the real-terrain fixtures are built on and deliberately
+                // frozen at the day it was measured — so it says nothing
+                // about the declarations a human has added since (`w13s29`,
+                // `w15s28`), and a mistyped id in one of those would reach
+                // the server as a target nothing places, in silence (ADR
+                // 0004). This is the same check over the *live* constant,
+                // and it grows by itself: a declaration added to
+                // `Colony.declared` is checked here the day it is written,
+                // and the only thing it needs is its room's committed
+                // capture.
+                //
+                // Sorted, and that is the one way it differs from the pair
+                // above: what a live declaration must get right is which
+                // tile each id belongs to, never the order the pairs stand
+                // in. `w13s29` is written in the order the survey ranked
+                // its rocks and `w15s28` in the order its capture lists
+                // them, and both are correct — nothing downstream may read
+                // a source by its index (`Outpost`), so an order asserted
+                // here would be a rule invented by its own test.
+                let declared = Colony.declared |> List.collect (fun colony -> colony.Outposts)
+
+                Expect.isNonEmpty declared "a declaration nobody made is nothing to check"
+
+                for outpost in declared do
+                    let capture = load outpost.RoomName
+
+                    Expect.equal
+                        (outpost.Sources
+                         |> List.map (fun (id, tile) -> id, RoomPos.pos tile)
+                         |> List.sort)
+                        (capture.RealSources |> List.sort)
+                        $"{outpost.RoomName}: every source the server answered with, each under its own id"
+
+                    Expect.equal
+                        (Some(fst outpost.Controller, RoomPos.pos (snd outpost.Controller)))
+                        capture.RealController
+                        $"{outpost.RoomName}: the controller a reserver or a claimer would hold"
+
+                    Expect.equal
+                        (outpost.Sources
+                         |> List.map (fun (_, tile) -> tile.Room)
+                         |> List.append [ (snd outpost.Controller).Room ]
+                         |> List.distinct)
+                        [ outpost.RoomName ]
+                        $"{outpost.RoomName}: every declared tile is filed under the room it is a tile of (ADR 0052 decision 2)"
+            }
+
+            test "a chain of real border rings joins every declared outpost to its home" {
+                // `ViewTests` asks this of the **names** over the live
+                // constant (`Outpost.withinHopBudget`), which is all that
+                // altitude can answer; this is the other half, #259's, and
+                // it needs terrain — so it belongs here, where the captures
+                // are. The first declaration to need it is W15S28: two hops
+                // out, joined only if W14S28's two rings are both crossable,
+                // and a room the names accept while the ground refuses is
+                // projected, pooled and hired for by a row that hires per
+                // declared outpost.
+                //
+                // `linked` is built the way the shell builds it
+                // (`World.linked`): a ring tile the capture carries whose
+                // terrain is not wall, and a room no capture is loaded for
+                // is joined to nothing — which is what keeps the search
+                // inside the rooms the projection would hold.
+                let rings =
+                    Colony.declared
+                    |> List.collect (fun colony ->
+                        Outpost.roomsProjected colony.Outposts colony.Home)
+                    |> List.distinct
+                    |> List.map (fun room -> room, (load room).Border)
+                    |> Map.ofList
+
+                let linked fromRoom toRoom =
+                    let walkableIn room tile =
+                        match Map.tryFind room rings with
+                        | Some border ->
+                            match Map.tryFind tile border with
+                            | Some terrain -> terrain <> Wall
+                            | None -> false
+                        | None -> false
+
+                    Seam.joinedBy (walkableIn fromRoom) (walkableIn toRoom) fromRoom toRoom
+
+                let unreachable =
+                    Colony.declared
+                    |> List.collect (fun colony ->
+                        Outpost.refused linked Tuning.defaults.MaxHops colony.Home colony.Outposts
+                        |> List.map (fun room -> $"{room} is unreachable from {colony.Home}"))
+
+                Expect.isEmpty
+                    unreachable
+                    $"""every declared outpost is joined to its home by a chain of Seams: {String.concat "; " unreachable}"""
+            }
+
             test "each declaration names its own capture's furniture, id and tile alike" {
                 // ADR 0042 declares W12S27 and W13S28 in the engine's own
                 // ids (ADR 0041's decision, pinned in the loader tests

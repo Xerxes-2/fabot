@@ -1,5 +1,8 @@
 # 下一批 outpost 候选房 — 30 房普查、铺路后的真实步数、ADR 0042 口径的净能量
 
+> **本文三条结论已过期（2026-09-10）**：ADR 0058 落地后 hop 预算是 3，"只有正交相邻的五个房能 declare" 与 §5 整节（"代码今天做不到的事"）已不成立 —— §2.2 那张"走得到但定不了价"的表现在全部可定价，其中 W15S28 已被 claim 成第三个 colony（`docs/research/third-colony.md`）；W16S25 那个 stronghold 已按 249,241 塌掉；两个 home 已到 RCL6，§3 的 bank 1800 / 1300 与由它算出的 hauler 取整都该重算。新的普查见 `docs/research/multihop-outposts.md`。本文其余部分（30 房普查、步数方法、经济口径）仍然有效，按写下的日期读。
+
+
 Date: 2026-09-07（tick 202,311，`shardSeason`）。本文所有房间事实都是**当日用只读 API 在赛季服实测的**，不是从 ADR 或既有研究里抄的；所有步数是**本文自己写的多房 Dijkstra 算出来的**，代码在 scratchpad 里逐条列出并注明假设；所有能量数字都用 `src/Core/Types.fs` 的 `Engine` 常量与 `src/Core/Decide.fs` 的体型规则重算，不用姊妹篇的旧数。姊妹篇：`remote-mining.md`（引擎算术与社区做法，本文不重复推导，只引用）。动机：W12S28 已经在 W12S27 上跑通一个 outpost（当下 reservation `endTime = 207,222`，容器立在 `15,44`，13 格路已铺），W13S28 自 2026-09-06 立起自己的 spawn 后一个 outpost 都没有 —— 下一个该declare 哪里。
 
 **Verified against**（本日 tick 202,311 的一手 API 调用，脚本全部在 `/tmp/claude-1000/-home-xerxes2-Dev-fabot/94cfc683-.../scratchpad/`）：

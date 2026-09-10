@@ -46,7 +46,16 @@ never a budget the bot acts on (ADR 0041: CPU is measured, not budgeted).
 | `stub`    | one synthetic room `W1N1` shaped like the live colony; every neighbour is solid rock                                                                                                                       | RCL5          |
 | `outpost` | `W12S28` with its neighbours `W12S27` and `W13S28` from the committed captures (ADR 0036), source containers, reservations and vision stood as on the live server                                          | RCL5          |
 | `young`   | `W13S28` alone as a colony at RCL1 on a 300 bank: two source containers, nothing else built (no road, rampart or buffer below `Colony.bootstrapLevel`)                                                     | RCL1          |
-| `pair`    | the tick the live bot runs (ADR 0047, ADR 0052): the mother `W12S28` at RCL5 with outpost `W12S27`, and the child `W13S28` bootstrapping with its own Spawn2 at `16,12`; prints a `decide by colony` table | child RCL2    |
+| `pair`    | the shape of the tick the live bot runs (ADR 0047, ADR 0052): the mother `W12S28` at RCL5 with outpost `W12S27`, and the child `W13S28` bootstrapping with its own Spawn2 at `16,12`; prints a `decide by colony` table | child RCL2    |
+
+The levels are the shape being profiled and not today's live RCL — the live
+pair passed RCL6 on ADR 0055's move. What every scenario standing `W13S28` as
+a colony **does** track is that colony's declaration: since 2026-09-10 it
+declares `W15S28` two hops east, so the harness answers terrain for that room
+and for the transit room `W14S28` between them (`DECLARED_UNFURNISHED` in
+`scripts/profile.mjs`, ADR 0058). A declared room the list forgets is a
+scenario that throws on `getRoomTerrain`, not one that quietly measures the
+wrong world.
 
 `--level N` moves the scenario's colony (`pair` moves the child; the mother
 stays at RCL5). `--scenario pair --level 3` is a reading, not a mistake:

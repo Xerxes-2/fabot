@@ -1329,13 +1329,21 @@ function crewBody(bodyOf, spawnName, row, rcl) {
 const HOME_ROOM = "W12S28";
 const OUTPOST_ROOMS = ["W12S27", "W13S28"];
 // Rooms a scenario's colonies declare but this harness does not furnish
-// or give vision of: W13S28 declares W13S29 (its south outpost, 2026-09-07),
-// so any world standing W13S28 as a colony must answer `getRoomTerrain`
-// for it — the terrain layer reads every declared room whether or not it
-// is seen (ADR 0041) — while its furniture, reservation and vision stay
-// unmodelled, exactly as a freshly declared outpost is until a reserver
-// walks in. Read off the committed capture, never invented.
-const DECLARED_UNFURNISHED = ["W13S29"];
+// or give vision of: W13S28 declares W13S29 (its south outpost, 2026-09-07)
+// and W15S28 (the third colony, 2026-09-10), so any world standing W13S28
+// as a colony must answer `getRoomTerrain` for both — the terrain layer
+// reads every declared room whether or not it is seen (ADR 0041) — while
+// their furniture, reservation and vision stay unmodelled, exactly as a
+// freshly declared room is until a claimer walks in. **W14S28 is here for
+// a second reason and not as a declaration**: it is the transit room a
+// shortest chain to W15S28 crosses, so `Outpost.roomsProjected` puts it in
+// the projection carrying terrain and a border ring and nothing else (ADR
+// 0058) — which is exactly what this list models, and the reason a
+// multi-hop declaration widens it by two rooms rather than one. Every one
+// of them is read off its committed capture, never invented; a room this
+// list forgets is a scenario that throws rather than one that lies, which
+// is how the miss this line fixes was found.
+const DECLARED_UNFURNISHED = ["W13S29", "W15S28", "W14S28"];
 // A capture's rocks, filed under the loader's own ids. Full and never
 // regenerating, because a scenario measures a tick and not a cycle: a rock that
 // ran dry mid-run would move every quota that reads income.

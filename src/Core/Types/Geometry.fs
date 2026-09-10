@@ -325,10 +325,11 @@ module RoomName =
                         None
                     else
                         // The goal first, and off one `linked` where expanding
-                        // the whole frontier would pay for four apiece: a
-                        // one-hop route is what every declaration in force asks
-                        // for, and it is asked several times a tick by every
-                        // reader of the scan set.
+                        // the whole frontier would pay for four apiece: all but
+                        // one declaration in force is a single hop, so the goal
+                        // test is the answer most of the time, and it is asked
+                        // several times a tick by every reader of the scan
+                        // set.
                         let arrived =
                             frontier
                             |> List.tryPick (fun (room, chain) ->

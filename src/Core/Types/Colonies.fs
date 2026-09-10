@@ -4,7 +4,9 @@
 [<AutoOpen>]
 module Fabot.Core.Types.Colonies
 
-/// One outpost: a neighbouring room this colony mines and does not own.
+/// One outpost: a room this colony mines and does not own, inside the hop
+/// budget its home reaches over a chain of Seams (`Tuning.MaxHops`, ADR 0058;
+/// it was a *neighbouring* room until that ADR, and most of them still are).
 /// Declared, never discovered (ADR 0041) — a constant a human moves in a
 /// commit, exactly as the Layout's horizon is (ADR 0039) — because every "the
 /// first creep to walk in writes it down" scheme has to answer what sent the
@@ -262,6 +264,36 @@ module Outpost =
             Controller = "6a8caaaddd4872bccd319367", { Room = "W13S29"; X = 15; Y = 41 }
         }
 
+    /// The third colony's room, declared 2026-09-10 off
+    /// `docs/research/third-colony.md`: two sources, a d3 Thorium deposit of
+    /// 22,000, and — the reason it and not a nearer room — the one site left
+    /// after the risk screen from which the sector Reactor is inside
+    /// `Tuning.MaxHops`: three crossings by way of W15S27 and the Source
+    /// Keeper room W15S26, against five from W13S28 and six from W12S28.
+    /// W13S25 is nearer still at two and is **not** this room's rival on the
+    /// budget: it borders W13S24, which an invader core holds and reserves, so
+    /// what ruled it out is a raid a room at RCL1 cannot answer and never the
+    /// arithmetic. It is **two** hops from its home, which is a
+    /// declaration ADR 0058 made writable and #243 would have refused: the
+    /// chain runs through W14S28, which enters the projection as a transit
+    /// room carrying terrain and nothing else. Declared as W13S28's outpost
+    /// and as a colony of its own on the same day, which is ADR 0047's
+    /// candidate-colony arrangement — the controller the mother's pool offers
+    /// is a Claim rather than a Reserve for exactly as long as the second
+    /// entry stands beside the first. The ids and tiles are the engine's, read
+    /// the day it was declared, and the source order is the capture's
+    /// (`tests/Core.Tests/rooms/W15S28.room`).
+    let w15s28: Outpost =
+        {
+            RoomName = "W15S28"
+            Sources =
+                [
+                    "6a8caa95dd4872bccd319014", { Room = "W15S28"; X = 6; Y = 30 }
+                    "6a8caa95dd4872bccd319013", { Room = "W15S28"; X = 10; Y = 19 }
+                ]
+            Controller = "6a8caa95dd4872bccd319015", { Room = "W15S28"; X = 25; Y = 31 }
+        }
+
 /// The [[stand-down]] gate's whole answer for one colony this tick (ADR 0043 as
 /// #165 narrows it), derived once off that colony's [[raid log]]
 /// (`Observe.standDown`) and handed to `ColonyView.ofWorld`: two sets rather
@@ -347,11 +379,17 @@ type Colony =
 [<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
 module Colony =
     /// The colonies a human has declared (ADR 0047): W12S28 with ADR 0042's
-    /// north outpost W12S27, and W13S28, the colony it raised, beside it.
-    /// Chosen by a human in an ADR and moved by a human in a commit, exactly as
-    /// the Layout's horizon is (ADR 0039). Claiming a second room therefore
-    /// begins here and not in the bot: a second entry beside this one is the
-    /// whole of "I mean to take that room" (ADR 0047's user story 1).
+    /// north outpost W12S27, W13S28 — the colony it raised — beside it, and
+    /// W15S28, which nobody owns yet. Chosen by a human in an ADR or a survey
+    /// and moved by a human in a commit, exactly as the Layout's horizon is
+    /// (ADR 0039). Claiming a room therefore begins here and not in the bot:
+    /// an entry beside these ones is the whole of "I mean to take that room"
+    /// (ADR 0047's user story 1), which is why the third entry has no spawn
+    /// behind it and is not a mistake.
+    ///
+    /// Three declared and two **living**: `Colony.living` is the set `decide`
+    /// runs over, and a home with no spawn of ours in it is not in it — its
+    /// mother works that room until one stands.
     let declared: Colony list =
         [
             {
@@ -363,8 +401,13 @@ module Colony =
             }
             // The second colony (ADR 0047). W13S28 was the first colony's
             // outpost until its own spawn stood; that tick it became a living
-            // colony and left the mother's list, so one room is projected by
-            // one colony.
+            // colony and left the mother's list. The same arrangement now runs
+            // one generation further down: W15S28 below is in *this* colony's
+            // list and declared beside it, so that room is projected by two
+            // colonies for as long as it has no spawn — which is what an
+            // outpost declaration naming a candidate colony already means
+            // (ADR 0047), and it collapses back to one the tick it stands
+            // one.
             {
                 Home = "W13S28"
                 // W13S29 to the south (2026-09-07): two sources across a
@@ -374,8 +417,25 @@ module Colony =
                 // that should have is ADR 0043's stand-down, which clocks off
                 // an invader *core* and not off creeps (#257) — and put back
                 // once that raid was fifty ticks from expiring.
-                Outposts = [ Outpost.w13s29 ]
+                //
+                // W15S28 two hops to the east (2026-09-10) is the candidate
+                // colony declared below, an outpost of its mother's until its
+                // own spawn stands.
+                Outposts = [ Outpost.w13s29; Outpost.w15s28 ]
                 Mother = Some "W12S28"
+            }
+            // The third colony (2026-09-10, `docs/research/third-colony.md`).
+            // The entry with no spawn behind it *is* the decision to take the
+            // room (ADR 0047's user story 1): W13S28 projects it as an outpost
+            // by the line above, and this line is what turns that room's
+            // controller from a Reserve into a Claim. No outposts of its own
+            // yet — W15S27, W15S29 and W14S29 are the rooms it will want, and
+            // a room worked from a colony that does not exist is a body bought
+            // for nobody.
+            {
+                Home = "W15S28"
+                Outposts = []
+                Mother = Some "W13S28"
             }
         ]
 
