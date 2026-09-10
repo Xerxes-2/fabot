@@ -1507,8 +1507,8 @@ let outpostTests =
                 Expect.equal
                     (Colony.outpostsOf Colony.declared "W13S28"
                      |> List.map (fun outpost -> outpost.RoomName))
-                    [ "W13S29"; "W14S28" ]
-                    "and the second colony works its south outpost off the 2026-09-07 survey and its west one off the 2026-09-10 survey"
+                    [ "W13S29" ]
+                    "and the second colony works its south outpost alone while it raises a child (W14S28 withdrawn by hand)"
 
                 // W15S28 is declared and is **not** an outpost of anybody's:
                 // it is owned, so it is a room its mother raises and not one
@@ -1526,13 +1526,19 @@ let outpostTests =
                          |> List.exists (fun outpost -> outpost.RoomName = "W15S28")))
                     "the third colony's room is nobody's outpost now that it is ours"
 
+                // And with the west outpost withdrawn, this is the
+                // assertion that has something to prove: the room between
+                // home and the nursery is in the projection on the
+                // *bootstrap* half's own account (ADR 0058), where until
+                // 2026-09-10 it was there only because a declaration
+                // happened to name it.
                 Expect.equal
                     (Colony.roomsProjected
                         (Colony.outpostsOf Colony.declared "W13S28")
                         [ "W15S28" ]
                         "W13S28")
-                    [ "W13S28"; "W13S29"; "W14S28"; "W15S28" ]
-                    "the home, its two outposts, and the nursery it raises two hops out"
+                    [ "W13S28"; "W13S29"; "W15S28"; "W14S28" ]
+                    "the home, its outpost, the nursery two hops out, and the transit room on the way to it"
 
                 Expect.isEmpty
                     (Colony.outpostsOf Colony.declared "W1N1")

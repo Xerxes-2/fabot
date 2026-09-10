@@ -433,8 +433,22 @@ module Colony =
                 // an invader *core* and not off creeps (#257) — and put back
                 // once that raid was fifty ticks from expiring.
                 //
-                // W14S28 to the west (2026-09-10), the survey's second pick
-                // and the room the chain to W15S28 crosses.
+                // W14S28 to the west was declared on 2026-09-10 and
+                // **withdrawn by hand the same day**, the way W13S29 was for
+                // three hundred ticks on 2026-09-08. Not because the room is
+                // wrong — it is the survey's second pick — but because of what
+                // it costs *this* colony *now*: a single spawn cannot raise a
+                // nursery two hops out and take on a second outpost at once.
+                // Live at t~306,8xx the numbers said so plainly: haul demand
+                // 2,790 → 4,810 the tick it was declared, the hauler row 2 →
+                // 4 with two alive, so the extensions sat at 1,065 of 2,000
+                // over a 162,931 storage, every body was cast at a 1,365 bank
+                // instead of 2,300, the worker row stood at one of five, and
+                // the nursery's spawn site had one pioneer of the three
+                // `Tuning.PioneerCount` allows. Its container is built and
+                // will decay; the room goes back in the list the day W15S28
+                // stands its own spawn. `Outpost.w14s28` stays written for
+                // that day.
                 //
                 // W15S28 is **not** here, and the day it was claimed is why.
                 // A candidate colony is its mother's outpost while nobody
@@ -448,7 +462,7 @@ module Colony =
                 // raises, whose every site is feeding-tier (ADR 0047 decision
                 // 4). Live proof: claimed at t~305,2xx, spawn site placed by
                 // hand, and not one body crossed until this line changed.
-                Outposts = [ Outpost.w13s29; Outpost.w14s28 ]
+                Outposts = [ Outpost.w13s29 ]
                 Mother = Some "W12S28"
             }
             // The third colony (2026-09-10, `docs/research/third-colony.md`).
