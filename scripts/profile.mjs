@@ -979,14 +979,7 @@ function buildStubWorld() {
     homeRooms: [room],
     // Each furnished home room's geometry and its clustered tiles, for
     // the ADR 0022 self-check below.
-    furnished: [
-      {
-        grid: capture,
-        sourcePositions: capture.sources.map((source) => source.pos),
-        controllerPos: capture.controller.pos,
-        clustered: cluster.built.concat(cluster.sites).map((s) => s.pos),
-      },
-    ],
+    furnished: [geometryOf(home)],
     describe: () => [
       `stub colony in ${ROOM} at RCL${LEVEL} (2 sources, spawn, controller, ` +
         `${furnitureLine()}, ${plural(roads.length, "road")}, ` +
@@ -1770,6 +1763,21 @@ function furnishHome({
   };
 }
 
+// A furnished home room's geometry, as the ADR 0022 self-check reads it: the
+// room's own ground, its rocks and its controller — off the capture, so what
+// the check measures the cluster against is the terrain and never the ordering
+// that placed it — and the tiles the cluster took. Every scenario hands its
+// rooms over through this, because a check written per scenario is a check a
+// fifth scenario can be added without.
+const geometryOf = (furnished) => ({
+  grid: furnished.capture,
+  sourcePositions: furnished.capture.sources.map((source) => source.pos),
+  controllerPos: furnished.capture.controller.pos,
+  clustered: furnished.cluster.built
+    .concat(furnished.cluster.sites)
+    .map((s) => s.pos),
+});
+
 // One captured room furnished as an outpost: the rocks, the reservation
 // the colony holds on the controller, and the containers the live server
 // stands there. Nothing owned — an outpost is a room we do not own, so no
@@ -2118,14 +2126,7 @@ function buildOutpostWorld() {
     // this world models.
     colonies: [home.name],
     homeRooms: [homeRoom],
-    furnished: [
-      {
-        grid: home,
-        sourcePositions: home.sources.map((source) => source.pos),
-        controllerPos: home.controller.pos,
-        clustered: cluster.built.concat(cluster.sites).map((s) => s.pos),
-      },
-    ],
+    furnished: [geometryOf(furnished)],
     crew: crewOutposts,
     describe: () => [
       `outpost colony on real terrain (ADR 0036) at RCL${LEVEL}, ${creeps.length} creeps over ` +
@@ -2297,16 +2298,7 @@ function buildYoungWorld() {
     claimed: new Map([[capture.name, home.occupied]]),
     colonies: [capture.name],
     homeRooms: [home.room],
-    furnished: [
-      {
-        grid: capture,
-        sourcePositions: capture.sources.map((source) => source.pos),
-        controllerPos: capture.controller.pos,
-        clustered: home.cluster.built
-          .concat(home.cluster.sites)
-          .map((s) => s.pos),
-      },
-    ],
+    furnished: [geometryOf(home)],
     describe: () => [
       `young colony in ${capture.name} on real terrain (ADR 0036) at RCL${LEVEL}, ` +
         `${creeps.length} creeps in one room`,
@@ -2518,24 +2510,7 @@ function buildPairWorld() {
     // profiled tick if the bundle decides for anything else.
     colonies: [motherCapture.name, childCapture.name],
     homeRooms: [mother.room, child.room],
-    furnished: [
-      {
-        grid: motherCapture,
-        sourcePositions: motherCapture.sources.map((source) => source.pos),
-        controllerPos: motherCapture.controller.pos,
-        clustered: mother.cluster.built
-          .concat(mother.cluster.sites)
-          .map((s) => s.pos),
-      },
-      {
-        grid: childCapture,
-        sourcePositions: childCapture.sources.map((source) => source.pos),
-        controllerPos: childCapture.controller.pos,
-        clustered: child.cluster.built
-          .concat(child.cluster.sites)
-          .map((s) => s.pos),
-      },
-    ],
+    furnished: [geometryOf(mother), geometryOf(child)],
     crew: crewOutposts,
     describe: () => [
       `mother and bootstrapping child on real terrain (ADR 0036, ADR 0052): ${motherCapture.name}` +
