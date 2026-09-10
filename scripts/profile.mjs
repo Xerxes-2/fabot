@@ -831,123 +831,52 @@ function buildStubGrid() {
     for (const p of line(a, b)) carve(p);
   }
 
-  // Shaped like `loadCapture`'s room below — a name, a mask read by
-  // coordinate, and the terrain object the engine hands back — so the
-  // placement rules in the geometry section above serve both scenarios
-  // off one shape rather than one each.
+  // A capture, in every respect `loadCapture` returns one — a name, a mask
+  // read by coordinate, the terrain object the engine hands back, and the
+  // room's own rocks and controller under their ids. Invented rather than
+  // read off a file, and that is the only difference: `furnishHome` furnishes
+  // this room by the same rules it furnishes a captured one, so the default
+  // scenario cannot fall behind a furnishing rule the others get.
   return {
     name: ROOM,
     mask: (x, y) => data[y * 50 + x],
     terrain: { get: (x, y) => data[y * 50 + x] },
+    sources: [
+      { id: "src-0", type: "source", pos: SOURCE_A },
+      { id: "src-1", type: "source", pos: SOURCE_B },
+    ],
+    controller: { id: "ctrl", type: "controller", pos: CONTROLLER },
   };
 }
 
 function buildStubWorld() {
   const { byId, register, structure } = worldRegistry();
 
-  const grid = buildStubGrid();
+  const capture = buildStubGrid();
 
-  const sources = [SOURCE_A, SOURCE_B].map((pos, i) =>
-    register({
-      id: `src-${i}`,
-      pos,
-      energy: 3000,
-      ticksToRegeneration: undefined,
-    }),
-  );
-
-  const controller = register({
-    id: "ctrl",
-    my: true,
-    // The name the engine spells this colony, which `World.ofGame` reads
-    // off a spawn room's controller and off nothing else: it is the name
-    // every reservation is compared against (ADR 0042), so a home
-    // controller with no owner leaves the colony nameless and a
-    // reservation of our own reading as a rival's. Nothing in this
-    // one-room world is reserved, but the two rooms of the `outpost`
-    // scenario are, and both rooms answer the same shape.
-    owner: { username: COLONY_OWNER },
-    level: LEVEL,
-    ticksToDowngrade: 9000,
-    safeModeAvailable: 1,
-    safeMode: undefined,
-    pos: CONTROLLER,
-    activateSafeMode: ok,
-  });
-
-  // Every tile something of the colony's already stands on. Claimed in the
-  // order the room is furnished — the fixed points, then the level's
-  // cluster, then the trunks that weave through what the cluster left.
-  const taken = new Set(
-    [SPAWN_POS, SOURCE_A, SOURCE_B, CONTROLLER, CONTAINER_A, CONTAINER_B].map(
-      keyOf,
-    ),
-  );
-  const claim = (pos) => {
-    taken.add(keyOf(pos));
-    return pos;
-  };
-
-  const containers = [
-    structure("cont-src", "container", CONTAINER_A, {
-      store: store({ used: 1500, capacity: CONTAINER_CAPACITY }),
-    }),
-    structure("cont-ctrl", "container", CONTAINER_B, {
-      store: store({ used: 800, capacity: CONTAINER_CAPACITY }),
-    }),
-  ];
-
-  // One object serves as structure (find tables), spawn (Game.spawns), and
-  // getObjectById target; the spawn-specific fields are attached below once
-  // the room exists. Its store is full for the same reason the extensions'
-  // are: the bank is what the fleet below is cast from.
-  const spawn = structure("spawn-1", "spawn", SPAWN_POS, {
-    store: store({
-      used: SPAWN_ENERGY_CAPACITY,
-      capacity: SPAWN_ENERGY_CAPACITY,
-    }),
-    hits: 5000,
-    hitsMax: 5000,
-  });
-
-  const cluster = placeCluster({
-    grid,
+  // Furnished by the same rules every other scenario's home room is, off the
+  // room's own invented terrain. What this scenario names by hand is the two
+  // tiles its constants *are* — the source container beside source A and the
+  // buffer beside the controller, both carved for by `buildStubGrid` and both
+  // trunked to — because in an invented room those tiles are not a guess about
+  // the ground, they are the ground.
+  //
+  // One source container and not one per rock, which is this scenario's own
+  // shape: source B stands none, so it is posted by nothing and counts zero
+  // income (ADR 0042), and the report says so.
+  const home = furnishHome({
+    capture,
     spawnPos: SPAWN_POS,
-    sourcePositions: [SOURCE_A, SOURCE_B],
-    controllerPos: CONTROLLER,
-    taken,
-    structure,
+    spawnName: "Spawn1",
+    rcl: LEVEL,
+    prefix: "",
     register,
+    structure,
+    sourceContainers: [CONTAINER_A],
+    bufferAt: CONTAINER_B,
   });
 
-  // Trunk roads: spawn → source container and spawn → controller container,
-  // walked around the cluster's obstacles rather than straight through
-  // them, and skipping tiles already holding a structure, site, or endpoint.
-  const blocked = new Set(
-    cluster.built.concat(cluster.sites).map((s) => keyOf(s.pos)),
-  );
-  const roadTiles = [];
-  for (const [a, b] of TRUNKS) {
-    for (const p of route(grid, a, b, blocked)) {
-      if (taken.has(keyOf(p))) continue;
-      claim(p);
-      roadTiles.push(p);
-    }
-  }
-  // A couple of roads below half hits, so the Repair family is in the
-  // measurement instead of pooling zero tasks.
-  const roads = roadTiles.map((pos, i) =>
-    structure(`road-${i}`, "road", pos, i % 8 === 3 ? { hits: 2100 } : {}),
-  );
-
-  const findTables = {
-    105: sources, // FIND_SOURCES
-    108: [spawn, ...cluster.built], // FIND_MY_STRUCTURES (ours: refillables, the Keep)
-    107: [spawn, ...cluster.built, ...roads, ...containers], // FIND_STRUCTURES
-    114: cluster.sites, // FIND_MY_CONSTRUCTION_SITES
-    103: [], // FIND_HOSTILE_CREEPS
-    106: [], // FIND_DROPPED_RESOURCES
-  };
+  const { taken, cluster, containers, roads, room, spawn, finds } = home;
 
   // --- census perturbation (--census-every) ------------------------------
   // The lane to source B is carved but unpaved — the room's spare line.
@@ -958,28 +887,14 @@ function buildStubWorld() {
   // 0032), while the world stays the same size and shape. The paved tile
   // stands at the default 4000/5000 hits, above the repair trigger, so what
   // a perturbed tick pays for is the recompute and not a new Repair task.
-  const spare = route(grid, SPAWN_POS, SOURCE_B, blocked).filter(
+  const spare = route(capture, SPAWN_POS, SOURCE_B, home.blocked).filter(
     (p) => !taken.has(keyOf(p)),
   );
-
-  const room = stubRoom({
-    name: ROOM,
-    controller,
-    findTables,
-    energy: { available: FURNITURE.bank, capacity: FURNITURE.bank },
-  });
-
-  Object.assign(spawn, {
-    name: "Spawn1",
-    spawning: null,
-    room,
-    spawnCreep: ok,
-  });
 
   const creeps = [];
 
   return {
-    terrains: new Map([[ROOM, grid.terrain]]),
+    terrains: new Map([[ROOM, capture.terrain]]),
     // A room this scenario does not model, answered as solid rock. The
     // scan set is the spawn room plus every declared outpost (ADR 0041),
     // and `World.factsOf` reads terrain for all of them whether or
@@ -1000,7 +915,7 @@ function buildStubWorld() {
     byId,
     perturb: pavingPerturbation({
       spare,
-      structures: findTables[107],
+      structures: finds[107],
       byId,
       structure,
     }),
@@ -1021,9 +936,9 @@ function buildStubWorld() {
       // the `outpost` scenario is where the walk and the hold are
       // measured. Building the two rooms for it here would make this the
       // outpost scenario twice.
-      reserver: stationsIn(room, grid, [SPAWN_POS]),
-      anchor: stationsIn(room, grid, [SOURCE_A, SOURCE_B]),
-      hauler: stationsIn(room, grid, [SPAWN_POS]),
+      reserver: stationsIn(room, capture, [SPAWN_POS]),
+      anchor: stationsIn(room, capture, [SOURCE_A, SOURCE_B]),
+      hauler: stationsIn(room, capture, [SPAWN_POS]),
       // The upgrader row stands at the controller container — the upgrade
       // buffer (ADR 0046): it draws from the store at its feet and spends
       // it into the controller from where it stands, so its tile is the
@@ -1039,8 +954,8 @@ function buildStubWorld() {
       // all five stand inside range 3. Standing this row anywhere else
       // would time a body walking to work that is defined as work done in
       // place.
-      upgrader: stationsIn(room, grid, [CONTAINER_B]),
-      worker: stationsIn(room, grid, [
+      upgrader: stationsIn(room, capture, [CONTAINER_B]),
+      worker: stationsIn(room, capture, [
         CONTROLLER,
         ...cluster.sites.map((site) => site.pos),
       ]),
@@ -1066,9 +981,9 @@ function buildStubWorld() {
     // the ADR 0022 self-check below.
     furnished: [
       {
-        grid,
-        sourcePositions: [SOURCE_A, SOURCE_B],
-        controllerPos: CONTROLLER,
+        grid: capture,
+        sourcePositions: capture.sources.map((source) => source.pos),
+        controllerPos: capture.controller.pos,
         clustered: cluster.built.concat(cluster.sites).map((s) => s.pos),
       },
     ],
@@ -1653,6 +1568,12 @@ function furnishHome({
   // Posts up first — and its upgrader row is not hired at that bank
   // anyway (#187).
   buffer = true,
+  // Where that buffer stands: "derive" takes the nearest free tile to the
+  // controller, and a tile names it outright. The same choice
+  // `sourceContainers` offers and for the same reason — a room whose
+  // furniture is already written down (the stub's own constants, a live
+  // room's containers) is not a room this should be guessing about.
+  bufferAt = "derive",
 }) {
   const furniture = furnitureFor(rcl);
   const taken = new Set([keyOf(spawnPos)]);
@@ -1667,8 +1588,11 @@ function furnishHome({
   const controller = register({
     id: capture.controller.id,
     my: true,
-    // The colony's own name, which every reservation is judged against —
-    // see the stub scenario's controller for why it is here.
+    // The name the engine spells this colony, which `World.ofGame` reads off a
+    // spawn room's controller and off nothing else: it is the name every
+    // reservation is compared against (ADR 0042), so a home controller with no
+    // owner leaves the colony nameless and a reservation of our own reads as a
+    // rival's.
     owner: { username: COLONY_OWNER },
     level: rcl,
     ticksToDowngrade: 9000,
@@ -1729,7 +1653,11 @@ function furnishHome({
     ? structure(
         `${prefix}cont-buffer`,
         "container",
-        claim(nearestFree(capture, capture.controller.pos, taken)),
+        claim(
+          bufferAt === "derive"
+            ? nearestFree(capture, capture.controller.pos, taken)
+            : bufferAt,
+        ),
         { store: store({ used: 800, capacity: CONTAINER_CAPACITY }) },
       )
     : null;
@@ -1787,12 +1715,12 @@ function furnishHome({
   );
 
   const finds = {
-    105: sources,
-    108: [spawn, ...cluster.built],
-    107: [spawn, ...cluster.built, ...roads, ...containers],
-    114: cluster.sites,
-    103: [],
-    106: [],
+    105: sources, // FIND_SOURCES
+    108: [spawn, ...cluster.built], // FIND_MY_STRUCTURES (ours: refillables, the Keep)
+    107: [spawn, ...cluster.built, ...roads, ...containers], // FIND_STRUCTURES
+    114: cluster.sites, // FIND_MY_CONSTRUCTION_SITES
+    103: [], // FIND_HOSTILE_CREEPS
+    106: [], // FIND_DROPPED_RESOURCES
   };
   const room = stubRoom({
     name: capture.name,
