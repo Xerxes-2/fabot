@@ -651,7 +651,7 @@ let pickupTaskTests =
 
                 Expect.contains
                     intents
-                    (WithdrawEnergyFromStructure("h1", "tomb-1"))
+                    (WithdrawFromStore("h1", "tomb-1"))
                     "and the act is withdraw, never pickup"
 
                 // The pairwise control: the same tombstone on the same

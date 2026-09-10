@@ -4,17 +4,19 @@
 [<AutoOpen>]
 module Fabot.Core.Types.Tasks
 
-/// The five shapes a body takes as far as a [[capacity]] is concerned (ADR
+/// The four shapes a body takes as far as a [[capacity]] is concerned (ADR
 /// 0052 decision 6) — part arithmetic and never a row's name (ADR 0006), so the
-/// classes are the ones the existing gates already cut the fleet along.
+/// classes are the ones the existing gates already cut the fleet along. A class
+/// exists here because some [[capacity]] scope cuts along it; `Carrier` — no
+/// Work part at all — never found that reader and was folded into `Light`
+/// (#233), the two having been one bucket to every scope ever written.
 type BodyClass =
     /// An ATTACK part (ADR 0056): the guard row's shape, and **first** in
     /// the ladder because it is the one cut no other class makes. A guard
-    /// carries no Work and no Carry, so read through the four classes
-    /// below it would fall into `Carrier` beside the [[hauler unit]]s and
-    /// the [[reserver]] — a class whose whole meaning is "nothing a
-    /// Work-shaped capacity is dividing for" — and the one [[capacity]]
-    /// written for a guard would be answering for them too.
+    /// carries no Work and no Carry, so read through the three classes
+    /// below it would fall into `Light` beside the [[hauler unit]]s and the
+    /// [[reserver]], and the one [[capacity]] written for a guard would be
+    /// answering for them too.
     | Fighter
     /// More Work than Move (ADR 0016): the garrison's shape. Its intake is
     /// digging and its work is a [[post]], so it is the class every cap
@@ -24,13 +26,13 @@ type BodyClass =
     /// Heavy (ADR 0046): the [[upgrader]] row, which lives beside the
     /// [[buffer]] and carries one trip's worth.
     | Standing
-    /// No Work part at all: the [[hauler unit]]'s shape, and the
-    /// [[reserver]]'s beside it — neither can spend anything at a
-    /// controller or into a site, so neither is ever what a Work-shaped
-    /// capacity is dividing for.
-    | Carrier
-    /// Everything else — the [[worker unit]], the generalist the colony's
-    /// surplus work is done by.
+    /// Everything else — the [[worker unit]] the colony's surplus work is
+    /// done by, and beside it the bodies with no Work part at all, the
+    /// [[hauler unit]] and the [[reserver]]. Those two carried a class of
+    /// their own until #233: no scope ever asked which of the two a holder
+    /// was, every one of them cutting at `Heavy` or at `Standing` instead,
+    /// so the distinction was a case a reader had to answer twice and a
+    /// second name for one crowd.
     | Light
 
 /// How many creeps a pooled Task admits at once, set by the Planner and counted

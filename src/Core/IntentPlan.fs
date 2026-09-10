@@ -41,7 +41,7 @@ let private channel =
     | AttackCreep(name, _)
     | HealCreep(name, _) -> Some(name, Exclusive)
     | TransferEnergyToStructure(name, _) -> Some(name, Transfer)
-    | WithdrawEnergyFromStructure(name, _) -> Some(name, Withdraw)
+    | WithdrawFromStore(name, _) -> Some(name, Withdraw)
     | UpgradeController(name, _) -> Some(name, Upgrade)
     | ReserveController(name, _) -> Some(name, Reserve)
     | ClaimController(name, _) -> Some(name, Claim)

@@ -638,6 +638,64 @@ let idleGroundTests =
                     "and the mover's set strictly contains the Layout's"
             }
 
+            // A [[tower]] tucked against a wall (#277): its own tile an
+            // obstacle as the engine has it, and two walkable neighbours,
+            // which is the shape that jams — both taken, and the hauler
+            // holding its Refill never reaches range 1. No source and no
+            // controller, so the working ground is empty and whatever the
+            // idle ground holds is the stores' rings alone.
+            let towerRoom =
+                { spatial
+                      [ "tow-1", { X = 10; Y = 10 } ]
+                      [
+                          { X = 10; Y = 10 }, Plain
+                          { X = 10; Y = 11 }, Plain
+                          { X = 11; Y = 10 }, Plain
+                      ] with
+                    TargetKinds = Map.ofList [ "tow-1", Structure BuiltKind.Tower ]
+                }
+                |> withObstacles [ { X = 10; Y = 10 } ]
+
+            test "a wall-tucked tower rings the idle ground like every other store" {
+                // #277: ADR 0010 pools a Refill on a tower, so a hauler
+                // holding one queues on its range-1 ring exactly as the
+                // Storage's does — and #268's enumeration named the cluster
+                // and held the tower out, which left that ring reading as
+                // ordinary ground for an idle body to park on.
+                let view =
+                    { snapshotWith [] towerRoom with
+                        Refillables =
+                            [
+                                {
+                                    Id = "tow-1"
+                                    FreeCapacity = 300
+                                    Kind = BuiltKind.Tower
+                                }
+                            ]
+                    }
+
+                let atlas = ofView view
+
+                Expect.equal
+                    (idleGroundIn atlas (atlasHome atlas))
+                    (Set.ofList [ { X = 10; Y = 11 }; { X = 11; Y = 10 } ])
+                    "the tower's two walkable neighbours, and its own obstacle tile is not one"
+            }
+
+            test "a structure of somebody else's rings nothing of ours" {
+                // The census this set is read off is the view's Refillables —
+                // ours (#277). `FIND_STRUCTURES` carries every owner's, so an
+                // abandoned room's tower stands in the kind census with no
+                // Refill of ours ever pooled on it, and no body of ours ever
+                // queues at it.
+                let atlas = ofView (snapshotWith [] towerRoom)
+
+                Expect.equal
+                    (idleGroundIn atlas (atlasHome atlas))
+                    Set.empty
+                    "a tower the colony does not fill is no store of this colony's"
+            }
+
             test "a room with no working ground and no store idles anywhere" {
                 let atlas =
                     spatial [] [ { X = 10; Y = 10 }, Plain; { X = 10; Y = 11 }, Plain ]

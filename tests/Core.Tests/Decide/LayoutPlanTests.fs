@@ -239,6 +239,41 @@ let layoutTests =
                         "the container waits for the road on its tile"
             }
 
+            test "a site of another kind on the pick is waited on, not asked for again" {
+                // #246: the tile clause subtracted the road sites alone, so a
+                // Tower, Extension or Rampart site a human had put on the
+                // container's own pick was invisible to it — the plan
+                // re-issued `PlaceConstructionSite` onto that tile every tick
+                // and the Executor answered ERR_INVALID_TARGET until somebody
+                // built it. Only a hand can make the collision: the Layout's
+                // own picks are pairwise disjoint. The container kind stays
+                // out of the census this reads, a container site on the pick
+                // being the target clause's business one rule above (ADR
+                // 0040).
+                let srcPos = { X = 15; Y = 25 }
+                let colony = withRoadsBuilt (trunkColony 4)
+
+                let pick =
+                    sitesOfKind Container (decideOn colony).Intents
+                    |> List.filter (fun tile -> chebyshev tile srcPos <= 1)
+
+                Expect.hasLength
+                    pick
+                    1
+                    "the premise: with the tile free the source container is asked for"
+
+                let blocked =
+                    { colony with
+                        Spatial =
+                            colony.Spatial
+                            |> withTargets [ "tow-site", pick.Head, Site BuiltKind.Tower ]
+                    }
+
+                Expect.isFalse
+                    (List.contains pick.Head (sitesOfKind Container (decideOn blocked).Intents))
+                    "the pick waits for the tile the engine has already given another site"
+            }
+
             test "the controller container lands in the Work Area beside a trunk" {
                 // At the road gate: the trunk it is judged against is a road
                 // site, and those are placed from RCL3 up (#209).

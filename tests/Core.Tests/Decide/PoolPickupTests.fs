@@ -473,7 +473,7 @@ let logisticsTests =
 
                 Expect.contains
                     intents
-                    (WithdrawEnergyFromStructure("w1", "can-ctrl"))
+                    (WithdrawFromStore("w1", "can-ctrl"))
                     "in range at tick start: the Executor-bound Intent fires"
 
                 Expect.contains intents (SayCreep("w1", "📥")) "the Task's own chat bubble"

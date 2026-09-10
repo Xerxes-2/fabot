@@ -883,7 +883,7 @@ let selfHealTests =
                     [
                         UpgradeController("patient", "controller")
                         TransferEnergyToStructure("patient", "store")
-                        WithdrawEnergyFromStructure("patient", "store")
+                        WithdrawFromStore("patient", "store")
                         PickupEnergy("patient", "pile")
                         ClaimController("patient", "controller")
                         ReserveController("patient", "controller")

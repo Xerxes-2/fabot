@@ -281,23 +281,37 @@ let walkedTicks colony assigned count (start: Map<string, Pos>) =
 let upgrader name =
     creepWith name 0 50 [ Work; Work; Carry; Move ]
 
-/// The [[storage]] tucked against a wall (#268): the stock at (10,10) with
+/// The wall pocket a tucked store stands in (#268): the tile at (10,10) with
 /// wall on every side but two — (10,11) and (11,11) — and a corridor running
-/// east from them along y = 11. Those two tiles are the whole of the ground
-/// its [[refill]] can be made from, and they are outside ADR 0022's [[working
+/// east from them along y = 11. Those two tiles are the whole of the ground a
+/// store there can be reached from, and they are outside ADR 0022's [[working
 /// ground]] to the last one: the room holds no source and no controller, so
 /// #241's set is empty here and whatever vacates them is the mover's own rule.
-/// The stock's own tile is an obstacle, exactly as the engine has it, so it is
-/// no third standing tile.
+/// The store's own tile is an obstacle, exactly as the engine has it, so it is
+/// no third standing tile. Two stores are stood in it below, and the pocket is
+/// stated once so the pair differ in the store and in nothing else.
+let private wallPocket =
+    spatial
+        []
+        ([ { X = 10; Y = 10 }, Plain; { X = 10; Y = 11 }, Plain ]
+         @ [ for x in 11..18 -> { X = x; Y = 11 }, Plain ])
+    |> withObstacles [ { X = 10; Y = 10 } ]
+
+/// The [[storage]] in that pocket (#268): an empty stock, so the room's one
+/// Task is the Refill of it.
 let internal wallStorageRoom =
-    { spatial
-          []
-          ([ { X = 10; Y = 10 }, Plain; { X = 10; Y = 11 }, Plain ]
-           @ [ for x in 11..18 -> { X = x; Y = 11 }, Plain ]) with
+    { wallPocket with
         Stores = Map.ofList [ "sto-1", 0 ]
     }
-    |> withObstacles [ { X = 10; Y = 10 } ]
     |> withTargets [ "sto-1", { X = 10; Y = 10 }, Structure BuiltKind.Storage ]
+
+/// A [[tower]] in the same pocket (#277): a Refill target like any other (ADR
+/// 0010), and the store #268's enumeration held out — so this room is the
+/// storage's jam with the one structure swapped in whose ring the mover could
+/// not see.
+let internal wallTowerRoom =
+    wallPocket
+    |> withTargets [ "tow-1", { X = 10; Y = 10 }, Structure BuiltKind.Tower ]
 
 /// The colony standing on it: no source, no controller and no placed spawn, so
 /// the only Task the room offers is the stock's own Refill.
@@ -307,6 +321,25 @@ let wallStorageColony creeps positions =
         Controller = None
         Creeps = creeps
         Spatial = wallStorageRoom |> withCreepsAt positions
+    }
+
+/// The same colony over the tower pocket (#277): the tower is the colony's own
+/// Refillable, which is what pools the Refill and what puts its tile in the
+/// stores the mover rings.
+let wallTowerColony creeps positions =
+    { bareRespawn with
+        Sources = []
+        Controller = None
+        Refillables =
+            [
+                {
+                    Id = "tow-1"
+                    FreeCapacity = 300
+                    Kind = BuiltKind.Tower
+                }
+            ]
+        Creeps = creeps
+        Spatial = wallTowerRoom |> withCreepsAt positions
     }
 
 /// The tier colony with the given hunger: one loaded Carry-only body

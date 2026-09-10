@@ -301,10 +301,11 @@ let private intentFor atlas (creep: CreepInfo) task =
     match task with
     | Harvest sourceId -> Some(HarvestSource(creep.Name, sourceId))
     // The same Intent for a tombstone or a ruin as for a container (#167):
-    // the engine's `withdraw` is one method over every store, so the
-    // Intent's name is the only thing that says "structure" and the
-    // Executor hands it whatever `getObjectById` answers with.
-    | Withdraw storeId -> Some(WithdrawEnergyFromStructure(creep.Name, storeId))
+    // the engine's `withdraw` is one method over every store, and the
+    // Intent names one too since #183 — the Executor hands it whatever
+    // `getObjectById` answers with, and no reader of a log line has to
+    // reconcile a store with a name that says structure.
+    | Withdraw storeId -> Some(WithdrawFromStore(creep.Name, storeId))
     // The reflex's own Intent, issued for a creep that walked: one act, one
     // vocabulary, whether the energy was underfoot already or was the reason the
     // creep came. Which is why an arriving picker spells it twice and `decide`

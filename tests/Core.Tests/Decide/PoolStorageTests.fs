@@ -338,7 +338,7 @@ let stockDrawTests =
 
                 Expect.contains
                     intents
-                    (WithdrawEnergyFromStructure("h1", "sto-1"))
+                    (WithdrawFromStore("h1", "sto-1"))
                     "the ordinary withdraw Intent serves the Storage"
 
                 Expect.contains intents (SayCreep("h1", "📥")) "the ordinary inbox bubble shows it"

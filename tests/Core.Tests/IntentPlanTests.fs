@@ -16,7 +16,7 @@ let private candidates name =
         HarvestSource(name, "source")
         UpgradeController(name, "controller")
         TransferEnergyToStructure(name, "store")
-        WithdrawEnergyFromStructure(name, "store")
+        WithdrawFromStore(name, "store")
         PickupEnergy(name, "pile")
         ReserveController(name, "controller")
         ClaimController(name, "controller")

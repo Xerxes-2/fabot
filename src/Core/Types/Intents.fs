@@ -10,7 +10,10 @@ type Intent =
     | PlaceConstructionSite of tile: RoomPos * kind: StructureKind
     | HarvestSource of creepName: string * sourceId: string
     | TransferEnergyToStructure of creepName: string * structureId: string
-    | WithdrawEnergyFromStructure of creepName: string * structureId: string
+    /// The withdraw act, whose target has not been a structure alone since
+    /// ADR 0023 widened it: a [[container]], the [[storage]], a tombstone or a
+    /// ruin — the same store the [[withdraw]] Task already names (#183).
+    | WithdrawFromStore of creepName: string * storeId: string
     | BuildSite of creepName: string * siteId: string
     | RepairStructure of creepName: string * structureId: string
     | UpgradeController of creepName: string * controllerId: string

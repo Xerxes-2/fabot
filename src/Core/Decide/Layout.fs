@@ -532,17 +532,25 @@ let internal planLayout
                             Serving = RoomPos.at room (Set.minElement serving)
                         })
 
-        // The tile clause (ADR 0040), and only it: a pick whose tile is still
-        // owed a road waits, because the engine takes one construction site per
-        // tile and the source container is planned onto the trunk's first tile.
-        // This is about the tile and moves with no target. It reads the road
-        // sites actually placed and not the whole gap (#209): below the gate no
-        // road site is placed at all, so there is nothing to collide with and
+        // The tile clause (ADR 0040), and only it: a pick whose tile another
+        // site already holds waits, because the engine takes one construction
+        // site per tile. This is about the tile and moves with no target. One
+        // census answers it — every pending site in the room but a container's
+        // (`Atlas.nonContainerSiteTilesIn`), the road the trunk owes among them
+        // and the hand-placed tower, extension or rampart beside it (#246,
+        // widening what #209 wrote as the road sites alone: against one of the
+        // others the plan re-issued `PlaceConstructionSite` every tick for
+        // `ERR_INVALID_TARGET` until somebody built it). The container kind
+        // stays out of it by its own rule, a container site on the pick being
+        // the target clause's business above and not a collision. Beside the
+        // census, the roads placed **this** tick, which no census carries yet
+        // — and the placed roads and not the whole gap (#209): below the road
+        // gate none is placed at all, so there is nothing to collide with and
         // nothing to wait for.
-        let owedRoad = Set.union (Atlas.pendingRoadTilesIn atlas room) placedRoads
+        let takenTiles = Set.union placedRoads (Atlas.nonContainerSiteTilesIn atlas room)
 
         let containerGap =
-            unservedPicks |> List.filter (fun tile -> not (Set.contains tile owedRoad))
+            unservedPicks |> List.filter (fun tile -> not (Set.contains tile takenTiles))
 
         // The ramparts (ADR 0034): one over every standing Keep structure and
         // every standing Post container, the tick the thing it covers stands —

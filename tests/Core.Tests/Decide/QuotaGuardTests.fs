@@ -401,16 +401,15 @@ let guardRowTests =
             }
 
             test "a guard classifies Fighter, and no other row's body does" {
-                // The [[body class]] ladder's new head (ADR 0056), read the
-                // only way it is readable today: `Fighter` answers no
-                // differently from `Carrier` in every [[capacity]] scope
-                // written so far — `(=) Heavy`, `(<>) Heavy`, `(=) Standing`
-                // and "neither Heavy nor Standing" — so the Guard Task's
-                // `Fighter -> quota` is the first cap that will tell them
-                // apart, and until it lands no fixture at the `decide` seam
-                // can. Pinned here rather than left to that ticket, because
-                // what it is guarding against is the guard falling back into
-                // `Carrier` beside the [[hauler unit]]s, which is silent.
+                // The [[body class]] ladder's head (ADR 0056), read the only
+                // way it is readable today: `Fighter` answers no differently
+                // from `Light` in every [[capacity]] scope but its own —
+                // `(=) Heavy`, `(<>) Heavy`, `(=) Standing` and "neither Heavy
+                // nor Standing" tell them apart nowhere — so the Guard Task's
+                // `Fighter -> quota` is the one cap that does. Pinned here
+                // because what it is guarding against is the guard falling
+                // back into `Light` beside the [[hauler unit]]s, which is
+                // silent.
                 //
                 // Both halves of one claim, so both are asserted over one
                 // fleet: the guard is a Fighter, and every other row's body
@@ -440,8 +439,8 @@ let guardRowTests =
                         "guard", Fighter
                         "anchor", Heavy
                         "upgrader", Standing
-                        "hauler", Carrier
-                        "reserver", Carrier
+                        "hauler", Light
+                        "reserver", Light
                         "worker", Light
                     ]
                     "one row's body classifies Fighter and it is the guard's"

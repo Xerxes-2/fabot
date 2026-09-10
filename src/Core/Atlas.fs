@@ -144,6 +144,17 @@ type Atlas =
             /// a colony whose Refillables hold no spawn to key a cluster (ADR
             /// 0004).
             Cluster: RefillCluster option
+            /// The ids of every structure this colony pours energy into — the
+            /// cluster's spawn and extensions and the [[tower]]s beside them,
+            /// the view's whole Refillable census rather than the ring the
+            /// cluster keys (#277). **Ids** and not tiles, because the tile
+            /// is a per-room question every census here answers the same way —
+            /// and named for what they are, the view's own `Refillables` being
+            /// a list of records and this the set of their ids. Read off the
+            /// view and never off the kind census: `FIND_STRUCTURES` carries
+            /// every owner's, and an abandoned room's tower is a structure
+            /// nothing of ours ever queues at.
+            RefillableIds: Set<string>
         }
 
 /// The Atlas over a view, recalling a spawn walk table rather than laying an
@@ -323,6 +334,7 @@ let ofViewRecalling (walks: WalkTable) (view: ColonyView) : Atlas =
             |> Set.ofList
         Buffers = None
         Cluster = RefillCluster.ofRefillables view.Refillables
+        RefillableIds = view.Refillables |> List.map (fun r -> r.Id) |> Set.ofList
     }
 
 /// The Atlas over a view with nothing recalled: a fresh spawn walk
@@ -882,30 +894,31 @@ let workingGroundIn (atlas: Atlas) (room: string) : Set<Pos> =
     else
         seatUnionIn atlas room
 
-/// The tiles of one room's **stores**, as #268 enumerates them: a built
-/// [[container]], which is a source container or the [[buffer]] (ADR 0012);
-/// the [[storage]] (ADR 0023); and the [[refill cluster]]'s members, the spawn
-/// and its extensions read as one ring (ADR 0054). A tower is **not** in that
-/// enumeration and is not held out for a reason of its own: a tower is a
-/// [[refill]] target like any other — ADR 0010 puts a tower's Refill in the
-/// pool at the surplus tier, and a hauler holding one stands on its range-1
-/// ring exactly as the Storage's does, so a wall-tucked tower jams the same
-/// way. It is left for a follow-up rather than smuggled in here. A
-/// construction *site* is not one either — nothing is poured into or taken out
-/// of a site. Filed by room like every other census (ADR 0041): a member the
+/// The tiles of one room's **stores**: a built [[container]], which is a source
+/// container or the [[buffer]] (ADR 0012); the [[storage]] (ADR 0023); and
+/// every structure the colony pours a [[refill]] into — the spawn and its
+/// extensions, which the [[refill cluster]] reads as one ring (ADR 0054), and
+/// the **tower** beside them. The last is #277 correcting #268's enumeration,
+/// which named the cluster and held the tower out: a tower is a Refill target
+/// like any other, ADR 0010 putting its Refill in the pool at the surplus
+/// tier, and a hauler holding one queues on its range-1 ring exactly as the
+/// Storage's does — so a wall-tucked tower jams the same way, which is the one
+/// thing this set exists to see. Read off the view's Refillable census
+/// (`atlas.RefillableIds`) rather than the cluster, so the next structure the
+/// colony learns to fill arrives here with its Task and not a ticket later,
+/// and never off the kind census, which carries every owner's. A construction
+/// *site* is not a store — nothing is poured into or taken out of a site.
+/// Filed by room like every other census (ADR 0041): a structure the
 /// projection places in another room, or not at all, contributes no tile (ADR
 /// 0004).
 let private storeTilesIn (atlas: Atlas) (room: string) : Set<Pos> =
-    let clusterTiles =
-        match atlas.Cluster with
-        | None -> Set.empty
-        | Some cluster ->
-            cluster.Members
-            |> Map.toList
-            |> List.choose (fst >> tileIn atlas room)
-            |> Set.ofList
+    let refillableTiles =
+        atlas.RefillableIds
+        |> Set.toList
+        |> List.choose (tileIn atlas room)
+        |> Set.ofList
 
-    Set.unionMany [ containerTilesIn atlas room; storageTilesIn atlas room; clusterTiles ]
+    Set.unionMany [ containerTilesIn atlas room; storageTilesIn atlas room; refillableTiles ]
 
 /// The [[idle ground]] of the room (#268): the working ground above, plus the
 /// walkable range-1 ring of every store in the room. The two

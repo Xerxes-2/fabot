@@ -1256,6 +1256,47 @@ let arbitrationTests =
                     "and no pair of bodies exchanges tiles on two consecutive ticks"
             }
 
+            test "#277 a wall-tucked tower: the idle bodies ring it and the hauler gets in" {
+                // The same pocket with the one store #268's enumeration held
+                // out. ADR 0010 pools a Refill on a tower, so a hauler holding
+                // one queues on its two standing tiles exactly as the stock's
+                // does — and until #277 those tiles were no store's ring, so
+                // an idle pair parked on them was parked on ordinary ground
+                // and the mover had nothing to say to it.
+                let creeps = [ worker "u1" 0 50; worker "u2" 0 50; hauler "h" 100 0 ]
+
+                let ticks =
+                    walkedTicks
+                        (wallTowerColony creeps)
+                        [ "h", Refill "tow-1" ]
+                        8
+                        (Map.ofList
+                            [
+                                "u1", { X = 10; Y = 11 }
+                                "u2", { X = 11; Y = 11 }
+                                "h", { X = 14; Y = 11 }
+                            ])
+
+                let besideTower (positions: Map<string, Pos>) =
+                    range positions["h"] { X = 10; Y = 10 } <= 1
+
+                Expect.isTrue
+                    (ticks |> List.skip 3 |> List.forall besideTower)
+                    "the hauler is standing beside the tower by the third tick and stays there"
+
+                let idleOnTheRing (positions: Map<string, Pos>) =
+                    [ "u1"; "u2" ]
+                    |> List.filter (fun name -> range positions[name] { X = 10; Y = 10 } <= 1)
+
+                Expect.isTrue
+                    (ticks |> List.skip 3 |> List.forall (idleOnTheRing >> List.isEmpty))
+                    "and by then neither idle body is left standing on the tower's two tiles"
+
+                Expect.isEmpty
+                    (repeatedSwaps ticks)
+                    "and no pair of bodies exchanges tiles on two consecutive ticks"
+            }
+
             test "#268 two tiles off the stock, the same bodies have no reason to move" {
                 // The pairwise other side: the rule is the stores' rings and
                 // not the room. (12,11) and (13,11) are two and three tiles

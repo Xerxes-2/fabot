@@ -310,7 +310,7 @@ let haulerTests =
 
                 Expect.contains
                     intents
-                    (WithdrawEnergyFromStructure("h1", "can-src"))
+                    (WithdrawFromStore("h1", "can-src"))
                     "in range at tick start: the withdraw fires"
             }
 

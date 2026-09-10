@@ -422,7 +422,7 @@ let guardTaskTests =
                 // counted, so neither the crowd that runs from a raid nor the
                 // [[anchor]] that cannot run can be matched into it. Both
                 // classes, because both stand in this room and the acceptance
-                // names both: a [[hauler unit]] is a `Carrier`, the Anchor a
+                // names both: a [[hauler unit]] is a `Light`, the Anchor a
                 // `Heavy`, and the `Fighters` share admits neither.
                 let colony = declaredRaid raiders |> withGuards [ guard "g-1", beside ]
 

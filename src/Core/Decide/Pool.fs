@@ -700,13 +700,13 @@ let private deadlineRank = -tierRungs
 /// order is what it always was.
 let internal priorityStep = 1
 
-/// Which of the five shapes a body is, as far as a [[capacity]] is concerned
+/// Which of the four shapes a body is, as far as a [[capacity]] is concerned
 /// (ADR 0052 decision 6, ADR 0006): part arithmetic, asked in the order the
 /// existing gates ask it in, because Heavy and Standing overlap on the
 /// [[anchor]]'s `6W/1C/1M` and every rule that reads both reads the heavy one
 /// first (ADR 0016 before ADR 0046). `Fighter` is asked before all of them (ADR
-/// 0056): a guard's `[T; A×3; M×5; H]` carries no Work at all, so the four
-/// classes below would answer `Carrier` — the class of the bodies that shift
+/// 0056): a guard's `[T; A×3; M×5; H]` carries no Work at all, so the three
+/// classes below would answer `Light` — the class of the bodies that shift
 /// energy, and the one a Guard's capacity must not be sharing a number with.
 /// Exported for the same reason `bodyFor` and `patternTable` are (ADR 0006): the
 /// ladder is a body fact a test reads directly. The head of the ladder is read
@@ -717,7 +717,6 @@ let bodyClassOf (tuning: Tuning) atlas (creep: CreepInfo) : BodyClass =
     if isGuardBody creep then Fighter
     elif Atlas.workHeavy atlas creep.Name then Heavy
     elif isStandingBody tuning creep then Standing
-    elif partCount creep.Body Work = 0 then Carrier
     else Light
 
 /// Planner, second half: this tick's pool with each entry's [[priority]] and
