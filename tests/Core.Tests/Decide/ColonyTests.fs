@@ -1508,6 +1508,52 @@ let twoColonyTests =
                     "adoption is inert there — two projectors name no single adopter — so the mother keeps her crews until the human's edit"
             }
 
+            test "a mother two hops from her nursery projects the room between them" {
+                // Found live on 2026-09-10: W15S28 was claimed two hops from
+                // W13S28, so the mother's bootstrap half projected it — and
+                // nothing projected the room the walk crosses, which is what
+                // `Atlas.route` needs to price a chain at all (ADR 0058). Her
+                // two borrowed Tasks there were therefore unpriceable and no
+                // pioneer could be sent, and the only thing that hid it was a
+                // separate outpost declaration standing in the room between.
+                // A borrowed room carries its transit rooms exactly as an
+                // outpost does, and a one-hop child adds none.
+                let raising home child =
+                    [
+                        {
+                            Home = home
+                            Outposts = []
+                            Mother = None
+                        }
+                        {
+                            Home = child
+                            Outposts = []
+                            Mother = Some home
+                        }
+                    ]
+
+                let projects home child =
+                    let colonies = raising home child
+
+                    Colony.roomsProjected
+                        []
+                        (Colony.bootstrapping
+                            (Map.ofList [ child, Nursery ])
+                            colonies
+                            (List.head colonies))
+                        home
+
+                Expect.equal
+                    (projects "W1N1" "W1N3")
+                    [ "W1N1"; "W1N3"; "W1N2" ]
+                    "the mother, the nursery two hops out, and the transit room a shortest chain crosses"
+
+                Expect.equal
+                    (projects "W1N1" "W1N2")
+                    [ "W1N1"; "W1N2" ]
+                    "and a one-hop nursery projects the pair it always did"
+            }
+
             test "a mother goes on projecting the child that names her, until it is independent" {
                 // ADR 0047 decision 4's window, at the seam that decides
                 // how long it lasts. A child's [[stage]] is not a fact any

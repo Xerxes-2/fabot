@@ -510,9 +510,29 @@ let private worldRooms (maxHops: int) (colonies: Colony list) (seen: string list
         // rectangle of one anyway would drag every room between here and a
         // mis-declaration into the world for nobody to use.
         |> List.collect (fun colony ->
-            colony.Outposts
-            |> List.filter (Outpost.withinHopBudget maxHops colony.Home)
-            |> fun outposts -> Outpost.roomsProjected outposts colony.Home)
+            let outposts =
+                colony.Outposts |> List.filter (Outpost.withinHopBudget maxHops colony.Home)
+
+            // The rooms a child of this colony's would be projected through,
+            // off the names alone: which of them the view actually borrows
+            // turns on a [[stage]] this function cannot read — the stages are
+            // derived from the world it is choosing the rooms for — so the
+            // declaration's shape is what is read here, and a room the view
+            // does not borrow costs the memo read a transit room costs
+            // (`Colony.roomsProjected`, ADR 0058). Without it a claimed
+            // nursery two hops out is projected with no chain to it, which is
+            // the state W15S28 was found in on 2026-09-10.
+            let children =
+                colonies
+                |> List.filter (fun child ->
+                    child.Mother = Some colony.Home
+                    && child.Home <> colony.Home
+                    && RoomName.hopsBetween colony.Home child.Home
+                       |> Option.exists (fun hops -> hops <= maxHops))
+                |> List.collect (fun child ->
+                    child.Home :: RoomName.transitBetween colony.Home child.Home)
+
+            Outpost.roomsProjected outposts colony.Home @ children)
 
     seen @ declared |> List.distinct
 

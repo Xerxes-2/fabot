@@ -264,6 +264,21 @@ module Outpost =
             Controller = "6a8caaaddd4872bccd319367", { Room = "W13S29"; X = 15; Y = 41 }
         }
 
+    /// W13S28's west outpost, declared 2026-09-10 off
+    /// `docs/research/multihop-outposts.md`, which ranks it second of the
+    /// six: one source, a 21-tile west Seam, and the lowest cost of any of
+    /// them because the room was already in the projection as the transit
+    /// room on the way to W15S28. It is also the room that keeps that chain
+    /// warm — a declaration of its own rather than a room seen in passing,
+    /// which is what it had become the day W15S28 was claimed. The ids and
+    /// tiles are the engine's, read the day it was declared.
+    let w14s28: Outpost =
+        {
+            RoomName = "W14S28"
+            Sources = [ "6a8caaa1dd4872bccd3191f9", { Room = "W14S28"; X = 6; Y = 8 } ]
+            Controller = "6a8caaa1dd4872bccd3191fa", { Room = "W14S28"; X = 22; Y = 15 }
+        }
+
     /// The third colony's room, declared 2026-09-10 off
     /// `docs/research/third-colony.md`: two sources, a d3 Thorium deposit of
     /// 22,000, and — the reason it and not a nearer room — the one site left
@@ -418,10 +433,22 @@ module Colony =
                 // an invader *core* and not off creeps (#257) — and put back
                 // once that raid was fifty ticks from expiring.
                 //
-                // W15S28 two hops to the east (2026-09-10) is the candidate
-                // colony declared below, an outpost of its mother's until its
-                // own spawn stands.
-                Outposts = [ Outpost.w13s29; Outpost.w15s28 ]
+                // W14S28 to the west (2026-09-10), the survey's second pick
+                // and the room the chain to W15S28 crosses.
+                //
+                // W15S28 is **not** here, and the day it was claimed is why.
+                // A candidate colony is its mother's outpost while nobody
+                // owns it — that is what pools the Claim — but `childrenWhere`
+                // gives a room in both lists to the outpost list, so leaving
+                // it here after the claim classified an owned, spawn-less room
+                // as a room we *mine*: no Reserve left to send a body, no
+                // container to make a Post, and its spawn site ranked in the
+                // outpost builders' budget behind a container one hop nearer.
+                // Out of this list it is what it is — a [[nursery]] its mother
+                // raises, whose every site is feeding-tier (ADR 0047 decision
+                // 4). Live proof: claimed at t~305,2xx, spawn site placed by
+                // hand, and not one body crossed until this line changed.
+                Outposts = [ Outpost.w13s29; Outpost.w14s28 ]
                 Mother = Some "W12S28"
             }
             // The third colony (2026-09-10, `docs/research/third-colony.md`).
@@ -596,7 +623,20 @@ module Colony =
         (bootstrap: string list)
         (home: string)
         : string list =
-        Outpost.roomsProjected outposts home @ bootstrap |> List.distinct
+        Outpost.roomsProjected outposts home
+        // A borrowed room carries its transit rooms exactly as an outpost does
+        // (ADR 0058): the mother works two Tasks in a child of hers, and a
+        // Task in a room no chain reaches is priced at `None` — so a nursery
+        // two hops out would be projected, its spawn site lifted to the
+        // feeding tier, and no pioneer could be sent to it. Found live on
+        // 2026-09-10, when W15S28 was claimed two hops from its mother and
+        // the only thing that made the walk priceable was a *separate*
+        // declaration standing in the room between. `transitBetween` answers
+        // off the names, so this asks nothing the union does not already know
+        // (ADR 0058 decision 2), and a one-hop child adds nothing.
+        @ (bootstrap
+           |> List.collect (fun room -> room :: RoomName.transitBetween home room))
+        |> List.distinct
 
     /// The colony that cast one creep, read off its own name: creep names are
     /// `{pattern}-{tick}-{spawn}`, so the room the named spawn stands in is its

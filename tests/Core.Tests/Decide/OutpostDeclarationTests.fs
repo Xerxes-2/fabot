@@ -1507,21 +1507,32 @@ let outpostTests =
                 Expect.equal
                     (Colony.outpostsOf Colony.declared "W13S28"
                      |> List.map (fun outpost -> outpost.RoomName))
-                    [ "W13S29"; "W15S28" ]
-                    "and the second colony works its south outpost off the 2026-09-07 survey, and the third colony's room off the 2026-09-10 one"
+                    [ "W13S29"; "W14S28" ]
+                    "and the second colony works its south outpost off the 2026-09-07 survey and its west one off the 2026-09-10 survey"
 
-                // The declaration ADR 0058 made writable, read at the
-                // altitude that says what it costs: W15S28 is **two** hops
-                // east, so the room a shortest chain crosses joins the
-                // projection beside it as a transit room — terrain and a
-                // border ring, no furniture, nothing pooled, no row hiring
-                // for it. #243 would have refused this declaration outright,
-                // and the difference between the two answers is one line of
-                // `Outpost.roomsProjected`.
+                // W15S28 is declared and is **not** an outpost of anybody's:
+                // it is owned, so it is a room its mother raises and not one
+                // she mines, and `childrenWhere` gives a room in both lists to
+                // the outpost list — which is the classification that stalled
+                // it live on 2026-09-10 (claimed, spawn site placed by hand,
+                // no body sent). What the mother projects for it is
+                // `Colony.roomsProjected`'s bootstrap half, and the transit
+                // room on the way is in there for the same reason an
+                // outpost's is (ADR 0058).
+                Expect.isFalse
+                    (Colony.declared
+                     |> List.exists (fun colony ->
+                         colony.Outposts
+                         |> List.exists (fun outpost -> outpost.RoomName = "W15S28")))
+                    "the third colony's room is nobody's outpost now that it is ours"
+
                 Expect.equal
-                    (Outpost.roomsProjected (Colony.outpostsOf Colony.declared "W13S28") "W13S28")
-                    [ "W13S28"; "W13S29"; "W15S28"; "W14S28" ]
-                    "the home, its one-hop outpost, the two-hop one, and the transit room between them"
+                    (Colony.roomsProjected
+                        (Colony.outpostsOf Colony.declared "W13S28")
+                        [ "W15S28" ]
+                        "W13S28")
+                    [ "W13S28"; "W13S29"; "W14S28"; "W15S28" ]
+                    "the home, its two outposts, and the nursery it raises two hops out"
 
                 Expect.isEmpty
                     (Colony.outpostsOf Colony.declared "W1N1")
