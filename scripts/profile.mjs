@@ -1428,6 +1428,57 @@ const OUTPOST_ROOMS = ["W12S27", "W13S28"];
 // unmodelled, exactly as a freshly declared outpost is until a reserver
 // walks in. Read off the committed capture, never invented.
 const DECLARED_UNFURNISHED = ["W13S29"];
+// A capture's rocks, filed under the loader's own ids. Full and never
+// regenerating, because a scenario measures a tick and not a cycle: a rock that
+// ran dry mid-run would move every quota that reads income.
+const registerSources = (capture, register) =>
+  capture.sources.map((source) =>
+    register({
+      id: source.id,
+      pos: source.pos,
+      energy: 3000,
+      ticksToRegeneration: undefined,
+    }),
+  );
+
+// The far-end haulers a scenario stands in its outposts, as the deferred crew
+// the fleet hire runs once bodies can be sized. One per standing container and
+// never one per room: the haul is a round trip per source container, and the
+// floor is deliberate, because the hired hauler row already prices those same
+// trips. Tiles come out of the room's own claimed set — the one `hireFleet`
+// stood the reserver and the outpost Anchors out of — and it is mutated in
+// place, so a crew body is never put on top of one already standing.
+const outpostCrew =
+  ({ outpostRooms, spawnName, rcl, register, creeps }) =>
+  (bodyOf, game) => {
+    const haulerParts = crewBody(bodyOf, spawnName, "hauler", rcl);
+
+    for (const outpost of outpostRooms) {
+      for (const [i, container] of outpost.containers.entries()) {
+        const pos = nearestFree(
+          outpost.capture,
+          container.pos,
+          outpost.occupied,
+        );
+        outpost.occupied.add(keyOf(pos));
+        const capacity =
+          haulerParts.filter((part) => part === "carry").length *
+          CARRY_CAPACITY;
+        const creep = register(
+          stubCreep({
+            name: `${outpost.capture.name.toLowerCase()}-${i}`,
+            pos,
+            parts: haulerParts,
+            used: Math.round(capacity * FILLS[i % FILLS.length]),
+          }),
+        );
+        creep.room = outpost.room;
+        creeps.push(creep);
+        game.creeps[creep.name] = creep;
+      }
+    }
+  };
+
 const declaredTerrains = () =>
   DECLARED_UNFURNISHED.map(loadCapture).map((capture) => [
     capture.name,
@@ -1612,14 +1663,7 @@ function furnishHome({
   for (const source of capture.sources) claim(source.pos);
   claim(capture.controller.pos);
 
-  const sources = capture.sources.map((source) =>
-    register({
-      id: source.id,
-      pos: source.pos,
-      energy: 3000,
-      ticksToRegeneration: undefined,
-    }),
-  );
+  const sources = registerSources(capture, register);
   const controller = register({
     id: capture.controller.id,
     my: true,
@@ -1810,14 +1854,7 @@ function furnishHome({
 // furnishes every outpost of the world — a raid in each would be profiling
 // the invasion nobody has ever seen.
 function furnishOutpost(capture, register, structure, raided = false) {
-  const sources = capture.sources.map((source) =>
-    register({
-      id: source.id,
-      pos: source.pos,
-      energy: 3000,
-      ticksToRegeneration: undefined,
-    }),
-  );
+  const sources = registerSources(capture, register);
   const controller = register({
     id: capture.controller.id,
     my: false,
@@ -2012,41 +2049,13 @@ function buildOutpostWorld() {
   // have the bundle hire that much less and the run would measure a fleet
   // nobody chose the size of.
   const creeps = [];
-  const crewOutposts = (bodyOf, game) => {
-    const haulerParts = crewBody(bodyOf, "Spawn1", "hauler", LEVEL);
-    for (const outpost of outpostRooms) {
-      // The room's own claimed tiles, the same set `hireFleet` stood the
-      // reserver and the outpost Anchors out of, so the crew cannot be put
-      // on top of one.
-      const occupied = outpost.occupied;
-      // One hauler per standing container and not per room: the haul is a
-      // round trip per source container, and W13S28 holds two of the
-      // three. One is ADR 0042's *paved* number — the unpaved outpost this
-      // world models sizes two — and the floor is deliberate, because the
-      // hired hauler row above already prices these same round trips.
-      const defs = outpost.containers.map((container) => ({
-        at: container.pos,
-        parts: haulerParts,
-      }));
-      for (const [i, def] of defs.entries()) {
-        const pos = nearestFree(outpost.capture, def.at, occupied);
-        occupied.add(keyOf(pos));
-        const capacity =
-          def.parts.filter((part) => part === "carry").length * CARRY_CAPACITY;
-        const creep = register(
-          stubCreep({
-            name: `${outpost.capture.name.toLowerCase()}-${i}`,
-            pos,
-            parts: def.parts,
-            used: Math.round(capacity * FILLS[i % FILLS.length]),
-          }),
-        );
-        creep.room = outpost.room;
-        creeps.push(creep);
-        game.creeps[creep.name] = creep;
-      }
-    }
-  };
+  const crewOutposts = outpostCrew({
+    outpostRooms,
+    spawnName: "Spawn1",
+    rcl: LEVEL,
+    register,
+    creeps,
+  });
 
   // The spare lane the census perturbation walks: the walkable ground
   // between one container and the next, which no trunk paves — every trunk
@@ -2455,33 +2464,13 @@ function buildPairWorld() {
   // rule and its reasons, and none of it is the child's — nothing of the
   // child's is a room away from its spawn.
   const creeps = [];
-  const crewOutposts = (bodyOf, game) => {
-    const haulerParts = crewBody(bodyOf, "Spawn1", "hauler", MOTHER_LEVEL);
-    for (const outpost of outpostRooms) {
-      for (const [i, container] of outpost.containers.entries()) {
-        const pos = nearestFree(
-          outpost.capture,
-          container.pos,
-          outpost.occupied,
-        );
-        outpost.occupied.add(keyOf(pos));
-        const capacity =
-          haulerParts.filter((part) => part === "carry").length *
-          CARRY_CAPACITY;
-        const creep = register(
-          stubCreep({
-            name: `${outpost.capture.name.toLowerCase()}-${i}`,
-            pos,
-            parts: haulerParts,
-            used: Math.round(capacity * FILLS[i % FILLS.length]),
-          }),
-        );
-        creep.room = outpost.room;
-        creeps.push(creep);
-        game.creeps[creep.name] = creep;
-      }
-    }
-  };
+  const crewOutposts = outpostCrew({
+    outpostRooms,
+    spawnName: "Spawn1",
+    rcl: MOTHER_LEVEL,
+    register,
+    creeps,
+  });
 
   const motherStations = homeStations(mother);
   const childStations = homeStations(child);
