@@ -90,7 +90,11 @@ let containerPostTests =
 
                 Expect.contains
                     verdicts
-                    (Verdict.Released("w1", taskId (Harvest "src-a"), ReleaseReason.Inapplicable))
+                    (Verdict.Released(
+                        "w1",
+                        taskId (Harvest "src-a"),
+                        ReleaseReason.Rejected RejectReason.Inapplicable
+                    ))
                     "a light body's full store ends its dig, container or no container"
             }
 
@@ -122,7 +126,11 @@ let containerPostTests =
 
                 Expect.contains
                     verdicts
-                    (Verdict.Released("a1", taskId (Harvest "src-a"), ReleaseReason.Unreachable))
+                    (Verdict.Released(
+                        "a1",
+                        taskId (Harvest "src-a"),
+                        ReleaseReason.Rejected RejectReason.Unreachable
+                    ))
                     "no container underfoot and no walk to one either"
 
                 Expect.isEmpty
@@ -184,7 +192,11 @@ let containerPostTests =
 
                 Expect.contains
                     verdicts
-                    (Verdict.Released("a1", taskId (Harvest "src-a"), ReleaseReason.Inapplicable))
+                    (Verdict.Released(
+                        "a1",
+                        taskId (Harvest "src-a"),
+                        ReleaseReason.Rejected RejectReason.Inapplicable
+                    ))
                     "a pending container is not yet a container"
             }
 
@@ -253,7 +265,11 @@ let postCapacityTests =
 
                 Expect.contains
                     verdicts
-                    (Verdict.Released("a2", taskId (Harvest "src-a"), ReleaseReason.OverCapacity))
+                    (Verdict.Released(
+                        "a2",
+                        taskId (Harvest "src-a"),
+                        ReleaseReason.Rejected RejectReason.CapacityFull
+                    ))
                     "one Post seats one garrison: the second Anchor is released, not left to crowd it"
 
                 Expect.equal
@@ -324,7 +340,7 @@ let postCapacityTests =
 
             test "the crowd a Post's Seat is kept from is every body but the garrison" {
                 // ADR 0051's cap is over a **group** and not over one row
-                // (ADR 0052 decision 6, `Capacity.Commuters`): the Seats
+                // (ADR 0052 decision 6, `CapScope.Commuters`): the Seats
                 // beyond the Posts are a count of tiles, and any body but a
                 // garrison may stand on one. The two non-garrison classes
                 // the colony casts are the generalist and the [[standing
@@ -402,7 +418,11 @@ let postCapacityTests =
 
                 Expect.contains
                     verdicts
-                    (Verdict.Released("w2", taskId (Harvest "src-a"), ReleaseReason.OverCapacity))
+                    (Verdict.Released(
+                        "w2",
+                        taskId (Harvest "src-a"),
+                        ReleaseReason.Rejected RejectReason.CapacityFull
+                    ))
                     "the second light holder is released over the light cap"
             }
 
@@ -607,7 +627,11 @@ let restockTests =
 
                 Expect.contains
                     verdicts
-                    (Verdict.Released("w1", taskId (Harvest "src-a"), ReleaseReason.TooEarly(0, 60)))
+                    (Verdict.Released(
+                        "w1",
+                        taskId (Harvest "src-a"),
+                        ReleaseReason.Rejected(RejectReason.TooEarly(0, 60))
+                    ))
                     "an arrival of now covers no wait at all"
 
                 Expect.equal (Map.tryFind "w1" assignments) None "and it is free to work elsewhere"
@@ -628,7 +652,11 @@ let restockTests =
 
                 Expect.contains
                     verdicts
-                    (Verdict.Released("w1", taskId (Harvest "src-a"), ReleaseReason.TooEarly(4, 60)))
+                    (Verdict.Released(
+                        "w1",
+                        taskId (Harvest "src-a"),
+                        ReleaseReason.Rejected(RejectReason.TooEarly(4, 60))
+                    ))
                     "why the creep is not on its way is a walk and a wait, not a bare word"
             }
 
@@ -756,7 +784,11 @@ let restockTests =
 
                 Expect.contains
                     verdicts
-                    (Verdict.Released("a1", taskId (Harvest "src-a"), ReleaseReason.TooEarly(0, 60)))
+                    (Verdict.Released(
+                        "a1",
+                        taskId (Harvest "src-a"),
+                        ReleaseReason.Rejected(RejectReason.TooEarly(0, 60))
+                    ))
                     "no container underfoot, so no garrison exemption"
 
                 Expect.equal

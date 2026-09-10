@@ -325,28 +325,69 @@ let private upgraderBodyFor capacity =
 
     List.replicate pairs Work @ [ Carry ] @ List.replicate pairs Move
 
+/// The reserver row's body for one outpost (ADR 0042): the deficit sizing and
+/// the bank truncation, whichever asks for less, never below one block. The
+/// deficit arrives as a second capacity ceiling, because "as many whole blocks
+/// as capacity buys" is already `reserverBodyFor`'s rule.
+let internal reserverBodyWithin claims capacity =
+    reserverBodyFor (min capacity (claims * bodyCost reserverPattern.Block))
+
+/// The second fact the two rows whose sizing is not the bank's answer alone
+/// read (ADR 0052 decision 4): the anchor row's Work ceiling — the [[post]] the
+/// finished body is being bought for (ADR 0053) — and the reserver row's
+/// outstanding claims (ADR 0042). Carried as one record so that the one sizing
+/// rule below takes one shape from every caller: the rows, the [[lead]]'s
+/// successor and the plain capacity reader each hand it what they know, and
+/// none of them restates the dispatch over the pattern.
+type BodySizing =
+    {
+        AnchorCap: int
+        ReserverClaims: int list
+    }
+
+/// The sizing a caller holding nothing but a capacity can ask for: both rows at
+/// their **largest** body — the anchor row at the held rock's saturation, the
+/// reserver row untruncated by any demand.
+let largestSizing =
+    {
+        AnchorCap = heldWorkCap
+        ReserverClaims = []
+    }
+
 /// Body for a pattern at an energy capacity, under the row's own sizing rule
 /// (ADR 0006): the anchor row spends on Work beside its fixed Carry/Move pair,
 /// the hauler, reserver and guard rows buy whole blocks, the upgrader row buys
 /// Work/Move pairs beside one Carry, and every other row pads its remainder at
 /// plain fatigue parity — or, if its block holds a part that rule cannot place,
-/// is refused rather than sized into some other body. A capacity is the whole
-/// of what this entry point holds, so the two rows whose real rule reads a
-/// second fact — the anchor's Post (ADR 0053) and the reserver's deficit — are
-/// answered here at their **largest** body.
-let bodyFor pattern capacity =
+/// is refused rather than sized into some other body. **The** dispatch over the
+/// pattern, asked by the rows, by the lead's successor and by `bodyFor` below:
+/// written per caller it was three tables, and a seventh row would have been
+/// three edits the compiler could not check.
+let sizedBodyFor (sizing: BodySizing) pattern capacity =
     if pattern.Name = anchorPattern.Name then
-        anchorBodyFor heldWorkCap capacity
+        anchorBodyFor sizing.AnchorCap capacity
     elif pattern.Name = haulerPattern.Name then
         haulerBodyFor capacity
     elif pattern.Name = reserverPattern.Name then
-        reserverBodyFor capacity
+        match sizing.ReserverClaims with
+        | [] -> reserverBodyFor capacity
+        // Every cast at the largest outstanding demand and never at the one
+        // standing beside it in the list: the Matcher pairs a finished body to a
+        // controller by travel cost, so a body sized for the room that has
+        // slipped furthest can land on the room that has not.
+        | claims -> reserverBodyWithin (List.max claims) capacity
     elif pattern.Name = guardPattern.Name then
         guardBodyFor capacity
     elif pattern.Name = upgraderPattern.Name then
         upgraderBodyFor capacity
     else
         parityBodyFor pattern capacity
+
+/// The same at the largest body either of those two rows can take: a capacity
+/// is the whole of what this entry point holds, so the anchor's Post (ADR 0053)
+/// and the reserver's deficit are answered at their ceiling.
+let bodyFor pattern capacity =
+    sizedBodyFor largestSizing pattern capacity
 
 /// The generalist body: the worker row of the pattern table, sized to
 /// capacity.

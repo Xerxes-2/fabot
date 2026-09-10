@@ -19,7 +19,7 @@ open Fabot.Core.Tests.Decide.Fixtures
 /// every one of the Harvest gate's light-body clauses and no exemption. Its
 /// store is the caller's, because the whole of the first clause is what the
 /// store holds. Named for the [[body class]] and not "commuter", which this
-/// file already spends on `Capacity.Commuters` — the crowd that is merely not
+/// file already spends on `CapScope.Commuters` — the crowd that is merely not
 /// Heavy, the Standing row included.
 let lightWorker name energy freeCapacity =
     creepWith
@@ -98,6 +98,34 @@ let nearFarCorridor creepPositions =
             for y in 9..21 -> { X = 10; Y = y }, (if y = 10 || y = 20 then Wall else Plain)
         ]
     |> withCreepsAt creepPositions
+
+/// The colony on a one-lane corridor with a walled source at its head: the
+/// rock at (10,10), plain ground down the column x = 10 on the rows named,
+/// and the caller's bodies standing where it puts them. Nothing else in the
+/// room is work, so a body here is walking to the rock or it is doing
+/// nothing — which is what leaves a Verdict about the walk, or the lack of
+/// one, standing alone.
+let corridorColonyOver rows creeps positions =
+    { bareRespawn with
+        Sources = [ source "src-a" ]
+        Creeps = creeps
+        Spatial =
+            spatial
+                [ "src-a", { X = 10; Y = 10 } ]
+                ([ for y in rows -> { X = 10; Y = y }, Plain ] @ [ { X = 10; Y = 10 }, Wall ])
+            |> withCreepsAt positions
+    }
+
+/// The corridor with room to walk in: y = 9..15, four tiles of approach south
+/// of the rock and one north of it.
+let corridorColony creeps positions =
+    corridorColonyOver [ 9..15 ] creeps positions
+
+/// The same corridor cut to the ground south of the rock, y = 11..14: every
+/// tile on it is within the source's Work Area, so what separates two bodies
+/// standing on it is never reachability.
+let shortCorridorColony creeps positions =
+    corridorColonyOver [ 11..14 ] creeps positions
 
 /// The Resolver's movement Verdicts at the same seam, with the named
 /// creeps on the verbose list (ADR 0018).

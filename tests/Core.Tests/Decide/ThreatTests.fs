@@ -849,7 +849,11 @@ let threatGateTests =
 
                 Expect.contains
                     verdicts
-                    (Verdict.Released("w1", taskId (Harvest "src-a"), ReleaseReason.Threatened))
+                    (Verdict.Released(
+                        "w1",
+                        taskId (Harvest "src-a"),
+                        ReleaseReason.Rejected RejectReason.Threatened
+                    ))
                     "the raid's release names the raid, not a Task that vanished"
 
                 Expect.isEmpty (Map.toList kept) "and the Seat is not offered to anyone else"
@@ -965,7 +969,11 @@ let threatGateTests =
 
                 Expect.contains
                     verdicts
-                    (Verdict.Released("a1", taskId (Harvest "src-a"), ReleaseReason.Threatened))
+                    (Verdict.Released(
+                        "a1",
+                        taskId (Harvest "src-a"),
+                        ReleaseReason.Rejected RejectReason.Threatened
+                    ))
                     "an unramparted Post in a Reach is no standing room"
 
                 Expect.isEmpty (Map.toList kept) "and a Work-heavy body does not run"
@@ -1042,7 +1050,11 @@ let threatGateTests =
 
                 Expect.contains
                     verdicts
-                    (Verdict.Released("w1", taskId (Harvest "src-a"), ReleaseReason.Unreachable))
+                    (Verdict.Released(
+                        "w1",
+                        taskId (Harvest "src-a"),
+                        ReleaseReason.Rejected RejectReason.Unreachable
+                    ))
                     "cold but unreachable is unreachable, and says so"
             }
         ]
@@ -1382,7 +1394,11 @@ let fleeTests =
 
                 Expect.contains
                     verdicts
-                    (Verdict.Released("w1", taskId Flee, ReleaseReason.Inapplicable))
+                    (Verdict.Released(
+                        "w1",
+                        taskId Flee,
+                        ReleaseReason.Rejected RejectReason.Inapplicable
+                    ))
                     "out of the Reach, out of the Task"
 
                 Expect.equal
@@ -1675,7 +1691,11 @@ let layeredThreatTests =
 
                 Expect.equal
                     (releasesWith [ hostileIn "W1N2" { X = 10; Y = 49 } [ Attack; Move ] ])
-                    [ "wo", taskId (Harvest "src-out"), ReleaseReason.Threatened ]
+                    [
+                        "wo",
+                        taskId (Harvest "src-out"),
+                        ReleaseReason.Rejected RejectReason.Threatened
+                    ]
                     "the outpost's rock loses its Seats; the home room's keeps its holder"
 
                 // Pairwise, the same body on the same coordinate filed at

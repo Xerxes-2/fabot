@@ -408,7 +408,7 @@ let private enrol roster (hostile: HostileInfo) =
             hostile.Id
             {
                 Owner = hostile.Owner
-                Body = hostile.Body |> List.countBy id |> Map.ofList
+                Body = partsOf hostile.Body
             }
             roster
 

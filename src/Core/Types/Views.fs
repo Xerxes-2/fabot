@@ -184,10 +184,7 @@ module ColonyView =
         let placed = facts.Layer.TargetPositions
         let tileOf id = Map.tryFind id placed
 
-        let idsOfKind kind =
-            facts.TargetKinds
-            |> Map.toList
-            |> List.choose (fun (id, k) -> if k = kind then Some id else None)
+        let idsOfKind = SpatialInfo.idsOfKindIn facts.TargetKinds
 
         match stage, idsOfKind Controller |> List.tryPick tileOf with
         | Some Bootstrapping, Some controller ->

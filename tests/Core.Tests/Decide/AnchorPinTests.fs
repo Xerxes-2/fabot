@@ -620,7 +620,11 @@ let heavyPinTests =
 
                 Expect.contains
                     verdicts
-                    (Verdict.Released("w1", taskId (Harvest "src-a"), ReleaseReason.TooEarly(0, 50)))
+                    (Verdict.Released(
+                        "w1",
+                        taskId (Harvest "src-a"),
+                        ReleaseReason.Rejected(RejectReason.TooEarly(0, 50))
+                    ))
                     "an arrival of now covers no wait at all, whatever tile it is on"
 
                 Expect.equal (Map.tryFind "w1" assignments) None "and the Seat is free again"
@@ -646,7 +650,11 @@ let heavyPinTests =
 
                 Expect.contains
                     verdicts
-                    (Verdict.Released("a1", taskId (Harvest "src-a"), ReleaseReason.TooEarly(4, 50)))
+                    (Verdict.Released(
+                        "a1",
+                        taskId (Harvest "src-a"),
+                        ReleaseReason.Rejected(RejectReason.TooEarly(4, 50))
+                    ))
                     "out of digging range the ordinary arrival gate judges it"
 
                 Expect.contains

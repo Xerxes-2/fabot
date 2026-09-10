@@ -200,10 +200,15 @@ module SpatialInfo =
     /// written here once, beside the kind census it reads. It had been a local
     /// helper of one pool with the promise in its comment, and two other
     /// modules re-derived it anyway.
-    let idsOfKind (spatial: SpatialInfo) (kind: TargetKind) : string list =
-        spatial.TargetKinds
+    let idsOfKindIn (kinds: Map<string, TargetKind>) (kind: TargetKind) : string list =
+        kinds
         |> Map.toList
         |> List.choose (fun (id, k) -> if k = kind then Some id else None)
+
+    /// The same walk over a whole projection's census, which is what all but
+    /// one of its readers hold.
+    let idsOfKind (spatial: SpatialInfo) (kind: TargetKind) : string list =
+        idsOfKindIn spatial.TargetKinds kind
 
     /// What one store holds this tick, and 0 for a target the projection
     /// carries no store for — the reading its three readers each want and each

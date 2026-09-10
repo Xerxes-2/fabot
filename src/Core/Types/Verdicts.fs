@@ -64,97 +64,6 @@ let matchFactorOf =
             MatchFactor.PoolOrder
         ]
 
-/// Why a remembered assignment was released: its Task left the pool, a Threat's
-/// Reach has taken the whole of its Work Area (ADR 0033) — asked first, because
-/// a Task with nowhere to stand is gone for this creep however well its body
-/// fits — the creep can no longer usefully work it, the Task's worker cap was
-/// already full, its Work Area is unreachable or empty (ADR 0002), or its time
-/// has not come: the creep's walk no longer covers a drained source's restock
-/// wait (ADR 0025).
-[<RequireQualifiedAccess>]
-type ReleaseReason =
-    | TaskGone
-    | Inapplicable
-    | OverCapacity
-    | Unreachable
-    | Threatened
-    | TooEarly of walk: int * wait: int
-
-/// The wire spelling of each ReleaseReason, as `matchFactorName` is
-/// MatchFactor's.
-let releaseReasonName =
-    function
-    | ReleaseReason.TaskGone -> "task-gone"
-    | ReleaseReason.Inapplicable -> "inapplicable"
-    | ReleaseReason.OverCapacity -> "over-capacity"
-    | ReleaseReason.Unreachable -> "unreachable"
-    | ReleaseReason.Threatened -> "threatened"
-    | ReleaseReason.TooEarly _ -> "too-early"
-
-/// The numbers a ReleaseReason carries beside its wire name, or None for
-/// a bare tag. The encoder's half of what `releaseReasonOf` reads back,
-/// beside the union the way the name table is: a case's payload is spelt
-/// out in one place, not once per row shape that carries it.
-let releaseReasonNumbers =
-    function
-    | ReleaseReason.TooEarly(walk, wait) -> Some(walk, wait)
-    | ReleaseReason.TaskGone
-    | ReleaseReason.Inapplicable
-    | ReleaseReason.OverCapacity
-    | ReleaseReason.Unreachable
-    | ReleaseReason.Threatened -> None
-
-/// The ReleaseReason a wire name spells for the numbers the wire carried
-/// beside it, or None for a name this vocabulary does not have — and for
-/// `too-early` with no numbers to be about.
-let releaseReasonOf =
-    reverseCarrying
-        releaseReasonName
-        (0, 0)
-        [
-            (fun _ -> Some ReleaseReason.TaskGone)
-            (fun _ -> Some ReleaseReason.Inapplicable)
-            (fun _ -> Some ReleaseReason.OverCapacity)
-            (fun _ -> Some ReleaseReason.Unreachable)
-            (fun _ -> Some ReleaseReason.Threatened)
-            Option.map ReleaseReason.TooEarly
-        ]
-
-/// Why an unassigned creep got nothing: the pool was empty, no Task fit its
-/// body or energy state, every fitting Task's worker cap was full, every
-/// fitting Task with room had an unreachable Work Area, or every Task it could
-/// otherwise have taken is one whose time has not come (ADR 0025).
-[<RequireQualifiedAccess>]
-type IdleReason =
-    | NoTasks
-    | NoneApplicable
-    | NoneFree
-    | NoneReachable
-    | NoneInTime
-
-/// The wire spelling of each IdleReason, as `matchFactorName` is
-/// MatchFactor's.
-let idleReasonName =
-    function
-    | IdleReason.NoTasks -> "no-tasks"
-    | IdleReason.NoneApplicable -> "none-applicable"
-    | IdleReason.NoneFree -> "none-free"
-    | IdleReason.NoneReachable -> "none-reachable"
-    | IdleReason.NoneInTime -> "none-in-time"
-
-/// The IdleReason a wire name spells, or None for a name this vocabulary
-/// does not have.
-let idleReasonOf =
-    reverseOf
-        idleReasonName
-        [
-            IdleReason.NoTasks
-            IdleReason.NoneApplicable
-            IdleReason.NoneFree
-            IdleReason.NoneReachable
-            IdleReason.NoneInTime
-        ]
-
 /// Why a Task in the pool was rejected for a creep, in a verbose scoring: a
 /// Threat's Reach has taken the whole of its Work Area (ADR 0033), it did not
 /// fit the creep's body or energy state, its worker cap was already full, its
@@ -200,6 +109,78 @@ let rejectReasonOf =
             (fun _ -> Some RejectReason.Unreachable)
             (fun _ -> Some RejectReason.Threatened)
             Option.map RejectReason.TooEarly
+        ]
+
+/// Why a remembered assignment was released: its Task left the pool, or one of
+/// the matching gates refused it for this creep — which is every `RejectReason`
+/// above, carried rather than restated. A release *is* a rejection of a Task
+/// the creep already held (`Matcher.gate` answers one cascade for both
+/// readings), and the one case no gate can produce is the Task no longer being
+/// in the pool to be refused: `TaskGone` is answered above the cascade, where
+/// there is nothing left to ask a gate about.
+[<RequireQualifiedAccess>]
+type ReleaseReason =
+    | TaskGone
+    | Rejected of RejectReason
+
+/// The wire spelling of each ReleaseReason, as `matchFactorName` is
+/// MatchFactor's: the refusals spell what they spelt as refusals, so the
+/// release channel and the scoring channel name one failure one way.
+let releaseReasonName =
+    function
+    | ReleaseReason.TaskGone -> "task-gone"
+    | ReleaseReason.Rejected reason -> rejectReasonName reason
+
+/// The numbers a ReleaseReason carries beside its wire name, or None for a
+/// bare tag — the carried reason's own, for the same reason the name is.
+let releaseReasonNumbers =
+    function
+    | ReleaseReason.TaskGone -> None
+    | ReleaseReason.Rejected reason -> rejectReasonNumbers reason
+
+/// The ReleaseReason a wire name spells for the numbers the wire carried
+/// beside it, or None for a name this vocabulary does not have — and for
+/// `too-early` with no numbers to be about, which is the carried decoder's
+/// answer and not a second rule.
+let releaseReasonOf payload name =
+    if name = releaseReasonName ReleaseReason.TaskGone then
+        Some ReleaseReason.TaskGone
+    else
+        rejectReasonOf payload name |> Option.map ReleaseReason.Rejected
+
+/// Why an unassigned creep got nothing: the pool was empty, no Task fit its
+/// body or energy state, every fitting Task's worker cap was full, every
+/// fitting Task with room had an unreachable Work Area, or every Task it could
+/// otherwise have taken is one whose time has not come (ADR 0025).
+[<RequireQualifiedAccess>]
+type IdleReason =
+    | NoTasks
+    | NoneApplicable
+    | NoneFree
+    | NoneReachable
+    | NoneInTime
+
+/// The wire spelling of each IdleReason, as `matchFactorName` is
+/// MatchFactor's.
+let idleReasonName =
+    function
+    | IdleReason.NoTasks -> "no-tasks"
+    | IdleReason.NoneApplicable -> "none-applicable"
+    | IdleReason.NoneFree -> "none-free"
+    | IdleReason.NoneReachable -> "none-reachable"
+    | IdleReason.NoneInTime -> "none-in-time"
+
+/// The IdleReason a wire name spells, or None for a name this vocabulary
+/// does not have.
+let idleReasonOf =
+    reverseOf
+        idleReasonName
+        [
+            IdleReason.NoTasks
+            IdleReason.NoneApplicable
+            IdleReason.NoneFree
+            IdleReason.NoneReachable
+            IdleReason.NoneInTime
         ]
 
 /// The wire spelling of each FootingKind, on the Layout channel's Memory leaf.

@@ -428,7 +428,11 @@ let haulerTests =
 
                 Expect.contains
                     verdicts
-                    (Verdict.Released("h1", taskId (Withdraw "can-src"), ReleaseReason.Inapplicable))
+                    (Verdict.Released(
+                        "h1",
+                        taskId (Withdraw "can-src"),
+                        ReleaseReason.Rejected RejectReason.Inapplicable
+                    ))
                     "the full store releases Withdraw"
 
                 Expect.equal

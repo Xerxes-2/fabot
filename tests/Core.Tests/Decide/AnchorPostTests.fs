@@ -17,7 +17,7 @@ let postGarrisonTests =
         [
             test "a heavy body standing on the one Post holds it while holding nothing" {
                 // #269, and the older half of it — the mechanism predates
-                // #258's widening. `Capacity.Garrisons` counted the Post's
+                // #258's widening. `CapScope.Garrisons` counted the Post's
                 // *holders*, so a rock whose garrison happened to hold no
                 // Task this tick read as an empty Post to every heavy body
                 // in the colony, and the Matcher walks its candidates in
@@ -115,7 +115,11 @@ let postGarrisonTests =
 
                 Expect.contains
                     verdicts
-                    (Verdict.Released("a1", taskId (Harvest "src-a"), ReleaseReason.TooEarly(0, 60)))
+                    (Verdict.Released(
+                        "a1",
+                        taskId (Harvest "src-a"),
+                        ReleaseReason.Rejected(RejectReason.TooEarly(0, 60))
+                    ))
                     "the bare Dual Seat carries no empty-window reprieve"
 
                 Expect.equal

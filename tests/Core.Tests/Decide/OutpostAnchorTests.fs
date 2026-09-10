@@ -134,7 +134,7 @@ let heavyPinAcrossTests =
                     (Verdict.Released(
                         "w",
                         taskId (Harvest "src-out"),
-                        ReleaseReason.TooEarly(0, 30)
+                        ReleaseReason.Rejected(RejectReason.TooEarly(0, 30))
                     ))
                     "a light body beside a dry rock is released as it always was"
 

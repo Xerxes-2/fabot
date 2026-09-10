@@ -355,7 +355,7 @@ let logisticsTests =
                     (Verdict.Released(
                         "a1",
                         taskId (Withdraw "can-ctrl"),
-                        ReleaseReason.Inapplicable
+                        ReleaseReason.Rejected RejectReason.Inapplicable
                     ))
                     "the gate releases the remembered collection"
 
@@ -389,7 +389,7 @@ let logisticsTests =
                     (Verdict.Released(
                         "w1",
                         taskId (Withdraw "can-ctrl"),
-                        ReleaseReason.Inapplicable
+                        ReleaseReason.Rejected RejectReason.Inapplicable
                     ))
                     "the full store releases Withdraw"
 

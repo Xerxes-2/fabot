@@ -40,55 +40,66 @@ type BodyClass =
 /// budget, one holder per controller, the [[pioneer]]s' ceiling on borrowed
 /// work — arrives here as numbers and tiles, and `hasCapacity` counts holders
 /// against them.
+/// Which crowd a cap is a number about. The scope half of a cap, carried beside
+/// its number rather than spelled in a field name on one side and a class
+/// predicate on the other: the pairing is the whole of what a cap means, and a
+/// reader that re-asserts it is a reader that can get it wrong.
+[<RequireQualifiedAccess>]
+type CapScope =
+    /// Holders of every class together (the [[refill cluster]]'s free energy
+    /// over one [[hauler unit]] load, a Seat count, one holder per controller).
+    | Everyone
+    /// Holders that are `Heavy`: the garrisons, who compete for standing room
+    /// with each other and with nobody else (ADR 0024).
+    | Garrisons
+    /// Holders that are **not** `Heavy`: ADR 0051's light crowd, kept off the
+    /// Seats a [[post]] has claimed. One number over the group and not one
+    /// apiece, because "the Seats beyond the Posts" is a count of tiles and any
+    /// body but a garrison may stand on one.
+    | Commuters
+    /// Holders that are `Standing`: the row that lives at the [[buffer]] and
+    /// drinks it fifty energy at a time (#196).
+    | Standing
+    /// Holders that are neither `Heavy` nor `Standing`: the generalists' own
+    /// share of a store the standing row also drinks from, divided by the load
+    /// *they* carry (#196).
+    | Generalists
+    /// Holders that are `Fighter`, **and no holder of any other class at all**:
+    /// the [[guard]]'s share of a Guard, which ADR 0056 states as `Fighter ->
+    /// the room's quota`, every other class 0". The exclusivity rides this scope
+    /// because the five above cannot spell "not a Fighter" between them —
+    /// `Commuters` and `Generalists` each contain the class — and a zero written
+    /// as two of them would be a number about somebody else's crowd rather than
+    /// a refusal. The one cap written for a class rather than for a crowd, and
+    /// the second lock on a Task whose applicability already asks for an ATTACK
+    /// part: the Matcher recognises no Task kinds (ADR 0052 decision 6), so what
+    /// keeps a [[hauler unit]] out of a fight has to be sayable in numbers.
+    | Fighters
+
 type Capacity =
     {
-        /// Holders of every class together. `None` is unbounded — the *deeper*
-        /// Refills (the [[buffer]]'s, the [[storage]]'s, a [[ferry]]'s sink)
-        /// and the surplus work the pool is mostly made of. The flow's own
-        /// Refill left that set in ADR 0054: the [[refill cluster]] carries a
-        /// number here, its free energy over one [[hauler unit]] load.
-        Total: int option
-        /// Holders that are `Heavy`: the garrisons, who compete for
-        /// standing room with each other and with nobody else (ADR 0024).
-        Garrisons: int option
-        /// Holders that are **not** `Heavy`: ADR 0051's light crowd, kept
-        /// off the Seats a [[post]] has claimed. One number over the group
-        /// and not one apiece, because "the Seats beyond the Posts" is a
-        /// count of tiles and any body but a garrison may stand on one.
-        Commuters: int option
-        /// Holders that are `Standing`: the row that lives at the
-        /// [[buffer]] and drinks it fifty energy at a time (#196).
-        Standing: int option
-        /// Holders that are neither `Heavy` nor `Standing`: the
-        /// generalists' own share of a store the standing row also drinks
-        /// from, divided by the load *they* carry (#196).
-        Generalists: int option
-        /// Holders that are `Fighter`, **and no holder of any other class at
-        /// all**: the [[guard]]'s share of a Guard, which ADR 0056 states as
-        /// "`Fighter -> the room's quota`, every other class 0". Both halves
-        /// ride one field because the four scopes above cannot spell "not a
-        /// Fighter" between them — `Commuters` and `Generalists` each contain
-        /// the class — and a zero written as two of them would be a number
-        /// about somebody else's crowd (the `None` scope) rather than a
-        /// refusal. The one cap written for a class rather than for a crowd,
-        /// and the second lock on a Task whose applicability already asks for
-        /// an ATTACK part: the Matcher recognises no Task kinds (ADR 0052
-        /// decision 6), so what keeps a [[hauler unit]] out of a fight has to
-        /// be sayable in numbers.
-        Fighters: int option
+        /// The caps this Task carries, each under the crowd it is a number
+        /// about. A scope with no entry is unbounded — which is most of the
+        /// pool, and the shape the Matcher answers without ever walking the
+        /// assignment map. One map rather than a field per scope, because a cap
+        /// *is* a (crowd, number) pair: spelt as a field name on one side and a
+        /// class predicate on the other, the association had to be re-asserted
+        /// by every reader, and "is anything capped at all" had to list them
+        /// all again.
+        Caps: Map<CapScope, int>
         /// Tiles whose standing **heavy** occupant holds a slot against
-        /// `Garrisons` whatever Task it holds this tick — **every** [[post]] of
-        /// the rock since #269, where #205 carried only the Posts whose
-        /// container was still a site. Standing room is a fact about where a
-        /// body is (ADR 0024), so the tile is taken while a heavy body stands
-        /// on it and free only when none does: a cap counting the Task's
-        /// holders alone reads the tile as free on every tick its occupant
-        /// happens to hold something else — a build tick on a site Post, an
-        /// Upgrade through a drained rock's window on a bare [[dual seat]].
-        /// **Unioned** with those holders and never added to them, one body
-        /// that both holds the Task and stands on its Post being one garrison
-        /// and not two. Counted against that one cap and not against `Total`.
-        /// Empty for every other Task.
+        /// `CapScope.Garrisons` whatever Task it holds this tick — **every**
+        /// [[post]] of the rock since #269, where #205 carried only the Posts
+        /// whose container was still a site. Standing room is a fact about where
+        /// a body is (ADR 0024), so the tile is taken while a heavy body stands
+        /// on it and free only when none does: a cap counting the Task's holders
+        /// alone reads the tile as free on every tick its occupant happens to
+        /// hold something else — a build tick on a site Post, an Upgrade through
+        /// a drained rock's window on a bare [[dual seat]]. **Unioned** with
+        /// those holders and never added to them, one body that both holds the
+        /// Task and stands on its Post being one garrison and not two. Counted
+        /// against that one cap and not against `CapScope.Everyone`. Empty for
+        /// every other Task.
         Garrison: Set<RoomPos>
         /// Tiles a candidate standing on is outside every cap above: the
         /// container site under a garrison's own feet, which the outpost
@@ -103,33 +114,48 @@ module Capacity =
     /// one the Matcher answers without ever walking the assignment map.
     let unbounded =
         {
-            Total = None
-            Garrisons = None
-            Commuters = None
-            Standing = None
-            Generalists = None
-            Fighters = None
+            Caps = Map.empty
             Garrison = Set.empty
             Exempt = Set.empty
         }
 
+    /// One crowd's cap written onto a Task.
+    let capping scope limit (capacity: Capacity) =
+        { capacity with
+            Caps = Map.add scope limit capacity.Caps
+        }
+
+    /// The same for a number that may be absent: no number is no cap, never a
+    /// cap of nothing — an unbounded scope has no entry at all, which is what
+    /// keeps "somebody else's crowd" and "a crowd admitting nobody" apart.
+    let cappingMaybe scope (limit: int option) (capacity: Capacity) =
+        match limit with
+        | Some n -> capping scope n capacity
+        | None -> capacity
+
+    /// The Post tiles whose heavy occupant takes a garrison slot (#269).
+    let garrisoning tiles (capacity: Capacity) = { capacity with Garrison = tiles }
+
+    /// The tiles a candidate standing on is outside every cap (#205).
+    let exempting tiles (capacity: Capacity) = { capacity with Exempt = tiles }
+
     /// One number over every class: a Seat count, a store's stock divided
     /// by one load, one holder per controller.
-    let total n = { unbounded with Total = Some n }
+    let total n =
+        unbounded |> capping CapScope.Everyone n
 
     /// The Guard's cap (ADR 0056): that room's quota of `Fighter` bodies,
     /// and nobody else at all.
-    let fighters n = { unbounded with Fighters = Some n }
+    let fighters n =
+        unbounded |> capping CapScope.Fighters n
+
+    /// The number one crowd is capped at, or None where that crowd is
+    /// unbounded: the read at the other end of `capping`.
+    let capOf scope (capacity: Capacity) = Map.tryFind scope capacity.Caps
 
     /// Whether any cap at all is set — the question that decides whether
     /// the Matcher pays for a walk over the holders (ADR 0029).
-    let isBounded (capacity: Capacity) =
-        capacity.Total.IsSome
-        || capacity.Garrisons.IsSome
-        || capacity.Commuters.IsSome
-        || capacity.Standing.IsSome
-        || capacity.Generalists.IsSome
-        || capacity.Fighters.IsSome
+    let isBounded (capacity: Capacity) = not (Map.isEmpty capacity.Caps)
 
 /// One entry of this tick's Task pool: the Task, where it ranks and how many
 /// bodies it admits (ADR 0052 decision 6).

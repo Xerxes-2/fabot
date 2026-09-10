@@ -235,18 +235,7 @@ let movementTests =
             test "a creep outside its Work Area steps toward the source, acting not yet" {
                 // A one-tile-wide plain corridor: x = 10, y = 9..15, with the
                 // source tile itself a wall (sources always sit on walls).
-                let corridor =
-                    [ for y in 9..15 -> { X = 10; Y = y }, Plain ] @ [ { X = 10; Y = 10 }, Wall ]
-
-                let snapshot =
-                    { bareRespawn with
-                        Sources = [ source "src-a" ]
-                        Creeps = [ worker "w1" 0 50 ]
-                        Spatial =
-
-                            spatial [ "src-a", { X = 10; Y = 10 } ] corridor
-                            |> withCreepsAt [ "w1", { X = 10; Y = 14 } ]
-                    }
+                let snapshot = corridorColony [ worker "w1" 0 50 ] [ "w1", { X = 10; Y = 14 } ]
 
                 let { Intents = intents } = decideOn snapshot
 
@@ -711,18 +700,10 @@ let arbitrationTests =
                 // The live -11 spam came from loaded travellers: a creep
                 // mid-journey with fatigue outstanding used to be issued its
                 // next step anyway, which the engine refused every tick.
-                let corridor =
-                    [ for y in 9..15 -> { X = 10; Y = y }, Plain ] @ [ { X = 10; Y = 10 }, Wall ]
-
                 let snapshot =
-                    { bareRespawn with
-                        Sources = [ source "src-a" ]
-                        Creeps = [ { worker "w1" 0 50 with Fatigue = 4 } ]
-                        Spatial =
-
-                            spatial [ "src-a", { X = 10; Y = 10 } ] corridor
-                            |> withCreepsAt [ "w1", { X = 10; Y = 14 } ]
-                    }
+                    corridorColony
+                        [ { worker "w1" 0 50 with Fatigue = 4 } ]
+                        [ "w1", { X = 10; Y = 14 } ]
 
                 Expect.isEmpty
                     (resolveOn snapshot [ "w1", Harvest "src-a" ] |> moveIntents)

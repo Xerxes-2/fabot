@@ -322,13 +322,6 @@ let internal haulerDemandOf (view: ColonyView) atlas : int * HaulDemandRow list 
 let private upgradeDrainOf body =
     partCountIn body Work * Engine.upgradeDrainPerWork
 
-/// The reserver row's body for one outpost (ADR 0042): the deficit sizing and
-/// the bank truncation, whichever asks for less, never below one block. The
-/// deficit arrives as a second capacity ceiling, because "as many whole blocks
-/// as capacity buys" is already `reserverBodyFor`'s rule.
-let internal reserverBodyWithin claims capacity =
-    reserverBodyFor (min capacity (claims * bodyCost reserverPattern.Block))
-
 /// Whether a living body was cast from the guard row: it carries an ATTACK
 /// part (ADR 0056). The same part test `findAttack.js` splits the engine's own
 /// invaders on, and the one cut no other row of this colony makes — every other
@@ -489,6 +482,35 @@ let internal reserverClaimsOf (view: ColonyView) : int list =
 
         reserved @ (claims |> List.map (fun _ -> 1))
 
+/// The two facts the two rows whose sizing is not the bank's answer alone read,
+/// derived once for the tick (ADR 0042): the anchor row's Work ceilings and the
+/// reserver row's outstanding CLAIM demands. Together with the bank they say
+/// what **this colony's rows will cast this tick** (ADR 0052 decision 4), which
+/// is the number three readers have to agree on: the casting cascade that buys
+/// the body, the amortization that charges for it, and the lead that prices its
+/// succession. A record and not two arguments, and derived in
+/// `decideUnarbitrated` rather than per reader, because both folds walk the
+/// projection and a lead is priced once per living creep in two different steps
+/// of the tick. Neither field may be derived from a creep's remaining life (ADR
+/// 0053): a [[lead]] is priced off this record, so which Posts stand *empty* —
+/// an arrival-time judgement (ADR 0026) — cannot be a field of it without
+/// closing a circle.
+type RowSizing =
+    {
+        /// `postWorkCapsOf`'s answer this tick — one ceiling per [[post]],
+        /// keyed by the Post's own tile.
+        AnchorPostCaps: Map<RoomPos, int>
+        /// `reserverClaimsOf`'s answer this tick — one entry per room the
+        /// row hires for, each that room's CLAIM demand.
+        ReserverClaims: int list
+    }
+
+let internal rowSizingOf (view: ColonyView) atlas : RowSizing =
+    {
+        AnchorPostCaps = postWorkCapsOf view atlas
+        ReserverClaims = reserverClaimsOf view
+    }
+
 /// The colony's surplus over one creep's lifetime: the income the two upgrade
 /// rows are hired out of, written once because both read it and a paraphrase
 /// would let them hire against different money (ADR 0012, ADR 0046). Income is
@@ -502,14 +524,9 @@ let internal reserverClaimsOf (view: ColonyView) : int list =
 /// hired off facts about the *ground*, so their price is settled before the
 /// surplus has a number, while the two rows hired out of the surplus itself are
 /// charged inside `workforceTarget`.
-let internal surplusOverLifetime
-    (view: ColonyView)
-    atlas
-    reserverClaims
-    (anchorPostCaps: Map<RoomPos, int>)
-    haulerQuota
-    =
+let internal surplusOverLifetime (view: ColonyView) atlas (sizing: RowSizing) haulerQuota =
     let capacity = view.Bank.Capacity
+    let reserverClaims = sizing.ReserverClaims
 
     // The row's own body, once, times the places it hires: every reserver cast
     // this tick carries the largest outstanding demand, so the charge is priced
@@ -532,7 +549,7 @@ let internal surplusOverLifetime
     // really feeds, and a quota times one ceiling is that same mistake wherever
     // the colony's Posts disagree.
     let amortization =
-        (anchorPostCaps
+        (sizing.AnchorPostCaps
          |> Map.fold (fun total _ cap -> total + bodyCost (anchorBodyFor cap capacity)) 0)
         + haulerQuota * bodyCost (bodyFor haulerPattern capacity)
         + reserverCost * Engine.creepLifetime / Engine.claimLifetime
@@ -626,6 +643,47 @@ let private workerFloor (tasks: Task list) =
 
     if building then 2 else 1
 
+/// Every number the specialist rows are hired against this tick, derived in the
+/// one order they depend on each other (`quotaRowsOf`) and handed on as one
+/// value. A record and not eight positional arguments: five of them are bare
+/// `int`s, the casting cascade, the `quotas` view and the Workforce target all
+/// read the same five, and a mis-ordering was silent in every one of them.
+/// `Surplus` rides beside them because it is not a row — it is the income the
+/// last two are divided out of, read here and by `upgraderQuota` alike.
+type QuotaRows =
+    {
+        /// One entry per room the reserver row hires for, each that room's
+        /// CLAIM demand (ADR 0042): the length is the addend, the largest entry
+        /// prices every cast.
+        Reserver: int list
+        Guard: int
+        Anchor: int
+        Hauler: int
+        Upgrader: int
+        Surplus: int
+    }
+
+/// The tick's rows, in dependency order: the two read off the ground, the
+/// income they leave, and the standing upgrade row that income buys. Written
+/// once because the cascade that casts a body, the amortization that charges
+/// for it and the target that counts it must read one set of numbers — a second
+/// derivation is a body hired against one number and counted against another.
+let internal quotaRowsOf (view: ColonyView) atlas (sizing: RowSizing) haulerQuota : QuotaRows =
+    let surplus = surplusOverLifetime view atlas sizing haulerQuota
+
+    {
+        Reserver = sizing.ReserverClaims
+        Guard = guardQuota view
+        // One Anchor per Post of *every* projected room (ADR 0042): an
+        // outpost's Post is the same garrison tile a home Post is, so it hires
+        // from the same row and travel cost pins each Anchor on the Post
+        // nearest it.
+        Anchor = Atlas.postCount atlas
+        Hauler = haulerQuota
+        Upgrader = upgraderQuota view atlas surplus
+        Surplus = surplus
+    }
+
 /// Workforce target (ADR 0012, ADR 0046, ADR 0056): six addends, each a pattern
 /// row's own colony fact — reservers one per declared outpost, guards one or two
 /// per raided one, Anchors one per Post, haulers the throughput quota, upgraders
@@ -653,17 +711,7 @@ let private workerFloor (tasks: Task list) =
 /// deficit read the body it is alive as one of the generalists the income
 /// already paid for — a raid would quietly retire a worker for as long as the
 /// guard stood.
-let internal workforceTarget
-    (view: ColonyView)
-    atlas
-    (tasks: Task list)
-    reserverClaims
-    guardQuota
-    anchorQuota
-    haulerQuota
-    upgraderQuota
-    surplus
-    =
+let internal workforceTarget (view: ColonyView) atlas (tasks: Task list) (rows: QuotaRows) =
     let home = SpatialInfo.homeName view.Spatial
 
     let unpostedSeats =
@@ -680,14 +728,15 @@ let internal workforceTarget
     // is hired against the rest (ADR 0046): the energy its Work drinks over a
     // lifetime, and the row's replacement cost over the same lifetime, priced
     // at the body the casting step would actually cast.
-    let upgraderCost = upgraderQuota * upgraderLifetimeCost capacity
+    let upgraderCost = rows.Upgrader * upgraderLifetimeCost capacity
 
     // Rounded up through the same ceilDiv as the hauler row (ADR 0037): the
     // granularity a floor would drop is a whole worker body's Work, which grows
     // with RCL, and the income it drops leaks every tick while the body it
     // oversells is paid for out of stock.
     let incomeWorkers =
-        ceilDiv (surplus - upgraderCost) (workerDrain * Engine.creepLifetime) |> max 0
+        ceilDiv (rows.Surplus - upgraderCost) (workerDrain * Engine.creepLifetime)
+        |> max 0
 
     // The pioneers (ADR 0047 decision 4): while a room this colony has claimed
     // still has no spawn in it, the mother hires `Tuning.PioneerCount` more
@@ -720,10 +769,10 @@ let internal workforceTarget
     let workerRow =
         (unpostedSeats + incomeWorkers |> max (workerFloor tasks)) + pioneers
 
-    List.length reserverClaims
-    + guardQuota
-    + anchorQuota
-    + haulerQuota
-    + upgraderQuota
+    List.length rows.Reserver
+    + rows.Guard
+    + rows.Anchor
+    + rows.Hauler
+    + rows.Upgrader
     + workerRow
     |> max view.Tuning.MinWorkforce

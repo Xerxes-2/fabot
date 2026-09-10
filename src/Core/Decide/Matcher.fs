@@ -156,31 +156,46 @@ let matchCreeps
                 |> Set.union (Set.ofList heavyHolders)
                 |> Set.count
 
-            // A cap the candidate's own class does not fall in is not its
-            // cap: the `None` scope is how a rule says "this number is
-            // about somebody else's crowd".
-            let within scope cap counted =
-                match cap with
-                | Some limit when cls |> Option.exists scope -> counted < limit
-                | _ -> true
+            // Whose crowd each scope is a number about, and how many of them
+            // this cap is counted against — the pairing the scope carries, read
+            // here once for every cap on the Task rather than re-asserted per
+            // field.
+            let appliesTo =
+                function
+                | CapScope.Everyone -> fun _ -> true
+                | CapScope.Garrisons -> (=) Heavy
+                | CapScope.Commuters -> (<>) Heavy
+                | CapScope.Standing -> (=) Standing
+                | CapScope.Generalists -> fun c -> c <> Heavy && c <> Standing
+                | CapScope.Fighters -> (=) Fighter
 
-            within (fun _ -> true) capacity.Total all
-            && within ((=) Heavy) capacity.Garrisons garrisoned
-            && within ((<>) Heavy) capacity.Commuters (all - heavy)
-            && within ((=) Standing) capacity.Standing standingRow
-            && within
-                (fun c -> c <> Heavy && c <> Standing)
-                capacity.Generalists
-                (all - heavy - standingRow)
-            // The one cap that refuses a class outright rather than counting it
-            // (ADR 0056): a `Fighters` number admits that many Fighters and no
-            // body of any other class, because the scopes above cannot spell
-            // "not a Fighter" — `Commuters` and `Generalists` both contain it —
-            // and `within`'s `None` scope means "somebody else's crowd", which
-            // is the opposite of a refusal.
-            && (match capacity.Fighters with
-                | Some limit -> cls = Some Fighter && (inClass Fighter |> List.length) < limit
-                | None -> true)
+            let counted =
+                function
+                | CapScope.Everyone -> all
+                | CapScope.Garrisons -> garrisoned
+                | CapScope.Commuters -> all - heavy
+                | CapScope.Standing -> standingRow
+                | CapScope.Generalists -> all - heavy - standingRow
+                | CapScope.Fighters -> inClass Fighter |> List.length
+
+            // Every cap on the Task holds, or the candidate is refused. A cap
+            // whose crowd the candidate's own class does not fall in is not its
+            // cap — that is how a rule says "this number is about somebody
+            // else's crowd" — and so is a class the Atlas cannot name.
+            capacity.Caps
+            |> Map.forall (fun scope limit ->
+                match scope with
+                // The one cap that refuses a class outright rather than counting
+                // it (ADR 0056): a `Fighters` number admits that many Fighters
+                // and no body of any other class, because the scopes above
+                // cannot spell "not a Fighter" — `Commuters` and `Generalists`
+                // both contain it — and a scope a class falls outside of means
+                // "somebody else's crowd", which is the opposite of a refusal.
+                | CapScope.Fighters -> cls = Some Fighter && counted scope < limit
+                | _ ->
+                    match cls with
+                    | Some c when appliesTo scope c -> counted scope < limit
+                    | _ -> true)
 
     // The vision grace (#151): a Task leaves the pool for two opposite reasons
     // and its id alone cannot tell them apart — the target was destroyed, or
@@ -242,9 +257,11 @@ let matchCreeps
     // the fresh cascade must not price it, and the keep path must not price it
     // unless the capacity gate has already failed.
     //
-    // `RejectReason` is `ReleaseReason` less `TaskGone` (`Types/Verdicts.fs`),
-    // and `TaskGone` is answered above this cascade, where the Task is in no
-    // pool at all and no gate here can be asked about it.
+    // The cascade's failures are a `RejectReason`, which is what a
+    // `ReleaseReason.Rejected` carries (`Types/Verdicts.fs`): one gate answers
+    // both readings, and the release path only says which reading it is.
+    // `TaskGone` is answered above this cascade, where the Task is in no pool
+    // at all and no gate here can be asked about it.
     let gate
         (escape: Lazy<bool>)
         acc
@@ -268,16 +285,6 @@ let matchCreeps
                     match tooEarly view atlas creep pooled.Task arrival with
                     | Some(walk, wait) -> Error(RejectReason.TooEarly(walk, wait))
                     | None -> Ok cost
-
-    // The same gate said as a release rather than as a refusal: the two unions
-    // carry the same five failures under two names, one per reading.
-    let asRelease =
-        function
-        | RejectReason.Threatened -> ReleaseReason.Threatened
-        | RejectReason.Inapplicable -> ReleaseReason.Inapplicable
-        | RejectReason.CapacityFull -> ReleaseReason.OverCapacity
-        | RejectReason.Unreachable -> ReleaseReason.Unreachable
-        | RejectReason.TooEarly(walk, wait) -> ReleaseReason.TooEarly(walk, wait)
 
     let kept, keptLoads, released =
         ((Map.empty, Map.empty, []), assignments)
@@ -305,7 +312,7 @@ let matchCreeps
                 // reading does not share with the cascade below.
                 | Some pooled ->
                     match gate (lazy (expiring view atlas sizing creep)) acc creep pooled with
-                    | Error reason -> release (asRelease reason)
+                    | Error reason -> release (ReleaseReason.Rejected reason)
                     | Ok _ -> Map.add name tid acc, hold loads tid, released)
 
     // The fresh candidate's reading of the same cascade: scored on the full key

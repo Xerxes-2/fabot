@@ -28,18 +28,10 @@ let resolverVerdictTests =
             }
 
             test "a lone fatigued traveller is grounded, nothing more" {
-                let corridor =
-                    [ for y in 9..15 -> { X = 10; Y = y }, Plain ] @ [ { X = 10; Y = 10 }, Wall ]
-
                 let snapshot =
-                    { bareRespawn with
-                        Sources = [ source "src-a" ]
-                        Creeps = [ { worker "w1" 0 50 with Fatigue = 4 } ]
-                        Spatial =
-
-                            spatial [ "src-a", { X = 10; Y = 10 } ] corridor
-                            |> withCreepsAt [ "w1", { X = 10; Y = 14 } ]
-                    }
+                    corridorColony
+                        [ { worker "w1" 0 50 with Fatigue = 4 } ]
+                        [ "w1", { X = 10; Y = 14 } ]
 
                 Expect.equal
                     (resolveVerdictsOn snapshot [ "w1", Harvest "src-a" ])
@@ -135,18 +127,7 @@ let resolverVerdictTests =
             }
 
             test "a creep simply stepping toward its Work Area produces no movement noise" {
-                let corridor =
-                    [ for y in 9..15 -> { X = 10; Y = y }, Plain ] @ [ { X = 10; Y = 10 }, Wall ]
-
-                let snapshot =
-                    { bareRespawn with
-                        Sources = [ source "src-a" ]
-                        Creeps = [ worker "w1" 0 50 ]
-                        Spatial =
-
-                            spatial [ "src-a", { X = 10; Y = 10 } ] corridor
-                            |> withCreepsAt [ "w1", { X = 10; Y = 14 } ]
-                    }
+                let snapshot = corridorColony [ worker "w1" 0 50 ] [ "w1", { X = 10; Y = 14 } ]
 
                 Expect.isEmpty
                     (resolveVerdictsOn snapshot [ "w1", Harvest "src-a" ])
@@ -163,18 +144,10 @@ let resolverVerdictTests =
                 // A fatigued lone traveller at the decide seam: the Matcher
                 // speaks first (the fresh match), the Resolver after (the
                 // grounding) — one additive list, interleaved downstream.
-                let corridor =
-                    [ for y in 9..15 -> { X = 10; Y = y }, Plain ] @ [ { X = 10; Y = 10 }, Wall ]
-
                 let snapshot =
-                    { bareRespawn with
-                        Sources = [ source "src-a" ]
-                        Creeps = [ { worker "w1" 0 50 with Fatigue = 4 } ]
-                        Spatial =
-
-                            spatial [ "src-a", { X = 10; Y = 10 } ] corridor
-                            |> withCreepsAt [ "w1", { X = 10; Y = 14 } ]
-                    }
+                    corridorColony
+                        [ { worker "w1" 0 50 with Fatigue = 4 } ]
+                        [ "w1", { X = 10; Y = 14 } ]
 
                 let { Verdicts = verdicts } = decideOn snapshot
 
@@ -247,18 +220,7 @@ let sayTests =
             test "a creep still walking toward its target says its glyph anyway" {
                 // Out of action range: no action Intent this tick, but the
                 // assignment holds — the bubble reports it every tick.
-                let corridor =
-                    [ for y in 9..15 -> { X = 10; Y = y }, Plain ] @ [ { X = 10; Y = 10 }, Wall ]
-
-                let snapshot =
-                    { bareRespawn with
-                        Sources = [ source "src-a" ]
-                        Creeps = [ worker "w1" 0 50 ]
-                        Spatial =
-
-                            spatial [ "src-a", { X = 10; Y = 10 } ] corridor
-                            |> withCreepsAt [ "w1", { X = 10; Y = 14 } ]
-                    }
+                let snapshot = corridorColony [ worker "w1" 0 50 ] [ "w1", { X = 10; Y = 14 } ]
 
                 let { Intents = intents } = decideOn snapshot
 
@@ -470,7 +432,7 @@ let verdictTests =
                     (Verdict.Released(
                         "w1",
                         taskId (Harvest "src-a"),
-                        ReleaseReason.TooEarly(0, 120)
+                        ReleaseReason.Rejected(RejectReason.TooEarly(0, 120))
                     ))
                     "an arrival that covers no wait leaves the rock, exactly as ADR 0013 did"
             }
@@ -488,7 +450,11 @@ let verdictTests =
                 Expect.equal
                     verdicts
                     [
-                        Verdict.Released("w1", taskId (Harvest "src-a"), ReleaseReason.Inapplicable)
+                        Verdict.Released(
+                            "w1",
+                            taskId (Harvest "src-a"),
+                            ReleaseReason.Rejected RejectReason.Inapplicable
+                        )
                         Verdict.Matched("w1", taskId (Refill "spawn-1"), MatchFactor.Rank)
                     ]
                     "the handover carries both halves: why released, what won next"
@@ -512,7 +478,7 @@ let verdictTests =
                     (Verdict.Released(
                         "hauler",
                         taskId (Harvest "src-a"),
-                        ReleaseReason.Inapplicable
+                        ReleaseReason.Rejected RejectReason.Inapplicable
                     ))
                     "the missing Work part releases the assignment as Inapplicable"
             }
@@ -545,7 +511,11 @@ let verdictTests =
 
                 Expect.contains
                     verdicts
-                    (Verdict.Released("w1", taskId (Harvest "src-a"), ReleaseReason.Unreachable))
+                    (Verdict.Released(
+                        "w1",
+                        taskId (Harvest "src-a"),
+                        ReleaseReason.Rejected RejectReason.Unreachable
+                    ))
                     "no Seat can be reached: the release says so"
             }
 
@@ -553,18 +523,10 @@ let verdictTests =
                 // One Seat at the source, two creeps remembered on it — an
                 // oversell memory can carry across a redeploy. The
                 // alphabetically first keeps; nothing else fits the loser.
-                let corridor =
-                    [ { X = 10; Y = 10 }, Wall ] @ [ for y in 11..14 -> { X = 10; Y = y }, Plain ]
-
                 let snapshot =
-                    { bareRespawn with
-                        Sources = [ source "src-a" ]
-                        Creeps = [ worker "w1" 0 50; worker "w2" 0 50 ]
-                        Spatial =
-
-                            spatial [ "src-a", { X = 10; Y = 10 } ] corridor
-                            |> withCreepsAt [ "w1", { X = 10; Y = 12 }; "w2", { X = 10; Y = 13 } ]
-                    }
+                    shortCorridorColony
+                        [ worker "w1" 0 50; worker "w2" 0 50 ]
+                        [ "w1", { X = 10; Y = 12 }; "w2", { X = 10; Y = 13 } ]
 
                 let sticky =
                     Map.ofList [ "w1", taskId (Harvest "src-a"); "w2", taskId (Harvest "src-a") ]
@@ -574,7 +536,11 @@ let verdictTests =
                 Expect.equal
                     verdicts
                     [
-                        Verdict.Released("w2", taskId (Harvest "src-a"), ReleaseReason.OverCapacity)
+                        Verdict.Released(
+                            "w2",
+                            taskId (Harvest "src-a"),
+                            ReleaseReason.Rejected RejectReason.CapacityFull
+                        )
                         Verdict.Kept("w1", taskId (Harvest "src-a"))
                         Verdict.Unassigned("w2", IdleReason.NoneFree)
                     ]
@@ -840,18 +806,10 @@ let verboseScoringTests =
                 // One Seat at the source, claimed by w1's match before w2's
                 // turn: w2's scoring shows the cap, and its upgrade row shows
                 // the empty carry. w1 is off the list and speaks no Scoring.
-                let corridor =
-                    [ { X = 10; Y = 10 }, Wall ] @ [ for y in 11..14 -> { X = 10; Y = y }, Plain ]
-
                 let snapshot =
-                    { bareRespawn with
-                        Sources = [ source "src-a" ]
-                        Creeps = [ worker "w1" 0 50; worker "w2" 0 50 ]
-                        Spatial =
-
-                            spatial [ "src-a", { X = 10; Y = 10 } ] corridor
-                            |> withCreepsAt [ "w1", { X = 10; Y = 12 }; "w2", { X = 10; Y = 13 } ]
-                    }
+                    shortCorridorColony
+                        [ worker "w1" 0 50; worker "w2" 0 50 ]
+                        [ "w1", { X = 10; Y = 12 }; "w2", { X = 10; Y = 13 } ]
 
                 let { Verdicts = verdicts } = decide snapshot Map.empty (Set.ofList [ "w2" ]) None
 
@@ -881,18 +839,7 @@ let verboseScoringTests =
                 // The creep's own claim is set aside for its scoring: the
                 // Task it holds must read as the winning row, not as
                 // rejected against its holder's own seat.
-                let corridor =
-                    [ { X = 10; Y = 10 }, Wall ] @ [ for y in 11..14 -> { X = 10; Y = y }, Plain ]
-
-                let snapshot =
-                    { bareRespawn with
-                        Sources = [ source "src-a" ]
-                        Creeps = [ worker "w1" 0 50 ]
-                        Spatial =
-
-                            spatial [ "src-a", { X = 10; Y = 10 } ] corridor
-                            |> withCreepsAt [ "w1", { X = 10; Y = 11 } ]
-                    }
+                let snapshot = shortCorridorColony [ worker "w1" 0 50 ] [ "w1", { X = 10; Y = 11 } ]
 
                 let sticky = Map.ofList [ "w1", taskId (Harvest "src-a") ]
                 let { Verdicts = verdicts } = decide snapshot sticky (Set.ofList [ "w1" ]) None

@@ -26,16 +26,14 @@ let private tileOf (c: ICreep) : RoomPos = RoomPos.at c.room.name (posOf c.pos)
 /// the reverse of the Core's one part-name table. The engine's part set is
 /// closed, so Tough is an unreachable fallback that keeps it total.
 let private bodyPartOf =
-    let byName = allBodyParts |> List.map (fun p -> partName p, p) |> Map.ofList
-    fun partType -> byName |> Map.tryFind partType |> Option.defaultValue Tough
+    reverseOf partName allBodyParts >> Option.defaultValue Tough
 
 /// Classify an engine STRUCTURE_* string into the Core's built kinds. A
 /// string the table lacks is a kind the decision layer has no rules for,
 /// which is what Other says. Classified once here so every filter below
 /// reads the kind and the rules over it stay in Core (#75).
 let private builtKindOf =
-    let byName = allBuiltKinds |> List.map (fun k -> builtKindName k, k) |> Map.ofList
-    fun structureType -> byName |> Map.tryFind structureType |> Option.defaultValue BuiltKind.Other
+    reverseOf builtKindName allBuiltKinds >> Option.defaultValue BuiltKind.Other
 
 /// One room's terrain as the engine spells it — the whole fifty-by-fifty grid,
 /// in the two windows the projection assembles from it, off one engine read so
@@ -662,9 +660,10 @@ let ofGame (maxHops: int) (colonies: Colony list) (lastPositions: Map<string, Ro
                                 // tick while the raid it was hired for went on
                                 // untouched.
                                 c.body
-                                |> Array.filter (fun p -> p.hits > 0)
-                                |> Array.countBy (fun p -> bodyPartOf p.``type``)
-                                |> Map.ofArray
+                                |> Array.toList
+                                |> List.filter (fun p -> p.hits > 0)
+                                |> List.map (fun p -> bodyPartOf p.``type``)
+                                |> partsOf
                             Moved =
                                 match Map.tryFind c.name lastPositions with
                                 | Some last -> last <> tileOf c

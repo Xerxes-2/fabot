@@ -443,19 +443,7 @@ let private actionIntents
     (creep: CreepInfo)
     (task: Task)
     : Intent list =
-    let drained =
-        match task with
-        | Harvest sourceId -> ticksToRestock view sourceId > 0
-        | Withdraw _
-        | Pickup _
-        | Refill _
-        | Build _
-        | Repair _
-        | Upgrade _
-        | Reserve _
-        | Claim _
-        | Guard _
-        | Flee -> false
+    let drained = restockWait view task > 0
 
     match task with
     | Guard room -> guardIntent view atlas creep room |> Option.toList

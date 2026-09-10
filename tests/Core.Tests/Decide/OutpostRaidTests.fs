@@ -90,8 +90,12 @@ let raidedOutpostTests =
                 Expect.equal
                     (releasesOf raiders)
                     [
-                        "a-out", taskId (Harvest "src-out"), ReleaseReason.Threatened
-                        "h-out1", taskId (Withdraw "can-out"), ReleaseReason.Threatened
+                        "a-out",
+                        taskId (Harvest "src-out"),
+                        ReleaseReason.Rejected RejectReason.Threatened
+                        "h-out1",
+                        taskId (Withdraw "can-out"),
+                        ReleaseReason.Rejected RejectReason.Threatened
                     ]
                     "the raid takes the rock's Seats and the container's ground, and says so"
             }
@@ -146,7 +150,7 @@ let guardTaskTests =
                 let capOf colony =
                     pooledOf colony
                     |> entryFor (Guard "W1N2")
-                    |> Option.map (fun entry -> entry.Capacity.Fighters)
+                    |> Option.map (fun entry -> entry.Capacity |> Capacity.capOf CapScope.Fighters)
 
                 Expect.equal
                     (capOf (declaredRaid raiders |> withGuards [ guard "g-1", beside ]))
@@ -371,7 +375,7 @@ let guardTaskTests =
                 let capOf colony =
                     pooledOf colony
                     |> entryFor (Guard "W1N2")
-                    |> Option.map (fun entry -> entry.Capacity.Fighters)
+                    |> Option.map (fun entry -> entry.Capacity |> Capacity.capOf CapScope.Fighters)
 
                 let raid = declaredRaid (raiders @ healers 2)
 

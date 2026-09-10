@@ -683,6 +683,19 @@ let saveLayout
 
     writeColonyLeaf home "layout" layout
 
+/// The keys one CPU row's phase group is written under, each beside the
+/// reader that answers it. One list, so the guard that admits a group and the
+/// encoder that writes one cannot come to disagree about what "all six" is.
+let private cpuPhaseFields: (string * (CpuPhases -> obj)) list =
+    [
+        "entry", (fun p -> box p.Entry)
+        "snapshot", (fun p -> box p.Snapshot)
+        "decide", (fun p -> box p.Decide)
+        "save", (fun p -> box p.Save)
+        "execute", (fun p -> box p.Execute)
+        "intents", (fun p -> box p.Intents)
+    ]
+
 /// The phase split off one CPU row, or `None` when the row carries none.
 /// Absent and malformed answer alike: a row that predates the split has no
 /// phase keys, and one whose keys will not decode was measured by nobody,
@@ -690,14 +703,7 @@ let saveLayout
 /// six or none — a half-decoded group would price a phase against a
 /// boundary that was never read.
 let private decodeCpuPhases (raw: obj) : CpuPhases option =
-    if
-        jsTypeof raw?entry = "number"
-        && jsTypeof raw?snapshot = "number"
-        && jsTypeof raw?decide = "number"
-        && jsTypeof raw?save = "number"
-        && jsTypeof raw?execute = "number"
-        && jsTypeof raw?intents = "number"
-    then
+    if cpuPhaseFields |> List.forall (fun (key, _) -> jsTypeof raw?(key) = "number") then
         Some
             {
                 Entry = unbox<float> raw?entry
@@ -796,12 +802,8 @@ let saveCpu (state: CpuState) =
 
             match sample.Phases with
             | Some phases ->
-                o?entry <- phases.Entry
-                o?snapshot <- phases.Snapshot
-                o?decide <- phases.Decide
-                o?save <- phases.Save
-                o?execute <- phases.Execute
-                o?intents <- phases.Intents
+                for key, read in cpuPhaseFields do
+                    o?(key) <- read phases
             | None -> ()
 
             o)

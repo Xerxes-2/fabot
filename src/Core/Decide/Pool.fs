@@ -56,7 +56,7 @@ let internal garrisons atlas (creep: CreepInfo) sourceId =
 /// biting the tick the container stands, which is the tick the rock joins the
 /// economy the clause is rationing.
 ///
-/// Read here in `applicable` and not as a `Capacity.Commuters` of zero, where
+/// Read here in `applicable` and not as a `CapScope.Commuters` of zero, where
 /// ADR 0052 decision 6 otherwise keeps the per-source numbers: a capacity
 /// bounds the crowd a Task admits but never evicts a body already holding it,
 /// and #235's case (b) is exactly an eviction — the outpost Anchor stands up
@@ -171,6 +171,36 @@ let private keepsThroughEmptyWindow atlas (creep: CreepInfo) sourceId =
         && Atlas.standsAtSource atlas creep.Name sourceId
         && not (Atlas.standsOnDualSeat atlas creep.Name))
 
+
+/// The ticks a Task waits on a restock before there is anything there to work
+/// (ADR 0025) — the one place the question is asked, so the gate that refuses
+/// an early walk (`tooEarly`) and the gate that withholds an early action
+/// (`Emitter.actionIntents`) cannot come to disagree about which Tasks wait at
+/// all. Exhaustive on purpose: a Task added to the union is a build error
+/// here, and answering it wrongly is a body sent to work that is not there.
+let internal restockWait (view: ColonyView) task =
+    match task with
+    | Harvest sourceId -> ticksToRestock view sourceId
+    | Withdraw _
+    // A pile is workable the tick a creep reaches it and every tick before. It
+    // moves — down by decay, up under an [[anchor]] spilling onto a full
+    // [[container]] — but neither direction is a restock, so there is no tick
+    // to be early *of*.
+    | Pickup _
+    | Refill _
+    | Build _
+    | Repair _
+    | Upgrade _
+    // A controller is always there to be reserved: a reservation has no restock
+    // and no stock, so a reserver that has walked to one is never early (ADR
+    // 0042).
+    | Reserve _
+    | Claim _
+    // A [[threat]] standing in a room is there to be hit the tick a guard
+    // arrives and every tick before: a fight has no restock (ADR 0056).
+    | Guard _
+    | Flee -> 0
+
 /// The walk and the wait that hold a Task up for this creep, or None when its
 /// time has come (ADR 0025, repriced by ADR 0029): a drained source's Harvest
 /// is applicable only when the creep's walk covers the restock wait — walk >=
@@ -208,45 +238,19 @@ let private keepsThroughEmptyWindow atlas (creep: CreepInfo) sourceId =
 /// Anchor (user, 2026-09-08). Every other Task is judged at the current tick. Two
 /// consequences, both ADR 0004's totality.
 let internal tooEarly (view: ColonyView) atlas (creep: CreepInfo) task (walk: Lazy<int option>) =
-    match task with
-    | Harvest sourceId ->
+    match task, restockWait view task with
+    // A stocked source is a wait of zero, which every walk covers, and so is
+    // every Task that waits on no restock at all. Asked first, which keeps the
+    // reprieve's Atlas joins off the pairs a stocked pool is mostly made of.
+    | _, 0 -> None
+    | Harvest sourceId, wait when not (keepsThroughEmptyWindow atlas creep sourceId) ->
         match walk.Value with
         // No walk at all is unreachable geometry, which is not earliness:
         // the reachability gate stands ahead of this one in both cascades
         // and names that rejection itself (ADR 0002, ADR 0029).
-        | None -> None
-        | Some ticks ->
-            let wait = ticksToRestock view sourceId
-
-            // A stocked source is a wait of zero, which every walk covers:
-            // the arm below answers it either way, and asking it first
-            // keeps the reprieve's Atlas joins off the pairs a stocked
-            // pool is mostly made of.
-            if wait = 0 || keepsThroughEmptyWindow atlas creep sourceId then
-                None
-            elif ticks < wait then
-                Some(ticks, wait)
-            else
-                None
-    | Withdraw _
-    // A pile is workable the tick a creep reaches it and every tick before. It
-    // moves — down by decay, up under an [[anchor]] spilling onto a full
-    // [[container]] — but neither direction is a restock, so there is no tick
-    // to be early *of*.
-    | Pickup _
-    | Refill _
-    | Build _
-    | Repair _
-    | Upgrade _
-    // A controller is always there to be reserved: a reservation has no restock
-    // and no stock, so a reserver that has walked to one is never early (ADR
-    // 0042).
-    | Reserve _
-    | Claim _
-    // A [[threat]] standing in a room is there to be hit the tick a guard
-    // arrives and every tick before: a fight has no restock (ADR 0056).
-    | Guard _
-    | Flee -> None
+        | Some ticks when ticks < wait -> Some(ticks, wait)
+        | _ -> None
+    | _ -> None
 
 /// Whether a Task stands in the **Safety** tier — the two Tasks the colony
 /// ranks above every kind of work because a creep is being killed (ADR 0033,
@@ -559,6 +563,13 @@ let private sitesPendingBeside (view: ColonyView) atlas controllerId =
         view.ConstructionSites
         |> List.exists (fun site -> Atlas.targetRoom atlas site.Id = Some room)
 
+/// The two of those rules that turn on the **room** a site stands in: a site
+/// in a [[nursery]], and one in a room this colony is bootstrapping. Read on
+/// its own by the outpost budget below, which is deciding the third rule and
+/// so cannot be asked it.
+let private isFeedingByRoom (view: ColonyView) atlas siteId =
+    isNurserySite view atlas siteId || isBootstrappingSite view atlas siteId
+
 /// Whether this Build is on the feeding tier rather than in the surplus the
 /// colony's other sites are spent out of — the three rules that lift one there,
 /// said once. One reader is left: `tierOf`, and nothing else. ADR 0052 decision
@@ -572,9 +583,7 @@ let private sitesPendingBeside (view: ColonyView) atlas controllerId =
 /// the switch on whether there is going to be a second colony at all (ADR
 /// 0047).
 let private isFeedingSite (view: ColonyView) atlas (fed: Set<string>) siteId =
-    Set.contains siteId fed
-    || isNurserySite view atlas siteId
-    || isBootstrappingSite view atlas siteId
+    Set.contains siteId fed || isFeedingByRoom view atlas siteId
 
 /// Whether a site stands in this colony's **own home room** — the room #234's
 /// surplus rung is scoped to, and the one question that separates the site a
@@ -702,7 +711,7 @@ let internal priorityStep = 1
 /// Exported for the same reason `bodyFor` and `patternTable` are (ADR 0006): the
 /// ladder is a body fact a test reads directly. The head of the ladder is read
 /// in one [[capacity]] scope and one only — the Guard Task's `Fighter -> the
-/// room's quota, every other class 0` (`Capacity.Fighters`, ADR 0056) — so a
+/// room's quota, every other class 0` (`CapScope.Fighters`, ADR 0056) — so a
 /// body that stopped answering `Fighter` here would be a body no Guard admits.
 let bodyClassOf (tuning: Tuning) atlas (creep: CreepInfo) : BodyClass =
     if isGuardBody creep then Fighter
@@ -829,15 +838,14 @@ let planPool (view: ColonyView) atlas (tasks: Task list) : PooledTask list =
     // them nothing with, and the outpost's own container, ADR 0042's switch on
     // whether that room is in the economy at all, is pushed back into the
     // surplus where travel cost answers a Seam and sixty tiles against an
-    // Upgrade underfoot. Asked through `isFeedingSite` with the budget's own
-    // answer held empty, so the queue and the tier read one sentence and
-    // cannot drift apart.
+    // Upgrade underfoot. Asked through the room half of the tier's own rule
+    // (`isFeedingByRoom`), the budget being what this queue is deciding, so the
+    // queue and the tier read one sentence and cannot drift apart.
     let outpostSites =
         tasks
         |> List.choose (function
             | Build siteId when
-                isOutpostSite view atlas siteId
-                && not (isFeedingSite view atlas Set.empty siteId)
+                isOutpostSite view atlas siteId && not (isFeedingByRoom view atlas siteId)
                 ->
                 Some siteId
             | _ -> None)
@@ -1193,15 +1201,15 @@ let planPool (view: ColonyView) atlas (tasks: Task list) : PooledTask list =
             let postTiles = Atlas.postsOf atlas sourceId
             let posts = Set.count postTiles
 
-            { Capacity.unbounded with
-                Total = seats
-                Garrisons = (if posts = 0 then None else Some posts)
-                Commuters =
-                    seats
-                    |> Option.filter (fun _ -> posts > 0)
-                    |> Option.map (fun n -> max 0 (n - posts))
-                Garrison = postTiles
-            }
+            Capacity.unbounded
+            |> Capacity.cappingMaybe CapScope.Everyone seats
+            |> Capacity.cappingMaybe CapScope.Garrisons (if posts = 0 then None else Some posts)
+            |> Capacity.cappingMaybe
+                CapScope.Commuters
+                (seats
+                 |> Option.filter (fun _ -> posts > 0)
+                 |> Option.map (fun n -> max 0 (n - posts)))
+            |> Capacity.garrisoning postTiles
         // The [[guard]]s that room wants and nobody else at all (ADR 0056):
         // `guardsWanted` is the row's own arithmetic, read here a second time
         // rather than restated, so the number the cascade hires against and the
@@ -1223,10 +1231,9 @@ let planPool (view: ColonyView) atlas (tasks: Task list) : PooledTask list =
             let stock = stored storeId
 
             if Set.contains storeId buffers then
-                { Capacity.unbounded with
-                    Standing = Some(ceilDiv stock standingLoad)
-                    Generalists = Some(ceilDiv stock workerLoad)
-                }
+                Capacity.unbounded
+                |> Capacity.capping CapScope.Standing (ceilDiv stock standingLoad)
+                |> Capacity.capping CapScope.Generalists (ceilDiv stock workerLoad)
             else
                 Capacity.total (ceilDiv stock haulerLoad)
         | Pickup pileId -> Capacity.total (ceilDiv (stored pileId) haulerLoad)
@@ -1281,10 +1288,9 @@ let planPool (view: ColonyView) atlas (tasks: Task list) : PooledTask list =
                 elif Set.contains siteId fedSiteIds then Some builderShare
                 else None
 
-            { Capacity.unbounded with
-                Total = total
-                Exempt = exempt
-            }
+            Capacity.unbounded
+            |> Capacity.cappingMaybe CapScope.Everyone total
+            |> Capacity.exempting exempt
         // A rescue is one body's trip (#284, `rescued`). Every other Repair is
         // uncapped, as it always was: a road under the spawn is worked by
         // whoever is standing over it.

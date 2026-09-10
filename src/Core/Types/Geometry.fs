@@ -138,7 +138,7 @@ module RoomPos =
     /// every reader that decided it by accident decided "range 0" (#204).
     let range (a: RoomPos) (b: RoomPos) : int option =
         if a.Room = b.Room then
-            Some(max (abs (a.X - b.X)) (abs (a.Y - b.Y)))
+            Some(range (pos a) (pos b))
         else
             None
 

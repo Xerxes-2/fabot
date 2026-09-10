@@ -2303,7 +2303,7 @@ let borrowedRoomBudgetTests =
                     planPool view (Atlas.ofView view) (planTasks view noThreats)
                     |> List.tryPick (fun pooled ->
                         if pooled.Task = Refill id then
-                            pooled.Capacity.Total
+                            Capacity.capOf CapScope.Everyone pooled.Capacity
                         else
                             None)
 

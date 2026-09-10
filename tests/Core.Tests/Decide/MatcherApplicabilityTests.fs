@@ -227,7 +227,11 @@ let harvestApplicabilityTests =
                 Expect.equal
                     (verdictsAt { X = 13; Y = 10 })
                     [
-                        Verdict.Released("w", taskId (Harvest "src-a"), ReleaseReason.Inapplicable)
+                        Verdict.Released(
+                            "w",
+                            taskId (Harvest "src-a"),
+                            ReleaseReason.Rejected RejectReason.Inapplicable
+                        )
                         Verdict.Unassigned("w", IdleReason.NoneApplicable)
                     ]
                     "four tiles off it the walk is still ahead, and half a store is not worth it"

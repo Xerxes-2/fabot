@@ -260,7 +260,7 @@ let refillClusterTests =
                     "and the other way round, so it is room and not id order deciding"
             }
 
-            test "a load the ring no longer has room for is released over-capacity" {
+            test "a load the ring no longer has room for is released capacity-full" {
                 // The price ADR 0054 records rather than removes. The cap
                 // is `ceil(free / one load)` and the ring's free energy
                 // only falls, so on the tick it crosses a load boundary one
@@ -309,8 +309,12 @@ let refillClusterTests =
 
                 Expect.contains
                     verdicts
-                    (Verdict.Released("h2", taskId (Refill "spawn-1"), ReleaseReason.OverCapacity))
-                    "and the other is released over-capacity, though it is the one that had arrived"
+                    (Verdict.Released(
+                        "h2",
+                        taskId (Refill "spawn-1"),
+                        ReleaseReason.Rejected RejectReason.CapacityFull
+                    ))
+                    "and the other is released capacity-full, though it is the one that had arrived"
             }
         ]
 
@@ -467,12 +471,14 @@ let repairTests =
                     "the road a quarter from destruction outranks the one under the spawn"
 
                 Expect.equal
-                    (entryFor "road-far" |> Option.map (fun e -> e.Capacity.Total))
+                    (entryFor "road-far"
+                     |> Option.map (fun e -> e.Capacity |> Capacity.capOf CapScope.Everyone))
                     (Some(Some 1))
                     "a rescue is one body's trip"
 
                 Expect.equal
-                    (entryFor "road-near" |> Option.map (fun e -> e.Capacity.Total))
+                    (entryFor "road-near"
+                     |> Option.map (fun e -> e.Capacity |> Capacity.capOf CapScope.Everyone))
                     (Some None)
                     "an ordinary Repair is uncapped, as it always was"
             }
@@ -492,7 +498,8 @@ let repairTests =
                     poolOn colony
                     |> List.choose (fun entry ->
                         match entry.Task with
-                        | Repair id when entry.Capacity.Total = Some 1 -> Some id
+                        | Repair id when Capacity.capOf CapScope.Everyone entry.Capacity = Some 1 ->
+                            Some id
                         | _ -> None)
 
                 Expect.equal
@@ -515,7 +522,7 @@ let repairTests =
                     (poolOn colony
                      |> List.tryPick (fun entry ->
                          if entry.Task = Repair "sto-1" then
-                             Some entry.Capacity.Total
+                             Some(Capacity.capOf CapScope.Everyone entry.Capacity)
                          else
                              None))
                     (Some None)
@@ -804,7 +811,11 @@ let repairTests =
 
                 Expect.contains
                     verdicts
-                    (Verdict.Released("w1", taskId (Repair "road-1"), ReleaseReason.Inapplicable))
+                    (Verdict.Released(
+                        "w1",
+                        taskId (Repair "road-1"),
+                        ReleaseReason.Rejected RejectReason.Inapplicable
+                    ))
                     "the empty creep's remembered Repair is released"
 
                 Expect.equal

@@ -56,35 +56,6 @@ let private castCanRefill (tuning: Tuning) (body: BodyPart list) =
     let parts = partsOf body
     canRefillParts tuning (castIsHeavy parts) parts
 
-/// The two facts the two rows whose sizing is not the bank's answer alone read,
-/// derived once for the tick (ADR 0042): the anchor row's Work ceilings and the
-/// reserver row's outstanding CLAIM demands. Together with the bank they say
-/// what **this colony's rows will cast this tick** (ADR 0052 decision 4), which
-/// is the number three readers have to agree on: the casting cascade that buys
-/// the body, the amortization that charges for it, and the lead that prices its
-/// succession. A record and not two arguments, and derived in
-/// `decideUnarbitrated` rather than per reader, because both folds walk the
-/// projection and a lead is priced once per living creep in two different steps
-/// of the tick. Neither field may be derived from a creep's remaining life (ADR
-/// 0053): a [[lead]] is priced off this record, so which Posts stand *empty* —
-/// an arrival-time judgement (ADR 0026) — cannot be a field of it without
-/// closing a circle.
-type RowSizing =
-    {
-        /// `postWorkCapsOf`'s answer this tick — one ceiling per [[post]],
-        /// keyed by the Post's own tile.
-        AnchorPostCaps: Map<RoomPos, int>
-        /// `reserverClaimsOf`'s answer this tick — one entry per room the
-        /// row hires for, each that room's CLAIM demand.
-        ReserverClaims: int list
-    }
-
-let internal rowSizingOf (view: ColonyView) atlas : RowSizing =
-    {
-        AnchorPostCaps = postWorkCapsOf view atlas
-        ReserverClaims = reserverClaimsOf view
-    }
-
 /// The largest ceiling the row's Posts ask for, and the held one where it has
 /// no Post at all: the anchor row's answer wherever a reader wants a body but
 /// names no Post (ADR 0053).
@@ -123,16 +94,13 @@ let private castBodyOf
     (pattern: BodyPattern)
     (tile: RoomPos)
     =
-    let capacity = view.Bank.Capacity
-
-    if pattern.Name = anchorPattern.Name then
-        anchorBodyFor (anchorCapAt sizing.AnchorPostCaps tile) capacity
-    elif pattern.Name = reserverPattern.Name then
-        match sizing.ReserverClaims with
-        | [] -> bodyFor reserverPattern capacity
-        | claims -> reserverBodyWithin (List.max claims) capacity
-    else
-        bodyFor pattern capacity
+    sizedBodyFor
+        {
+            AnchorCap = anchorCapAt sizing.AnchorPostCaps tile
+            ReserverClaims = sizing.ReserverClaims
+        }
+        pattern
+        view.Bank.Capacity
 
 /// A creep's lead (ADR 0026): the ticks its replacement needs to stand where it
 /// stands — the successor body's cast time plus that body's walk out of the
@@ -191,7 +159,6 @@ type private SpecialistRow =
         Pattern: BodyPattern
         Quota: int
         Census: CreepInfo -> bool
-        Size: RoomEnergy -> BodyPart list
     }
 
 
@@ -232,59 +199,20 @@ let internal planSpawns
         [], Quotas.silent
     else
 
-        // The specialist rows' quota rules (ADR 0006, ADR 0012): one Anchor per
-        // Post, haulers per the throughput arithmetic — the hauler quota
-        // arriving memoised on the census signature (ADR 0017), which signs the
-        // *union* of what the Layout and the quota read, neither input set
-        // containing the other. Both quotas are addends of the target itself.
-        // One Anchor per Post of *every* projected room (ADR 0042): an
-        // outpost's Post is the same garrison tile a home Post is, so it hires
-        // from the same row and travel cost pins each Anchor on the Post
-        // nearest it.
-        let anchorQuota = Atlas.postCount atlas
+        // Every specialist row's quota rule in one value (`quotaRowsOf`, ADR
+        // 0006, ADR 0012, ADR 0042, ADR 0046, ADR 0056): one Anchor per Post,
+        // haulers per the throughput arithmetic — the hauler quota arriving
+        // memoised on the census signature (ADR 0017), which signs the *union*
+        // of what the Layout and the quota read, neither input set containing
+        // the other — the reserver row's demand list, the guard row's zero on
+        // every ordinary tick, the income those leave and the standing upgrade
+        // row that income buys. Read once here because every row is an addend of
+        // the target below *and* a gap of its own in the cascade, and a body
+        // hired against one reading and counted against another is an oversell
+        // every tick.
+        let rows = quotaRowsOf view atlas sizing haulerQuota
 
-        // The reserver row's quota and its body in one value (ADR 0042): one
-        // entry per declared outpost, each entry that outpost's CLAIM demand,
-        // and the largest of them is what every cast this tick carries.
-        let reserverClaims = sizing.ReserverClaims
-
-        // The guard row's quota (ADR 0056): zero on every ordinary tick, and on
-        // the ticks a raid stands in a declared outpost, one or two per raided
-        // room. Read here beside the others because it is an addend of the
-        // target below and a gap of its own in the cascade.
-        let guardQuota = guardQuota view
-
-        // The anchor row's ceilings this tick, one per Post, read once beside
-        // the quotas for the reason the reserver's demand list is (ADR 0042,
-        // ADR 0053): the row's bodies are what the amortization is charged and
-        // what the casts below buy, and each Post's two readings must be one
-        // body.
-        let anchorPostCaps = sizing.AnchorPostCaps
-
-        // The income the two upgrade rows are hired out of, once (ADR
-        // 0046): the standing row's quota is derived from it and the
-        // commuting row's is derived from what that quota leaves, so the
-        // two must read one number and not two spellings of it.
-        let surplus =
-            surplusOverLifetime view atlas reserverClaims anchorPostCaps haulerQuota
-
-        // The upgrader row's quota (ADR 0046), read here beside the other
-        // rows' for the same reason: it is an addend of the target below
-        // and a gap of its own in the cascade, and a body hired for one
-        // and not counted in the other would be an oversell every tick.
-        let upgraderQuota = upgraderQuota view atlas surplus
-
-        let target =
-            workforceTarget
-                view
-                atlas
-                tasks
-                reserverClaims
-                guardQuota
-                anchorQuota
-                haulerQuota
-                upgraderQuota
-                surplus
+        let target = workforceTarget view atlas tasks rows
 
         // The deficit and every row gap count the creeps that will still be
         // alive when a replacement could arrive: an expiring creep is already
@@ -363,7 +291,7 @@ let internal planSpawns
                 |> List.choose (fun creep -> Atlas.creepTile atlas creep.Name)
                 |> Set.ofList
 
-            anchorPostCaps
+            sizing.AnchorPostCaps
             |> Map.toList
             |> List.filter (fun (tile, _) -> not (Set.contains tile manned))
             |> List.map snd
@@ -382,7 +310,7 @@ let internal planSpawns
         let anchorCap =
             emptyPostCaps
             |> List.tryHead
-            |> Option.defaultValue (richestAnchorCap anchorPostCaps)
+            |> Option.defaultValue (richestAnchorCap sizing.AnchorPostCaps)
 
         // Reserver gaps are filled before Anchor gaps, Anchor gaps before
         // hauler gaps, hauler gaps before upgrader gaps and those before
@@ -408,6 +336,17 @@ let internal planSpawns
         // sum of it. Written out three times it was three orderings kept in
         // step by hand, and a seventh pattern was four edits the compiler could
         // not check.
+        // What the two rows whose sizing reads a second fact read this tick
+        // (`Bodies.sizedBodyFor`): the dearest vacancy's Work ceiling, and the
+        // outstanding reserver demands. A positive gap on the reserver row is a
+        // non-empty demand list, so that arm's `List.max` is total wherever it
+        // is reached.
+        let rowSizing =
+            {
+                AnchorCap = anchorCap
+                ReserverClaims = rows.Reserver
+            }
+
         let rows: SpecialistRow list =
             [
                 // The guard row's own `Living` is where ADR 0056's "no decay"
@@ -421,46 +360,37 @@ let internal planSpawns
                 {
                     Name = "guard"
                     Pattern = guardPattern
-                    Quota = guardQuota
-                    Census = isGuardBody
+                    Quota = rows.Guard
                     // Priced at capacity like every row but the floor (ADR
                     // 0021), so a bank that cannot hold 750 casts nothing here
                     // and yields to the reserver behind it (ADR 0050): a colony
                     // that small has ADR 0043's [[stand-down]] and nothing else.
-                    Size = fun bank -> bodyFor guardPattern bank.Capacity
+                    Census = isGuardBody
                 }
                 {
                     Name = "reserver"
                     Pattern = reserverPattern
-                    Quota = List.length reserverClaims
+                    Quota = List.length rows.Reserver
+                    // Sized at the largest outstanding demand, which is
+                    // `sizedBodyFor`'s own reserver arm over `rowSizing` below.
                     Census = isReserverBody
-                    // Every cast at the largest outstanding demand and never at
-                    // the one standing beside it in the list: the Matcher pairs
-                    // a finished body to a controller by travel cost, so a body
-                    // sized for the room that has slipped furthest can land on
-                    // the room that has not. A positive gap is a non-empty
-                    // demand list, so the `List.max` is total inside this
-                    // sizing — and it is inside it, because `List.replicate 0`
-                    // still evaluates the element.
-                    Size = fun bank -> reserverBodyWithin (List.max reserverClaims) bank.Capacity
                 }
                 {
                     Name = "anchor"
                     Pattern = anchorPattern
-                    Quota = anchorQuota
-                    Census = isAnchorBody
+                    Quota = rows.Anchor
                     // Sized under the dearest **vacancy**'s ceiling and never a
                     // colony-wide constant (ADR 0053): which Post the finished
                     // body lands on is the Matcher's, so the cast carries the
-                    // saturation of the richest rock this row has a hole on.
-                    Size = fun bank -> anchorBodyFor anchorCap bank.Capacity
+                    // saturation of the richest rock this row has a hole on —
+                    // `rowSizing`'s `AnchorCap` below.
+                    Census = isAnchorBody
                 }
                 {
                     Name = "hauler"
                     Pattern = haulerPattern
-                    Quota = haulerQuota
+                    Quota = rows.Hauler
                     Census = isHaulerBody
-                    Size = fun bank -> bodyFor haulerPattern bank.Capacity
                 }
                 // Behind the three rows hired off the ground and ahead of the
                 // generalist (ADR 0046): the upgrader spends the surplus those
@@ -478,9 +408,8 @@ let internal planSpawns
                 {
                     Name = "upgrader"
                     Pattern = upgraderPattern
-                    Quota = upgraderQuota
+                    Quota = rows.Upgrader
                     Census = fun creep -> patternOf view.Tuning atlas creep = upgraderPattern
-                    Size = fun bank -> bodyFor upgraderPattern bank.Capacity
                 }
             ]
 
@@ -571,7 +500,10 @@ let internal planSpawns
                 (castFromBank haulerPattern (fun bank -> bodyFor haulerPattern bank.Available))
             @ (filled
                |> List.collect (fun (row, _, _, gap) ->
-                   List.replicate gap (castFromBank row.Pattern row.Size)))
+                   List.replicate
+                       gap
+                       (castFromBank row.Pattern (fun bank ->
+                           sizedBodyFor rowSizing row.Pattern bank.Capacity))))
             @ List.replicate
                 (deficit - (supplyFloor + specialistSeats) |> max 0)
                 (castFromBank workerPattern (fun bank -> bodyFor workerPattern bank.Capacity))

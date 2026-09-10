@@ -85,9 +85,18 @@ let wireVocabularyTests =
                 // they are reversed for a payload: the decoder is handed
                 // the very pair `casesOf` spelt, and `too-early` must read
                 // back as that case rather than as a bare tag around zeros.
+                //
+                // A ReleaseReason is `TaskGone` or a carried RejectReason, so
+                // its enumeration is built off that union's own rather than
+                // read from its metadata: `casesOf` samples numbers and names,
+                // not unions, and a reason added to the refusals has to arrive
+                // here as a release too — which is the whole point of the two
+                // being one union now.
                 roundTrips
                     "ReleaseReason"
-                    (casesOf<ReleaseReason> ())
+                    (Array.append
+                        [| ReleaseReason.TaskGone |]
+                        (casesOf<RejectReason> () |> Array.map ReleaseReason.Rejected))
                     releaseReasonName
                     (releaseReasonOf sampleNumbers)
 

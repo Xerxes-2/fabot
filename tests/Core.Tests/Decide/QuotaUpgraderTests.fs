@@ -811,7 +811,7 @@ let quotaInputTests =
                     poolOn (ferryMother Bootstrapping)
                     |> List.tryPick (fun entry ->
                         if entry.Task = Refill "can-child" then
-                            Some entry.Capacity.Total
+                            Some(Capacity.capOf CapScope.Everyone entry.Capacity)
                         else
                             None)
 

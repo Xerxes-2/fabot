@@ -151,7 +151,11 @@ let movementTests =
                         7
                         [ "a" ]
                         [
-                            Verdict.Released("a", "t1", ReleaseReason.Unreachable)
+                            Verdict.Released(
+                                "a",
+                                "t1",
+                                ReleaseReason.Rejected RejectReason.Unreachable
+                            )
                             Verdict.Unassigned("a", IdleReason.NoneReachable)
                         ]
 
@@ -160,7 +164,8 @@ let movementTests =
                     [
                         5, Verdict.Matched("a", "t1", MatchFactor.Rank)
                         6, Verdict.Grounded "a"
-                        7, Verdict.Released("a", "t1", ReleaseReason.Unreachable)
+                        7,
+                        Verdict.Released("a", "t1", ReleaseReason.Rejected RejectReason.Unreachable)
                         7, Verdict.Unassigned("a", IdleReason.NoneReachable)
                     ]
                     "one chronology holds task and movement events"

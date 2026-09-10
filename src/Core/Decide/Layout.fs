@@ -114,43 +114,32 @@ let internal planFire (view: ColonyView) atlas : Intent list =
                     let _, target = reachable |> List.minBy (fun (r, h) -> r, h.Id)
                     Some(FireTower(towerId, target.Id)))
 
-/// Extensions the controller level allows in the room (Screeps
-/// CONTROLLER_STRUCTURES for "extension").
-let private extensionAllowance level =
-    match level with
-    | 0
-    | 1 -> 0
-    | 2 -> 5
-    | 3 -> 10
-    | 4 -> 20
-    | 5 -> 30
-    | 6 -> 40
-    | 7 -> 50
-    | _ -> 60
-
-/// Towers the controller level allows in the room (Screeps
-/// CONTROLLER_STRUCTURES for "tower").
-let private towerAllowance level =
-    match level with
-    | 0
-    | 1
-    | 2 -> 0
-    | 3
-    | 4 -> 1
-    | 5
-    | 6 -> 2
-    | 7 -> 3
-    | _ -> 6
-
-/// Storages the controller level allows in the room (Screeps
-/// CONTROLLER_STRUCTURES for "storage").
-let private storageAllowance level =
-    match level with
-    | 0
-    | 1
-    | 2
-    | 3 -> 0
-    | _ -> 1
+/// What a controller level allows the room, by kind (Screeps
+/// CONTROLLER_STRUCTURES). One table over the kind and not one per kind,
+/// because the gap rule below subtracts a census keyed by that same kind: a
+/// pair carried separately is a pair that can be handed to each other's
+/// allowance. Nothing but the three sized kinds is in it — every other kind
+/// the Layout places is sized by its own rule (a road by the trunk, a
+/// container by ADR 0040's pick, a rampart by ADR 0034's cover), so an
+/// allowance is not the question asked of them and none is answered.
+let private allowanceOf kind level =
+    match kind, level with
+    | BuiltKind.Extension, (0 | 1) -> 0
+    | BuiltKind.Extension, 2 -> 5
+    | BuiltKind.Extension, 3 -> 10
+    | BuiltKind.Extension, 4 -> 20
+    | BuiltKind.Extension, 5 -> 30
+    | BuiltKind.Extension, 6 -> 40
+    | BuiltKind.Extension, 7 -> 50
+    | BuiltKind.Extension, _ -> 60
+    | BuiltKind.Tower, (0 | 1 | 2) -> 0
+    | BuiltKind.Tower, (3 | 4) -> 1
+    | BuiltKind.Tower, (5 | 6) -> 2
+    | BuiltKind.Tower, 7 -> 3
+    | BuiltKind.Tower, _ -> 6
+    | BuiltKind.Storage, (0 | 1 | 2 | 3) -> 0
+    | BuiltKind.Storage, _ -> 1
+    | _ -> 0
 
 /// Whether the Layout places **road sites** at all this tick (ADR 0011 as #209
 /// amends it): only for an `Independent` colony. Not an engine unlock — the
@@ -233,15 +222,11 @@ let internal planLayout
         // The room being planned, and no other (#140): the allowance is this
         // controller's, so what is subtracted from it is this room's census —
         // a neighbour's site counted here is a site this room never places.
-        let gapAt allowanceOf kind level =
-            allowanceOf level
+        let gapAt kind level =
+            allowanceOf kind level
             - Atlas.builtIn atlas room kind
             - Atlas.pendingIn atlas room kind
             |> max 0
-
-        let storageGap = gapAt storageAllowance BuiltKind.Storage
-        let towerGap = gapAt towerAllowance BuiltKind.Tower
-        let extensionGap = gapAt extensionAllowance BuiltKind.Extension
 
         // The still-unclaimed slots, Storage first and tower next: a built or
         // pending structure keeps its tile out of the ordering (it is a target)
@@ -249,9 +234,9 @@ let internal planLayout
         // horizon; the Storage is not one of them and reads none (ADR 0022) —
         // its whole allowance is held from level 0, because once an extension
         // takes that tile it never comes back.
-        let storageSlots = storageGap view.Tuning.StorageLevel
-        let towerSlots = towerGap view.Tuning.HorizonLevel
-        let extensionSlots = extensionGap view.Tuning.HorizonLevel
+        let storageSlots = gapAt BuiltKind.Storage view.Tuning.StorageLevel
+        let towerSlots = gapAt BuiltKind.Tower view.Tuning.HorizonLevel
+        let extensionSlots = gapAt BuiltKind.Extension view.Tuning.HorizonLevel
 
         // The Link footings cannot be named here — their targets are the
         // container picks, which are derived from the trunks the reservation is
@@ -583,9 +568,11 @@ let internal planLayout
             tiles
             |> List.map (fun tile -> PlaceConstructionSite(RoomPos.at room tile, kind))
 
-        place Storage (storagePick |> List.truncate (storageGap controller.Level))
-        @ place Tower (towerTiles |> List.truncate (towerGap controller.Level))
-        @ place Extension (extensionTiles |> List.truncate (extensionGap controller.Level))
+        place Storage (storagePick |> List.truncate (gapAt BuiltKind.Storage controller.Level))
+        @ place Tower (towerTiles |> List.truncate (gapAt BuiltKind.Tower controller.Level))
+        @ place
+            Extension
+            (extensionTiles |> List.truncate (gapAt BuiltKind.Extension controller.Level))
         @ place Road (Set.toList placedRoads)
         @ place Container containerGap
         @ place Rampart (Set.toList rampartGap),

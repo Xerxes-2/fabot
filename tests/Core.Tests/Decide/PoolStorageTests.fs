@@ -378,7 +378,11 @@ let stockDrawTests =
 
                 Expect.contains
                     filled.Verdicts
-                    (Verdict.Released("h1", taskId (Withdraw "sto-1"), ReleaseReason.Inapplicable))
+                    (Verdict.Released(
+                        "h1",
+                        taskId (Withdraw "sto-1"),
+                        ReleaseReason.Rejected RejectReason.Inapplicable
+                    ))
                     "the full store ends the draw, as it ends every other one"
 
                 Expect.contains
