@@ -1057,6 +1057,118 @@ let private overreachingWorld =
                 ))
     }
 
+/// A two-hop declaration and the room a chain to it crosses: the mother
+/// declares W10S28, two hops west, so W11S28 is in her scan set for the walk
+/// alone (`Outpost.roomsProjected`, ADR 0058). Both rooms are **seen and
+/// furnished** — which is the whole point, because a transit room's promise is
+/// trivially kept while it is blind, and #286 is what happens the tick a
+/// pioneer walks through one.
+let private twoHop = "W10S28"
+let private crossed = "W11S28"
+
+let private twoHopDeclaration: Colony list =
+    declared
+    |> List.map (fun colony ->
+        if colony.Home <> mother then
+            colony
+        else
+            { colony with
+                Outposts =
+                    colony.Outposts
+                    @ [
+                        {
+                            RoomName = twoHop
+                            Sources = [ "src-two", { Room = twoHop; X = 5; Y = 5 } ]
+                            Controller = "ctrl-two", { Room = twoHop; X = 7; Y = 7 }
+                        }
+                    ]
+            })
+
+let private twoHopWorld =
+    { pairWorld with
+        Rooms =
+            pairWorld.Rooms
+            |> Map.add
+                twoHop
+                (snd (
+                    roomOf twoHop Ownership.Unowned [ "src-two", { X = 5; Y = 5 }, Source ]
+                    |> withSources [ "src-two" ]
+                ))
+            |> Map.add
+                crossed
+                (snd (
+                    roomOf
+                        crossed
+                        Ownership.Unowned
+                        [
+                            "src-crossed", { X = 9; Y = 9 }, Source
+                            "ctrl-crossed", { X = 11; Y = 11 }, Controller
+                            "cont-crossed", { X = 9; Y = 10 }, Structure BuiltKind.Container
+                        ]
+                    |> withSources [ "src-crossed" ]
+                    |> withStores [ "cont-crossed", 1_500 ]
+                    |> withSites [ "site-crossed" ]
+                ))
+    }
+
+[<Tests>]
+let transitTests =
+    testList
+        "a transit room carries ground and no work"
+        [
+            test "the room a chain crosses is projected, and its furniture is not" {
+                // #286, found live on 2026-09-10: the room between W13S28 and
+                // the nursery it was raising was reserved, anchored, given a
+                // container and hauled from — 2,020 of a 2,540-energy haul
+                // demand for a room no declaration names — because our own
+                // pioneers walking through it were the vision that filed its
+                // furniture. ADR 0058 decision 2's promise ("terrain and a
+                // border ring and nothing else") is kept per colony, here.
+                let view = viewUnder twoHopDeclaration twoHopWorld mother
+
+                Expect.isEmpty
+                    view.Refused
+                    "the premise: a two-hop declaration is not refused (ADR 0058)"
+
+                Expect.isTrue
+                    (Map.containsKey crossed view.Spatial.Rooms)
+                    "the transit room is in the projection, which is what a chain is priced over"
+
+                Expect.isNonEmpty
+                    (SpatialInfo.layerOf view.Spatial crossed).Terrain
+                    "carrying the ground a walk crosses"
+
+                Expect.isNonEmpty
+                    (view.Spatial.Borders |> Map.find crossed)
+                    "and the border ring the Seam is read off"
+
+                Expect.isEmpty
+                    (view.Sources |> List.filter (fun source -> source.Id = "src-crossed"))
+                    "its rock is not pooled: no Harvest, so no anchor row hires for it"
+
+                for id in [ "src-crossed"; "ctrl-crossed"; "cont-crossed" ] do
+                    Expect.isFalse
+                        (Map.containsKey id view.Spatial.TargetKinds)
+                        $"{id}: nothing in a transit room is a target a Task could name"
+
+                Expect.isEmpty
+                    (view.ConstructionSites |> List.filter (fun site -> site.Id = "site-crossed"))
+                    "and its sites are nobody's Build"
+
+                Expect.isEmpty
+                    (view.Spatial.Stores |> Map.filter (fun id _ -> id = "cont-crossed"))
+                    "and its container is no store to haul from — the 2,020-demand row that started this"
+
+                // Beside it, the declaration two hops out is untouched: its
+                // furniture is laid in without vision (ADR 0041), which is
+                // what makes the room above a transit room and not a
+                // refusal.
+                Expect.isTrue
+                    (Map.containsKey "src-two" view.Spatial.TargetKinds)
+                    "the two-hop outpost's own rock is placed off the declaration"
+            }
+        ]
+
 [<Tests>]
 let declarationTests =
     testList

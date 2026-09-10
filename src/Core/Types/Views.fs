@@ -223,6 +223,49 @@ module ColonyView =
             Sources = []
         }
 
+    /// A **transit** room's facts: the ground a chain of [[seam]]s crosses and
+    /// the bodies standing on it, and not one thing a rule could work (ADR
+    /// 0058, #286). ADR 0058 decision 2 promised exactly this — *"a transit
+    /// room enters the projection carrying terrain and a border ring and
+    /// nothing else"* — and left it to `furnitureOf`, which reads a
+    /// declaration that names none. That holds only while the room is
+    /// **blind**: the tick one of our bodies walks through it, `World.seenFacts`
+    /// files the room's real sources, its real controller and whatever stands
+    /// in it, and from there nothing tells it apart from a declared outpost.
+    ///
+    /// Live on 2026-09-10 that cost a colony its child: W14S28, the room
+    /// between W13S28 and the nursery it was raising, was reserved (a reserver
+    /// hired against a controller **no declaration names**), anchored, given a
+    /// container and hauled from — 2,020 of a 2,540-energy haul demand, on a
+    /// single-spawn colony whose worker row stood at zero of five while the
+    /// nursery's spawn site sat at 1,668 of 15,000. Withdrawing the
+    /// declaration did not stop it (the room is a transit room either way) and
+    /// killing the bodies did not either: the rows re-hired within seven
+    /// hundred ticks, because the pioneers crossing the room are themselves the
+    /// vision.
+    ///
+    /// So the promise is kept here, where the room's facts enter one colony's
+    /// view, and it is kept **per colony**: the same room is a transit room for
+    /// the mother and an ordinary neighbour for whoever declares it. What
+    /// survives is what is not *work* — the layer's terrain and its occupants,
+    /// the border ring a Seam is read off, the hostiles ADR 0033's Reach and
+    /// Flee owe an answer about, and the room's ownership. What goes is every
+    /// id a Task could name.
+    let private transiting (facts: RoomFacts) : RoomFacts =
+        { facts with
+            Layer =
+                { facts.Layer with
+                    TargetPositions = Map.empty
+                }
+            TargetKinds = Map.empty
+            Hits = Map.empty
+            Stores = Map.empty
+            Controller = None
+            Refillables = []
+            Sources = []
+            ConstructionSites = []
+        }
+
     /// One colony's view of this tick (ADR 0052 decision 1): the rooms it works
     /// cut out of the `World`, the bodies it holds cut out of the world's
     /// creeps, its own bank and controller, and the explicit little it may take
@@ -263,6 +306,20 @@ module ColonyView =
         // The scan set with each room's facts beside it, in scan order —
         // a room the world holds nothing for reads empty (ADR 0004), and a
         // room this colony only bootstraps reads the borrowed work alone.
+        // The rooms in the set for the walk alone: everything the union added
+        // that is neither this colony's home, nor a room it works, nor a room
+        // it raises (`Colony.roomsProjected`, ADR 0058). Derived by
+        // subtraction rather than returned beside the set, because the union is
+        // the one place that rule is spelled and a second derivation would be a
+        // second answer free to disagree.
+        let transit =
+            scanned
+            |> List.filter (fun room ->
+                room <> home
+                && not (List.contains room bootstrap)
+                && not (outposts |> List.exists (fun outpost -> outpost.RoomName = room)))
+            |> Set.ofList
+
         let worked =
             scanned
             |> List.map (fun room ->
@@ -271,6 +328,8 @@ module ColonyView =
                 room,
                 (if List.contains room bootstrap then
                      borrowed (Map.tryFind room stages) facts
+                 elif Set.contains room transit then
+                     transiting facts
                  else
                      facts))
 
@@ -287,6 +346,10 @@ module ColonyView =
         // because an object id is already unique across the world (ADR 0041).
         // Deterministic under a collision that cannot happen: the fold walks
         // the scan set in order, and one object stands in one room.
+        // The list-valued halves of the same merge: every worked room's, in
+        // the scan set's order.
+        let collected (select: RoomFacts -> 'a list) = worked |> List.collect (snd >> select)
+
         let mergedBy (select: RoomFacts -> Map<string, 'v>) =
             (Map.empty, worked)
             ||> List.fold (fun acc (_, facts) ->
@@ -331,15 +394,13 @@ module ColonyView =
             // with the declared outpost rocks laid in beside them whether
             // or not there is vision (ADR 0041).
             Sources =
-                worked
-                |> List.collect (fun (_, facts) -> facts.Sources)
-                |> Outpost.pooledSources scanned outposts
+                collected (fun facts -> facts.Sources) |> Outpost.pooledSources scanned outposts
             Controller = homeFacts.Controller
             RoomControl = control
-            ConstructionSites = worked |> List.collect (fun (_, facts) -> facts.ConstructionSites)
+            ConstructionSites = collected (fun facts -> facts.ConstructionSites)
             Creeps = mine |> List.map (fun creep -> creep.Info)
-            Hostiles = worked |> List.collect (fun (_, facts) -> facts.Hostiles)
-            InvaderCores = worked |> List.collect (fun (_, facts) -> facts.InvaderCores)
+            Hostiles = collected (fun facts -> facts.Hostiles)
+            InvaderCores = collected (fun facts -> facts.InvaderCores)
             Spatial =
                 {
                     RoomName = Some home
