@@ -17,6 +17,22 @@ open Fabot.Core.Types
 /// (ADR 0033). The home name and not the controller's or a tower's room, because
 /// both arms need an answer on a tick the projection places neither: ADR 0004's
 /// absence would otherwise widen the reflex back to every room.
+/// The Layout's one pick rule: cheapest by the caller's price, ties to the
+/// lowest (X, Y), and None where there is nothing to pick from. Every tile the
+/// Layout settles on goes through it, because a pick that left the coordinates
+/// out of its key would be decided by set ordering instead — and set ordering
+/// is not the same under Fable as under .NET, so the plan would differ between
+/// the bot and its own tests.
+let private cheapest (price: 'a -> int) (tileOf: 'a -> Pos) (candidates: 'a list) : 'a option =
+    match candidates with
+    | [] -> None
+    | _ ->
+        candidates
+        |> List.minBy (fun candidate ->
+            let tile = tileOf candidate
+            price candidate, tile.X, tile.Y)
+        |> Some
+
 let private hostilesAtHome (view: ColonyView) : HostileInfo list =
     let home = SpatialInfo.homeName view.Spatial
     view.Hostiles |> List.filter (fun hostile -> hostile.Pos.Room = home)
@@ -66,11 +82,7 @@ let internal planSafeMode (view: ColonyView) atlas : Intent list =
         // The undefended arm (ADR 0034 as #217 amends it): a colony with no
         // tower standing fires on the first armed hostile in its room.
         let undefended =
-            List.isEmpty (Atlas.placedTowers atlas)
-            && here
-               |> List.exists (fun h ->
-                   List.contains BodyPart.Attack h.Body
-                   || List.contains BodyPart.RangedAttack h.Body)
+            List.isEmpty (Atlas.placedTowers atlas) && here |> List.exists isArmed
 
         if claimerInReach || keepDamaged || undefended then
             [ ActivateSafeMode controller.Id ]
@@ -371,14 +383,17 @@ let internal planLayout
             |> List.choose (fun (sourceId, trunk) ->
                 let seats = Atlas.seatTilesOf atlas sourceId |> RoomPos.inRoom room
 
-                if Set.isEmpty trunk || Set.isEmpty seats then
+                // The trunk guard is not the empty-list one `cheapest` makes:
+                // the price below is a `List.min` over the trunk's own tiles.
+                if Set.isEmpty trunk then
                     None
                 else
                     seats
                     |> Set.toList
-                    |> List.minBy (fun seat ->
-                        trunk |> Set.toList |> List.map (range seat) |> List.min, seat.X, seat.Y)
-                    |> fun seat -> Some(sourceId, seat))
+                    |> cheapest
+                        (fun seat -> trunk |> Set.toList |> List.map (range seat) |> List.min)
+                        id
+                    |> Option.map (fun seat -> sourceId, seat))
 
         let sourceContainerTiles = sourceContainerPicks |> List.map snd
 
@@ -397,12 +412,7 @@ let internal planLayout
                     && not (Set.contains tile workAreaSwamps)
                     && trunkTiles |> Set.exists (fun t -> range tile t = 1))
                 |> Set.toList
-                |> function
-                    | [] -> None
-                    | candidates ->
-                        candidates
-                        |> List.minBy (fun tile -> range tile controllerPos, tile.X, tile.Y)
-                        |> Some)
+                |> cheapest (fun tile -> range tile controllerPos) id)
 
         // The Link footings (ADR 0022): one tile held for a link beside every
         // target a link will ever serve — each planned source container, the
@@ -455,8 +465,9 @@ let internal planLayout
                     && not (List.contains tile footingTargetTiles)
                     && not (Set.contains tile taken))
                 |> Set.toList
+                |> cheapest (fun tile -> range tile spawnPos) id
                 |> function
-                    | [] ->
+                    | None ->
                         taken,
                         served,
                         {
@@ -464,18 +475,15 @@ let internal planLayout
                             Kind = kind
                         }
                         :: unserved
-                    | candidates ->
-                        candidates
-                        |> List.minBy (fun tile -> range tile spawnPos, tile.X, tile.Y)
-                        |> fun tile ->
-                            Set.add tile taken,
-                            {
-                                Target = RoomPos.at room target
-                                Kind = kind
-                                Tile = RoomPos.at room tile
-                            }
-                            :: served,
-                            unserved)
+                    | Some tile ->
+                        Set.add tile taken,
+                        {
+                            Target = RoomPos.at room target
+                            Kind = kind
+                            Tile = RoomPos.at room tile
+                        }
+                        :: served,
+                        unserved)
 
         // The tower and the extensions take the ordering again with the
         // footings held out — a footing outranks both — and the Storage's pick
@@ -690,13 +698,8 @@ let internal planOutpostContainers (view: ColonyView) atlas : Intent list =
             |> Set.toList
             |> List.choose (fun seat ->
                 Atlas.seamWalkTicks atlas room home seat |> Option.map (fun walk -> walk, seat))
-            |> function
-                | [] -> None
-                | priced ->
-                    let _, seat =
-                        priced |> List.minBy (fun (walk, seat: Pos) -> walk, seat.X, seat.Y)
-
-                    Some(PlaceConstructionSite(RoomPos.at room seat, Container)))
+            |> cheapest fst snd
+            |> Option.map (fun (_, seat) -> PlaceConstructionSite(RoomPos.at room seat, Container)))
 
 /// Colony reflex beside the pipeline, the second after safe mode: every creep
 /// with free carry capacity standing within pickup range of a dropped energy

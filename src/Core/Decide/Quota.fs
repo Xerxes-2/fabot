@@ -33,8 +33,7 @@ let internal ceilDiv numerator divisor = (numerator + divisor - 1) / divisor
 let internal heldRateOf (control: RoomControlInfo) =
     if
         control.Owner = Ownership.Ours
-        || control.Reservation
-           |> Option.exists (fun held -> held.Holder = ReservationHolder.Ours)
+        || RoomControlInfo.heldBy ReservationHolder.Ours control |> Option.isSome
     then
         Engine.heldOutputPerTick
     else
@@ -306,7 +305,7 @@ let internal haulerDemandOf (view: ColonyView) atlas : int * HaulDemandRow list 
     // reserver. #157's argument for two builders, said again for the haul.
     let remote =
         rows
-        |> List.filter (fun row -> row.Container.Room <> SpatialInfo.homeName view.Spatial)
+        |> List.filter (fun row -> row.Container.Room <> home)
         |> List.sumBy (fun row -> row.Demand)
 
     // The colony's whole haul, rounded once (ADR 0049), and the ferry's own
@@ -318,10 +317,6 @@ let internal haulerDemandOf (view: ColonyView) atlas : int * HaulDemandRow list 
 
 /// The hauler quota alone; `haulerDemandOf` is the same arithmetic with
 /// its lines kept.
-let private haulerQuota (view: ColonyView) atlas : int =
-    let quota, _, _ = haulerDemandOf view atlas
-    quota
-
 /// What one body of this shape drinks a tick standing at a controller: its Work
 /// parts at the rate above.
 let private upgradeDrainOf body =
@@ -384,9 +379,6 @@ let internal isGuardBody (creep: CreepInfo) = partCount creep.Body Attack > 0
 let guardBlocksBeat (view: ColonyView) (room: string) (blocks: int) : bool =
     let parts part body = partCountIn body part
 
-    let armed (h: HostileInfo) =
-        parts Attack h.Body + parts RangedAttack h.Body > 0
-
     let raid = view.Hostiles |> List.filter (fun h -> h.Pos.Room = room)
 
     let raidDamage =
@@ -399,7 +391,7 @@ let guardBlocksBeat (view: ColonyView) (room: string) (blocks: int) : bool =
 
     let raidHits =
         raid
-        |> List.filter armed
+        |> List.filter isArmed
         |> List.sumBy (fun h -> Engine.partHits * List.length h.Body)
 
     let block = guardPattern.Block
@@ -473,8 +465,7 @@ let internal reserverClaimsOf (view: ColonyView) : int list =
     let heldTicks room =
         view.RoomControl
         |> Map.tryFind room
-        |> Option.bind (fun control -> control.Reservation)
-        |> Option.filter (fun held -> held.Holder = ReservationHolder.Ours)
+        |> Option.bind (RoomControlInfo.heldBy ReservationHolder.Ours)
         |> Option.map (fun held -> held.TicksToEnd)
         |> Option.defaultValue 0
 
@@ -579,6 +570,15 @@ let internal isStandingBody (tuning: Tuning) (creep: CreepInfo) = standingParts 
 let private upgraderDrain capacity =
     upgradeDrainOf (bodyFor upgraderPattern capacity)
 
+/// What one body of the row costs the colony over a life: the energy its Work
+/// drinks plus the body itself (ADR 0046). One expression, because the quota
+/// below *sells* bodies at this price and `workforceTarget` *charges* the
+/// surplus at it — written apart, a term added to one silently oversells the
+/// worker row against the other.
+let private upgraderLifetimeCost capacity =
+    upgraderDrain capacity * Engine.creepLifetime
+    + bodyCost (bodyFor upgraderPattern capacity)
+
 /// The upgrader row's quota (ADR 0046): the surplus divided by what one
 /// standing body **costs the colony over a life** — the energy its Work drinks
 /// plus the body itself — rounded **down**, with the remainder handed on to the
@@ -604,10 +604,7 @@ let internal upgraderQuota (view: ColonyView) atlas surplus =
     then
         0
     else
-        surplus
-        / (upgraderDrain capacity * Engine.creepLifetime
-           + bodyCost (bodyFor upgraderPattern capacity))
-        |> max 0
+        surplus / upgraderLifetimeCost capacity |> max 0
 
 /// The worker row's floor (ADR 0046): the row's income term is whatever the
 /// upgrader row has not eaten, and beside a buffer that can still be nothing at
@@ -683,9 +680,7 @@ let internal workforceTarget
     // is hired against the rest (ADR 0046): the energy its Work drinks over a
     // lifetime, and the row's replacement cost over the same lifetime, priced
     // at the body the casting step would actually cast.
-    let upgraderCost =
-        upgraderQuota * upgraderDrain capacity * Engine.creepLifetime
-        + upgraderQuota * bodyCost (bodyFor upgraderPattern capacity)
+    let upgraderCost = upgraderQuota * upgraderLifetimeCost capacity
 
     // Rounded up through the same ceilDiv as the hauler row (ADR 0037): the
     // granularity a floor would drop is a whole worker body's Work, which grows

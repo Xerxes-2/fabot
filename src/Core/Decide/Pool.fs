@@ -62,6 +62,26 @@ let internal garrisons atlas (creep: CreepInfo) sourceId =
 /// and #235's case (b) is exactly an eviction — the outpost Anchor stands up
 /// and the squatting light body has to be released that tick, not merely
 /// refused the next time it asks.
+/// Every Work-heavy body of the colony beside the tile it is standing on — the
+/// garrison census (ADR 0024), which is a fact about *where a body is* and not
+/// about what it holds. Both gates below read it and neither reads it the same
+/// way: one sums the rate the standers are drawing off a rock, the other asks
+/// which of a rock's Posts none of them is on. A body the projection cannot
+/// place stands nowhere (ADR 0004) and is in neither answer.
+///
+/// **`workHeavy` and not `bodyClassOf`**, which is the Matcher's own census
+/// (`heavyStanders` there): that one tests `isGuardBody` first, so a body
+/// carrying ATTACK beside `Work > Move` is a Fighter to it and heavy here. No
+/// row this colony casts is both, and the two are kept apart rather than
+/// silently given one answer.
+let private heavyStanders (view: ColonyView) atlas : (CreepInfo * RoomPos) list =
+    view.Creeps
+    |> List.choose (fun creep ->
+        if Atlas.workHeavy atlas creep.Name then
+            Atlas.creepTile atlas creep.Name |> Option.map (fun tile -> creep, tile)
+        else
+            None)
+
 let internal hasSpareRate (view: ColonyView) atlas (sourceId: string) =
     let posts = Atlas.standingPostsOf atlas sourceId
 
@@ -77,13 +97,9 @@ let internal hasSpareRate (view: ColonyView) atlas (sourceId: string) =
             // one of these tiles digs *some* source, and where two rocks share
             // a Seat it is charged to both — the ambiguity `Atlas.postsOf` has
             // carried since ADR 0024's cap, not one this gate introduces.
-            view.Creeps
-            |> List.sumBy (fun creep ->
-                if
-                    Atlas.workHeavy atlas creep.Name
-                    && Atlas.creepTile atlas creep.Name
-                       |> Option.exists (fun tile -> Set.contains tile posts)
-                then
+            heavyStanders view atlas
+            |> List.sumBy (fun (creep, tile) ->
+                if Set.contains tile posts then
                     (creep.Body |> Map.tryFind Work |> Option.defaultValue 0)
                     * Engine.harvestPerWork
                 else
@@ -129,13 +145,12 @@ let internal hasUnmannedPost (view: ColonyView) atlas (creep: CreepInfo) (source
     if Set.isEmpty posts then
         true
     else
+        // The candidate never counts against itself, which is this gate's own
+        // clause and not the census's.
         let manned =
-            view.Creeps
-            |> List.choose (fun c ->
-                if c.Name <> creep.Name && Atlas.workHeavy atlas c.Name then
-                    Atlas.creepTile atlas c.Name
-                else
-                    None)
+            heavyStanders view atlas
+            |> List.choose (fun (stander, tile) ->
+                if stander.Name <> creep.Name then Some tile else None)
             |> Set.ofList
 
         posts |> Set.exists (fun tile -> not (Set.contains tile manned))
@@ -285,23 +300,29 @@ let private roomOfWork atlas task =
     | Guard room -> Some room
     | Flee -> None
 
-/// The Reach standing on a Task's own room, or None when the question does not
-/// arise at all — the Safety tier, which `safetyTier` exempts whole (ADR 0056
-/// decision 3), and a tick with no Reach anywhere. A Reach is one room's grid
-/// (`Threats.Reach`), so the tiles it takes are matched on that room's
-/// coordinates and on no other's (ADR 0052 decision 2, #138) — and the room is
-/// the **Task's** and never the creep's, a body a border away being judged
-/// against the ground it is walking to. The join is written here once because
-/// its two readers make it in opposite polarity: `areaFor` thins an area by it
-/// and `threatened` asks whether it has taken the area whole, and two copies of
-/// a room-scoping rule is exactly how #138 came back.
-let private reachOnWork (threats: Threats) atlas task =
+/// Whether a tile stands in the Reach on a Task's own room, or None when the
+/// question does not arise at all — the Safety tier, which `safetyTier` exempts
+/// whole (ADR 0056 decision 3), and a tick with no Reach anywhere. A Reach is
+/// one room's grid (`Threats.Reach`), so the tiles it takes are matched on that
+/// room's coordinates and on no other's (ADR 0052 decision 2, #138) — and the
+/// room is the **Task's** and never the creep's, a body a border away being
+/// judged against the ground it is walking to.
+///
+/// A **predicate** and not the room and the grid it is made of, because its two
+/// readers want it in opposite polarity: `areaFor` thins an area by it and
+/// `threatened` asks whether it has taken the area whole. Handed out as
+/// ingredients it was two textual copies of the room-scoping rule, which is
+/// exactly how #138 came back.
+let private reachOnWork (threats: Threats) atlas task : (RoomPos -> bool) option =
     if safetyTier task || Map.isEmpty threats.Reach then
         None
     else
         let room = roomOfWork atlas task
 
-        Some(room, room |> Option.map (Threats.reachIn threats) |> Option.defaultValue Set.empty)
+        let reach =
+            room |> Option.map (Threats.reachIn threats) |> Option.defaultValue Set.empty
+
+        Some(fun tile -> Some tile.Room = room && Set.contains (RoomPos.pos tile) reach)
 
 /// The tiles a creep may work a Task from this tick (ADR 0033): its Work Area
 /// less its room's Reach — and for Flee, the safe set of the room the creep
@@ -346,10 +367,7 @@ let internal areaFor (threats: Threats) atlas creep task : Set<RoomPos> =
 
     match reachOnWork threats atlas task with
     | None -> ground
-    | Some(room, reach) ->
-        ground
-        |> Set.filter (fun tile ->
-            not (Some tile.Room = room && Set.contains (RoomPos.pos tile) reach))
+    | Some hot -> ground |> Set.filter (hot >> not)
 
 /// Whether a creep may act on a Task from the tile it is standing on this tick
 /// — `Atlas.mayAct` over the ground `areaFor` has just thinned (ADR 0033).
@@ -442,13 +460,10 @@ let internal threatened (threats: Threats) atlas (creep: CreepInfo) task =
     // tile of the area inside that room's Reach.
     match reachOnWork threats atlas task with
     | None -> false
-    | Some(room, reach) ->
+    | Some hot ->
         let area = Atlas.workAreaAcross atlas creep.Name task
 
-        not (Set.isEmpty area)
-        && area
-           |> Set.forall (fun tile ->
-               Some tile.Room = room && Set.contains (RoomPos.pos tile) reach)
+        not (Set.isEmpty area) && Set.forall hot area
 
 /// Whether the creep itself is standing where it can be hurt: its own tile
 /// inside a Reach of its own room (ADR 0033). Flee's applicability is this and
@@ -1099,6 +1114,12 @@ let planPool (view: ColonyView) atlas (tasks: Task list) : PooledTask list =
     // was the site that decides whether income *exists*; this is the ordinary
     // home site, which decides how fast it grows.
     let priorityOf task =
+        // One tier for the whole of this Task's priority: the rungs below are
+        // *inside* it (the `tierRungs`/`priorityStep` design), and read once it
+        // is visible that the guards and the base are talking about the same
+        // tier of the same Task rather than three independent questions.
+        let tier = tierOf task
+
         let step =
             match task with
             | Pickup pileId ->
@@ -1112,12 +1133,9 @@ let planPool (view: ColonyView) atlas (tasks: Task list) : PooledTask list =
                     -priorityStep
                 else
                     0
-            | Withdraw storeId when
-                tierOf task = Feeding && stored storeId >= Engine.containerCapacity
-                ->
+            | Withdraw storeId when tier = Feeding && stored storeId >= Engine.containerCapacity ->
                 -2 * priorityStep
-            | Build siteId when tierOf task = Surplus && isHomeSite view atlas siteId ->
-                -priorityStep
+            | Build siteId when tier = Surplus && isHomeSite view atlas siteId -> -priorityStep
             // Over the home site as well as over the Upgrade (#284): a site is
             // work the colony chose to start, and a structure a quarter from
             // destruction is work it has already paid for and is about to lose.
@@ -1130,7 +1148,7 @@ let planPool (view: ColonyView) atlas (tasks: Task list) : PooledTask list =
             && view.Controller |> Option.exists (fun c -> c.Id = id)
             ->
             deadlineRank
-        | _ -> priorityOfTier (tierOf task) + step
+        | _ -> priorityOfTier tier + step
 
     // How many bodies the Task admits, and of which shapes. **Harvest is three
     // numbers over one source** (ADR 0024, ADR 0051): the Seat count every

@@ -131,6 +131,14 @@ let private moveIntentFor
             let around = Atlas.adjacentWalkableIn atlas room step |> Set.ofList
             beside |> List.filter (fun tile -> Set.contains tile around)
 
+    // A body that has not arrived: the step it asked for, the ways around it,
+    // and no Work Area at all — it is standing outside the one it is walking
+    // to, so nothing it is pushed off is work (#267). `parked`'s sibling, and
+    // the same reason for existing: a rule two branches each have to remember
+    // is a rule one of them can forget.
+    let travelling rank step =
+        intent rank (step :: detour step) Set.empty
+
     // The graced holder's crossing (#151), asked before the Task branches
     // because it is the one body with neither: its Task left the pool with its
     // target's room's vision, so there is nothing to price and nothing to act
@@ -144,9 +152,10 @@ let private moveIntentFor
 
     match crossingStep, task with
     | Some step, _ ->
-        // Walking, and toward a room it cannot even see: nowhere it stands this
-        // tick is work (#267).
-        intent idleRank (step :: detour step) Set.empty
+        // Walking, and toward a room it cannot even see, so it pushes at the
+        // idle rank: the Task it walks for is in no pool to be priced against
+        // the ones that are.
+        travelling idleRank step
     | None, None ->
         // The room's [[idle ground]] and the ground just off it: any way off runs
         // through one of those tiles, so the nearest of them is the nearest
@@ -208,10 +217,7 @@ let private moveIntentFor
             intent (rankOf task) (pos :: (inside @ outside)) area
         else
             match stepToward atlas creep task area |> Option.map RoomPos.pos with
-            | Some step ->
-                // A traveller has not arrived: it is standing outside its Work
-                // Area, so nothing it is pushed off is work (#267).
-                intent (rankOf task) (step :: detour step) Set.empty
+            | Some step -> travelling (rankOf task) step
             | None -> parked (rankOf task)
 
 /// The push a rank carries into the arbitration's arithmetic. `Rank` stays the

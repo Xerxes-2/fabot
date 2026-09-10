@@ -180,6 +180,20 @@ module SpatialInfo =
     let roomOf (spatial: SpatialInfo) (id: string) : string option =
         placementOf spatial id |> Option.map (fun tile -> tile.Room)
 
+    /// Every target the projection carries hits for, joined to the structure
+    /// kind it is filed under, in id order. Hits with no kind, and hits on a
+    /// target of a non-structure kind, drop out (ADR 0004). One walk over the
+    /// two maps, which its readers used to make privately and had to agree on
+    /// the ordering of: the Repair pool's hungry census keys off these ids and
+    /// so does the Raid log's damage differencing.
+    let structureHits (spatial: SpatialInfo) : (string * BuiltKind * HitsInfo) list =
+        spatial.Hits
+        |> Map.toList
+        |> List.choose (fun (id, hits) ->
+            match Map.tryFind id spatial.TargetKinds with
+            | Some(Structure kind) -> Some(id, kind, hits)
+            | _ -> None)
+
     /// The ids the projection files under one kind, in id order. The
     /// containers, the Storage and the controllers are all pooled by the
     /// projection's kind — never by position, never by name — so the walk is

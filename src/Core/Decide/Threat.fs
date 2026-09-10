@@ -96,9 +96,13 @@ let threatsOf (view: ColonyView) atlas : Threats =
     with
     | [] -> noThreats
     | threats ->
+        // The tick's Threats partitioned by the room they stand in, once: all
+        // three maps below are keyed on this one room set, and derived from
+        // three separate regroupings nothing said so.
+        let byRoom = threats |> List.groupBy (fun (room, _, _) -> room)
+
         let reach =
-            threats
-            |> List.groupBy (fun (room, _, _) -> room)
+            byRoom
             |> List.choose (fun (room, inRoom) ->
                 let ramparts = Atlas.ourRampartTilesIn atlas room
 
@@ -124,10 +128,8 @@ let threatsOf (view: ColonyView) atlas : Threats =
         // `Atlas.walkableTilesIn` builds a 2,500-tile set per call and
         // memoises nothing.
         let walkable =
-            threats
-            |> List.map (fun (room, _, _) -> room)
-            |> List.distinct
-            |> List.map (fun room -> room, Atlas.walkableTilesIn atlas room)
+            byRoom
+            |> List.map (fun (room, _) -> room, Atlas.walkableTilesIn atlas room)
             |> Map.ofList
 
         let walkableIn room =
@@ -141,8 +143,7 @@ let threatsOf (view: ColonyView) atlas : Threats =
         // rampart is standing room like any other: the tile a guard fights
         // from is the best tile it has, not one it has to flee.
         let ring =
-            threats
-            |> List.groupBy (fun (room, _, _) -> room)
+            byRoom
             |> List.map (fun (room, inRoom) ->
                 let standing = inRoom |> List.map (fun (_, pos, _) -> pos) |> Set.ofList
                 let walkable = walkableIn room

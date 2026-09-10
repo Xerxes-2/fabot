@@ -117,14 +117,13 @@ let private isHungry (tuning: Tuning) kind (hits: HitsInfo) =
 let internal hungryStructures (view: ColonyView) : (string * BuiltKind) list =
     let ramparts = keepsRamparts view
 
-    view.Spatial.Hits
-    |> Map.toList
-    |> List.choose (fun (id, hits) ->
-        match Map.tryFind id view.Spatial.TargetKinds with
+    SpatialInfo.structureHits view.Spatial
+    |> List.choose (fun (id, kind, hits) ->
+        match kind with
         // A rampart below the line the colony keeps them from is not
         // hungry: it is decaying away (#214, `keepsRamparts`).
-        | Some(Structure BuiltKind.Rampart) when not ramparts -> None
-        | Some(Structure kind) when isHungry view.Tuning kind hits -> Some(id, kind)
+        | BuiltKind.Rampart when not ramparts -> None
+        | _ when isHungry view.Tuning kind hits -> Some(id, kind)
         | _ -> None)
 
 /// The range a hostile can hurt a creep from, or None for one that cannot (ADR
@@ -139,3 +138,11 @@ let internal weaponRange (hostile: HostileInfo) : int option =
     |> function
         | [] -> None
         | ranges -> Some(List.max ranges)
+
+/// Whether a hostile can hurt anything at all — `weaponRange` asked as a
+/// yes/no (ADR 0033), and the one cut between a raider and a scout or a lone
+/// healer. Written here because four rules turn on it and each used to own its
+/// own opinion of what a weapon is: whose hits the guard beat counts, whether
+/// a room stands down, whether safe mode fires, and whether a Reach is derived
+/// at all.
+let internal isArmed (hostile: HostileInfo) : bool = weaponRange hostile |> Option.isSome

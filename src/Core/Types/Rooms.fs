@@ -248,3 +248,14 @@ type RoomControlInfo =
         /// a room *we* own shields us. False where no controller stands.
         SafeMode: bool
     }
+
+[<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
+module RoomControlInfo =
+    /// The reservation this room carries **if it is that holder's**, and None
+    /// otherwise — an unheld room and one held by somebody else read alike
+    /// (ADR 0004). Four rules ask it of four different holders and each used to
+    /// spell the same bind-and-filter for itself; what each does with the
+    /// answer stays its own, because the deadlines they derive are genuinely
+    /// different clocks.
+    let heldBy (holder: ReservationHolder) (control: RoomControlInfo) : ReservationInfo option =
+        control.Reservation |> Option.filter (fun held -> held.Holder = holder)

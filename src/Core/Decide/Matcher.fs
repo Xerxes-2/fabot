@@ -51,18 +51,18 @@ let matchCreeps
     // 0026): two creeps hold the same standing room against each other only
     // while both are standing on it, so a holder counts against a candidate
     // exactly when their two stays overlap.
+    //
+    // One relation, asked twice with the two bodies swapped: does this walk end
+    // before that body dies? An unpriceable walk is no overlap to refuse (ADR
+    // 0004), and neither is a life the projection does not carry.
+    let outlives (walk: int option) (life: int option) =
+        match walk with
+        | None -> true
+        | Some ticks -> life |> Option.forall (fun remaining -> remaining >= ticks)
+
     let overlaps (candidate: CreepInfo) task arrival name =
-        let alive =
-            match arrival with
-            | None -> true
-            | Some ticks -> Map.tryFind name lives |> Option.forall (fun life -> life >= ticks)
-
-        let arrived =
-            match Atlas.walkTicks atlas name task with
-            | None -> true
-            | Some ticks -> ticks <= candidate.TicksToLive
-
-        alive && arrived
+        outlives arrival (Map.tryFind name lives)
+        && outlives (Atlas.walkTicks atlas name task) (Some candidate.TicksToLive)
 
     let holdersAt (acc: Assignments) (candidate: CreepInfo) task arrival =
         let tid = taskId task

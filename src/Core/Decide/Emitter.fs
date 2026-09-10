@@ -66,6 +66,12 @@ let internal applicable
     // read — and a garrison's whole working life is spent past half full.
     let halfEmpty = creep.FreeCapacity * 2 >= creep.Energy + creep.FreeCapacity
 
+    // A delivery of Work: the three Tasks that spend a Work part into something
+    // out of the body's own store (ADR 0046), and the one clause all three
+    // share. Refill is *not* one of them — it carries rather than works — so it
+    // keeps its own `has Carry` beside this.
+    let spending = has Work && creep.Energy > 0
+
     match task with
     // ADR 0024's full-store reprieve, and beside it the clause that keeps ADR
     // 0048's own Consequence reachable ("stands where it is until it can dig
@@ -228,13 +234,12 @@ let internal applicable
     // (`Atlas.standsOnPostSite`). Both prohibitions are about a walk, and
     // neither reaches a site the body is standing on.
     | Build siteId ->
-        has Work
-        && creep.Energy > 0
+        spending
         && (Atlas.standsOnPostSite atlas creep.Name siteId || (not standing && not heavy))
     // Repair leaves Upgrade's arm with ADR 0046's gate (a delivery, and a
     // standing body's Carry is one trip's worth), and the two stay
     // otherwise identical: a Work part and something to spend.
-    | Repair _ -> has Work && creep.Energy > 0 && not standing
+    | Repair _ -> spending && not standing
     // The one Task the whole row exists for, and so the one place the standing
     // gate must not appear (ADR 0046): a standing body spends its Work into the
     // controller from where it stands. And the sixth gate, which is that
@@ -246,8 +251,7 @@ let internal applicable
     // buffer-side row are exactly the shapes this leaves standing (ADR 0020,
     // ADR 0046), both already inside the Work Area.
     | Upgrade _ ->
-        has Work
-        && creep.Energy > 0
+        spending
         && (not heavy || mayActNow threats atlas creep.Name task)
         // A standing body holds no commuting body (ADR 0046) and the borrowed
         // Upgrade is a commute across the Seam (#213): the lift that sends the

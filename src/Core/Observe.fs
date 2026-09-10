@@ -434,8 +434,7 @@ let private deadlineOf (view: ColonyView) (core: InvaderCoreInfo) =
     | None ->
         view.RoomControl
         |> Map.tryFind core.RoomName
-        |> Option.bind (fun control -> control.Reservation)
-        |> Option.filter (fun held -> held.Holder = ReservationHolder.Invader)
+        |> Option.bind (RoomControlInfo.heldBy ReservationHolder.Invader)
         |> Option.filter (fun held -> held.TicksToEnd >= view.Tuning.StandDownFallback)
         |> Option.map (fun held -> view.Time + held.TicksToEnd, StandDownBasis.Reservation)
         |> Option.defaultValue (view.Time + view.Tuning.StandDownFallback, StandDownBasis.Fallback)
@@ -462,8 +461,8 @@ let private rivalDeadlines (view: ColonyView) =
     view.RoomControl
     |> Map.toList
     |> List.choose (fun (room, control) ->
-        control.Reservation
-        |> Option.filter (fun held -> held.Holder = ReservationHolder.Rival)
+        control
+        |> RoomControlInfo.heldBy ReservationHolder.Rival
         |> Option.map (fun held ->
             room, (view.Time + held.TicksToEnd, StandDownBasis.RivalReservation)))
 
@@ -502,11 +501,8 @@ let private rivalDeadlines (view: ColonyView) =
 /// guards beat is a fight; a raid two guards lose is a room to leave, and it is
 /// left for exactly as long as the raid has to live.
 let private raidDeadlines (view: ColonyView) =
-    let armed (h: HostileInfo) =
-        h.Body |> List.exists (fun p -> p = Attack || p = RangedAttack)
-
     view.Hostiles
-    |> List.filter armed
+    |> List.filter Decide.Facts.isArmed
     |> List.filter (fun h -> h.Pos.Room <> SpatialInfo.homeName view.Spatial)
     |> List.map (fun h -> h.Pos.Room)
     |> List.distinct
@@ -692,12 +688,9 @@ let foldRaids (cap: int) (alive: Set<string>) (view: ColonyView) (prior: RaidSta
     // baseline. The kinds are the rule's, never a list of ids: a rampart
     // raised mid-episode joins it the tick it stands.
     let defended =
-        view.Spatial.Hits
-        |> Map.toList
-        |> List.choose (fun (id, hits) ->
-            match Map.tryFind id view.Spatial.TargetKinds with
-            | Some(Structure kind) when isDefence kind -> Some(id, hits.Hits)
-            | _ -> None)
+        SpatialInfo.structureHits view.Spatial
+        |> List.choose (fun (id, kind, hits) ->
+            if isDefence kind then Some(id, hits.Hits) else None)
         |> Map.ofList
 
     // Hits lost since the previous tick's baseline: decreases summed,
