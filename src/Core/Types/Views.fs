@@ -144,6 +144,14 @@ type ColonyView =
         /// unchanged. A withheld room is one the colony stops holding
         /// assignments in; a dark one is a room it is still working and
         /// cannot see this tick.
+        ///
+        /// Narrowed once more inside that set, by the same rule (#271): a room
+        /// this colony only **crosses** carries no memory either. Its work is
+        /// taken out of the projection where the facts are cut
+        /// (`transiting`), and a memory of work the projection has just
+        /// refused would reach the grace anyway — which is how a [[stand-down]]
+        /// on a room a chain runs *through* used to hold a hauler to a Withdraw
+        /// it had already withdrawn from.
         Sightings: Map<string, RoomSighting>
     }
 
@@ -201,6 +209,15 @@ module ColonyView =
             |> Set.ofList
         | _ -> Set.empty
 
+    /// The narrowing itself. The room's **memory** is not cut with it and needs
+    /// no cutting (#271): a room reaches this arm only through `Colony.bootstrapping`
+    /// or `Colony.reclaiming`, both of which read the room's control entry, and
+    /// a control entry is vision's — so a bootstrapped room is a room we can
+    /// see this tick, its sighting is this tick's, and the grace (which asks
+    /// only about rooms gone **dark**) never reads it. A child's room that does
+    /// go dark is not narrowed here at all: it loses its [[stage]] with its
+    /// control entry and leaves the scan set outright, taking its sighting with
+    /// it.
     let private borrowed (stage: ColonyStage option) (facts: RoomFacts) : RoomFacts =
         let sink = ferrySink stage facts
 
@@ -251,7 +268,11 @@ module ColonyView =
     /// id a Task could name — and, since #248, the one placement fact that
     /// carries no id at all, the tiles a rival's construction sites hold: the
     /// test is whether the field is *work*, not whether something can be named
-    /// off it.
+    /// off it. The room's **memory** goes with its work and for the same reason
+    /// (#271) — an id this colony may not work is not one it may be held to
+    /// while the room is dark — but it goes one level up, at the walk in
+    /// `ofWorld`, because a sighting is the world's and not a field of the
+    /// facts: this function is handed no memory to drop.
     let private transiting (facts: RoomFacts) : RoomFacts =
         { facts with
             Layer =
@@ -311,9 +332,6 @@ module ColonyView =
                 world
                 colony
 
-        // The scan set with each room's facts beside it, in scan order —
-        // a room the world holds nothing for reads empty (ADR 0004), and a
-        // room this colony only bootstraps reads the borrowed work alone.
         // The rooms in the set for the walk alone: everything the union added
         // that is neither this colony's home, nor a room it works, nor a room
         // it raises (`Colony.roomsProjected`, ADR 0058). Derived by
@@ -328,18 +346,35 @@ module ColonyView =
                 && not (outposts |> List.exists (fun outpost -> outpost.RoomName = room)))
             |> Set.ofList
 
-        let worked =
+        // The scan set with everything the world holds about each room beside
+        // it, in scan order: this tick's facts — a room the world holds nothing
+        // for reads empty (ADR 0004), and a room this colony only bootstraps
+        // reads the borrowed work alone — and the memory of the room the vision
+        // grace reads (#151).
+        //
+        // A room the colony only **crosses** keeps neither, and that is one
+        // rule and not two (#271): `transiting` takes its every id out of the
+        // projection, and a memory of those ids would put them back the tick
+        // the room went dark, which is the only tick the grace looks at. The
+        // live case is a [[stand-down]] on a room a chain runs *through* — the
+        // gate takes the room out of `outposts` and the chain keeps it in
+        // `scanned`, so it lands here as a transit room with the census of the
+        // outpost it was still in it, and its Withdraw went on holding a hauler
+        // the withdrawal had released for a whole `Tuning.VisionGrace`.
+        let narrowed =
             scanned
             |> List.map (fun room ->
                 let facts = World.roomOf world room
+                let remembered = Map.tryFind room world.Sightings
 
-                room,
-                (if List.contains room bootstrap then
-                     borrowed (Map.tryFind room stages) facts
-                 elif Set.contains room transit then
-                     transiting facts
-                 else
-                     facts))
+                if List.contains room bootstrap then
+                    room, borrowed (Map.tryFind room stages) facts, remembered
+                elif Set.contains room transit then
+                    room, transiting facts, None
+                else
+                    room, facts, remembered)
+
+        let worked = narrowed |> List.map (fun (room, facts, _) -> room, facts)
 
         // This colony's bodies, and the names to cut its geometry by: a
         // colony's fleet and its layers' occupants are one set, so the two
@@ -456,6 +491,14 @@ module ColonyView =
             // The world's memory of these rooms and of no others (#151):
             // narrowed by the scan set the [[stand-down]] gate has already
             // cut, so a withheld room's remembered census cannot hold a
-            // creep to a Task in a room the colony has withdrawn from.
-            Sightings = world.Sightings |> Map.filter (fun room _ -> List.contains room scanned)
+            // creep to a Task in a room the colony has withdrawn from. Read
+            // off the same walk the facts are, because the scan set alone did
+            // not deliver that (#271): a withheld room the chain to a further
+            // outpost still crosses stays in the set, and the narrowing that
+            // takes its work is the walk's.
+            Sightings =
+                narrowed
+                |> List.choose (fun (room, _, remembered) ->
+                    remembered |> Option.map (fun sighting -> room, sighting))
+                |> Map.ofList
         }

@@ -251,6 +251,14 @@ type WorldCreep =
 /// that room's Seam, which is border layer and terrain and needs no vision.
 /// Nothing is placed or priced off a sighting, and no stale fact reaches a
 /// decision through it.
+///
+/// The world holds one of these per room it can see and keeps it for the rooms
+/// it cannot; which of them reaches a colony is the **view**'s cut, and it is
+/// the whole of what keeps the promise above at the colony's altitude
+/// (`ColonyView.ofWorld`, #271): a room this colony does not work carries no
+/// memory here, and neither does a room it only **crosses** on the way to one
+/// it does — an id taken out of the projection is not one the grace may hold a
+/// body to.
 type RoomSighting =
     {
         /// The tick vision last answered for the room. Equal to the world's
@@ -263,7 +271,8 @@ type RoomSighting =
         /// carrying the kinds would be a field no decision reads, which is the
         /// growth ADR 0007's rule refuses — and it is the narrowing that puts
         /// the promise above into the *type*: there is no stale kind here for
-        /// the next rule to read one out of.
+        /// the next rule to read one out of. The view's cut is written off the
+        /// **room**, never off what stands in it, so it needs none either.
         Targets: Set<string>
     }
 

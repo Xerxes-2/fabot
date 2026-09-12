@@ -875,6 +875,43 @@ let colonyViewTests =
                     "and a colony carries no sighting of a room outside its own scan set"
             }
 
+            test "a room a mother borrows is never one she remembers in the dark" {
+                // #271 asked whether the [[borrowed work]] cut has to travel
+                // to the sighting too — whether the mother's grace can hold a
+                // hauler to `withdraw:can-child`, a Task the borrowing takes
+                // out of her pool (ADR 0047 decision 4). It cannot, and this
+                // is why: the grace reads a room only while it is **dark**
+                // (`lastSeenIn` asks for `Tick < Time`), and a room reaches
+                // the borrowed cut only through a [[stage]] or an ownership,
+                // both read off a control entry vision pays for. So the memory
+                // she carries of the child's room is always this tick's.
+                Expect.equal
+                    ((viewOf pairWorld mother).Sightings
+                     |> Map.tryFind child
+                     |> Option.map (fun sighting -> sighting.Tick))
+                    (Some pairWorld.Time)
+                    "the room she borrows was seen this tick, so no grace reads its memory"
+
+                // And the tick it does go dark it is not narrowed here at all:
+                // with no control entry there is no stage, the room leaves her
+                // scan set outright, and its memory leaves with it — which is
+                // the same withdrawal the [[stand-down]] gets above.
+                let blind =
+                    { pairWorld with
+                        Rooms = unseen child pairWorld.Rooms
+                    }
+
+                let view = viewOf blind mother
+
+                Expect.isFalse
+                    (Map.containsKey child view.Spatial.Rooms)
+                    "dark, the child's room is not in her projection at all"
+
+                Expect.isFalse
+                    (Map.containsKey child view.Sightings)
+                    "and she remembers nothing of it"
+            }
+
             test "an unseen outpost still carries its declared furniture" {
                 // The half ADR 0041 refuses to make vision wait for: a
                 // source's id and tile are declared, so the Harvest that
@@ -1084,6 +1121,28 @@ let private twoHopDeclaration: Colony list =
                     ]
             })
 
+/// The same chain with the room in the middle **declared** too, which is what
+/// makes a stand-down on it interesting: shut, it leaves the outpost list and
+/// the chain to `twoHop` keeps it in the scan set, so one gate field turns a
+/// worked outpost into a transit room (#271).
+let private chainDeclaration: Colony list =
+    twoHopDeclaration
+    |> List.map (fun colony ->
+        if colony.Home <> mother then
+            colony
+        else
+            { colony with
+                Outposts =
+                    colony.Outposts
+                    @ [
+                        {
+                            RoomName = crossed
+                            Sources = [ "src-crossed", { Room = crossed; X = 9; Y = 9 } ]
+                            Controller = "ctrl-crossed", { Room = crossed; X = 11; Y = 11 }
+                        }
+                    ]
+            })
+
 let private twoHopWorld =
     { pairWorld with
         Rooms =
@@ -1166,6 +1225,75 @@ let transitTests =
                 Expect.isTrue
                     (Map.containsKey "src-two" view.Spatial.TargetKinds)
                     "the two-hop outpost's own rock is placed off the declaration"
+            }
+
+            test "and a room the chain crosses is remembered no more than it is worked" {
+                // #271, and the only case of it a running colony can reach.
+                // Here the mother declares **both** rooms, so `crossed` is an
+                // outpost of hers one hop out and `twoHop` is one hop further
+                // through it. The [[stand-down]] gate shuts `crossed` (ADR
+                // 0043): it leaves her outpost list — its rock, its container
+                // and the Withdraw they pool go out with it — but the chain to
+                // `twoHop` keeps it in her scan set, so it arrives here as a
+                // **transit** room.
+                //
+                // The scan-set narrowing #151 wrote cannot see that, and the
+                // room's memory rode on: `withdraw:cont-crossed`, a Task the
+                // withdrawal had just taken out of the pool, answered the
+                // [[vision grace]] the tick the room went dark, and the mother's
+                // hauler was Kept and walked back into the room the stand-down
+                // had withdrawn it from for a whole `Tuning.VisionGrace`.
+                let walked =
+                    { twoHopWorld with
+                        Sightings =
+                            twoHopWorld.Sightings
+                            |> Map.add
+                                crossed
+                                {
+                                    Tick = twoHopWorld.Time - 1
+                                    Targets = Set.ofList [ "cont-crossed"; "src-crossed" ]
+                                }
+                    }
+
+                let viewWith shut =
+                    let holders =
+                        World.creepColonies
+                            Tuning.defaults
+                            chainDeclaration
+                            (World.living chainDeclaration walked)
+                            noneShut
+                            walked
+
+                    ColonyView.ofWorld
+                        Tuning.defaults
+                        chainDeclaration
+                        { StandDown.none with Shut = shut }
+                        holders
+                        walked
+                        (chainDeclaration |> List.find (fun colony -> colony.Home = mother))
+
+                let stoodDown = viewWith (Set.singleton crossed)
+
+                Expect.isTrue
+                    (Map.containsKey crossed stoodDown.Spatial.Rooms)
+                    "the premise: shut, the room is still projected — the chain to the far outpost crosses it"
+
+                Expect.isFalse
+                    (Map.containsKey "cont-crossed" stoodDown.Spatial.TargetKinds)
+                    "and its container is no Task of hers: that is the withdrawal ADR 0043 spells"
+
+                Expect.isNone
+                    (Map.tryFind crossed stoodDown.Sightings)
+                    "so she remembers nothing of it either, and the grace has no room to answer with"
+
+                // Pairwise, one field of the gate apart: worked, the room is
+                // an outpost like any other and its memory rides on the view
+                // whole. The narrowing is the transit room's alone, and it is
+                // the gate that decides which of the two this room is.
+                Expect.equal
+                    ((viewWith Set.empty).Sightings |> Map.tryFind crossed)
+                    (Map.tryFind crossed walked.Sightings)
+                    "open, it is an outpost she works and she remembers what stood in it"
             }
         ]
 
