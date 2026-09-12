@@ -1328,22 +1328,49 @@ function crewBody(bodyOf, spawnName, row, rcl) {
 // west).
 const HOME_ROOM = "W12S28";
 const OUTPOST_ROOMS = ["W12S27", "W13S28"];
-// Rooms a scenario's colonies declare but this harness does not furnish
-// or give vision of: W13S28 declares W13S29 (its south outpost, 2026-09-07)
-// and W15S28 (the third colony, 2026-09-10), so any world standing W13S28
-// as a colony must answer `getRoomTerrain` for both — the terrain layer
-// reads every declared room whether or not it is seen (ADR 0041) — while
-// their furniture, reservation and vision stay unmodelled, exactly as a
-// freshly declared room is until a claimer walks in. **W14S28 is here for
-// a second reason and not as a declaration**: it is the transit room a
-// shortest chain to W15S28 crosses, so `Outpost.roomsProjected` puts it in
-// the projection carrying terrain and a border ring and nothing else (ADR
-// 0058) — which is exactly what this list models, and the reason a
-// multi-hop declaration widens it by two rooms rather than one. Every one
-// of them is read off its committed capture, never invented; a room this
-// list forgets is a scenario that throws rather than one that lies, which
-// is how the miss this line fixes was found.
-const DECLARED_UNFURNISHED = ["W13S29", "W15S28", "W14S28"];
+// Rooms a scenario's colonies declare but this harness does not furnish or
+// give vision of: the terrain layer reads every declared room whether or
+// not it is seen (ADR 0041), so a world standing a declared home as a
+// colony must answer `getRoomTerrain` for the whole of that colony's
+// projection set — while the furniture, reservation and vision of the rooms
+// it does not furnish stay unmodelled, exactly as a freshly declared room
+// is until a claimer walks in. Today that is W13S29 (W13S28's south
+// outpost, 2026-09-07), W15S28 (the third colony, 2026-09-10) and W14S28 —
+// the last of those not as a declaration but as the transit room a shortest
+// chain to W15S28 crosses, which `Outpost.roomsProjected` puts in the
+// projection carrying terrain and a border ring and nothing else (ADR
+// 0058), and which is why a multi-hop declaration widens this by two rooms
+// rather than one.
+//
+// **Derived and not written down** (#287). It was a literal list, and a
+// literal list is a hand-copied shadow of a constant a human edits
+// elsewhere: when W13S28's declaration grew on 2026-09-10 the list did not,
+// and `outpost`, `young` and `pair` all died inside `getRoomTerrain` on the
+// next run — the regression gate for every `src/App` and `src/Core` change
+// off, with nothing but a stack trace in a tool nobody runs on a green
+// `dotnet test` to say so. The rule is the *bundle's own*: `World`'s
+// `worldRooms` is the one function that decides which rooms the world holds
+// facts for, and it is a pure function of `Colony.declared`, `Tuning`'s hop
+// budget and the rooms the scenario gives vision of — so the harness asks
+// it rather than restating it, and a declaration a human moves in
+// `Colony.declared` moves this set on the same commit.
+//
+// What is subtracted is what the scenario furnishes itself: the rooms it
+// hands `buildGame` real captures and `find` tables for. Every remaining
+// room is still read off its committed capture and never invented — that is
+// what makes deriving the set safe rather than merely convenient, and it is
+// why `loadCapture` names a missing file: a declared room with no capture is
+// a file nobody committed, not a grid the stub world is lying about.
+const declaredUnfurnished = (seen) => {
+  const projected = globalThis.__fabotWorldRooms;
+  if (!projected) {
+    throw new Error(
+      "the bundle must be loaded before a scenario's world is built: the declared rooms are " +
+        "read off `World.worldRooms`, not out of a list in this file (#287)",
+    );
+  }
+  return projected(seen).filter((room) => !seen.includes(room));
+};
 // A capture's rocks, filed under the loader's own ids. Full and never
 // regenerating, because a scenario measures a tick and not a cycle: a rock that
 // ran dry mid-run would move every quota that reads income.
@@ -1395,11 +1422,16 @@ const outpostCrew =
     }
   };
 
-const declaredTerrains = () =>
-  DECLARED_UNFURNISHED.map(loadCapture).map((capture) => [
-    capture.name,
-    capture.terrain,
-  ]);
+// The terrain entries for those rooms, keyed as `buildGame` keys every
+// other room. `seen` is the scenario's own vision — the room names it builds
+// stub rooms for, which is what `Game.rooms` answers with and therefore what
+// the bundle reads under that same name in `World.worldRooms`. (Not
+// `furnished`: this file already spends that word on a home's geometry,
+// and half the rooms in this argument are unfurnished outposts.)
+const declaredTerrains = (seen) =>
+  declaredUnfurnished(seen)
+    .map(loadCapture)
+    .map((capture) => [capture.name, capture.terrain]);
 // The tile the live colony's spawn actually stands on — the same one
 // RoomInvariantTests sweeps W12S28 over, so the plan this scenario profiles
 // is the plan the suite already reasons about.
@@ -1492,6 +1524,17 @@ const capturesDirectory = () =>
 // this hands back are the same fifty-by-fifty grid.
 function loadCapture(roomName) {
   const file = path.join(capturesDirectory(), `${roomName}.room`);
+  // Named before it is read, because some of the rooms asked for here are
+  // derived from `Colony.declared` and not written down anywhere: the first
+  // thing a human learns after declaring a room they never captured should
+  // be which file to commit, not a bare ENOENT from inside a terrain lookup.
+  if (!existsSync(file)) {
+    throw new Error(
+      `capture ${roomName}.room is not committed — every room a scenario ` +
+        "stands or a declaration projects into has to carry one (ADR 0036), and this " +
+        `harness reads it out of ${path.relative(process.cwd(), capturesDirectory())}`,
+    );
+  }
   const lines = readFileSync(file, "utf8").split("\n");
 
   const sectionAt = (marker) => {
@@ -2035,7 +2078,7 @@ function buildOutpostWorld() {
     terrains: new Map([
       [home.name, home.terrain],
       ...outposts.map((capture) => [capture.name, capture.terrain]),
-      ...declaredTerrains(),
+      ...declaredTerrains(rooms.map((room) => room.name)),
     ]),
     rooms,
     spawns: [spawn],
@@ -2286,10 +2329,14 @@ function buildYoungWorld() {
 
   const creeps = [];
   const stations = homeStations(home);
+  const rooms = [home.room];
 
   return {
-    terrains: new Map([[capture.name, capture.terrain], ...declaredTerrains()]),
-    rooms: [home.room],
+    terrains: new Map([
+      [capture.name, capture.terrain],
+      ...declaredTerrains(rooms.map((room) => room.name)),
+    ]),
+    rooms,
     spawns: [home.spawn],
     creeps,
     byId,
@@ -2489,7 +2536,7 @@ function buildPairWorld() {
       [motherCapture.name, motherCapture.terrain],
       [childCapture.name, childCapture.terrain],
       ...outposts.map((capture) => [capture.name, capture.terrain]),
-      ...declaredTerrains(),
+      ...declaredTerrains(rooms.map((room) => room.name)),
     ]),
     rooms,
     spawns: [mother.spawn, child.spawn],
@@ -3004,6 +3051,69 @@ globalThis.__fabotDecideCalls = [];
 }
 `;
 
+// The second probe: the bundle's own answer to "which rooms does the world
+// hold facts for", so this harness can furnish a world that answers every
+// `getRoomTerrain` the bot will make without a human keeping a list in step
+// (#287). `World.worldRooms` is private to the shell and exported by
+// nothing — the bundle exports `loop` and only `loop` — so it is reached
+// the way `decideUnarbitrated` above is: the appended source runs in the
+// bundle's own top-level scope, where every module-level binding esbuild
+// emitted is in scope. Nothing is wrapped and nothing is called, so this
+// costs the measured tick nothing.
+//
+// Handed the scenario's seen rooms and answering with the union the shell
+// takes, so the transit rectangle and the hop budget come from the rule
+// that uses them rather than from a second statement of it here.
+//
+// Two things it deliberately does not take on a name's word. `MaxHops` is a
+// *field* of a binding and not a binding, so the textual check below cannot
+// see it: renamed in `Tuning`, it would arrive here as `undefined`, no
+// outpost would clear the hop budget, and the derived set would collapse to
+// the seen rooms — which is precisely the "the stub world holds no terrain"
+// throw this ticket exists to delete. It is asserted numeric at load
+// instead. And the `seen` list is built out of the bundle's *own* list
+// rather than by calling a Fable list constructor by name: `ofArray`,
+// `ofArray2`, `ofArray3`, `ofArrayWithTail` and `MapTreeModule_ofArray` all
+// live in this bundle under names esbuild hands out by collision order, so
+// a guard on `function ofArray(` pins an arity and not an identity — one
+// re-ordering and the probe silently builds the wrong structure, which
+// surfaces as a `Compare` TypeError from inside a map. `ColonyModule_declared`
+// *is* an F# list of the very type `worldRooms` wants, so its own terminator
+// and its own cons cell build the argument, and there is no third name to be
+// wrong about.
+const WORLD_ROOMS_PROBE = `
+// ---- appended by scripts/profile.mjs: the shell's own declared-room set ----
+{
+  const hops = TuningModule_defaults.MaxHops;
+  if (typeof hops !== "number") {
+    throw new Error(
+      "src/Core/Types/Rules.fs's \\\`Tuning.defaults\\\` carries no numeric \\\`MaxHops\\\` — " +
+        "scripts/profile.mjs derives a scenario's declared rooms through it (#287), and " +
+        "whatever renamed the field is what this probe has to be re-pointed at",
+    );
+  }
+  let nil = ColonyModule_declared;
+  while (nil.tail != null) nil = nil.tail;
+  const cons = (head, tail) => new (nil.constructor)(head, tail);
+  globalThis.__fabotWorldRooms = (seen) =>
+    Array.from(
+      worldRooms(hops, ColonyModule_declared, seen.reduceRight((tail, room) => cons(room, tail), nil)),
+    );
+}
+`;
+
+// The bindings that probe reads, each checked before the bundle is loaded
+// rather than after, so a rename in the shell or a Fable upgrade names
+// itself instead of surfacing as "the stub world holds no terrain".
+const WORLD_ROOMS_BINDINGS = [
+  ["function worldRooms(", "src/App/World.fs's `worldRooms`"],
+  [
+    "var ColonyModule_declared ",
+    "src/Core/Types/Colonies.fs's `Colony.declared`",
+  ],
+  ["var TuningModule_defaults ", "src/Core/Types/Rules.fs's `Tuning.defaults`"],
+];
+
 // The bundle as the engine would load it, plus the probe above. Written
 // beside the original rather than over it — under the same basename, so
 // the hotspot tables' `[main.js:NNNN]` locations still name the lines a
@@ -3021,11 +3131,19 @@ function loadBundle(file) {
         "has to be re-pointed at",
     );
   }
+  for (const [binding, where] of WORLD_ROOMS_BINDINGS) {
+    if (source.includes(`\n${binding}`)) continue;
+    throw new Error(
+      `${path.relative(process.cwd(), file)} holds no top-level \`${binding}\` and this harness ` +
+        `needs it to ask the bundle which rooms a colony's declaration projects (#287) — it is ` +
+        `${where}. Whatever renamed or inlined it is what this probe has to be re-pointed at`,
+    );
+  }
   globalThis.__fabotClock = () => performance.now();
   const probed = path.join(here, "..", "build", "probe");
   mkdirSync(probed, { recursive: true });
   const probedFile = path.join(probed, path.basename(file));
-  writeFileSync(probedFile, source + DECIDE_PROBE);
+  writeFileSync(probedFile, source + DECIDE_PROBE + WORLD_ROOMS_PROBE);
   const { loop } = createRequire(import.meta.url)(probedFile);
   return { loop, decideCalls: () => globalThis.__fabotDecideCalls };
 }
@@ -3040,6 +3158,16 @@ if (!existsSync(bundle)) {
   console.error("dist/main.js not found — run `npm run build` first.");
   process.exit(1);
 }
+
+// Loaded before the world is built and not after: a scenario's terrain set
+// is the bundle's own answer for the rooms its colonies declare (#287), so
+// the bundle has to be in the heap before `buildWorld` can ask. Its module
+// body does run at load — `Colony.declared`, `Tuning.defaults` and every
+// other Fable module-level binding are evaluated here, which is exactly what
+// the probe depends on — but nothing in it touches `Game` or `Memory` until
+// `loop` is called, so requiring it before those globals exist reads nothing
+// that is not there yet.
+const { loop, decideCalls } = loadBundle(bundle);
 
 const world = buildWorld();
 const { game, terrainReads } = buildGame(world);
@@ -3111,8 +3239,6 @@ for (const home of world.furnished) {
 // counter zeroed after that reads "never projected" for a room the bundle
 // projects every tick.
 for (const name of worldRooms) terrainReads.set(name, 0);
-
-const { loop, decideCalls } = loadBundle(bundle);
 
 // The fleet, before a tick is either warmed or measured: the bundle hires
 // it against this level's bank, and the outpost crews follow it. Neither

@@ -49,13 +49,19 @@ never a budget the bot acts on (ADR 0041: CPU is measured, not budgeted).
 | `pair`    | the shape of the tick the live bot runs (ADR 0047, ADR 0052): the mother `W12S28` at RCL5 with outpost `W12S27`, and the child `W13S28` bootstrapping with its own Spawn2 at `16,12`; prints a `decide by colony` table | child RCL2    |
 
 The levels are the shape being profiled and not today's live RCL — the live
-pair passed RCL6 on ADR 0055's move. What every scenario standing `W13S28` as
-a colony **does** track is that colony's declaration: since 2026-09-10 it
-declares `W15S28` two hops east, so the harness answers terrain for that room
-and for the transit room `W14S28` between them (`DECLARED_UNFURNISHED` in
-`scripts/profile.mjs`, ADR 0058). A declared room the list forgets is a
-scenario that throws on `getRoomTerrain`, not one that quietly measures the
-wrong world.
+pair passed RCL6 on ADR 0055's move. What every scenario standing a declared
+home as a colony **does** track is that colony's declaration, and it tracks it
+without a human's help: the rooms a scenario furnishes are written down here,
+but the rooms it must additionally answer terrain for are **derived** from
+`Colony.declared` by asking the bundle's own `World.worldRooms` (#287), so a
+declaration moved in `src/Core/Types/Colonies.fs` moves the harness on the same
+commit. The set is deliberately not written down again here: it is the
+colony's whole projection, outposts and the transit rooms a multi-hop chain
+crosses alike (ADR 0058), which is why declaring a room two hops out widens it
+by two rooms rather than one. Each room in it is read off its committed capture
+(ADR 0036) and never invented, so a declared room with no capture fails as
+`capture W16S27.room is not committed`, naming the file to commit rather than
+blaming the stub world for holding no terrain.
 
 `--level N` moves the scenario's colony (`pair` moves the child; the mother
 stays at RCL5). `--scenario pair --level 3` is a reading, not a mistake:

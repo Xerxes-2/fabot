@@ -163,7 +163,7 @@ controller 6a8caa95dd4872bccd319015  {W15S28; 25,31}
 
 ## 8. 这条 declaration 顺手暴露的一个闸门缺口
 
-`scripts/profile.mjs` 的 `DECLARED_UNFURNISHED` 是硬编码的房名表（当时只有 `["W13S29"]`），而 `outpost` / `young` / `pair` 三个场景刻意不传 `unmodelled` —— 所以 W13S28 一旦多declare 一个房，三个场景全部在 `getRoomTerrain` 上抛异常（`the stub world holds no terrain for W15S28`），只有 `stub` 活着。ADR 0058 早写下过这件事的一半（*"A profile scenario that stands a multi-hop outpost properly is its own ticket."*），但它写的是"站好一个多跳 outpost"，没写"忘了它会让闸门整个熄掉"。本次一并修了（补上 W15S28 与 transit 的 W14S28，两个 capture 都早已 committed），四个场景现在都跑得通，Summary 里那两个区间就是这么量出来的。**要读出来的一般结论**：`DECLARED_UNFURNISHED` 是 `Colony.declared` 的影子，改 declaration 必须一起改它，而它今天没有任何测试保护 —— 这值得单开一张 ticket（让 harness 自己从 `Colony.declared` 推这张表，而不是抄一份）。
+`scripts/profile.mjs` 的 `DECLARED_UNFURNISHED` 是硬编码的房名表（当时只有 `["W13S29"]`），而 `outpost` / `young` / `pair` 三个场景刻意不传 `unmodelled` —— 所以 W13S28 一旦多declare 一个房，三个场景全部在 `getRoomTerrain` 上抛异常（`the stub world holds no terrain for W15S28`），只有 `stub` 活着。ADR 0058 早写下过这件事的一半（*"A profile scenario that stands a multi-hop outpost properly is its own ticket."*），但它写的是"站好一个多跳 outpost"，没写"忘了它会让闸门整个熄掉"。本次一并修了（补上 W15S28 与 transit 的 W14S28，两个 capture 都早已 committed），四个场景现在都跑得通，Summary 里那两个区间就是这么量出来的。**要读出来的一般结论**：`DECLARED_UNFURNISHED` 是 `Colony.declared` 的影子，改 declaration 必须一起改它，而它今天没有任何测试保护 —— 这值得单开一张 ticket（让 harness 自己从 `Colony.declared` 推这张表，而不是抄一份）。**（后记：这张 ticket 是 #287，已做完 —— `DECLARED_UNFURNISHED` 这个名字自此不存在，harness 现在直接问 bundle 的 `World.worldRooms`。）**
 
 ## 9. 本文没做的事
 
