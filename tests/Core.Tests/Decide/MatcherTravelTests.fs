@@ -3,6 +3,7 @@
 module Fabot.Core.Tests.Decide.MatcherTravelTests
 
 open Expecto
+open FSharp.Reflection
 open Fabot.Core
 open Fabot.Core.Types
 open Fabot.Core.Decide
@@ -1527,5 +1528,231 @@ let arbitrationTests =
                 Expect.isEmpty
                     (resolveOn mother [ "eb", Harvest "src-e" ] |> moveIntents)
                     "and the mother alone can only see a tile she must not claim"
+            }
+        ]
+
+/// Every rank the ladder puts a Task on: each tier's own (read off the `Tier`
+/// union itself, so a tier added to the ladder joins this walk without anybody
+/// remembering to), and the downgrade deadline's beside them, which is a rank
+/// one whole tier above Feeding and no tier of its own (ADR 0007) — read off
+/// `Pool.deadlineRank` for the same reason and not re-derived here. Reading the
+/// cases off a union is `WireTests`' technique and carries its argument (#80):
+/// reflection lives in the test projects alone, so none of it reaches the Fable
+/// bundle.
+let private ladderRanks: (string * int) list =
+    let tiers =
+        FSharpType.GetUnionCases typeof<Tier>
+        |> Array.toList
+        |> List.map (fun case ->
+            case.Name, priorityOfTier (FSharpValue.MakeUnion(case, [||]) :?> Tier))
+
+    ("the downgrade deadline", deadlineRank) :: tiers |> List.sortBy snd
+
+/// Every rung the Planner may step a Task by inside its tier, off the `Rung`
+/// union itself: a rule that wants a rung of its own has to add a case there,
+/// and the walk below then checks it against `weightOfRank`'s window without
+/// anybody remembering to widen a literal here (#237).
+let private ladderRungs: (string * int) list =
+    FSharpType.GetUnionCases typeof<Rung>
+    |> Array.toList
+    |> List.map (fun case -> case.Name, rankOfRung (FSharpValue.MakeUnion(case, [||]) :?> Rung))
+
+/// The tier a rank belongs to: the nearest one, ties going to the deeper — the
+/// rounding `weightOfRank` is supposed to do, written a second way so the test
+/// does not assert the formula against itself.
+let private nearestRank (rank: int) =
+    ladderRanks |> List.minBy (fun (_, at) -> abs (at - rank), -at)
+
+[<Tests>]
+let pushWeightTests =
+    testList
+        "push weight"
+        [
+            test "#237 every rank inside a tier pushes with that tier's own weight" {
+                // The exhaustive walk the ticket asked for: every rank the
+                // window admits, which is half a tier above the shallowest tier
+                // down to half a tier below the deepest — and one rank short of
+                // that at the deep end, because a tie rounds to the *deeper*
+                // tier, so what a tier owns is `tierRungs / 2` up and
+                // `tierRungs / 2 - 1` down. The asymmetry is the point: what
+                // this walk proves is that the window is exactly one tier wide.
+                // Each rank must push with the weight of the tier it is a rung
+                // of — a rung orders Tasks *inside* a tier (ADR 0052 decision
+                // 6) and says nothing about corridors. A ladder that grows a
+                // tier, or a `tierRungs` that changes, is walked here as it
+                // stands rather than against a copy of the old numbers. The
+                // idle rank is not on the ladder and is pinned below.
+                let half = tierRungs / 2
+                let shallowest = ladderRanks |> List.map snd |> List.min
+                let deepest = ladderRanks |> List.map snd |> List.max
+
+                for rank in (shallowest - half) .. (deepest + half - 1) do
+                    let tier, at = nearestRank rank
+
+                    Expect.equal
+                        (weightOfRank rank)
+                        (weightOfRank at)
+                        $"rank %d{rank} is a rung of %s{tier} and pushes as %s{tier} does"
+            }
+
+            test "#237 the boundary the ladder's rule is stated against" {
+                // Where the window ends, pinned from both sides, because it is
+                // what `Pool.tierRungs` tells the next author who wants a rung:
+                // half a tier up is still the tier's own push, and one rung
+                // beyond it is the tier above's. Every rung steps a Task up, so
+                // this is the bound a rule may take, and the reason the ladder's
+                // sentence reads "at the most" rather than "or more".
+                let half = tierRungs / 2
+
+                for (shallower, above), (name, at) in List.pairwise ladderRanks do
+                    Expect.equal
+                        (weightOfRank (at - half))
+                        (weightOfRank at)
+                        $"half a tier above %s{name} is still %s{name}'s own push"
+
+                    Expect.equal
+                        (weightOfRank (at - half - 1))
+                        (weightOfRank above)
+                        $"one rung further and it is %s{shallower}'s, which is the defect #237 cured"
+            }
+
+            test "#237 the rungs the Planner steps still push as the tier does" {
+                // The ticket's own table, named, and walked off the `Rung`
+                // union rather than off a literal: a [[pickup]] steps one rung
+                // (#216 R5, #242) and a full source container's [[withdraw]]
+                // steps two; inside Surplus a rescued Repair steps two as well
+                // (#284). Before this ticket the second rung rounded past its
+                // tier, so in a corridor a body holding a full container's
+                // Withdraw pushed harder than one holding the spawn's Refill —
+                // which the rung never claimed and the [[resolver]] must not
+                // read into it. That corridor is the case below.
+                for name, at in ladderRanks do
+                    for rung, step in ladderRungs do
+                        Expect.equal
+                            (weightOfRank (at + step))
+                            (weightOfRank at)
+                            $"%s{rung} inside %s{name} is still %s{name}'s push"
+            }
+
+            test "one tier is one unit of push weight, and a body with no Task the least" {
+                // What ADR 0001's eviction price is arithmetic on (#267): a
+                // body is taken off its work only by a chain worth more than
+                // the sidestep, which is a body one *tier* up and never one
+                // rung. So the ladder's tiers must come out one apart, in
+                // order, and an idle body must still push with something.
+                let weights = ladderRanks |> List.map (fun (name, at) -> name, weightOfRank at)
+
+                Expect.equal
+                    (weights |> List.map snd)
+                    (weights |> List.mapi (fun i _ -> List.length weights - i + 1))
+                    $"each tier pushes one more than the tier below it: %A{weights}"
+
+                Expect.equal
+                    (weightOfRank System.Int32.MaxValue)
+                    1
+                    "a creep with no Task pushes with the smallest weight there is, not none"
+            }
+        ]
+
+/// The corridor #237 is written about, and the three bodies it takes to reach
+/// it. A one-tile lane y = 10 from the source container at (9,10) east to the
+/// spawn walled in at (19,10), with a single pocket tile at (12,11) to stand
+/// aside on and the controller off the lane's east end at (20,10).
+///
+/// The container holds a full 2,000, so its Withdraw takes the two rungs a full
+/// source container takes (#216 R5) and stands at Feeding − 2; the spawn is
+/// hungry, so its Refill stands on Feeding's own rank; and the controller is
+/// inside its downgrade deadline, so its Upgrade is a whole tier above both
+/// (ADR 0007). Three bodies and not two, which is the part a fixture author
+/// would not guess: `arbitrate` offers travellers in rank order, so the body
+/// holding the Withdraw is offered *before* the one holding the Refill and can
+/// never shove it off a tile it has not asked for yet. The shove needs the
+/// deadline's body behind the Refill, whose own chain moves the Refill onto the
+/// lane tile both of the others want — and only then is the Withdraw's chain
+/// priced against a body standing on the tile it asked for.
+let private fullContainerCorridor positions =
+    let lane =
+        spatial [] ([ for x in 9..19 -> { X = x; Y = 10 }, Plain ] @ [ { X = 12; Y = 11 }, Plain ])
+        |> withTargets
+            [
+                "src-a", { X = 9; Y = 9 }, Source
+                "can-src", { X = 9; Y = 10 }, Structure BuiltKind.Container
+                "spawn-1", { X = 19; Y = 10 }, Structure BuiltKind.Spawn
+                "ctrl-1", { X = 20; Y = 10 }, Controller
+            ]
+
+    { bareRespawn with
+        Sources = [ source "src-a" ]
+        Refillables = [ refillable "spawn-1" 300 BuiltKind.Spawn ]
+        Controller =
+            Some
+                { controllerAt 3 with
+                    TicksToDowngrade = 4000
+                }
+        Creeps = [ for name, _ in positions -> worker name 50 0 ]
+        Spatial =
+            { lane with
+                Stores = Map.ofList [ "can-src", 2000 ]
+            }
+            |> withCreepsAt positions
+            |> withObstacles [ { X = 19; Y = 10 }; { X = 20; Y = 10 } ]
+    }
+
+[<Tests>]
+let pushWeightCorridorTests =
+    testList
+        "push weight in a corridor"
+        [
+            test "#237 a full container's Withdraw does not shove the spawn's Refill aside" {
+                // The live symptom the arithmetic above is only half of. The
+                // Refill body stands at (11,10) heading east to the spawn, the
+                // Withdraw body at (13,10) heading west to the container, and
+                // both want the lane tile between them; the deadline's body
+                // comes up the lane behind the Refill and pushes it onto that
+                // tile. One of the two ends up on the pocket at (12,11), and
+                // which one it is was the whole of the bug: the two rungs
+                // bought the Withdraw a push weight of 7 against the Refill's
+                // 6, so a chain that shoved the Refill off the tile it had just
+                // been moved onto scored 7 − 6 = 1 and was taken. Now both
+                // weigh 6, the chain scores 0, and it is the Withdraw that
+                // falls to its tail — a rung ordering two Tasks for one body
+                // and saying nothing about a corridor, which is what the rung
+                // has always claimed to be.
+                let positions =
+                    [
+                        "refill", { X = 11; Y = 10 }
+                        "withdraw", { X = 13; Y = 10 }
+                        "deadline", { X = 10; Y = 10 }
+                    ]
+
+                let snapshot = fullContainerCorridor positions
+
+                let assigned =
+                    [
+                        "refill", Refill "spawn-1"
+                        "withdraw", Withdraw "can-src"
+                        "deadline", Upgrade "ctrl-1"
+                    ]
+
+                Expect.equal
+                    (poolOn snapshot
+                     |> List.choose (fun entry ->
+                         match entry.Task with
+                         | Withdraw "can-src"
+                         | Refill "spawn-1" -> Some(taskId entry.Task, entry.Priority)
+                         | _ -> None)
+                     |> List.sortBy fst)
+                    [ taskId (Refill "spawn-1"), 0; taskId (Withdraw "can-src"), -2 ]
+                    "the premise: the two Tasks are one tier and two rungs apart"
+
+                Expect.contains
+                    (resolveVerdictsOn snapshot assigned)
+                    (Verdict.Yielded("withdraw", "refill"))
+                    "the body that stands aside is the one holding the rung, not the one holding the tier"
+
+                Expect.equal
+                    (resolveOn snapshot assigned |> moveIntents)
+                    [ "refill", Right; "withdraw", BottomLeft; "deadline", Right ]
+                    "so the Refill keeps the lane and the Withdraw takes the pocket beside it"
             }
         ]

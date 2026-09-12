@@ -229,10 +229,33 @@ let private moveIntentFor
 /// pushes with something, or a crowd of idle bodies would be a wall no
 /// traveller could walk into. The ladder's rungs are divided back out,
 /// **rounding to the tier** (ADR 0052 decision 6): a [[priority]] the Planner
-/// stepped one rung inside its tier is a claim about which of two Tasks a creep
+/// stepped a rung inside its tier is a claim about which of two Tasks a creep
 /// should take and never about how hard it should push through a corridor.
-let private weightOfRank (rank: int) : int =
-    max 1 (ceilDiv (priorityOfTier Stock - rank - priorityStep) tierRungs + 2)
+///
+/// The rounding is to the **nearest** tier, and it was one rung wide until #237
+/// — the ceiling slid by a single `priorityStep`, which was every step that
+/// existed when it was written. A rung is not the only step any more: a full
+/// source container's Withdraw steps two (#216 R5) and a rescued Repair steps
+/// two inside Surplus (#284), and both of those rounded *past* their own tier
+/// and pushed a whole weight harder than the tier they belong to — in a
+/// corridor, the body holding a full container's Withdraw shoving aside the one
+/// holding the spawn's Refill. Sliding by half a tier instead makes the window
+/// one whole tier wide and centred on it, so every rung the ladder admits lands
+/// on its own tier's weight, and no tier's weight moves — the tiers themselves
+/// sit on the grid's multiples either way.
+///
+/// What the window asks of the ladder in return is `Pool.tierRungs`' own rule,
+/// and the arithmetic it is stated against is here: a tier owns the ranks from
+/// `tierRungs / 2` above it to `tierRungs / 2 - 1` below, a tie going to the
+/// deeper tier. Every rung steps a Task **up**, so a rung may be half a tier at
+/// the most; `Pool.Rung` is the vocabulary that keeps a new one from being
+/// written without this line being checked against it.
+///
+/// Exported for the tests that walk it (#237): one unit of push weight is one
+/// whole tier, which ADR 0001's eviction price reads, and the rungs in between
+/// are the Matcher's business alone.
+let weightOfRank (rank: int) : int =
+    max 1 (ceilDiv (priorityOfTier Stock - rank - tierRungs / 2) tierRungs + 2)
 
 /// The room's matching while the arbitration runs: a tile's holder and a
 /// holder's tile, one relation written both ways because the search reads it

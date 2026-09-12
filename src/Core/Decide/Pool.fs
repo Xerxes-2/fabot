@@ -628,8 +628,11 @@ let private insideDowngradeDeadline (view: ColonyView) =
 
 /// The tier of work a Task belongs to, once its target is taken into account
 /// (ADR 0010, ADR 0012, ADR 0023) — the ladder `planPool` sets each entry's
-/// [[priority]] off.
-type internal Tier =
+/// [[priority]] off. Exported with the constants, `priorityOfTier`, the
+/// deadline's rank and `Rung` below for the reason `bodyClassOf` is (ADR 0006):
+/// the ladder is one fact, and the test that walks every rank and every rung of
+/// it (#237) reads it here rather than keeping a second copy that can drift.
+type Tier =
     /// Getting out of a Reach (ADR 0033): the one Task in it is Flee, and
     /// it sits above every other tier and above the downgrade deadline
     /// too, because no other work matters while a creep is being killed.
@@ -667,8 +670,16 @@ type internal Tier =
 
 /// How far apart two tiers stand on the [[priority]] ladder. Ten and not one,
 /// so that a Task can be ordered against another **inside** its tier
-/// (`priorityStep`) without ever reaching the tier above or below it.
-let internal tierRungs = 10
+/// (`priorityStep`) without ever reaching the tier above or below it. **A rung
+/// must stay inside the half-tier the Resolver rounds by**, or it buys the Task
+/// a push weight its own tier does not have (#237): `weightOfRank` rounds a rank
+/// to its *nearest* tier and gives a tie to the deeper one, so the ranks a tier
+/// owns run from `tierRungs / 2` above it to `tierRungs / 2 - 1` below. Every
+/// rung on this ladder is a step **up**, so a rung may be `tierRungs / 2` at the
+/// most and one more than that rounds onto the tier above; a step *down*, if a
+/// rule ever wants one, has a rung less of room. `Rung` is the vocabulary that
+/// keeps the two in step.
+let tierRungs = 10
 
 /// The whole tier order, shallowest first — the one place the ordering lives
 /// (ADR 0010, ADR 0012, ADR 0023): the flow is fed, then the stock is drawn on,
@@ -678,7 +689,7 @@ let internal tierRungs = 10
 /// over Tier on purpose — a tier this match forgets is a build error. The
 /// downgrade deadline (ADR 0007) is the one thing above the sequence rather
 /// than in it.
-let internal priorityOfTier =
+let priorityOfTier =
     function
     // One tier beneath `deadlineRank`'s, which is itself one beneath the
     // shallowest tier of work: a fleeing creep outbids even a controller
@@ -693,12 +704,45 @@ let internal priorityOfTier =
 /// One tier above the shallowest tier of work: where the downgrade
 /// deadline puts Upgrade (ADR 0007). Not a tier of its own — "never let it
 /// downgrade" is an ordering imposed on the sequence, not a tier of work.
-let private deadlineRank = -tierRungs
+/// Exported with the ladder around it and for its reason (#237): it is a rank
+/// the Planner really puts a Task on, so the test that walks every rank of the
+/// ladder reads it here rather than re-deriving it and drifting when ADR 0007's
+/// lift moves.
+let deadlineRank = -tierRungs
 
 /// The step a Task is moved by when it is ordered against another inside
 /// one tier. One rung of ten, so it never crosses a tier and the tier
-/// order is what it always was.
-let internal priorityStep = 1
+/// order is what it always was, and — the rule `tierRungs` states — so that a
+/// rung stays inside the half-tier `weightOfRank` rounds by.
+let priorityStep = 1
+
+/// The rungs a Task may be stepped by inside its tier: `planPool`'s whole
+/// vocabulary of them, and a union rather than an int for the reason `Tier` is
+/// one (#237). A rung is a claim about which of two Tasks a creep should take,
+/// and the Resolver's `weightOfRank` has to round every one of them back onto
+/// the tier's own push weight — so a rule that wants a new rung adds a case
+/// here, where the test that checks each rung against that rounding walks the
+/// cases off the union itself and cannot be left behind. A rung always steps a
+/// Task **up**, so the ranks below are negative.
+type Rung =
+    /// No rung at all: the tier's own rank, which is where most Tasks sit.
+    | OnTheTier
+    /// One rung up: the [[pickup]] whose pile is the copy that is going away
+    /// (#216 R5, #242), and the [[build]] on a site in the colony's own home
+    /// room (#234).
+    | OneRungUp
+    /// Two rungs up: a full source [[container]]'s [[withdraw]], whose income
+    /// is going away (#216 R5), and the rescued [[repair]] inside Surplus
+    /// (#284).
+    | TwoRungsUp
+
+/// What a rung is worth on the ladder — `priorityOfTier`'s twin for the steps
+/// inside a tier, exhaustive over `Rung` on purpose for the same reason.
+let rankOfRung =
+    function
+    | OnTheTier -> 0
+    | OneRungUp -> -priorityStep
+    | TwoRungsUp -> -2 * priorityStep
 
 /// Which of the four shapes a body is, as far as a [[capacity]] is concerned
 /// (ADR 0052 decision 6, ADR 0006): part arithmetic, asked in the order the
@@ -1127,6 +1171,11 @@ let planPool (view: ColonyView) atlas (tasks: Task list) : PooledTask list =
         // tier of the same Task rather than three independent questions.
         let tier = tierOf task
 
+        // Which rung inside that tier, and never a rank: a rung is spelt as a
+        // `Rung` case so that the Resolver's half-tier rounding is checked
+        // against every one of them (#237). A rule that wants a rung these
+        // three do not name adds its case beside them rather than a step of
+        // its own here.
         let step =
             match task with
             | Pickup pileId ->
@@ -1137,17 +1186,17 @@ let planPool (view: ColonyView) atlas (tasks: Task list) : PooledTask list =
                 let worthATripOfItsOwn = stored pileId * 2 >= haulerLoad
 
                 if overADrawableStore || worthATripOfItsOwn then
-                    -priorityStep
+                    OneRungUp
                 else
-                    0
+                    OnTheTier
             | Withdraw storeId when tier = Feeding && stored storeId >= Engine.containerCapacity ->
-                -2 * priorityStep
-            | Build siteId when tier = Surplus && isHomeSite view atlas siteId -> -priorityStep
+                TwoRungsUp
+            | Build siteId when tier = Surplus && isHomeSite view atlas siteId -> OneRungUp
             // Over the home site as well as over the Upgrade (#284): a site is
             // work the colony chose to start, and a structure a quarter from
             // destruction is work it has already paid for and is about to lose.
-            | Repair id when Set.contains id rescued -> -2 * priorityStep
-            | _ -> 0
+            | Repair id when Set.contains id rescued -> TwoRungsUp
+            | _ -> OnTheTier
 
         match task with
         | Upgrade id when
@@ -1155,7 +1204,7 @@ let planPool (view: ColonyView) atlas (tasks: Task list) : PooledTask list =
             && view.Controller |> Option.exists (fun c -> c.Id = id)
             ->
             deadlineRank
-        | _ -> priorityOfTier tier + step
+        | _ -> priorityOfTier tier + rankOfRung step
 
     // How many bodies the Task admits, and of which shapes. **Harvest is three
     // numbers over one source** (ADR 0024, ADR 0051): the Seat count every
