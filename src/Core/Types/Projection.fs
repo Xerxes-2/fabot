@@ -73,6 +73,20 @@ type RoomLayer =
         /// Tiles holding a built road — built structures only, a road
         /// construction site is not yet a road (ADR 0010).
         Roads: Set<Pos>
+        /// Tiles held by a construction site **somebody else** placed. Tiles
+        /// and nothing else — no id, no kind, no owner (#248): the engine
+        /// takes one construction site per tile whoever owns it, so the only
+        /// thing this colony can ever decide about one of these is not to ask
+        /// for a site under it (`Atlas.collidingSiteTilesIn`). Our own sites
+        /// stay where they were, id-keyed as `TargetKind.Site` and pooled as
+        /// Build one to one (`RoomFacts.ConstructionSites`), because every
+        /// other rule that reads a site reads it as something we may build,
+        /// count against an allowance, garrison a [[post]] for or rampart —
+        /// and a rival's is none of those. It is not an obstacle either: the
+        /// engine blocks a creep on an obstacle-type site of its **own
+        /// owner's** and a hostile creep walking onto one destroys it, so
+        /// these tiles stay out of `Obstacles` and out of the pricing.
+        RivalSites: Set<Pos>
     }
 
 [<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
@@ -88,6 +102,7 @@ module RoomLayer =
             CreepPositions = Map.empty
             Obstacles = Set.empty
             Roads = Set.empty
+            RivalSites = Set.empty
         }
 
 /// A [[colony view]]'s spatial projection: the terrain of the rooms the colony

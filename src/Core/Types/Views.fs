@@ -248,12 +248,22 @@ module ColonyView =
     /// survives is what is not *work* — the layer's terrain and its occupants,
     /// the border ring a Seam is read off, the hostiles ADR 0033's Reach and
     /// Flee owe an answer about, and the room's ownership. What goes is every
-    /// id a Task could name.
+    /// id a Task could name — and, since #248, the one placement fact that
+    /// carries no id at all, the tiles a rival's construction sites hold: the
+    /// test is whether the field is *work*, not whether something can be named
+    /// off it.
     let private transiting (facts: RoomFacts) : RoomFacts =
         { facts with
             Layer =
                 { facts.Layer with
                     TargetPositions = Map.empty
+                    // A rival's site is a placement fact and nothing else
+                    // (#248), and nothing is ever placed in a transit room:
+                    // carried here it would be work of a sort after all — the
+                    // census signature would sign it, and a neighbour building
+                    // in a room we merely walk through would throw the plan
+                    // memo away.
+                    RivalSites = Set.empty
                 }
             TargetKinds = Map.empty
             Hits = Map.empty

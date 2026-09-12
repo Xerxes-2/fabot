@@ -18,6 +18,16 @@ let findStructures = 107
 /// Screeps `FIND_MY_CONSTRUCTION_SITES` constant.
 let findMyConstructionSites = 114
 
+/// Screeps `FIND_HOSTILE_CONSTRUCTION_SITES` constant: every construction site
+/// in the room a user who is not us placed — "hostile" being the engine's word
+/// for `my === false` and this bot having no ally vocabulary. Swept beside the
+/// sweep above rather than partitioning one `FIND_CONSTRUCTION_SITES` pass
+/// (#248), so each array is already the side it belongs to: ours are the
+/// projection's id-keyed sites and the colony's Build pool, and these are tiles
+/// alone. The engine takes one site per tile whoever owns it, which is the
+/// whole of why they are read.
+let findHostileConstructionSites = 115
+
 /// Screeps `FIND_HOSTILE_CREEPS` constant.
 let findHostileCreeps = 103
 

@@ -10,6 +10,22 @@ open Fabot.Core.Tests
 open Fabot.Core.Tests.Decide.Fixtures
 open Fabot.Core.Tests.Decide.LayoutFixtures
 
+/// The premise the two collision cases below perturb (#246, #248): the RCL4
+/// trunk colony with its roads standing, and the one tile that tick's plan asks
+/// for the source container on. Asserted here rather than in each case, because
+/// a case that blocks a tile the plan never wanted would pass for the wrong
+/// reason.
+let private sourceContainerPick () =
+    let colony = withRoadsBuilt (trunkColony 4)
+
+    let pick =
+        sitesOfKind Container (decideOn colony).Intents
+        |> List.filter (fun tile -> chebyshev tile { X = 15; Y = 25 } <= 1)
+
+    Expect.hasLength pick 1 "the premise: with the tile free the source container is asked for"
+
+    colony, pick.Head
+
 [<Tests>]
 let layoutTests =
     testList
@@ -250,28 +266,48 @@ let layoutTests =
                 // out of the census this reads, a container site on the pick
                 // being the target clause's business one rule above (ADR
                 // 0040).
-                let srcPos = { X = 15; Y = 25 }
-                let colony = withRoadsBuilt (trunkColony 4)
-
-                let pick =
-                    sitesOfKind Container (decideOn colony).Intents
-                    |> List.filter (fun tile -> chebyshev tile srcPos <= 1)
-
-                Expect.hasLength
-                    pick
-                    1
-                    "the premise: with the tile free the source container is asked for"
+                let colony, pick = sourceContainerPick ()
 
                 let blocked =
                     { colony with
                         Spatial =
-                            colony.Spatial
-                            |> withTargets [ "tow-site", pick.Head, Site BuiltKind.Tower ]
+                            colony.Spatial |> withTargets [ "tow-site", pick, Site BuiltKind.Tower ]
                     }
 
                 Expect.isFalse
-                    (List.contains pick.Head (sitesOfKind Container (decideOn blocked).Intents))
+                    (List.contains pick (sitesOfKind Container (decideOn blocked).Intents))
                     "the pick waits for the tile the engine has already given another site"
+            }
+
+            test "a rival's site on the pick is waited on the same way" {
+                // #248, the other half of #246's hole: the tile clause read a
+                // census built from `FIND_MY_CONSTRUCTION_SITES`, so the only
+                // sites it could collide with were our own. One site per tile
+                // is the engine's rule whoever placed the site, so a rival's
+                // refuses the pick exactly as a hand-placed Tower of ours does,
+                // and the plan waits rather than asking again.
+                //
+                // The window at home is **narrow** and not zero, which is why
+                // this half is worth having and why it is not urgent:
+                // `createConstructionSite` answers ERR_RCL_NOT_ENOUGH in a room
+                // another player owns, so nobody starts one here — but a site
+                // placed while the room was still *neutral* survives into the
+                // room we then claim, so a freshly claimed [[nursery]] is the
+                // window. Inside it the container pick is the only one that
+                // waits: the road, clustered, tower and rampart gaps still pick
+                // blind onto a colliding tile, which is #291 and not this
+                // ticket — widening them changes what those plans consider
+                // owed.
+                let colony, pick = sourceContainerPick ()
+
+                let blocked =
+                    { colony with
+                        Spatial = colony.Spatial |> withRivalSites [ pick ]
+                    }
+
+                Expect.isFalse
+                    (List.contains pick (sitesOfKind Container (decideOn blocked).Intents))
+                    "the pick waits for the tile a rival's site already holds"
             }
 
             test "the controller container lands in the Work Area beside a trunk" {

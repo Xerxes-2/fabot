@@ -1763,6 +1763,11 @@ function furnishHome({
     108: [spawn, ...cluster.built], // FIND_MY_STRUCTURES (ours: refillables, the Keep)
     107: [spawn, ...cluster.built, ...roads, ...containers], // FIND_STRUCTURES
     114: cluster.sites, // FIND_MY_CONSTRUCTION_SITES
+    // FIND_HOSTILE_CONSTRUCTION_SITES (#248). Empty on purpose and said
+    // rather than defaulted: a rival's site is a tile the container pick may
+    // not take, and no scenario here stands another player in the room — a
+    // world that did would be measuring the refusal, not the tick.
+    115: [],
     103: [], // FIND_HOSTILE_CREEPS
     106: [], // FIND_DROPPED_RESOURCES
   };
@@ -1924,6 +1929,7 @@ function furnishOutpost(capture, register, structure, raided = false) {
         108: [],
         107: containers,
         114: [],
+        115: [],
         103: hostiles,
         106: [],
       },

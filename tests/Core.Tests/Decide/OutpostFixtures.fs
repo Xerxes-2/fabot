@@ -195,6 +195,19 @@ let internal containerSites (colony: ColonyView) =
 /// are whichever of its eight neighbours the case does.
 let internal outpostSource = { X = 10; Y = 44 }
 
+/// One named room's layer, changed in place — merging into whatever
+/// `withOutpostGround` and its callers already laid there, and starting from an
+/// empty layer for a room nothing has (ADR 0004: absence reads as empty, never
+/// as a throw). The one shape every "and now put *this* on an outpost tile"
+/// fixture below wants, written once.
+let internal withOutpostLayer room (change: RoomLayer -> RoomLayer) (colony: ColonyView) =
+    let layer =
+        Map.tryFind room colony.Spatial.Rooms |> Option.defaultValue RoomLayer.empty
+
+    { colony with
+        Spatial = colony.Spatial |> withNeighbour room (change layer)
+    }
+
 /// A road that **stands** on one of the outpost's tiles, handed over in the
 /// two pieces `World.factsOf` hands one in: the id-keyed kind census, which
 /// `withOutpostGround` takes as a `Structure`, and the layer's own `Roads`,
@@ -202,18 +215,22 @@ let internal outpostSource = { X = 10; Y = 44 }
 /// fixture laying one piece alone would be a road the projection half
 /// believes in.
 let internal paved room tiles (colony: ColonyView) =
-    let layer =
-        Map.tryFind room colony.Spatial.Rooms |> Option.defaultValue RoomLayer.empty
+    colony
+    |> withOutpostLayer room (fun layer ->
+        { layer with
+            Roads = Set.union layer.Roads (Set.ofList tiles)
+        })
 
-    { colony with
-        Spatial =
-            colony.Spatial
-            |> withNeighbour
-                room
-                { layer with
-                    Roads = Set.union layer.Roads (Set.ofList tiles)
-                }
-    }
+/// A construction site **somebody else** put on one of the outpost's tiles
+/// (#248): the layer's `RivalSites` and nothing beside it, which is the whole
+/// of what the projection carries about one — no id, no kind, and so no entry
+/// in the id-keyed census `withOutpostGround` places our own sites through.
+let internal rivalSites room tiles (colony: ColonyView) =
+    colony
+    |> withOutpostLayer room (fun layer ->
+        { layer with
+            RivalSites = Set.union layer.RivalSites (Set.ofList tiles)
+        })
 
 /// Two Seats and two ways out. `(10,45)` is a row nearer the border and
 /// its only run to it is three tiles of swamp; `(11,43)` is a row farther

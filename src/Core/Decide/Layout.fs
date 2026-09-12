@@ -535,19 +535,28 @@ let internal planLayout
         // The tile clause (ADR 0040), and only it: a pick whose tile another
         // site already holds waits, because the engine takes one construction
         // site per tile. This is about the tile and moves with no target. One
-        // census answers it — every pending site in the room but a container's
-        // (`Atlas.nonContainerSiteTilesIn`), the road the trunk owes among them
-        // and the hand-placed tower, extension or rampart beside it (#246,
+        // census answers it — `Atlas.collidingSiteTilesIn`: every pending site
+        // of ours in the room but a container's, the road the trunk owes among
+        // them and the hand-placed tower, extension or rampart beside it (#246,
         // widening what #209 wrote as the road sites alone: against one of the
         // others the plan re-issued `PlaceConstructionSite` every tick for
-        // `ERR_INVALID_TARGET` until somebody built it). The container kind
-        // stays out of it by its own rule, a container site on the pick being
-        // the target clause's business above and not a collision. Beside the
+        // `ERR_INVALID_TARGET` until somebody built it), and every site another
+        // player has placed in the room whatever its kind (#248 — the same
+        // refusal from another hand, which the census could not see while it
+        // read our own sites alone). That rival half is **narrow** here and
+        // wide out in an outpost: the engine refuses a site in a room another
+        // player owns, so nobody starts one in this room — but a site placed
+        // while the room was still neutral survives into the room we claim, so
+        // a freshly claimed nursery is the window it covers. Narrow is not the
+        // same as defensive-only, which is why it is subtracted and not merely
+        // asserted against. The container kind stays out of *our*
+        // half by its own rule, a container site on the pick being the target
+        // clause's business above and not a collision. Beside the
         // census, the roads placed **this** tick, which no census carries yet
         // — and the placed roads and not the whole gap (#209): below the road
         // gate none is placed at all, so there is nothing to collide with and
         // nothing to wait for.
-        let takenTiles = Set.union placedRoads (Atlas.nonContainerSiteTilesIn atlas room)
+        let takenTiles = Set.union placedRoads (Atlas.collidingSiteTilesIn atlas room)
 
         let containerGap =
             unservedPicks |> List.filter (fun tile -> not (Set.contains tile takenTiles))
@@ -619,8 +628,11 @@ let internal planLayout
 /// Executor asked for a container on an occupied tile and was answered
 /// ERR_INVALID_TARGET once a tick, for ever — no container, so no Post, no
 /// Anchor and no income, behind a road the surplus tier gives two workers
-/// hundreds of ticks to finish. So a Seat holding a site of another kind is no
-/// candidate (`Atlas.nonContainerSiteTilesIn`), the pick is the shortest walk
+/// hundreds of ticks to finish. So a Seat holding a site of another kind of
+/// ours — or a site of **anyone else's**, of any kind at all, which out here in
+/// a room nobody owns is the likelier hand and was invisible to the census
+/// until #248 — is no candidate
+/// (`Atlas.collidingSiteTilesIn`), the pick is the shortest walk
 /// over the Seats that are left, and a source whose every Seat is taken plans
 /// nothing and waits: asking the engine for a refusal once a tick is not a
 /// plan, and this colony has no vocabulary for cancelling a human's site.
@@ -637,7 +649,21 @@ let internal planLayout
 /// long, and a Seat is wherever in it the human happened to pave. What keeps
 /// its travel cost meanwhile is everything behind the head ("an ordinary
 /// outpost site keeps its travel cost"), and the outage is silent either way,
-/// the `-7` line having been the only thing that ever said so. A
+/// the `-7` line having been the only thing that ever said so.
+/// **That argument is about our own sites, and does not carry to a rival's**
+/// (#248). #266's queue is the Build pool, which this colony keeps ours-only
+/// on purpose — we never raise another player's site — so no budget ever
+/// reaches one, and the only other way a site leaves a tile by itself is a
+/// creep of ours stepping onto an **obstacle**-kind one, which a road or a
+/// container is not. So a rival's road or container site on a Seat is a wait
+/// with no end this colony can name: both Seats held that way and the rock has
+/// no container, no [[post]], no [[anchor]] and no income, indefinitely and
+/// with nothing in the timeline saying so. It is still the better of the two
+/// answers — asking the engine for a refusal once a tick was never a plan, and
+/// the `-7` was a symptom and not a report — but it is a wait on the rival's
+/// hand and not on a queue, and the record that would say so out loud is not
+/// this rule's to keep: the [[layout record]]'s three lists are the home
+/// Layout's, and an outpost shortfall entry beside them is its own ticket. A
 /// **standing** road is not subtracted and must not be: a container site goes
 /// down on a built road, and out here that is the best tile there is. It is a
 /// collision rule and not a target one, so ADR 0040's "by target, not by tile"
@@ -689,7 +715,7 @@ let internal planOutpostContainers (view: ColonyView) atlas : Intent list =
             // tick until that site is built.
             Set.difference
                 (Atlas.seatTilesOf atlas sourceId |> RoomPos.inRoom room)
-                (Atlas.nonContainerSiteTilesIn atlas room)
+                (Atlas.collidingSiteTilesIn atlas room)
             |> Set.toList
             |> List.choose (fun seat ->
                 Atlas.seamWalkTicks atlas room home seat |> Option.map (fun walk -> walk, seat))

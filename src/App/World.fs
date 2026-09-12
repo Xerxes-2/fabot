@@ -138,6 +138,18 @@ let private seenFacts
             let site = o :?> IConstructionSite
             site, builtKindOf site.structureType)
 
+    // Everybody else's sites standing here, as tiles and nothing more (#248).
+    // No kind is classified and no id is kept: the engine takes one
+    // construction site per tile whoever placed it, and refusing to ask for a
+    // site under one is the only thing a decision can do about it
+    // (`RoomLayer.RivalSites`). Every other reader of a site — the Build pool,
+    // the gap rule's allowance, the Post a container site raises, the rampart
+    // that covers it — asks a question that presumes the site is ours, and the
+    // census above is what answers those.
+    let rivalSites =
+        room.find findHostileConstructionSites
+        |> Array.map (fun o -> posOf (o :?> IConstructionSite).pos)
+
     // The structures we own here, classified once. Their **ids** are what
     // the kinds that ask for an owner are checked against (`needsOwner`,
     // ADR 0034) — FIND_STRUCTURES carries every owner's — and the
@@ -235,6 +247,11 @@ let private seenFacts
                     |> Array.filter (fun (_, kind) -> kind = BuiltKind.Road)
                     |> Array.map (fun (st, _) -> posOf st.pos)
                     |> Set.ofArray
+                // Tiles and no kind, and deliberately not in `Obstacles`
+                // above: the engine blocks a creep on an obstacle-type site
+                // its own owner placed, and a hostile creep that walks onto
+                // one destroys it, so a rival's site prices nothing (#248).
+                RivalSites = Set.ofArray rivalSites
             }
         // The border ring of the room, under its own name: the Atlas
         // answers a Seam from these and from nothing else (ADR 0041).

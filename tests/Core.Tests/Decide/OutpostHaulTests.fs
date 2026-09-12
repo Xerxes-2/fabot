@@ -277,6 +277,37 @@ let outpostContainerTests =
                     "both Seats hold a site, so this rock is planned no container this tick"
             }
 
+            test "a Seat a rival's site holds is no candidate either, whatever it is building" {
+                // #248, the hole #244 left: the projection's site census was
+                // read off `FIND_MY_CONSTRUCTION_SITES`, so the only sites
+                // this clause could see were ours — and out here, in a room
+                // nobody owns, another player's site is exactly the one it
+                // most needs to see. The engine takes one site per tile
+                // whoever placed it, so the refusal is the same `-7` a tick,
+                // and the pick moves the same way.
+                let rivalOn tile =
+                    northBorderColony { X = 10; Y = 38 }
+                    |> withOutpostGround "W1N2" detourGround [ "src-out", outpostSource, Source ]
+                    |> rivalSites "W1N2" [ tile ]
+
+                Expect.equal
+                    (containerSites (rivalOn { X = 11; Y = 43 }))
+                    [ "W1N2", { X = 10; Y = 45 } ]
+                    "the Seat the walk picked is a rival's, so the dearer Seat takes the container"
+
+                // Subtracted from the candidates and never counted as a
+                // container: the projection carries a rival's site as a tile
+                // and no kind at all, so whatever another player is raising on that Seat
+                // cannot reach ADR 0040's target clause and answer "this rock
+                // is served". A rival's container never will be ours, and a
+                // rock deferred to one would wait for a switch that never
+                // closes (ADR 0042).
+                Expect.equal
+                    (containerSites (rivalOn { X = 10; Y = 45 }))
+                    [ "W1N2", { X = 11; Y = 43 } ]
+                    "the Seat that lost is a rival's, and the rock is still unserved"
+            }
+
             test "a home container on the pick's coordinates defers nothing" {
                 // The room-blind census this rule would have inherited: a
                 // `Pos` carries no room (ADR 0041), so a census unioning

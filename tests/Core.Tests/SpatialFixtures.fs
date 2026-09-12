@@ -54,6 +54,17 @@ let withObstacles (tiles: Pos list) (spatial: SpatialInfo) : SpatialInfo =
             Obstacles = Set.ofList tiles
         })
 
+/// The home layer with a construction site of somebody else's on each of these
+/// tiles (#248). The `RivalSites` twin of the two funnels above, replacing
+/// likewise. Tiles and nothing more is the whole of what the projection carries
+/// about one, so there is no id or kind for a case to name.
+let withRivalSites (tiles: Pos list) (spatial: SpatialInfo) : SpatialInfo =
+    spatial
+    |> withHome (fun layer ->
+        { layer with
+            RivalSites = Set.ofList tiles
+        })
+
 /// The home layer with these tiles paved. The Roads twin, replacing likewise.
 let withRoads (tiles: Pos list) (spatial: SpatialInfo) : SpatialInfo =
     spatial |> withHome (fun layer -> { layer with Roads = Set.ofList tiles })

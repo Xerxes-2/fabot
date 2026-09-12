@@ -73,6 +73,60 @@ let censusSignatureTests =
                     "the pending census is a signature input"
             }
 
+            test "a rival's site appearing moves the signature" {
+                // ADR 0044: the memo signs the union of its readers, and
+                // since #248 the Layout's tile clause reads the tiles
+                // somebody else's sites hold. They carry no id and no kind,
+                // so they reach the signature as tiles and not through the
+                // pending census — and unsigned they would be invisible: the
+                // memo would hand back the plan from before the rival built,
+                // which is the very `PlaceConstructionSite` the engine is
+                // answering `-7`.
+                let perturbed =
+                    trunkColony 2
+                    |> fun colony ->
+                        { colony with
+                            Spatial = colony.Spatial |> withRivalSites [ { X = 24; Y = 24 } ]
+                        }
+
+                Expect.notEqual
+                    (censusSignature perturbed)
+                    (censusSignature (trunkColony 2))
+                    "the rival census is a signature input"
+            }
+
+            test "a rival's site outside the home room moves it too" {
+                // The rival half is signed for **every** projected room, which
+                // is deliberately wider than its one memoised reader: the
+                // Layout's tile clause plans the home room alone, and
+                // `planOutpostContainers` — the only other caller of
+                // `Atlas.collidingSiteTilesIn` — is off this memo by a rule of
+                // its own. Wide on ADR 0044's ground: over-invalidating is the
+                // cheap error, the standing and pending halves widened per room
+                // the same way, and a census stopping at the home layer is a
+                // signature gap the tick another rule joins the memo. Pinned so
+                // that narrowing it is an alarm and not a quiet saving. The
+                // neighbour stands in both colonies, or `held` would move on
+                // the room set alone and prove nothing about this half.
+                let neighbouring rivals =
+                    let colony = trunkColony 2
+
+                    { colony with
+                        Spatial =
+                            colony.Spatial
+                            |> withNeighbour
+                                "W1N2"
+                                { RoomLayer.empty with
+                                    RivalSites = Set.ofList rivals
+                                }
+                    }
+
+                Expect.notEqual
+                    (censusSignature (neighbouring [ { X = 24; Y = 24 } ]))
+                    (censusSignature (neighbouring []))
+                    "an outpost's rival sites are signed as the home room's are"
+            }
+
             test "a structure and a site of the same kind on the same tile differ" {
                 let standing =
                     trunkColony 2

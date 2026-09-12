@@ -19,7 +19,8 @@ let private assignedTasks (tasks: Task list) (assignments: Assignments) : Map<st
 
 /// The census signature (ADR 0017): a string over exactly the inputs the
 /// census-derived plans read — the (kind, position) census of standing
-/// structures, the (kind, position) census of pending sites, the controller
+/// structures, the (kind, position) census of pending sites of ours, the tiles
+/// another player's sites hold (#248), the controller
 /// level, the home room's name, who holds each room the projection carries, and
 /// every colony's [[stage]]. Any one input moving moves the signature;
 /// everything else a view carries — creeps, stores, hits, piles, hostiles,
@@ -36,7 +37,9 @@ let private assignedTasks (tasks: Task list) (assignments: Assignments) : Map<st
 /// every *kind* rather than the containers alone, because the round trip floods
 /// that room's step-weight grid. The pending census spans every projected room
 /// too: the walk table's far leg floods the *goal* room's grid, and a site
-/// outside home closes a tile there.
+/// outside home closes a tile there. The rival half spans every projected room
+/// as well, and that one is wider than its reader on purpose rather than by
+/// derivation — the comment on it says why.
 let censusSignature (view: ColonyView) : string =
     let spatial = view.Spatial
     let home = SpatialInfo.homeName spatial
@@ -64,6 +67,36 @@ let censusSignature (view: ColonyView) : string =
         census (function
             | Site kind -> Some kind
             | _ -> None)
+
+    // The tiles another player's construction sites hold (#248), named the way
+    // ADR 0044's consequence names every census input — `{kind}@{room}:{x},{y}`
+    // — with the one thing we know about such a site standing in the kind
+    // slot, that it is not ours: a rival's site reaches the projection as a
+    // tile and nothing else (`RoomLayer.RivalSites`), so there is no id to join
+    // it through the census above and no built kind to name. Signed at all
+    // because ADR 0044 makes the memo sign the union of its readers: the
+    // Layout's tile clause reads these, so a rival building on the container's
+    // pick between two ticks must throw the plan away. Unsigned, the memo would
+    // hand back the very `PlaceConstructionSite` the engine is refusing.
+    //
+    // Signed for **every** projected room, which is deliberately wider than
+    // that reader — `planLayout` plans the home room alone, and
+    // `planOutpostContainers`, the only other caller of
+    // `Atlas.collidingSiteTilesIn`, is off this memo by a rule of its own. Wide
+    // on ADR 0044's own ground: over-invalidating is the cheap error (a
+    // recompute) where a missed input is the expensive one (a stall until a
+    // reset), the standing and pending halves widened per room the same way,
+    // and a signature cut to today's one reader is a signature gap the tick
+    // another rule joins the memo.
+    let rivals =
+        spatial.Rooms
+        |> Map.toList
+        |> List.collect (fun (room, layer) ->
+            layer.RivalSites
+            |> Set.toList
+            |> List.map (fun tile -> $"Rival@{room}:{tile.X},{tile.Y}"))
+        |> List.sort
+        |> String.concat ";"
 
     let level =
         view.Controller
@@ -95,7 +128,7 @@ let censusSignature (view: ColonyView) : string =
         |> List.map (fun (room, stage) -> $"{room}:{stage}")
         |> String.concat ","
 
-    $"{home}|{level}|{held}|{stages}|{standing}|{pending}"
+    $"{home}|{level}|{held}|{stages}|{standing}|{pending}|{rivals}"
 
 /// The decision seam: a colony view in — with the verbose list of creep names
 /// owed the manufactured-evidence Verdicts and the previous tick's plan memo —
