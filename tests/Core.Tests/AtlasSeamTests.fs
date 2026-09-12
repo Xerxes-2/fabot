@@ -1117,4 +1117,57 @@ let routeTests =
                     None
                     "a room joined to nothing reaches nothing, neighbour or not"
             }
+
+            test "routesBy answers every chain of the fewest hops, and routeBy is its first" {
+                // #288: at one hop the chain is unique, and at two it is
+                // not — an L-shaped target is reached round either corner
+                // for the same number of borders and not for the same
+                // number of ticks. The search hands every one of them out
+                // and the price picks (`Atlas.routes`); what `adjacent`'s
+                // order still decides is only the order they come in, which
+                // is what keeps `routeBy` the answer it always was.
+                let anywhere _ _ = true
+
+                Expect.equal
+                    (RoomName.routesBy anywhere 3 "W13S28" "W14S29")
+                    [ [ "W13S28"; "W13S29"; "W14S29" ]; [ "W13S28"; "W14S28"; "W14S29" ] ]
+                    "both corners of the diagonal, south before west by adjacent's order"
+
+                Expect.equal
+                    (RoomName.routeBy anywhere 3 "W13S28" "W14S29")
+                    (Some [ "W13S28"; "W13S29"; "W14S29" ])
+                    "and the one chain the compass used to answer alone is still the first"
+
+                Expect.equal
+                    (RoomName.routesBy anywhere 3 "W13S28" "W15S29" |> List.length)
+                    3
+                    "two west and one south is three chains of three hops, and no fourth"
+
+                Expect.equal
+                    (RoomName.routesBy anywhere 3 "W13S28" "W13S29")
+                    [ [ "W13S28"; "W13S29" ] ]
+                    "a neighbour is one chain: at one hop there is nothing to choose between"
+
+                Expect.equal
+                    (RoomName.routesBy anywhere 3 "W13S28" "W13S28")
+                    [ [ "W13S28" ] ]
+                    "a room and itself crosses nothing"
+
+                Expect.isEmpty
+                    (RoomName.routesBy anywhere 2 "W13S28" "W15S29")
+                    "past the hop budget there is no chain to choose from at all (ADR 0004)"
+
+                // W13S29's border is walled end to end, so the L has one
+                // corner left and the chain is unique again.
+                let notThrough room = fun a b -> a <> room && b <> room
+
+                Expect.equal
+                    (RoomName.routesBy (notThrough "W13S29") 3 "W13S28" "W14S29")
+                    [ [ "W13S28"; "W14S28"; "W14S29" ] ]
+                    "a corner the terrain shuts is a chain the search never offers"
+
+                Expect.isEmpty
+                    (RoomName.routesBy (fun _ _ -> false) 3 "W13S28" "W13S29")
+                    "and a room joined to nothing is reached by no chain"
+            }
         ]

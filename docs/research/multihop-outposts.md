@@ -1,5 +1,7 @@
 # 多跳 outpost — ADR 0058 落地后 W12S28 / W13S28 还能 declare 哪些房
 
+> **§3.2 的结论与由它定价的全部多跳数字已过期（2026-09-13，#288）**：正是本文 §3.2 那张表让 #288 立案，而 #288 已经把链的选择从 compass 挪到了价格 —— `Atlas.routes` 现在交出**所有**最短链，有价可比的读者（Task 定价、`haulRoundTripTicks`、`castWalkTicks`）各自留最便宜的那条。所以 §3.2 第 3 条"**这是一条设计上的既定事实，不是 bug**"已经不成立，§3.2 表里"代码的价"那一列现在读的是"最便宜的价"那一列：W15S27 是 **107** 而不是 146，W15S29 是 **101** 而不是 141，W13S28→W14S29 是 **86/84** 而不是 104/89，W12S28→W13S29 是 **54/73** 而不是 103/95。连带地，§4 的经济表、§3.3 的 trunk 拆分、§6 的排序都是按旧链定价的，**W15S27 / W15S29 归 W15S28 而不归 W13S28 的那条理由（§3.2 后果 2）失去了它的数字依据**（结论可能仍然对，但要按新价重算）。重测另开 issue，按写下的日期读本文其余部分。
+
 Date: 2026-09-10（tick 302,850–303,110，`shardSeason`）。姊妹篇 `docs/research/remote-candidates.md`（tick 202,311）当日的核心限制 —— *"`Atlas.seams` 只认正交相邻，对角房和两房外的房静默变成空房"* —— **已经被 ADR 0058 解除**：一次 walk 现在跨一条 Seam 链，`Tuning.MaxHops = 3`（`src/Core/Types/Rules.fs:276`），`dist/main.js` 里 `routeBy` / `transitBetween` 都在跑。本文把那份普查在新的几何下重做一遍：**1–3 跳之内，两个 home 各自还能/该 declare 哪些房、按什么顺序、收益和风险各是多少。**
 
 本文所有房间事实都是**本日用只读 API 在赛季服现测的**（只用 `GET /api/game/room-objects`、`GET /api/game/room-terrain?encoded=1`、`POST /api/game/map-stats`、`GET /api/game/time`，以及 `scripts/observe.mjs` 的只读 Memory 通道；没有调用任何写入或 console 端点）。所有步数是**本文自己的多房 Dijkstra 算的**，并且**按 `Atlas.chainedInto` 的链式定价复刻**，不是自由 flood。所有能量数字用仓库自己的常量与体型规则重算（`src/Core/Types/Rules.fs`、`src/Core/Decide/Bodies.fs`、`src/Core/Decide/Quota.fs`）。

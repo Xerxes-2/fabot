@@ -205,10 +205,12 @@ module RoomName =
 
     /// The four rooms a name grid puts next to this one, in a fixed order —
     /// north, east, south, west — whatever terrain has to say about them. The
-    /// order is the route search's tie-break and nothing else: two chains of
-    /// the same length are the same price to a walk that has not been priced
-    /// yet, and a search that broke the tie on the heap's whim would answer a
-    /// different room on two ticks that read the same world.
+    /// order is the order the route search *offers* its chains in, and since
+    /// #288 that is all it is: two chains of the same length are not the same
+    /// price, so the choice between them is the caller's walk and no longer
+    /// this list's (`routesBy`). What the fixed order still buys is that a
+    /// search which broke the remaining ties on the heap's whim would offer
+    /// them in a different order on two ticks that read the same world.
     let adjacent (roomName: string) : string list =
         match worldCoordsOf roomName with
         | Some(x, y) ->
@@ -284,64 +286,94 @@ module RoomName =
             ]
         | _ -> []
 
-    /// The chain of rooms a walk crosses, ends included, or `None` where the
-    /// hop budget or the terrain leaves none (ADR 0058): a breadth-first search
-    /// over the name grid, `linked` deciding which of the four steps out of a
-    /// room a creep can actually take, stopped at `maxHops` crossings.
+    /// **Every** chain of rooms a walk of the fewest possible crossings could
+    /// take, ends included, and an empty list where the hop budget or the
+    /// terrain leaves none (ADR 0058, #288): a breadth-first search over the
+    /// name grid, `linked` deciding which of the four steps out of a room a
+    /// creep can actually take, stopped at `maxHops` crossings.
     ///
     /// `linked` is the caller's because the two askers answer it differently
     /// and must not: the Atlas reads a Seam band off two rooms' border rings
-    /// (`Atlas.route`), and a room the projection does not carry is joined to
+    /// (`Atlas.routes`), and a room the projection does not carry is joined to
     /// nothing — which is what keeps this search inside the rooms
-    /// `transitBetween` put there rather than wandering the sector. Breadth
-    /// first, so the chain that comes back crosses the fewest borders any
-    /// chain could; `RoomName.adjacent`'s fixed order breaks the ties, so the
-    /// answer is a function of the world and not of the search.
-    let routeBy
+    /// `transitBetween` put there rather than wandering the sector.
+    ///
+    /// **All of them and not the first**, which is #288's whole correction.
+    /// Breadth first still says how *long* a chain may be — every chain here
+    /// crosses the fewest borders any chain could — but at two hops there is
+    /// more than one such chain and they are not the same walk: an L-shaped
+    /// target is reached round either corner, and the room the walk turns in
+    /// decides how long both legs are (measured at up to +91% on rooms this
+    /// colony works). ADR 0058 decision 1 promised the chain was "a function
+    /// of the world and not of the search" and `adjacent`'s north-east-
+    /// south-west order delivered only the second half of that: deterministic,
+    /// and blind to the terrain it was choosing over. So the choice moves to
+    /// the one reader that can price it — `Atlas.routes`' callers keep the
+    /// cheapest by their own walk — and what the fixed order decides here is
+    /// only the **order** the candidates come in, which is what leaves a tie
+    /// on the price falling the way it always fell.
+    let routesBy
         (linked: string -> string -> bool)
         (maxHops: int)
         (fromRoom: string)
         (toRoom: string)
-        : string list option =
+        : string list list =
         if fromRoom = toRoom then
-            Some [ fromRoom ]
+            [ [ fromRoom ] ]
         elif maxHops < 1 then
-            None
+            []
         else
-            // The chain is carried on the queue reversed, so extending it is a
-            // cons: the rooms are at most `maxHops` and the reverse is paid
-            // once, on the one chain that wins.
+            // The chains are carried on the queue reversed, so extending one is
+            // a cons: the rooms are at most `maxHops` and the reverse is paid
+            // once, on the chains that arrive.
             let rec search (frontier: (string * string list) list) (seen: Set<string>) =
                 match frontier with
-                | [] -> None
+                | [] -> []
                 | _ ->
                     // The chain's length and not its hop count: a chain of
                     // n rooms crosses n-1 borders, and this guards *before*
                     // the frontier is expanded, so the step about to be taken
-                    // is the one being budgeted for.
+                    // is the one being budgeted for. Every entry of a frontier
+                    // is the same length — a layer is one breadth — so the
+                    // first one answers for all of them.
                     let chainLength = List.length (snd (List.head frontier))
 
                     if chainLength > maxHops then
-                        None
+                        []
                     else
-                        // The goal first, and off one `linked` where expanding
-                        // the whole frontier would pay for four apiece: all but
-                        // one declaration in force is a single hop, so the goal
-                        // test is the answer most of the time, and it is asked
-                        // several times a tick by every reader of the scan
-                        // set.
+                        // The goal before the frontier is expanded, off one
+                        // `linked` per room where expanding would pay for four
+                        // apiece: all but one declaration in force is a single
+                        // hop, so the goal test is the answer most of the time,
+                        // and it is asked several times a tick by every reader
+                        // of the scan set. A layer that reaches the goal at all
+                        // is the last layer there is — a chain one border
+                        // longer can only lose — so the arrivals are the whole
+                        // answer. Per frontier *entry* and not per room, since
+                        // #288: a room two chains of the same length reach
+                        // stands in the frontier twice and is asked twice, here
+                        // and in the expansion below. What bounds that is
+                        // `maxHops` and nothing else, and at three it is not
+                        // worth a set to dedupe the asking.
                         let arrived =
                             frontier
-                            |> List.tryPick (fun (room, chain) ->
+                            |> List.choose (fun (room, chain) ->
                                 if List.contains toRoom (adjacent room) && linked room toRoom then
                                     Some(List.rev (toRoom :: chain))
                                 else
                                     None)
 
                         match arrived with
-                        | Some chain -> Some chain
-                        | None ->
-
+                        | _ :: _ -> arrived
+                        | [] ->
+                            // A room may enter the frontier under **several**
+                            // chains of the same length, which is exactly the
+                            // tie this search no longer breaks. What it may not
+                            // enter under is a *longer* one, and that is what
+                            // `seen` still forbids: a room reached in an earlier
+                            // layer is never extended into again, so the
+                            // frontier stays one breadth and the chains stay
+                            // simple.
                             let steps =
                                 [
                                     for room, chain in frontier do
@@ -350,26 +382,24 @@ module RoomName =
                                                 yield next, next :: chain
                                 ]
 
-                            match steps |> List.tryFind (fun (room, _) -> room = toRoom) with
-                            | Some(_, chain) -> Some(List.rev chain)
-                            | None ->
-                                // One room enters the frontier once, under the
-                                // first chain that reached it: a second chain of
-                                // the same length is a tie this search has already
-                                // broken, and a longer one can only lose.
-                                let fresh =
-                                    steps
-                                    |> List.fold
-                                        (fun (kept, taken) (room, chain) ->
-                                            if Set.contains room taken then
-                                                kept, taken
-                                            else
-                                                (room, chain) :: kept, Set.add room taken)
-                                        ([], seen)
-
-                                search (List.rev (fst fresh)) (snd fresh)
+                            search
+                                steps
+                                (steps |> List.fold (fun taken (room, _) -> Set.add room taken) seen)
 
             search [ fromRoom, [ fromRoom ] ] (Set.singleton fromRoom)
+
+    /// The first of those chains — the answer this module gave before #288,
+    /// under `adjacent`'s own order. What a reader takes when it wants to know
+    /// **whether** a walk exists (`Outpost.routable`) or has no price to choose
+    /// a chain with; a reader that prices one takes `routesBy` above and keeps
+    /// the cheapest.
+    let routeBy
+        (linked: string -> string -> bool)
+        (maxHops: int)
+        (fromRoom: string)
+        (toRoom: string)
+        : string list option =
+        routesBy linked maxHops fromRoom toRoom |> List.tryHead
 
 /// The border two rooms share, as tiles — the half of a [[seam]] that
 /// `RoomName` answers over names alone (ADR 0041). Written here rather than

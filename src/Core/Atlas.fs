@@ -100,14 +100,14 @@ type Atlas =
                     string list * Task * bool * FatigueFactor * Pricing,
                     int[]
                  >
-            /// Memoised room chain per ordered room pair — the rooms a walk
-            /// between them crosses, ends included (ADR 0058). Answered off
-            /// the border rings alone, so it is settled before any flood is
-            /// forced and a pair with no chain costs the tick one search and
-            /// no grid. `None` is an answer and is memoised as one: a pair
-            /// beyond the hop budget is asked about once per creep that
-            /// prices toward it.
-            Routes: System.Collections.Generic.Dictionary<string * string, string list option>
+            /// Memoised room chains per ordered room pair — every chain of the
+            /// fewest crossings a walk between them could take, ends included
+            /// (ADR 0058, #288). Answered off the border rings alone, so it is
+            /// settled before any flood is forced and a pair with no chain
+            /// costs the tick one search and no grid. The empty list is an
+            /// answer and is memoised as one: a pair beyond the hop budget is
+            /// asked about once per creep that prices toward it.
+            Routes: System.Collections.Generic.Dictionary<string * string, string list list>
             /// Memoised traffic-blind cast walk out of a spawner's tile, per
             /// (spawner tile, fatigue factor, goal's room), for bodies the view
             /// does not carry: a lead prices a replacement not yet cast (ADR
@@ -1293,30 +1293,49 @@ let private ringWalkable (atlas: Atlas) (room: string) : Pos -> bool =
 let seams (atlas: Atlas) (fromRoom: string) (toRoom: string) : (Pos * Pos) list =
     Seam.bandBy (ringWalkable atlas fromRoom) (ringWalkable atlas toRoom) fromRoom toRoom
 
-/// The rooms a walk from one room to another crosses, ends included, or `None`
-/// where the projection joins them by no chain inside the hop budget (ADR
-/// 0058). The Seam model's one-hop answer generalised: `seams` says which of
-/// two rooms' four grid neighbours a creep can actually step into, and
-/// `RoomName.routeBy` walks that relation breadth first out to
-/// `Tuning.MaxHops`.
+/// Every chain of rooms a walk from one room to another could cross at the
+/// fewest crossings, ends included, and empty where the projection joins them
+/// by no chain inside the hop budget (ADR 0058, #288). The Seam model's
+/// one-hop answer generalised: `seams` says which of two rooms' four grid
+/// neighbours a creep can actually step into, and `RoomName.routesBy` walks
+/// that relation breadth first out to `Tuning.MaxHops`.
 ///
-/// Two rooms with a band between them answer `[from; to]`, which is every
-/// chain this bot could name before this ADR — so a one-hop price is the same
-/// price, joined over the same band, and the whole of what multi-hop adds is
-/// the chains that used to be `None`. A room the projection does not carry has
-/// no ring, `seams` gives it an empty band, and it is joined to nothing: the
-/// search therefore stays inside the rooms `RoomName.transitBetween` put in
-/// the world and cannot wander the sector on a tick that memoised a long
-/// chain. Memoised per ordered pair, `None` included (ADR 0004: the absence is
-/// the answer, and it is answered once).
-let route (atlas: Atlas) (fromRoom: string) (toRoom: string) : string list option =
+/// Two rooms with a band between them answer `[[from; to]]`, which is every
+/// chain this bot could name before that ADR — so a one-hop price is the same
+/// price, joined over the same band, and it is also the reason this is not the
+/// list it looks like: at one hop there is nothing to choose between, which is
+/// every pair in the colony's own declaration today. A room the projection
+/// does not carry has no ring, `seams` gives it an empty band, and it is
+/// joined to nothing: the search therefore stays inside the rooms
+/// `RoomName.transitBetween` put in the world and cannot wander the sector on
+/// a tick that memoised a long chain. Memoised per ordered pair, the empty
+/// answer included (ADR 0004: the absence is the answer, and it is answered
+/// once).
+///
+/// **Which chain is walked is not decided here** (#288). A chain's price is
+/// three single-room floods laid end to end, so two chains of the same hop
+/// length are not the same number of ticks, and the corner an L-shaped target
+/// is turned in is worth up to +91% on rooms this colony works. Handing every
+/// shortest chain out is what lets the readers that *have* a price —
+/// `joinedAlong` for a Task, a haul or a step, `castWalkTicks` for a lead —
+/// keep the cheapest by their own walk, exactly as the band's own crossing is
+/// chosen. The search's own order survives as the order of this list, so a
+/// tie on the price falls where it always fell.
+let routes (atlas: Atlas) (fromRoom: string) (toRoom: string) : string list list =
     memoised atlas.Routes (fromRoom, toRoom) (fun () ->
-        RoomName.routeBy
+        RoomName.routesBy
             (fun here there ->
                 Seam.joinedBy (ringWalkable atlas here) (ringWalkable atlas there) here there)
             atlas.Tuning.MaxHops
             fromRoom
             toRoom)
+
+/// The first of those chains, or `None` where there is none — what a reader
+/// with no price to choose one with takes (`stepTowardRoom`, whose room is
+/// dark and prices nothing, and which is therefore the one mover that can
+/// contradict a price: #297), and the answer `route` gave before #288.
+let route (atlas: Atlas) (fromRoom: string) (toRoom: string) : string list option =
+    routes atlas fromRoom toRoom |> List.tryHead
 
 /// Whether a creep stands on a Seam — its room's border ring, the tile the
 /// engine put it down on the tick it crossed. Read off the coordinate alone;
@@ -1743,19 +1762,69 @@ let private joinedAcross
 /// the target and its own band: what the far leg answers is a field over that
 /// next room, whatever is behind it. A one-hop route makes the two the same
 /// room and this is the call it always was.
-/// The prelude both cross-room joins wear: the route to the far room, the next
-/// hop along it, the Seam band between here and *that hop* — never the target,
+/// The prelude both cross-room joins wear, over **one** chain: the next hop
+/// along it, the Seam band between here and *that hop* — never the target,
 /// which is the one thing about `joinedAcross`' contract a second call site can
 /// get wrong — and the join over the two legs. Each missing piece is an absence
-/// of its own (ADR 0004): no route joins nothing, and neither does an empty
+/// of its own (ADR 0004): no chain joins nothing, and neither does an empty
 /// band.
 ///
 /// The legs arrive as functions of what the prelude found rather than as values,
 /// for two reasons that are both the callers': neither leg may be flooded before
-/// there is a band to join it on, and the far leg is a fold along the chain the
-/// route named. Which bound the near leg carries stays the caller's too — a walk
-/// hands over a flood settled whole (`Drained`), a price one it can go on
-/// relaxing (`Resuming`).
+/// there is a band to join it on, and the far leg is a fold along the chain.
+/// Which bound the near leg carries stays the caller's too — a walk hands over a
+/// flood settled whole (`Drained`), a price one it can go on relaxing
+/// (`Resuming`). The near leg is the creep's own and not the chain's, so the
+/// caller hands the *same* thunk to every chain it prices and buys one flood
+/// however many they are: the hauler quota's `Drained` leg is a whole flood, and
+/// a second candidate must not buy a second one.
+let private joinedOn
+    (atlas: Atlas)
+    (pricing: Pricing)
+    (factor: FatigueFactor)
+    (fromRoom: string)
+    (from: Pos)
+    (near: unit -> NearLeg)
+    (far: string list -> Pos -> int)
+    (chain: string list)
+    : (int * Pos) option =
+    match chain with
+    | _ :: (next :: _ as onward) ->
+        match seams atlas fromRoom next with
+        | [] -> None
+        | band -> joinedAcross atlas pricing factor fromRoom from next band (near ()) (far onward)
+    | _ -> None
+
+/// The same join over **every** shortest chain, keeping the cheapest — what a
+/// reader with one price to pay takes.
+///
+/// **The cheapest chain and not the first** (#288). Every chain `routes` hands
+/// out crosses the same number of borders and they are not the same walk, so
+/// this prices each of them and keeps the smallest `(sum, exit)` pair — the
+/// same minimum `joinedAcross` takes over the crossings of one band, taken once
+/// more over the chains, and for the same reason: the price is exactly what is
+/// being chosen on. A one-hop pair answers one chain and this is the call it
+/// always was, to the digit and to the flood.
+///
+/// What the choice costs, honestly: one far leg per candidate chain, which is
+/// the dear term and *is* memoised (`farFieldAlong`, so it is paid once for the
+/// colony rather than once per creep); and, per creep and not memoised at all,
+/// one band scan inside `joinedAcross` per candidate and whatever relaxation a
+/// `Resuming` near leg owes the second band it is read over. The near flood
+/// itself is bought once (`near` above). At `Tuning.MaxHops` = 3 a pair has at
+/// most three chains, so those per-creep terms are bounded by three.
+///
+/// A reader that prices two journeys over one chain must not call this twice:
+/// two independent minima sum to a trip no chain realises, which is
+/// `haulRoundTripTicks`' own note (#288).
+///
+/// Two *pricings* of one journey may now win on different chains, and that is
+/// ADR 0029's licence and not a crack in it: `Walk` is traffic-blind and
+/// `TravelCost` carries the occupancy surcharge, so a packed corridor can move
+/// the mover to the other corner while the clock that plans against an empty
+/// world keeps the first. The disagreement is the surcharge's, it lasts as long
+/// as the crowd does, and the alternative — letting today's standing creeps
+/// pick the chain a fleet is sized on — is the one ADR 0049 forbids.
 let private joinedAlong
     (atlas: Atlas)
     (pricing: Pricing)
@@ -1766,12 +1835,24 @@ let private joinedAlong
     (near: unit -> NearLeg)
     (far: string list -> Pos -> int)
     : (int * Pos) option =
-    match route atlas fromRoom toRoom with
-    | Some(_ :: (next :: _ as onward)) ->
-        match seams atlas fromRoom next with
-        | [] -> None
-        | band -> joinedAcross atlas pricing factor fromRoom from next band (near ()) (far onward)
-    | _ -> None
+    // One flood for however many chains are priced, said the way this file
+    // already says it (the per-creep flood table above). Every cross-room price
+    // every creep asks for comes through here, so the wrapper per call was
+    // profiled rather than assumed: at or under the harness's own run-to-run
+    // spread on all five scenarios, which is not a reason to hand-roll it.
+    let leg = lazy (near ())
+
+    routes atlas fromRoom toRoom
+    |> List.fold
+        (fun best chain ->
+            match best, joinedOn atlas pricing factor fromRoom from leg.Force far chain with
+            | None, priced -> priced
+            | best, None -> best
+            // The smallest `(sum, exit)` pair, so a tie on the price falls to
+            // the lowest exit tile exactly as it does inside one band — and a
+            // chain that merely ties changes nothing the mover then walks.
+            | Some won, Some other -> Some(min won other))
+        None
 
 let private pricedAcrossInto
     (atlas: Atlas)
@@ -2185,6 +2266,18 @@ let firstStepWithin (atlas: Atlas) (creep: string) (goals: Set<RoomPos>) : RoomP
 /// whose target left the projection with its room's vision while the border it
 /// is walking at stayed exactly where it was. Total (ADR 0004): no Seam, no
 /// step, and a creep already in the room is not crossing to it.
+///
+/// **It walks the compass's chain while the price walks the cheapest** (#288,
+/// #297). `route` is the first chain of `routes` and nothing in here can rank
+/// the rest: the near leg and the crossing tie wherever the two corners are
+/// symmetric, and what really separates two chains is the transit rooms' own
+/// traversal — a price toward a room with nothing in it to price toward. So for
+/// a target reachable two ways this mover can aim at the *other* border of the
+/// creep's own room than the one the price was won at, and which of the two a
+/// creep obeys flips with its target room's vision. Before #288 the two agreed
+/// by construction, there being one chain. #297 carries the trace and what a fix
+/// has to decide; `AtlasCrossRoomTests` pins the divergence, so closing it turns
+/// a test red rather than passing unnoticed.
 let stepTowardRoom (atlas: Atlas) (creep: string) (room: string) : RoomPos option =
     match Map.tryFind creep atlas.CreepAt with
     | Some(creepRoom, from) when creepRoom <> room ->
@@ -2269,6 +2362,24 @@ let firstStepIgnoringTraffic
 /// flooded out of the container and in to the sink, the leg *back* being the
 /// same direction priced on the empty body — reversing it would charge the sink
 /// room's exit rather than the container room's.
+///
+/// **One chain carries both legs** (#288). Where several shortest chains join
+/// the two rooms, the cheapest is taken over the round trip and never over each
+/// leg apart: a hauler that went out round one corner and came back round the
+/// other is not a journey, and the two minima summed sit *below* every chain's
+/// own trip — 113 against a cheapest real 114 on the fixture this is pinned on,
+/// and 147 against 182 when the corners are further apart. Which is the error
+/// #288 was opened over with its sign flipped, and this is the query ADR 0049
+/// sums into the hauler quota, so it would size the fleet for a haul nobody
+/// makes. The two legs are two *pricings* of one walk — loaded and empty, which
+/// is why the leg back is flooded in the same direction — so the chain they
+/// share is the one thing about them that is not a body's business. What that
+/// costs where there really are several: this leg's far field is `chainedInto`
+/// direct and not `farFieldAlong`'s memo — the quota prices a body and not a
+/// creep, and there is no creep to key one on — so a second chain is a second
+/// chained flood per leg. Bounded by `Tuning.MaxHops` = 3, paid inside a
+/// census-keyed row (ADR 0017, ADR 0049), and nil for every pair a colony works
+/// today, all of which answer one chain.
 let haulRoundTripTicks
     (atlas: Atlas)
     (body: BodyPart list)
@@ -2281,28 +2392,51 @@ let haulRoundTripTicks
     let goals = adjacentWalkableIn atlas sinkRoom (RoomPos.pos sink)
     let weights = weightsOf atlas fromRoom
 
-    let legTicks factor =
-        if fromRoom = sinkRoom then
+    let loadedFactor = loadedFactorOf body
+    let emptyFactor = emptyFactorOf body
+
+    if fromRoom = sinkRoom then
+        let legTicks factor =
             let dist, _ = walkFloodFrom weights factor from
             nearestReached (reachedIn dist) goals
-        else
-            joinedAlong
-                atlas
-                Walk
-                factor
-                fromRoom
-                from
-                sinkRoom
-                (fun () -> Drained(fst (walkFloodFrom weights factor from)))
-                (fun onward -> reachedIn (chainedInto atlas factor Walk onward goals))
-            |> Option.map fst
 
-    let loaded = legTicks (loadedFactorOf body)
-    let empty = legTicks (emptyFactorOf body)
+        match legTicks loadedFactor, legTicks emptyFactor with
+        | Some out, Some back -> Some(out + back)
+        | _ -> None
+    else
+        match routes atlas fromRoom sinkRoom with
+        | [] -> None
+        | chains ->
+            // The chains first and the floods after, so a pair no chain joins
+            // still costs the tick one search and no grid (ADR 0058) — and one
+            // flood per leg however many chains there are, the flood out of the
+            // container being this body's and not the chain's.
+            let legOn factor =
+                let near = Drained(fst (walkFloodFrom weights factor from))
 
-    match loaded, empty with
-    | Some out, Some back -> Some(out + back)
-    | _ -> None
+                fun chain ->
+                    joinedOn
+                        atlas
+                        Walk
+                        factor
+                        fromRoom
+                        from
+                        (fun () -> near)
+                        (fun onward -> reachedIn (chainedInto atlas factor Walk onward goals))
+                        chain
+                    |> Option.map fst
+
+            let out = legOn loadedFactor
+            let back = legOn emptyFactor
+
+            chains
+            |> List.choose (fun chain ->
+                match out chain, back chain with
+                | Some loaded, Some empty -> Some(loaded + empty)
+                | _ -> None)
+            |> function
+                | [] -> None
+                | trips -> Some(List.min trips)
 
 /// A cast walk carried across a Seam and on into every tile of the far room at
 /// once: the answer `joinedAcross` gives for one goal, given for all of them by
@@ -2387,10 +2521,20 @@ let castWalkTicks
         match atlas.Walks.TryGetValue((spawn, factor, goalRoom)) with
         | true, table -> arrival table
         | _ ->
-            match route atlas atlas.Home goalRoom with
-            | None -> None
-            | Some chain ->
-                let table = castAlong atlas factor (near ()) chain
+            match routes atlas atlas.Home goalRoom with
+            | [] -> None
+            | chains ->
+                // The cheapest chain per **tile**, which is the same choice
+                // the join makes and the shape a lead is answered in (#288):
+                // one table holds every goal in the room at once, so the
+                // minimum is taken elementwise rather than over one goal's
+                // price. A single chain reduces to the table it always was,
+                // untouched and uncopied.
+                let table =
+                    chains
+                    |> List.map (castAlong atlas factor (near ()))
+                    |> List.reduce (Array.map2 min)
+
                 atlas.Walks.[(spawn, factor, goalRoom)] <- table
                 arrival table
 

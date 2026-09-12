@@ -144,7 +144,10 @@ let private moveIntentFor
     // target's room's vision, so there is nothing to price and nothing to act
     // on, and the room name is the whole of what the mover was handed. No Seam
     // to that room — it is not next door — and it falls through to the idle
-    // rule below, which is what it is until the vision comes back.
+    // rule below, which is what it is until the vision comes back. Which chain
+    // it crosses on is the compass's and not the price's, so where the room is
+    // reachable round either of two corners the grace can turn a creep at the
+    // border and the returning vision turn it back (#288, #297).
     let crossingStep =
         match task, crossing with
         | None, Some room -> Atlas.stepTowardRoom atlas creep room |> Option.map RoomPos.pos

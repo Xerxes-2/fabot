@@ -429,3 +429,99 @@ let crossRoomWalkTests =
                     "and some far tile was pinned at a number rather than at absence, or the per-tile half proves nothing either"
             }
         ]
+
+/// A projection over a chain of captures: the first room is the colony's own
+/// with one body standing in it, the last carries its own sources, and every
+/// room in the list brings its terrain and its border ring — which is what the
+/// shell lays for a declared room and for the transit rooms between (ADR 0058).
+/// Which rooms are in the list is the whole of what the cases below vary: a
+/// corner the projection does not carry has no ring, so no chain turns in it.
+let private chainedProjection (rooms: string list) (stand: Pos) =
+    let captures = rooms |> List.map load
+    let home = List.head captures
+    let far = List.last captures
+
+    { SpatialInfo.empty with
+        RoomName = Some home.RoomName
+        Rooms =
+            captures
+            |> List.map (fun capture ->
+                capture.RoomName,
+                { RoomLayer.empty with
+                    Terrain = capture.Terrain
+                    CreepPositions =
+                        if capture.RoomName = home.RoomName then
+                            Map.ofList [ "w", stand ]
+                        else
+                            Map.empty
+                    TargetPositions =
+                        if capture.RoomName = far.RoomName then
+                            Map.ofList far.Sources
+                        else
+                            Map.empty
+                })
+            |> Map.ofList
+        Borders =
+            captures
+            |> List.map (fun capture -> capture.RoomName, capture.Border)
+            |> Map.ofList
+        TargetKinds = far.Sources |> List.map (fun (id, _) -> id, Source) |> Map.ofList
+    }
+    |> AtlasFixtures.snapshotWith [ AtlasFixtures.worker "w" ]
+    |> ofView
+
+[<Tests>]
+let cornerChainTests =
+    testList
+        "multi-hop corners on real terrain"
+        [
+            test "the L to W14S29 is priced round whichever corner is cheaper" {
+                // #288 on the captures, and on the very pair
+                // `docs/research/multihop-outposts.md` measured (tick
+                // 302,850): W14S29 is two hops from W13S28 and both corners
+                // are real rooms — W13S29 to the south, which `adjacent`
+                // names first, and W14S28 to the west, which that survey
+                // priced the cheaper. Nothing is written down here but the
+                // room names: the captures decide the numbers, and what this
+                // pins is that the price is the smaller of the two and never
+                // the compass's by default.
+                let far = load "W14S29"
+                let stand = standingSample (load "W13S28") |> List.head
+
+                let both = chainedProjection [ "W13S28"; "W13S29"; "W14S28"; "W14S29" ] stand
+                let southCorner = chainedProjection [ "W13S28"; "W13S29"; "W14S29" ] stand
+                let westCorner = chainedProjection [ "W13S28"; "W14S28"; "W14S29" ] stand
+
+                Expect.equal
+                    (routes both "W13S28" "W14S29")
+                    [ [ "W13S28"; "W13S29"; "W14S29" ]; [ "W13S28"; "W14S28"; "W14S29" ] ]
+                    "the premise: two chains of two hops, the compass's south one first"
+
+                let mutable cheaper = 0
+
+                for sourceId, _ in far.Sources do
+                    let task = Harvest sourceId
+
+                    match
+                        walkTicks both "w" task,
+                        walkTicks southCorner "w" task,
+                        walkTicks westCorner "w" task
+                    with
+                    | Some priced, Some south, Some west ->
+                        Expect.equal
+                            priced
+                            (min south west)
+                            $"{sourceId}: the walk with both corners carried is the cheaper corner's"
+
+                        if west < south then
+                            cheaper <- cheaper + 1
+                    | answers ->
+                        failtest
+                            $"{sourceId}: every chain of this L prices on real terrain, got {answers}"
+
+                Expect.isGreaterThan
+                    cheaper
+                    0
+                    "and the corner the compass names really is the dearer one on these captures, or the case proves nothing"
+            }
+        ]

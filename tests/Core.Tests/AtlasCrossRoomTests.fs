@@ -1533,3 +1533,267 @@ let multiHopTests =
                     "and an unpriceable target is an absence, never a number (ADR 0004)"
             }
         ]
+
+/// The L: a target two hops out on the diagonal, with **both** rooms a
+/// shortest chain could turn the corner in carried as transit layers (#288).
+/// W1N1 is world (-2,-2), so the corners are W1N2 to the north and W2N1 to
+/// the west and the target W2N2 is (-3,-3).
+///
+/// Everything about the two chains is deliberately symmetric but the corner
+/// itself, so the difference between them is the corner room and nothing
+/// else. The creep stands at (25,25), where the home room's two one-wide
+/// corridors meet, twenty-five ticks from either exit. The target's corridor
+/// is entered within a tile of the same place whichever corner the walk
+/// turned in, and the source at (48,40) is seven or eight ticks up it. What
+/// differs is the corner itself: the **north** one's corridor is swamp, five
+/// ticks a tile, and the **west** one's is plain — a hundred ticks apart over
+/// chains of equal hop length. `RoomName.adjacent` names north before west,
+/// so the compass's chain is the dear one.
+///
+/// The home ring is the caller's, which is how one corner is taken away: no
+/// band out of the home room is no chain through that corner, and the same
+/// geometry then prices the one chain that is left.
+let private cornerOfFour homeRing =
+    let home =
+        { RoomLayer.empty with
+            Terrain =
+                Map.ofList (
+                    plainLine
+                        [
+                            // The column up to the north exit and the row west
+                            // to the west one, meeting where the creep stands.
+                            for y in 1..25 do
+                                { X = 25; Y = y }
+
+                            for x in 1..24 do
+                                { X = x; Y = 25 }
+                        ]
+                )
+            CreepPositions = Map.ofList [ "w", { X = 25; Y = 25 } ]
+        }
+
+    // The dear corner: landed on (25,49), the walk turns west along a row of
+    // swamp to the exit at (0,48), which lands it on (49,48) of the target.
+    let northCorner =
+        { RoomLayer.empty with
+            Terrain = Map.ofList [ for x in 1..25 -> { X = x; Y = 48 }, Swamp ]
+        }
+
+    // The cheap one: landed on (49,25), the walk turns north up a plain
+    // column to the exit at (48,0), which lands it on (48,49) of the target.
+    let westCorner =
+        { RoomLayer.empty with
+            Terrain = Map.ofList (plainLine [ for y in 1..25 -> { X = 48; Y = y } ])
+        }
+
+    let target =
+        { RoomLayer.empty with
+            Terrain =
+                Map.ofList (
+                    plainLine
+                        [
+                            for y in 1..48 do
+                                if y <> 40 then
+                                    { X = 48; Y = y }
+                        ]
+                )
+            TargetPositions = Map.ofList [ "src-far", { X = 48; Y = 40 } ]
+        }
+
+    { SpatialInfo.empty with
+        RoomName = Some "W1N1"
+        Borders =
+            Map.ofList
+                [
+                    "W1N1", Map.ofList homeRing
+                    "W1N2", Map.ofList [ { X = 25; Y = 49 }, Plain; { X = 0; Y = 48 }, Plain ]
+                    "W2N1", Map.ofList [ { X = 49; Y = 25 }, Plain; { X = 48; Y = 0 }, Plain ]
+                    "W2N2", Map.ofList [ { X = 49; Y = 48 }, Plain; { X = 48; Y = 49 }, Plain ]
+                ]
+        TargetKinds = Map.ofList [ "src-far", Source ]
+    }
+    |> withHome (fun _ -> home)
+    |> withNeighbour "W1N2" northCorner
+    |> withNeighbour "W2N1" westCorner
+    |> withNeighbour "W2N2" target
+    |> snapshotWith [ worker "w" ]
+    |> ofView
+
+/// Both corners reachable — the fixture every case below is really about.
+let private bothCorners =
+    cornerOfFour [ { X = 25; Y = 0 }, Plain; { X = 0; Y = 25 }, Plain ]
+
+/// Only the compass's corner, the home room's west border walled end to end.
+let private northCornerOnly = cornerOfFour [ { X = 25; Y = 0 }, Plain ]
+
+/// Only the cheap corner, the north border walled instead.
+let private westCornerOnly = cornerOfFour [ { X = 0; Y = 25 }, Plain ]
+
+/// A body that feels a swamp on both legs: one Work part beside the Carry,
+/// where the [[hauler unit]]'s empty leg generates no fatigue at all and
+/// would cross the swamp corner at a plain tile's price (ADR 0029).
+let private walkerBody = [ Work; Carry; Move ]
+
+/// A [[hauler unit]]'s own body, which is the one the corners split: loaded it
+/// feels the swamp corner at five ticks a tile, empty it generates no fatigue
+/// at all and crosses that same corner for a plain tile's price (ADR 0029). So
+/// the leg out is cheapest round the west corner and the leg back is cheapest
+/// round the north one — over two *different* chains.
+let private haulerBody = [ Carry; Move ]
+
+/// The haul the L is priced on: the target room's container at (48,41),
+/// one tile up its corridor from the source, to the home room's spawn tile
+/// where the two corridors meet.
+let private cornerHaulWith body atlas =
+    haulRoundTripTicks atlas body (at "W2N2" { X = 48; Y = 41 }) (at "W1N1" { X = 25; Y = 25 })
+
+let private cornerHaulOf atlas = cornerHaulWith walkerBody atlas
+
+[<Tests>]
+let cornerTests =
+    testList
+        "atlas multi-hop corner"
+        [
+            test "an L-shaped target is priced on the cheapest chain, not the compass's" {
+                // #288: two chains of the same hop length are not two chains
+                // of the same price — the room the walk turns the corner in
+                // decides how long the legs are — so the price is taken over
+                // every shortest chain and the cheapest kept.
+                //
+                // Counted, over the cheap corner: twenty-five ticks out of
+                // the home room (twenty-four steps up to (25,1) and the exit
+                // tile), the landing on (49,25) free, twenty-five in the west
+                // corner — the diagonal step onto (48,24), twenty-three more
+                // up its column and the exit at (48,0) — the landing on
+                // (48,49) free again, and eight in the target: the step onto
+                // (48,48) and seven more to the Seat at (48,41). Fifty-eight.
+                //
+                // The same walk turned in the north corner pays 121 for that
+                // room instead of 25, because its tiles are swamp at five
+                // ticks apiece, and seven in the target instead of eight
+                // because its landing at (49,48) has ground diagonally
+                // beside it: a hundred and fifty-three.
+                Expect.equal
+                    (routes bothCorners "W1N1" "W2N2")
+                    [ [ "W1N1"; "W1N2"; "W2N2" ]; [ "W1N1"; "W2N1"; "W2N2" ] ]
+                    "both corners are chains of two hops, the compass's north one first"
+
+                Expect.equal
+                    (walkTicks northCornerOnly "w" (Harvest "src-far"))
+                    (Some 153)
+                    "the premise: through the swamp corner alone the walk is 25 + 121 + 7"
+
+                Expect.equal
+                    (walkTicks westCornerOnly "w" (Harvest "src-far"))
+                    (Some 58)
+                    "and through the plain one alone it is 25 + 25 + 8"
+
+                Expect.equal
+                    (walkTicks bothCorners "w" (Harvest "src-far"))
+                    (Some 58)
+                    "so with both open the price is the cheaper chain's, not the first found"
+
+                Expect.equal
+                    (travelCost bothCorners "w" (Harvest "src-far"))
+                    (Some 116)
+                    "and the ranking price is the same chain at two units a plain step"
+            }
+
+            test "the mover crosses at the corner the price was paid at" {
+                // ADR 0030's law over the chain the price chose: a mover
+                // that followed the compass while the price followed the
+                // terrain would walk the creep out of the wrong border of
+                // its own room every tick of the haul.
+                Expect.equal
+                    (firstStepFor bothCorners "w" (Harvest "src-far"))
+                    (Some { X = 24; Y = 25 })
+                    "west along the home row, toward the crossing the price was won at"
+
+                Expect.equal
+                    (firstStepFor northCornerOnly "w" (Harvest "src-far"))
+                    (Some { X = 25; Y = 24 })
+                    "and north up its column when the swamp corner is the only one left"
+            }
+
+            test "the vision-grace mover still walks the compass's chain" {
+                // #297, standing and pinned rather than fixed here: the mover
+                // of #151's vision grace has no price to choose a chain with —
+                // its target's room is dark — so it takes the first chain and
+                // that is the compass's. The same creep under the price walks
+                // the other way out of its own room, and the two swap as the
+                // vision lapses and returns. Red the day #297 lands, which is
+                // the point of writing it down.
+                Expect.equal
+                    (stepTowardRoom bothCorners "w" "W2N2")
+                    (Some(at "W1N1" { X = 25; Y = 24 }))
+                    "north, the compass's corner, while `firstStepFor` above steps west"
+            }
+
+            test "the round trip is priced on the cheapest chain, both legs of it" {
+                // ADR 0049 sums these into the hauler quota, which is what
+                // makes the tie-break an energy bill and not a cosmetic one
+                // (#288): the dear chain hires bodies for a haul nobody
+                // makes.
+                let dear = cornerHaulOf northCornerOnly
+                let cheap = cornerHaulOf westCornerOnly
+
+                Expect.equal
+                    (cornerHaulOf bothCorners)
+                    (Some 171)
+                    "the cheaper corner's round trip, loaded out and empty back"
+
+                Expect.equal cheap (Some 171) "which is the chain's own price with no rival"
+
+                Expect.equal
+                    dear
+                    (Some 456)
+                    "against 456 through the swamp corner, which is what the compass was buying"
+            }
+
+            test "the round trip's two legs are cheapest on one chain, never on two" {
+                // #288 with its sign flipped: a hauler's loaded leg is
+                // cheapest round the plain corner and its empty leg, which
+                // generates no fatigue and so crosses swamp for nothing, is
+                // cheapest round the swamp one. Priced a leg at a time the
+                // trip comes out at 113 — under the better of the two chains
+                // a creep could actually walk, because no creep goes out
+                // round one corner and comes back round the other. ADR 0049
+                // sums this into the hauler quota, so a number below every
+                // real journey hires a fleet for a haul nobody makes.
+                let both = cornerHaulWith haulerBody bothCorners
+
+                Expect.equal
+                    (cornerHaulWith haulerBody westCornerOnly)
+                    (Some 114)
+                    "the plain corner's own trip: 58 out loaded, 56 back empty"
+
+                Expect.equal
+                    (cornerHaulWith haulerBody northCornerOnly)
+                    (Some 208)
+                    "the swamp corner's own: 153 out loaded, 55 back empty over free swamp"
+
+                Expect.equal
+                    both
+                    (Some 114)
+                    "so with both corners open the trip is the cheaper chain's"
+
+                Expect.isGreaterThan
+                    both
+                    (Some 113)
+                    "and never the 113 the two legs' separate minima sum to, which is no chain's trip"
+            }
+
+            test "the cast walk takes the cheapest chain too" {
+                // `castWalkTicks` folds the same chain forwards (ADR 0030,
+                // ADR 0058), so a lead over an L is the same choice made
+                // over a table of every tile at once.
+                let lead atlas =
+                    castWalkTicks atlas walkerBody { X = 25; Y = 25 } (at "W2N2" { X = 48; Y = 41 })
+
+                Expect.equal (lead bothCorners) (Some 57) "the cheap corner's lead, to the tile"
+
+                Expect.equal (lead westCornerOnly) (Some 57) "which is that chain's own price"
+
+                Expect.equal (lead northCornerOnly) (Some 152) "against the swamp corner's 152"
+            }
+        ]
