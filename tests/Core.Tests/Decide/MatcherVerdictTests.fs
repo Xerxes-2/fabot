@@ -521,8 +521,9 @@ let verdictTests =
 
             test "a remembered oversell releases with OverCapacity, the loser idles as NoneFree" {
                 // One Seat at the source, two creeps remembered on it — an
-                // oversell memory can carry across a redeploy. The
-                // alphabetically first keeps; nothing else fits the loser.
+                // oversell memory can carry across a redeploy. The nearer of
+                // the two keeps (#230), which here is also the
+                // alphabetically first; nothing else fits the loser.
                 let snapshot =
                     shortCorridorColony
                         [ worker "w1" 0 50; worker "w2" 0 50 ]
@@ -545,6 +546,148 @@ let verdictTests =
                         Verdict.Unassigned("w2", IdleReason.NoneFree)
                     ]
                     "the cap releases the oversell and explains the loser's idleness"
+            }
+
+            test "an oversold cap releases the furthest holder, whatever the names are" {
+                // #230: the release fold judges each remembered assignment
+                // against the ones it has already kept, so the order it walks
+                // a Task's holders in *is* the rule for who keeps the slot.
+                // In memory order that was the creep-name order, so the body
+                // already standing on the one Seat could lose it to one two
+                // tiles further down the corridor — ADR 0054 records the same
+                // price on the [[refill cluster]] and defers the fix to here,
+                // because it is the Matcher's release order for every capped
+                // Task and not that Task's rule.
+                //
+                // Pairwise on the one thing that may decide it: the two
+                // bodies swap names between the halves and stand where they
+                // stood, so a half that changes is name order deciding.
+                let releasedFrom near far =
+                    let snapshot =
+                        shortCorridorColony
+                            [ worker near 0 50; worker far 0 50 ]
+                            [ near, { X = 10; Y = 12 }; far, { X = 10; Y = 14 } ]
+
+                    let sticky =
+                        Map.ofList [ near, taskId (Harvest "src-a"); far, taskId (Harvest "src-a") ]
+
+                    let {
+                            Assignments = assignments
+                            Verdicts = verdicts
+                        } =
+                        decideFrom sticky snapshot
+
+                    Map.tryFind near assignments,
+                    verdicts
+                    |> List.choose (function
+                        | Verdict.Released(name, _, ReleaseReason.Rejected RejectReason.CapacityFull) ->
+                            Some name
+                        | _ -> None)
+
+                Expect.equal
+                    (releasedFrom "w1" "w2")
+                    (Some(taskId (Harvest "src-a")), [ "w2" ])
+                    "the body on the Seat keeps it and the far one pays for the cap"
+
+                Expect.equal
+                    (releasedFrom "w2" "w1")
+                    (Some(taskId (Harvest "src-a")), [ "w1" ])
+                    "names swapped and nothing moves: it is proximity deciding, not the fold's order"
+            }
+
+            test "an unplaced holder does not outrank the body standing on the Seat" {
+                // #230, the other half of the order: `Atlas.walkTicks` answers
+                // `Some 0` for a body the projection cannot place (ADR 0004's
+                // escape — unpriceable geometry never counts against a Task),
+                // which is the same number it answers for a body standing in
+                // the Work Area. Ranked on that number alone the ghost sorts
+                // level with — and by name ahead of — the body we can watch
+                // standing on the one Seat, and the cap gives the slot to the
+                // one nobody can find. A holder with no tile has no distance
+                // from anything, so it sorts behind every holder that has one.
+                let releasedFrom placed ghost =
+                    let snapshot =
+                        shortCorridorColony
+                            [ worker placed 0 50; worker ghost 0 50 ]
+                            [ placed, { X = 10; Y = 11 } ]
+
+                    let sticky =
+                        Map.ofList
+                            [ placed, taskId (Harvest "src-a"); ghost, taskId (Harvest "src-a") ]
+
+                    let { Assignments = assignments } = decideFrom sticky snapshot
+
+                    Map.tryFind placed assignments, Map.tryFind ghost assignments
+
+                Expect.equal
+                    (releasedFrom "w1" "w2")
+                    (Some(taskId (Harvest "src-a")), None)
+                    "the body on the Seat keeps it; the one with no tile is the one released"
+
+                Expect.equal
+                    (releasedFrom "w2" "w1")
+                    (Some(taskId (Harvest "src-a")), None)
+                    "and names swapped, so it is placement deciding and not the fold's order"
+            }
+
+            test "a holder the geometry disconnects sorts last under either name order" {
+                // #230's tie-break has no distance to read for a walled-off
+                // body, so it sorts behind the one it can price — the same
+                // place an unplaced body sorts, and for the same reason. What
+                // that settles is the Verdict: the cap is full by the time the
+                // walled-off body is judged, and the gate cascade gives a pair
+                // over a full cap `CapacityFull` whichever way it is read
+                // (fresh candidate or remembered assignment). Judging it
+                // *first* instead would earn it `Unreachable` and make the
+                // reason a function of where the fold sorted it, which is the
+                // kind of answer #230 exists to remove; the gate order is
+                // where reachability's precedence lives, and it is deliberate.
+                let reasonsFrom islanded seated =
+                    let terrain =
+                        [
+                            { X = 10; Y = 11 }, Plain
+                            { X = 10; Y = 12 }, Plain
+                            { X = 20; Y = 20 }, Plain
+                        ]
+
+                    let snapshot =
+                        { bareRespawn with
+                            Sources = [ source "src-a" ]
+                            Creeps = [ worker islanded 0 50; worker seated 0 50 ]
+                            Spatial =
+                                spatial [ "src-a", { X = 10; Y = 10 } ] terrain
+                                |> withCreepsAt
+                                    [ islanded, { X = 20; Y = 20 }; seated, { X = 10; Y = 11 } ]
+                        }
+
+                    let sticky =
+                        Map.ofList
+                            [ islanded, taskId (Harvest "src-a"); seated, taskId (Harvest "src-a") ]
+
+                    let {
+                            Assignments = assignments
+                            Verdicts = verdicts
+                        } =
+                        decideFrom sticky snapshot
+
+                    Map.tryFind seated assignments,
+                    verdicts
+                    |> List.choose (function
+                        | Verdict.Released(name, _, ReleaseReason.Rejected reason) when
+                            name = islanded
+                            ->
+                            Some reason
+                        | _ -> None)
+
+                Expect.equal
+                    (reasonsFrom "w1" "w2")
+                    (Some(taskId (Harvest "src-a")), [ RejectReason.CapacityFull ])
+                    "the Seat keeps the body that can reach it and the cap answers the other"
+
+                Expect.equal
+                    (reasonsFrom "w2" "w1")
+                    (Some(taskId (Harvest "src-a")), [ RejectReason.CapacityFull ])
+                    "and the same with the names swapped, where memory order used to give either"
             }
 
             test "an empty pool idles a creep with NoTasks" {

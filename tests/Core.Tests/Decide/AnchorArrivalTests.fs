@@ -296,7 +296,7 @@ let arrivalCapacityTests =
                 // while the Anchor nine steps up the lane is 41 ticks
                 // away. Neither is standing on the tile while the other
                 // is, so neither counts against the other, and the release
-                // fold reaches the pair in creep-name order without that
+                // fold reaches the pair nearest-first (#230) without that
                 // order deciding anything: a window read only from the
                 // candidate's end released whichever of the two the fold
                 // came to second.

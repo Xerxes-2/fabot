@@ -264,10 +264,11 @@ let refillClusterTests =
                 // The price ADR 0054 records rather than removes. The cap
                 // is `ceil(free / one load)` and the ring's free energy
                 // only falls, so on the tick it crosses a load boundary one
-                // of the bodies aimed at the ring is released — a body that
-                // may well be the one already standing beside a member,
-                // because the release fold walks the assignments in
-                // creep-name order and not by proximity.
+                // of the bodies aimed at the ring is released — and since
+                // #230 it is the body **furthest** from the ring, not the
+                // one whose name sorts later. `h2` is standing beside the
+                // spawn with a full store and pours this tick; `h1` is seven
+                // tiles down the column and keeps nothing.
                 //
                 // It is once per load *poured*, where a Task per extension
                 // paid a `task-gone` per extension filled, so the churn is
@@ -305,16 +306,16 @@ let refillClusterTests =
                 // is one too many for what is left.
                 let holders, verdicts = outcome (200, 0, 0)
 
-                Expect.equal holders [ "h1" ] "one load's worth of room holds one"
+                Expect.equal holders [ "h2" ] "one load's worth of room holds the body that arrived"
 
                 Expect.contains
                     verdicts
                     (Verdict.Released(
-                        "h2",
+                        "h1",
                         taskId (Refill "spawn-1"),
                         ReleaseReason.Rejected RejectReason.CapacityFull
                     ))
-                    "and the other is released capacity-full, though it is the one that had arrived"
+                    "and the walker is released capacity-full, being the one furthest from the ring"
             }
         ]
 

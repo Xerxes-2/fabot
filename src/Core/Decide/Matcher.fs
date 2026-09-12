@@ -286,11 +286,79 @@ let matchCreeps
                     | Some(walk, wait) -> Error(RejectReason.TooEarly(walk, wait))
                     | None -> Ok cost
 
+    // Which holder a cap that has shrunk gives up (#230). The fold below
+    // judges each remembered assignment against the ones it has already kept,
+    // so the order it walks one Task's holders in *is* the rule for who keeps
+    // the slot — and in the assignment map's own order that is creep-name
+    // order, which is a fact about nobody's distance from anything. **The
+    // nearest keeps**: the body already standing in the Work Area is the one
+    // whose next tick is work, and the one still walking is the one that has
+    // spent nothing yet. ADR 0054 records this price on the [[refill
+    // cluster]], where `ceil(free / one load)` shrinks continuously and the
+    // release fires often enough to see; the order is the Matcher's and not
+    // that Task's, so every capped Task gets it.
+    //
+    // Read off `Atlas.walkTicks`, the same number the capacity gate counts
+    // holders at (ADR 0026), and ordered only where it *could* decide
+    // something: a **bounded** Task with more than one holder. Most of the pool
+    // is neither and is never walked for this (ADR 0029), which must stay that
+    // way. It is not, though, only the walks the gate below would have priced
+    // anyway: a holder `threatened` or inapplicable never reached that gate's
+    // `arrival` lazy, and one standing on an `Exempt` tile short-circuits
+    // `hasCapacity` ahead of it. Those floods are new, bounded by the holders
+    // of capped Tasks, and memoised per start tile within the tick — the
+    // profile does not move on them, and it is the thing to re-read if this
+    // order ever grows a second number.
+    //
+    // **A body the Atlas can say nothing about sorts last**, and that is two
+    // holders and not one, because `Atlas.walkTicks` answers `Some 0` for a
+    // creep the projection does not place (ADR 0004's escape, so that
+    // unpriceable geometry never counts *against* a Task) — the same number it
+    // answers for a body standing in the Work Area. Ranked on the walk alone
+    // the ghost ties with the body on the tile and takes the slot on its name;
+    // the escape is a ranking price for the capacity gate and not a claim that
+    // a body nobody can find is the nearest one to anything. So the tier is
+    // read off `Atlas.creepTile` first: placed and priced sorts by the walk,
+    // placed-but-disconnected and unplaced alike sort behind every holder that
+    // has a distance at all, and the creep name breaks a tie so the fold stays
+    // a function of the view.
+    //
+    // Sorting the disconnected holder last is also what keeps the *reason*
+    // right: it meets the cap the kept holders filled and is released
+    // `CapacityFull`, which is what the gate cascade above gives that pair in
+    // either reading of it — one cascade answers the candidate and the
+    // assignment, and the release path only says which reading it is.
+    let tier (pooled: PooledTask) (name: string) =
+        match Atlas.creepTile atlas name with
+        | Some _ ->
+            match Atlas.walkTicks atlas name pooled.Task with
+            | Some walk -> 0, walk
+            | None -> 1, 0
+        | None -> 1, 0
+
+    let remembered =
+        assignments
+        |> Map.toList
+        |> List.groupBy snd
+        |> List.collect (fun (tid, holders) ->
+            // A lone holder is the whole order, and is not worth the lookup.
+            match holders with
+            | []
+            | [ _ ] -> holders
+            | _ ->
+                match Map.tryFind tid byId with
+                | Some pooled when Capacity.isBounded pooled.Capacity ->
+                    holders |> List.sortBy (fun (name, _) -> tier pooled name, name)
+                | _ -> holders)
+
+    // The releases are reported in the assignment map's order whatever order
+    // they were decided in, so the Verdict list stays the memory order its
+    // readers (ADR 0009) have always been handed.
     let kept, keptLoads, released =
-        ((Map.empty, Map.empty, []), assignments)
-        ||> Map.fold (fun (acc, loads, released) name tid ->
+        ((Map.empty, Map.empty, []), remembered)
+        ||> List.fold (fun (acc, loads, released) (name, tid) ->
             let release reason =
-                acc, loads, Verdict.Released(name, tid, reason) :: released
+                acc, loads, (name, Verdict.Released(name, tid, reason)) :: released
 
             match view.Creeps |> List.tryFind (fun c -> c.Name = name) with
             | None -> acc, loads, released
@@ -411,4 +479,4 @@ let matchCreeps
 
     let next, _, statuses = view.Creeps |> List.fold assignOne (kept, keptLoads, [])
 
-    next, List.rev released @ List.rev statuses
+    next, (released |> List.sortBy fst |> List.map snd) @ List.rev statuses
