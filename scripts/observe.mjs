@@ -229,7 +229,7 @@ if (command === "console") {
   //                  losses: [{ creep, t }],
   //                  damage }],
   //     outposts: [{ room, opened, last, expiry, basis }],
-  //     rivalHeld: { <room>: tick },
+  //     rivalHeld: { <room>: { since, lastLooked } },
   //     living: [creep], hits: { <structure id>: hits } }
   // Stored oldest first like the Transition log's ring, printed newest
   // first. `closest` is simply absent when nothing of ours could be placed,
@@ -251,9 +251,10 @@ if (command === "console") {
   // its own and `observe.mjs outposts` reads it whole, so this command
   // prints the spawn-room raids alone rather than filtering a mixed list.
   // `rivalHeld` is that same command's other half — the rooms last seen
-  // **owned** by another player, against the tick the gate shut on, ADR
-  // 0043's withdrawal with no clock (a rival's reservation is a clocked row
-  // of `outposts` since #165) — and is no more a raid than a stand-down is.
+  // **owned** by another player, against the tick the gate shut on and the
+  // tick of the last look into the room (#275), ADR 0043's withdrawal with no
+  // clock (a rival's reservation is a clocked row of `outposts` since #165) —
+  // and is no more a raid than a stand-down is.
   const { home, stored } = await raidLeaf();
   const episodes = Array.isArray(stored.episodes) ? [...stored.episodes].reverse() : [];
 
@@ -295,7 +296,7 @@ if (command === "console") {
   // The wire shape written by ObserveMemory.fs, a key of its own beside
   // `episodes` in the same leaf:
   //   { outposts: [{ room, opened, last, expiry, basis }],
-  //     rivalHeld: { <room>: tick } }
+  //     rivalHeld: { <room>: { since, lastLooked } } }
   // One `outposts` row per clocked [[stand-down]]: the room it shuts, the
   // window (opened, and the last tick the threat was actually seen there),
   // the absolute tick the stand-down runs to, and which deadline that tick
@@ -318,10 +319,12 @@ if (command === "console") {
   // concluded it, and the gate withholds it with no clock to compare
   // against. Ownership alone since #165 — a rival's reservation decays at
   // one a tick and is a row of the clocked list above, where it says so in
-  // its basis. The tick is still not a deadline; it is the date an income
+  // its basis. `since` is still not a deadline; it is the date an income
   // drop is lined up against (#117's US-20), the answer the clocked family
-  // gets from `opened`, and — since #165 — the tick the *stride* between
-  // looks is counted from, one look every `Tuning.RivalRecheck` ticks. It is
+  // gets from `opened`. The *stride* between looks — one look every
+  // `Tuning.RivalRecheck` ticks (#165) — is counted from `lastLooked` beside
+  // it, the tick the gate last handed a look out on (#275), so a tick the
+  // loop never ran leaves the look owed instead of cancelling it. It is
   // a remembered conclusion: the fold writes it on the ticks with vision and
   // holds it through the ticks without, because the gate's own effect is to
   // take that vision away, and the stride exists because that effect would
@@ -359,17 +362,49 @@ if (command === "console") {
         'hand-edited, or its wire shape has moved. Not read as "no room was taken".',
     );
   }
-  const rivalHeld = Object.entries(stored.rivalHeld).map(([room, since]) => {
-    if (typeof since !== "number") {
+  // Each entry carries two ticks since #275 — `{ since, lastLooked }`: the
+  // tick the gate shut on, which dates the withdrawal, and the tick the last
+  // look into the room was taken on, which is what the stride to the next look
+  // is measured from. A bare number is the shape written before that, and the
+  // bot reads it the same way this does: that tick is the shutting and the only
+  // look the record can vouch for. Either shape must yield two numbers.
+  //
+  // A third shape parts the two readers on purpose. The bot drops that entry
+  // and keeps the rest of the leaf (ADR 0028's row-by-row degradation), which
+  // un-latches the room and lets the next look with vision decide it again —
+  // the safe direction for a colony that has to keep running. This command
+  // stops instead: a diagnostic that guessed would print a date the bot never
+  // read, and the one thing worse than no answer here is a confident wrong one.
+  // Both readers refuse to *invent* a tick, which is the rule that matters; what
+  // they do afterwards is what each is for.
+  const rivalHeld = Object.entries(stored.rivalHeld).map(([room, entry]) => {
+    const badShape = () =>
       fail(
-        `the tick at Memory.fabot.observe.colonies.${home}.raids.rivalHeld.${room} is off the ` +
-          `wire shape: ${JSON.stringify(since)} — the leaf was hand-edited, or its wire ` +
+        `the entry at Memory.fabot.observe.colonies.${home}.raids.rivalHeld.${room} is off the ` +
+          `wire shape: ${JSON.stringify(entry)} — the leaf was hand-edited, or its wire ` +
           "shape has moved. " +
           'Not read as "that room is open": the bot is withholding a room this command ' +
           "cannot date.",
       );
+
+    if (typeof entry === "number") {
+      return { room, since: entry, lastLooked: entry };
     }
-    return { room, since };
+    // `return badShape()`, though `fail` exits and nothing after it runs:
+    // control falling out of a call made for its side effect reads as a bug
+    // every time it is re-read, and the reader should not have to go and check
+    // that `fail` never returns to know this function does not.
+    if (entry === null || typeof entry !== "object" || Array.isArray(entry)) {
+      return badShape();
+    }
+    if (typeof entry.since !== "number") {
+      return badShape();
+    }
+    const lastLooked = entry.lastLooked ?? entry.since;
+    if (typeof lastLooked !== "number") {
+      return badShape();
+    }
+    return { room, since: entry.since, lastLooked };
   });
 
   // The clock the rows are read against. Off the server rather than off the
@@ -523,20 +558,25 @@ if (command === "console") {
         console.log("  because another player owns it — not a threat that passes,");
         console.log("  a room that stopped being ours to work (ADR 0043)");
         // How this one ends, and since #165 the colony has a part in it: the
-        // gate re-admits the room to the **scan** for one tick every
-        // `Tuning.RivalRecheck`, counted from the tick above, and a look on
-        // that tick that finds no owner clears the latch. It is a look and
-        // not a return — the room is in no pool and no quota on that tick
-        // either — and it only tells us anything if something of ours can see
-        // the room, which the withdrawal itself makes unlikely. So the
-        // hand-edit is still worth naming, and is now a shortcut rather than
-        // the only way back.
-        const stride =
-          held.since +
-          Math.ceil(Math.max(1, now - held.since) / RIVAL_RECHECK) * RIVAL_RECHECK;
+        // gate re-admits the room to the **scan** for one tick once a whole
+        // `Tuning.RivalRecheck` has passed since the last look, and a look that
+        // finds no owner
+        // clears the latch. It is a look and not a return — the room is in no
+        // pool and no quota on that tick either — and it only tells us
+        // anything if something of ours can see the room, which the withdrawal
+        // itself makes unlikely. So the hand-edit is still worth naming, and is
+        // now a shortcut rather than the only way back.
+        //
+        // The stride is counted from the last look and not from the shutting
+        // (#275), so the next one is that tick plus the stride flat: a look is
+        // owed from there onwards and the first tick the gate is evaluated on
+        // pays it, where an exact-multiple test lost a whole stride to every
+        // tick the loop missed. Already past means the look is owed now.
+        const nextLook = held.lastLooked + RIVAL_RECHECK;
         console.log(
-          `  the gate looks again at ${tickOf(stride)} — one tick in every ` +
-            `${ticks(RIVAL_RECHECK)}, counted from the tick above (#165); the room is scanned`,
+          `  the gate looks again at ${tickOf(nextLook)}${nextLook <= now ? " — owed now" : ""}` +
+            ` — one look every ${ticks(RIVAL_RECHECK)} at the earliest, counted from the last ` +
+            `look at ${tickOf(held.lastLooked)} (#165, #275); the room is scanned`,
         );
         console.log("  on that tick and worked on none, and a look finding no owner clears it");
         console.log(

@@ -69,8 +69,9 @@ type ColonyView =
         /// this colony's business at all. Absent for a room vision did not
         /// answer for, per-entry as every other absence is (ADR 0004). One
         /// entry can be a room the colony does **not** work: the [[stand-down]]
-        /// gate re-admits a room it has latched to the scan for one tick in
-        /// every `Tuning.RivalRecheck` (#165), and this is the whole of what
+        /// gate re-admits a room it has latched to the scan for one tick, once
+        /// a whole `Tuning.RivalRecheck` has passed since the last look into it
+        /// (#165 as #275 measures the stride), and this is the whole of what
         /// such a look reads. Nothing else of that room is here — no layer, no
         /// rock, no Task — so every reader below finds it nowhere, which is why
         /// the look moves no decision and only the next [[raid log]] is any

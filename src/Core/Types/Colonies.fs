@@ -315,8 +315,9 @@ module Outpost =
 /// than one, because after #165 the gate has two strengths and not one. A room
 /// is withdrawn from the work the colony does, and a room whose withdrawal
 /// **latched** on another player's ownership is looked into all the same, once
-/// in every `Tuning.RivalRecheck` ticks, so the conclusion that shut it can be
-/// contradicted by the only thing that ever could — a tick with vision. One
+/// a whole `Tuning.RivalRecheck` has passed since the last look (#275), so the
+/// conclusion that shut it can be contradicted by the only thing that ever
+/// could — a tick with vision. One
 /// record and not two derivations: the two answers are read off one log and one
 /// tick, and split apart they would be free to disagree about which rooms the
 /// colony has withdrawn from.

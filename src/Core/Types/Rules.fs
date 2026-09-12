@@ -216,11 +216,15 @@ type Tuning =
         /// ticks, the stronghold expansion period (ADR 0043).
         StandDownFallback: int
         /// How often a [[stand-down]] latched on another player's **ownership**
-        /// is looked at again (#165): the room is re-admitted to the colony's
-        /// scan set on one tick in every this many, and to nothing else — it
-        /// stays out of the Task pool and out of the quotas throughout — so one
-        /// tick of vision can clear a latch the gate's own withdrawal would
-        /// otherwise make permanent. 5,000 ticks, twice ADR 0043's stronghold
+        /// is looked at again (#165): once this many ticks have passed since the
+        /// last look, the room is re-admitted to the colony's scan set for one
+        /// tick, and to nothing else — it stays out of the Task pool and out of
+        /// the quotas throughout — so one tick of vision can clear a latch the
+        /// gate's own withdrawal would otherwise make permanent. A floor on the
+        /// gap and not a cadence (#275): the look is owed from that tick onwards
+        /// and the first tick the gate is evaluated on pays it, so a tick the
+        /// loop never ran delays a look rather than forfeiting a whole stride of
+        /// an outpost's income. 5,000 ticks, twice ADR 0043's stronghold
         /// expansion period: a room another player walks away from is a thing
         /// that happens over hours, so a stride this long costs at most one
         /// such window of an outpost's income and keeps the withdrawal what

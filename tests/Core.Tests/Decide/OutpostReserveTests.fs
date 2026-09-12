@@ -597,6 +597,69 @@ let standDownGateTests =
                     "the same decision, memo and census signature and all"
             }
 
+            test "a look the loop never took is still owed, and the room it frees comes back" {
+                // #275, end to end. The stride between looks used to be an
+                // exact-multiple test, so the gate had to be asked on one
+                // precise tick or the whole 5,000 went by again: a throw before
+                // the log was written, a tick the engine cut short with an
+                // empty bucket, or a deploy landing mid-tick cost an outpost a
+                // full stride of income, and nothing anywhere said so. The look
+                // is owed from the stride onwards instead, so the first tick
+                // the gate *is* evaluated on pays it.
+                let latched =
+                    Observe.RaidState.empty
+                    // No world roster, for the reason the tests above give.
+                    |> Observe.foldRaids
+                        Observe.capEpisodes
+                        Set.empty
+                        { incomeColony with
+                            Time = 100
+                            RoomControl = Map.ofList [ "W1N2", rivalRoom ]
+                        }
+
+                // The tick the look fell due on is one the loop never ran, and
+                // so are the 1,233 after it. Nowhere near a multiple of the
+                // stride, which is exactly what the old test needed.
+                let late = 100 + Tuning.defaults.RivalRecheck + 1_234
+
+                Expect.equal
+                    (Observe.standDown Tuning.defaults late latched).Rechecked
+                    (Set.singleton "W1N2")
+                    "the look the gate never got to take is still owed on the tick it is asked"
+
+                // What the shell does with that answer: it reads the room's
+                // controller and nothing else of it (`ColonyView.ofWorld`).
+                // Here the rival has gone, which is the one thing that can
+                // clear the latch.
+                let freed =
+                    latched
+                    |> Observe.foldRaids
+                        Observe.capEpisodes
+                        Set.empty
+                        { incomeColony with
+                            Time = late
+                            RoomControl = Map.ofList [ "W1N2", neutralRoom ]
+                        }
+
+                // Named apart from the `poolAt` a few tests up, which takes a
+                // control and a tick against one fixed log: one name carrying
+                // two signatures in one file reads as the same helper twice.
+                let workedFrom log t =
+                    gatedColony
+                        [ northGated; westGated ]
+                        (Observe.standDown Tuning.defaults t log).Shut
+                        (surplusFleet 4)
+                    |> tasksNaming "W1N2"
+
+                Expect.isEmpty
+                    (workedFrom latched late)
+                    "on the tick of the look itself the room is still withheld from the work"
+
+                Expect.isNonEmpty
+                    (workedFrom freed (late + 1))
+                    "and the tick after a look that found nobody there, its rock is pooled again"
+            }
+
             test "the creep standing in a stood-down outpost is released, on the existing path" {
                 // ADR 0043's re-entry rule has a mirror: nothing new
                 // withdraws the creeps either. The room's Tasks stop

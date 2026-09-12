@@ -395,6 +395,88 @@ let private decodeOutpost (raw: obj) : OutpostEpisode =
             | None -> failwith "unknown wire name"
     }
 
+// One latched room on the wire (#275): `{ since, lastLooked }` — the tick the
+// gate shut on, and the tick the last look into the room was taken on, which is
+// what the stride to the next look is measured from.
+let private encodeLatch (latch: RivalLatch) =
+    let o = createEmpty<obj>
+    o?since <- latch.Since
+    o?lastLooked <- latch.LastLooked
+    o
+
+// A latch written as a bare number is the shape this leaf carried before #275,
+// and a live bundle meets one on the tick it is deployed: every room the running
+// colony has latched is recorded that way. The number is the tick the gate shut
+// on, and under the old rule it was also the tick the stride was counted from,
+// so it reads as both fields — the first look under the new rule then falls a
+// full `RivalRecheck` after the shutting, which is where the old rule would have
+// put it too. A record carrying `since` and no `lastLooked` reads the same way,
+// for the same reason: the only look such a log can vouch for is the one that
+// shut the gate.
+//
+// Every *other* shape throws, and the throw costs this entry alone
+// (`latchMapOf`). `unbox` is a cast and not a check — the discipline
+// `decodeOutpost` states against itself two decoders up — so a `since` that is
+// not a number would read back as a tick all the same: `{}`, `[100, 100]` and
+// `"100"` all decode to the epoch, dating the withdrawal to tick 0 where #117's
+// US-20 asks for the real one, and leaving `lookDue`'s elapsed test to compare
+// a tick against a string for ever. An unfalsifiable latch is precisely what
+// #275 exists to kill, so a latch that cannot be read is dropped instead: the
+// room leaves the gate, re-enters the scan, and the next look with vision
+// decides it again. Both ticks are checked the same way, because a
+// `lastLooked` that is not a number is the same lie about the same gate.
+let private decodeLatch (raw: obj) : RivalLatch =
+    let tickOf (field: obj) =
+        if jsTypeof field = "number" then
+            unbox<int> field
+        else
+            failwith "not a tick"
+
+    if jsTypeof raw = "number" then
+        let since = unbox<int> raw
+
+        { Since = since; LastLooked = since }
+    elif isNull raw || jsTypeof raw <> "object" then
+        failwith "not a latch"
+    else
+        let since = tickOf raw?since
+
+        {
+            Since = since
+            LastLooked =
+                if isNull raw?lastLooked then
+                    since
+                else
+                    tickOf raw?lastLooked
+        }
+
+// The latch map read back — `hashOf encodeLatch`'s decode partner, absent
+// reading as empty the way an absent row array does, and an entry that will not
+// decode costing that entry and no more, the way a row of `rowsOf` does (ADR
+// 0028).
+//
+// Entry by entry and not leaf by leaf, which is the difference between one
+// reopened room and a lost history. The only `try` above this one is
+// `loadRaids`' own `leafOr`, which wraps the whole bundle: a single unreadable
+// entry throwing past here would take the episode ring, every clocked
+// stand-down row, `Living` and `Hits` with it, and `saveRaids` would write that
+// emptiness back on the same tick, making it permanent. A `null` under one room
+// is the likely hand edit rather than an exotic one — editing this leaf is the
+// documented way out of a stuck latch, and writing `null` is how the Memory
+// HTTP API is told to remove a path — and the rows it would cost include every
+// live stand-down, which is the safety channel.
+let private latchMapOf (raw: obj) : Map<string, RivalLatch> =
+    if isNull raw then
+        Map.empty
+    else
+        objectEntries raw
+        |> Array.choose (fun (key, value) ->
+            try
+                Some(key, decodeLatch value)
+            with _ ->
+                None)
+        |> Map.ofArray
+
 // The observe subtree is created on demand and replaced whole only when
 // what stands there is not an object; each writer then assigns its own
 // leaf, so `creeps`, `verbose`, `cpu` and the `colonies` subtree never
@@ -515,11 +597,11 @@ let loadRaids (home: string) : RaidState =
             // The clockless withdrawal's memory (ADR 0043): the rooms last
             // seen **owned** by another player — a rival's reservation is a
             // clocked row of `outposts` since #165 — each against the tick
-            // that look was taken on, which is also the tick the strides
-            // between rechecks are counted from. An empty map is honest —
-            // the room is still scanned, so the next look with vision
-            // re-decides it.
-            RivalHeld = intMapOf raids?rivalHeld
+            // that look was taken on, and — since #275 — the tick the last
+            // look was taken on beside it, which is what the stride between
+            // rechecks is counted from. An empty map is honest — the room is
+            // still scanned, so the next look with vision re-decides it.
+            RivalHeld = latchMapOf raids?rivalHeld
             Living = raids?living |> unbox<string[]> |> Set.ofArray
             // The damage baseline, absent from a bundle written
             // before it existed: an empty baseline charges the next
@@ -534,10 +616,11 @@ let saveRaids (home: string) (state: RaidState) =
     let raids = createEmpty<obj>
     raids?episodes <- state.Episodes |> List.map encodeEpisode |> List.toArray
     raids?outposts <- state.Outposts |> List.map encodeOutpost |> List.toArray
-    // Room name to the tick the gate shut on: the clockless withdrawal
-    // has no window, expiry or basis to carry, so a row shape would be a
-    // name with three empty fields beside the one date it keeps.
-    raids?rivalHeld <- state.RivalHeld |> Map.toSeq |> hashOf box
+    // Room name to the two ticks the clockless withdrawal keeps: the one the
+    // gate shut on and the one the last look was taken on (#275). Still no
+    // window, expiry or basis — this withdrawal has none — so the entry stays a
+    // pair of dates under the room's own key rather than a row of the ring.
+    raids?rivalHeld <- state.RivalHeld |> Map.toSeq |> hashOf encodeLatch
     raids?living <- state.Living |> Set.toArray
     raids?hits <- state.Hits |> Map.toSeq |> hashOf box
     writeColonyLeaf home "raids" raids

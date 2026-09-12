@@ -251,6 +251,41 @@ type OutpostEpisode =
 /// vision would see it.
 let standingDown (tick: int) (episode: OutpostEpisode) = tick < episode.Expiry
 
+/// One room latched on another player's **ownership**: ADR 0043's clockless
+/// withdrawal, and the two ticks it takes to hold one honestly (#275). Two and
+/// not one, because the record answers two questions that used to be asked of
+/// the same number and are not the same question: *when did this room stop
+/// paying* — the date an operator lines an income drop up against (#117's
+/// US-20) — and *when is the colony next willing to question the conclusion*.
+/// A record and no clock in either field: neither tick is compared against an
+/// expiry, because ownership is the one trigger the engine gives no end for.
+type RivalLatch =
+    {
+        /// The tick the gate shut on: the first look that found the room in
+        /// another player's hands, and never restamped by a later look that
+        /// agrees with it. The *current* withdrawal's date — a room that came
+        /// back and was taken again dates from the taking that holds it now.
+        Since: int
+        /// The tick the last look **fell due** on, and the tick the stride to
+        /// the next one is measured from (`lookDue`, #275). It starts equal to
+        /// `Since` — the look that shut the gate is a look — and moves on every
+        /// tick the gate hands the room out, whether or not vision answered on
+        /// it: being blind in the room is the common case rather than a look
+        /// that did not happen, the withdrawal itself having taken the vision
+        /// away, and a stride stamped only when something was seen would leave a
+        /// blind room re-admitted to the scan on every tick from its first due
+        /// one onwards.
+        ///
+        /// The gate's tick and not the shell's, which is a real gap in one
+        /// corner: `ColonyView.ofWorld` reads a controller only for rooms this
+        /// colony **declares**, deliberately, so a room latched here and since
+        /// undeclared is stamped by a look nothing ever took. The record over-
+        /// claims there and the gate does not: re-declaring the room costs at
+        /// most one stride before the look that can free it, and until then
+        /// nothing is spent on it.
+        LastLooked: int
+    }
+
 /// The whole persisted Raid log.
 type RaidState =
     {
@@ -266,25 +301,22 @@ type RaidState =
         /// further rule of its own (`trimOutposts`).
         Outposts: OutpostEpisode list
         /// The rooms whose controller, on the last tick the colony could see
-        /// it, **belonged to** another player, each against the tick that look
-        /// was taken on: ADR 0043's *other* withdrawal, the one that needs no
-        /// clock, because a room somebody else holds has not been made
+        /// it, **belonged to** another player, each against the two ticks a
+        /// `RivalLatch` keeps: ADR 0043's *other* withdrawal, the one that needs
+        /// no clock, because a room somebody else holds has not been made
         /// dangerous — it has stopped being ours to work. Ownership alone since
         /// #165: a rival's *reservation* stood here too until the cost of
         /// latching a room for a hold that decays in at most 5,000 ticks was
         /// priced, and it is now a clocked episode in the ring above, where the
-        /// engine's own countdown says when the room comes back. The tick is
-        /// still no clock and nothing compares against it — what compares
-        /// against it is the **stride** between looks (`standDown`, #165), which
-        /// re-admits the room to the scan once every `Tuning.RivalRecheck` ticks
-        /// so a latch the rival has walked away from can be cleared by the only
-        /// thing that ever could. It is also the trace the gate's closing leaves
-        /// in the observe channel (#117's US-20), which is how that channel
-        /// answers which tick a room's income stopped arriving on.
-        /// The first look's tick and not the last, because that is the tick the
-        /// gate shut — and because the stride is measured from it, a look that
-        /// finds the rival still there must leave it where it stands or the next
-        /// look would never fall due. A remembered conclusion and not a per-tick
+        /// engine's own countdown says when the room comes back. Neither tick is
+        /// a clock and nothing compares against `Since` at all: it is the trace
+        /// the gate's closing leaves in the observe channel (#117's US-20),
+        /// which is how that channel answers which tick a room's income stopped
+        /// arriving on. What is compared against is `LastLooked`, one stride at
+        /// a time (`lookDue`, #165 as #275 measures it): the room is re-admitted
+        /// to the scan once a whole `Tuning.RivalRecheck` has passed since the
+        /// last look, so a latch the rival has walked away from can be cleared
+        /// by the only thing that ever could. A remembered conclusion and not a per-tick
         /// reading, which is the whole reason it is persisted: the judgement needs vision (ADR
         /// 0004), and the gate's own effect is to withdraw the creeps that pay
         /// for it, so a gate that re-read this off the view would reopen the
@@ -295,7 +327,7 @@ type RaidState =
         /// colony keeps **in Memory** (#117); the [[sighting]] the vision grace
         /// reads is per-room and carried across ticks too, and is heap-only
         /// (#151).
-        RivalHeld: Map<string, int>
+        RivalHeld: Map<string, RivalLatch>
         /// The owned creep names the previous tick projected, less the ones
         /// whose life ran out on it: the baseline this tick's losses are read
         /// against. Carried only while an episode is open, so a creep that
@@ -589,9 +621,45 @@ let private trimOutposts cap tick (episodes: OutpostEpisode list) =
 /// concerned and the engine gives no end for it, while a reservation decays at
 /// one a tick and ends on a tick the engine is already counting down
 /// (`rivalDeadlines`). A room read as latched here is withdrawn from until a
-/// look with vision says otherwise, and the looks are `Tuning.RivalRecheck`
-/// apart (`standDown`).
+/// look with vision says otherwise, and the looks are at least
+/// `Tuning.RivalRecheck` apart (`lookDue`).
 let private rivalOwned (control: RoomControlInfo) = control.Owner = Ownership.Rival
+
+/// Whether a latched room's next look falls due on this tick: a whole
+/// `Tuning.RivalRecheck` has passed since the last look was taken (#275). The
+/// one place the stride is spelled, read by the gate that hands the look out
+/// and by the fold that records it having been taken, over the same log and the
+/// same tick, so neither can be looking at a stride the other is not. They read
+/// the knob off different places — the gate takes its `Tuning` as an argument
+/// and the fold reads the view's — so the agreement is the caller's to keep,
+/// and every caller hands the gate the tuning it built the view with.
+///
+/// An **elapsed** test and not the exact multiple #165 shipped. A multiple is a
+/// gate that has to be asked on precisely one tick in five thousand or not at
+/// all, and a tick's evaluation is not guaranteed: the loop can throw before
+/// the fold writes the log, the engine cuts a tick short when the bot is out of
+/// CPU and the bucket is empty, and a deploy lands in the middle of one. Every
+/// tick lost that way silently cost the outpost a whole further stride of
+/// income. Owed is owed: the first tick this is asked on from the stride
+/// onwards pays it, and taking the look is what starts the next stride
+/// (`foldRaids`).
+///
+/// A stamp **ahead of** the clock is a look owed now. No look can be taken on a
+/// tick that has not happened, so such a stamp is not a record but a wrong
+/// number — a mistyped hand edit of the leaf, which is the documented way out
+/// of a stuck latch, or a private server rolled back behind the tick the log
+/// was written on. Without this clause the elapsed test absorbs it silently and
+/// the latch is unfalsifiable again for as long as the stamp leads the clock:
+/// the very thing #165 bought and #275 must not sell back. The exact multiple
+/// it replaces self-corrected within one tick of the stamp; this corrects
+/// within one, too, and `foldRaids` stamps the real tick over it, so the leaf
+/// heals as well as the gate.
+///
+/// A `RivalRecheck` of zero or less is "never look again", which is this rule
+/// switched off rather than a stride no tick can reach.
+let private lookDue (tuning: Tuning) (tick: int) (latch: RivalLatch) =
+    tuning.RivalRecheck > 0
+    && (latch.LastLooked > tick || tick - latch.LastLooked >= tuning.RivalRecheck)
 
 /// The [[stand-down]] gate's answer for this colony this tick (ADR 0043 as #165
 /// narrows it), read off the previous tick's log. This is the one reader that
@@ -605,15 +673,13 @@ let private rivalOwned (control: RoomControlInfo) = control.Owner = Ownership.Ri
 ///
 /// `Shut` is every room a stand-down's clock is still running in, and every room
 /// the colony last saw in another player's ownership. `Rechecked` is the second of
-/// those families alone, and only on the ticks a whole `Tuning.RivalRecheck`
-/// after the look that shut the room: the latch's own effect is to stop
-/// scanning the room, so left alone it can never meet the tick with vision that
-/// would clear it, and the room stays abandoned long after the rival has gone
-/// (#165). The stride is measured from the recorded tick and never restamped, so
-/// a look that finds the rival still there leaves the next one a full
-/// `RivalRecheck` away rather than starting the count again. A `RivalRecheck` of
-/// zero or less is "never look again", which is this rule switched off rather
-/// than a division by zero.
+/// those families alone, and only once a whole `Tuning.RivalRecheck` has passed
+/// since the last look into that room (`lookDue`): the latch's own effect is to
+/// stop scanning the room, so left alone it can never meet the tick with vision
+/// that would clear it, and the room stays abandoned long after the rival has
+/// gone (#165). The look stays owed until it is taken, and `foldRaids` records
+/// the taking, so a look that finds the rival still there leaves the next one a
+/// full `RivalRecheck` away rather than one that never falls due at all.
 let standDown (tuning: Tuning) (tick: int) (state: RaidState) : StandDown =
     {
         Shut =
@@ -625,10 +691,7 @@ let standDown (tuning: Tuning) (tick: int) (state: RaidState) : StandDown =
         Rechecked =
             state.RivalHeld
             |> Map.toList
-            |> List.filter (fun (_, since) ->
-                tuning.RivalRecheck > 0
-                && tick > since
-                && (tick - since) % tuning.RivalRecheck = 0)
+            |> List.filter (snd >> lookDue tuning tick)
             |> List.map fst
             |> Set.ofList
     }
@@ -800,14 +863,38 @@ let foldRaids (cap: int) (alive: Set<string>) (view: ColonyView) (prior: RaidSta
         // look. No ring and no cap: the map is bounded by the rooms the colony
         // scans (ADR 0041), only a room with a `RoomControl` entry ever
         // entering it.
+        //
+        // The stride between those looks is stamped here and nowhere else
+        // (#275): a look the gate handed out this tick is a look taken, so its
+        // room's `LastLooked` moves to this tick whether or not vision answered
+        // — being blind in the room is the common case, the withdrawal having
+        // taken the vision away, and a stride only stamped when something was
+        // seen would leave a blind room re-admitted to the scan on every tick
+        // from its first due one onwards. Which ticks those are is `lookDue`'s
+        // to say, the same function the gate asks, over the same log and the
+        // same tick, so the record can never disagree with the look it records.
         RivalHeld =
-            (prior.RivalHeld, view.RoomControl)
+            let looked =
+                prior.RivalHeld
+                |> Map.map (fun _ latch ->
+                    if lookDue view.Tuning view.Time latch then
+                        { latch with LastLooked = view.Time }
+                    else
+                        latch)
+
+            (looked, view.RoomControl)
             ||> Map.fold (fun rooms room control ->
                 if rivalOwned control then
                     if Map.containsKey room rooms then
                         rooms
                     else
-                        Map.add room view.Time rooms
+                        Map.add
+                            room
+                            {
+                                Since = view.Time
+                                LastLooked = view.Time
+                            }
+                            rooms
                 else
                     Map.remove room rooms)
         Living = if Option.isSome episode then surviving else Set.empty

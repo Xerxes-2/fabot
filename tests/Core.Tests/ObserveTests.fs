@@ -1822,7 +1822,7 @@ let clocklessTests =
 
                 Expect.equal
                     owned.RivalHeld
-                    (Map.ofList [ outpostRoom, 100 ])
+                    (Map.ofList [ outpostRoom, { Since = 100; LastLooked = 100 } ])
                     "an owner that is not us, against the tick the look was taken on"
 
                 Expect.isEmpty
@@ -1895,7 +1895,7 @@ let clocklessTests =
 
                 Expect.equal
                     blind.RivalHeld
-                    (Map.ofList [ outpostRoom, 100 ])
+                    (Map.ofList [ outpostRoom, { Since = 100; LastLooked = 100 } ])
                     "thirty blind ticks leave the last look's conclusion, and its tick, exactly where they stood"
             }
 
@@ -1915,8 +1915,8 @@ let clocklessTests =
 
                 Expect.equal
                     twice.RivalHeld
-                    (Map.ofList [ outpostRoom, 100 ])
-                    "the tick the gate shut on, forty ticks after a second look agreed with it"
+                    (Map.ofList [ outpostRoom, { Since = 100; LastLooked = 100 } ])
+                    "the tick the gate shut on, forty ticks after a second look agreed with it — and no look fell due in between (#275)"
             }
 
             test "a room taken again after it was freed is dated by the second withdrawal" {
@@ -1932,7 +1932,7 @@ let clocklessTests =
 
                 Expect.equal
                     again.RivalHeld
-                    (Map.ofList [ outpostRoom, 300 ])
+                    (Map.ofList [ outpostRoom, { Since = 300; LastLooked = 300 } ])
                     "the look that shut it this time, and not the one whose gate has been cleared"
             }
 
@@ -1957,6 +1957,80 @@ let clocklessTests =
                     |> raidTick 101 (quiet |> visible outpostRoom None)
 
                 Expect.isEmpty freed.RivalHeld "the room the colony can see is nobody else's again"
+            }
+
+            test "the look that falls due moves the stride, and never the date the gate shut on" {
+                // #275. The stride is measured between *looks*, so the tick a
+                // look was taken on is the one the record has to carry — and
+                // it is carried beside the shutting tick rather than over it,
+                // because the two answer different questions: one dates an
+                // income drop for an operator (#117's US-20), the other says
+                // when the colony next questions its own conclusion.
+                //
+                // The look is stamped whether or not vision answered. The gate
+                // re-admits the room to the scan for that tick and the colony
+                // may well be blind in it — which is the common case, the
+                // withdrawal itself having taken the vision away — and a look
+                // stamped only when it saw something would leave a blind room
+                // re-admitted on every tick from the stride onwards.
+                let recheck = Tuning.defaults.RivalRecheck
+                let state = RaidState.empty |> raidTick 100 (quiet |> ownedByRival outpostRoom)
+
+                Expect.equal
+                    state.RivalHeld
+                    (Map.ofList [ outpostRoom, { Since = 100; LastLooked = 100 } ])
+                    "the look that shut the gate is the last look taken, so far"
+
+                // Forty ticks late, which is the whole of what this ticket
+                // fixes: a tick the gate was not evaluated on delays the look
+                // rather than cancelling it.
+                let looked = state |> raidTick (100 + recheck + 40) quiet
+
+                Expect.equal
+                    looked.RivalHeld
+                    (Map.ofList
+                        [
+                            outpostRoom,
+                            {
+                                Since = 100
+                                LastLooked = 100 + recheck + 40
+                            }
+                        ])
+                    "the blind look is taken all the same, and the date of the withdrawal stands"
+
+                Expect.isEmpty
+                    (recheckedAt (100 + recheck + 41) looked)
+                    "so the tick after the look, nothing is looked into"
+
+                Expect.equal
+                    (recheckedAt (100 + 2 * recheck + 40) looked)
+                    (Set.singleton outpostRoom)
+                    "and the next look falls a stride after the look, not a stride after the shutting"
+            }
+
+            test "a look with vision that agrees moves the stride and clears nothing" {
+                // The look that finds the rival still there: the latch stands,
+                // its date stands, and the stride runs again from this look.
+                // The one thing that separates it from the blind look above is
+                // that it could have cleared the latch and did not.
+                let recheck = Tuning.defaults.RivalRecheck
+
+                let agreed =
+                    RaidState.empty
+                    |> raidTick 100 (quiet |> ownedByRival outpostRoom)
+                    |> raidTick (100 + recheck) (quiet |> ownedByRival outpostRoom)
+
+                Expect.equal
+                    agreed.RivalHeld
+                    (Map.ofList
+                        [
+                            outpostRoom,
+                            {
+                                Since = 100
+                                LastLooked = 100 + recheck
+                            }
+                        ])
+                    "still theirs, shut since the same tick, and looked into on the stride"
             }
 
             test "a colony nobody has taken anything from remembers nothing" {
@@ -2107,12 +2181,19 @@ let gateTests =
                     (Set.singleton outpostRoom)
                     "on the stride itself the room is re-admitted to the scan"
 
+                // The look is one tick long because taking it stamps the
+                // stride, so the test for that has to fold the tick the look
+                // was taken on — the gate alone, asked twice about a log
+                // nothing wrote to in between, is being asked about a look
+                // that is still owed (#275, and the test below).
+                let looked = state |> raidTick (100 + recheck) (quiet |> ownedByRival outpostRoom)
+
                 Expect.isEmpty
-                    (recheckedAt (100 + recheck + 1) state)
+                    (recheckedAt (100 + recheck + 1) looked)
                     "and the look is one tick long"
 
                 Expect.equal
-                    (recheckedAt (100 + 2 * recheck) state)
+                    (recheckedAt (100 + 2 * recheck) looked)
                     (Set.singleton outpostRoom)
                     "a look that changed nothing leaves the next one a whole stride away"
 
@@ -2122,10 +2203,14 @@ let gateTests =
 
                 // The knob at a second value, which is what makes it a
                 // tunable and not a constant in disguise (ADR 0052 decision
-                // 5). 3,000 rather than 1,000 on purpose: 5,000 is a multiple
-                // of 1,000, so a colony tuned to look every 1,000 ticks would
-                // look on the shipped stride too and the pair would prove
-                // nothing about which number was read.
+                // 5). The exact-multiple rule had its own trap here — 5,000 is
+                // a multiple of 1,000, so a colony tuned to 1,000 would have
+                // looked on the shipped stride too — and the elapsed rule
+                // (#275) has none: any value below the shipped one separates
+                // the two at a tick between them. 3,000 is that, and the pair
+                // below asks 3,100: a stride of 3,000 has elapsed there and a
+                // stride of 5,000 has not, so the second assertion fails
+                // outright if the constant is read in place of the knob.
                 let sooner =
                     { Tuning.defaults with
                         RivalRecheck = 3000
@@ -2137,8 +2222,8 @@ let gateTests =
                     "a colony tuned to look oftener looks on its own stride"
 
                 Expect.isEmpty
-                    (standDown sooner (100 + recheck) state).Rechecked
-                    "and not on the one the bot ships with"
+                    (recheckedAt 3_100 state)
+                    "and on that tick the shipped stride is not due yet: the knob is read, not a constant"
 
                 Expect.isEmpty
                     (standDown
@@ -2149,6 +2234,83 @@ let gateTests =
                         state)
                         .Rechecked
                     "a stride of zero is this rule switched off, not a tick divided by nothing"
+            }
+
+            test "a tick the gate was never evaluated on delays the look, never forfeits it" {
+                // #275. The stride used to be an exact-multiple test —
+                // `(tick - since) % RivalRecheck = 0` — a gate that has to be
+                // asked on precisely the right tick or not at all. A tick's
+                // evaluation is not guaranteed: the loop can throw before the
+                // log is written, the engine cuts a tick short when the bot is
+                // out of CPU and the bucket is empty, and a deploy lands in the
+                // middle of one. Under the old test every tick lost that way
+                // cost a whole 5,000 ticks of an outpost's income, silently,
+                // because the next tick the gate answered on was another stride
+                // away. A look that is owed stays owed.
+                let recheck = Tuning.defaults.RivalRecheck
+                let state = RaidState.empty |> raidTick 100 (quiet |> ownedByRival outpostRoom)
+
+                Expect.isEmpty
+                    (recheckedAt (100 + recheck - 1) state)
+                    "one tick short of the stride the look is not owed yet"
+
+                Expect.equal
+                    (recheckedAt (100 + recheck + 1) state)
+                    (Set.singleton outpostRoom)
+                    "the tick after the stride, with nothing having looked, the look is still owed"
+
+                Expect.equal
+                    (recheckedAt (100 + recheck + 3_000) state)
+                    (Set.singleton outpostRoom)
+                    "and three thousand ticks after it, nowhere near a multiple of the stride"
+
+                Expect.equal
+                    (recheckedAt (100 + 3 * recheck - 1) state)
+                    (Set.singleton outpostRoom)
+                    "two whole strides of missed ticks are a late look and not a lost one"
+            }
+
+            test "a look stamped ahead of the clock is owed now, and the fold stamps the real tick" {
+                // #275's own hazard, which the exact multiple it replaces did
+                // not have. An elapsed test has no upper bound, so a
+                // `LastLooked` in the future absorbs every tick until the
+                // clock catches it up and a stride passes on top — a latch
+                // silenced for longer than the stride, which is exactly the
+                // unfalsifiable gate #165 bought its way out of. Two ways in,
+                // both real: a mistyped hand edit of this leaf, which is the
+                // documented way out of a stuck latch, and a private server
+                // rolled back behind the tick the log was written on. No look
+                // is taken on a tick that has not happened, so a stamp ahead
+                // of the clock is a wrong number and not a record.
+                let ahead =
+                    { RaidState.empty with
+                        RivalHeld =
+                            Map.ofList [ outpostRoom, { Since = 100; LastLooked = 9_000_000 } ]
+                    }
+
+                Expect.equal
+                    (recheckedAt 100_000 ahead)
+                    (Set.singleton outpostRoom)
+                    "the look is owed on the first tick the gate is asked, not nine million ticks out"
+
+                Expect.equal
+                    (shutAt 100_000 ahead)
+                    (Set.singleton outpostRoom)
+                    "and the room is withheld from the work through it, as on every other tick"
+
+                // The gate corrects in one tick; the leaf corrects with it,
+                // because the fold stamps the tick the look actually fell due
+                // on over the impossible one.
+                let healed = ahead |> raidTick 100_000 (quiet |> ownedByRival outpostRoom)
+
+                Expect.equal
+                    healed.RivalHeld
+                    (Map.ofList [ outpostRoom, { Since = 100; LastLooked = 100_000 } ])
+                    "the impossible stamp is written over by the look that was taken, the date standing"
+
+                Expect.isEmpty
+                    (recheckedAt 100_001 healed)
+                    "so the stride runs from the real look and the room is not re-read every tick"
             }
 
             test "a clocked stand-down is never re-checked, and an empty log never looks" {
