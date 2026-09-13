@@ -9,7 +9,7 @@
 // which moves the structure census every Nth tick so the census-keyed
 // memos (ADR 0017, ADR 0032) are made to pay their recompute.
 //
-// Four scenarios, chosen with --scenario:
+// Five scenarios, chosen with --scenario:
 //   stub     one synthetic room (the default), the shape this harness has
 //            always measured
 //   outpost  the colony's own room and its declared neighbours, on the
@@ -29,6 +29,23 @@
 //            `Tuning.BootstrapLevel` (#192). `decide` runs once per living
 //            colony, exactly as `Main.loop` runs it, and the report
 //            prints one CPU row per colony's `decide` beside the total.
+//   reactor  the season's programme (ADR 0057, ADR 0060): the third
+//            colony W15S28 at RCL6 with its Thorium deposit actually dug
+//            — a standing extractor on the deposit, the mine container on
+//            its Seat and a pile on the mine post — and the sector
+//            Reactor in W15S25 declared as an [[errand]] three crossings
+//            out, by W15S27 and the Source Keeper room W15S26, with the
+//            re-claimer standing at the far end of that chain. Every
+//            scenario has furnished its room's **mineral** all along
+//            (`furnishHome` fills FIND_MINERALS), and until this one none
+//            furnished an extractor, a mineral container or a Thorium
+//            pile, so `ourMineralContainers` was `[]` everywhere and every
+//            ore arm of the pool was a branch this harness had never
+//            entered (#308) — and
+//            neither was the masked keeper layer, the errand's projection
+//            entry, the priced three-hop chain (ADR 0059) or the
+//            `Reclaim` Task at the end of it. ADR 0056's rule, one
+//            programme further on.
 //
 // The two scenarios that stand an outpost — `outpost` and `pair` — also
 // take `--raided`, which puts one armed hostile in the first of them: the
@@ -64,6 +81,12 @@
 //                  `Tuning.BootstrapLevel` the bootstrap window closes,
 //                  the mother stops projecting the child's room and the
 //                  two colonies run side by side with nothing shared.
+//   reactor        the one colony, default RCL6 — `Tuning.ExtractorLevel`,
+//                  which is the level the mine exists at at all. Below it
+//                  the scenario stands no extractor and no mine
+//                  container, because the Layout plans neither there, and
+//                  says so in its report rather than measuring a mine the
+//                  colony would not have built.
 
 import { createRequire } from "node:module";
 import { Session } from "node:inspector/promises";
@@ -73,7 +96,7 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { report as cpuReport } from "./cpu-trigger.mjs";
 
-const SCENARIOS = ["stub", "outpost", "young", "pair"];
+const SCENARIOS = ["stub", "outpost", "young", "pair", "reactor"];
 // The scenarios `--raided` means anything for: a raid stands in an outpost,
 // and these are the two that furnish one. Refused elsewhere rather than
 // quietly ignored — a flag that named no hostile and printed no raid would
@@ -82,7 +105,7 @@ const SCENARIOS = ["stub", "outpost", "young", "pair"];
 const RAIDABLE = ["outpost", "pair"];
 const USAGE =
   "usage: npm run profile -- [ticks] [top-N] [--census-every N]" +
-  " [--scenario stub|outpost|young|pair] [--level 1..8] [--raided]" +
+  " [--scenario stub|outpost|young|pair|reactor] [--level 1..8] [--raided]" +
   "  (positive integers)";
 
 // The controller level a scenario's colony is built at, and the one number
@@ -97,7 +120,15 @@ const USAGE =
 // Which colony the flag moves is the scenario's, and the header comment
 // spells it: for `pair` it is the child, and the mother stays at
 // MOTHER_LEVEL below.
-const DEFAULT_LEVEL = { stub: 5, outpost: 5, young: 1, pair: 2 };
+//
+// `reactor`'s 6 is `Tuning.ExtractorLevel` and the one default that is not a
+// live room's — W15S28 stands at RCL5 — because a run under that level stands
+// no mine and the scenario exists for the ore half. It is spelled here and not
+// read off the bundle because the flags are parsed before the bundle loads;
+// the scenario itself asks `Tuning` for the level its mine stands at, so a
+// default left behind by a change to that field costs the run its mine and the
+// `mine` block reports which of the two rooms was measured.
+const DEFAULT_LEVEL = { stub: 5, outpost: 5, young: 1, pair: 2, reactor: 6 };
 
 // The mother's level in the `pair` scenario. Pinned rather than flagged:
 // ADR 0052's scenario is "an RCL5 mother with a bootstrapping child", and
@@ -1097,6 +1128,18 @@ function stubCreep({ name, pos, parts, used, ticksToLive = CREEP_LIFE_TIME }) {
     // the surface `Bindings.fs` declares is the only stub that cannot
     // rot this way.
     claimController: ok,
+    // The [[re-claimer]]'s verb (ADR 0057 decision 5, #318): the season mod's
+    // own custom intent, taking the sector Reactor for this player. The same
+    // bill a fifth time, and this one was standing unpaid in the tree — the
+    // verb landed in `Bindings.fs` with the `ClaimReactor` Intent and no
+    // scenario declared an errand, so nothing in this harness ever reached it
+    // and `dotnet test`, which does not drive the Executor against a stub
+    // creep, could not. The `reactor` scenario found it on its first run, in
+    // the **hiring** loop rather than a profiled tick, which is the shape of
+    // this defect every time: a verb the Executor reaches for the tick a row
+    // is first matched takes the whole run down, and that is how a stub says
+    // "this row does not exist".
+    claimReactor: ok,
     // The [[guard]]'s two verbs (ADR 0056), and the same bill a fourth
     // time: the `--raided` outpost is where a Guard is pooled, so the tick
     // a Fighter stands on an invader's ring the Executor reaches for both
@@ -1147,7 +1190,13 @@ function pavingPerturbation({ spare, structures, byId, structure }) {
 // drain (ADR 0046), a number with no places in it at all, so however many
 // the colony hires they all belong at the one buffer and the cursor is
 // meant to wrap them around it.
-const ONE_PER_STATION = new Set(["anchor"]);
+// The [[miner]] row is the second of them and arrived with the `reactor`
+// scenario: its quota is one body per deposit the colony can actually dig
+// (`Quota.minerQuota`), and the place it works from is the mine [[post]] — the
+// container's own tile — exactly as an Anchor's is a rock's. A second miner
+// wrapping onto the one station would be two bodies on one Post, which is the
+// same silence the Anchor's entry here refuses.
+const ONE_PER_STATION = new Set(["anchor", "miner"]);
 
 // The fleet, hired by the bundle rather than written down.
 // ---------------------------------------------------------------------------
@@ -1218,6 +1267,12 @@ function hireFleet(world, game, loop) {
     claimsIn(world, creep.room.name).add(keyOf(creep.pos));
   const cursors = new Map();
   const bodies = new Map();
+  // The bodies this function cast, kept as well as counted: every scenario's
+  // crew is stood *after* the hire and onto the same `world.creeps`, so a
+  // caller that wanted the fleet alone had to take it by position off that
+  // list. Handed back instead, the invariant is the record's and not the
+  // ordering's.
+  const hires = [];
   let hired = 0;
   let hireTicks = 0;
 
@@ -1334,6 +1389,7 @@ function hireFleet(world, game, loop) {
       creep.room = station.room;
       world.byId.set(creep.id, creep);
       world.creeps.push(creep);
+      hires.push(creep);
       game.creeps[creep.name] = creep;
       hired++;
     }
@@ -1345,7 +1401,7 @@ function hireFleet(world, game, loop) {
   // the wrong one would stand a 300-energy body where an 1,800-energy one
   // works.
   const bodyOf = (spawnName, row) => bodies.get(`${spawnName} ${row}`);
-  return { hired, hireTicks, bodyOf };
+  return { hired, hireTicks, bodyOf, hires };
 }
 
 // The body a crew the bundle does not hire is cast from: one the colony
@@ -2729,11 +2785,670 @@ function buildPairWorld() {
   };
 }
 
+// ---------------------------------------------------------------------------
+// Scenario `reactor`: the season's programme — the third colony with its mine
+// dug, and the sector Reactor declared as an [[errand]] three crossings out
+// (ADR 0057, ADR 0060).
+// ---------------------------------------------------------------------------
+
+// The third colony's room (`Colony.declared`, 2026-09-10). Its two rocks are
+// on the west side and its controller in the south-east, which is why its
+// trunk is the longest of the nine candidate rooms the survey swept.
+const REACTOR_HOME = "W15S28";
+
+// Where its spawn stands. The live room has **none** — it was claimed on
+// 2026-09-10 with a spawn site placed by hand and this colony is not living
+// yet — so unlike `HOME_SPAWN` and `CHILD_SPAWN` this is not a tile read off
+// the server. It is the tile `docs/research/third-colony.md` §2's own
+// per-room sweep names as the cheapest spawn position in W15S28 (57 trunk
+// tiles, `ext=40 / unserved=0 / unrouted=0`), which is the nearest thing to a
+// fact there is about a room whose Layout has not been built: a number a
+// human derived once, written down here rather than re-derived, for the
+// reason every other placement in this file is. The report says so, and
+// `docs/profiling.md`'s known fictions say so, because it is the one tile in
+// this scenario the live server cannot be compared against.
+const REACTOR_SPAWN = { x: 18, y: 30 };
+// Not `Spawn1`: an object id is unique across the world and a spawn *name* is
+// what `Decide.planSpawns` writes into every creep name it casts, so the
+// third colony's spawn carries the third name. It is the live room's own
+// name and tile: W15S28 stands `Spawn3` at `18,30` on the server, read at
+// t411,716 on 2026-09-13, which is the tile the sweep in
+// `docs/research/third-colony.md` §2 chose before the room was claimed.
+const REACTOR_SPAWN_NAME = "Spawn3";
+
+// One field of the bundle's own `Tuning.defaults`, asserted numeric by name.
+// `Tuning` is `private` to Core and this script drives the compiled bundle, so
+// every threshold the scenario stands a world *against* is read here rather
+// than written down a second time — a copy is free to fall behind the rule it
+// mirrors, and the report states these thresholds as facts about what it
+// measured.
+const tuningNumber = (field) => {
+  const defaults = globalThis.__fabotTuning?.();
+  const value = defaults?.[field];
+  if (typeof value !== "number") {
+    throw new Error(
+      `src/Core/Types/Rules.fs's \`Tuning.defaults\` carries no numeric \`${field}\` — the ` +
+        "reactor scenario stands its mine against it rather than against a number written in " +
+        "this file (#321), and whatever renamed the field is what this has to be re-pointed at",
+    );
+  }
+  return value;
+};
+
+// What the mine holds, and both numbers are chosen to put a rung in the
+// measurement rather than to be tidy. Both are **checked against the
+// bundle's own Tuning** where the mine is stood, because the report states
+// each relation as a fact about the branch it measured, and a threshold
+// raised in `Rules.fs` would otherwise leave the scenario quietly measuring
+// the other side of the rung under a report that still claimed this one:
+//
+// - the mineral container at 1,800 of 2,000 is **over**
+//   `Tuning.MineContactCliff`, which is #306's own rung: a mineral container
+//   past the cliff is drawn before the [[storage]]'s bank rather than tying
+//   it and losing every travel-cost tie. Under the cliff that branch is never
+//   taken and the ore's Withdraw is a `StockDraw` like any other.
+// - the pile at 630 is the amount live on W12S28's mine tile at ~t401,850
+//   (#311), and it is over `Tuning.PickupThreshold` — under it the Pickup is
+//   not pooled at all and the floor arm goes unexecuted.
+const MINE_CONTAINER_THORIUM = 1800;
+const MINE_PILE_THORIUM = 630;
+
+// The ore aboard the one hauler that carries some. A body holding Thorium is
+// applicable to the Thorium Refill and to nothing else — ore aboard shuts
+// every energy intake it has (ADR 0057 decision 3) — so without one the sink
+// half of the mine-to-Storage leg is pooled and never matched, which is
+// exactly the "pooled is not executed" gap #308 found on the intake half.
+const ORE_HAULER_THORIUM = 150;
+
+// The season mod's `FIND_REACTORS`, as `Bindings.fs`'s `findReactors` spells
+// it. Written here as the engine's own number the way every other find table
+// in this file is, and it is the **only** sweep that can answer with a
+// reactor: the mod registers it through `registerCustomObjectPrototype`, so
+// it is in no built-in find cache and `FIND_STRUCTURES` has never carried it
+// (#318).
+const FIND_REACTORS = 10051;
+
+// Whose flag stands on the reactor when the run starts. A **rival**'s, and
+// that is the whole of what the `Reclaim`'s act is gated on (ADR 0057
+// decision 5): `ClaimReactor` is issued on a tick the reactor is not ours and
+// on no other, so a scenario that stood an unclaimed — or our own — reactor
+// would hold the Task for the whole run and emit the act never. The name is
+// the one ADR 0060 decision 4 read off the live board.
+const REACTOR_RIVAL = "Odiodin";
+
+// The declared [[errand]]s of one home, off the bundle's own constant and
+// never off a copy here (#287's rule, one declaration kind further on): the
+// reactor's id and tile are a human's entry in `Colony.declared`, and a
+// second spelling of them in this file would be a hand-copied shadow free to
+// fall behind exactly as the declared-room list did.
+const declaredErrands = (home) => {
+  const errands = globalThis.__fabotErrands;
+  if (!errands) {
+    throw new Error(
+      "the bundle must be loaded before a scenario's world is built: the declared errands are " +
+        "read off `Colony.declared`, not out of a list in this file (#287, #321)",
+    );
+  }
+  return errands(home);
+};
+
+const chebyshev = (a, b) => Math.max(Math.abs(a.x - b.x), Math.abs(a.y - b.y));
+
+// The mine, stood on a home room's own deposit (ADR 0057 decision 1): the
+// extractor on the deposit's tile, the mineral [[container]] on one of its
+// Seats, and the pile the dig lands on the floor when the container is at its
+// cap (#311). Three objects, and until this scenario none of them stood
+// anywhere in this harness — which is why `ourMineralContainers` was `[]` at
+// every level, the mine Withdraw was never pooled, the [[hauler unit]]'s mine
+// term was always zero and `depositIsDiggable` was never asked a question with
+// a non-trivial answer (#308).
+//
+// Every tile is read off the capture and the room's own claimed set, never
+// written down: the deposit is where the season mod put it, and the Seat is
+// whichever walkable neighbour the furnishing left free. The **range-1 check
+// is not a formality** — `Facts.ourMineralContainerPairs` joins a container to
+// a deposit at Chebyshev 1 in the deposit's own room, so a container one tile
+// further out is no mine Post at all and the whole leg would go on reading
+// empty with the report still calling it a mine.
+function standMine(home, register, structure) {
+  const deposits = home.capture.minerals ?? [];
+  if (deposits.length !== 1) {
+    throw new Error(
+      `${home.capture.name}: the capture carries ${deposits.length} Thorium deposits and this ` +
+        "scenario is about the one this colony was sited for (ADR 0060 decision 3)",
+    );
+  }
+  const deposit = deposits[0];
+  const seat = nearestFree(home.capture, deposit.pos, home.taken);
+  if (chebyshev(seat, deposit.pos) !== 1) {
+    throw new Error(
+      `${home.capture.name}: the nearest free tile to the deposit at ${keyOf(deposit.pos)} is ` +
+        `${keyOf(seat)}, which is not one of its Seats — a container off the Seat ring joins no ` +
+        "deposit (Facts.ourMineralContainerPairs) and the mine leg would read empty",
+    );
+  }
+  home.taken.add(keyOf(seat));
+
+  // Both stores against the bundle's own thresholds, because the `mine` block
+  // states both relations as facts about what it measured. A cliff raised past
+  // 1,800 in `Rules.fs` leaves this container **under** it, #306's rung
+  // unexecuted and the report still calling it "over Tuning.MineContactCliff";
+  // a `PickupThreshold` raised past 630 takes the floor arm out of the pool
+  // altogether. Loud here, where the edit that closes it is one number.
+  const cliff = tuningNumber("MineContactCliff");
+  if (MINE_CONTAINER_THORIUM <= cliff) {
+    throw new Error(
+      `the mine container holds ${MINE_CONTAINER_THORIUM} T against a Tuning.MineContactCliff ` +
+        `of ${cliff}: the reactor scenario stands it **over** the cliff so #306's rung is in ` +
+        "the ms, and the `mine` block says so on every run — raise MINE_CONTAINER_THORIUM past " +
+        "the cliff (and under CONTAINER_CAPACITY) or the report is claiming a branch this world " +
+        "no longer takes",
+    );
+  }
+  const threshold = tuningNumber("PickupThreshold");
+  if (MINE_PILE_THORIUM <= threshold) {
+    throw new Error(
+      `the mine pile holds ${MINE_PILE_THORIUM} T against a Tuning.PickupThreshold of ` +
+        `${threshold}: under the threshold the Pickup is not pooled at all and the floor arm of ` +
+        "the ore half goes unexecuted, which is the coverage this scenario exists to have",
+    );
+  }
+
+  // The extractor stands on the deposit's own tile, which is a wall — that is
+  // where the mod puts a Thorium deposit and it is what keeps the tile off the
+  // clustered checkerboard. `cooldown` is a real field on this kind alone
+  // (`EXTRACTOR_COOLDOWN` is 5) and 0 is a real answer meaning "this tick", so
+  // the dig's act is issued rather than withheld (ADR 0057 decision 2).
+  const extractor = structure("extractor-0", "extractor", deposit.pos, {
+    cooldown: 0,
+  });
+  const container = structure("cont-mine", "container", seat, {
+    store: store({
+      used: 0,
+      capacity: CONTAINER_CAPACITY,
+      thorium: MINE_CONTAINER_THORIUM,
+    }),
+  });
+  // On the mine Post, which is where the store-less [[miner]]'s overflow lands
+  // — but only **once the container is at its cap**, and that is the engine's
+  // rule and not a detail: `_create-energy.js` pours a drop into a container
+  // standing on the same tile first and lands on the floor only with what will
+  // not fit. So this pair is the tick *after* a draw, the pile already down and
+  // 200 taken back out of a full container, and never a world where a dig at
+  // 1,800 made the pile. `Pool.fs` reads the pile as "that container's next
+  // dig, landed on the floor because the store was full" and ranks the two
+  // together for it, which is why they share the tile here.
+  //
+  // What sharing it costs the measurement is named in the report's fictions:
+  // the container's `Withdraw(_, Thorium)` and the pile's `Pickup(_, Thorium)`
+  // are then priced at the **same** travel cost, so which of the two rungs an
+  // empty carrier takes is not arbitrated over any distance here.
+  //
+  // A pile is a bare amount and not a store, so it carries `amount` where
+  // everything else carries `getUsedCapacity` (`IResource`).
+  const pile = register({
+    id: "pile-mine",
+    resourceType: THORIUM,
+    amount: MINE_PILE_THORIUM,
+    pos: seat,
+  });
+
+  home.finds[107].push(extractor, container);
+  // Ours, unlike the containers beside it: an extractor is an owned structure
+  // and `World.factsOf` reads whose a structure is off this table alone.
+  home.finds[108].push(extractor);
+  home.finds[106].push(pile);
+
+  return { deposit, seat, extractor, container, pile };
+}
+
+// The ore crew: the bodies the mine-to-[[storage]] leg needs at both ends,
+// stood after the fleet is hired for the reason every other crew in this file
+// is — the world-wide `Game.creeps` is what the Workforce target counts
+// against, so crewing first would have the bundle hire that much less.
+//
+// A **floor and not a quota**, like the outpost crew above: the hauler row's
+// own quota already prices the mine's round trips (`Quota.mineRows`), and what
+// this stands is one body per *arm* rather than one body per trip. The count is
+// the shape of the mine and not a number chosen here:
+//
+// - one body **holding ore**, for the sink. `Refill(storage, Thorium)` is
+//   applicable to a body carrying Thorium and to no other — ore aboard shuts
+//   every energy intake it has (ADR 0057 decision 3) — and `store()` has
+//   answered that second column honestly only since #262, so this is the case
+//   no scenario in this harness had ever stood.
+// - one **empty** body per ore draw the mine offers, which today is two: the
+//   mineral container's `Withdraw(_, Thorium)` and the pile on its Post's
+//   `Pickup(_, Thorium)`. One body would take whichever of the two outranks the
+//   other and leave the second pooled and unmatched — and a Task pooled but
+//   matched to nobody is precisely what #308 found this harness reporting as
+//   coverage.
+//
+// Empty rather than part-filled, which is not a convenience but the condition:
+// a hauler holding energy is applicable to neither ore Task, and the colony's
+// own hired hauler row is holding energy by the time this runs.
+const oreCrew =
+  ({ home, spawnName, rcl, mine, sink, claimed, register, creeps }) =>
+  (bodyOf, game) => {
+    const parts = crewBody(bodyOf, spawnName, "hauler", rcl);
+    const capacity =
+      parts.filter((part) => part === "carry").length * CARRY_CAPACITY;
+
+    const stand = (name, at, thorium) => {
+      const pos = nearestFree(home.capture, at, claimed);
+      claimed.add(keyOf(pos));
+      const creep = register(stubCreep({ name, pos, parts, used: 0 }));
+      creep.store = store({ used: 0, capacity, thorium });
+      creep.room = home.room;
+      creeps.push(creep);
+      game.creeps[creep.name] = creep;
+      return creep;
+    };
+
+    // One body at each **end** of the leg, which is what makes the acts as well
+    // as the Tasks reachable: the draws below stand at the mine, and the laden
+    // body stands beside the [[storage]] it is carrying its load to. Standing it
+    // at the mine instead held `Refill(storage, Thorium)` perfectly well and
+    // issued the `transfer` never — the body was twenty tiles from its Work Area
+    // and spent the frozen run walking — which is a Task executed and an act
+    // that is not, and the whole point of counting the two apart. Beside the
+    // spawn where the level stands no Storage, where the Refill is not pooled
+    // at all (#262 reads this arm off the Storage and off nothing about the
+    // mine).
+    const laden = stand(
+      "ore-laden",
+      sink ? sink.pos : home.spawnPos,
+      Math.min(ORE_HAULER_THORIUM, capacity),
+    );
+    if (!mine) return [laden];
+    return [
+      laden,
+      stand("ore-draw-0", mine.container.pos, 0),
+      stand("ore-draw-1", mine.pile.pos, 0),
+    ];
+  };
+
+function buildReactorWorld() {
+  const { byId, register, structure } = worldRegistry();
+
+  const capture = loadCapture(REACTOR_HOME);
+
+  // The errand, off the declaration: one room, one target id, one tile. A
+  // colony that declared none — or two — is a world this scenario cannot
+  // stand, and saying so beats standing the first of them and calling the
+  // report an errand's.
+  const errands = declaredErrands(REACTOR_HOME);
+  if (errands.length !== 1) {
+    throw new Error(
+      `${REACTOR_HOME} declares ${errands.length} errands in Colony.declared and the reactor ` +
+        "scenario is about the one sector Reactor this colony was sited to reach (ADR 0060 " +
+        "decision 3)",
+    );
+  }
+  const errand = errands[0];
+  if (errand.tileRoom !== errand.room) {
+    throw new Error(
+      `${REACTOR_HOME}'s errand names a target in ${errand.tileRoom} and a room of ` +
+        `${errand.room} — a tile filed under another room's name is dropped by Errand.place, so ` +
+        "nothing would ever be projected there",
+    );
+  }
+
+  const home = furnishHome({
+    capture,
+    spawnPos: REACTOR_SPAWN,
+    spawnName: REACTOR_SPAWN_NAME,
+    rcl: LEVEL,
+    prefix: "",
+    register,
+    structure,
+  });
+
+  // The mine, only at the level the colony would have one (ADR 0057 decision
+  // 1). Below `Tuning.ExtractorLevel` the room stands its two energy Posts and
+  // its cluster and nothing else, exactly as `young` stands no road below
+  // `Tuning.BootstrapLevel`, and the report says which of the two rooms this
+  // run measured.
+  const mine =
+    LEVEL >= tuningNumber("ExtractorLevel")
+      ? standMine(home, register, structure)
+      : null;
+
+  // --- the errand room ---------------------------------------------------
+  // Vision in it, because the body standing there is what the live colony's
+  // vision of that room *is* (ADR 0060 decision 1) — it is the only eye we
+  // have on the reactor, and a scenario that stood the body and left the room
+  // dark would measure the errand narrowing over an empty room rather than
+  // over the rocks and the sites the engine really answers with. The
+  // narrowing's whole claim is that none of that reaches the pool, and a
+  // scenario with nothing to narrow proves it about nothing.
+  //
+  // No controller, and that is the vocabulary hole the errand kind fills: a
+  // sector centre has none at all, which is why this room can never be an
+  // `Outpost` and why `furnishOutpost` above cannot stand it.
+  const errandCapture = loadCapture(errand.room);
+  const errandSources = registerSources(errandCapture, register);
+  // The reactor itself: an id, an owner, and nothing else that decides. It is
+  // indestructible and carries no `hits`, and its tile is the
+  // **declaration**'s and never a fact read here.
+  //
+  // `my` is **false** and not `undefined`, which is the mod's own accessor
+  // answering about a reactor somebody else holds: `my: o => o.user ? o.user ==
+  // scope.runtimeData.user._id : undefined` and `owner: o => o.user ? {
+  // username } : undefined` (`mod-season5/src/reactor.roomObject.js`), so a
+  // rival's flag gives `my = false` with an `owner`, and `undefined` is the
+  // **unowned** answer alone. Both fall through `World.factsOf` to `Rival`
+  // while the owner stands, so nothing in the report moves — but a stub
+  // standing a shape the engine never produces is how a harness comes to be
+  // believed about a branch it never ran (#262).
+  const reactor = register({
+    id: errand.id,
+    my: false,
+    owner: { username: REACTOR_RIVAL },
+    pos: errand.tile,
+  });
+  const errandRoom = stubRoom({
+    name: errandCapture.name,
+    controller: undefined,
+    findTables: {
+      105: errandSources,
+      108: [],
+      107: [],
+      114: [],
+      115: [],
+      103: [],
+      106: [],
+      116: [],
+      [FIND_REACTORS]: [reactor],
+    },
+  });
+  // What a body may not be stood on out there: the reactor's own tile — so
+  // the re-claimer is resolved outward onto the ring it acts from rather than
+  // under the thing it is acting on — and the room's rocks, which are
+  // obstacles the engine will not let a creep share however thoroughly the
+  // errand narrowing drops them from the pool.
+  const errandOccupied = new Set([
+    keyOf(errand.tile),
+    ...errandSources.map((source) => keyOf(source.pos)),
+  ]);
+
+  // --- the fleet's stations ----------------------------------------------
+  const stations = homeStations(home);
+  // The re-claimer, three crossings out at the far end of the chain (ADR 0060
+  // decision 3). It is cast from the **reserver** row — a `[Claim; Move]` body
+  // is read back as a reserver whatever it was bought for (ADR 0006), which is
+  // why the errand's seat is a third entry in that row's quota and not a row
+  // of its own — and it is stationed at the reactor's tile, which the claimed
+  // set above holds, so `nearestFree` resolves it onto the range-1 ring the
+  // act is made from. Standing it at home instead would price a three-room
+  // walk it never finishes in a frozen world and the `ClaimReactor` act would
+  // be emitted never, which is the branch this scenario exists to execute.
+  //
+  // At the far **end** of the crossing and not part-way along it, which is a
+  // deviation from #321's wording and taken deliberately: a body stood in
+  // W15S26 or W15S27 would put a creep's own walk across the masked layer in
+  // every tick's ms, but those two rooms carry terrain alone — standing a body
+  // in one means standing a third room, and the act the scenario exists to
+  // execute is gated on being at range 1 of the reactor (ADR 0057 decision 5),
+  // so it would be issued never. The **chain** is priced across the mask
+  // regardless, every tick, by `World.linked` (ADR 0059), which is the half a
+  // mid-crossing body would have added nothing to.
+  //
+  // Appended to the row's home seat rather than replacing it: `homeStations`
+  // seats the reserver at the spawn so that the day W15S28 declares an outpost
+  // this harness reports a creep in the wrong room instead of throwing on the
+  // first cast, and the errand's seat is a *third* entry in that row's quota
+  // and not a substitute for it. First in the list, so the row's one body
+  // stands at the reactor.
+  stations.reserver = [
+    ...stationsIn(errandRoom, errandCapture, [errand.tile]),
+    ...stations.reserver,
+  ];
+  // The [[miner]] on the mine Post, which is a place and not a pool: the row's
+  // quota is one body per deposit it can dig, and the tile it digs from is the
+  // container's own — the same rule that stands an Anchor on a source's Post
+  // (ADR 0020, ADR 0048, ADR 0051). Empty below `Tuning.ExtractorLevel`, where
+  // no extractor stands and the row's quota is zero, and `hireFleet` says so
+  // if it is ever cast against such a world.
+  stations.miner = mine ? stationsOn(home.room, capture, [mine.seat]) : [];
+
+  // The spare lane the census perturbation walks: the unpaved ground between
+  // each pair of the room's containers in turn, the `outpost` scenario's own
+  // rule. Container to container and not Post to Post — at RCL6 the room's
+  // containers include the upgrade buffer, which is no Post at all.
+  const paved = new Set(home.taken);
+  const spare = [];
+  for (let i = 0; i + 1 < home.containers.length; i++) {
+    for (const tile of route(
+      capture,
+      home.containers[i].pos,
+      home.containers[i + 1].pos,
+      home.blocked,
+    )) {
+      const key = keyOf(tile);
+      if (paved.has(key)) continue;
+      paved.add(key);
+      spare.push(tile);
+    }
+  }
+  if (spare.length === 0) {
+    throw new Error(
+      `${capture.name}: every tile between the containers is already paved`,
+    );
+  }
+
+  const creeps = [];
+  // The home room's claimed tiles less its Posts, as every scenario hands
+  // them over — and the mine Post is out of it too, for the Anchor row's own
+  // reason: `standMine` claims the Seat in `taken` after `furnishHome` has
+  // taken its copy, so the tile the miner garrisons is free for it to stand on
+  // and is claimed by `hireFleet` the tick the body is cast.
+  const homeClaimed = home.occupied;
+
+  // The acts the Executor actually made, counted on the stub's own verbs and
+  // **against the target they were aimed at**. The assignment table says which
+  // Task a body ended the run holding; it does not say whether the act that
+  // Task exists for was ever issued, and those are two different claims — most
+  // sharply for the `Reclaim`, whose Task is held on every tick of a
+  // re-claimer's life while the act is gated on a fact about its target (ADR
+  // 0057 decision 5). The target is read off the object because a bare count of
+  // `harvest` would be the two Anchors' energy digs with the mine's one folded
+  // invisibly into it, which is a number that cannot go to zero and therefore
+  // says nothing.
+  const storage =
+    home.cluster.built.find((s) => s.structureType === "storage") ?? null;
+  const acts = {
+    claimReactor: 0,
+    harvest: 0,
+    withdraw: 0,
+    pickup: 0,
+    transfer: 0,
+  };
+  // One row per act worth counting: the verb, the target it has to be aimed at,
+  // and — for the two verbs the engine takes a resource on — the resource it
+  // has to name. Both halves are the difference between a number that can go to
+  // zero and a number that cannot: a bare `transfer` count is every extension
+  // refill in the room, and a `transfer` at the Storage is that plus the energy
+  // sink; only `transfer` at the Storage **of Thorium** is the mine leg's own
+  // act.
+  const counted = [
+    { verb: "claimReactor", id: errand.id, resource: null },
+    { verb: "harvest", id: mine?.deposit.id ?? null, resource: null },
+    { verb: "withdraw", id: mine?.container.id ?? null, resource: THORIUM },
+    { verb: "pickup", id: mine?.pile.id ?? null, resource: null },
+    { verb: "transfer", id: storage?.id ?? null, resource: THORIUM },
+  ];
+
+  const standOreCrew = oreCrew({
+    home,
+    spawnName: REACTOR_SPAWN_NAME,
+    rcl: LEVEL,
+    mine,
+    sink: storage,
+    claimed: homeClaimed,
+    register,
+    creeps,
+  });
+
+  const rooms = [home.room, errandRoom];
+  return {
+    terrains: new Map([
+      [capture.name, capture.terrain],
+      [errandCapture.name, errandCapture.terrain],
+      ...declaredTerrains(rooms.map((room) => room.name)),
+    ]),
+    rooms,
+    spawns: [home.spawn],
+    creeps,
+    byId,
+    perturb: pavingPerturbation({
+      spare,
+      structures: home.finds[107],
+      byId,
+      structure,
+    }),
+    stations,
+    claimed: new Map([
+      [capture.name, homeClaimed],
+      [errandCapture.name, errandOccupied],
+    ]),
+    colonies: [capture.name],
+    homeRooms: [home.room],
+    furnished: [geometryOf(home)],
+    crew: (bodyOf, game) => {
+      standOreCrew(bodyOf, game);
+      // Counted on every body of the world rather than on the ones we expect to
+      // act: which creep holds which Task is the Matcher's answer and not this
+      // file's, and a counter on the body we guessed would read zero for the
+      // right reason and the wrong one alike. Wrapped here, which is after the
+      // hire and before the first warm-up tick, so the count is the run's and
+      // not the hiring loop's.
+      for (const creep of creeps) {
+        for (const { verb, id, resource } of counted) {
+          const inner = creep[verb];
+          // Rest arguments and not one: `withdraw` and `transfer` take a
+          // resource beside the target, and a wrapper that forwarded the first
+          // argument alone would quietly re-spell every act it counted as an
+          // energy one.
+          creep[verb] = (...args) => {
+            if (
+              id !== null &&
+              args[0]?.id === id &&
+              (resource === null || args[1] === resource)
+            ) {
+              acts[verb]++;
+            }
+            return inner(...args);
+          };
+        }
+      }
+    },
+    crewLabel: "ore crew",
+    // The two ore draws, seeded into the assignment table before the first
+    // warm-up tick exactly as `seedHeldRepair` seeds the held Repair, and for
+    // the same reason in a different place.
+    //
+    // **Pooling them was never the problem; being matched was.** Both Tasks are
+    // pooled on every tick of this scenario — the run without this seed proves
+    // it — and both lose every body to the energy arms standing beside them,
+    // because a source [[container]]'s Withdraw is **Feeding** tier where the
+    // ore's is the [[storage]]'s (ADR 0057 decision 3, #306 giving the ore its
+    // rungs *inside* that tier and not above it). In a live colony the feeding
+    // arms drain and the ore's turn comes — measured, not assumed: W12S28's
+    // Storage held 19,848 T and W13S28's 15,716 T at t411,716 on 2026-09-13,
+    // all of it through this same pair of arms — while in a frozen world the
+    // source containers stand at 1,500 for ever and it never does. So the
+    // branch this scenario exists to execute — the mine Withdraw's own
+    // applicability, the past-the-cliff rung, the pile's capacity arithmetic,
+    // the Executor's
+    // `withdraw`/`pickup` against a Thorium target — is reachable only by
+    // seeding it, which is the technique #285 established and wrote down.
+    //
+    // The `:Thorium` suffix mirrors `Facts.resourceSuffix` the way
+    // `REPAIR_TRIGGER` mirrors `Tuning.RepairTrigger`, and drifts the same way:
+    // nothing here is read by the bundle, so a re-spelled id shows up in the
+    // report as a seed that did not survive rather than as a wrong number in
+    // the ms.
+    seed: () => {
+      if (!mine) return [];
+      const rows = [
+        {
+          creep: "ore-draw-0",
+          task: `withdraw:${mine.container.id}:Thorium`,
+          what: `the mine container at ${keyOf(mine.seat)}, ${MINE_CONTAINER_THORIUM} T`,
+        },
+        {
+          creep: "ore-draw-1",
+          task: `pickup:${mine.pile.id}:Thorium`,
+          what: `the pile on the Post, ${MINE_PILE_THORIUM} T`,
+        },
+      ];
+      if (!globalThis.Memory.fabot) globalThis.Memory.fabot = {};
+      globalThis.Memory.fabot.assignments = {
+        ...(globalThis.Memory.fabot.assignments ?? {}),
+        ...Object.fromEntries(rows.map((row) => [row.creep, row.task])),
+      };
+      return rows;
+    },
+    // What the report's own block reads back, beside the assignment table. The
+    // flag's owner is read **off the object the world stands** and not off
+    // `REACTOR_RIVAL`: the report's errand header says whose flag the act is
+    // made against, and a header printing the module constant would go on
+    // saying "Odiodin" over a reactor this file had re-pointed at somebody
+    // else — a claim about the world sourced from a name in the harness.
+    errand: { ...errand, rival: reactor.owner.username },
+    mine,
+    acts,
+    describe: () => [
+      `the season's programme on real terrain (ADR 0036, ADR 0060): ${capture.name} at ` +
+        `RCL${LEVEL} with the sector Reactor in ${errand.room} declared as an errand, ` +
+        `${creeps.length} creeps over ${rooms.length} seen rooms`,
+      `  ${capture.name} home     ${plural(home.sources.length, "source")}, controller, ` +
+        `${furnitureLine(home.furniture)}, ${plural(home.roads.length, "road")}, ` +
+        `${plural(home.containers.length, "container")}, ` +
+        `${plural(home.cluster.sites.length, "site")}, ${REACTOR_SPAWN_NAME} at ` +
+        `${keyOf(REACTOR_SPAWN)} — the cheapest spawn tile the survey's own sweep found for ` +
+        "this room (docs/research/third-colony.md §2), and the tile the live W15S28 stands " +
+        "Spawn3 on today",
+      mine
+        ? `  ${capture.name} mine     deposit ${mine.deposit.id} at ${keyOf(mine.deposit.pos)} ` +
+          `under a standing extractor, mine container at ${keyOf(mine.seat)} holding ` +
+          `${MINE_CONTAINER_THORIUM} T (checked over Tuning.MineContactCliff where the mine is ` +
+          `stood, so #306's past-the-cliff rung is in these ms), and a ${MINE_PILE_THORIUM} T ` +
+          "pile on the Post"
+        : `  ${capture.name} mine     none: this room is under Tuning.ExtractorLevel, where the ` +
+          "Layout plans neither an extractor nor a mineral container (ADR 0057 decision 1) — so " +
+          "the miner row's quota is zero and the ore's Withdraw and its Pickup are pooled by " +
+          "nothing" +
+          (storage
+            ? ", leaving the Storage's own Thorium Refill as the one ore arm this level pools " +
+              "at all (the `mine` block reads back whether a body held it)"
+            : "; and no Storage stands at this level either, so the Thorium Refill is pooled " +
+              "by nothing and no ore arm is executed here at all"),
+      `  ${errand.room} errand   the sector Reactor ${errand.id} at ${keyOf(errand.tile)}, held ` +
+        `by ${REACTOR_RIVAL}, ${plural(errandSources.length, "source")} and no controller at ` +
+        "all — vision, because the body standing there is this colony's only eye on the room, " +
+        "and the errand narrowing is what keeps that room's rocks out of the pool",
+      `  ${plural(stationsOf(creeps, "reserver").length, "re-claimer")} at ` +
+        `${stationsOf(creeps, "reserver").join(", ") || "no station"} — three crossings out on ` +
+        "the reactor's own ring, cast from the reserver row (ADR 0006: a [Claim; Move] body is " +
+        "one pattern however it was bought)",
+      `  ${plural(stationsOf(creeps, "miner").length, "miner")} at ` +
+        `${stationsOf(creeps, "miner").join(", ") || "no station"}` +
+        (mine
+          ? " — on the mine Post, which is the container's own tile"
+          : ": no extractor stands at this level, so the row hires nobody"),
+    ],
+    spareTiles: spare.length,
+  };
+}
+
 const WORLDS = {
   stub: buildStubWorld,
   outpost: buildOutpostWorld,
   young: buildYoungWorld,
   pair: buildPairWorld,
+  reactor: buildReactorWorld,
 };
 
 const buildWorld = () => WORLDS[scenario]();
@@ -3023,6 +3738,234 @@ function printHeldRepair(seed) {
   );
 }
 
+// What the season's programme actually executed — read off the bundle's own
+// Memory, its own mask and the stub's own verbs, and off nothing this harness
+// derives, exactly as `printRaid` and `printHeldRepair` read theirs.
+//
+// This is the reading the scenario exists for, and it is three separate claims
+// that a single ms figure would blur into one:
+//
+// - **the chain**, which is `Errand.routable` walking a price from W15S28 to
+//   W15S25 over the masked layer of a Source Keeper room. Its evidence is the
+//   `refused` leaf of the colony's own [[layout record]]: an errand no chain
+//   joins is named there under its kind (ADR 0060 decision 1), so an **empty**
+//   list is the bundle saying it found the three-hop chain over the mask. A
+//   run whose refused list names the errand has measured the refusal and not
+//   the walk, and the block says which.
+// - **the Task**, which is the `Reclaim` the errand pools and the body at the
+//   far end holding it after the last tick.
+// - **the act**, which is `ClaimReactor` and is a different claim again: the
+//   Task is held on every tick of a re-claimer's life and the act is issued
+//   only on a tick the reactor is not ours (ADR 0057 decision 5). Counted on
+//   the stub's own `claimReactor`, because a Task held and an act issued are
+//   exactly the two things a harness fiction can come apart between.
+//
+// And beside them the mine, which is #308's finding closed: the ore's
+// Withdraw, its Pickup and its Refill are named by the Task ids the assignment
+// table holds, with the `:Thorium` suffix `Facts.taskId` gives the second
+// resource — a run that names none of them has furnished a mine and matched
+// nobody to it.
+function printReactor(world, seeded) {
+  if (!world.errand) return;
+  const { errand, mine, acts } = world;
+  const assignments = globalThis.Memory?.fabot?.assignments ?? {};
+  const home = world.homeRooms[0].name;
+  const layout = globalThis.Memory?.fabot?.observe?.colonies?.[home]?.layout;
+  const refused = Array.isArray(layout?.refused) ? layout.refused : null;
+
+  console.log(
+    `\nerrand — ${errand.room} holds the sector Reactor ${errand.id} at ${keyOf(errand.tile)}, ` +
+      `${errand.rival}'s flag on it: these ms include the errand's projection entry, the ` +
+      "declared target laid under vision, and the price of a three-hop chain over a masked " +
+      "Source Keeper room, which no other scenario's do (ADR 0060)",
+  );
+  console.log(
+    "  the chain: " +
+      (refused === null
+        ? "this bundle wrote no layout record for the colony, so whether the chain was found " +
+          "cannot be read back — treat the ms below as unattributed"
+        : refused.length === 0
+          ? `Colony.declared's declarations are all routable from ${home} — the errand is not on ` +
+            "the layout record's refused list, which is the bundle saying a chain of Seams " +
+            "joined it inside Tuning.MaxHops (the mask line below says which of the rooms that " +
+            "chain crosses is masked). Nothing was refused, so `Errand.routable`'s **refusal** " +
+            "arm and the record's refused entry are branches these ms do not include — that " +
+            "half is pinned in ViewTests and is not priced here"
+          : `refused: ${refused.map((row) => `${row.room} (${row.kind})`).join(", ")} — this run ` +
+            "measured the refusal and not the walk"),
+  );
+
+  // The mask, off the bundle's own `Keepers.maskedTilesIn` at the margin
+  // `Tuning.keeperMargin` derives — never a number written here. Over the rooms
+  // the world holds terrain for, so a room that enters the chain tomorrow
+  // enters this line with it.
+  //
+  // Called flat and not through `?.`: `loadBundle` guarantees both bindings
+  // before the bundle is required, so a probe that did not bind is a broken
+  // invariant and not a world without keepers — and a missing binding read
+  // through `?.` would print "no room this world holds terrain for carries a
+  // declared keeper centre", which is a false claim about the **world** for a
+  // fault in the **harness** (ADR 0027). `declaredErrands` and
+  // `declaredUnfurnished` both throw by name here; so does this.
+  if (!globalThis.__fabotKeeperMargin || !globalThis.__fabotMaskedTiles) {
+    throw new Error(
+      "the bundle must be loaded before the errand block is printed: the mask is read off " +
+        "`Keepers.maskedTilesIn` at `Tuning.keeperMargin`, not off a number in this file (#321)",
+    );
+  }
+  const margin = globalThis.__fabotKeeperMargin();
+  const masked = [...world.terrains.keys()]
+    .map((room) => [room, globalThis.__fabotMaskedTiles(room)])
+    .filter(([, tiles]) => tiles > 0);
+  console.log(
+    `  the mask: margin ${margin} (Tuning.keeperMargin = keeper pin + ranged range ` +
+      "+ Tuning.ReachMargin), " +
+      (masked.length
+        ? masked.map(([room, tiles]) => `${room} ${tiles} tiles`).join(", ") +
+          " — every walk priced across those rooms is priced over the masked layer"
+        : "no room this world holds terrain for carries a declared keeper centre, so the masked " +
+          "layer is a branch this run did not execute"),
+  );
+
+  // Who held the Reclaim, and whether the act fired. Read off the table by the
+  // Task id's own prefix rather than off the creep this file stationed: which
+  // body holds it is the Matcher's answer.
+  const reclaimId = `reclaim:${errand.id}`;
+  const holders = Object.entries(assignments)
+    .filter(([, taskId]) => taskId === reclaimId)
+    .map(([name]) => name);
+  const standing = world.creeps.filter(
+    (creep) => creep.room.name === errand.room,
+  );
+  console.log(
+    `  the Reclaim: ${reclaimId} held after the last tick by ` +
+      (holders.join(", ") ||
+        "nobody — the Task was pooled and matched to no body, so this run measured the pool " +
+          "entry and not the match"),
+  );
+  console.log(
+    `  the ClaimReactor act: issued ${plural(acts.claimReactor, "time")} over the run's ` +
+      `${WARMUP} warm-up and ${TICKS} profiled ticks` +
+      (acts.claimReactor === 0
+        ? " — the act is gated on the reactor not being ours (ADR 0057 decision 5) and on a body " +
+          "standing at range 1, so a run that issued none executed the Task and not the act"
+        : ", each one against a rival's flag, which is the tick the act exists for"),
+  );
+  console.log(
+    `  the ${plural(standing.length, "creep")} standing in ${errand.room}, and the Task ` +
+      "Memory.fabot.assignments holds for each after the last tick:",
+  );
+  const width = Math.max(0, ...standing.map((creep) => creep.name.length));
+  for (const creep of standing) {
+    console.log(
+      `    ${creep.name.padEnd(width)}  ` +
+        (assignments[creep.name] ??
+          "no Task at all: it neither ran nor worked"),
+    );
+  }
+
+  if (!mine) {
+    // What is left of the ore half where no mine stands, read **back** and
+    // never asserted. The dig's three arms go with the extractor, but the
+    // Storage's own Thorium Refill is pooled only where a Storage stands —
+    // and under RCL4 there is none, the laden body ends the run holding no
+    // Task at all and not one ore act is issued. A line naming the Refill as
+    // the half this run *did* execute would be a printed coverage claim with
+    // nothing behind it at three of the eight levels, which is #308's own
+    // shape and the thing this scenario was cut to end.
+    const held = Object.entries(assignments).filter(([, taskId]) =>
+      taskId.endsWith(":Thorium"),
+    );
+    console.log(
+      `\nmine — ${home} stands under Tuning.ExtractorLevel, so it has no extractor and no ` +
+        "mineral container (ADR 0057 decision 1): the ore's Harvest, its Withdraw and its " +
+        "Pickup are branches this run did not execute. Of the ore half, what the assignment " +
+        "table holds after the last tick: " +
+        (held.length
+          ? `${held.map(([name, taskId]) => `${name} ${taskId}`).join(", ")}, with transfer of ` +
+            `Thorium into the Storage issued ${plural(acts.transfer, "time")}`
+          : "no ore Task on any body and no ore act issued — this level stands no Storage " +
+            "either, so the Thorium Refill is pooled by nothing and these ms include no ore " +
+            "arm at all"),
+    );
+    return;
+  }
+
+  const ore = Object.entries(assignments).filter(
+    ([, taskId]) =>
+      taskId.endsWith(":Thorium") || taskId === `harvest:${mine.deposit.id}`,
+  );
+  console.log(
+    `\nmine — ${home} digs ${mine.deposit.id} at ${keyOf(mine.deposit.pos)} under a standing ` +
+      `extractor, into the container at ${keyOf(mine.seat)} (${MINE_CONTAINER_THORIUM} T, over ` +
+      `Tuning.MineContactCliff) with a ${MINE_PILE_THORIUM} T pile on the Post: these ms include ` +
+      "the miner row's quota, the ore's Harvest, the mine Withdraw and #306's past-the-cliff " +
+      "rung, the floor's Pickup and the Storage's Thorium Refill — the half of ADR 0057 that " +
+      "no profile had executed one line of (#308)",
+  );
+  console.log(
+    `  the acts, each aimed at the mine's own target over the run's ${WARMUP} warm-up and ` +
+      `${TICKS} profiled ticks: harvest on the deposit ${acts.harvest}, withdraw of Thorium from ` +
+      `the container ${acts.withdraw}, pickup off the pile ${acts.pickup}, transfer of Thorium ` +
+      `into the Storage ${acts.transfer}`,
+  );
+  // The seeds, read **back** and never trusted (#285): a seeded holder that
+  // lost its Task on tick 1 leaves the arm it was seeded for unexecuted for the
+  // whole run, and these ms would then be a plain tick's under a mine's
+  // heading.
+  for (const row of seeded) {
+    const standing = assignments[row.creep] ?? null;
+    console.log(
+      `  seeded ${row.creep} holding ${row.task} — ${row.what}; after the last tick the table ` +
+        "holds: " +
+        (standing === row.task
+          ? `${standing} — the arm was executed for the whole run`
+          : `${standing ?? "no Task at all"} — the seed did not survive, so this arm was ` +
+            "measured for part of this run at most"),
+    );
+  }
+  console.log(
+    "  the ore Tasks Memory.fabot.assignments holds after the last tick:",
+  );
+  if (ore.length === 0) {
+    console.log(
+      "    none — the ore arms were pooled and matched to nobody, so this run measured the " +
+        "pool entries and not one match; #308's finding is not closed by these ms",
+    );
+  } else {
+    const oreWidth = Math.max(0, ...ore.map(([name]) => name.length));
+    for (const [name, taskId] of ore)
+      console.log(`    ${name.padEnd(oreWidth)}  ${taskId}`);
+  }
+  // Said on every run rather than left to a reader's memory of the queue: the
+  // courier is #319 and has not shipped, so `Deliver` is not a Task kind in
+  // this tree and no scenario can execute one. What this scenario stands is
+  // the half of the programme that exists — the ore into the Storage, and the
+  // flag taken back — and the day the courier lands it is this scenario that
+  // owes it a body in a transit room.
+  // Said on every run rather than left to a reader's memory of the queue —
+  // and read off the table like every other claim in this block, so the day
+  // the courier lands and a body holds one, this line reports the Task
+  // instead of going on denying it exists.
+  const delivering = Object.entries(assignments).filter(([, taskId]) =>
+    taskId.startsWith("deliver:"),
+  );
+  console.log(
+    "  the delivery: " +
+      (delivering.length
+        ? `${delivering
+            .map(([name, taskId]) => `${name} ${taskId}`)
+            .join(
+              ", ",
+            )} — the courier has landed and this scenario is standing its far end; ` +
+          "the ms below include the leg from the Storage to the reactor"
+        : "no body ended the run holding a `deliver:` Task (the courier is #319 and is not in " +
+          "this tree), so the leg from the Storage to the reactor is executed by nothing here. " +
+          "The re-claimer above is the whole of what stands at the far end today; the courier " +
+          "joins this scenario on the commit that lands it."),
+  );
+}
+
 function printReport(classes, pooled, world, allTicks) {
   // The level is printed on the first line of every run, tripped trigger
   // or not: the ms below are a colony's only at the level it was built at,
@@ -3257,16 +4200,104 @@ const WORLD_ROOMS_PROBE = `
 }
 `;
 
-// The bindings that probe reads, each checked before the bundle is loaded
-// rather than after, so a rename in the shell or a Fable upgrade names
-// itself instead of surfacing as "the stub world holds no terrain".
-const WORLD_ROOMS_BINDINGS = [
-  ["function worldRooms(", "src/App/World.fs's `worldRooms`"],
+// The third probe: the declaration's own [[errand]]s and the [[keeper
+// margin]] the mask is laid at, for the same reason the second one exists
+// (#287). The `reactor` scenario stands the sector Reactor's object and
+// stations a body at it, and both need the target's **id** and its **tile** —
+// which live in `Colony.declared` and nowhere else. Written down here they
+// would be a hand-copied shadow of a human's constant, which is exactly the
+// rot that took the declared-room list out of step on 2026-09-10; read off
+// the bundle they move on the commit that moves the declaration, and a
+// scenario whose errand has been re-pointed at another room fails loudly
+// rather than furnishing a reactor nobody declares.
+//
+// The mask is read the same way and for a second reason besides: what the
+// report has to say about W15S26 is not "the harness masked it" — the
+// harness masks nothing — but how much ground the **bundle's own**
+// `Keepers.maskedTilesIn` takes out of a room the chain crosses, at the
+// margin `Tuning.keeperMargin` derives. Both are pure functions of
+// constants, so this costs the measured tick nothing.
+//
+// Nothing is checked textually here beyond the two bindings below, because
+// what this reads past them are *record fields* — `Home`, `Errands`,
+// `RoomName`, `Target` — which the guard on a top-level name cannot see. A
+// rename arrives as `undefined` and is thrown on by name, which is the same
+// answer one line later.
+const DECLARATION_PROBE = `
+// ---- appended by scripts/profile.mjs: the declaration's errands and the mask ----
+{
+  const shapeError = (what) =>
+    new Error(
+      "src/Core/Types/Colonies.fs's declaration no longer carries " + what + " — " +
+        "scripts/profile.mjs reads the reactor scenario's errand target off it rather than " +
+        "writing the id and the tile down a second time (#287's rule, #321), and whatever " +
+        "renamed the field is what this probe has to be re-pointed at",
+    );
+  globalThis.__fabotErrands = (home) => {
+    for (const colony of ColonyModule_declared) {
+      if (colony.Home !== home) continue;
+      if (colony.Errands == null) throw shapeError("a \\\`Colony.Errands\\\` list");
+      return Array.from(colony.Errands, (errand) => {
+        const target = errand.Target;
+        if (errand.RoomName == null || target == null || target.length !== 2)
+          throw shapeError("an \\\`Errand\\\` of a room name and a target pair");
+        const [id, tile] = target;
+        if (tile == null || typeof tile.X !== "number" || typeof tile.Y !== "number" ||
+            typeof tile.Room !== "string")
+          throw shapeError("an \\\`Errand.Target\\\` tile of a room, an X and a Y");
+        return { room: errand.RoomName, id, tile: { x: tile.X, y: tile.Y }, tileRoom: tile.Room };
+      });
+    }
+    return [];
+  };
+  globalThis.__fabotTuning = () => TuningModule_defaults;
+  globalThis.__fabotKeeperMargin = () => TuningModule_keeperMargin(TuningModule_defaults);
+  globalThis.__fabotMaskedTiles = (room) =>
+    Array.from(maskedTilesIn(TuningModule_keeperMargin(TuningModule_defaults), room)).length;
+}
+`;
+
+// The bindings the two appended probes above reach, each checked before the
+// bundle is loaded rather than after, so a rename in the shell or a Fable
+// upgrade names itself instead of surfacing as "the stub world holds no
+// terrain" or as a mask of nothing. Each row carries **what it is for** as
+// well as where it lives, because the throw's whole job is to tell whoever
+// renamed it which probe to re-point — and three of these five serve the
+// declaration probe rather than the room set.
+//
+// **Exactly one** top-level declaration each, the way
+// `function decideUnarbitrated(` below is counted and for its reason: esbuild
+// hands out bare names by collision order, so a second module bringing its own
+// `maskedTilesIn` would take the bare name or be given `maskedTilesIn_1` — a
+// guard that only asks whether the name exists would pass while the probe
+// bound the other module's function.
+const PROBE_BINDINGS = [
+  [
+    "function worldRooms(",
+    "src/App/World.fs's `worldRooms`",
+    "asking the bundle which rooms a colony's declaration projects (#287)",
+  ],
   [
     "var ColonyModule_declared ",
     "src/Core/Types/Colonies.fs's `Colony.declared`",
+    "the declared colonies, their outposts and their errands (#287, #321)",
   ],
-  ["var TuningModule_defaults ", "src/Core/Types/Rules.fs's `Tuning.defaults`"],
+  [
+    "var TuningModule_defaults ",
+    "src/Core/Types/Rules.fs's `Tuning.defaults`",
+    "the hop budget, the keeper margin and the mine thresholds a scenario stands against " +
+      "(#287, #321)",
+  ],
+  [
+    "function TuningModule_keeperMargin(",
+    "src/Core/Types/Rules.fs's `Tuning.keeperMargin`",
+    "the margin the reactor scenario's mask line is read at (#321)",
+  ],
+  [
+    "function maskedTilesIn(",
+    "src/Core/Types/Keepers.fs's `maskedTilesIn`",
+    "how much ground the mask takes out of a room the chain crosses (#321)",
+  ],
 ];
 
 // The bundle as the engine would load it, plus the probe above. Written
@@ -3286,19 +4317,25 @@ function loadBundle(file) {
         "has to be re-pointed at",
     );
   }
-  for (const [binding, where] of WORLD_ROOMS_BINDINGS) {
-    if (source.includes(`\n${binding}`)) continue;
+  for (const [binding, where, purpose] of PROBE_BINDINGS) {
+    let found = 0;
+    for (let at = 0; (at = source.indexOf(`\n${binding}`, at)) >= 0; at += 1)
+      found++;
+    if (found === 1) continue;
     throw new Error(
-      `${path.relative(process.cwd(), file)} holds no top-level \`${binding}\` and this harness ` +
-        `needs it to ask the bundle which rooms a colony's declaration projects (#287) — it is ` +
-        `${where}. Whatever renamed or inlined it is what this probe has to be re-pointed at`,
+      `${path.relative(process.cwd(), file)} holds ${found} top-level \`${binding}\` ` +
+        `declarations and this harness needs exactly one for ${purpose} — it is ${where}. ` +
+        "Whatever renamed, inlined or collided with it is what this probe has to be re-pointed at",
     );
   }
   globalThis.__fabotClock = () => performance.now();
   const probed = path.join(here, "..", "build", "probe");
   mkdirSync(probed, { recursive: true });
   const probedFile = path.join(probed, path.basename(file));
-  writeFileSync(probedFile, source + DECIDE_PROBE + WORLD_ROOMS_PROBE);
+  writeFileSync(
+    probedFile,
+    source + DECIDE_PROBE + WORLD_ROOMS_PROBE + DECLARATION_PROBE,
+  );
   const { loop } = createRequire(import.meta.url)(probedFile);
   return { loop, decideCalls: () => globalThis.__fabotDecideCalls };
 }
@@ -3399,7 +4436,7 @@ for (const name of worldRooms) terrainReads.set(name, 0);
 // The fleet, before a tick is either warmed or measured: the bundle hires
 // it against this level's bank, and the outpost crews follow it. Neither
 // count is written down anywhere in this file (#144).
-const { hired, hireTicks, bodyOf } = hireFleet(world, game, loop);
+const { hired, hireTicks, bodyOf, hires } = hireFleet(world, game, loop);
 if (world.crew) world.crew(bodyOf, game);
 // Where the hired fleet stands, which since #163 is no longer the home
 // room for every body: the reserver row and the outposts' own Anchors are
@@ -3410,8 +4447,15 @@ if (world.crew) world.crew(bodyOf, game);
 // The crew stands outside the count entirely — it is not hired — and is
 // named after it.
 const homeNames = world.homeRooms.map((room) => room.name);
+// The **hired** bodies and not the world's, which are the hires plus whatever
+// crew followed them — `hireFleet` hands its own casts back for exactly this.
+// Counted over the world it read "8 of 11 at home" while every crew stood a
+// room away and said nothing; the tick a crew stands in a home room instead —
+// the `reactor` scenario's ore crew does — the same line reads more bodies at
+// home than were ever hired and reports a **negative** count stationed outside
+// one.
 const atHome = (name) =>
-  world.creeps.filter((creep) => creep.room.name === name).length;
+  hires.filter((creep) => creep.room.name === name).length;
 const homeHires = homeNames.reduce((total, name) => total + atHome(name), 0);
 const outpostHires = hired - homeHires;
 console.log(
@@ -3422,7 +4466,12 @@ console.log(
       ? `, ${outpostHires} of them stationed outside a home room`
       : "") +
     (world.creeps.length > hired
-      ? `, plus ${world.creeps.length - hired} outpost crew`
+      ? // What a scenario calls the bodies it stands that the bundle did not
+        // hire. Every crew in this harness stood in an outpost until the
+        // `reactor` scenario's ore crew stood in the home room, and a line
+        // that called those three an outpost crew would be naming a room this
+        // scenario does not have.
+        `, plus ${world.creeps.length - hired} ${world.crewLabel ?? "outpost crew"}`
       : ""),
 );
 
@@ -3501,6 +4550,16 @@ function seedHeldRepair(world) {
 }
 
 const heldRepair = seedHeldRepair(world);
+
+// And whatever else the scenario seeds, on the same rule, at the same moment
+// and for the same reason (#285's technique, ADR 0056's rule): a branch the
+// colony would arrive at over ticks and a frozen world never does is seeded
+// into the assignment table before the first warm-up tick, and the report
+// reads the table **back** rather than trusting the seed. Scenario-supplied
+// rather than a second function here, because what is seedable is a fact about
+// the world a scenario furnished — the `reactor` scenario's ore draws are the
+// only ones today.
+const seeded = world.seed ? world.seed() : [];
 
 // One counter over warm-up and profiled ticks alike, so the recompute path
 // is JIT-warm before it is measured.
@@ -3630,6 +4689,7 @@ printReport(classes, pooled, world, ticks.all);
 printDecideByColony(classes, decideMs, ticks, stages);
 printRaid(world);
 printHeldRepair(heldRepair);
+printReactor(world, seeded);
 
 // Per room, because ADR 0041 layered the memo by room name: the number to
 // read is one read per room the bundle projected, over the whole run. Read
