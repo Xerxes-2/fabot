@@ -301,11 +301,11 @@ let planTasks (view: ColonyView) (threats: Threats) : Task list =
     let refills =
         (cluster
          |> Option.filter (fun c -> RefillCluster.free c > 0)
-         |> Option.map (fun c -> Refill c.Spawn)
+         |> Option.map (fun c -> Refill(c.Spawn, Energy))
          |> Option.toList)
         @ (view.Refillables
            |> List.filter (fun r -> r.FreeCapacity > 0 && not (Set.contains r.Id clustered))
-           |> List.map (fun r -> Refill r.Id))
+           |> List.map (fun r -> Refill(r.Id, Energy)))
 
     let builds = view.ConstructionSites |> List.map (fun site -> Build site.Id)
 
@@ -363,6 +363,15 @@ let planTasks (view: ColonyView) (threats: Threats) : Task list =
     let containers = idsOfKind (Structure BuiltKind.Container)
     let storages = idsOfKind (Structure BuiltKind.Storage)
 
+    // The room left in a [[storage]], over **both** resources it holds (ADR
+    // 0057 decision 3). A store's capacity is one number and the Thorium banked
+    // for the delivery is counted against it exactly as the energy is, so the
+    // energy sink and the Thorium sink read one free-capacity question rather
+    // than two that can each be satisfied by ignoring the other. With no
+    // Thorium standing this is the `stored id < capacity` it has always been.
+    let storageRoom id =
+        Engine.storageCapacity - stored id - SpatialInfo.heldIn view.Spatial Thorium id
+
     // A tombstone and a ruin are stores the same way, so they pool through the
     // same line: a store with energy in it yields a Withdraw, and what will
     // become of the thing holding it is not this pool's question. The engine's
@@ -389,7 +398,7 @@ let planTasks (view: ColonyView) (threats: Threats) : Task list =
     let withdraws =
         containers @ tombstones
         |> List.filter (fun id -> stored id > 0 && not (inABorrowedRoom id))
-        |> List.map Withdraw
+        |> List.map (fun id -> Withdraw(id, Energy))
 
     // The piles worth walking to: a dropped pile at or over
     // `Tuning.PickupThreshold` is a Feeding-tier Task, and every smaller one is
@@ -422,15 +431,56 @@ let planTasks (view: ColonyView) (threats: Threats) : Task list =
                     && not (isSourceContainerTile view controllerRoom pos)
                     && stored id < Engine.containerCapacity
                 | None -> false)
-            |> List.map Refill)
+            |> List.map (fun id -> Refill(id, Energy)))
         |> Option.defaultValue []
 
     // The colony's stock is the outflow's last stop (ADR 0023): a standing
     // Storage with room is one more Refill target, on the deepest tier of all.
     let storageRefills =
         storages
-        |> List.filter (fun id -> stored id < Engine.storageCapacity)
-        |> List.map Refill
+        |> List.filter (fun id -> storageRoom id > 0)
+        |> List.map (fun id -> Refill(id, Energy))
+
+    // **The mine-to-[[storage]] leg** (ADR 0057 decision 3): the one pair of
+    // Tasks in this colony that is not about energy. The intake is the mineral
+    // [[container]] under the [[miner]]'s feet, whose Thorium the store-less dig
+    // drops into; the sink is the Storage, which is the free warehouse — an
+    // obstacle nothing can stand on, so the contact penalty that costs a body a
+    // tick of life per decade of Thorium on its tile never reaches it.
+    //
+    // Read off `ourDeposits` and never off a container census (#261): a scanned
+    // neighbour arrives in the projection with its own deposit, its own
+    // extractor and its own container, and nothing in the shape of those three
+    // says whose they are. The room is the join, and the same borrowed-room
+    // filter the energy Withdraws carry is read over it — no store of a child's
+    // is the mother's to draw, at any [[stage]] (ADR 0047 decision 1).
+    let mineralContainers =
+        ourMineralContainers view |> List.filter (inABorrowedRoom >> not)
+
+    let mineWithdraws =
+        mineralContainers
+        |> List.filter (fun id -> SpatialInfo.heldIn view.Spatial Thorium id > 0)
+        |> List.map (fun id -> Withdraw(id, Thorium))
+
+    // The sink, pooled off the **Storage alone** and off no fact about the mine
+    // (#262): the Planner is creep-blind (ADR 0013), so what gates this is the
+    // store that takes the load, and a body already holding Thorium must have
+    // somewhere to put it down whatever the ground behind it has become. Gating
+    // it on a standing mineral container read the intake's own condition onto
+    // the sink and stranded the carrier the moment the two disagreed — the
+    // container is destroyed or decays and the Layout re-places it as a site, and
+    // for the whole of that window a laden hauler is applicable to **nothing**:
+    // no Work for the three spending Tasks, Thorium aboard shutting every energy
+    // intake, and `Refill(_, Energy)` wanting energy it does not have. The row's
+    // census counts the body as living, so it reads itself satisfied and casts no
+    // replacement, and one hauler leaves the energy economy for up to 1,500
+    // ticks. The Task is inapplicable to a body holding no Thorium, which is
+    // every body of every colony before the extractor stands, so the entry is
+    // the whole of what pooling it unconditionally costs.
+    let mineRefills =
+        storages
+        |> List.filter (fun id -> storageRoom id > 0)
+        |> List.map (fun id -> Refill(id, Thorium))
 
     // The [[ferry]]'s other half (ADR 0052 decision 7): a bootstrapping child's
     // upgrade buffer is a Refill target of the mother's, on the same tier her
@@ -441,7 +491,7 @@ let planTasks (view: ColonyView) (threats: Threats) : Task list =
         ferrySinks
         |> Set.toList
         |> List.filter (fun id -> stored id < Engine.containerCapacity)
-        |> List.map Refill
+        |> List.map (fun id -> Refill(id, Energy))
 
     // The stock's other half (ADR 0023): a stocked Storage is a Withdraw source
     // too, but only while the pool holds a Refill whose target is not the stock
@@ -458,7 +508,9 @@ let planTasks (view: ColonyView) (threats: Threats) : Task list =
         then
             []
         else
-            storages |> List.filter (fun id -> stored id > 0) |> List.map Withdraw
+            storages
+            |> List.filter (fun id -> stored id > 0)
+            |> List.map (fun id -> Withdraw(id, Energy))
 
     flees
     @ guards
@@ -488,3 +540,11 @@ let planTasks (view: ColonyView) (threats: Threats) : Task list =
     @ ferryRefills
     @ storageRefills
     @ storageWithdraws
+    // Last, which costs the pair nothing: pool order is the Matcher's final
+    // tie-break and reaches only an exact tie in [[priority]], [[travel cost]]
+    // and crowding load alike — and the Thorium pair shares its rank with the
+    // Storage's own two Tasks, which no body of the colony is ever applicable to
+    // at the same time as one of these (a body holding Thorium has no energy,
+    // and an empty one has no Thorium).
+    @ mineWithdraws
+    @ mineRefills

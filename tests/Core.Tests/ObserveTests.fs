@@ -419,6 +419,7 @@ let ours name : CreepInfo =
         Hits = { Hits = 300; HitsMax = 300 }
         Fatigue = 0
         Energy = 0
+        Thorium = 0
         FreeCapacity = 50
         Moved = false
         Body = Map.ofList [ Work, 1; Carry, 1; Move, 1 ]

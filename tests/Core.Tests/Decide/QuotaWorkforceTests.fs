@@ -305,12 +305,12 @@ let haulerTests =
 
                 Expect.equal
                     (Map.tryFind "h1" assignments)
-                    (Some(taskId (Withdraw "can-src")))
+                    (Some(taskId (Withdraw("can-src", Energy))))
                     "the intake half of the haul cycle: free capacity beside a stocked container"
 
                 Expect.contains
                     intents
-                    (WithdrawFromStore("h1", "can-src"))
+                    (WithdrawFromStore("h1", "can-src", Energy, None))
                     "in range at tick start: the withdraw fires"
             }
 
@@ -333,7 +333,7 @@ let haulerTests =
 
                 Expect.equal
                     (Map.tryFind "h1" assignments)
-                    (Some(taskId (Withdraw "can-src")))
+                    (Some(taskId (Withdraw("can-src", Energy))))
                     "the buffer is inapplicable by body; the far source container is the intake"
             }
 
@@ -375,7 +375,7 @@ let haulerTests =
 
                 Expect.equal
                     (Map.tryFind "w1" assignments)
-                    (Some(taskId (Withdraw "can-ctrl")))
+                    (Some(taskId (Withdraw("can-ctrl", Energy))))
                     "a body that can spend at the controller draws from the buffer beside it"
             }
 
@@ -418,7 +418,7 @@ let haulerTests =
                             |> withCreepsAt [ "h1", { X = 12; Y = 10 } ]
                     }
 
-                let remembered = Map.ofList [ "h1", taskId (Withdraw "can-src") ]
+                let remembered = Map.ofList [ "h1", taskId (Withdraw("can-src", Energy)) ]
 
                 let {
                         Assignments = assignments
@@ -430,14 +430,14 @@ let haulerTests =
                     verdicts
                     (Verdict.Released(
                         "h1",
-                        taskId (Withdraw "can-src"),
+                        taskId (Withdraw("can-src", Energy)),
                         ReleaseReason.Rejected RejectReason.Inapplicable
                     ))
                     "the full store releases Withdraw"
 
                 Expect.equal
                     (Map.tryFind "h1" assignments)
-                    (Some(taskId (Refill "can-ctrl")))
+                    (Some(taskId (Refill("can-ctrl", Energy))))
                     "the rematch flips to the outflow"
             }
         ]

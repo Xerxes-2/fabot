@@ -32,6 +32,25 @@ let pickupReflexTests =
                 Expect.isEmpty (pickups intents) "no free capacity, nothing to gain"
             }
 
+            test "a body carrying the season's ore leaves the pile alone" {
+                // #262, ADR 0057 decision 3: a body carries one resource at a
+                // time, and the reflex is the one act in the colony that runs
+                // beside the pipeline and never asks `applicable` — so free
+                // capacity alone had a laden hauler scoop energy into the store
+                // holding its Thorium, which is the mixed load the decision
+                // forbids. Pairwise against "an adjacent creep with free
+                // capacity picks up" on the ore alone: the same body, the same
+                // tile, thirty free either way.
+                let snapshot =
+                    pileColony [ worker "w1" 0 50 |> carrying 20 ] [ "w1", { X = 10; Y = 11 } ]
+
+                let { Intents = intents } = decideOn snapshot
+
+                Expect.isEmpty
+                    (pickups intents)
+                    "room in the store is not hunger while the season's ore is in it"
+            }
+
             test "a pile out of reach draws nobody — the reflex never moves a creep" {
                 let snapshot = pileColony [ worker "w1" 0 50 ] [ "w1", { X = 10; Y = 13 } ]
                 let { Intents = intents } = decideOn snapshot
@@ -297,12 +316,16 @@ let logisticsTests =
 
                 Expect.equal
                     (Map.tryFind "w1" near.Assignments)
-                    (Some(taskId (Withdraw "can-ctrl")))
+                    (Some(taskId (Withdraw("can-ctrl", Energy))))
                     "the cheaper-to-reach buffer wins the feeding-tier tie"
 
                 Expect.contains
                     near.Verdicts
-                    (Verdict.Matched("w1", taskId (Withdraw "can-ctrl"), MatchFactor.TravelCost))
+                    (Verdict.Matched(
+                        "w1",
+                        taskId (Withdraw("can-ctrl", Energy)),
+                        MatchFactor.TravelCost
+                    ))
                     "the match speaks its Verdict: travel cost decided"
 
                 let far = decideOn (colonyAt { X = 12; Y = 10 })
@@ -342,7 +365,7 @@ let logisticsTests =
                         Spatial = haulRoom |> withCreepsAt [ "a1", { X = 15; Y = 10 } ]
                     }
 
-                let remembered = Map.ofList [ "a1", taskId (Withdraw "can-ctrl") ]
+                let remembered = Map.ofList [ "a1", taskId (Withdraw("can-ctrl", Energy)) ]
 
                 let {
                         Assignments = assignments
@@ -354,7 +377,7 @@ let logisticsTests =
                     verdicts
                     (Verdict.Released(
                         "a1",
-                        taskId (Withdraw "can-ctrl"),
+                        taskId (Withdraw("can-ctrl", Energy)),
                         ReleaseReason.Rejected RejectReason.Inapplicable
                     ))
                     "the gate releases the remembered collection"
@@ -376,7 +399,7 @@ let logisticsTests =
                         Spatial = haulRoom |> withCreepsAt [ "w1", { X = 17; Y = 10 } ]
                     }
 
-                let remembered = Map.ofList [ "w1", taskId (Withdraw "can-ctrl") ]
+                let remembered = Map.ofList [ "w1", taskId (Withdraw("can-ctrl", Energy)) ]
 
                 let {
                         Assignments = assignments
@@ -388,7 +411,7 @@ let logisticsTests =
                     verdicts
                     (Verdict.Released(
                         "w1",
-                        taskId (Withdraw "can-ctrl"),
+                        taskId (Withdraw("can-ctrl", Energy)),
                         ReleaseReason.Rejected RejectReason.Inapplicable
                     ))
                     "the full store releases Withdraw"
@@ -411,7 +434,7 @@ let logisticsTests =
 
                 Expect.equal
                     (Map.tryFind "w1" assignments)
-                    (Some(taskId (Withdraw "can-ctrl")))
+                    (Some(taskId (Withdraw("can-ctrl", Energy))))
                     "the empty store tops up from the buffer one tile away"
             }
 
@@ -439,7 +462,7 @@ let logisticsTests =
 
                 Expect.equal
                     (Map.tryFind "w1" assignments)
-                    (Some(taskId (Refill "spawn-1")))
+                    (Some(taskId (Refill("spawn-1", Energy))))
                     "the buffer never outbids feeding the spawn"
             }
 
@@ -458,7 +481,7 @@ let logisticsTests =
 
                 Expect.equal
                     (Map.tryFind "h1" assignments)
-                    (Some(taskId (Refill "can-ctrl")))
+                    (Some(taskId (Refill("can-ctrl", Energy))))
                     "the buffer Refill is live work for a body that can do nothing better"
             }
 
@@ -473,7 +496,7 @@ let logisticsTests =
 
                 Expect.contains
                     intents
-                    (WithdrawFromStore("w1", "can-ctrl"))
+                    (WithdrawFromStore("w1", "can-ctrl", Energy, None))
                     "in range at tick start: the Executor-bound Intent fires"
 
                 Expect.contains intents (SayCreep("w1", "📥")) "the Task's own chat bubble"

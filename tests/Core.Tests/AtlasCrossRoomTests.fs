@@ -765,8 +765,8 @@ let crossRoomHaulTests =
                 // from.
                 let atlas = haulAcross [ { X = 25; Y = 0 }, Plain ] [ { X = 25; Y = 49 }, Plain ]
 
-                let out = walkTicks atlas "loaded" (Refill "spawn-1")
-                let back = walkTicks atlas "empty" (Refill "spawn-1")
+                let out = walkTicks atlas "loaded" (Refill("spawn-1", Energy))
+                let back = walkTicks atlas "empty" (Refill("spawn-1", Energy))
 
                 Expect.equal out (Some 34) "the premise: the loaded leg the Matcher would price"
                 Expect.equal back (Some 17) "and the empty one"

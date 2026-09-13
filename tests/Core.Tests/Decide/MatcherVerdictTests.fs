@@ -191,7 +191,7 @@ let sayTests =
                 let sticky =
                     Map.ofList
                         [
-                            "w1", (taskId (Refill "spawn-1"))
+                            "w1", (taskId (Refill("spawn-1", Energy)))
                             "w2", (taskId (Build "site-1"))
                             "w3", (taskId (Upgrade "ctrl-1"))
                         ]
@@ -367,7 +367,7 @@ let verdictTests =
 
                 Expect.equal
                     verdicts
-                    [ Verdict.Matched("w1", taskId (Refill "spawn-1"), MatchFactor.Rank) ]
+                    [ Verdict.Matched("w1", taskId (Refill("spawn-1", Energy)), MatchFactor.Rank) ]
                     "the feeding tier beat the surplus tier: rank decided"
             }
 
@@ -390,7 +390,7 @@ let verdictTests =
 
                 Expect.equal
                     verdicts
-                    [ Verdict.Matched("w1", taskId (Refill "spawn-1"), MatchFactor.Rank) ]
+                    [ Verdict.Matched("w1", taskId (Refill("spawn-1", Energy)), MatchFactor.Rank) ]
                     "the colony feeds its own reproduction before its guns: rank decided"
             }
 
@@ -456,12 +456,16 @@ let verdictTests =
                         Creeps = [ worker "w1" 50 0 ]
                     }
 
-                let sticky = Map.ofList [ "w1", taskId (Refill "spawn-1") ]
+                let sticky = Map.ofList [ "w1", taskId (Refill("spawn-1", Energy)) ]
                 let { Verdicts = verdicts } = decideFrom sticky snapshot
 
                 Expect.contains
                     verdicts
-                    (Verdict.Released("w1", taskId (Refill "spawn-1"), ReleaseReason.TaskGone))
+                    (Verdict.Released(
+                        "w1",
+                        taskId (Refill("spawn-1", Energy)),
+                        ReleaseReason.TaskGone
+                    ))
                     "the release names the vanished Task"
             }
 
@@ -484,7 +488,7 @@ let verdictTests =
                         Creeps = [ worker "w1" 50 0 ]
                     }
 
-                let held = taskId (Refill "spawn-1")
+                let held = taskId (Refill("spawn-1", Energy))
                 let sticky = Map.ofList [ "w1", held ]
 
                 // The home room's own name under `SpatialInfo.empty`, which
@@ -560,7 +564,7 @@ let verdictTests =
                             taskId (Harvest "src-a"),
                             ReleaseReason.Rejected RejectReason.Inapplicable
                         )
-                        Verdict.Matched("w1", taskId (Refill "spawn-1"), MatchFactor.Rank)
+                        Verdict.Matched("w1", taskId (Refill("spawn-1", Energy)), MatchFactor.Rank)
                     ]
                     "the handover carries both halves: why released, what won next"
             }
@@ -897,14 +901,14 @@ let rankTierTests =
 
                 Expect.equal
                     feeding.Verdicts
-                    [ Verdict.Matched("h1", taskId (Refill "spawn-1"), MatchFactor.Rank) ]
+                    [ Verdict.Matched("h1", taskId (Refill("spawn-1", Energy)), MatchFactor.Rank) ]
                     "the colony feeds its own reproduction first: rank decided"
 
                 let surplus = decideOn (tierColony [ fullSpawn; hungryTower ])
 
                 Expect.equal
                     surplus.Verdicts
-                    [ Verdict.Matched("h1", taskId (Refill "tower-1"), MatchFactor.Rank) ]
+                    [ Verdict.Matched("h1", taskId (Refill("tower-1", Energy)), MatchFactor.Rank) ]
                     "reproduction fed, the guns outrank the buffer: rank decided"
             }
 
@@ -931,7 +935,13 @@ let rankTierTests =
                 let verdictsFor colony = (decideOn colony).Verdicts
 
                 let tied =
-                    [ Verdict.Matched("w1", taskId (Refill "tower-1"), MatchFactor.PoolOrder) ]
+                    [
+                        Verdict.Matched(
+                            "w1",
+                            taskId (Refill("tower-1", Energy)),
+                            MatchFactor.PoolOrder
+                        )
+                    ]
 
                 Expect.equal
                     (verdictsFor
@@ -1036,7 +1046,7 @@ let verboseScoringTests =
                                     taskId (Harvest "src-a"),
                                     RejectReason.Inapplicable
                                 )
-                                Candidate.Scored(taskId (Refill "spawn-1"), 0, 0, 0)
+                                Candidate.Scored(taskId (Refill("spawn-1", Energy)), 0, 0, 0)
                                 // Two tiers below the flow's zero, ten rungs
                                 // apiece since #216 R5: the ladder gained
                                 // room for a Task to be ordered inside its
@@ -1045,7 +1055,7 @@ let verboseScoringTests =
                                 Candidate.Scored(taskId (Upgrade "ctrl-1"), 20, 0, 0)
                             ]
                         )
-                        Verdict.Matched("w1", taskId (Refill "spawn-1"), MatchFactor.Rank)
+                        Verdict.Matched("w1", taskId (Refill("spawn-1", Energy)), MatchFactor.Rank)
                     ]
                     "every pool Task appears once: scored on the key or rejected at its gate"
             }
@@ -1148,5 +1158,66 @@ let verboseScoringTests =
                         Verdict.Unassigned("w1", IdleReason.NoneReachable)
                     ]
                     "the scoring pinpoints the gate the idle reason summarises"
+            }
+        ]
+
+[<Tests>]
+let resourceIdVerdictTests =
+    testList
+        "a Task id that names a resource"
+        [
+            test "the vision grace reads the store out of a Thorium Withdraw's id" {
+                // A Task id has two colons since ADR 0057 decision 3 put a
+                // resource on the [[withdraw]] and the [[refill]], and the
+                // vision grace (#151) holds an *id* and no Task — the Task it
+                // named has left the pool — so what it has to find in that id is
+                // the target the room's census files, between the first colon
+                // and the next. Neither an object id nor a room name has ever
+                // held a colon, which is what makes the reading total.
+                //
+                // Pairwise on the resource alone: the same store, the same dark
+                // room, the same grace, held under each of the two ids. Read
+                // whole, the Thorium id's target would be "can-min:Thorium",
+                // which the sighting does not hold, and the grace would quietly
+                // stop covering exactly the Tasks this ticket added.
+                let home = SpatialInfo.homeName mineHaulColony.Spatial
+
+                // The store gone from the projection, so the Task really has
+                // left the pool and the grace is the only thing that can keep
+                // its holder.
+                let gone = mineHaulColony |> withoutMineContainer
+
+                let blind =
+                    { gone with
+                        Time = 1000
+                        Creeps = [ hauler "h1" 0 200 ]
+                    }
+
+                let verdictsUnder sightings held =
+                    (decideFrom
+                        (Map.ofList [ "h1", taskId held ])
+                        { blind with Sightings = sightings })
+                        .Verdicts
+
+                let seen =
+                    Map.ofList
+                        [
+                            home,
+                            {
+                                Tick = 999
+                                Targets = Set.singleton "can-min"
+                            }
+                        ]
+
+                for held in [ Withdraw("can-min", Energy); Withdraw("can-min", Thorium) ] do
+                    Expect.contains
+                        (verdictsUnder seen held)
+                        (Verdict.Kept("h1", taskId held))
+                        $"the grace finds the store in %s{taskId held}"
+
+                    Expect.contains
+                        (verdictsUnder Map.empty held)
+                        (Verdict.Released("h1", taskId held, ReleaseReason.TaskGone))
+                        $"and with nothing seen there is no grace to keep %s{taskId held}"
             }
         ]

@@ -613,7 +613,7 @@ let downgradeDeadlineTests =
 
                 Expect.equal
                     (Map.tryFind "w1" kept)
-                    (Some(taskId (Refill "spawn-1")))
+                    (Some(taskId (Refill("spawn-1", Energy))))
                     "above half the timer, upgrade stays surplus work"
             }
 
@@ -628,7 +628,7 @@ let downgradeDeadlineTests =
 
                 Expect.equal
                     (Map.tryFind "w1" kept)
-                    (Some(taskId (Refill "spawn-1")))
+                    (Some(taskId (Refill("spawn-1", Energy))))
                     "a fresh timer changes nothing"
             }
         ]
@@ -1190,7 +1190,7 @@ let fleeTests =
                 //
                 // Pairwise on the hostile and on nothing else: the same dark
                 // room, the same held Refill, the same body on the same tile.
-                let held = taskId (Refill "spawn-1")
+                let held = taskId (Refill("spawn-1", Energy))
 
                 let dark hostiles =
                     { laneColony [ worker "w1" 50 0 ] [ "w1", { X = 25; Y = 22 } ] with
@@ -1403,7 +1403,7 @@ let fleeTests =
 
                 Expect.equal
                     (Map.tryFind "w1" assignments)
-                    (Some(taskId (Refill "spawn-1")))
+                    (Some(taskId (Refill("spawn-1", Energy))))
                     "and it goes back to work the same tick"
             }
 

@@ -116,7 +116,7 @@ let standingBodyTests =
 
                 Expect.equal
                     (laneAssignment [] [] empty)
-                    (Some(taskId (Withdraw "can-buf")))
+                    (Some(taskId (Withdraw("can-buf", Energy))))
                     "the row drinks from the buffer at its feet, which is why it stands there"
             }
 
@@ -160,7 +160,7 @@ let standingBodyTests =
 
                 Expect.equal
                     (assignedIn (emptyOf upgraderPattern))
-                    (Some(taskId (Withdraw "can-buf")))
+                    (Some(taskId (Withdraw("can-buf", Energy))))
                     "twenty-four under its feet is a trip's worth for the row that never leaves"
 
                 Expect.equal
@@ -207,7 +207,7 @@ let standingBodyTests =
 
                 Expect.equal
                     (matched 3)
-                    (Some(taskId (Refill "spawn-1"), MatchFactor.Rank))
+                    (Some(taskId (Refill("spawn-1", Energy)), MatchFactor.Rank))
                     "at RCL3 it is surplus, and the flow five steps off outranks it"
             }
 
@@ -268,7 +268,7 @@ let standingBodyTests =
                 let workerAssigned, _ = outcome (empty workerPattern)
 
                 Expect.isTrue
-                    (workerAssigned = Some(taskId (Withdraw "sto-1"))
+                    (workerAssigned = Some(taskId (Withdraw("sto-1", Energy)))
                      || workerAssigned = Some(taskId (Pickup "pile-1")))
                     "the generalist, one Carry per Work, walks to whichever intake is cheaper"
             }
@@ -334,7 +334,7 @@ let standingRefillTests =
                 // so easily have been written the other way round.
                 Expect.equal
                     (deliveryAssignment (hauler "hauler" 100 0))
-                    (Some(taskId (Refill "spawn-1")))
+                    (Some(taskId (Refill("spawn-1", Energy))))
                     "no Work part means no standing body, whatever the Carry"
             }
 
@@ -380,7 +380,7 @@ let standingRefillTests =
                 // could never count).
                 Expect.equal
                     (deliveryAssignment (creepWith "upgrader" 50 0 (bodyFor upgraderPattern 550)))
-                    (Some(taskId (Refill "spawn-1")))
+                    (Some(taskId (Refill("spawn-1", Energy))))
                     "three Work against a fifty-energy load is not yet a commute"
             }
 
@@ -392,7 +392,7 @@ let standingRefillTests =
                 // parity keeps it there).
                 Expect.equal
                     (deliveryAssignment workerBody)
-                    (Some(taskId (Refill "spawn-1")))
+                    (Some(taskId (Refill("spawn-1", Energy))))
                     "the row that carries its energy to work keeps its deliveries"
             }
         ]

@@ -544,7 +544,7 @@ let anchorTests =
 
                 Expect.equal
                     (Map.tryFind "g1" assignments)
-                    (Some(taskId (Refill "spawn-1")))
+                    (Some(taskId (Refill("spawn-1", Energy))))
                     "the loaded mobile body delivers"
 
                 Expect.equal

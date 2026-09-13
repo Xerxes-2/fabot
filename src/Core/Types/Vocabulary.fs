@@ -54,9 +54,10 @@ let partCountIn (body: BodyPart list) part =
 /// because it is the engine's vocabulary and not a shape of ours: `withdraw`
 /// and `transfer` have taken one of these strings all along, and what the
 /// Tasks that carry it gain is an argument we had been passing implicitly.
-/// Nothing carries it yet — widening `Withdraw` and `Refill` is #262's —
-/// so its one reader today is `resourceName`, the spelling the shell hands
-/// the engine.
+/// Carried by `Withdraw` and `Refill` since #262 — and by the two Intents
+/// behind them — so that one pair of Tasks answers for both legs of the haul
+/// cycle: **every existing construction is `Energy`**, and `Thorium` is the
+/// mine-to-[[storage]] leg ADR 0057 decision 3 adds beside it.
 type Resource =
     | Energy
     | Thorium
@@ -74,10 +75,14 @@ type Task =
     /// is `rockId` and not `sourceId` because this field is where a reader looks
     /// up what the id means, and half of what it can name is not a source.
     | Harvest of rockId: string
-    /// Take stored energy out of a stocked container (ADR 0012), or out of the
+    /// Take a resource out of a stocked container (ADR 0012), or out of the
     /// Storage a tier below them (ADR 0023) — the haul cycle's intake, judged
-    /// over stores rather than energy's name.
-    | Withdraw of storeId: string
+    /// over stores rather than energy's name. The **resource** is the argument
+    /// the engine's own `withdraw` has taken all along and this colony had been
+    /// passing implicitly (ADR 0057 decision 3): every store the colony draws
+    /// today is an `Energy` one, and the mineral [[container]] is the one
+    /// `Thorium` store there is.
+    | Withdraw of storeId: string * resource: Resource
     /// Walk to a dropped energy pile and take it. The Task half of what the
     /// [[pickup reflex]] does by hand: the reflex takes what is already within
     /// range 1 of a creep standing there for its own reasons, and this is what
@@ -91,8 +96,12 @@ type Task =
     /// [[ferry]]'s sink — and the flow's own sink, which since ADR 0054 is not
     /// a structure but a **place**: the id is the [[refill cluster]]'s spawn,
     /// and that spawn and every extension of the colony are one Task with one
-    /// [[capacity]].
-    | Refill of structureId: string
+    /// [[capacity]]. The **resource** is the Withdraw's argument read from the
+    /// other end (ADR 0057 decision 3): every energy sink the colony has is an
+    /// `Energy` Refill, and the [[storage]] takes a `Thorium` one beside its
+    /// own — the free warehouse, being an obstacle nothing can stand on and so
+    /// the one store the contact penalty never reaches.
+    | Refill of structureId: string * resource: Resource
     | Build of siteId: string
     | Repair of structureId: string
     | Upgrade of controllerId: string

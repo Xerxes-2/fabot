@@ -372,7 +372,7 @@ let postCapacityTests =
 
                 Expect.equal
                     (Map.tryFind "u1" assignments)
-                    (Some(taskId (Withdraw "can-ctrl")))
+                    (Some(taskId (Withdraw("can-ctrl", Energy))))
                     "and the body the cap turned away drinks at the buffer it was cast for"
             }
 

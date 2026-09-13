@@ -192,6 +192,7 @@ let private creep name room : WorldCreep =
                 Hits = { Hits = 300; HitsMax = 300 }
                 Fatigue = 0
                 Energy = 0
+                Thorium = 0
                 FreeCapacity = 50
                 Moved = false
                 Body = body
@@ -1078,7 +1079,7 @@ let colonyViewTests =
                     "and neither is the buffer beside its controller"
 
                 Expect.isFalse
-                    (List.contains (Withdraw "buf-child") (planTasks taken noThreats))
+                    (List.contains (Withdraw("buf-child", Energy)) (planTasks taken noThreats))
                     "nothing of that room is an intake of hers"
             }
 
@@ -1100,7 +1101,7 @@ let colonyViewTests =
                     "but its buffer is not a store of hers"
 
                 Expect.isFalse
-                    (List.contains (Withdraw "buf-child") (planTasks raising noThreats))
+                    (List.contains (Withdraw("buf-child", Energy)) (planTasks raising noThreats))
                     "so nothing pools a draw on it"
 
                 Expect.equal

@@ -112,16 +112,22 @@ let internal withPileRoom room piles positions (colony: ColonyView) =
             }
     }
 
+/// The stores the pool draws and the structures it fills, **in energy**: every
+/// case that reads these is about the haul cycle and its tiers, and since #262
+/// the [[storage]] carries a Thorium Refill in every colony that stands one —
+/// pooled off the Storage alone, so that a body already holding the season's ore
+/// has somewhere to put it down whatever has become of the mine behind it. The
+/// Thorium pair has its own cases, which name it rather than counting ids.
 let withdrawTasks tasks =
     tasks
     |> List.choose (function
-        | Withdraw storeId -> Some storeId
+        | Withdraw(storeId, Energy) -> Some storeId
         | _ -> None)
 
 let refillTasks tasks =
     tasks
     |> List.choose (function
-        | Refill structureId -> Some structureId
+        | Refill(structureId, Energy) -> Some structureId
         | _ -> None)
 
 /// The stock fixture: the tier corridor with the Storage standing at
@@ -248,7 +254,11 @@ let crowdOfThree =
 let drawersOf assignments storeId =
     assignments
     |> Map.toList
-    |> List.choose (fun (name, tid) -> if tid = taskId (Withdraw storeId) then Some name else None)
+    |> List.choose (fun (name, tid) ->
+        if tid = taskId (Withdraw(storeId, Energy)) then
+            Some name
+        else
+            None)
 
 /// The stock-crowding fixture: the same field with one Storage standing at
 /// (13,10) — an obstacle, as the projection carries a built one — and the

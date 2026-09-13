@@ -340,12 +340,12 @@ let tests =
 
                 Expect.equal
                     (Map.tryFind "w1" kept)
-                    (Some(taskId (Refill "spawn-1")))
+                    (Some(taskId (Refill("spawn-1", Energy))))
                     "full creep switches to delivering"
 
                 Expect.contains
                     intents
-                    (TransferEnergyToStructure("w1", "spawn-1"))
+                    (TransferEnergyToStructure("w1", "spawn-1", Energy))
                     "delivery intent emitted"
             }
 
@@ -373,12 +373,12 @@ let tests =
 
                 Expect.equal
                     (Map.tryFind "w1" kept)
-                    (Some(taskId (Refill "tower-1")))
+                    (Some(taskId (Refill("tower-1", Energy))))
                     "the tower is the delivery that remains"
 
                 Expect.contains
                     intents
-                    (TransferEnergyToStructure("w1", "tower-1"))
+                    (TransferEnergyToStructure("w1", "tower-1", Energy))
                     "the same transfer intent feeds a tower"
             }
 
@@ -392,7 +392,7 @@ let tests =
                 let { Assignments = kept } =
                     decide
                         snapshot
-                        (Map.ofList [ "w1", (taskId (Refill "spawn-1")) ])
+                        (Map.ofList [ "w1", (taskId (Refill("spawn-1", Energy))) ])
                         Set.empty
                         None
 
@@ -436,7 +436,7 @@ let tests =
 
                 Expect.equal
                     (Map.tryFind "w1" kept)
-                    (Some(taskId (Refill "spawn-1")))
+                    (Some(taskId (Refill("spawn-1", Energy))))
                     "refill outranks upgrade while a structure is missing energy"
             }
 
@@ -539,7 +539,7 @@ let tests =
 
                 Expect.equal
                     (Map.tryFind "w1" kept)
-                    (Some(taskId (Refill "spawn-1")))
+                    (Some(taskId (Refill("spawn-1", Energy))))
                     "refill outranks build while a structure is missing energy"
             }
 
@@ -592,7 +592,7 @@ let intakeRoomTests =
 
                 Expect.equal
                     (matched 280)
-                    (Some(taskId (Refill "ext-1")))
+                    (Some(taskId (Refill("ext-1", Energy))))
                     "twenty free of three hundred: a delivery, not an intake"
 
                 Expect.equal
@@ -652,17 +652,17 @@ let intakeWorthTests =
 
                 Expect.equal
                     (matched 216)
-                    (Some(taskId (Withdraw "stock-1")))
+                    (Some(taskId (Withdraw("stock-1", Energy))))
                     "the live reading: two hundred at its feet is not worth a twelve-hundred body's trip"
 
                 Expect.equal
                     (matched 599)
-                    (Some(taskId (Withdraw "stock-1")))
+                    (Some(taskId (Withdraw("stock-1", Energy))))
                     "one under half a load is still the stock's"
 
                 Expect.equal
                     (matched 600)
-                    (Some(taskId (Withdraw "can-src")))
+                    (Some(taskId (Withdraw("can-src", Energy))))
                     "half the body's free capacity standing in the store is worth the trip"
             }
 
@@ -702,7 +702,7 @@ let intakeWorthTests =
 
                 Expect.equal
                     (matched 225)
-                    (Some(taskId (Withdraw "can-src")))
+                    (Some(taskId (Withdraw("can-src", Energy))))
                     "half of 450 standing in the store is worth the trip"
             }
         ]
@@ -755,7 +755,7 @@ let intakeDecayTests =
 
                 Expect.equal
                     (matched Tombstone)
-                    (Some(taskId (Withdraw "store-1")))
+                    (Some(taskId (Withdraw("store-1", Energy))))
                     "a tombstone ends, so its hundred and fifty is drawn by the body that is asking"
 
                 Expect.equal
@@ -806,7 +806,7 @@ let intakeDecayTests =
 
                 Expect.equal
                     (matched (Structure BuiltKind.Storage))
-                    (Some(taskId (Withdraw "store-1")))
+                    (Some(taskId (Withdraw("store-1", Energy))))
                     "the deepest intake in the colony draws whatever body asks it"
 
                 Expect.isNone
@@ -882,8 +882,8 @@ let selfHealTests =
                 let selected =
                     [
                         UpgradeController("patient", "controller")
-                        TransferEnergyToStructure("patient", "store")
-                        WithdrawFromStore("patient", "store")
+                        TransferEnergyToStructure("patient", "store", Energy)
+                        WithdrawFromStore("patient", "store", Energy, None)
                         PickupEnergy("patient", "pile")
                         ClaimController("patient", "controller")
                         ReserveController("patient", "controller")

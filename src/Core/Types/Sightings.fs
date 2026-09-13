@@ -115,7 +115,26 @@ type CreepInfo =
         Hits: HitsInfo
         /// Energy currently carried.
         Energy: int
-        /// Carry capacity still free (0 = full).
+        /// Thorium currently carried (ADR 0057 decision 3): a **second field
+        /// beside `Energy`** and never a resource key inside it, for the reason
+        /// `SpatialInfo.Thorium` gives — every existing reader asks about energy
+        /// and would otherwise grow a question it never asks.
+        ///
+        /// It is here because a decision reads it (ADR 0007): **a body carries
+        /// one resource at a time**. The Thorium arm of [[withdraw]] is
+        /// applicable to an *empty* store and not #232's half-empty one, the
+        /// Thorium arm of [[refill]] to a body holding some, and the three
+        /// energy intakes are shut to a body holding any — a mixed load pours
+        /// energy into a reactor that refuses it and arrives at the decade cliff
+        /// with the wrong count in its store. Derived arithmetic would not do:
+        /// `FreeCapacity` is the engine's whole-store answer, so the Thorium a
+        /// body holds is `capacity - free - energy` only where the three agree,
+        /// and a hand-built fixture is free to state a body that no engine would
+        /// hand back.
+        Thorium: int
+        /// Carry capacity still free (0 = full) — the **whole** store's, a
+        /// creep's store being general: a body holding 999 Thorium of 1,200
+        /// reports 201 free and no energy at all.
         FreeCapacity: int
         /// Active part counts (body entries with hits > 0). Absent or zero
         /// means the creep has no usable part of that kind.

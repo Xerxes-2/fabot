@@ -842,7 +842,7 @@ let nurseryTests =
 
                 Expect.equal
                     (matchOf homeSited)
-                    (Some(taskId (Refill "ext-1"), MatchFactor.Rank))
+                    (Some(taskId (Refill("ext-1", Energy)), MatchFactor.Rank))
                     "the colony's own spawnless home is no nursery of its own: its site stays surplus"
             }
 
@@ -2063,7 +2063,7 @@ let colonyStageTests =
 
                 Expect.equal
                     (matched Independent)
-                    (Some(taskId (Refill "spawn-1"), MatchFactor.Rank))
+                    (Some(taskId (Refill("spawn-1", Energy)), MatchFactor.Rank))
                     "and an independent one leaves it surplus, under the flow like any home site"
             }
 
@@ -2302,7 +2302,7 @@ let borrowedRoomBudgetTests =
 
                     planPool view (Atlas.ofView view) (planTasks view noThreats)
                     |> List.tryPick (fun pooled ->
-                        if pooled.Task = Refill id then
+                        if pooled.Task = Refill(id, Energy) then
                             Capacity.capOf CapScope.Everyone pooled.Capacity
                         else
                             None)

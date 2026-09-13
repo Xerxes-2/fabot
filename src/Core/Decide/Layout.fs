@@ -865,10 +865,20 @@ let internal planOutpostContainers (view: ColonyView) atlas : Intent list =
 /// outpost (ADR 0042): its hauler runs one container, so the Anchor's overflow
 /// lands on the container's own tile, a full container turns that overflow into
 /// a pile, and the hauler then stands *on* the pile and walked away from it.
+///
+/// **A body already carrying the season's ore is not hungry** (#262, ADR 0057
+/// decision 3). The reflex runs beside the pipeline and asks nothing of
+/// `applicable`, so free capacity alone let a hauler holding 150 of 200 Thorium
+/// scoop energy into the same store — the mixed load decision 3 forbids, made by
+/// the one act in the colony that never consulted the gate forbidding it. It is
+/// survivable today, the Feeding-tier energy Refill outranking the Stock-tier
+/// Thorium one so the body pours the energy first, but two claims the Thorium
+/// arm rests on are false while it stands: that `Refill(_, Energy)` is
+/// unreachable for a laden body, and that a body holding Thorium has no energy.
 let internal planPickups (view: ColonyView) atlas : Intent list =
     let hungry =
         view.Creeps
-        |> List.filter (fun c -> c.FreeCapacity > 0)
+        |> List.filter (fun c -> c.FreeCapacity > 0 && c.Thorium = 0)
         |> List.map (fun c -> c.Name)
         |> Set.ofList
 

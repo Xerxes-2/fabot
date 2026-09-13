@@ -17,6 +17,20 @@ module Engine =
     /// CARRY_CAPACITY: the energy one Carry part holds.
     let carryPartCapacity = 50
 
+    /// HARVEST_MINERAL_POWER: the Thorium one Work part takes out of a deposit
+    /// in one act — one, against a source's two (ADR 0057).
+    let mineralHarvestPerWork = 1
+
+    /// EXTRACTOR_COOLDOWN: the ticks an extractor is refused after a harvest.
+    /// The **cycle** is one longer (`mineralHarvestCycle`): the intent pass runs
+    /// before the object pass, so the cooldown written at the end of the harvest
+    /// tick is decremented five times and successive digs land six ticks apart.
+    let extractorCooldown = 5
+
+    /// The ticks between one dig of a deposit and the next, which is what turns
+    /// a [[miner]]'s Work parts into a rate: `Work / 6` Thorium a tick.
+    let mineralHarvestCycle = extractorCooldown + 1
+
     /// CREEP_LIFE_TIME: the ticks a spawned creep lives — the horizon a
     /// body's replacement cost is amortized over.
     let creepLifetime = 1500

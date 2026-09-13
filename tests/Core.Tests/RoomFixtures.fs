@@ -475,6 +475,10 @@ let private castCreep name (body: BodyPart list) fill : CreepInfo =
             }
         Fatigue = 0
         Energy = carried
+        // No fixture carries Thorium: the season's ore reaches a body only
+        // through the mine leg (ADR 0057 decision 3), and a captured room's
+        // creeps are the colony's energy fleet.
+        Thorium = 0
         FreeCapacity = capacity - carried
         Moved = false
         Body = body |> List.countBy id |> Map.ofList

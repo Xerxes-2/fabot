@@ -42,7 +42,8 @@ let raidedOutpostTests =
 
                 Expect.equal
                     (Map.tryFind "h-out1" quiet, Map.tryFind "h-out2" quiet)
-                    (Some(taskId (Withdraw "can-out")), Some(taskId (Withdraw "can-out")))
+                    (Some(taskId (Withdraw("can-out", Energy))),
+                     Some(taskId (Withdraw("can-out", Energy))))
                     "and the crew empties the container that Post feeds"
 
                 Expect.equal
@@ -77,7 +78,7 @@ let raidedOutpostTests =
                         Map.ofList
                             [
                                 "a-out", taskId (Harvest "src-out")
-                                "h-out1", taskId (Withdraw "can-out")
+                                "h-out1", taskId (Withdraw("can-out", Energy))
                             ]
 
                     (decideFrom held (raidedOutpost hostiles)).Verdicts
@@ -94,7 +95,7 @@ let raidedOutpostTests =
                         taskId (Harvest "src-out"),
                         ReleaseReason.Rejected RejectReason.Threatened
                         "h-out1",
-                        taskId (Withdraw "can-out"),
+                        taskId (Withdraw("can-out", Energy)),
                         ReleaseReason.Rejected RejectReason.Threatened
                     ]
                     "the raid takes the rock's Seats and the container's ground, and says so"
@@ -573,7 +574,7 @@ let guardTaskTests =
 
                 Expect.contains
                     rejections
-                    (taskId (Withdraw "can-out"), RejectReason.Threatened)
+                    (taskId (Withdraw("can-out", Energy)), RejectReason.Threatened)
                     "and so is the ground the container is drawn from"
 
                 Expect.contains
@@ -630,7 +631,7 @@ let crossSeamThreatTests =
 
                 Expect.equal
                     (Map.tryFind "w-home" quiet.Assignments)
-                    (Some(taskId (Withdraw "can-out")))
+                    (Some(taskId (Withdraw("can-out", Energy))))
                     "the premise: with the room quiet the body is offered the outpost's work and crosses for it"
 
                 Expect.equal
@@ -782,7 +783,7 @@ let containerSwitchTests =
 
                 Expect.equal
                     (List.except (planTasks switchPosted noThreats) (planTasks stocked noThreats))
-                    [ Withdraw "can-out" ]
+                    [ Withdraw("can-out", Energy) ]
                     "and stocked it adds exactly one Task, the Withdraw of its own store"
 
                 let decayed =

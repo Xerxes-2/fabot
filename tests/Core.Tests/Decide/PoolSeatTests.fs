@@ -176,7 +176,7 @@ let refillClusterTests =
                 let holders free =
                     let { Assignments = assignments } = decideOn (colony free)
 
-                    holdersOf (Refill "spawn-1") assignments
+                    holdersOf (Refill("spawn-1", Energy)) assignments
 
                 Expect.hasLength (holders 100) 1 "one load of room admits one body"
                 Expect.hasLength (holders 300) 2 "and two loads' worth admits the second"
@@ -193,7 +193,7 @@ let refillClusterTests =
                         [ creepWith "h1" 50 0 [ Carry; Carry; Move ] ]
                         [ "h1", { X = 10; Y = 18 } ]
 
-                let sticky = Map.ofList [ "h1", taskId (Refill "spawn-1") ]
+                let sticky = Map.ofList [ "h1", taskId (Refill("spawn-1", Energy)) ]
 
                 let {
                         Assignments = assignments
@@ -203,7 +203,7 @@ let refillClusterTests =
 
                 Expect.equal
                     (Map.tryFind "h1" assignments)
-                    (Some(taskId (Refill "spawn-1")))
+                    (Some(taskId (Refill("spawn-1", Energy))))
                     "the near extension is full and the far one is not: the Task stands"
 
                 Expect.isEmpty
@@ -224,13 +224,17 @@ let refillClusterTests =
                         [ creepWith "h1" 50 0 [ Carry; Carry; Move ] ]
                         [ "h1", { X = 10; Y = 18 } ]
 
-                let sticky = Map.ofList [ "h1", taskId (Refill "spawn-1") ]
+                let sticky = Map.ofList [ "h1", taskId (Refill("spawn-1", Energy)) ]
 
                 let { Verdicts = verdicts } = decideFrom sticky full
 
                 Expect.contains
                     verdicts
-                    (Verdict.Released("h1", taskId (Refill "spawn-1"), ReleaseReason.TaskGone))
+                    (Verdict.Released(
+                        "h1",
+                        taskId (Refill("spawn-1", Energy)),
+                        ReleaseReason.TaskGone
+                    ))
                     "a cluster with no room left is no Task"
             }
 
@@ -251,12 +255,12 @@ let refillClusterTests =
 
                 Expect.contains
                     northIntents
-                    (TransferEnergyToStructure("h1", "ext-1"))
+                    (TransferEnergyToStructure("h1", "ext-1", Energy))
                     "ext-2 is full, so the load goes into the extension that is not"
 
                 Expect.contains
                     southIntents
-                    (TransferEnergyToStructure("h1", "ext-2"))
+                    (TransferEnergyToStructure("h1", "ext-2", Energy))
                     "and the other way round, so it is room and not id order deciding"
             }
 
@@ -284,7 +288,11 @@ let refillClusterTests =
                         [ "h1", { X = 10; Y = 18 }; "h2", { X = 10; Y = 11 } ]
 
                 let sticky =
-                    Map.ofList [ "h1", taskId (Refill "spawn-1"); "h2", taskId (Refill "spawn-1") ]
+                    Map.ofList
+                        [
+                            "h1", taskId (Refill("spawn-1", Energy))
+                            "h2", taskId (Refill("spawn-1", Energy))
+                        ]
 
                 let outcome free =
                     let {
@@ -293,7 +301,7 @@ let refillClusterTests =
                         } =
                         decideFrom sticky (colony free)
 
-                    holdersOf (Refill "spawn-1") assignments, verdicts
+                    holdersOf (Refill("spawn-1", Energy)) assignments, verdicts
 
                 // Four hundred of room is two of the 300 bank's 200-energy
                 // loads, so both bodies keep what they hold.
@@ -312,7 +320,7 @@ let refillClusterTests =
                     verdicts
                     (Verdict.Released(
                         "h1",
-                        taskId (Refill "spawn-1"),
+                        taskId (Refill("spawn-1", Energy)),
                         ReleaseReason.Rejected RejectReason.CapacityFull
                     ))
                     "and the walker is released capacity-full, being the one furthest from the ring"
@@ -697,7 +705,7 @@ let repairTests =
 
                 Expect.equal
                     verdicts
-                    [ Verdict.Matched("w1", taskId (Refill "spawn-1"), MatchFactor.Rank) ]
+                    [ Verdict.Matched("w1", taskId (Refill("spawn-1", Energy)), MatchFactor.Rank) ]
                     "the colony feeds itself before it patches roads: rank decided"
             }
 
@@ -758,7 +766,7 @@ let repairTests =
 
                 Expect.equal
                     verdicts
-                    [ Verdict.Matched("w1", taskId (Refill "spawn-1"), MatchFactor.Rank) ]
+                    [ Verdict.Matched("w1", taskId (Refill("spawn-1", Energy)), MatchFactor.Rank) ]
                     "the colony feeds itself before it mends containers: rank decided"
             }
 

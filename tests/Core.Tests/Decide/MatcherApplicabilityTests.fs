@@ -332,3 +332,155 @@ let harvestApplicabilityTests =
                     "the clause starts biting the tick the container stands"
             }
         ]
+
+[<Tests>]
+let thoriumApplicabilityTests =
+    testList
+        "the Thorium leg's applicability"
+        [
+            // ADR 0057 decision 3: the Thorium arm is applicable to an **empty**
+            // carrier and not to #232's half-empty one, because a body carries
+            // one resource at a time here — a mixed load pours energy into a
+            // reactor that refuses it and arrives at the decade cliff with the
+            // wrong count in its store. Pairwise on the body's store alone: the
+            // same hauler, on the same tile beside the same container, differing
+            // in nothing but what it is already carrying.
+            test "an empty carrier draws the mine; a half-loaded one does not" {
+                let matchedWith body =
+                    let colony =
+                        { mineHaulColony with
+                            Creeps = [ body ]
+                            Spatial =
+                                mineHaulColony.Spatial |> withCreepsAt [ "h1", { X = 12; Y = 10 } ]
+                        }
+
+                    Map.tryFind "h1" (decideOn colony).Assignments
+
+                Expect.equal
+                    (matchedWith (hauler "h1" 0 200))
+                    (Some(taskId (Withdraw("can-min", Thorium))))
+                    "nothing aboard is what makes a body the mine's"
+
+                Expect.equal
+                    (matchedWith (hauler "h1" 100 100))
+                    (Some(taskId (Refill("sto-1", Energy))))
+                    "half a load of energy aboard, and the body is a delivery and not an intake"
+            }
+
+            test "a two-hundred-unit container is worth a whole hauler's trip" {
+                // #232's worth-the-trip line stays, and the stock-tier disjunct
+                // answers it for this arm on the line's own stated reason: what
+                // the line buys is the fall to the tier below, and there is none
+                // below the Storage's tier. A body refused the mine has no
+                // deeper intake to fall to — it would stand idle while the
+                // container fills and the miner's next dig bleeds onto the
+                // ground, which is 3.33 Thorium a tick against a container that
+                // holds 2,000.
+                let thin = mineHaulColony |> withMineStock 200
+
+                let colony =
+                    { thin with
+                        Creeps = [ hauler "h1" 0 200 ]
+                        Spatial = thin.Spatial |> withCreepsAt [ "h1", { X = 12; Y = 10 } ]
+                    }
+
+                Expect.equal
+                    (Map.tryFind "h1" (decideOn colony).Assignments)
+                    (Some(taskId (Withdraw("can-min", Thorium))))
+                    "a fifth of a container is still the only Thorium there is"
+            }
+
+            test "a loaded carrier pours into the Storage, and takes no energy on the way" {
+                // The delivery half, and the invariant that makes it one trip:
+                // a body holding the season's ore is applicable to the Storage's
+                // Thorium Refill and to **no energy intake at all** — not the
+                // container under its feet, not a pile, not a rock. Pairwise on
+                // the load alone: the same body, the same tile, energy in one
+                // half and Thorium in the other, beside a container stocked with
+                // six hundred of each.
+                let colony load =
+                    { mineHaulColony with
+                        Spatial =
+                            { mineHaulColony.Spatial with
+                                Stores = Map.add "can-min" 600 mineHaulColony.Spatial.Stores
+                            }
+                            |> withCreepsAt [ "h1", { X = 13; Y = 10 } ]
+                        Creeps = [ load ]
+                    }
+
+                Expect.equal
+                    (Map.tryFind "h1" (decideOn (colony (hauler "h1" 0 200))).Assignments)
+                    (Some(taskId (Withdraw("can-min", Energy))))
+                    "the premise: an empty body beside that container draws its energy"
+
+                Expect.equal
+                    (Map.tryFind
+                        "h1"
+                        (decideOn (colony (hauler "h1" 0 200 |> carrying 150))).Assignments)
+                    (Some(taskId (Refill("sto-1", Thorium))))
+                    "with the ore aboard the same body has one Task: put it down"
+            }
+
+            test "a light body carrying Thorium is offered no rock either" {
+                // The third energy intake (ADR 0057 decision 3). A worker that
+                // took a load off the mineral container is Work-carrying and
+                // half empty, and Harvest is the Feeding tier — so without the
+                // clause it would outrank its own delivery, dig energy into the
+                // same store and carry the pair around for the rest of its life.
+                // Pairwise on the load alone, on the source fixture where the
+                // rock is the only Task there is.
+                let matchedWith body =
+                    let colony = sourceColony loneSourceRoom [ body, { X = 13; Y = 10 } ]
+
+                    Map.tryFind "w" (decideOn colony).Assignments
+
+                Expect.equal
+                    (matchedWith (lightWorker "w" 0 450))
+                    (Some(taskId (Harvest "src-a")))
+                    "the premise: an empty generalist digs"
+
+                Expect.isNone
+                    (matchedWith (lightWorker "w" 0 450 |> carrying 50))
+                    "with the season's ore aboard it digs nothing"
+            }
+
+            test "a laden carrier keeps its sink when the mine container goes" {
+                // #262. The ore shuts every energy intake and the body has no
+                // Work to spend, so the Storage's Thorium Refill is the **only**
+                // Task a laden hauler is ever applicable to — and while that
+                // Refill was pooled off a standing mineral container the two
+                // could disagree. The container is destroyed or decays and the
+                // Layout re-places it as a site; for the whole of that window a
+                // hauler mid-haul had no applicable Task at all, while the row's
+                // census counted it living and cast no replacement: one carrier
+                // out of the energy economy for up to 1,500 ticks. So the sink
+                // is the Storage's own fact and not the mine's.
+                //
+                // Three readings, pairwise on the container alone.
+                let gone = mineHaulColony |> withoutMineContainer
+
+                let matchedIn colony body =
+                    let colony =
+                        { colony with
+                            Creeps = [ body ]
+                            Spatial = colony.Spatial |> withCreepsAt [ "h1", { X = 13; Y = 10 } ]
+                        }
+
+                    Map.tryFind "h1" (decideOn colony).Assignments
+
+                Expect.equal
+                    (matchedIn gone (hauler "h1" 100 100))
+                    (Some(taskId (Refill("sto-1", Energy))))
+                    "the premise: with the container gone the colony still has energy work"
+
+                Expect.equal
+                    (matchedIn mineHaulColony (hauler "h1" 0 200 |> carrying 150))
+                    (Some(taskId (Refill("sto-1", Thorium))))
+                    "and the laden body's one Task while the mine stands is to put the ore down"
+
+                Expect.equal
+                    (matchedIn gone (hauler "h1" 0 200 |> carrying 150))
+                    (Some(taskId (Refill("sto-1", Thorium))))
+                    "which the ground behind it going away does not take from it"
+            }
+        ]

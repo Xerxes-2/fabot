@@ -293,14 +293,14 @@ let private safetyTier task =
 let private roomOfWork atlas task =
     match task with
     | Harvest id
-    | Withdraw id
     | Pickup id
-    | Refill id
     | Build id
     | Repair id
     | Upgrade id
     | Reserve id
     | Claim id -> Atlas.targetRoom atlas id
+    | Withdraw(id, _)
+    | Refill(id, _) -> Atlas.targetRoom atlas id
     | Guard room -> Some room
     | Flee -> None
 
@@ -1017,7 +1017,20 @@ let planPool (view: ColonyView) atlas (tasks: Task list) : PooledTask list =
         // is five a tick or ten, and a claim decides whether there is going to
         // be a second colony at all.
         | Claim _ -> Feeding
-        | Withdraw storeId ->
+        // **The Thorium pair ranks at the [[storage]]'s tier** (ADR 0057
+        // decision 3, reading ADR 0023): the draw at `StockDraw` here and the
+        // sink at `Stock` below, which the Refill arm reaches through the kind
+        // it already asks — the Thorium Refill's target *is* the Storage, so
+        // nothing about that half is new. Read on the container's own tier this
+        // draw would be Feeding work, and an empty hauler beside the mine would
+        // take the season's ore ahead of the energy the spawn is waiting on. A
+        // miner making 3.33 T/tick against a delivery cadence that consumes 1.25
+        // has 2.6× of slack, so this is genuinely the work a body does when it
+        // has no better; the container's own overflow penalty is 0.3 energy a
+        // tick of repair. **Asked before the kind**, because the store it names
+        // is a container and would otherwise answer Feeding.
+        | Withdraw(_, Thorium) -> StockDraw
+        | Withdraw(storeId, Energy) ->
             if Map.tryFind storeId view.Spatial.TargetKinds = Some(Structure BuiltKind.Storage) then
                 StockDraw
             else
@@ -1029,7 +1042,7 @@ let planPool (view: ColonyView) atlas (tasks: Task list) : PooledTask list =
         // `priorityOf` steps up a rung, the one lying on a drawable store and
         // the one holding half a [[hauler unit]]'s load (#216 R5, #242).
         | Pickup _ -> Feeding
-        | Refill structureId ->
+        | Refill(structureId, _) ->
             let isTower =
                 view.Refillables
                 |> List.exists (fun r -> r.Id = structureId && r.Kind = BuiltKind.Tower)
@@ -1094,7 +1107,7 @@ let planPool (view: ColonyView) atlas (tasks: Task list) : PooledTask list =
         tasks
         |> List.choose (fun task ->
             match task with
-            | Withdraw storeId when tierOf task = Feeding ->
+            | Withdraw(storeId, _) when tierOf task = Feeding ->
                 SpatialInfo.placementOf view.Spatial storeId
             | _ -> None)
         |> Set.ofList
@@ -1189,7 +1202,11 @@ let planPool (view: ColonyView) atlas (tasks: Task list) : PooledTask list =
                     OneRungUp
                 else
                     OnTheTier
-            | Withdraw storeId when tier = Feeding && stored storeId >= Engine.containerCapacity ->
+            // Only an **energy** container's Withdraw ever reads Feeding, so
+            // this rung is the energy one it always was: what is going away is
+            // the [[anchor]]'s next dig onto a full store, and a deposit's
+            // container is drawn on the Storage's own tier below it.
+            | Withdraw(storeId, _) when tier = Feeding && stored storeId >= Engine.containerCapacity ->
                 TwoRungsUp
             | Build siteId when tier = Surplus && isHomeSite view atlas siteId -> OneRungUp
             // Over the home site as well as over the Upgrade (#284): a site is
@@ -1293,8 +1310,15 @@ let planPool (view: ColonyView) atlas (tasks: Task list) : PooledTask list =
         // room being claimed by one touch of one CLAIM part.
         | Reserve _
         | Claim _ -> Capacity.total 1
-        | Withdraw storeId ->
-            let stock = stored storeId
+        // **Capped by its store's stock of the resource it names** (#161, read
+        // down ADR 0057 decision 3's second column): a store answers the number
+        // its own holding of *that* resource divides into loads, so the mineral
+        // container's Thorium cap is counted off the Thorium and never off the
+        // energy it holds none of. The divisor is the [[hauler unit]]'s load
+        // either way — one row draws both legs, which is the whole of decision
+        // 3's "a row's quota grows, not a row".
+        | Withdraw(storeId, resource) ->
+            let stock = SpatialInfo.heldIn view.Spatial resource storeId
 
             if Set.contains storeId buffers then
                 Capacity.unbounded
@@ -1313,7 +1337,7 @@ let planPool (view: ColonyView) atlas (tasks: Task list) : PooledTask list =
         // gather every loaded body onto one ring and leave the [[buffer]] and
         // the [[storage]] unvisited. Divided by the [[hauler unit]]'s load and
         // never a candidate's own carry, and a `Total` with no per-class share.
-        | Refill spawnId when cluster |> Option.exists (fun c -> c.Spawn = spawnId) ->
+        | Refill(spawnId, _) when cluster |> Option.exists (fun c -> c.Spawn = spawnId) ->
             let free = cluster |> Option.map RefillCluster.free |> Option.defaultValue 0
 
             Capacity.total (ceilDiv free haulerLoad)
@@ -1324,7 +1348,7 @@ let planPool (view: ColonyView) atlas (tasks: Task list) : PooledTask list =
         // rather than a second economy is that it is *bounded*, and a cap on the
         // carriers would leave every generalist free to cross for the same
         // store. The tier puts this Refill below every sink at home.
-        | Refill structureId when Set.contains structureId ferrySinks ->
+        | Refill(structureId, _) when Set.contains structureId ferrySinks ->
             Capacity.total (Map.tryFind structureId ferryShare |> Option.defaultValue 0)
         // A borrowed Upgrade takes the bodies hired for it and no more (#213):
         // `Tuning.PioneerCount`, the same constant the worker row is raised by,

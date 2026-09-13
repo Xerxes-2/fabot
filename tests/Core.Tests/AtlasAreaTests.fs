@@ -78,7 +78,7 @@ let refillClusterTests =
                 // — which is what makes one Task out of a ring of ten.
                 let atlas = clusterAtlas [] (50, 50, 0)
 
-                let area = workArea atlas (Refill "spawn-1") |> tilesHome atlas
+                let area = workArea atlas (Refill("spawn-1", Energy)) |> tilesHome atlas
 
                 Expect.isTrue
                     (Set.contains { X = 9; Y = 10 } area)
@@ -106,13 +106,13 @@ let refillClusterTests =
                 Expect.isTrue
                     (Set.contains
                         { X = 11; Y = 10 }
-                        (workArea hungry (Refill "spawn-1") |> tilesHome hungry))
+                        (workArea hungry (Refill("spawn-1", Energy)) |> tilesHome hungry))
                     "ext-2 has room, so the tile beside it is a tile to work from"
 
                 Expect.isFalse
                     (Set.contains
                         { X = 11; Y = 10 }
-                        (workArea full (Refill "spawn-1") |> tilesHome full))
+                        (workArea full (Refill("spawn-1", Energy)) |> tilesHome full))
                     "ext-2 is full, so its ring is nobody's standing room this tick"
             }
 
@@ -124,12 +124,12 @@ let refillClusterTests =
                 let westHungry = clusterAtlas [ "w1", { X = 13; Y = 10 } ] (0, 0, 50)
 
                 Expect.equal
-                    (refillTarget eastHungry "w1" "spawn-1")
+                    (refillTarget eastHungry "w1" "spawn-1" Energy)
                     (Some "ext-1")
                     "ext-2 is full, so the transfer names the extension that is not"
 
                 Expect.equal
-                    (refillTarget westHungry "w1" "spawn-1")
+                    (refillTarget westHungry "w1" "spawn-1" Energy)
                     (Some "ext-2")
                     "and the other way round, so it is room and not id order deciding"
             }
@@ -141,7 +141,7 @@ let refillClusterTests =
                 let atlas = clusterAtlas [ "w1", { X = 13; Y = 10 } ] (50, 50, 50)
 
                 Expect.equal
-                    (refillTarget atlas "w1" "tower-1")
+                    (refillTarget atlas "w1" "tower-1" Energy)
                     (Some "tower-1")
                     "an unclustered Refill is the single structure it always was"
             }
@@ -150,7 +150,7 @@ let refillClusterTests =
                 let atlas = clusterAtlas [ "w1", { X = 13; Y = 10 } ] (0, 0, 0)
 
                 Expect.isNone
-                    (refillTarget atlas "w1" "spawn-1")
+                    (refillTarget atlas "w1" "spawn-1" Energy)
                     "the whole ring full is the tick the Emitter issues no transfer"
             }
         ]

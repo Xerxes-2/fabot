@@ -275,10 +275,21 @@ function line(a, b) {
   return tiles;
 }
 
-function store({ used = 0, capacity = 0 } = {}) {
+// A store is **per resource** (ADR 0057 decision 3). Answering `used` whatever
+// was asked made every stocked container, every Storage and every loaded creep
+// in this harness report its energy again as Thorium — invisible while nothing
+// read the second column, and the tick `World` began filling
+// `SpatialInfo.Thorium` and `CreepInfo.Thorium` off it, a lie that changes
+// decisions: a hauler holding 400 energy read as a body carrying the season's
+// ore, which shuts every energy intake it has. `thorium` defaults to none, so
+// the whole existing furniture is energy and says so.
+//
+// `getFreeCapacity` is the **whole** store's room, which is what the engine
+// answers for a general store and what the bot reads a creep's by.
+function store({ used = 0, capacity = 0, thorium = 0 } = {}) {
   return {
-    getUsedCapacity: () => used,
-    getFreeCapacity: () => capacity - used,
+    getUsedCapacity: (resource) => (resource === THORIUM ? thorium : used),
+    getFreeCapacity: () => capacity - used - thorium,
   };
 }
 

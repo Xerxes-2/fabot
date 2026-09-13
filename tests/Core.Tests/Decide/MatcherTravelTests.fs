@@ -103,7 +103,7 @@ let travelCostTests =
 
                 Expect.equal
                     (Map.tryFind "w1" assignments)
-                    (Some(taskId (Refill "spawn-1")))
+                    (Some(taskId (Refill("spawn-1", Energy))))
                     "travel cost breaks ties within a rank, never across ranks"
             }
 
@@ -1067,7 +1067,11 @@ let arbitrationTests =
                     ]
 
                 let assigned =
-                    [ "w1", Upgrade "ctrl-1"; "w2", Upgrade "ctrl-1"; "h", Refill "can-buf" ]
+                    [
+                        "w1", Upgrade "ctrl-1"
+                        "w2", Upgrade "ctrl-1"
+                        "h", Refill("can-buf", Energy)
+                    ]
 
                 let start =
                     Map.ofList
@@ -1137,7 +1141,8 @@ let arbitrationTests =
                 let creeps = [ for n in 1..6 -> worker $"w%d{n}" 50 0 ] @ [ hauler "h" 100 0 ]
 
                 let assigned =
-                    [ for n in 1..6 -> $"w%d{n}", Upgrade "ctrl-1" ] @ [ "h", Refill "can-buf" ]
+                    [ for n in 1..6 -> $"w%d{n}", Upgrade "ctrl-1" ]
+                    @ [ "h", Refill("can-buf", Energy) ]
 
                 let start =
                     Map.ofList
@@ -1176,7 +1181,8 @@ let arbitrationTests =
                 let creeps = [ for n in 1..5 -> worker $"w%d{n}" 50 0 ] @ [ hauler "h" 100 0 ]
 
                 let assigned =
-                    [ for n in 1..5 -> $"w%d{n}", Upgrade "ctrl-1" ] @ [ "h", Refill "can-buf" ]
+                    [ for n in 1..5 -> $"w%d{n}", Upgrade "ctrl-1" ]
+                    @ [ "h", Refill("can-buf", Energy) ]
 
                 let start =
                     Map.ofList
@@ -1217,7 +1223,7 @@ let arbitrationTests =
                 let ticks =
                     walkedTicks
                         (wallStorageColony creeps)
-                        [ "h", Refill "sto-1" ]
+                        [ "h", Refill("sto-1", Energy) ]
                         8
                         (Map.ofList
                             [
@@ -1269,7 +1275,7 @@ let arbitrationTests =
                 let ticks =
                     walkedTicks
                         (wallTowerColony creeps)
-                        [ "h", Refill "tow-1" ]
+                        [ "h", Refill("tow-1", Energy) ]
                         8
                         (Map.ofList
                             [
@@ -1729,8 +1735,8 @@ let pushWeightCorridorTests =
 
                 let assigned =
                     [
-                        "refill", Refill "spawn-1"
-                        "withdraw", Withdraw "can-src"
+                        "refill", Refill("spawn-1", Energy)
+                        "withdraw", Withdraw("can-src", Energy)
                         "deadline", Upgrade "ctrl-1"
                     ]
 
@@ -1738,11 +1744,14 @@ let pushWeightCorridorTests =
                     (poolOn snapshot
                      |> List.choose (fun entry ->
                          match entry.Task with
-                         | Withdraw "can-src"
-                         | Refill "spawn-1" -> Some(taskId entry.Task, entry.Priority)
+                         | Withdraw("can-src", Energy)
+                         | Refill("spawn-1", Energy) -> Some(taskId entry.Task, entry.Priority)
                          | _ -> None)
                      |> List.sortBy fst)
-                    [ taskId (Refill "spawn-1"), 0; taskId (Withdraw "can-src"), -2 ]
+                    [
+                        taskId (Refill("spawn-1", Energy)), 0
+                        taskId (Withdraw("can-src", Energy)), -2
+                    ]
                     "the premise: the two Tasks are one tier and two rungs apart"
 
                 Expect.contains

@@ -66,6 +66,23 @@ let internal applicable
     // read — and a garrison's whole working life is spent past half full.
     let halfEmpty = creep.FreeCapacity * 2 >= creep.Energy + creep.FreeCapacity
 
+    // **A body carries one resource at a time** (ADR 0057 decision 3). Thorium
+    // aboard shuts every *energy* intake — the Withdraw, the Pickup and the
+    // light body's Harvest — because a mixed load pours energy into a reactor
+    // that refuses it and arrives at the decade cliff with the wrong count in
+    // its store. The mirror of it is the Thorium arm's own gate below, which
+    // asks for an **empty** store and not #232's half-empty one: between the
+    // two, a load is one resource from the tick it is taken to the tick it is
+    // poured. Zero for every body in a colony with no mine, so no energy
+    // decision moves.
+    let carryingThorium = creep.Thorium > 0
+
+    // Nothing aboard at all, over both resources — the Thorium intake's own
+    // gate. Read as the two holdings and not as `FreeCapacity` against the
+    // body's carry, because that arithmetic is the engine's own and a hand-built
+    // body is free to state a store the engine would never hand back.
+    let emptyHanded = creep.Energy = 0 && creep.Thorium = 0
+
     // A delivery of Work: the three Tasks that spend a Work part into something
     // out of the body's own store (ADR 0046), and the one clause all three
     // share. Refill is *not* one of them — it carries rather than works — so it
@@ -192,12 +209,19 @@ let internal applicable
             || ((halfEmpty || mayActNow threats atlas creep.Name task)
                 && not standing
                 && hasSpareRate view atlas sourceId))
+        // A body already carrying the season's ore does not dig energy into the
+        // same store (ADR 0057 decision 3). Never true of a garrison — the
+        // [[miner]] is the only body of this colony that touches Thorium at the
+        // rock and it has no store to hold any — so what the clause refuses is a
+        // light body that took a load off the mineral container and would
+        // otherwise outrank its own delivery on the Feeding tier.
+        && not carryingThorium
     // The body half of this gate — a Carry part and ADR 0016's comparative
     // clause — is read a second time out of line by `canRefill`, the supply
     // floor's arming condition (ADR 0050): a clause narrowing what a body may
     // draw with belongs in front of both readers, or a colony whose only carrier
     // this gate has just shut out still reads as able to refill.
-    | Withdraw storeId ->
+    | Withdraw(storeId, resource) ->
         let buffer = Set.contains storeId (Atlas.controllerContainers atlas)
 
         // **A Withdraw must be worth this body's trip** (#232): the store has
@@ -226,7 +250,21 @@ let internal applicable
         // body]] at the buffer under its own feet**: the same exception #205
         // makes of a site on a creep's own Post — this clause prices a trip and
         // that row makes none.
-        let stock = SpatialInfo.storedIn view.Spatial storeId
+        // **Read down the resource's own column** (ADR 0057 decision 3): what
+        // makes a store worth a body's trip is what that store holds of the
+        // thing the body came for, so the mineral container is priced on its
+        // Thorium and the energy stores on theirs. Identical to `storedIn` for
+        // every Withdraw this colony had before the extractor stood.
+        //
+        // On the Thorium arm the stock-tier disjunct below already answers
+        // **true**, and for its own stated reason rather than by accident: what
+        // the line buys is the fall to the tier below, and there is none below
+        // the Storage's tier — a body refused the mine has no deeper intake to
+        // fall to, so the refusal would leave it idle while the container fills
+        // and the miner's next dig bleeds onto the ground. The column is read
+        // here all the same, because which stock a Withdraw is worth is a
+        // question about its own resource on any tier it is ever ranked at.
+        let stock = SpatialInfo.heldIn view.Spatial resource storeId
 
         let worthTheTrip =
             stock * 2 >= creep.FreeCapacity
@@ -234,27 +272,46 @@ let internal applicable
             || pooled.Priority >= priorityOfTier StockDraw
             || (buffer && standing)
 
-        has Carry
-        && halfEmpty
-        && worthTheTrip
-        && not heavy
-        && (has Work || not buffer)
-        // A standing body fetches from the buffer at its feet and from nowhere
-        // else (#206, ADR 0046): its one Carry is one trip's worth, and a trip
-        // to the Storage — or across a Seam to a pile — is the commute the row
-        // was shaped to never make.
-        && (buffer || not standing)
+        // **The Thorium arm is a different sentence** (ADR 0057 decision 3),
+        // and the whole of the difference is the store gate: an **empty** body
+        // and not #232's half-empty one, because a body carries one resource at
+        // a time here. The three clauses it keeps are the ones about the body
+        // rather than about the target — a Carry part to hold the ore, ADR
+        // 0016's comparative gate (a Work-heavy body's intake is digging), and
+        // #206's standing gate (a trip to the mine is the commute that row was
+        // shaped to never make) — and the two it drops are the two that are
+        // about the *controller's* container: ADR 0019's Work part and the
+        // buffer-side exemption, neither of which a mineral container can be.
+        match resource with
+        | Thorium -> has Carry && emptyHanded && worthTheTrip && not heavy && not standing
+        | Energy ->
+            has Carry
+            && halfEmpty
+            && not carryingThorium
+            && worthTheTrip
+            && not heavy
+            && (has Work || not buffer)
+            // A standing body fetches from the buffer at its feet and from
+            // nowhere else (#206, ADR 0046): its one Carry is one trip's worth,
+            // and a trip to the Storage — or across a Seam to a pile — is the
+            // commute the row was shaped to never make.
+            && (buffer || not standing)
     // The Withdraw gate without its one target-shaped clause: a Carry part,
     // room to put the energy, and ADR 0016's comparative gate — a Work-heavy
     // body's intake is digging, and picking a pile up off the ground is no more
     // its work than drawing a container is. The buffer clause has no
     // counterpart here: ADR 0019 shuts a Work-less body out of the
     // *controller's* container, and a pile is nobody's buffer.
-    | Pickup _ -> has Carry && halfEmpty && not heavy && not standing
+    | Pickup _ -> has Carry && halfEmpty && not carryingThorium && not heavy && not standing
     // Its two body clauses are read a second time out of line by
     // `canRefill`, beside Withdraw's (ADR 0050) — the Energy clause is not,
     // being a state and not a fact about the body.
-    | Refill _ -> has Carry && creep.Energy > 0 && not standing
+    // The delivery half read down the same two columns (ADR 0057 decision 3):
+    // the energy sinks take a body holding energy and the [[storage]]'s Thorium
+    // sink takes one holding Thorium, which is the intake's own gate seen from
+    // the far end — what a body took is what it has to put down.
+    | Refill(_, Energy) -> has Carry && creep.Energy > 0 && not standing
+    | Refill(_, Thorium) -> has Carry && carryingThorium && not standing
     // The body gate on Build (#157, widened to every Build by #234), here for
     // the same reason ADR 0016's Withdraw gate is: the ladder lifts a site over
     // the Task that was pinning the body, and a rank the whole colony shares is
@@ -343,7 +400,11 @@ let private intentFor atlas (creep: CreepInfo) task =
     // Intent names one too since #183 — the Executor hands it whatever
     // `getObjectById` answers with, and no reader of a log line has to
     // reconcile a store with a name that says structure.
-    | Withdraw storeId -> Some(WithdrawFromStore(creep.Name, storeId))
+    // `None` for the amount, which is what every Withdraw of this colony has
+    // always meant: take as much as the body has room for (ADR 0057 decision 3).
+    // The one place a number is ever named is the delivery's 999-unit load, and
+    // that is decision 4's.
+    | Withdraw(storeId, resource) -> Some(WithdrawFromStore(creep.Name, storeId, resource, None))
     // The reflex's own Intent, issued for a creep that walked: one act, one
     // vocabulary, whether the energy was underfoot already or was the reason the
     // creep came. Which is why an arriving picker spells it twice and `decide`
@@ -354,9 +415,9 @@ let private intentFor atlas (creep: CreepInfo) task =
     // energy lands in is settled here, at arrival, off the tile the body
     // actually stands on (`Atlas.refillTarget`). Every other Refill resolves
     // through the same call, so the Emitter has one line and not a branch.
-    | Refill structureId ->
-        Atlas.refillTarget atlas creep.Name structureId
-        |> Option.map (fun target -> TransferEnergyToStructure(creep.Name, target))
+    | Refill(structureId, resource) ->
+        Atlas.refillTarget atlas creep.Name structureId resource
+        |> Option.map (fun target -> TransferEnergyToStructure(creep.Name, target, resource))
     | Build siteId -> Some(BuildSite(creep.Name, siteId))
     | Repair structureId -> Some(RepairStructure(creep.Name, structureId))
     | Upgrade controllerId -> Some(UpgradeController(creep.Name, controllerId))

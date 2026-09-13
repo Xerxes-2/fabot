@@ -175,7 +175,7 @@ let private seenFacts
     let dropped =
         room.find findDroppedResources
         |> Array.map (fun o -> o :?> IResource)
-        |> Array.filter (fun r -> r.resourceType = "energy")
+        |> Array.filter (fun r -> r.resourceType = resourceName Energy)
 
     // The stores with a clock on them (#167): a dead creep's tombstone and a
     // destroyed structure's ruin, projected as one kind because a Withdraw
@@ -185,7 +185,7 @@ let private seenFacts
     let tombstones =
         Array.append (room.find findTombstones) (room.find findRuins)
         |> Array.map (fun o -> o :?> ITombstone)
-        |> Array.filter (fun r -> r.store.getUsedCapacity "energy" > 0)
+        |> Array.filter (fun r -> r.store.getUsedCapacity (resourceName Energy) > 0)
 
     // The season's Thorium deposits, and only those (ADR 0057 decision 1).
     // The mod stands an ordinary-ore mineral in the same room and the colony
@@ -320,8 +320,10 @@ let private seenFacts
             Array.concat
                 [
                     storedStructures
-                    |> Array.map (fun (st, _) -> st.id, st.store.getUsedCapacity "energy")
-                    tombstones |> Array.map (fun r -> r.id, r.store.getUsedCapacity "energy")
+                    |> Array.map (fun (st, _) ->
+                        st.id, st.store.getUsedCapacity (resourceName Energy))
+                    tombstones
+                    |> Array.map (fun r -> r.id, r.store.getUsedCapacity (resourceName Energy))
                     dropped |> Array.map (fun r -> r.id, r.amount)
                 ]
             |> Map.ofArray
@@ -441,7 +443,7 @@ let private seenFacts
             |> Array.map (fun (st, kind) ->
                 {
                     Id = st.id
-                    FreeCapacity = st.store.getFreeCapacity "energy"
+                    FreeCapacity = st.store.getFreeCapacity (resourceName Energy)
                     Kind = kind
                 }
                 : RefillableInfo)
@@ -719,8 +721,16 @@ let ofGame (maxHops: int) (colonies: Colony list) (lastPositions: Map<string, Ro
                             TicksToLive = c.ticksToLive
                             Fatigue = c.fatigue
                             Hits = { Hits = c.hits; HitsMax = c.hitsMax }
-                            Energy = c.store.getUsedCapacity "energy"
-                            FreeCapacity = c.store.getFreeCapacity "energy"
+                            Energy = c.store.getUsedCapacity (resourceName Energy)
+                            // The season's ore beside it (ADR 0057 decision 3):
+                            // a body carries one resource at a time, and which
+                            // of the two it is holding decides which arm of
+                            // [[withdraw]] and [[refill]] it answers.
+                            Thorium = c.store.getUsedCapacity (resourceName Thorium)
+                            // The **whole** store's free room: a creep's store
+                            // is general, so this is the capacity less
+                            // everything aboard and not the energy's own share.
+                            FreeCapacity = c.store.getFreeCapacity (resourceName Energy)
                             Body =
                                 // The parts still standing, and never the parts
                                 // it was cast with (#270): the engine destroys

@@ -88,13 +88,13 @@ let withdrawCapacityTests =
                     } =
                     decide
                         (crowdColony 400 2000 [ "h1", { X = 25; Y = 10 }; "h2", { X = 11; Y = 10 } ])
-                        (Map.ofList [ "h1", taskId (Withdraw "can-near") ])
+                        (Map.ofList [ "h1", taskId (Withdraw("can-near", Energy)) ])
                         (Set.singleton "h2")
                         None
 
                 Expect.equal
                     (Map.tryFind "h1" assignments)
-                    (Some(taskId (Withdraw "can-near")))
+                    (Some(taskId (Withdraw("can-near", Energy))))
                     "the walking holder keeps the store it was already sent to"
 
                 Expect.equal
@@ -118,7 +118,7 @@ let withdrawCapacityTests =
                     (Some
                         [
                             Candidate.Rejected(
-                                taskId (Withdraw "can-near"),
+                                taskId (Withdraw("can-near", Energy)),
                                 RejectReason.CapacityFull
                             )
                             Candidate.Rejected(taskId (Upgrade "ctrl-1"), RejectReason.Inapplicable)
@@ -259,12 +259,12 @@ let pickupTaskTests =
                 // under its feet.
                 Expect.equal
                     (matched (pileDownTheLane 800 599))
-                    (Some(taskId (Withdraw "can-a"), MatchFactor.TravelCost))
+                    (Some(taskId (Withdraw("can-a", Energy)), MatchFactor.TravelCost))
                     "one under half a load: rank ties and the near store wins on price"
 
                 Expect.equal
                     (matched (pileDownTheLane 800 100))
-                    (Some(taskId (Withdraw "can-a"), MatchFactor.TravelCost))
+                    (Some(taskId (Withdraw("can-a", Energy)), MatchFactor.TravelCost))
                     "and a pile at the threshold is still the distance's to decide"
 
                 // Pairwise on the container's stock alone: a **full** source
@@ -275,7 +275,7 @@ let pickupTaskTests =
                 // the body draws.
                 Expect.equal
                     (matched (pileDownTheLane Engine.containerCapacity 600))
-                    (Some(taskId (Withdraw "can-a"), MatchFactor.Rank))
+                    (Some(taskId (Withdraw("can-a", Energy)), MatchFactor.Rank))
                     "two thousand full outranks the whole trip on the ground"
             }
 
@@ -306,7 +306,7 @@ let pickupTaskTests =
 
                 Expect.equal
                     (matched (pileAgainstAHungrySpawn 1800 599))
-                    (Some(taskId (Refill "spawn-1"), MatchFactor.TravelCost))
+                    (Some(taskId (Refill("spawn-1", Energy)), MatchFactor.TravelCost))
                     "one energy under the line the spawn is the near Task again"
 
                 // And the other copy that is going away: a tombstone is a
@@ -320,7 +320,7 @@ let pickupTaskTests =
 
                 Expect.equal
                     (matched (pileAgainstATombstone 599))
-                    (Some(taskId (Withdraw "tomb-a"), MatchFactor.TravelCost))
+                    (Some(taskId (Withdraw("tomb-a", Energy)), MatchFactor.TravelCost))
                     "which under the line is travel cost's again"
             }
 
@@ -350,7 +350,7 @@ let pickupTaskTests =
 
                 Expect.equal
                     (matched (pileAgainstAHungrySpawn 550 100))
-                    (Some(taskId (Refill "spawn-1"), MatchFactor.TravelCost))
+                    (Some(taskId (Refill("spawn-1", Energy)), MatchFactor.TravelCost))
                     "and at RCL2, where the cast has outgrown twice the threshold, it does not"
             }
 
@@ -382,7 +382,7 @@ let pickupTaskTests =
 
                 Expect.equal
                     (Map.tryFind "h1" apart)
-                    (Some(taskId (Withdraw "can-a")))
+                    (Some(taskId (Withdraw("can-a", Energy))))
                     "a pile ten tiles off moves nothing: the container underfoot is still the flow"
 
                 // And a *full* container outranks the pile on its own tile
@@ -405,7 +405,7 @@ let pickupTaskTests =
 
                 Expect.equal
                     (Map.tryFind "h1" brimming)
-                    (Some(taskId (Withdraw "can-a")))
+                    (Some(taskId (Withdraw("can-a", Energy))))
                     "full, the container is drawn first and the reflex takes the pile beside it"
             }
 
@@ -455,7 +455,7 @@ let pickupTaskTests =
                 // cost may decide that, which is the whole of the fix.
                 Expect.equal
                     (Map.tryFind "h2" assignments)
-                    (Some(taskId (Withdraw "can-near")))
+                    (Some(taskId (Withdraw("can-near", Energy))))
                     "and the rest of the row is not sent past the full store beside it"
             }
 
@@ -646,12 +646,12 @@ let pickupTaskTests =
 
                 Expect.equal
                     (Map.tryFind "h1" assignments)
-                    (Some(taskId (Withdraw "tomb-1")))
+                    (Some(taskId (Withdraw("tomb-1", Energy))))
                     "a store with a clock on it is drawn like any other"
 
                 Expect.contains
                     intents
-                    (WithdrawFromStore("h1", "tomb-1"))
+                    (WithdrawFromStore("h1", "tomb-1", Energy, None))
                     "and the act is withdraw, never pickup"
 
                 // The pairwise control: the same tombstone on the same
@@ -856,12 +856,178 @@ let fullContainerTests =
 
                 Expect.equal
                     (matched 2000)
-                    (Some(taskId (Withdraw "can-b"), MatchFactor.Rank))
+                    (Some(taskId (Withdraw("can-b", Energy)), MatchFactor.Rank))
                     "the full container outranks the near one"
 
                 Expect.equal
                     (matched 1000)
-                    (Some(taskId (Withdraw "can-a"), MatchFactor.TravelCost))
+                    (Some(taskId (Withdraw("can-a", Energy)), MatchFactor.TravelCost))
                     "both half-full: the near one, by travel cost"
+            }
+        ]
+
+[<Tests>]
+let thoriumLegTests =
+    testList
+        "the Thorium leg's pool"
+        [
+            test "the mineral container is a Withdraw and the Storage a Refill, both in Thorium" {
+                // ADR 0057 decision 3: the mine-to-[[storage]] leg is the
+                // existing pair with a resource on it, so what the pool gains is
+                // two entries and not two Task kinds. The intake is the
+                // container the store-less [[miner]] drops into; the sink is the
+                // Storage, the one store nothing can stand on and so the one the
+                // contact penalty never reaches.
+                let tasks = planTasks mineHaulColony noThreats
+
+                Expect.contains
+                    tasks
+                    (Withdraw("can-min", Thorium))
+                    "the mineral container is drawn in Thorium"
+
+                Expect.contains tasks (Refill("sto-1", Thorium)) "and the Storage takes the load"
+
+                // The id carries the resource and the energy spelling is
+                // untouched, which is what keeps a standing assignment standing
+                // across the deploy that lands this.
+                Expect.equal
+                    (taskId (Withdraw("can-min", Thorium)))
+                    "withdraw:can-min:Thorium"
+                    "the Thorium draw is its own identity at that store"
+            }
+
+            test "an empty mineral container is drawn by nobody, and the sink stands anyway" {
+                // Pairwise, one number apart. The Withdraw follows the stock the
+                // way every other store's does; the Refill follows the *ground*,
+                // because the Planner is creep-blind (ADR 0013) and what it can
+                // see is that this colony has a mine at all — a hauler walking
+                // home with a load must still have somewhere to put it on the
+                // tick the container it drew from reads zero.
+                let tasks = planTasks (mineHaulColony |> withMineStock 0) noThreats
+
+                Expect.isFalse
+                    (List.contains (Withdraw("can-min", Thorium)) tasks)
+                    "nothing in the container is nothing to come for"
+
+                Expect.contains
+                    tasks
+                    (Refill("sto-1", Thorium))
+                    "and the sink is the mine's and not the load's"
+            }
+
+            test "a colony with no mineral container draws nothing, and still has a sink" {
+                // The intake is the mine's and the sink is the **Storage's**
+                // (#262). The draw is read off `ourDeposits` and the container
+                // standing on the deposit's Seat (#261), so a deposit whose
+                // container is not up yet is a mine with no store to come to.
+                // The Refill is read off the Storage alone: a body already
+                // holding the ore is applicable to that Task and to nothing else
+                // in the colony, so gating the sink on the intake's own ground
+                // left a hauler mid-haul with no applicable Task at all for the
+                // whole of the window the Layout takes to re-place a destroyed
+                // container — and the row's census, counting it living, cast no
+                // replacement.
+                let tasks = planTasks (mineHaulColony |> withoutMineContainer) noThreats
+
+                Expect.isFalse
+                    (List.contains (Withdraw("can-min", Thorium)) tasks)
+                    "no mineral container, nothing to draw"
+
+                Expect.contains
+                    tasks
+                    (Refill("sto-1", Thorium))
+                    "and the Storage takes a load whatever the ground behind it has become"
+            }
+
+            test "the Thorium pair ranks at the Storage's tier, one resource apart" {
+                // ADR 0057 decision 3 reading ADR 0023. Pairwise on the
+                // **resource alone**: the same container, holding 600 of each,
+                // yields a Feeding-tier draw in energy and a StockDraw one in
+                // Thorium — so what moves the rank is the resource and not the
+                // store's kind, which is a container either way. Read on the
+                // container's own tier the mine would be Feeding work, and an
+                // empty hauler beside it would take the season's ore ahead of
+                // the energy the spawn is waiting on.
+                let colony =
+                    { mineHaulColony with
+                        Spatial =
+                            { mineHaulColony.Spatial with
+                                Stores = Map.add "can-min" 600 mineHaulColony.Spatial.Stores
+                            }
+                    }
+
+                let rankOf task =
+                    poolOn colony
+                    |> List.tryPick (fun pooled ->
+                        if pooled.Task = task then Some pooled.Priority else None)
+
+                Expect.equal
+                    (rankOf (Withdraw("can-min", Energy)))
+                    (Some(priorityOfTier Feeding))
+                    "the premise: energy in a container is Feeding-tier intake"
+
+                Expect.equal
+                    (rankOf (Withdraw("can-min", Thorium)))
+                    (Some(priorityOfTier StockDraw))
+                    "and the Thorium beside it is drawn on the Storage's own tier"
+
+                Expect.equal
+                    (rankOf (Refill("sto-1", Thorium)))
+                    (Some(priorityOfTier Stock))
+                    "the sink is the Storage's deepest tier, below every energy sink"
+            }
+
+            test "the Thorium draw is capped by its own column and not by the energy one" {
+                // #161's cap read down ADR 0057 decision 3's second column: the
+                // store answers the number its holding of *that* resource
+                // divides into loads. The row's cast at this bank is
+                // `[4 Carry; 2 Move]` — 200 — so 600 Thorium is three seats and
+                // the energy the same container holds none of is no seats at
+                // all. Pairwise on the stock alone.
+                let seatsAt units =
+                    poolOn (mineHaulColony |> withMineStock units)
+                    |> List.tryPick (fun pooled ->
+                        if pooled.Task = Withdraw("can-min", Thorium) then
+                            Capacity.capOf CapScope.Everyone pooled.Capacity
+                        else
+                            None)
+
+                Expect.equal
+                    (partCountIn (bodyFor haulerPattern mineHaulColony.Bank.Capacity) Carry
+                     * Engine.carryPartCapacity)
+                    200
+                    "the premise: the divisor is the hauler row's own cast at this bank"
+
+                Expect.equal (seatsAt 600) (Some 3) "six hundred of Thorium is three loads"
+                Expect.equal (seatsAt 200) (Some 1) "one load is one seat"
+            }
+
+            test "the acts the leg emits name the resource, and the Withdraw names no amount" {
+                // The Intents behind the pair (ADR 0057 decision 3): the
+                // engine's `withdraw` and `transfer` have taken a resource
+                // argument all along, and what this ticket changed is that the
+                // colony says which rather than passing energy implicitly. The
+                // **amount** is `None` — take as much as the body has room for,
+                // which is what every Withdraw here has always meant; the one
+                // place a number is ever named is the delivery's 999-unit load,
+                // and that is decision 4's.
+                let intentsFor load tile =
+                    let colony =
+                        { mineHaulColony with
+                            Creeps = [ load ]
+                            Spatial = mineHaulColony.Spatial |> withCreepsAt [ "h1", tile ]
+                        }
+
+                    (decideOn colony).Intents
+
+                Expect.contains
+                    (intentsFor (hauler "h1" 0 200) { X = 12; Y = 10 })
+                    (WithdrawFromStore("h1", "can-min", Thorium, None))
+                    "the draw names the mineral container and the season's resource"
+
+                Expect.contains
+                    (intentsFor (hauler "h1" 0 200 |> carrying 150) { X = 13; Y = 10 })
+                    (TransferEnergyToStructure("h1", "sto-1", Thorium))
+                    "and the pour names the Storage and the same resource back"
             }
         ]

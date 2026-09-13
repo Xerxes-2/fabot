@@ -348,7 +348,7 @@ let tuningTests =
                                 ]
                     }
 
-                let held = taskId (Refill "spawn-1")
+                let held = taskId (Refill("spawn-1", Energy))
                 let sticky = Map.ofList [ "w1", held ]
 
                 let verdictsOf colony = (decideFrom sticky colony).Verdicts

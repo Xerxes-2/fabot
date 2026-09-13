@@ -18,7 +18,7 @@ let roomLayerTests =
                 let refills =
                     planTasks collidingRooms noThreats
                     |> List.choose (function
-                        | Refill id -> Some id
+                        | Refill(id, _) -> Some id
                         | _ -> None)
 
                 // Room-blind, both judgements invert: the home buffer reads
@@ -76,7 +76,7 @@ let roomLayerTests =
                 let refills =
                     planTasks late noThreats
                     |> List.choose (function
-                        | Refill id -> Some id
+                        | Refill(id, _) -> Some id
                         | _ -> None)
                     |> List.sort
 

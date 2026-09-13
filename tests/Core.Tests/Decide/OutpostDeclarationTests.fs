@@ -761,7 +761,7 @@ let outpostTests =
 
                 Expect.equal
                     (matchOf hungry)
-                    (Some(taskId (Refill "ext-1"), MatchFactor.TravelCost))
+                    (Some(taskId (Refill("ext-1", Energy)), MatchFactor.TravelCost))
                     "and one extension with room in it takes the same worker back, on cost alone"
             }
 
@@ -800,7 +800,7 @@ let outpostTests =
 
                 Expect.equal
                     (matchOf homeSite)
-                    (Some(taskId (Refill "ext-1"), MatchFactor.Rank))
+                    (Some(taskId (Refill("ext-1", Energy)), MatchFactor.Rank))
                     "the colony's own container site is surplus work, and the flow outranks it"
             }
 

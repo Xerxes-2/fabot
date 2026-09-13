@@ -38,7 +38,7 @@ let onDemandFloodTests =
 
                 for roomName, spawn, _ in floodRooms do
                     let capture = load roomName
-                    let task = Refill "spawn-1"
+                    let task = Refill("spawn-1", Energy)
 
                     let stands =
                         capture.Terrain
@@ -283,7 +283,7 @@ let onDemandFloodTests =
                         [
                             for id in loaded.SourceIds -> Harvest id
                             for id in Option.toList loaded.ControllerId -> Upgrade id
-                            yield Refill "spawn-1"
+                            yield Refill("spawn-1", Energy)
                         ]
 
                     let atlasOf () = standingIn capture spawn creep stand

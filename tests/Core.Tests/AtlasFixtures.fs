@@ -67,6 +67,7 @@ let worker name =
         Hits = { Hits = 300; HitsMax = 300 }
         Fatigue = 0
         Energy = 0
+        Thorium = 0
         FreeCapacity = 50
         Moved = false
         Body = Map.ofList [ Work, 1; Carry, 1; Move, 1 ]
@@ -84,6 +85,7 @@ let creepWith name energy body =
             }
         Fatigue = 0
         Energy = energy
+        Thorium = 0
         FreeCapacity = 50
         Moved = false
         Body = body |> List.countBy id |> Map.ofList

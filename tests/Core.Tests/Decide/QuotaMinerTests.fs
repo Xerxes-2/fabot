@@ -386,3 +386,103 @@ let minerGroundTests =
                     "so it takes nothing"
             }
         ]
+
+[<Tests>]
+let mineHaulTests =
+    testList
+        "the mine's haul"
+        [
+            test "the mineral container is one more term in the hauler row's demand sum" {
+                // ADR 0057 decision 3: the leg is worked by the existing
+                // [[hauler unit]] row and no new one, so what grows is a row's
+                // quota and not the cascade. The term is the mineral
+                // [[container]]'s round trip to the [[storage]] times the
+                // [[miner]]'s own rate — `Work / 6` Thorium a tick, the
+                // extractor's cooldown being five and the intent pass running
+                // before the object pass — which is the `output × trip` shape
+                // every source container's line already has, in the other
+                // resource.
+                //
+                // Pairwise on the container alone: the same colony with the mine
+                // container not yet standing has no mine and asks for nothing.
+                let demandOf colony = (decideOn colony).Quotas.HaulerDemand
+
+                let withMine = demandOf mineHaulColony
+                let without = demandOf (mineHaulColony |> withoutMineContainer)
+
+                Expect.isEmpty
+                    without
+                    "the premise: no source containers here, so the mine is the whole sum"
+
+                Expect.equal (List.length withMine) 1 "and with it standing there is one line"
+
+                let row = List.head withMine
+
+                Expect.equal
+                    row.Container
+                    (RoomPos.at (SpatialInfo.homeName mineHaulColony.Spatial) minePost)
+                    "the line is the mineral container's own tile"
+
+                Expect.equal
+                    row.Output
+                    (partCountIn (bodyFor minerPattern mineHaulColony.Bank.Capacity) Work)
+                    "priced at the row's cast at this bank, one Thorium a Work part a dig"
+
+                Expect.equal
+                    (row.Sinks |> List.map (fun sink -> sink.Kind))
+                    [ "storage" ]
+                    "the Storage and never the three energy sinks: it is the store nothing stands on"
+
+                Expect.isTrue
+                    (row.Demand > 0 && row.Sinks |> List.forall (fun sink -> sink.Trip.IsSome))
+                    "a priced trip is a demand, and the trip is the one the Atlas answers"
+            }
+
+            test "a mine the colony cannot bank to asks for no haul at all" {
+                // ADR 0004 at this term: the Storage is the one sink, so a
+                // colony with none standing prices nothing here — which is the
+                // same tick the Thorium pair is not pooled either, the Refill
+                // needing a Storage with room. Pairwise against the case above,
+                // one structure apart.
+                Expect.isEmpty
+                    (decideOn mineColony).Quotas.HaulerDemand
+                    "no Storage, no leg, no term"
+            }
+
+            test "a mine that cannot be dug asks for no haul either" {
+                // #262: the term prices the [[miner]]'s output, so it must read
+                // the same facts the miner row's own quota puts a body at 0 for
+                // (ADR 0057 decision 2). The container alone bought a carrier
+                // for a mine producing nothing — and both halves are ordinary
+                // rather than hypothetical: the Layout emits the extractor and
+                // the container as two 5,000-point sites in one tick and which
+                // finishes first is the builder's accident, which is the RCL6
+                // build window this leg lands in.
+                //
+                // Pairwise on one fact at a time against the case above.
+                let demandOf colony = (decideOn colony).Quotas.HaulerDemand
+
+                // The deposit read out but still in the projection — the tick
+                // before the mod's `postProcessObject` deletes it.
+                let runOut =
+                    { mineHaulColony with
+                        Spatial =
+                            { mineHaulColony.Spatial with
+                                Thorium = Map.add "min-a" 0 mineHaulColony.Spatial.Thorium
+                            }
+                    }
+
+                Expect.equal
+                    (List.length (demandOf mineHaulColony))
+                    1
+                    "the premise: a standing extractor over a full deposit is one line"
+
+                Expect.isEmpty
+                    (demandOf (mineHaulColony |> withExtractorSite))
+                    "an extractor under construction extracts nothing, so nothing is carried"
+
+                Expect.isEmpty
+                    (demandOf runOut)
+                    "and a deposit with nothing left in it is a mine that is over"
+            }
+        ]

@@ -71,10 +71,16 @@ let private execute (intent: Intent) : Outcome =
             room.createConstructionSite (tile.X, tile.Y, structureName kind))
     | HarvestSource(creepName, sourceId) ->
         withCreepTarget creepName sourceId (fun c t -> c.harvest t)
-    | TransferEnergyToStructure(creepName, structureId) ->
-        withCreepTarget creepName structureId (fun c t -> c.transfer (t, "energy"))
-    | WithdrawFromStore(creepName, storeId) ->
-        withCreepTarget creepName storeId (fun c t -> c.withdraw (t, "energy"))
+    | TransferEnergyToStructure(creepName, structureId, resource) ->
+        withCreepTarget creepName structureId (fun c t -> c.transfer (t, resourceName resource))
+    // `None` is the engine's own default — as much as the body holds room for,
+    // which is what every Withdraw of this colony has always asked for — and is
+    // spelled by calling the two-argument form (ADR 0057 decision 3).
+    | WithdrawFromStore(creepName, storeId, resource, amount) ->
+        withCreepTarget creepName storeId (fun c t ->
+            match amount with
+            | None -> c.withdraw (t, resourceName resource)
+            | Some units -> withdrawAmount c t (resourceName resource) units)
     | BuildSite(creepName, siteId) -> withCreepTarget creepName siteId (fun c t -> c.build t)
     | RepairStructure(creepName, structureId) ->
         withCreepTarget creepName structureId (fun c t -> c.repair t)

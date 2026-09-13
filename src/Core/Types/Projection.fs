@@ -267,3 +267,14 @@ module SpatialInfo =
     /// used to spell for itself.
     let storedIn (spatial: SpatialInfo) (id: string) : int =
         spatial.Stores |> Map.tryFind id |> Option.defaultValue 0
+
+    /// What one store holds of one **resource** this tick, and 0 for a target
+    /// the projection carries none of it for (ADR 0057 decision 3). The two
+    /// id-keyed maps read through one name, so a rule written over a
+    /// [[withdraw]]'s or a [[refill]]'s resource asks one question instead of
+    /// branching on the resource at every site that asks — which is what keeps
+    /// the energy answer `storedIn`'s own and the Thorium answer beside it.
+    let heldIn (spatial: SpatialInfo) (resource: Resource) (id: string) : int =
+        match resource with
+        | Energy -> storedIn spatial id
+        | Thorium -> spatial.Thorium |> Map.tryFind id |> Option.defaultValue 0

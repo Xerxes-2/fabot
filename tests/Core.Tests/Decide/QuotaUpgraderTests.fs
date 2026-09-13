@@ -770,17 +770,17 @@ let quotaInputTests =
                 let lending = poolFor Bootstrapping
 
                 Expect.isTrue
-                    (List.contains (Refill "can-child") lending)
+                    (List.contains (Refill("can-child", Energy)) lending)
                     "the child's buffer is a sink of hers while she is raising it"
 
                 Expect.isFalse
-                    (List.contains (Withdraw "can-child") lending)
+                    (List.contains (Withdraw("can-child", Energy)) lending)
                     "and never an intake, however much stands in it"
 
                 let grown = poolFor Independent
 
                 Expect.isFalse
-                    (List.contains (Refill "can-child") grown)
+                    (List.contains (Refill("can-child", Energy)) grown)
                     "an independent child feeds itself, which is what the stage means"
 
                 // And the denial does **not** ride on the lend. The two
@@ -794,11 +794,11 @@ let quotaInputTests =
                 // the stage, over the same store the case above pools the
                 // Refill for.
                 Expect.isFalse
-                    (List.contains (Withdraw "can-child") (poolFor Nursery))
+                    (List.contains (Withdraw("can-child", Energy)) (poolFor Nursery))
                     "a nursery's store is not hers to draw either"
 
                 Expect.isFalse
-                    (List.contains (Withdraw "can-child") grown)
+                    (List.contains (Withdraw("can-child", Energy)) grown)
                     "nor a grown child's: no store of a child's is ever her intake"
 
                 // What bounds the lend is the capacity and never the tier
@@ -810,7 +810,7 @@ let quotaInputTests =
                 let bound =
                     poolOn (ferryMother Bootstrapping)
                     |> List.tryPick (fun entry ->
-                        if entry.Task = Refill "can-child" then
+                        if entry.Task = Refill("can-child", Energy) then
                             Some(Capacity.capOf CapScope.Everyone entry.Capacity)
                         else
                             None)
@@ -849,11 +849,11 @@ let quotaInputTests =
                 let lending = planTasks (stocked Bootstrapping) noThreats
 
                 Expect.isTrue
-                    (List.contains (Refill "can-child") lending)
+                    (List.contains (Refill("can-child", Energy)) lending)
                     "the lend is the one hungry sink she has"
 
                 Expect.isTrue
-                    (List.contains (Withdraw "storage-1") lending)
+                    (List.contains (Withdraw("storage-1", Energy)) lending)
                     "so the stock it is priced from is drawable"
 
                 // The pairwise control on the one fact that decides it: the
@@ -862,7 +862,7 @@ let quotaInputTests =
                 // not opened against its own Refill (ADR 0023).
                 Expect.isFalse
                     (List.contains
-                        (Withdraw "storage-1")
+                        (Withdraw("storage-1", Energy))
                         (planTasks (stocked Independent) noThreats))
                     "and with nothing to feed, the stock stays shut"
             }

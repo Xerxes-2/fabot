@@ -282,7 +282,7 @@ let plannerTests =
                 let refills =
                     planTasks snapshot noThreats
                     |> List.choose (function
-                        | Refill structureId -> Some structureId
+                        | Refill(structureId, _) -> Some structureId
                         | _ -> None)
 
                 Expect.equal refills [ "spawn-1" ] "the cluster is pooled once, under its spawn"
@@ -305,7 +305,7 @@ let plannerTests =
                 let refills snapshot =
                     planTasks snapshot noThreats
                     |> List.choose (function
-                        | Refill structureId -> Some structureId
+                        | Refill(structureId, _) -> Some structureId
                         | _ -> None)
 
                 Expect.equal
@@ -337,7 +337,7 @@ let plannerTests =
                 let refills =
                     planTasks snapshot noThreats
                     |> List.choose (function
-                        | Refill structureId -> Some structureId
+                        | Refill(structureId, _) -> Some structureId
                         | _ -> None)
 
                 Expect.equal
@@ -361,7 +361,7 @@ let plannerTests =
                 let refills =
                     planTasks snapshot noThreats
                     |> List.choose (function
-                        | Refill structureId -> Some structureId
+                        | Refill(structureId, _) -> Some structureId
                         | _ -> None)
 
                 Expect.equal

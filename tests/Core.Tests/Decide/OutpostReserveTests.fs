@@ -138,9 +138,9 @@ let reserveTests =
                     (List.sort
                         [
                             taskId (Harvest "src-a")
-                            taskId (Withdraw "cont-1")
+                            taskId (Withdraw("cont-1", Energy))
                             taskId (Pickup "pile-1")
-                            taskId (Refill "spawn-1")
+                            taskId (Refill("spawn-1", Energy))
                             taskId (Build "site-1")
                             taskId (Repair "road-1")
                             taskId (Upgrade "ctrl-1")

@@ -44,7 +44,7 @@ let stockTests =
 
                 Expect.equal
                     verdicts
-                    [ Verdict.Matched("h1", taskId (Refill "can-ctrl"), MatchFactor.Rank) ]
+                    [ Verdict.Matched("h1", taskId (Refill("can-ctrl", Energy)), MatchFactor.Rank) ]
                     "the buffer is filled before the stock: rank decided"
             }
 
@@ -60,7 +60,7 @@ let stockTests =
 
                 Expect.equal
                     verdicts
-                    [ Verdict.Matched("h1", taskId (Refill "tower-1"), MatchFactor.Rank) ]
+                    [ Verdict.Matched("h1", taskId (Refill("tower-1", Energy)), MatchFactor.Rank) ]
                     "the guns are fed before the stock: rank decided"
             }
 
@@ -86,12 +86,12 @@ let stockTests =
 
                 Expect.equal
                     (Map.tryFind "h1" assignments)
-                    (Some(taskId (Refill "sto-1")))
+                    (Some(taskId (Refill("sto-1", Energy))))
                     "the load the colony has nowhere else to put sinks into the stock"
 
                 Expect.contains
                     intents
-                    (TransferEnergyToStructure("h1", "sto-1"))
+                    (TransferEnergyToStructure("h1", "sto-1", Energy))
                     "the ordinary transfer Intent serves the Storage"
 
                 Expect.contains
@@ -101,7 +101,13 @@ let stockTests =
 
                 Expect.equal
                     verdicts
-                    [ Verdict.Matched("h1", taskId (Refill "sto-1"), MatchFactor.OnlyCandidate) ]
+                    [
+                        Verdict.Matched(
+                            "h1",
+                            taskId (Refill("sto-1", Energy)),
+                            MatchFactor.OnlyCandidate
+                        )
+                    ]
                     "a stock deposit speaks the Verdicts every other Refill speaks"
             }
         ]
@@ -221,14 +227,26 @@ let stockDrawTests =
 
                 Expect.equal
                     equidistant.Verdicts
-                    [ Verdict.Matched("h1", taskId (Withdraw "can-src"), MatchFactor.Rank) ]
+                    [
+                        Verdict.Matched(
+                            "h1",
+                            taskId (Withdraw("can-src", Energy)),
+                            MatchFactor.Rank
+                        )
+                    ]
                     "the flow is emptied before the stock: rank decided"
 
                 let underfoot = drawFrom { X = 16; Y = 10 }
 
                 Expect.equal
                     underfoot.Verdicts
-                    [ Verdict.Matched("h1", taskId (Withdraw "can-src"), MatchFactor.Rank) ]
+                    [
+                        Verdict.Matched(
+                            "h1",
+                            taskId (Withdraw("can-src", Energy)),
+                            MatchFactor.Rank
+                        )
+                    ]
                     "and it is emptied first from the stock's own doorstep too"
             }
 
@@ -252,7 +270,7 @@ let stockDrawTests =
 
                 Expect.equal
                     verdicts
-                    [ Verdict.Matched("w1", taskId (Withdraw "sto-1"), MatchFactor.Rank) ]
+                    [ Verdict.Matched("w1", taskId (Withdraw("sto-1", Energy)), MatchFactor.Rank) ]
                     "a load worth carrying is worth completing first: rank decided"
             }
 
@@ -276,7 +294,7 @@ let stockDrawTests =
 
                 Expect.equal
                     verdicts
-                    [ Verdict.Matched("h1", taskId (Refill "spawn-1"), MatchFactor.Rank) ]
+                    [ Verdict.Matched("h1", taskId (Refill("spawn-1", Energy)), MatchFactor.Rank) ]
                     "the spawn is fed before the stock is drawn on: rank decided"
             }
 
@@ -305,7 +323,7 @@ let stockDrawTests =
 
                 Expect.equal
                     verdicts
-                    [ Verdict.Matched("h1", taskId (Withdraw "sto-1"), MatchFactor.Rank) ]
+                    [ Verdict.Matched("h1", taskId (Withdraw("sto-1", Energy)), MatchFactor.Rank) ]
                     "the draw outranks the load's way back in: rank decided"
             }
 
@@ -333,19 +351,25 @@ let stockDrawTests =
 
                 Expect.equal
                     (Map.tryFind "h1" assignments)
-                    (Some(taskId (Withdraw "sto-1")))
+                    (Some(taskId (Withdraw("sto-1", Energy))))
                     "with nothing in the containers the stock is the intake"
 
                 Expect.contains
                     intents
-                    (WithdrawFromStore("h1", "sto-1"))
+                    (WithdrawFromStore("h1", "sto-1", Energy, None))
                     "the ordinary withdraw Intent serves the Storage"
 
                 Expect.contains intents (SayCreep("h1", "📥")) "the ordinary inbox bubble shows it"
 
                 Expect.equal
                     verdicts
-                    [ Verdict.Matched("h1", taskId (Withdraw "sto-1"), MatchFactor.OnlyCandidate) ]
+                    [
+                        Verdict.Matched(
+                            "h1",
+                            taskId (Withdraw("sto-1", Energy)),
+                            MatchFactor.OnlyCandidate
+                        )
+                    ]
                     "a stock draw speaks the Verdicts every other Withdraw speaks"
             }
 
@@ -366,13 +390,13 @@ let stockDrawTests =
 
                 Expect.equal
                     (Map.tryFind "h1" empty.Assignments)
-                    (Some(taskId (Withdraw "sto-1")))
+                    (Some(taskId (Withdraw("sto-1", Energy))))
                     "the buffer's own hunger is what opens the stock"
 
                 let filled =
                     decide
                         (drawColony stores (creepWith "h1" 100 0 [ Carry; Carry; Move ]) beside)
-                        (Map.ofList [ "h1", taskId (Withdraw "sto-1") ])
+                        (Map.ofList [ "h1", taskId (Withdraw("sto-1", Energy)) ])
                         Set.empty
                         None
 
@@ -380,14 +404,14 @@ let stockDrawTests =
                     filled.Verdicts
                     (Verdict.Released(
                         "h1",
-                        taskId (Withdraw "sto-1"),
+                        taskId (Withdraw("sto-1", Energy)),
                         ReleaseReason.Rejected RejectReason.Inapplicable
                     ))
                     "the full store ends the draw, as it ends every other one"
 
                 Expect.contains
                     filled.Verdicts
-                    (Verdict.Matched("h1", taskId (Refill "can-ctrl"), MatchFactor.Rank))
+                    (Verdict.Matched("h1", taskId (Refill("can-ctrl", Energy)), MatchFactor.Rank))
                     "and the load goes on to the buffer, not back into the stock"
             }
 
@@ -447,7 +471,13 @@ let stockDrawTests =
 
                 Expect.equal
                     worked.Verdicts
-                    [ Verdict.Matched("w1", taskId (Withdraw "sto-1"), MatchFactor.OnlyCandidate) ]
+                    [
+                        Verdict.Matched(
+                            "w1",
+                            taskId (Withdraw("sto-1", Energy)),
+                            MatchFactor.OnlyCandidate
+                        )
+                    ]
                     "a Work part is neither a bar to the stock nor a ticket to it"
 
                 let heavy = decideOn (colonyFor (anchor "a1" 0 50))
@@ -475,20 +505,24 @@ let stockDrawTests =
                         (creepWith "h1" 0 100 [ Carry; Carry; Move ])
                         { X = 13; Y = 10 }
 
-                let remembered = Map.ofList [ "h1", taskId (Withdraw "sto-1") ]
+                let remembered = Map.ofList [ "h1", taskId (Withdraw("sto-1", Energy)) ]
 
                 let hungry = decideFrom remembered (colonyWithBuffer 800)
 
                 Expect.contains
                     hungry.Verdicts
-                    (Verdict.Kept("h1", taskId (Withdraw "sto-1")))
+                    (Verdict.Kept("h1", taskId (Withdraw("sto-1", Energy))))
                     "while one sink still has room the trip stands"
 
                 let filled = decideFrom remembered (colonyWithBuffer 2000)
 
                 Expect.contains
                     filled.Verdicts
-                    (Verdict.Released("h1", taskId (Withdraw "sto-1"), ReleaseReason.TaskGone))
+                    (Verdict.Released(
+                        "h1",
+                        taskId (Withdraw("sto-1", Energy)),
+                        ReleaseReason.TaskGone
+                    ))
                     "the tick it fills, the walk it was on is over"
             }
 
@@ -505,30 +539,34 @@ let stockDrawTests =
                 let arrived =
                     decide
                         (drawColony stores loaded { X = 20; Y = 10 })
-                        (Map.ofList [ "h1", taskId (Refill "can-ctrl") ])
+                        (Map.ofList [ "h1", taskId (Refill("can-ctrl", Energy)) ])
                         Set.empty
                         None
 
                 Expect.contains
                     arrived.Verdicts
-                    (Verdict.Released("h1", taskId (Refill "can-ctrl"), ReleaseReason.TaskGone))
+                    (Verdict.Released(
+                        "h1",
+                        taskId (Refill("can-ctrl", Energy)),
+                        ReleaseReason.TaskGone
+                    ))
                     "the buffer filled while the hauler walked to it"
 
                 Expect.equal
                     (Map.tryFind "h1" arrived.Assignments)
-                    (Some(taskId (Refill "sto-1")))
+                    (Some(taskId (Refill("sto-1", Energy))))
                     "the stock is the one sink left: the load turns around"
 
                 let back =
                     decide
                         (drawColony stores loaded { X = 16; Y = 10 })
-                        (Map.ofList [ "h1", taskId (Refill "sto-1") ])
+                        (Map.ofList [ "h1", taskId (Refill("sto-1", Energy)) ])
                         Set.empty
                         None
 
                 Expect.contains
                     back.Intents
-                    (TransferEnergyToStructure("h1", "sto-1"))
+                    (TransferEnergyToStructure("h1", "sto-1", Energy))
                     "the ordinary transfer puts the remainder back: nothing is dropped"
             }
         ]

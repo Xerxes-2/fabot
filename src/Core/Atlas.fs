@@ -787,11 +787,11 @@ let targetRoom (atlas: Atlas) (targetId: string) : string option =
 let private actionOn =
     function
     | Harvest id
-    | Withdraw id
     | Reserve id
     | Claim id
-    | Pickup id
-    | Refill id -> Some(id, 1)
+    | Pickup id -> Some(id, 1)
+    | Withdraw(id, _)
+    | Refill(id, _) -> Some(id, 1)
     | Build id
     | Repair id
     | Upgrade id -> Some(id, 3)
@@ -804,7 +804,10 @@ let private actionOn =
 /// — is the single structure's it always was.
 let private clusterOf (atlas: Atlas) (task: Task) : RefillCluster option =
     match task, atlas.Cluster with
-    | Refill id, Some cluster when cluster.Spawn = id -> Some cluster
+    // The resource is not asked: a cluster is a ring of energy feeders and the
+    // Thorium Refill's target is the [[storage]], so no Thorium Refill ever
+    // names a cluster's spawn (ADR 0057 decision 3).
+    | Refill(id, _), Some cluster when cluster.Spawn = id -> Some cluster
     | _ -> None
 
 /// The tiles a Task's action is measured from, beside the room they stand in:
@@ -2260,15 +2263,25 @@ let mayAct (atlas: Atlas) (creep: string) (task: Task) (area: Set<RoomPos>) : bo
 /// answers, the spawn first. It takes the Refill's structure id and not the
 /// whole Task, so the only way to answer `None` is a cluster with nothing left
 /// to pour into, which the Emitter reads as the silence a drained Harvest
-/// keeps.
-let refillTarget (atlas: Atlas) (creep: string) (structureId: string) : string option =
-    match clusterOf atlas (Refill structureId) with
+/// keeps. The **resource** rides along beside the id for the same reason: a
+/// Refill is one Task over two resources since ADR 0057 decision 3, and what
+/// this asks of it — is it the cluster's, and how far does its act reach —
+/// is a question about the Task and not about the id alone.
+let refillTarget
+    (atlas: Atlas)
+    (creep: string)
+    (structureId: string)
+    (resource: Resource)
+    : string option =
+    let task = Refill(structureId, resource)
+
+    match clusterOf atlas task with
     | None -> Some structureId
     | Some cluster ->
         let hungry = RefillCluster.hungry cluster
 
         let inReach =
-            match actionOn (Refill structureId), Map.tryFind creep atlas.CreepAt with
+            match actionOn task, Map.tryFind creep atlas.CreepAt with
             | Some(_, actionRange), Some(creepRoom, creepPos) ->
                 hungry
                 |> List.choose (fun id ->

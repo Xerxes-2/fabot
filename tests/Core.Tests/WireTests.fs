@@ -34,9 +34,12 @@ let private sampleName = Some(sampleText 0)
 /// enumeration no hand-written list can be trusted to match. A case that
 /// carries fields is built around `sampleField` or `sampleText`, so a
 /// reason that is no longer a bare tag is enumerated exactly like one.
-/// Numbers and names are sampled; any other field type throws, which is
-/// the next author's notice to widen this rather than a case quietly
-/// skipped.
+/// Numbers, names and a `Resource` are sampled; any other field type throws,
+/// which is the next author's notice to widen this rather than a case quietly
+/// skipped. The Resource sample is `Energy` and one case is built per union
+/// case, so what this enumeration proves about the resource-carrying Tasks is
+/// that their *prefixes* differ — that the two **resources** differ at one store
+/// is the cross-product the Task test below walks by hand.
 let private casesOf<'a> () =
     FSharpType.GetUnionCases typeof<'a>
     |> Array.map (fun case ->
@@ -47,6 +50,8 @@ let private casesOf<'a> () =
                     box (sampleField i)
                 elif field.PropertyType = typeof<string> then
                     box (sampleText i)
+                elif field.PropertyType = typeof<Resource> then
+                    box Energy
                 else
                     failwith $"no sample value for a {field.PropertyType.Name} field")
 
@@ -250,5 +255,33 @@ let wireVocabularyTests =
                     (tasks |> Array.map Decide.Facts.taskId |> Array.distinct |> Array.length)
                     (Array.length tasks)
                     "Task: no two cases share a task id"
+
+                // And the other axis, which `casesOf` cannot walk: the two
+                // Tasks that carry a [[resource]] spell one id per resource at
+                // one store (ADR 0057 decision 3). Off `allResources`, so a
+                // third resource is checked the day it is named rather than the
+                // day it collides. The energy spelling is pinned outright
+                // beside it: a Task id is a key carried across ticks, in Memory
+                // and in every `observe` transition line, so widening the
+                // colony's energy work's own ids would orphan every standing
+                // assignment on the tick the bundle is deployed.
+                let perResource task =
+                    allResources |> List.map (task >> Decide.Facts.taskId)
+
+                for spelt in
+                    [
+                        perResource (fun r -> Withdraw("store", r))
+                        perResource (fun r -> Refill("store", r))
+                    ] do
+                    Expect.equal
+                        (spelt |> List.distinct |> List.length)
+                        (List.length spelt)
+                        $"one id per resource at one store: %A{spelt}"
+
+                Expect.equal
+                    (Decide.Facts.taskId (Withdraw("store", Energy)),
+                     Decide.Facts.taskId (Refill("store", Energy)))
+                    ("withdraw:store", "refill:store")
+                    "and the energy spelling is the one it has always been"
             }
         ]

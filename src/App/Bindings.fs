@@ -340,3 +340,13 @@ let objectEntries (_o: obj) : (string * obj)[] = jsNative
 /// expresses as absence entry by entry (ADR 0004).
 [<Emit("$0[$1]")>]
 let objectItem<'T> (_o: obj) (_key: string) : 'T = jsNative
+
+/// `creep.withdraw` with the engine's **optional third argument** supplied — the
+/// amount (ADR 0057 decision 3). A stub of its own rather than a second
+/// interface member, because F# has no optional argument on an abstract member
+/// and the two-argument call is not the same call as one passing `undefined`:
+/// `withdraw(target, resource)` takes as much as the body has room for, which is
+/// what every Withdraw of this colony means and what the Intent spells `None`.
+[<Emit("$0.withdraw($1, $2, $3)")>]
+let withdrawAmount (_creep: ICreep) (_target: obj) (_resource: string) (_amount: int) : int =
+    jsNative

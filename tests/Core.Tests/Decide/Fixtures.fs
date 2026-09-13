@@ -224,6 +224,9 @@ let creepWith name energy freeCapacity body =
             }
         Fatigue = 0
         Energy = energy
+        // Energy unless a case says otherwise: `carrying` below is the one
+        // builder that puts the season's ore in a body (ADR 0057 decision 3).
+        Thorium = 0
         FreeCapacity = freeCapacity
         Moved = false
         Body = body |> List.countBy id |> Map.ofList
@@ -741,6 +744,50 @@ let onCooldown ticks (colony: ColonyView) =
 /// all**, which is the one shape no other row of this colony casts. Store-less,
 /// so it has neither energy nor free capacity to report.
 let miner name = creepWith name 0 0 [ Work; Work; Move ]
+
+/// The same body with `units` of **Thorium** aboard (ADR 0057 decision 3), out
+/// of the free room it was built with: a creep's store is general, so what the
+/// ore takes it takes off the whole store's free capacity and not off an energy
+/// share of it. The one builder that puts the season's ore in a body — a mixed
+/// load is exactly what the decision forbids, so a case that wants one says
+/// both fields by hand.
+let carrying units (creep: CreepInfo) =
+    { creep with
+        Thorium = units
+        FreeCapacity = max 0 (creep.FreeCapacity - units)
+    }
+
+/// The mine fixture with the colony's [[storage]] standing at (14,10) — an
+/// obstacle, as the projection carries a built one — and 600 Thorium in the
+/// mineral container (ADR 0057 decision 3). The whole of the mine-to-Storage leg
+/// in one colony: the deposit, the extractor, the container the [[miner]] drops
+/// into, and the free warehouse the load is carried to, the Storage being the
+/// one store the contact penalty never reaches because nothing can stand on it.
+///
+/// The corridor is one tile wide, so the stand is forced and legible: the
+/// container's only Seat is (12,10) and the Storage's is (13,10), one step
+/// apart. No controller and no Refillables, inherited from `mineColony`, so the
+/// only energy sink in the pool is the Storage's own — which is what makes the
+/// Thorium pair's ranking readable beside it.
+let mineHaulColony =
+    { mineColony with
+        Spatial =
+            { mineColony.Spatial with
+                Thorium = Map.add "can-min" 600 mineColony.Spatial.Thorium
+            }
+            |> withObstacles [ { X = 14; Y = 10 } ]
+            |> withTargets [ "sto-1", { X = 14; Y = 10 }, Structure BuiltKind.Storage ]
+    }
+
+/// The same colony with the mineral container holding `units` rather than 600 —
+/// the one fact a pairwise case about the Thorium leg moves.
+let withMineStock units (colony: ColonyView) =
+    { colony with
+        Spatial =
+            { colony.Spatial with
+                Thorium = Map.add "can-min" units colony.Spatial.Thorium
+            }
+    }
 
 /// The haul fixture (ADR 0012): a plain corridor y = 10, x = 9..21; the
 /// source embedded in wall at (10,10) with Seats (9,10) and (11,10), the

@@ -12,11 +12,30 @@ type Intent =
     /// decision 2): a source, or a Thorium deposit under an extractor of ours.
     /// The Intent's name is the frozen one and the field's is the honest one.
     | HarvestSource of creepName: string * rockId: string
-    | TransferEnergyToStructure of creepName: string * structureId: string
+    /// The transfer act, over the resource the [[refill]] Task names (ADR 0057
+    /// decision 3): `transfer` has taken one all along, and what changed is that
+    /// the colony now says which rather than passing energy implicitly. The
+    /// Intent's **name** is frozen, exactly as `HarvestSource`'s is over a rock
+    /// that is no longer always a source: it is the spelling a [[raid log]] and
+    /// every `observe` channel already reads.
+    | TransferEnergyToStructure of creepName: string * structureId: string * resource: Resource
     /// The withdraw act, whose target has not been a structure alone since
     /// ADR 0023 widened it: a [[container]], the [[storage]], a tombstone or a
-    /// ruin — the same store the [[withdraw]] Task already names (#183).
-    | WithdrawFromStore of creepName: string * storeId: string
+    /// ruin — the same store the [[withdraw]] Task already names (#183) — and
+    /// whose resource is the Task's own since ADR 0057 decision 3.
+    ///
+    /// The **amount** is `int option`, and `None` — take as much as the body
+    /// has room for, which is what every construction of this Intent has meant
+    /// until now — is the whole of what this colony asks for today. The one
+    /// place a Withdraw will ever name a number is the delivery's 999-unit load
+    /// (ADR 0057 decision 4), whose decade cliff is worth 275 ticks of a
+    /// courier's life; the field arrives here with the resource beside it
+    /// because the two are one argument list on the engine's own `withdraw`.
+    | WithdrawFromStore of
+        creepName: string *
+        storeId: string *
+        resource: Resource *
+        amount: int option
     | BuildSite of creepName: string * siteId: string
     | RepairStructure of creepName: string * structureId: string
     | UpgradeController of creepName: string * controllerId: string

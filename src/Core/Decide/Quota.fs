@@ -261,7 +261,81 @@ let internal haulerDemandOf (view: ColonyView) atlas : int * HaulDemandRow list 
                     | trips -> output * List.max trips
             })
 
-    let demand = rows |> List.sumBy (fun row -> row.Demand)
+    // **The mine-to-[[storage]] leg is one more term in this sum, not one more
+    // row of bodies** (ADR 0057 decision 3): the act is the existing pair with a
+    // resource on it, so what grows is a row's quota. Each mineral
+    // [[container]]'s round trip to the Storage times the [[miner]]'s own rate
+    // — `Work / 6` Thorium a tick, the extractor's cooldown being five and the
+    // intent pass running before the object pass — which is the same
+    // `output × trip` shape every source container's line has, in the other
+    // resource.
+    //
+    // The Storage alone and never the three sinks: Thorium goes to the one store
+    // nothing can stand on, the contact penalty being a property of a tile. A
+    // colony with no Storage standing, or one whose mine it cannot price, asks
+    // for nothing here (ADR 0004) — which is also the tick the pair is not
+    // pooled at all, the Refill needing a Storage with room.
+    //
+    // The rate is the row's **cast** at this bank and never a living miner's
+    // parts, exactly as every other term here is a cast: a quota priced off a
+    // body that stands moves when that body dies (ADR 0042, #208).
+    let minerRate =
+        partCountIn (minerBodyFor view.Tuning.MinerWorkPerMove view.Bank.Capacity) Work
+        * Engine.mineralHarvestPerWork
+
+    let mineRows =
+        if List.isEmpty storages then
+            []
+        else
+            ourMineralContainerPairs view
+            // **A mine that cannot be dug asks for no carrier** (#262): the term
+            // prices the [[miner]]'s output, so it must read the same two facts
+            // the miner row's own quota puts a body at 0 for — the deposit holds
+            // Thorium, and the extractor **stands**. Without them the container
+            // alone bought a hauler for a mine producing nothing: the RCL6 build
+            // window this leg lands in, where the Layout emits the extractor and
+            // the container as two sites and the container is the one that
+            // finishes first, and the tick the deposit runs to zero under a
+            // standing extractor. The third fact, the mine [[post]], is the
+            // container this list is made of.
+            |> List.filter (fun (depositId, _) -> depositIsDiggable view atlas depositId)
+            |> List.choose (fun (_, containerId) ->
+                SpatialInfo.placementOf view.Spatial containerId)
+            // **No store of a child's is the mother's to draw** (ADR 0047
+            // decision 1), which is the same filter the Task pool reads over
+            // this same list: a room this colony owns may still be a child's,
+            // and a term priced for a mine nothing in the pool draws is a body
+            // hired for a haul that is never offered.
+            |> List.filter (fun container -> not (List.contains container.Room view.Borrowed.Rooms))
+            |> List.map (fun container ->
+                let trip =
+                    storages
+                    |> List.choose (Atlas.haulRoundTripTicks atlas body container)
+                    |> function
+                        | [] -> None
+                        | trips -> Some(List.min trips)
+
+                {
+                    Container = container
+                    Output = minerRate
+                    Sinks = [ { Kind = "storage"; Trip = trip } ]
+                    Demand =
+                        match trip with
+                        | None -> 0
+                        // One division, here rather than in the sum: the rate is
+                        // a fraction of a Thorium a tick and every other term in
+                        // this sum is a whole energy a tick, so the mine's term
+                        // is brought to whole units before it joins them. The
+                        // truncation is under one unit against a load of
+                        // hundreds.
+                        | Some trip -> minerRate * trip / Engine.mineralHarvestCycle
+                })
+
+    // The source containers' demand and the mine's, summed before the one
+    // rounding ADR 0049 takes.
+    let demand =
+        (rows |> List.sumBy (fun row -> row.Demand))
+        + (mineRows |> List.sumBy (fun row -> row.Demand))
 
     // The [[ferry]] (ADR 0052 decision 7): the bodies a mother lends a
     // bootstrapping child, over and above the haul her own containers ask for.
@@ -303,6 +377,14 @@ let internal haulerDemandOf (view: ColonyView) atlas : int * HaulDemandRow list 
     // a room that is not home — and not off the declaration: a room a
     // [[stand-down]] withdrew asks for nothing here, exactly as it asks for no
     // reserver. #157's argument for two builders, said again for the haul.
+    //
+    // **The source containers' rows alone** and never the mine's: the whole of
+    // the argument is an [[anchor]] dropping its next fifty on the floor of a
+    // room nobody can reach, and a mineral container overflowing drops the
+    // [[miner]]'s Thorium onto a tile inside the colony's own room, where the
+    // next hauler takes it. A deposit is dug only in a room this colony **owns**
+    // at RCL6, so a mine row out of the home room is a child's, and the child
+    // hauls its own.
     let remote =
         rows
         |> List.filter (fun row -> row.Container.Room <> home)
@@ -313,7 +395,9 @@ let internal haulerDemandOf (view: ColonyView) atlas : int * HaulDemandRow list 
     // tick-energy, so it is added after the division rather than inside it.
     let hired = ceilDiv demand capacity
 
-    (if remote * 2 >= capacity then max hired 2 else hired) + ferry, rows, capacity
+    // The mine's lines ride at the end of the reported rows, so
+    // `observe.mjs quotas` prints the new term beside the ones it always had.
+    (if remote * 2 >= capacity then max hired 2 else hired) + ferry, rows @ mineRows, capacity
 
 /// The hauler quota alone; `haulerDemandOf` is the same arithmetic with
 /// its lines kept.
@@ -475,10 +559,10 @@ let internal guardQuota (view: ColonyView) : int =
 /// engine refuses to let us dig it.
 let internal minerQuota (view: ColonyView) atlas : int =
     ourDeposits view
+    // The first two are `depositIsDiggable`, which the [[hauler unit]]'s own
+    // mine term reads off the same sentence (#262).
     |> List.filter (fun id ->
-        Map.tryFind id view.Spatial.Thorium |> Option.defaultValue 0 > 0
-        && (Atlas.extractorOn atlas id).IsSome
-        && not (Set.isEmpty (Atlas.postsOf atlas id)))
+        depositIsDiggable view atlas id && not (Set.isEmpty (Atlas.postsOf atlas id)))
     |> List.length
 
 /// The reserver row's quota and its sizing, which are one rule with two faces
