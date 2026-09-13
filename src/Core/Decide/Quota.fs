@@ -611,13 +611,14 @@ let internal reserverClaimsOf (view: ColonyView) : int list =
 
         reserved @ (claims |> List.map (fun _ -> 1))
 
-/// The two facts the two rows whose sizing is not the bank's answer alone read,
-/// derived once for the tick (ADR 0042): the anchor row's Work ceilings and the
-/// reserver row's outstanding CLAIM demands. Together with the bank they say
-/// what **this colony's rows will cast this tick** (ADR 0052 decision 4), which
-/// is the number three readers have to agree on: the casting cascade that buys
-/// the body, the amortization that charges for it, and the lead that prices its
-/// succession. A record and not two arguments, and derived in
+/// The facts the rows whose sizing is not the bank's answer alone read, derived
+/// once for the tick (ADR 0042): the anchor row's Work ceilings, the reserver
+/// row's outstanding CLAIM demands, and the miner row's knob and its count.
+/// Together with the bank they say what **this colony's rows will cast this
+/// tick** (ADR 0052 decision 4), which is the number three readers have to agree
+/// on: the casting cascade that buys the body, the amortization that charges for
+/// it, and the lead that prices its succession. A record and not a handful of
+/// arguments, and derived in
 /// `decideUnarbitrated` rather than per reader, because both folds walk the
 /// projection and a lead is priced once per living creep in two different steps
 /// of the tick. Neither field may be derived from a creep's remaining life (ADR
@@ -637,6 +638,14 @@ type RowSizing =
         /// alone either, and the third thing it reads is a knob of this
         /// colony's rather than a fact of the tick.
         MinerWorkPerMove: int
+        /// `minerQuota`'s answer this tick — one [[miner]] per diggable
+        /// deposit. Here for `ReserverClaims`' own reason (#304): the number is
+        /// both the addend of the [[workforce target]] and the multiplier of
+        /// the charge deducted from the surplus, and a second derivation is a
+        /// body hired against one number and counted against another. It is
+        /// also a walk of the projection's targets that every colony without a
+        /// deposit was paying for twice.
+        MinerQuota: int
     }
 
 let internal rowSizingOf (view: ColonyView) atlas : RowSizing =
@@ -644,6 +653,7 @@ let internal rowSizingOf (view: ColonyView) atlas : RowSizing =
         AnchorPostCaps = postWorkCapsOf view atlas
         ReserverClaims = reserverClaimsOf view
         MinerWorkPerMove = view.Tuning.MinerWorkPerMove
+        MinerQuota = minerQuota view atlas
     }
 
 /// The colony's surplus over one creep's lifetime: the income the two upgrade
@@ -655,10 +665,10 @@ let internal rowSizingOf (view: ColonyView) atlas : RowSizing =
 /// half (ADR 0004). An output is what the garrison digs, capped at the rock's
 /// rate, and the row is charged its replacement at that same body, so credit
 /// and charge are one cast — since ADR 0053, Post by Post. From that income the
-/// reserver, anchor and hauler rows' amortization is deducted: those three are
-/// hired off facts about the *ground*, so their price is settled before the
-/// surplus has a number, while the two rows hired out of the surplus itself are
-/// charged inside `workforceTarget`.
+/// reserver, anchor, hauler and [[miner]] rows' amortization is deducted: those
+/// four are hired off facts about the *ground*, so their price is settled before
+/// the surplus has a number, while the two rows hired out of the surplus itself
+/// are charged inside `workforceTarget`.
 let internal surplusOverLifetime (view: ColonyView) atlas (sizing: RowSizing) haulerQuota =
     let capacity = view.Bank.Capacity
     let reserverClaims = sizing.ReserverClaims
@@ -677,6 +687,24 @@ let internal surplusOverLifetime (view: ColonyView) atlas (sizing: RowSizing) ha
             List.length reserverClaims
             * bodyCost (reserverBodyWithin (List.max reserverClaims) capacity)
 
+    // The [[miner]] row charged like the three rows beside it (#304), on the
+    // argument `workforceTarget`'s own docstring states and this one does not
+    // repeat: a row that earns nothing and stands for as long as the deposit
+    // does is the guard's excuse read the other way round. Off `sizing` and
+    // never re-derived here, for `ReserverClaims`' reason — the addend and the
+    // charge must be one number.
+    //
+    // Scaled onto the 1,500 this sum is written in exactly as the reserver's
+    // CLAIM body is, and by a number that is a **policy assumption** rather
+    // than a bound: the miner spends its life standing *on* the mineral
+    // container, and `Tuning.MineContactAgeing` is what the mod's contact
+    // penalty comes to while the haul keeps that container inside the 100..999
+    // band. Its own doc carries the two live ways that is optimistic (#306,
+    // #313); what an under-charge costs is an upgrade mouth the mine is really
+    // paying for, which is the same error this term exists to fix, smaller.
+    let minerCost =
+        sizing.MinerQuota * bodyCost (minerBodyFor sizing.MinerWorkPerMove capacity)
+
     // The anchor row charged **Post by Post**, each at the body the casting
     // step would actually buy for that Post (ADR 0053): a row whose bodies
     // shrank with a lapsed reservation while its amortization went on deducting
@@ -688,6 +716,7 @@ let internal surplusOverLifetime (view: ColonyView) atlas (sizing: RowSizing) ha
          |> Map.fold (fun total _ cap -> total + bodyCost (anchorBodyFor cap capacity)) 0)
         + haulerQuota * bodyCost (bodyFor haulerPattern capacity)
         + reserverCost * Engine.creepLifetime / Engine.claimLifetime
+        + minerCost * view.Tuning.MineContactAgeing
 
     // Summed over the posted sources at each one's own output, never a count
     // times a constant (ADR 0042): a source the colony cannot price contributes
@@ -819,7 +848,7 @@ let internal quotaRowsOf (view: ColonyView) atlas (sizing: RowSizing) haulerQuot
         // nearest it.
         Anchor = Atlas.postCount atlas
         Hauler = haulerQuota
-        Miner = minerQuota view atlas
+        Miner = sizing.MinerQuota
         Upgrader = upgraderQuota view atlas surplus
         Surplus = surplus
     }
@@ -846,17 +875,19 @@ let internal quotaRowsOf (view: ColonyView) atlas (sizing: RowSizing) haulerQuot
 /// *site*. The reserver row is the quota this switch does *not* gate — it is
 /// what makes the container possible — arriving as `reserverClaims`, whose
 /// length is the addend and whose largest entry prices the amortization. The
-/// income and the three ground-hired rows' amortization arrive together as
+/// income and the four ground-hired rows' amortization arrive together as
 /// `surplus`, read here and by `upgraderQuota` alike. The guard row is an addend
-/// like the rest (ADR 0056) and is charged nowhere else: it is 0 for the whole
-/// of an ordinary life, and a guard left out of the target would have the
-/// deficit read the body it is alive as one of the generalists the income
-/// already paid for — a raid would quietly retire a worker for as long as the
-/// guard stood. **The miner row is an addend on that same argument** (ADR 0057
-/// decision 2) and is likewise charged nowhere else: it is hired off a fact
-/// about the ground — a deposit standing under an extractor — and it produces
-/// no energy at all, so `surplus` has no term that answers for it and a miner
-/// left out of the target would retire a generalist for the whole of its life.
+/// like the rest (ADR 0056) and is the one addend charged nowhere else: it is 0
+/// for the whole of an ordinary life, and a guard left out of the target would
+/// have the deficit read the body it is alive as one of the generalists the
+/// income already paid for — a raid would quietly retire a worker for as long as
+/// the guard stood. **The miner row is an addend on that same argument** (ADR
+/// 0057 decision 2) — it is hired off a fact about the ground, a deposit
+/// standing under an extractor, and a miner left out of the target would retire
+/// a generalist for the whole of its life — but it is **not** uncharged (#304):
+/// it produces no energy at all and it stands for as long as the deposit does,
+/// which is the guard's excuse read the other way round, so its replacement is a
+/// term of `surplus` beside the reserver's, the anchor's and the hauler's.
 let internal workforceTarget (view: ColonyView) atlas (tasks: Task list) (rows: QuotaRows) =
     let home = SpatialInfo.homeName view.Spatial
 

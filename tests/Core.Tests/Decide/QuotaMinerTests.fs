@@ -25,6 +25,46 @@ let private richMine capacity =
         Bank = bank capacity capacity
     }
 
+/// The mine with an **income** beside it: the corridor run out to x = 4 with a
+/// source walled in at either end and a built container on each one's only Seat
+/// — two [[post]]s, so both rocks are income the surplus counts (ADR 0042) — at
+/// a 550 bank. `mineColony` carries no source at all on purpose, so this is the
+/// one colony in the suite whose surplus has a number for the miner's charge to
+/// come out of (#304).
+///
+/// **Neither source container may stand on a [[seat]] of the deposit**, and
+/// that is why the west source is at x = 4 rather than at the corridor's old
+/// mouth: `Atlas.postsOf` reads a mine [[post]] as (any mineral's Seats) ∩ (any
+/// container tile in the room), so an energy container on (9,10) — which is
+/// `min-a`'s other Seat — is a second mine Post holding no Thorium, and the
+/// fixture carrying this charge's whole justification would be a colony whose
+/// deposit has a standing place that ages nobody. The gate itself is #261's and
+/// is filed as #312; what is fixed here is the fixture.
+let private earningMine =
+    { mineColony with
+        Bank = bank 550 550
+        Sources = [ source "src-a"; source "src-b" ]
+        Spatial =
+            mineColony.Spatial
+            |> withHome (fun layer ->
+                { layer with
+                    Terrain =
+                        layer.Terrain
+                        |> Map.add { X = 4; Y = 10 } Wall
+                        |> Map.add { X = 5; Y = 10 } Plain
+                        |> Map.add { X = 6; Y = 10 } Plain
+                        |> Map.add { X = 7; Y = 10 } Plain
+                        |> Map.add { X = 20; Y = 10 } Wall
+                })
+            |> withTargets
+                [
+                    "src-a", { X = 4; Y = 10 }, Source
+                    "can-src", { X = 5; Y = 10 }, Structure BuiltKind.Container
+                    "src-b", { X = 20; Y = 10 }, Source
+                    "can-srb", { X = 19; Y = 10 }, Structure BuiltKind.Container
+                ]
+    }
+
 /// The mine colony with a **scanned neighbour** beside it carrying its own
 /// deposit, its own extractor and its own container — the room owned by
 /// somebody else, which is the whole of what tells the two apart (#261).
@@ -190,16 +230,20 @@ let minerQuotaTests =
             }
 
             test "the miner row is an addend of the Workforce target" {
-                // The guard row's own argument said again (ADR 0057 decision
-                // 2): the row produces no energy at all, so no term of the
-                // surplus answers for it, and a miner left out of the target
-                // would have the deficit read the body it is alive as one of
-                // the generalists the income already paid for — quietly
-                // retiring a worker for the whole of its life.
+                // ADR 0057 decision 2: a miner left out of the target would
+                // have the deficit read the body it is alive as one of the
+                // generalists the income already paid for — quietly retiring a
+                // worker for the whole of its life.
                 // Read under a Workforce floor of one, which is the premise:
                 // `Tuning.MinWorkforce` is two, and a colony this small stands
                 // on the floor either side of the pair, where a difference of
                 // one addend is invisible.
+                // `mineColony` has no source at all, so its income is zero and
+                // the surplus the miner is now charged against (#304, below)
+                // is at or under zero either side of the pair: what the addend
+                // costs the *generalist* row is the case beneath this one, and
+                // it is a fact about a colony with an income rather than about
+                // the addend.
                 let targetOf colony =
                     (decideOn
                         { colony with
@@ -211,6 +255,93 @@ let minerQuotaTests =
                     (targetOf mineColony - targetOf (mineColony |> withExtractorSite))
                     1
                     "the tick the extractor stands the target grows by exactly one"
+            }
+
+            test "the miner row's replacement is deducted from the surplus, three bodies of it" {
+                // #304: the row is an addend of the target **and** a term of
+                // the amortization, which is the reserver, anchor and hauler
+                // rows' own shape — every row hired off a fact about the
+                // ground has its replacement settled before the surplus has a
+                // number, and the two rows hired out of the surplus itself are
+                // charged inside `workforceTarget`. A miner charged nowhere is
+                // an upgrade mouth's worth of income the colony sells twice for
+                // as long as a deposit lasts.
+                //
+                // **Three bodies over one worker's life**, scaled exactly as
+                // the reserver's 600-tick body is scaled onto the 1,500 this
+                // sum is written in: the miner stands *on* the mineral
+                // container, `thorium.js` takes `floor(log10 store.T)` off the
+                // `ageTime` of everything on that tile every tick, and a
+                // container the haul keeps inside the 100..999 band therefore
+                // burns `Tuning.MineContactAgeing` (3) ticks of the body's life
+                // a tick (ADR 0057's Consequences, where the programme's
+                // ~220,000 energy is priced off that same 500-tick life and its
+                // twenty-six bodies).
+                //
+                // The number is read from **both sides**, because one worker
+                // unit is about six miner bodies wide and a single income
+                // therefore pins a band and not a number: at the 550 bank a
+                // charge of two bodies still hires the eighth generalist, and
+                // at the 500 bank a charge of four retires one the third does
+                // not. Neither bank can do both — a worker unit is wider than
+                // four miner bodies, so only one rounding boundary ever falls
+                // inside the range — which is why this case is two colonies.
+                let ageing ticks (colony: ColonyView) =
+                    { colony with
+                        Tuning =
+                            { colony.Tuning with
+                                MineContactAgeing = ticks
+                            }
+                    }
+
+                // The fixture's own guard, because the charge is priced per
+                // mine [[post]] and `Atlas.postsOf` intersects the deposit's
+                // Seats with **every** container tile in the room: take the
+                // mineral container away and the row must go to nothing. It
+                // read 1 while an energy container stood on the deposit's other
+                // Seat, which is the gate filed as #312.
+                Expect.equal
+                    (quotaOfRow "miner" (earningMine |> withoutMineContainer))
+                    (Some 0)
+                    "no source container of this colony stands on a Seat of the deposit"
+
+                // The 550 bank, from below. Two posted rocks leave 22,550 of
+                // surplus and a generalist's two Work drink 3,000 over a life,
+                // which is eight of them; three miner bodies at 550 are 1,650,
+                // leaving 20,900 — seven. Two would have left 21,450 and hired
+                // the eighth.
+                Expect.equal
+                    (quotaOfRow "worker" (earningMine |> withExtractorSite))
+                    (Some 8)
+                    "the premise: with no miner to pay for, the whole income is the generalist row's"
+
+                Expect.equal
+                    (quotaOfRow "worker" earningMine)
+                    (Some 7)
+                    "the tick the extractor stands one generalist is retired to pay for the miner"
+
+                Expect.equal
+                    (quotaOfRow "worker" (earningMine |> ageing 2))
+                    (Some 8)
+                    "and two bodies of charge would not have retired it — the row is charged more than twice"
+
+                // The 500 bank, from above: the same colony one cast smaller,
+                // where the rounding boundary sits between the third body and
+                // the fourth. This is also `MineContactAgeing`'s own pairwise
+                // — a Tuning field arrives with one (ADR 0057's Consequences)
+                // — and it is the reading that says the charge is *three* and
+                // not merely "at least three".
+                let leanMine = { earningMine with Bank = bank 500 500 }
+
+                Expect.equal
+                    (quotaOfRow "worker" leanMine)
+                    (Some 8)
+                    "three bodies of charge leave the eighth generalist standing at this bank"
+
+                Expect.equal
+                    (quotaOfRow "worker" (leanMine |> ageing 4))
+                    (Some 7)
+                    "a fourth body of charge would retire it, which is what makes the three a number"
             }
         ]
 

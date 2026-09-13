@@ -212,6 +212,31 @@ type Tuning =
         /// less — where `EXTRACTOR_COOLDOWN` beside it would be a lie about the
         /// server.
         MinerWorkPerMove: int
+        /// The ticks of life a [[miner]] burns in one tick, which is what
+        /// turns `CREEP_LIFE_TIME` into the 500-tick life its replacement is
+        /// amortized at (ADR 0057's Consequences, where the programme's
+        /// ~220,000 energy is priced off that same number and its twenty-six
+        /// bodies). The **engine** fact beside it is a formula and not a
+        /// number: `thorium.js` sums `store.T` over a tile, takes
+        /// `p = floor(log10 total)` and subtracts it from the `ageTime` of
+        /// everything standing there, so a body burns `1 + p`. Three is what
+        /// `p = 2` makes of that, and `p = 2` is a fact about **our haul** —
+        /// the mineral container held in the 100..999 band — which is why the
+        /// number is a knob of this colony's where `EXTRACTOR_COOLDOWN` beside
+        /// it would be a lie about the server.
+        ///
+        /// It is a **policy assumption and not a bound**, and the two ways it
+        /// is optimistic are written down rather than discovered: over one
+        /// 600-tick fill at 3.33 T/tick the tile stands at `p = 0` for three
+        /// ticks, `p = 1` for twenty-seven, `p = 2` for 270 and `p = 3` for
+        /// 300, which averages **3.44**; and #306 records the container
+        /// standing *full* at 2,000 — `p = 3`, so `1 + p = 4` — in a colony
+        /// whose haulers never reach the Thorium draw's tier. Three is
+        /// therefore a floor on a cadence nothing in the code enforces, and
+        /// what it costs while it is wrong is an upgrade mouth the mine is
+        /// really paying for. The number moves with #306's answer and not
+        /// before it (#313).
+        MineContactAgeing: int
         /// The Layout horizon (ADR 0011, moved to RCL5 by ADR 0039 and to RCL6
         /// by ADR 0055): the whole plan is computed up to this level regardless
         /// of the current one, so today's roads route around tomorrow's
@@ -316,6 +341,7 @@ module Tuning =
             StorageLevel = 4
             ExtractorLevel = 6
             MinerWorkPerMove = 5
+            MineContactAgeing = 3
             HorizonLevel = 6
             OutpostBuilders = 2
             BootstrapLevel = 3
