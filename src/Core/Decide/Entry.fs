@@ -68,6 +68,27 @@ let censusSignature (view: ColonyView) : string =
             | Site kind -> Some kind
             | _ -> None)
 
+    // The Thorium deposits, each on its tile (ADR 0057 decision 1). Signed on
+    // ADR 0044's rule that the memo signs the union of its readers: since this
+    // ticket the Layout reads them twice — the extractor's tile *is* the
+    // deposit's, and the mineral container is seated on its Seats — and
+    // `Atlas.workingGroundIn` reads them at every level, so a deposit that
+    // arrived or left moves the clustered ordering itself. Leaving is the live
+    // case and not a hypothetical: the mod deletes an exhausted Thorium deposit
+    // outright, and unsigned, the memo would keep handing back a plan naming a
+    // container on the Seat of a rock that is gone.
+    let minerals =
+        spatial.TargetKinds
+        |> Map.toList
+        |> List.choose (fun (id, kind) ->
+            match kind with
+            | Mineral ->
+                SpatialInfo.placementOf spatial id
+                |> Option.map (fun tile -> $"Mineral@{tile.Room}:{tile.X},{tile.Y}")
+            | _ -> None)
+        |> List.sort
+        |> String.concat ";"
+
     // The tiles another player's construction sites hold (#248), named the way
     // ADR 0044's consequence names every census input — `{kind}@{room}:{x},{y}`
     // — with the one thing we know about such a site standing in the kind
@@ -128,7 +149,7 @@ let censusSignature (view: ColonyView) : string =
         |> List.map (fun (room, stage) -> $"{room}:{stage}")
         |> String.concat ","
 
-    $"{home}|{level}|{held}|{stages}|{standing}|{pending}|{rivals}"
+    $"{home}|{level}|{held}|{stages}|{standing}|{pending}|{rivals}|{minerals}"
 
 /// The decision seam: a colony view in — with the verbose list of creep names
 /// owed the manufactured-evidence Verdicts and the previous tick's plan memo —

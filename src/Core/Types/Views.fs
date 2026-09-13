@@ -173,6 +173,10 @@ module ColonyView =
         | Source
         | Dropped
         | Tombstone
+        // A child's deposit is the child's: the mother's [[pioneer]]s build
+        // and upgrade out there and mine nothing, so a mineral of the room
+        // she is raising is no more borrowable than its sources are.
+        | Mineral
         | Structure _ -> false
 
     /// One bootstrapped room's facts, cut down to the borrowed work (ADR 0052
@@ -235,6 +239,15 @@ module ColonyView =
             TargetKinds = kinds
             Hits = Map.empty
             Stores = facts.Stores |> Map.filter (fun id _ -> Set.contains id sink)
+            // Neither survives the cut, and the [[ferry]]'s exemption does not
+            // reach them (ADR 0057): a ferry carries energy, so no Thorium of
+            // the child's is a fact the mother may act on, and the deposit's own
+            // amount would otherwise ride here under an id `borrowable` has just
+            // dropped — a fact with no target, which is the shape ADR 0004
+            // forbids. The child's extractor cooldown goes for the same reason:
+            // the miner that reads it is hers.
+            Thorium = Map.empty
+            Cooldowns = Map.empty
             Sources = []
         }
 
@@ -289,6 +302,12 @@ module ColonyView =
             TargetKinds = Map.empty
             Hits = Map.empty
             Stores = Map.empty
+            // A deposit's remaining Thorium, a store's Thorium and an
+            // extractor's cooldown are work facts by the test above — what a
+            // quota reads and what an Emitter gates on (ADR 0057) — so they go
+            // out with the stores they stand beside.
+            Thorium = Map.empty
+            Cooldowns = Map.empty
             Controller = None
             Refillables = []
             Sources = []
@@ -462,6 +481,8 @@ module ColonyView =
                     TargetKinds = mergedBy (fun facts -> facts.TargetKinds)
                     Hits = mergedBy (fun facts -> facts.Hits)
                     Stores = mergedBy (fun facts -> facts.Stores)
+                    Thorium = mergedBy (fun facts -> facts.Thorium)
+                    Cooldowns = mergedBy (fun facts -> facts.Cooldowns)
                 }
                 // The declared furniture goes in last, over the whole
                 // assembled projection rather than room by room inside it

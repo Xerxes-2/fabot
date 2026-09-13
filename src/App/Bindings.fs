@@ -42,6 +42,13 @@ let findHostileStructures = 109
 /// Screeps `FIND_DROPPED_RESOURCES` constant.
 let findDroppedResources = 106
 
+/// Screeps `FIND_MINERALS` constant: the mineral deposits standing in the room
+/// (ADR 0057 decision 1). The season mod puts a Thorium deposit in most rooms
+/// beside the ordinary ore, and only the Thorium one is projected — the filter
+/// is on `mineralType` in `World`, where every other engine string is
+/// classified.
+let findMinerals = 116
+
 /// Screeps `FIND_TOMBSTONES` constant: what a creep leaves behind when it
 /// dies, holding whatever it carried (#167).
 let findTombstones = 118
@@ -111,6 +118,20 @@ type IEffect =
     /// expiry read off this has the current tick added to it (ADR 0043, #133).
     abstract ticksRemaining: int
 
+/// A mineral deposit standing in a room (ADR 0057 decision 1). Read only for
+/// the season's Thorium: `mineralType` is the filter, and `mineralAmount` is
+/// what the projection carries as the deposit's own remaining Thorium. Density
+/// and `ticksToRegeneration` are not bound — a Thorium deposit never
+/// regenerates, and nothing decides on the density.
+type IMineral =
+    abstract id: string
+    abstract pos: IRoomPosition
+    /// Screeps RESOURCE_* string; "T" for the season's Thorium.
+    abstract mineralType: string
+    /// How much is left in the deposit. The mod deletes a Thorium deposit
+    /// outright the tick this hits zero, so it is never read as 0 here.
+    abstract mineralAmount: int
+
 type IStructure =
     abstract id: string
     /// Screeps STRUCTURE_* string, e.g. "spawn" or "extension".
@@ -124,6 +145,11 @@ type IStructure =
     /// The effects standing on this structure; undefined when none does,
     /// the shape `safeMode` and `reservation` also arrive in.
     abstract effects: IEffect[]
+    /// Ticks before this structure may act again. Defined on the extractor
+    /// alone among the kinds we build (`EXTRACTOR_COOLDOWN` is 5), and read
+    /// only there — the shell classifies the kind first, so no other structure
+    /// is ever asked (ADR 0057 decision 2).
+    abstract cooldown: int
 
 /// A dropped resource pile lying on the ground.
 type IResource =

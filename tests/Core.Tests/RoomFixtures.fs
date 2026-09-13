@@ -37,6 +37,13 @@ type RoomCapture =
         /// sector centre or Source Keeper room — has none, and cannot be
         /// owned.
         Controller: (string * Pos) option
+        /// The room's **Thorium** deposits, each under a readable id, as the
+        /// sources are (ADR 0057 decision 1). The capture records every
+        /// mineral the server answered with and this is the cut the shell
+        /// makes — `World.ofGame` filters `FIND_MINERALS` on `mineralType` —
+        /// so the room's ordinary ore is loaded, ignored and never projected.
+        /// A sector centre has none.
+        Minerals: (string * Pos) list
         /// The same sources, in the same order, under the ids the *engine*
         /// gave them — what the capture actually recorded, before the
         /// rename above made it readable. Beside the readable ids rather
@@ -50,6 +57,9 @@ type RoomCapture =
         RealSources: (string * Pos) list
         /// The controller under the engine's own id, as `RealSources` is.
         RealController: (string * Pos) option
+        /// The Thorium deposits under the engine's own ids, as
+        /// `RealSources` is.
+        RealMinerals: (string * Pos) list
     }
 
 /// A captured room projected as a `SpatialInfo`, beside the ids the
@@ -60,6 +70,10 @@ type LoadedRoom =
         Spatial: SpatialInfo
         SourceIds: string list
         ControllerId: string option
+        /// The Thorium deposits the projection carries, in the capture's
+        /// order (ADR 0057 decision 1) — empty for a room the mod put none
+        /// in, which is what a sector centre is.
+        MineralIds: string list
     }
 
 let private roomSide = 50
@@ -144,28 +158,38 @@ let load (roomName: string) : RoomCapture =
         lines.[objectSection + 1 ..] |> Array.filter (fun line -> line.Trim() <> "")
 
     match Array.tryHead objectRows with
-    | Some "id\ttype\tx\ty" -> ()
-    | _ -> failwithf "%s: the objects section has no id/type/x/y column header" path
+    | Some "id\ttype\tx\ty\tresource" -> ()
+    | _ -> failwithf "%s: the objects section has no id/type/x/y/resource column header" path
 
     // The capture keeps the API's real ids, which is what makes it
     // traceable; the projection's keys are the test's own vocabulary — and
     // since an outpost is declared in the engine's ids, both are carried
     // out rather than one being thrown away here.
-    // A mineral row is read and ignored: a mineral has no TargetKind to
-    // enter the projection through.
+    // The resource column is the one thing a row carries that its
+    // coordinates do not say and a rule depends on: the season mod stands a
+    // Thorium deposit beside the room's ordinary ore, and the shell projects
+    // only the Thorium one (ADR 0057). It is keyed on with the kind, so an
+    // ordinary-ore row is loaded here and reaches no list below — which is
+    // the cut `World.ofGame` makes, restated once in the loader that stands
+    // in for it.
     let objects =
         objectRows
         |> Array.skip 1
         |> Array.map (fun line ->
             match line.Split '\t' with
-            | [| objectId; kind; x; y |] -> kind, (objectId, { X = int x; Y = int y })
-            | _ -> failwithf "%s: object row %s is not id/type/x/y" path line)
+            | [| objectId; kind; x; y; resource |] ->
+                (kind, resource), (objectId, { X = int x; Y = int y })
+            | _ -> failwithf "%s: object row %s is not id/type/x/y/resource" path line)
 
-    let ofKind kind =
-        objects |> Array.filter (fst >> (=) kind) |> Array.map snd |> List.ofArray
+    let ofKind kind resource =
+        objects
+        |> Array.filter (fst >> (=) (kind, resource))
+        |> Array.map snd
+        |> List.ofArray
 
-    let sources = ofKind "source"
-    let controller = ofKind "controller" |> List.tryHead
+    let sources = ofKind "source" (resourceName Energy)
+    let controller = ofKind "controller" "-" |> List.tryHead
+    let minerals = ofKind "mineral" (resourceName Thorium)
 
     {
         RoomName = field "room"
@@ -175,8 +199,10 @@ let load (roomName: string) : RoomCapture =
         Border = border
         Sources = sources |> List.mapi (fun index (_, pos) -> $"src-{index}", pos)
         Controller = controller |> Option.map (fun (_, pos) -> "ctrl", pos)
+        Minerals = minerals |> List.mapi (fun index (_, pos) -> $"min-{index}", pos)
         RealSources = sources
         RealController = controller
+        RealMinerals = minerals
     }
 
 /// The captured room with a spawn standing on it. The spawn is always the
@@ -200,6 +226,14 @@ let project (capture: RoomCapture) (spawn: Pos) (fallbackController: Pos option)
 
             for id, pos in Option.toList controllerTarget do
                 yield id, pos, Controller
+
+            // The Thorium deposits (ADR 0057 decision 1). Projected like any
+            // other target and blocking their tile the way the shell does — a
+            // mineral is one of Screeps' OBSTACLE_OBJECT_TYPES — which costs
+            // nothing on these captures, every season deposit standing on a
+            // wall tile already.
+            for id, pos in capture.Minerals do
+                yield id, pos, Mineral
         ]
 
     {
@@ -226,7 +260,8 @@ let project (capture: RoomCapture) (spawn: Pos) (fallbackController: Pos option)
                                     |> List.choose (fun (_, pos, kind) ->
                                         match kind with
                                         | Structure built when not (isWalkable built) -> Some pos
-                                        | Controller -> Some pos
+                                        | Controller
+                                        | Mineral -> Some pos
                                         | _ -> None)
                                     |> Set.ofList
                             }
@@ -242,6 +277,7 @@ let project (capture: RoomCapture) (spawn: Pos) (fallbackController: Pos option)
                 TargetKinds = targets |> List.map (fun (id, _, kind) -> id, kind) |> Map.ofList
             }
         SourceIds = capture.Sources |> List.map fst
+        MineralIds = capture.Minerals |> List.map fst
         ControllerId = controllerTarget |> Option.map fst
     }
 

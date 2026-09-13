@@ -168,6 +168,19 @@ let wireVocabularyTests =
                     (casesOf<BuiltKind> () |> Array.filter (fun kind -> kind <> BuiltKind.Other))
                     builtKindName
                     (reverseOf builtKindName allBuiltKinds)
+
+                // The resources the colony names (ADR 0057). The same
+                // contract as the two above and for the same reason: these
+                // strings are `store` keys and the argument of every
+                // `withdraw` and `transfer`, so a case added to the union
+                // without a spelling is a resource the shell cannot ask the
+                // engine for. Thorium's is the season mod's one-letter "T",
+                // which is also what `mineralType` reads on the deposit.
+                roundTrips
+                    "Resource"
+                    (casesOf<Resource> ())
+                    resourceName
+                    (reverseOf resourceName allResources)
             }
 
             test "a name outside a vocabulary decodes to nothing, never to a case" {

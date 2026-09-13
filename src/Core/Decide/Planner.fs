@@ -10,8 +10,12 @@ open Fabot.Core.Types
 /// The source container geometry (ADR 0012): a tile within range 1 of the given
 /// source is that source's container tile — the Seat-standing kind the Layout
 /// places, which harvest overflow fills. The one range this colony calls a
-/// source container, asked of one source.
-let internal servesSource (sourcePos: Pos) (tile: Pos) = range tile sourcePos <= 1
+/// source container, asked of one source. Since ADR 0057 the Layout asks it of
+/// a **Thorium deposit** too: served is a container standing or pending within
+/// range 1, and that is one rule over two kinds of rock. Named for the source
+/// because every other caller here is a source's, and a deposit's own readers
+/// say which rock they meant (`servingRock`).
+let internal servesSource (rockPos: Pos) (tile: Pos) = range tile rockPos <= 1
 
 /// The source a tile of the named room is a container's for: the placed source
 /// **standing in that same room** within range 1 of it, or None where there is

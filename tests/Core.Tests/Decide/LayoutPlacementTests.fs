@@ -31,6 +31,7 @@ let builtKindTests =
                         "storage"
                         "link"
                         "rampart"
+                        "extractor"
                     ]
                     "each BuiltKind maps to its Screeps string"
             }
@@ -68,6 +69,10 @@ let builtKindTests =
                         BuiltKind.Storage, Some WholeLine.Full
                         BuiltKind.Link, None
                         BuiltKind.Rampart, Some WholeLine.Floor
+                        // Nothing repairs an extractor and nothing may: it
+                        // does not decay, and its hits never reach the
+                        // projection (ADR 0057 decision 1).
+                        BuiltKind.Extractor, None
                     ]
                     "one line per kind, and none for the kinds Repair never touches"
 
@@ -129,13 +134,21 @@ let builtKindTests =
                     "an unmodelled kind puts no store in the projection"
             }
 
-            test "a creep stands on a road, a container or a rampart, and on nothing else" {
+            test
+                "a creep stands on a road, a container, a rampart or an extractor, and on nothing else" {
                 // Screeps OBSTACLE_OBJECT_TYPES, as the projection reads it:
                 // every kind that is not walkable blocks its tile.
                 Expect.equal
                     (allBuiltKinds |> List.filter isWalkable)
-                    [ BuiltKind.Road; BuiltKind.Container; BuiltKind.Rampart ]
-                    "the three kinds a creep may share a tile with"
+                    [
+                        BuiltKind.Road
+                        BuiltKind.Container
+                        BuiltKind.Rampart
+                        // The extractor is not one of OBSTACLE_OBJECT_TYPES,
+                        // so a body walks over it as it walks over a road.
+                        BuiltKind.Extractor
+                    ]
+                    "the four kinds a creep may share a tile with"
 
                 Expect.isFalse
                     (isWalkable BuiltKind.Other)
@@ -149,13 +162,24 @@ let builtKindTests =
                 // so a transposed case would place one kind and describe
                 // another with nothing in either layer to catch it.
                 Expect.equal
-                    ([ Extension; Tower; Road; Container; Storage ] |> List.map builtKindOfPlaceable)
+                    ([
+                        Extension
+                        Tower
+                        Road
+                        Container
+                        Storage
+                        Rampart
+                        StructureKind.Extractor
+                     ]
+                     |> List.map builtKindOfPlaceable)
                     [
                         BuiltKind.Extension
                         BuiltKind.Tower
                         BuiltKind.Road
                         BuiltKind.Container
                         BuiltKind.Storage
+                        BuiltKind.Rampart
+                        BuiltKind.Extractor
                     ]
                     "each placeable kind widens to its own built kind"
             }

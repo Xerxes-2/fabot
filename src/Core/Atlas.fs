@@ -592,6 +592,30 @@ let pendingContainerTilesIn (atlas: Atlas) (room: string) : Set<Pos> =
 let containerCensusIn (atlas: Atlas) (room: string) : Set<Pos> =
     Set.union (containerTilesIn atlas room) (pendingContainerTilesIn atlas room)
 
+/// The extractor census of one room (ADR 0057 decision 1): the tiles an
+/// extractor stands on united with the tiles one is pending on. Read exactly
+/// as the container census is and for exactly its reason — the engine takes
+/// one extractor per room and refuses a second `createConstructionSite`, so a
+/// plan that could not see the one already there would ask once a tick for
+/// ever. Tiles and not a count because the extractor's tile is its mineral's:
+/// the question the Layout asks is "is this deposit's own tile taken", and a
+/// count would answer a different one in a room the mod ever gave two
+/// deposits.
+let extractorCensusIn (atlas: Atlas) (room: string) : Set<Pos> =
+    Set.union
+        (tilesOfKindIn atlas room (Structure BuiltKind.Extractor))
+        (tilesOfKindIn atlas room (Site BuiltKind.Extractor))
+
+/// The Thorium minerals one room holds, each beside its tile, in id order (ADR
+/// 0057 decision 1). Only Thorium is ever projected, the shell filtering
+/// `FIND_MINERALS` on `mineralType`, so this is the whole of what the Layout
+/// plans an extractor and a container for. Total (ADR 0004): a room the
+/// projection places none in answers with the empty list, which plans nothing
+/// and loses nothing.
+let mineralsIn (atlas: Atlas) (room: string) : (string * Pos) list =
+    targetsOfKind atlas Mineral
+    |> List.choose (fun id -> tileIn atlas room id |> Option.map (fun tile -> id, tile))
+
 /// Tiles of one room a construction site cannot go down on today, whatever the
 /// plan wants there. The engine takes one construction site per tile, so a pick
 /// onto an occupied tile is answered ERR_INVALID_TARGET once a tick for as long
@@ -779,17 +803,18 @@ let private actionTilesOf (atlas: Atlas) (task: Task) : (string * Pos list) opti
 let private seatTiles (ground: int[]) (pos: Pos) : Set<Pos> =
     neighbours pos |> List.filter (walkableAt ground) |> Set.ofList
 
-/// Seat tiles of a source — the geometry behind `seats`, for the Layout's
-/// source-container pick (ADR 0012). Empty for a source the projection does not
-/// place (ADR 0004). The source's own room answers, not the colony's: the id
-/// resolves the room (ADR 0041), so an outpost source's Seats are never a home
-/// tile of the same coordinate.
-let private seatTilesIn (atlas: Atlas) (sourceId: string) : (string * Set<Pos>) option =
-    Map.tryFind sourceId atlas.TargetAt
+/// Seat tiles of a placed **rock** — the geometry behind `seats`, for the
+/// Layout's source-container pick (ADR 0012) and, since ADR 0057, for the
+/// mineral container's: a deposit's Seats are its neighbours by the same
+/// terrain rule, and the id is all either caller hands in. Empty for a target
+/// the projection does not place (ADR 0004). The rock's own room answers, not
+/// the colony's: the id resolves the room (ADR 0041), so an outpost source's
+/// Seats are never a home tile of the same coordinate.
+let private seatTilesIn (atlas: Atlas) (rockId: string) : (string * Set<Pos>) option =
+    Map.tryFind rockId atlas.TargetAt
     |> Option.map (fun (room, pos) -> room, seatTiles (groundOf atlas room) pos)
 
-let seatTilesOf (atlas: Atlas) (sourceId: string) : Set<RoomPos> =
-    seatTilesIn atlas sourceId |> stamped
+let seatTilesOf (atlas: Atlas) (rockId: string) : Set<RoomPos> = seatTilesIn atlas rockId |> stamped
 
 /// Seats of a source: its Seat tile count. None for a source the
 /// projection does not place: no capacity is derivable, and unpriceable
@@ -886,24 +911,53 @@ let private upgradeAreaIn (atlas: Atlas) (room: string) : Set<Pos> =
         | None -> Set.empty)
     |> List.fold Set.union Set.empty
 
-/// The working ground of the room (ADR 0022): every projected source's Seats
+/// The ground a room's Thorium minerals hold (ADR 0057 decision 1): each
+/// deposit's own tile, which is where the extractor goes, and every Seat of
+/// it, which is where the miner stands and where its container is planned.
+/// Every Seat and not the one the plan picked, exactly as a source's Seats are
+/// all working ground and not just its container's: the pick moves with the
+/// trunks, and a tile an extension took never comes back (ADR 0022). At a wall
+/// mouth there may be only one accessible tile in the set, and an extension
+/// landing on it would cost the room its whole deposit.
+///
+/// Its own union and deliberately **not** folded into `seatUnionIn`, which is
+/// the source Seats and is read by three other rules: a mineral's Seat under a
+/// container would otherwise count as a [[post]], hire an [[anchor]] to
+/// garrison it and enter the Anchor row's quota — none of which is this
+/// ticket's, and the miner row it belongs to is ADR 0057 decision 2's.
+/// Off `mineralsIn` and never a second census of the same kind: which deposits
+/// a room holds is one question, and two spellings of it are two answers free
+/// to disagree.
+let private mineralGroundIn (atlas: Atlas) (room: string) : Set<Pos> =
+    let ground = groundOf atlas room
+
+    mineralsIn atlas room
+    |> List.map (fun (_, tile) -> Set.add tile (seatTiles ground tile))
+    |> List.fold Set.union Set.empty
+
+/// The working ground of the room (ADR 0022): every projected source's Seats,
+/// every projected Thorium mineral's tile and Seats (ADR 0057 decision 1),
 /// plus, in the colony's own room, its controller's Upgrade Work Area — the
 /// tiles the colony works from, off-limits to the Layout's clustered ordering,
-/// since a tower or extension there eats a tile an Anchor or an upgrader
-/// stands on. The Upgrade half is the home room's alone, for the reason
-/// `standingPostsIn` splits the Dual Seats on: the colony upgrades one
+/// since a tower or extension there eats a tile an Anchor, a miner or an
+/// upgrader stands on. The Upgrade half is the home room's alone, for the
+/// reason `standingPostsIn` splits the Dual Seats on: the colony upgrades one
 /// controller, its own, and *reserves* an [[outpost]]'s, so an outpost
 /// controller's area is ground nobody upgrades from (ADR 0042) — a set the
 /// Layout, asking only about home, never saw the width of until the mover
-/// began asking room by room (#241). Total: a room with neither kind of
-/// geometry reserves nothing (ADR 0004). This is the **Layout's** question and
-/// stays it: what the mover asks is `idleGroundIn` below, a strictly wider set
+/// began asking room by room (#241). The mineral half is **every** room's,
+/// like the Seats: a deposit is a fact of the room and not of the colony
+/// looking at it. Total: a room with none of the three kinds of geometry
+/// reserves nothing (ADR 0004). This is the **Layout's** question and stays
+/// it: what the mover asks is `idleGroundIn` below, a strictly wider set
 /// (#268), and widening this one instead would move every clustered pick.
 let workingGroundIn (atlas: Atlas) (room: string) : Set<Pos> =
+    let mined = mineralGroundIn atlas room
+
     if room = atlas.Home then
-        Set.union (seatUnionIn atlas room) (upgradeAreaIn atlas room)
+        Set.unionMany [ seatUnionIn atlas room; upgradeAreaIn atlas room; mined ]
     else
-        seatUnionIn atlas room
+        Set.union (seatUnionIn atlas room) mined
 
 /// The tiles of one room's **stores**: a built [[container]], which is a source
 /// container or the [[buffer]] (ADR 0012); the [[storage]] (ADR 0023); and

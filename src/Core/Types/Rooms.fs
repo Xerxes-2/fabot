@@ -48,6 +48,13 @@ type BuiltKind =
     /// may stand on a rampart, and folding it into Other would make every kind
     /// the decision layer does not model walkable with it.
     | Rampart
+    /// The extractor over a Thorium mineral (ADR 0057 decision 1). One per
+    /// room ever, standing on the mineral's own tile, and a modelled kind
+    /// rather than Other for one reason: the Layout has to see the one already
+    /// standing — or the site going up — before it asks for another. It feeds
+    /// nothing, stores nothing, decays into nothing and is never repaired, so
+    /// every predicate over the vocabulary answers no for it.
+    | Extractor
     /// Any structure kind the decision layer has no rules for yet.
     | Other
 

@@ -42,6 +42,25 @@ let partCount (parts: Map<BodyPart, int>) part =
 let partCountIn (body: BodyPart list) part =
     body |> List.filter ((=) part) |> List.length
 
+/// What a store holds, as this colony reads it (ADR 0057 decision 3): the
+/// energy every Task in the pool is about, and the season's Thorium beside it.
+/// Two cases and not the engine's whole `RESOURCE_*` table, because a resource
+/// belongs here when a decision of ours names it — the room's ordinary ore is
+/// never extracted, there being no market this season, so it is not a case and
+/// never reaches the projection at all (`World` filters `FIND_MINERALS` to
+/// `mineralType = "T"`).
+///
+/// Declared here beside the body parts rather than with the stores it measures,
+/// because it is the engine's vocabulary and not a shape of ours: `withdraw`
+/// and `transfer` have taken one of these strings all along, and what the
+/// Tasks that carry it gain is an argument we had been passing implicitly.
+/// Nothing carries it yet — widening `Withdraw` and `Refill` is #262's —
+/// so its one reader today is `resourceName`, the spelling the shell hands
+/// the engine.
+type Resource =
+    | Energy
+    | Thorium
+
 /// The engine's own numbers (ADR 0052 decision 5), each named for the server
 /// constant it spells. A number belongs here when changing it would be a **lie
 /// about the server**, and in `Tuning` below when changing it would be a

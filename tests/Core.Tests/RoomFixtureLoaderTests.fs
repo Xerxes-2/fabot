@@ -113,6 +113,40 @@ let loaderTests =
                     "the controller the room has"
             }
 
+            test "the Thorium deposit is loaded and the room's ordinary ore is not" {
+                // The cut `World.ofGame` makes, restated in the loader that
+                // stands in for it (ADR 0057 decision 1): the season mod
+                // stands an ordinary-ore mineral beside the Thorium one and
+                // the colony never extracts it, so only the Thorium deposit
+                // reaches the projection. The capture records both — it says
+                // what the server said — and the `resource` column is what
+                // tells them apart. W12S28 carries "O" at (11,7) and "T" at
+                // (26,5); one of the two survives.
+                let room = load "W12S28"
+
+                Expect.equal
+                    room.Minerals
+                    [ "min-0", { X = 26; Y = 5 } ]
+                    "the Thorium deposit alone, keyed for a person to read"
+
+                Expect.equal
+                    room.RealMinerals
+                    [ "6a901a44b8684d000833897b", { X = 26; Y = 5 } ]
+                    "under the id the server gave it"
+
+                // The other two owned rooms, named here with the furniture
+                // because these are the tiles ADR 0057's whole programme is
+                // about and the Layout tests below name none.
+                Expect.equal
+                    ((load "W13S28").Minerals, (load "W15S28").Minerals)
+                    ([ "min-0", { X = 42; Y = 30 } ], [ "min-0", { X = 29; Y = 12 } ])
+                    "W13S28's deposit and W15S28's, on the tiles the live rooms have them on"
+
+                Expect.isEmpty
+                    (load "W15S25").Minerals
+                    "and the sector centre holds a mineral the mod made no Thorium: nothing is projected"
+            }
+
             test "the engine's own ids ride beside the readable ones" {
                 // The decision #124 had to make and this pins: an outpost
                 // is declared in the *engine's* ids, because a live

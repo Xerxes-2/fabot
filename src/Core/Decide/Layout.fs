@@ -325,6 +325,27 @@ let internal planLayout
 
         let trunkTiles = sourceTrunks |> List.map snd |> List.fold Set.union Set.empty
 
+        // The spawn-bound half of those routes, kept apart from the union (ADR
+        // 0057 decision 1). The mineral container is seated against **the
+        // [[storage]]'s trunk**, and the Storage is never the trunk hub: it
+        // stands on the cluster's first pick, beside the spawn by construction
+        // (ADR 0023), so the paved line a deposit's load is carried down is the
+        // `Spawn` half of `sourceRoutes`. The `UpgradeArea` half leads the
+        // other way — past the spawn and out to the controller — and a Seat
+        // priced against the union would, at a deposit beyond the spawn, be the
+        // Seat *furthest* from the haul that is the whole reason the container
+        // is there. The goals are kept apart in `sourceRoutes` precisely so a
+        // rule can ask for one of them.
+        let spawnTrunkTiles =
+            sourceRoutes
+            |> List.collect (fun (_, routes) ->
+                routes
+                |> List.collect (fun (goal, path) ->
+                    match goal with
+                    | TrunkGoal.Spawn _ -> path
+                    | TrunkGoal.UpgradeArea -> []))
+            |> Set.ofList
+
         // The controller's Work Area paves its swamps and only its swamps —
         // upgraders shuttle within it, so the dear ground gets a road and the
         // plain ground does not. No reservation can stand here: the Work Area is
@@ -399,9 +420,79 @@ let internal planLayout
                 |> Set.toList
                 |> cheapest (fun tile -> range tile controllerPos) id)
 
+        // The room's Thorium deposits and the level that unlocks them (ADR
+        // 0057 decision 1). `CONTROLLER_STRUCTURES.extractor` is 1 at RCL6, 7
+        // and 8 and 0 below, so nothing here is planned until the room stands
+        // at `Tuning.ExtractorLevel` — and it is the **current** level and not
+        // the horizon, which is the other half of that decision: the deposit
+        // sits on a wall tile at the mouth of a wall, off the clustered
+        // checkerboard and unbuildable for every other kind, so unlike the
+        // Storage and the Link footings there is no window an extension can
+        // take and nothing to hold open (ADR 0022). The container is gated
+        // with it rather than planned from level 0 the way a source's is: a
+        // container beside a deposit no body can dig is a site the surplus
+        // tier builds for nothing.
+        let minerals =
+            if controller.Level >= view.Tuning.ExtractorLevel then
+                Atlas.mineralsIn atlas room
+            else
+                []
+
+        // The extractor, on the mineral's own tile (ADR 0057 decision 1). One
+        // per room ever, so the census is the whole of the gap: a standing
+        // extractor or a site going up on that tile is the plan already made,
+        // and asking again would be `ERR_INVALID_TARGET` once a tick for ever.
+        // No allowance and no ordering — the tile is the target's, and the
+        // clustered ring never offers a wall. The tile clause is still owed
+        // below (`extractorGap`) and not asserted away here: the engine takes
+        // one construction site per tile whoever placed it, a **road** site is
+        // the one kind Screeps allows on a natural wall, and a rival's site
+        // survives into a room we claim (#248) — and the extractor is the one
+        // kind whose tile can never move to dodge one, so an unsubtracted
+        // collision is `ERR_INVALID_TARGET` once a tick for ever.
+        let extractorTiles =
+            let census = Atlas.extractorCensusIn atlas room
+
+            minerals
+            |> List.map snd
+            |> List.filter (fun tile -> not (Set.contains tile census))
+
+        // The mineral container, on the deposit's Seat nearest the **Storage's**
+        // trunk (ADR 0057 decision 1): the source container's rule with the
+        // source swapped out. A source seats its container on its **own**
+        // trunk, which is the paved line its haul leaves by; a mineral has no
+        // trunk of its own — nothing paves one to a deposit — so what it is
+        // seated against is the line the load is carried down to the
+        // [[storage]], which is the same walk read from the other end and is
+        // `spawnTrunkTiles` and not the whole network. Seats are terrain
+        // geometry (ADR 0001), so at a wall mouth this is a choice between one
+        // and three tiles and never a search.
+        let mineralContainerPicks =
+            minerals
+            |> List.choose (fun (mineralId, _) ->
+                let seats = Atlas.seatTilesOf atlas mineralId |> RoomPos.inRoom room
+
+                // The same trunk guard the source picks carry: the price below
+                // is a `List.min` over the trunk's own tiles, which has no
+                // answer for a room that paved none — and a room that reached
+                // no spawn has no haul to the Storage to price against either.
+                if Set.isEmpty spawnTrunkTiles then
+                    None
+                else
+                    seats
+                    |> Set.toList
+                    |> cheapest
+                        (fun seat ->
+                            spawnTrunkTiles |> Set.toList |> List.map (range seat) |> List.min)
+                        id
+                    |> Option.map (fun seat -> mineralId, seat))
+
         // The Link footings (ADR 0022): one tile held for a link beside every
         // target a link will ever serve — each planned source container, the
-        // controller container, and the Storage. Planned, not built: a Post
+        // controller container, and the Storage. **Not** the mineral
+        // container: a link carries energy and nothing else, so there is no
+        // link a deposit's container will ever be served by and no footing to
+        // hold for one (ADR 0057 decision 1 names none). Planned, not built: a Post
         // needs a standing container, so a Post-anchored rule would reserve
         // nothing at level 0 and the tiles would be gone by the time links
         // arrive. The count is the rule's, never a constant (ADR 0027). The
@@ -423,7 +514,17 @@ let internal planLayout
             ]
             |> List.distinctBy fst
 
-        let footingTargetTiles = footingTargets |> List.map fst
+        // The tiles no footing may be reserved on: every footing target, since
+        // a link beside one container may not stand on another's tile — and
+        // the **mineral container's** pick with them (ADR 0057 decision 1),
+        // which is a container the plan is about to ask for and is the target
+        // of no footing, so it reaches this list through no other route. A link
+        // and a container cannot share a tile, and the loss is silent in both
+        // directions: the footing fold would record the tile as *served* while
+        // the container site took it, and the Storage would go without the link
+        // ADR 0022 reserved one for.
+        let footingBlockedTiles =
+            (footingTargets |> List.map fst) @ (mineralContainerPicks |> List.map snd)
 
         // A standing link is a target, so its own footing has stopped being
         // buildable: added back, or the footing would jump the tick the link
@@ -447,7 +548,7 @@ let internal planLayout
                 |> Set.filter (fun tile ->
                     range tile target = 1
                     && not (Set.contains tile roadPlan)
-                    && not (List.contains tile footingTargetTiles)
+                    && not (List.contains tile footingBlockedTiles)
                     && not (Set.contains tile taken))
                 |> Set.toList
                 |> cheapest (fun tile -> range tile spawnPos) id
@@ -495,11 +596,15 @@ let internal planLayout
         // pick the clause defers because something else serves its target is a
         // loss the room keeps — nothing demolishes the orphan — so it rides out
         // beside the footings and the trunks.
-        let servingSource sourceId =
-            Atlas.positionOf atlas sourceId
+        // Named for the geometry and not for the source, because since ADR
+        // 0057 two kinds of rock are judged by it and the rule is one rule:
+        // served is a container standing or pending within range 1, wherever
+        // it sits.
+        let servingRock rockId =
+            Atlas.positionOf atlas rockId
             |> Option.filter inHome
-            |> Option.map (fun sourcePos ->
-                Set.filter (servesSource (RoomPos.pos sourcePos)) containerCensus)
+            |> Option.map (fun rockPos ->
+                Set.filter (servesSource (RoomPos.pos rockPos)) containerCensus)
             |> Option.defaultValue Set.empty
 
         // Every target beside its pick and the containers already serving
@@ -509,9 +614,11 @@ let internal planLayout
         let targets =
             [
                 for sourceId, pick in sourceContainerPicks ->
-                    ContainerTarget.Source sourceId, pick, servingSource sourceId
+                    ContainerTarget.Source sourceId, pick, servingRock sourceId
                 for pick in Option.toList controllerContainerTile ->
                     ContainerTarget.Controller, pick, Set.intersect containerCensus upgradeArea
+                for mineralId, pick in mineralContainerPicks ->
+                    ContainerTarget.Mineral mineralId, pick, servingRock mineralId
             ]
 
         let unservedPicks =
@@ -558,8 +665,27 @@ let internal planLayout
         // nothing to wait for.
         let takenTiles = Set.union placedRoads (Atlas.collidingSiteTilesIn atlas room)
 
+        // Distinct, because the picks are made per **target** and the targets
+        // are judged independently (ADR 0040): a deposit two tiles from a rock,
+        // or from the controller's Work Area, can be seated on the very tile
+        // that rock's container was picked for, and both targets are unserved
+        // on the tick before either site stands. Two
+        // `PlaceConstructionSite(tile, Container)` in one tick is one site and
+        // one `ERR_INVALID_TARGET`, and one container within range 1 of both is
+        // exactly what ADR 0040's target clause says serves both.
         let containerGap =
-            unservedPicks |> List.filter (fun tile -> not (Set.contains tile takenTiles))
+            unservedPicks
+            |> List.filter (fun tile -> not (Set.contains tile takenTiles))
+            |> List.distinct
+
+        // The extractor's tile clause, subtracted off the same census the
+        // containers are (ADR 0057 decision 1, and #248's rule that narrow is
+        // not the same as defensive-only): the one kind that can stand on the
+        // wall the deposit occupies is a road, which the engine allows there as
+        // a tunnel, so a site of ours or of a rival's on that tile is a
+        // placement the engine refuses and the plan cannot route around.
+        let extractorGap =
+            extractorTiles |> List.filter (fun tile -> not (Set.contains tile takenTiles))
 
         // The ramparts (ADR 0034): one over every standing Keep structure and
         // every standing Post container, the tick the thing it covers stands —
@@ -592,6 +718,7 @@ let internal planLayout
             (extensionTiles |> List.truncate (gapAt BuiltKind.Extension controller.Level))
         @ place Road (Set.toList placedRoads)
         @ place Container containerGap
+        @ place Extractor extractorGap
         @ place Rampart (Set.toList rampartGap),
         List.rev servedFootings,
         List.rev unservedFootings,

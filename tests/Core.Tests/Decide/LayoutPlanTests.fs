@@ -762,6 +762,237 @@ let layoutTests =
         ]
 
 [<Tests>]
+let extractorTests =
+    testList
+        "the extractor and the mineral container"
+        [
+            test "the extractor is planned on the deposit's own tile, from RCL6 and not before" {
+                // ADR 0057 decision 1: `CONTROLLER_STRUCTURES.extractor` is 1
+                // at RCL6, 7 and 8 and 0 below, and the Layout filters at the
+                // **current** level rather than reserving at the horizon —
+                // the deposit is a wall tile off the clustered checkerboard,
+                // so there is no window an extension can take.
+                for level in 1..5 do
+                    Expect.isEmpty
+                        (sitesOfKind
+                            StructureKind.Extractor
+                            (decideOn (mineralColony level)).Intents)
+                        $"RCL{level} unlocks no extractor, so the plan asks for none"
+
+                for level in 6..8 do
+                    Expect.equal
+                        (sitesOfKind
+                            StructureKind.Extractor
+                            (decideOn (mineralColony level)).Intents)
+                        [ mineralPos ]
+                        $"RCL{level}: one extractor, on the mineral's tile and no other"
+            }
+
+            test "a standing extractor is never asked for again, nor is a pending site" {
+                // The engine takes one extractor per room and refuses a
+                // second `createConstructionSite`, so a plan that could not
+                // see the one already there would ask once a tick for ever —
+                // #244's failure, in the one kind whose tile can never move.
+                let colony = mineralColony 6
+
+                for kind in [ Structure BuiltKind.Extractor; Site BuiltKind.Extractor ] do
+                    let standing =
+                        { colony with
+                            Spatial = colony.Spatial |> withTargets [ "ext-a", mineralPos, kind ]
+                        }
+
+                    Expect.isEmpty
+                        (sitesOfKind StructureKind.Extractor (decideOn standing).Intents)
+                        $"%A{kind} on the deposit's tile claims it: nothing re-drops"
+            }
+
+            test "the deposit's container takes the Seat nearest the Storage's trunk" {
+                // ADR 0057 decision 1's own sentence, and the whole of what
+                // distinguishes it from "nearest any trunk": the container is
+                // seated on the Seat nearest **the Storage's** trunk, because
+                // the haul leg this container exists for ends at the Storage
+                // and the Storage stands beside the spawn (ADR 0023). The
+                // fixture is built where the two readings disagree — a deposit
+                // whose north-west Seat stands **on** the source→controller
+                // arc, which leaves the spawn behind and runs the other way,
+                // and whose south-west Seat is one step off the source→spawn
+                // leg. Priced against every paved tile the arc wins at range 0;
+                // priced against the line the load is carried down, it loses.
+                let colony = mineralColonyAt trunkSplitMineralPos 6
+                let { Intents = intents } = decideOn colony
+                let seats = mineralSeats colony
+                let roads = (SpatialInfo.layerOf colony.Spatial "W1N1").Roads
+
+                // The premise, checked rather than asserted in a comment.
+                Expect.isTrue
+                    (Set.contains controllerSideSeat seats && Set.contains storageSideSeat seats)
+                    "both tiles are Seats of this deposit"
+
+                Expect.isTrue
+                    (Set.contains controllerSideSeat roads)
+                    "and the controller-bound Seat is itself a paved trunk tile, at range 0 from one"
+
+                Expect.isFalse
+                    (Set.contains storageSideSeat roads)
+                    "where the spawn-bound Seat is not: the wider metric cannot prefer it by accident"
+
+                Expect.equal
+                    (sitesOfKind Container intents
+                     |> List.filter (fun tile -> Set.contains tile seats))
+                    [ storageSideSeat ]
+                    "the Seat nearest the Storage's trunk, and not the one standing on the controller's"
+            }
+
+            test "a container already serving the deposit defers the pick and records it" {
+                // ADR 0040's target clause, read down the mineral column: the
+                // deposit is served when a container stands within range 1 of
+                // it wherever that container sits, so a moved pick costs a
+                // worse tile and never a second container.
+                let colony = mineralColony 6
+                let seats = mineralSeats colony
+
+                let pick =
+                    sitesOfKind Container (decideOn colony).Intents
+                    |> List.find (fun t -> Set.contains t seats)
+
+                let orphan = seats |> Set.toList |> List.find (fun tile -> tile <> pick)
+
+                let after =
+                    decideOn
+                        { colony with
+                            Spatial =
+                                colony.Spatial
+                                |> withTargets [ "can-min", orphan, Structure BuiltKind.Container ]
+                        }
+
+                Expect.isEmpty
+                    (sitesOfKind Container after.Intents
+                     |> List.filter (fun tile -> Set.contains tile seats))
+                    "the deposit is served: no second container beside it"
+
+                Expect.contains
+                    after.Memo.DeferredContainers
+                    {
+                        Target = ContainerTarget.Mineral "min-a"
+                        Pick = plannedTile pick
+                        Serving = plannedTile orphan
+                    }
+                    "and the loss is recorded under the mineral's own target, naming both tiles"
+            }
+
+            test "the deposit holds no Link footing: a link carries energy alone" {
+                // ADR 0022's count is one per planned source container, one
+                // for the controller container and one for the Storage. ADR
+                // 0057 names no footing for the mineral container and there
+                // is none to name — a link transfers energy and nothing else
+                // — so the deposit must not widen the reservation.
+                let bare = decideOn (trunkColony 6)
+                let mined = decideOn (mineralColony 6)
+
+                Expect.equal
+                    (List.length mined.Memo.ServedFootings)
+                    (List.length bare.Memo.ServedFootings)
+                    "the same footing count with the deposit standing as without it"
+
+                Expect.isEmpty mined.Memo.UnservedFootings "and none goes unserved"
+            }
+
+            test "no Link footing is reserved on the mineral container's own tile" {
+                // A link and a container cannot share a tile, and the footing
+                // fold refuses to reserve on the container picks for exactly
+                // that reason — but the mineral's pick is the target of no
+                // footing, so it reached that refusal through no other route.
+                // Reproduced here: at (18,25) the deposit's Seat at (17,24) is
+                // both the mineral container's pick and the tile the fold
+                // chooses for a footing, and the loss is silent in both
+                // directions — the memo records the footing as *served* while
+                // the container site takes the tile.
+                let colony = mineralColonyAt { X = 18; Y = 25 } 6
+                let decision = decideOn colony
+                let seats = mineralSeats colony
+
+                let pick =
+                    sitesOfKind Container decision.Intents
+                    |> List.filter (fun tile -> Set.contains tile seats)
+                    |> List.exactlyOne
+
+                Expect.isFalse
+                    (decision.Memo.ServedFootings
+                     |> List.exists (fun footing -> RoomPos.pos footing.Tile = pick))
+                    "the container's tile is not also reserved for a link"
+
+                Expect.isEmpty
+                    decision.Memo.UnservedFootings
+                    "and every footing still finds a tile of its own"
+            }
+
+            test "a site standing on the deposit's tile defers the extractor" {
+                // The tile clause (ADR 0040), owed by the extractor like every
+                // other placed kind and subtracted rather than asserted away
+                // (#248). The engine allows a **road** on a natural wall — a
+                // tunnel — so the deposit's tile is not beyond reach of a site,
+                // and it is the one kind whose tile can never move to dodge
+                // one: unsubtracted, the plan asks for the extractor and eats
+                // `ERR_INVALID_TARGET` once a tick for ever.
+                let colony = mineralColony 6
+
+                let tunnelled =
+                    { colony with
+                        Spatial =
+                            colony.Spatial
+                            |> withTargets [ "road-site", mineralPos, Site BuiltKind.Road ]
+                    }
+
+                Expect.equal
+                    (sitesOfKind StructureKind.Extractor (decideOn colony).Intents)
+                    [ mineralPos ]
+                    "the premise: with the tile free the extractor is asked for"
+
+                Expect.isEmpty
+                    (sitesOfKind StructureKind.Extractor (decideOn tunnelled).Intents)
+                    "and with a road site on it the plan waits instead of asking every tick"
+            }
+
+            test "a deposit seated on a rock's container tile is asked for one container, not two" {
+                // The picks are made per **target** and judged independently
+                // (ADR 0040), so a deposit close enough to a rock can be seated
+                // on the very tile that rock's container was picked for — and
+                // on the tick before either site stands both targets are
+                // unserved. Two `PlaceConstructionSite` on one tile in one tick
+                // is one site and one `ERR_INVALID_TARGET`; one container
+                // within range 1 of both is what ADR 0040 says serves both.
+                let colony = mineralColonyAt { X = 17; Y = 25 } 6
+                let { Intents = intents } = decideOn colony
+                let containers = sitesOfKind Container intents
+
+                Expect.equal
+                    (List.length containers)
+                    (List.length (List.distinct containers))
+                    "no tile is asked for a container twice in one tick"
+            }
+
+            test "the deposit's ground is off the clustered ordering at every level" {
+                // ADR 0057 decision 1's working-ground clause, which is ADR
+                // 0022's and is gated on no level at all: an extension
+                // landing on the one accessible tile at a wall mouth would
+                // cost the room its whole deposit, and it would land there
+                // long before the extractor is unlocked.
+                for level in 1..8 do
+                    let colony = mineralColony level
+                    let atlas = Atlas.ofView colony
+                    let ground = Set.add mineralPos (mineralSeats colony)
+
+                    Expect.isTrue
+                        (Set.isSubset ground (Atlas.workingGroundIn atlas "W1N1"))
+                        $"RCL{level}: the deposit and its Seats are working ground"
+
+                    Expect.isEmpty
+                        (Set.intersect ground (clusterTiles (decideOn colony).Intents))
+                        $"RCL{level}: and no clustered pick takes one of them"
+            }
+        ]
+
+[<Tests>]
 let storageTests =
     testList
         "storage"

@@ -172,6 +172,16 @@ type Tuning =
         /// here rather than at the horizon (ADR 0022): its tile never comes
         /// back once an extension takes it.
         StorageLevel: int
+        /// The level the engine unlocks the extractor at
+        /// (`CONTROLLER_STRUCTURES` for "extractor": 1 at RCL6, 7 and 8, and 0
+        /// below). Beside `StorageLevel` and for its reason — it is the level
+        /// the engine unlocks the kind at — and the Layout filters the
+        /// extractor and its container here rather than reserving anything at
+        /// the horizon (ADR 0057 decision 1): the deposit sits on a **wall**
+        /// tile at the mouth of a wall, off the clustered checkerboard and
+        /// unbuildable for every other kind, so there is no window for an
+        /// extension to take and nothing to hold open.
+        ExtractorLevel: int
         /// The Layout horizon (ADR 0011, moved to RCL5 by ADR 0039 and to RCL6
         /// by ADR 0055): the whole plan is computed up to this level regardless
         /// of the current one, so today's roads route around tomorrow's
@@ -274,6 +284,7 @@ module Tuning =
             FerryLoads = 1
             SafeModeDeadline = 3
             StorageLevel = 4
+            ExtractorLevel = 6
             HorizonLevel = 6
             OutpostBuilders = 2
             BootstrapLevel = 3

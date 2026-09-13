@@ -125,6 +125,35 @@ let private withCreeps (creeps: (string * Pos) list) (name, facts: RoomFacts) =
             }
     }
 
+/// A room with the season's furniture standing in it (ADR 0057): a Thorium
+/// deposit under its own target kind, the extractor over it with a cooldown on
+/// it, and the deposit's remaining amount beside the container's Thorium in the
+/// second store map. Applied to a room a world has already built, because what
+/// these tests ask is what a *narrowing* leaves of it.
+let private withThorium (world: World) (room: string) : World =
+    { world with
+        Rooms =
+            world.Rooms
+            |> Map.change
+                room
+                (Option.map (fun (facts: RoomFacts) ->
+                    { facts with
+                        Layer =
+                            { facts.Layer with
+                                TargetPositions =
+                                    facts.Layer.TargetPositions
+                                    |> Map.add $"min-{room}" { X = 20; Y = 20 }
+                                    |> Map.add $"ext-{room}" { X = 20; Y = 20 }
+                            }
+                        TargetKinds =
+                            facts.TargetKinds
+                            |> Map.add $"min-{room}" Mineral
+                            |> Map.add $"ext-{room}" (Structure BuiltKind.Extractor)
+                        Thorium = Map.ofList [ $"min-{room}", 22_000 ]
+                        Cooldowns = Map.ofList [ $"ext-{room}", 3 ]
+                    }))
+    }
+
 let private withStores stores (name, facts: RoomFacts) =
     name,
     { facts with
@@ -634,6 +663,39 @@ let colonyViewTests =
                     (Map.tryFind "can-child" (viewOf pairWorld child).Spatial.Stores)
                     (Some 900)
                     "its own source container is its own to draw"
+            }
+
+            test "the mother carries none of the child's Thorium, and no deposit to hang it on" {
+                // A child's deposit is the child's (ADR 0057): `borrowable`
+                // drops `Mineral`, so if the amount rode on it would be a fact
+                // keyed by an id the borrowed layer no longer places — the
+                // shape ADR 0004 forbids — and the [[ferry]]'s exemption does
+                // not reach it either, a ferry carrying energy.
+                let world = withThorium pairWorld child
+                let spatial = (viewUnder declared world mother).Spatial
+
+                Expect.isFalse
+                    (Map.containsKey $"min-{child}" spatial.TargetKinds)
+                    "the child's deposit is not a target she carries"
+
+                Expect.isEmpty spatial.Thorium "so she carries no Thorium of its at all"
+
+                Expect.isEmpty
+                    spatial.Cooldowns
+                    "and no extractor clock: the miner that reads it is the child's"
+
+                // The child's own view is untouched, as it is for the stores.
+                let childSpatial = (viewUnder declared world child).Spatial
+
+                Expect.equal
+                    (Map.tryFind $"min-{child}" childSpatial.Thorium)
+                    (Some 22_000)
+                    "its own deposit's remaining amount is its own to read"
+
+                Expect.equal
+                    (Map.tryFind $"ext-{child}" childSpatial.Cooldowns)
+                    (Some 3)
+                    "and its own extractor's clock with it"
             }
 
             test "the mother keeps the child's ground whole" {
@@ -1225,6 +1287,30 @@ let transitTests =
                 Expect.isTrue
                     (Map.containsKey "src-two" view.Spatial.TargetKinds)
                     "the two-hop outpost's own rock is placed off the declaration"
+            }
+
+            test
+                "and its deposit, its Thorium and its extractor's clock go with the rest of the work" {
+                // The two maps ADR 0057 adds, held to `transiting`'s own test:
+                // what goes is every id a Task could name, and the test is
+                // whether the field is *work*. A deposit's remaining amount is
+                // what the miner row's quota reads and an extractor's cooldown
+                // is what its Emitter gates on — both work by any reading, and
+                // a colony that only walks through the room works neither.
+                let world = withThorium twoHopWorld crossed
+                let view = viewUnder twoHopDeclaration world mother
+
+                Expect.isFalse
+                    (Map.containsKey $"min-{crossed}" view.Spatial.TargetKinds)
+                    "the deposit is no target of hers"
+
+                Expect.isFalse
+                    (Map.containsKey $"min-{crossed}" view.Spatial.Thorium)
+                    "so neither is what it has left to give"
+
+                Expect.isFalse
+                    (Map.containsKey $"ext-{crossed}" view.Spatial.Cooldowns)
+                    "nor the clock on an extractor she will never harvest through"
             }
 
             test "and a room the chain crosses is remembered no more than it is worked" {

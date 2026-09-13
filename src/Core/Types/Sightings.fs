@@ -159,6 +159,15 @@ type RoomFacts =
         /// containers and the Storage, the piles, the tombstones and the
         /// ruins.
         Stores: Map<string, int>
+        /// Thorium currently held, per store standing here, and the remaining
+        /// amount of the Thorium mineral itself (ADR 0057 decision 3). A
+        /// second map beside `Stores` and never a resource key inside it, for
+        /// the reason `SpatialInfo.Thorium` gives.
+        Thorium: Map<string, int>
+        /// Ticks before a structure standing here may act again — the
+        /// extractor's cooldown, which is the one clock a decision of ours
+        /// reads off a structure (ADR 0057 decision 2).
+        Cooldowns: Map<string, int>
         /// Who holds the room, and whether its safe mode is running (ADR
         /// 0042) — `None` for a room nothing looked into this tick, which
         /// is not the same fact as a room nobody holds (ADR 0004).
@@ -214,6 +223,8 @@ module RoomFacts =
             TargetKinds = Map.empty
             Hits = Map.empty
             Stores = Map.empty
+            Thorium = Map.empty
+            Cooldowns = Map.empty
             Control = None
             Controller = None
             Energy = { Available = 0; Capacity = 0 }

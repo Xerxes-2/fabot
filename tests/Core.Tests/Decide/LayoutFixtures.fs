@@ -112,6 +112,59 @@ let withStanding id pos kind room =
             Obstacles = Set.add pos layer.Obstacles
         })
 
+/// The tile the trunk fixture's Thorium deposit stands on (ADR 0057): a
+/// wall tile well south of the trunk line, so its eight Seats are open
+/// ground and the Seat nearest the trunk is a choice and not the only
+/// candidate. South rather than beside the spawn because the pick is a
+/// comparison and a deposit inside the cluster would make it a tie.
+let mineralPos = { X = 25; Y = 33 }
+
+/// The trunk fixture with a Thorium deposit standing in it: a wall tile
+/// carrying a `TargetKind.Mineral`, blocking its own tile the way the shell
+/// projects one (a mineral is one of Screeps' OBSTACLE_OBJECT_TYPES) and
+/// off every trunk. The colony's roads are stood first, because the
+/// container pick is priced against the trunks and a room below the road
+/// gate has paved none (#209).
+let mineralColonyAt pos level =
+    let colony = trunkColony level
+
+    { colony with
+        Spatial =
+            colony.Spatial
+            |> withHome (fun layer ->
+                { layer with
+                    Terrain = Map.add pos Wall layer.Terrain
+                })
+            |> withStanding "min-a" pos Mineral
+    }
+    |> withRoadsBuilt
+
+let mineralColony level = mineralColonyAt mineralPos level
+
+/// The tile a second deposit fixture stands on: the one place in this room
+/// where the two readings of "the Seat nearest the trunk" disagree, and the
+/// premise of the test that tells them apart (ADR 0057 decision 1). The trunk
+/// fixture's source→controller leg **arcs north over the spawn** — the spawn
+/// and its two built extensions are in the way — so a deposit here has one Seat
+/// standing on that arc at (22,19) and another one step off the source→spawn
+/// leg at (22,21). Priced against every trunk the room paved, the arc's tile
+/// wins at range 0 and the container is seated on the side facing *away* from
+/// the Storage; priced against the Storage's trunk, which is what ADR 0057
+/// says, (22,21) wins.
+let trunkSplitMineralPos = { X = 23; Y = 20 }
+
+/// The Seat of `trunkSplitMineralPos` that stands on the controller-bound arc,
+/// and the Seat one step off the spawn-bound leg: the wrong answer and the
+/// right one, named so a metric that widened back would fail by name.
+let controllerSideSeat = { X = 22; Y = 19 }
+let storageSideSeat = { X = 22; Y = 21 }
+
+/// The deposit's Seats in `mineralColony`: the walkable neighbours of its
+/// tile, by terrain alone (ADR 0001), derived rather than written down so
+/// the set follows the fixture's terrain if that ever moves.
+let mineralSeats (colony: ColonyView) =
+    Atlas.seatTilesOf (Atlas.ofView colony) "min-a" |> Set.map RoomPos.pos
+
 /// A footing fixture whose trunks run through the clustered ring: the
 /// source stands against the room's east edge and the controller against
 /// its west edge, so the source→controller trunk crosses the whole

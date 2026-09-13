@@ -5,7 +5,7 @@
 room	W15S29
 shard	shardSeason
 server	https://screeps.com/season/
-tick	272898
+tick	398109
 
 [terrain]
 11111110000000000000000111111111111111000000000011
@@ -60,8 +60,8 @@ tick	272898
 11111111111111111000000000000011111111111111111111
 
 [objects]
-id	type	x	y
-6a8caa95dd4872bccd319018	controller	12	34
-6a8cae619a27bdd9986d319a	mineral	6	31
-6a901a43b8684d0008338892	mineral	25	2
-6a8caa95dd4872bccd319017	source	18	20
+id	type	x	y	resource
+6a8caa95dd4872bccd319018	controller	12	34	-
+6a8cae619a27bdd9986d319a	mineral	6	31	H
+6a901a43b8684d0008338892	mineral	25	2	T
+6a8caa95dd4872bccd319017	source	18	20	energy

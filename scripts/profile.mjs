@@ -536,7 +536,11 @@ const isWall = (grid, p) => (grid.mask(p.x, p.y) & WALL) !== 0;
 // on W12S28 the RCL5 cluster stood on 8,38 / 8,40 / 8,42 — three of the
 // Upgrade tiles that ADR 0022 was decided on — and one level higher it
 // took the east source's Seat at 17,39 and pushed the Anchor off it.
-function workingGround(grid, sourcePositions, controllerPos) {
+// `mineralPositions` takes no default: a call site that forgets it would
+// otherwise reserve nothing for the deposit and profile a colony whose cluster
+// is free to stand on the Seats ADR 0057 holds for it. Without one the loop
+// below throws, which is the answer that says so.
+function workingGround(grid, sourcePositions, controllerPos, mineralPositions) {
   const ground = new Set();
   const reserve = (tile) => {
     if (tile.x < 1 || tile.x > 48 || tile.y < 1 || tile.y > 48) return;
@@ -544,6 +548,12 @@ function workingGround(grid, sourcePositions, controllerPos) {
   };
   for (const source of sourcePositions)
     for (const tile of neighbours(source)) reserve(tile);
+  // The Thorium deposits' Seats, on the same rule and for the same reason
+  // (ADR 0057 decision 1): an extension on the one accessible tile at a wall
+  // mouth costs the room its deposit. The deposit's own tile needs no reserve
+  // — it is a wall, which `reserve` already refuses.
+  for (const mineral of mineralPositions)
+    for (const tile of neighbours(mineral)) reserve(tile);
   for (let dx = -3; dx <= 3; dx++) {
     for (let dy = -3; dy <= 3; dy++) {
       reserve({ x: controllerPos.x + dx, y: controllerPos.y + dy });
@@ -685,6 +695,10 @@ function placeCluster({
   spawnPos,
   sourcePositions,
   controllerPos,
+  // The room's Thorium deposits, whose Seats are working ground the same
+  // way a rock's are (ADR 0057 decision 1). No default, for the reason
+  // `workingGround` gives: a forgotten one is a silent deposit-free profile.
+  mineralPositions,
   taken,
   structure,
   register,
@@ -701,7 +715,12 @@ function placeCluster({
   const furniture = furnitureFor(rcl);
   const { extensions, extensionSites, towers, storages } = furniture;
   const wanted = extensions + towers + storages + extensionSites;
-  const reserved = workingGround(grid, sourcePositions, controllerPos);
+  const reserved = workingGround(
+    grid,
+    sourcePositions,
+    controllerPos,
+    mineralPositions,
+  );
   const tiles = clusterTiles(grid, spawnPos, wanted, taken, reserved, rcl);
   let at = 0;
   const take = () => {
@@ -771,6 +790,17 @@ const SOURCE_B = { x: 38, y: 39 };
 const CONTROLLER = { x: 8, y: 33 };
 const CONTAINER_A = { x: 12, y: 15 }; // source container, beside source A
 const CONTAINER_B = { x: 9, y: 32 }; // controller container
+// The season's Thorium, as `RESOURCE_THORIUM` spells it — the `mineralType`
+// on the deposit, the key its store is read under, and the one resource
+// besides energy this colony names (ADR 0057).
+const THORIUM = "T";
+// The room's Thorium deposit (ADR 0057). A wall tile, as the season mod
+// places one, and far enough from the cluster that its Seats are ground the
+// ordering would otherwise have reached — which is the whole of what the
+// working-ground exclusion has to be measured against. `buildStubGrid` walls
+// it and carves its ring, so the deposit is at a wall mouth here exactly as
+// it is in the three live rooms.
+const MINERAL = { x: 33, y: 18 };
 // The paved trunks; buildStubGrid also carves an unpaved lane to source B
 // so the room is connected everywhere the bot expects to reach.
 const TRUNKS = [
@@ -824,12 +854,21 @@ function buildStubGrid() {
     CONTROLLER,
     CONTAINER_A,
     CONTAINER_B,
+    MINERAL,
   ]) {
     carve(p);
   }
   for (const [a, b] of [...TRUNKS, [SPAWN_POS, SOURCE_B]]) {
     for (const p of line(a, b)) carve(p);
   }
+
+  // The deposit itself back to wall, its ring left carved: a Thorium mineral
+  // stands on a wall tile at the mouth of a wall (`mineral.roomObject.js`),
+  // which is what puts it off the clustered checkerboard and outside the
+  // Layout's ordering by construction (ADR 0057 decision 1). Last, so no
+  // carve above can re-open it — the deposit is the one tile in this room
+  // that has to stay solid.
+  data[MINERAL.y * 50 + MINERAL.x] = WALL;
 
   // A capture, in every respect `loadCapture` returns one — a name, a mask
   // read by coordinate, the terrain object the engine hands back, and the
@@ -846,6 +885,9 @@ function buildStubGrid() {
       { id: "src-1", type: "source", pos: SOURCE_B },
     ],
     controller: { id: "ctrl", type: "controller", pos: CONTROLLER },
+    minerals: [
+      { id: "min-0", type: "mineral", resource: THORIUM, pos: MINERAL },
+    ],
   };
 }
 
@@ -1371,6 +1413,24 @@ const declaredUnfurnished = (seen) => {
   }
   return projected(seen).filter((room) => !seen.includes(room));
 };
+// A capture's Thorium deposits, as engine mineral objects. Full, for the same
+// reason its rocks are: a scenario measures a tick and not a season, and a
+// deposit that ran down mid-run would move the one quota that reads it. Every
+// scenario furnishes these, the stub's invented room included, because the
+// Layout plans an extractor and a container off them from RCL6 (ADR 0057
+// decision 1) and their Seats are working ground at every level — so a world
+// without one profiles a colony that has no deposit, which since the season
+// started is no colony of ours.
+const registerMinerals = (capture, register) =>
+  (capture.minerals ?? []).map((mineral) =>
+    register({
+      id: mineral.id,
+      pos: mineral.pos,
+      mineralType: THORIUM,
+      mineralAmount: 22_000,
+    }),
+  );
+
 // A capture's rocks, filed under the loader's own ids. Full and never
 // regenerating, because a scenario measures a tick and not a cycle: a rock that
 // ran dry mid-run would move every quota that reads income.
@@ -1555,6 +1615,18 @@ function loadCapture(roomName) {
       data[y * 50 + x] = rows[y].charCodeAt(x) - 0x30;
   }
 
+  // The header is checked and not assumed, the way the F# loader checks it:
+  // a capture written before the `resource` column (ADR 0057) parses
+  // perfectly well here and answers `undefined` for every mineral's type, so
+  // the scenario would silently profile a colony with no deposit in it —
+  // which is the one thing this harness is now measuring.
+  const header = lines[objectSection + 1];
+  if (header !== "id\ttype\tx\ty\tresource") {
+    throw new Error(
+      `${file}: the objects section has no id/type/x/y/resource column header — re-capture it`,
+    );
+  }
+
   // The capture's own ids are the engine's, and that is the point: a
   // declaration written in RoomFixtures' readable short names would match
   // nothing a live projection keys by (ADR 0041), so the scenario carries
@@ -1563,8 +1635,8 @@ function loadCapture(roomName) {
     .slice(objectSection + 2)
     .filter((row) => row.trim() !== "")
     .map((row) => {
-      const [id, type, x, y] = row.split("\t");
-      return { id, type, pos: { x: Number(x), y: Number(y) } };
+      const [id, type, x, y, resource] = row.split("\t");
+      return { id, type, resource, pos: { x: Number(x), y: Number(y) } };
     });
 
   return {
@@ -1573,6 +1645,14 @@ function loadCapture(roomName) {
     terrain: { get: (x, y) => data[y * 50 + x] },
     sources: objects.filter((o) => o.type === "source"),
     controller: objects.find((o) => o.type === "controller"),
+    // The Thorium deposits alone (ADR 0057): the mod stands the room's
+    // ordinary ore beside them and `World.ofGame` filters `FIND_MINERALS` on
+    // `mineralType`, so a scenario that furnished both would hand the bundle
+    // a target it would drop on the next line. The `resource` column is what
+    // tells them apart.
+    minerals: objects.filter(
+      (o) => o.type === "mineral" && o.resource === THORIUM,
+    ),
   };
 }
 
@@ -1716,6 +1796,13 @@ function furnishHome({
     hitsMax: 5000,
   });
 
+  // The room's Thorium deposits (ADR 0057 decision 1). Registered before the
+  // cluster is placed, because their Seats are working ground the ordering
+  // may not take — the same self-check ADR 0022's sources and Upgrade area
+  // are under, and the reason a scenario furnishes them at every level and
+  // not only at the one the extractor is unlocked at.
+  const minerals = registerMinerals(capture, register);
+
   // The level's cluster on the room's own ground: the extensions, towers
   // and Storage this level allows, and the extension sites held back out
   // of that same allowance.
@@ -1724,6 +1811,7 @@ function furnishHome({
     spawnPos,
     sourcePositions: capture.sources.map((source) => source.pos),
     controllerPos: capture.controller.pos,
+    mineralPositions: minerals.map((mineral) => mineral.pos),
     taken,
     structure,
     register,
@@ -1770,6 +1858,7 @@ function furnishHome({
     115: [],
     103: [], // FIND_HOSTILE_CREEPS
     106: [], // FIND_DROPPED_RESOURCES
+    116: minerals, // FIND_MINERALS (ADR 0057)
   };
   const room = stubRoom({
     name: capture.name,
@@ -1829,6 +1918,9 @@ const geometryOf = (furnished) => ({
   grid: furnished.capture,
   sourcePositions: furnished.capture.sources.map((source) => source.pos),
   controllerPos: furnished.capture.controller.pos,
+  mineralPositions: (furnished.capture.minerals ?? []).map(
+    (mineral) => mineral.pos,
+  ),
   clustered: furnished.cluster.built
     .concat(furnished.cluster.sites)
     .map((s) => s.pos),
@@ -1847,6 +1939,12 @@ const geometryOf = (furnished) => ({
 // the invasion nobody has ever seen.
 function furnishOutpost(capture, register, structure, raided = false) {
   const sources = registerSources(capture, register);
+  // The outpost's own deposit (ADR 0057 decision 1). Nothing out here plans
+  // an extractor — the Layout plans the home room alone — but the projection
+  // carries the target and the mover reads its Seats as working ground, so a
+  // scenario that furnished one only at home would measure a narrower
+  // projection than the live colony's.
+  const minerals = registerMinerals(capture, register);
   const controller = register({
     id: capture.controller.id,
     my: false,
@@ -1932,6 +2030,7 @@ function furnishOutpost(capture, register, structure, raided = false) {
         115: [],
         103: hostiles,
         106: [],
+        116: minerals, // FIND_MINERALS (ADR 0057)
       },
     }),
   };
@@ -3224,6 +3323,7 @@ for (const home of world.furnished) {
     home.grid,
     home.sourcePositions,
     home.controllerPos,
+    home.mineralPositions,
   );
   const onWorkingGround = home.clustered.filter((pos) =>
     reservedGround.has(keyOf(pos)),

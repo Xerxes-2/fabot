@@ -132,6 +132,12 @@ let private seenFacts
             let st = o :?> IStructure
             st, builtKindOf st.structureType)
 
+    // The structures whose store enters the projection (ADR 0012, ADR 0023),
+    // swept once: the energy table below and the Thorium table beside it ask
+    // the same question of the same array, and two sweeps are two answers free
+    // to disagree the day the predicate moves.
+    let storedStructures = structures |> Array.filter (fun (_, kind) -> isStored kind)
+
     let sites =
         room.find findMyConstructionSites
         |> Array.map (fun o ->
@@ -181,6 +187,19 @@ let private seenFacts
         |> Array.map (fun o -> o :?> ITombstone)
         |> Array.filter (fun r -> r.store.getUsedCapacity "energy" > 0)
 
+    // The season's Thorium deposits, and only those (ADR 0057 decision 1).
+    // The mod stands an ordinary-ore mineral in the same room and the colony
+    // never extracts it — there is no market this season — so it is filtered
+    // out here, where every other engine string is classified, and the Core's
+    // `TargetKind.Mineral` carries no resource because only one kind ever
+    // reaches it. An exhausted deposit is deleted by the mod outright, so a
+    // mineral that leaves this array is a deposit that is gone and not one at
+    // zero.
+    let minerals =
+        room.find findMinerals
+        |> Array.map (fun o -> o :?> IMineral)
+        |> Array.filter (fun m -> m.mineralType = resourceName Thorium)
+
     // The controller travels through FIND_STRUCTURES on live servers, but
     // is projected explicitly so nothing depends on that detail.
     let controllers =
@@ -209,6 +228,7 @@ let private seenFacts
                                 controllers |> Array.map (fun c -> c.id, posOf c.pos)
                                 dropped |> Array.map (fun r -> r.id, posOf r.pos)
                                 tombstones |> Array.map (fun r -> r.id, posOf r.pos)
+                                minerals |> Array.map (fun m -> m.id, posOf m.pos)
                             ]
                     )
                 // This room's creeps, not the world's — the scope rides on the
@@ -238,6 +258,13 @@ let private seenFacts
                                 |> Array.filter (fun (_, kind) -> not (isWalkable kind))
                                 |> Array.map (fun (site, _) -> posOf site.pos)
                                 controllers |> Array.map (fun c -> posOf c.pos)
+                                // A mineral is one of Screeps'
+                                // OBSTACLE_OBJECT_TYPES, exactly as the
+                                // controller beside it is. The season's
+                                // deposits stand on wall tiles, so this
+                                // subtracts nothing today; it is here because
+                                // it is what the engine does.
+                                minerals |> Array.map (fun m -> posOf m.pos)
                             ]
                     )
                 // Built roads only: a road construction site is not yet a
@@ -271,6 +298,7 @@ let private seenFacts
                         // A tombstone stands on the tile its creep died on and
                         // a ruin where its structure stood.
                         tombstones |> Array.map (fun r -> r.id, Tombstone)
+                        minerals |> Array.map (fun m -> m.id, Mineral)
                     ]
             )
         // Hits on the repairable kinds only — the decaying roads and containers
@@ -291,12 +319,40 @@ let private seenFacts
         Stores =
             Array.concat
                 [
-                    structures
-                    |> Array.filter (fun (_, kind) -> isStored kind)
+                    storedStructures
                     |> Array.map (fun (st, _) -> st.id, st.store.getUsedCapacity "energy")
                     tombstones |> Array.map (fun r -> r.id, r.store.getUsedCapacity "energy")
                     dropped |> Array.map (fun r -> r.id, r.amount)
                 ]
+            |> Map.ofArray
+        // The Thorium beside it (ADR 0057 decision 3): what each store holds of
+        // it, and the deposit's own remaining amount, which is the fact the
+        // miner row's quota reads. A second map and never a resource key inside
+        // `Stores`, for the reason the field's own comment gives. Absent per
+        // entry (ADR 0004): a store holding none of it has no entry, so a
+        // colony with no deposit carries an empty map rather than a table of
+        // zeroes.
+        Thorium =
+            Array.concat
+                [
+                    storedStructures
+                    |> Array.map (fun (st, _) ->
+                        st.id, st.store.getUsedCapacity (resourceName Thorium))
+                    minerals |> Array.map (fun m -> m.id, m.mineralAmount)
+                ]
+            |> Array.filter (fun (_, held) -> held > 0)
+            |> Map.ofArray
+        // The extractor's cooldown (ADR 0057 decision 2): `EXTRACTOR_COOLDOWN`
+        // is 5 and the intent pass runs before the object pass, so successive
+        // harvests land six ticks apart and the other five are refused. Read
+        // off the one kind that carries one — `cooldown` is undefined on every
+        // other structure the colony builds — and 0 is a real answer here,
+        // meaning "this tick", which is why the map is not filtered the way the
+        // Thorium above is.
+        Cooldowns =
+            structures
+            |> Array.filter (fun (_, kind) -> kind = BuiltKind.Extractor)
+            |> Array.map (fun (st, _) -> st.id, st.cooldown)
             |> Map.ofArray
         // Who holds the room, home included (ADR 0042). A seen room with
         // no controller at all gets a truthful entry: nobody owns or

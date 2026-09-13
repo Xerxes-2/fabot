@@ -406,4 +406,149 @@ let horizonTests =
             }
         ]
 
+// ---- the extractor and its container, on the rooms that hold a deposit ---
+
+/// ADR 0057 decision 1 on the three rooms it is for. Outside the sweep for
+/// the reason the horizon list is: the sweep is the general rule over every
+/// spawn at RCL4, and this is three rooms' arithmetic at the level the engine
+/// unlocks the extractor at, each planned from the tile its live spawn stands
+/// on. The deposit's tile is the capture's own and nothing here invented it;
+/// the spawn tiles are **not** in any committed artifact — a capture records a
+/// room's fixed furniture and never a base (ADR 0036) — so they are read off
+/// the live rooms and are as good as the tick they were read at. What they
+/// decide is only where the cluster grows from, which is the same thing the
+/// sweep varies on purpose.
+[<Tests>]
+let extractorTests =
+    testList
+        "the extractor at RCL6"
+        [
+            // The three rooms we own that hold a Thorium deposit, each beside
+            // the tile its live spawn stands on and the deposit's own
+            // coordinates as the capture records them. Read as a table because
+            // the rule is one rule: what differs between the three is terrain.
+            for room, spawn, deposit in
+                [
+                    "W12S28", { X = 12; Y = 40 }, { X = 26; Y = 5 }
+                    "W13S28", { X = 16; Y = 12 }, { X = 42; Y = 30 }
+                    "W15S28", { X = 18; Y = 30 }, { X = 29; Y = 12 }
+                ] do
+                test $"{room} at RCL6 plans the extractor on its deposit, and at RCL5 plans neither" {
+                    let capture = load room
+                    let loaded = project capture spawn None
+
+                    let planOf level =
+                        decide (colonyOf loaded level) Map.empty Set.empty None
+                        |> fun decision -> placementsOf decision.Intents
+
+                    // The capture is the premise, not the expectation: the
+                    // room holds exactly one Thorium deposit and it is where
+                    // the season mod put it.
+                    Expect.equal
+                        (capture.Minerals |> List.map snd)
+                        [ deposit ]
+                        "the capture holds one Thorium deposit, on the tile the live room has it on"
+
+                    let atSix = planOf 6
+
+                    Expect.equal
+                        (tilesOfKind Extractor atSix)
+                        [ deposit ]
+                        "one extractor, on the mineral's own tile"
+
+                    // The container is judged on what a whole room can say
+                    // about it: exactly one, on a Seat of the deposit, and on a
+                    // tile nothing else in the plan wants. **Which** Seat is
+                    // ADR 0057's own sentence — "nearest the Storage's trunk" —
+                    // and it is pinned where it can be pinned honestly, in
+                    // `LayoutPlanTests` on a fixture built where that reading
+                    // and "nearest any trunk" disagree. Re-deriving it here off
+                    // `tilesOfKind Road` would only restate whatever metric the
+                    // Layout used, and would pass under either.
+                    let atlas = ofView (colonyOf loaded 6)
+                    let seats = seatTilesOf atlas (List.exactlyOne loaded.MineralIds)
+
+                    let containers =
+                        tilesOfKind Container atSix
+                        |> List.filter (fun tile -> Set.contains (RoomPos.at room tile) seats)
+
+                    Expect.hasLength containers 1 "one container for the deposit"
+
+                    Expect.isFalse
+                        (List.contains (List.exactlyOne containers) (tilesOfKind Road atSix))
+                        "and the plan does not pave the tile it seats it on"
+
+                    // ADR 0022's two whole-room invariants, at the level the
+                    // sweep does not reach and with the two kinds it has never
+                    // seen in the plan. The sweep runs at RCL4 and RCL2 (and
+                    // its own spawn stride), so without this the extractor and
+                    // the mineral container are in no double-booking check at
+                    // all — which is where a footing on the container's tile
+                    // and a second container on one tile would both have hidden.
+                    let footprints =
+                        placementsOf (decide (colonyOf loaded 6) Map.empty Set.empty None).Intents
+                        |> List.filter (fun (_, kind) -> kind <> Rampart)
+                        |> List.map fst
+
+                    Expect.equal
+                        (List.length (List.distinct footprints))
+                        (List.length footprints)
+                        "no tile is asked for two structures in one tick, the extractor among them"
+
+                    Expect.isEmpty
+                        (decide (colonyOf loaded 6) Map.empty Set.empty None).Memo.UnservedFootings
+                        "and every Link footing still finds a tile with the deposit's container placed"
+
+                    // The level below, where `CONTROLLER_STRUCTURES.extractor`
+                    // is still 0. Not the horizon's business: the deposit sits
+                    // on a wall tile off the clustered checkerboard, so there
+                    // is no window an extension can take and nothing to hold
+                    // open a level early (ADR 0022 against ADR 0057).
+                    let atFive = planOf 5
+
+                    Expect.isEmpty
+                        (tilesOfKind Extractor atFive)
+                        "RCL5 unlocks no extractor, so none is asked for"
+
+                    Expect.isEmpty
+                        (tilesOfKind Container atFive
+                         |> List.filter (fun tile -> Set.contains (RoomPos.at room tile) seats))
+                        "and no container for a deposit no body can dig"
+                }
+
+            test "the deposit's ground is off the clustered ordering at every level" {
+                // ADR 0057 decision 1's working-ground clause, which is ADR
+                // 0022's and is not gated on the level the extractor is: an
+                // extension landing on the one accessible tile at a wall mouth
+                // would cost the room its whole deposit, and it would land
+                // there long before RCL6.
+                let capture = load "W12S28"
+                let loaded = project capture { X = 12; Y = 40 } None
+
+                for level in [ 4; 6 ] do
+                    let colony = colonyOf loaded level
+                    let atlas = ofView colony
+
+                    let placed =
+                        decide colony Map.empty Set.empty None |> fun d -> placementsOf d.Intents
+
+                    let mineralId = List.exactlyOne loaded.MineralIds
+
+                    let ground =
+                        seatTilesOf atlas mineralId
+                        |> Set.add (
+                            RoomPos.at "W12S28" (List.exactlyOne (List.map snd capture.Minerals))
+                        )
+                        |> Set.map RoomPos.pos
+
+                    Expect.isTrue
+                        (Set.isSubset ground (workingGroundIn atlas "W12S28"))
+                        $"the deposit and its Seats are working ground at RCL{level}"
+
+                    Expect.isEmpty
+                        (Set.intersect ground (clusteredTiles placed))
+                        $"and no clustered pick takes one of them at RCL{level}"
+            }
+        ]
+
 // ---- the Seam bands the captured rooms hold -----------------------------

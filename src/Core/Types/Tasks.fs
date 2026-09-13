@@ -189,6 +189,12 @@ type StructureKind =
     /// defensive kind the Layout places, and the only placeable kind that
     /// goes on a tile something already stands on.
     | Rampart
+    /// The extractor over a Thorium mineral (ADR 0057 decision 1). The one
+    /// placeable kind whose tile is its *target's* — it goes on the mineral
+    /// itself, which is a wall tile at the mouth of a wall and so outside the
+    /// clustered ordering by construction — and the only one the Layout places
+    /// exactly once in a room's life.
+    | Extractor
 
 /// One step of creep movement, engine vocabulary: Top decreases Y.
 type Direction =
@@ -222,6 +228,21 @@ let partName =
     | BodyPart.Claim -> "claim"
     | Tough -> "tough"
 
+/// Every Resource the colony names — the closed set, for building tables over
+/// the vocabulary, and closed by `Core.Tests` exactly as `allBodyParts` is.
+let allResources = [ Energy; Thorium ]
+
+/// Screeps RESOURCE_* strings as the engine spells them, in `store` keys and in
+/// the `withdraw`/`transfer` calls that have taken one all along — the one
+/// place the spelling lives (its reverse is derived from this table).
+/// `RESOURCE_THORIUM` is the season mod's own one-letter key, which is what
+/// `mineralType` reads on the deposit and what the reactor's store is filed
+/// under (ADR 0057).
+let resourceName =
+    function
+    | Energy -> "energy"
+    | Thorium -> "T"
+
 /// Every BuiltKind the engine spells — the modelled set, not the engine's whole
 /// structure vocabulary. Every spelling outside it classifies to Other, which is
 /// why Other is not one of them: it is the absence of a modelled kind. A
@@ -236,6 +257,7 @@ let allBuiltKinds =
         BuiltKind.Storage
         BuiltKind.Link
         BuiltKind.Rampart
+        BuiltKind.Extractor
     ]
 
 /// Screeps STRUCTURE_* strings as the engine spells them, in `structureType`
@@ -253,6 +275,7 @@ let builtKindName =
     | BuiltKind.Storage -> "storage"
     | BuiltKind.Link -> "link"
     | BuiltKind.Rampart -> "rampart"
+    | BuiltKind.Extractor -> "extractor"
     | BuiltKind.Other -> ""
 
 /// The built kind a placement Intent's kind names: the one crossing between
@@ -268,6 +291,7 @@ let builtKindOfPlaceable =
     | Container -> BuiltKind.Container
     | Storage -> BuiltKind.Storage
     | Rampart -> BuiltKind.Rampart
+    | Extractor -> BuiltKind.Extractor
 
 /// The kinds Refill keeps fed (ADR 0010): the spawn-energy feeders and the
 /// towers, the structures a view projects as Refillables. The controller
@@ -283,6 +307,7 @@ let isRefillable =
     | BuiltKind.Storage
     | BuiltKind.Link
     | BuiltKind.Rampart
+    | BuiltKind.Extractor
     | BuiltKind.Other -> false
 
 /// The Keep (ADR 0034): the structures worth defending — the spawn, the tower
@@ -299,6 +324,7 @@ let isKeep =
     | BuiltKind.Container
     | BuiltKind.Link
     | BuiltKind.Rampart
+    | BuiltKind.Extractor
     | BuiltKind.Other -> false
 
 /// The kinds a raid's damage is charged on (ADR 0034): the Keep and the
@@ -315,6 +341,7 @@ let isDefence =
     | BuiltKind.Road
     | BuiltKind.Container
     | BuiltKind.Link
+    | BuiltKind.Extractor
     | BuiltKind.Other -> false
 
 /// The kinds whose projection has to ask the engine who owns them: every
@@ -331,6 +358,7 @@ let needsOwner =
     | BuiltKind.Road
     | BuiltKind.Container
     | BuiltKind.Link
+    | BuiltKind.Extractor
     | BuiltKind.Other -> false
 
 /// Where a kind is whole — which of the three rules judges its hits (ADR
@@ -364,6 +392,7 @@ let wholeLine =
     | BuiltKind.Storage -> Some WholeLine.Full
     | BuiltKind.Extension
     | BuiltKind.Link
+    | BuiltKind.Extractor
     | BuiltKind.Other -> None
 
 /// The kinds whose stored energy enters the projection: the containers,
@@ -380,6 +409,7 @@ let isStored =
     | BuiltKind.Road
     | BuiltKind.Link
     | BuiltKind.Rampart
+    | BuiltKind.Extractor
     | BuiltKind.Other -> false
 
 /// The kinds a creep can stand on; every other kind blocks its tile
@@ -390,7 +420,11 @@ let isWalkable =
     function
     | BuiltKind.Road
     | BuiltKind.Container
-    | BuiltKind.Rampart -> true
+    | BuiltKind.Rampart
+    // The extractor is not one of OBSTACLE_OBJECT_TYPES: the miner that works
+    // it stands beside the mineral, never on it, but a body crossing a room
+    // walks over an extractor as it walks over a road.
+    | BuiltKind.Extractor -> true
     | BuiltKind.Spawn
     | BuiltKind.Extension
     | BuiltKind.Tower

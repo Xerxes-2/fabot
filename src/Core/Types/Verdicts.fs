@@ -240,6 +240,7 @@ let containerTargetName =
     function
     | ContainerTarget.Source _ -> "source"
     | ContainerTarget.Controller -> "controller"
+    | ContainerTarget.Mineral _ -> "mineral"
 
 /// The source a ContainerTarget names beside its wire name, or None for
 /// the controller, which names none. The encoder's half of what
@@ -248,6 +249,7 @@ let containerTargetSource =
     function
     | ContainerTarget.Source source -> Some source
     | ContainerTarget.Controller -> None
+    | ContainerTarget.Mineral mineral -> Some mineral
 
 /// The ContainerTarget a wire name spells for the source the wire carried
 /// beside it, or None for a name this vocabulary does not have — and for
@@ -260,6 +262,7 @@ let containerTargetOf =
         [
             Option.map ContainerTarget.Source
             (fun _ -> Some ContainerTarget.Controller)
+            Option.map ContainerTarget.Mineral
         ]
 
 /// The wire spelling of each StandDownBasis, on the Raid log's Memory leaf

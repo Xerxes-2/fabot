@@ -43,6 +43,51 @@ let censusSignatureTests =
                     "and it is a kind of its own, not the unmodelled kind it used to project as"
             }
 
+            test "a Thorium deposit appearing or leaving moves the signature" {
+                // ADR 0044's rule — the memo signs the union of its readers —
+                // read down the mineral column (ADR 0057 decision 1). The
+                // Layout reads the deposit twice, the extractor's tile being
+                // the deposit's own and the container's a Seat of it, and
+                // `Atlas.workingGroundIn` reads it at every level, so the
+                // clustered ordering itself moves with it. Leaving is the live
+                // case: the mod deletes an exhausted Thorium deposit outright,
+                // and unsigned, the memo would hand back a plan naming a
+                // container on the Seat of a rock that is gone.
+                let bare = trunkColony 6
+
+                let standing =
+                    { bare with
+                        Spatial =
+                            bare.Spatial
+                            |> withHome (fun layer ->
+                                { layer with
+                                    Terrain = Map.add mineralPos Wall layer.Terrain
+                                })
+                            |> withStanding "min-a" mineralPos Mineral
+                    }
+
+                Expect.notEqual
+                    (censusSignature standing)
+                    (censusSignature bare)
+                    "the deposit is a signature input, so its deletion throws the plan away"
+
+                let moved =
+                    { standing with
+                        Spatial =
+                            standing.Spatial
+                            |> withHome (fun layer ->
+                                { layer with
+                                    TargetPositions =
+                                        Map.add "min-a" { X = 26; Y = 33 } layer.TargetPositions
+                                })
+                    }
+
+                Expect.notEqual
+                    (censusSignature moved)
+                    (censusSignature standing)
+                    "and it is signed by its tile, which is the extractor's own"
+            }
+
             test "a structure moving moves the signature" {
                 let colony = trunkColony 2
 

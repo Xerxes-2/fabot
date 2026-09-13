@@ -124,6 +124,13 @@ type UnroutedTrunk = { Source: string; Goal: TrunkGoal }
 type ContainerTarget =
     | Source of source: string
     | Controller
+    /// A Thorium mineral, named by its id (ADR 0057 decision 1). A target of
+    /// its own and not a source: the two are served by the same rule — a
+    /// container standing or pending within range 1 — and planned by two, the
+    /// source's container seating on that source's own trunk and the mineral's
+    /// on the trunk out to the Storage, the mineral having no trunk of its
+    /// own. A room may hold several, so it carries its id as a source does.
+    | Mineral of mineral: string
 
 /// A container pick the plan did not place because its target is already served
 /// by a container standing somewhere else (ADR 0040): the target, the tile the

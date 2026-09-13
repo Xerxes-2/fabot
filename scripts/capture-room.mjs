@@ -63,10 +63,27 @@ if (objectsRes.ok !== 1) fail(`objects read failed: ${JSON.stringify(objectsRes)
 
 // The room's furniture and nothing else. Sorted so a re-capture diffs on
 // what moved rather than on whatever order the server happened to answer in.
+//
+// Each row carries the resource the object holds, because a mineral's type is
+// the one thing about this furniture the coordinates do not say and a rule
+// depends on: the season mod stands a Thorium deposit beside the room's
+// ordinary ore, and only the Thorium one is ever projected (ADR 0057). A
+// source holds energy and a controller holds nothing, spelt "-", so the table
+// is one shape rather than a ragged one.
 const furniture = ["source", "controller", "mineral"];
+// A mineral with no `mineralType` is the server answering something this
+// script does not understand, and a "?" written into the file would be
+// swallowed by both readers as an ore that is simply not Thorium. Throwing is
+// the only spelling that says so.
+const resourceOf = (o) => {
+  if (o.type !== "mineral") return o.type === "source" ? "energy" : "-";
+  if (!o.mineralType)
+    throw new Error(`mineral ${o._id} at ${o.x},${o.y} has no mineralType`);
+  return o.mineralType;
+};
 const objects = (objectsRes.objects ?? [])
   .filter((o) => furniture.includes(o.type))
-  .map((o) => ({ id: o._id, type: o.type, x: o.x, y: o.y }))
+  .map((o) => ({ id: o._id, type: o.type, x: o.x, y: o.y, resource: resourceOf(o) }))
   .sort((a, b) => a.type.localeCompare(b.type) || a.x - b.x || a.y - b.y);
 
 const rows = [];
@@ -86,8 +103,8 @@ const lines = [
   ...rows,
   "",
   "[objects]",
-  "id\ttype\tx\ty",
-  ...objects.map((o) => `${o.id}\t${o.type}\t${o.x}\t${o.y}`),
+  "id\ttype\tx\ty\tresource",
+  ...objects.map((o) => `${o.id}\t${o.type}\t${o.x}\t${o.y}\t${o.resource}`),
   "",
 ].join("\n");
 

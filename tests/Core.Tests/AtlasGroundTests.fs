@@ -551,6 +551,64 @@ let workingGroundTests =
                     "the Seats the Anchors stand on and the tiles the upgraders stand on, together"
             }
 
+            test "a Thorium deposit's tile and Seats are working ground, in any room" {
+                // ADR 0057 decision 1's working-ground clause. The deposit
+                // stands on its own tile — a wall, which is where the mod
+                // puts one — so the tile is in the set through the mineral
+                // and never through the terrain, and its two open
+                // neighbours are Seats by the same rule a source's are.
+                // Gated on no level: the extractor waits for RCL6 and the
+                // tile an extension would take never comes back.
+                let atlas =
+                    { spatial
+                          [ "min-a", { X = 20; Y = 20 } ]
+                          [
+                              { X = 19; Y = 20 }, Plain
+                              { X = 20; Y = 20 }, Wall
+                              { X = 21; Y = 20 }, Swamp
+                              { X = 20; Y = 19 }, Wall
+                          ] with
+                        TargetKinds = Map.ofList [ "min-a", Mineral ]
+                    }
+                    |> snapshotWith []
+                    |> ofView
+
+                Expect.equal
+                    (workingGroundIn atlas (atlasHome atlas))
+                    (Set.ofList [ { X = 19; Y = 20 }; { X = 20; Y = 20 }; { X = 21; Y = 20 } ])
+                    "the deposit and the two Seats it has; the walled neighbour is no Seat"
+            }
+
+            test "a deposit's Seat under a container is no Post, and hires no Anchor" {
+                // The half of ADR 0057 decision 1 that says where the
+                // mineral's Seats do *not* go. They are working ground, so
+                // the Layout keeps its cluster off them; they are not in the
+                // source Seat union, so a container standing on one raises no
+                // [[post]], counts in no Anchor quota and garrisons nobody.
+                // The miner that stands there is the miner row's, and that
+                // row is ADR 0057 decision 2's — a different ticket.
+                let atlas =
+                    { spatial
+                          [ "min-a", { X = 20; Y = 20 }; "can-min", { X = 19; Y = 20 } ]
+                          [ { X = 19; Y = 20 }, Plain; { X = 20; Y = 20 }, Wall ] with
+                        TargetKinds =
+                            Map.ofList
+                                [ "min-a", Mineral; "can-min", Structure BuiltKind.Container ]
+                    }
+                    |> snapshotWith []
+                    |> ofView
+
+                let home = atlasHome atlas
+
+                Expect.isTrue
+                    (Set.contains { X = 19; Y = 20 } (workingGroundIn atlas home))
+                    "the Seat is ground the Layout may not cluster on"
+
+                Expect.equal (postsIn atlas home) Set.empty "and it is no Post"
+
+                Expect.equal (postCount atlas) 0 "so no Anchor is hired to garrison it"
+            }
+
             test "a room with neither sources nor a controller works no ground" {
                 let atlas =
                     { spatial [ "spawn-1", { X = 10; Y = 10 } ] [ { X = 10; Y = 11 }, Plain ] with

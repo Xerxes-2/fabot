@@ -29,6 +29,17 @@ type TargetKind =
     /// engine objects, because the only thing any reader decides on is that it
     /// holds energy and will be gone, and `Withdraw` is the verb for either.
     | Tombstone
+    /// A Thorium mineral (ADR 0057 decision 1) — a **fact and not a
+    /// declaration**: it stands in a room the colony owns and sees every tick,
+    /// so `World` reads it off `FIND_MINERALS` and files it here like any
+    /// other target. Only Thorium ever reaches the projection, the shell
+    /// filtering on `mineralType`, so the case carries no resource: the room's
+    /// ordinary ore is never extracted, there being no market this season, and
+    /// a field every value of which is the same value is not a fact. What it
+    /// has left to give rides in `SpatialInfo.Thorium` beside the stores. The
+    /// day the mod deletes an exhausted deposit the target leaves the
+    /// projection, which is what retires everything hung off it.
+    | Mineral
 
 /// Whether a projected target is one of the two transient kinds — a pile or a
 /// tombstone/ruin — that stand on a tile without holding it. Both vanish
@@ -42,7 +53,8 @@ let isTransient =
     | Source
     | Controller
     | Structure _
-    | Site _ -> false
+    | Site _
+    | Mineral -> false
 
 /// One room's geometry, filed under that room's name (ADR 0041): every
 /// container the projection keys by `Pos`, gathered into one record rather
@@ -146,6 +158,29 @@ type SpatialInfo =
         /// on the same key — a tombstone's or a ruin's energy, and a pile's
         /// amount.
         Stores: Map<string, int>
+        /// Target id -> Thorium currently held there (ADR 0057 decision 3): the
+        /// mineral container's, the [[storage]]'s, and the deposit's own
+        /// remaining amount — every store the shell classifies to a modelled
+        /// kind, plus the rock. The sector Reactor is **not** among them today
+        /// and the ADR's sentence naming it is a forward one: it classifies to
+        /// `BuiltKind.Other`, which holds no store at all, so it arrives here
+        /// on the ticket that models the kind and gives its store a reader. A
+        /// **second id-keyed map beside
+        /// `Stores`** and deliberately not a `Map<string, Map<Resource, int>>`,
+        /// which would make every existing energy reader ask a question it
+        /// never asks and give a bug somewhere to answer it wrongly. Two
+        /// resources that share no Task, no tier, no sink and no quota are two
+        /// facts, and the generalisation is one commit away on the day a third
+        /// resource has a reader. Absent per entry (ADR 0004): a store holding
+        /// no Thorium has no entry, which reads the same as a store the
+        /// projection cannot see.
+        Thorium: Map<string, int>
+        /// Target id -> ticks before this structure may act again — today the
+        /// extractor's alone (`EXTRACTOR_COOLDOWN` is 5, so successive
+        /// harvests land six ticks apart). Id-keyed and unlayered like the
+        /// stores, and absent per entry: a structure with no clock on it has
+        /// no entry here, and 0 means "now", which is a different answer.
+        Cooldowns: Map<string, int>
     }
 
 [<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
@@ -159,6 +194,8 @@ module SpatialInfo =
             TargetKinds = Map.empty
             Hits = Map.empty
             Stores = Map.empty
+            Thorium = Map.empty
+            Cooldowns = Map.empty
         }
 
     /// The name the projection's own room is filed under: `RoomName`, and the
