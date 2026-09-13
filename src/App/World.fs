@@ -633,7 +633,19 @@ let private worldRooms (maxHops: int) (colonies: Colony list) (seen: string list
                 |> List.collect (fun child ->
                     child.Home :: RoomName.transitBetween colony.Home child.Home)
 
-            Outpost.roomsProjected outposts colony.Home @ children)
+            // The colony's [[errand]]s and their chains, narrowed by the same
+            // budget for the same reason (ADR 0060 decision 1): the errand room
+            // joins `worldRooms` because a **standing** colony declares it, so
+            // the world holds its terrain and the view can price a walk into a
+            // room with no controller. Only the declaring colony's errands
+            // reach here, which is the whole of "projected for that colony
+            // alone" at the world's altitude.
+            let errands =
+                colony.Errands |> List.filter (Errand.withinHopBudget maxHops colony.Home)
+
+            Outpost.roomsProjected outposts colony.Home
+            @ Errand.roomsProjected errands colony.Home
+            @ children)
 
     seen @ declared |> List.distinct
 

@@ -457,17 +457,50 @@ module World =
             fromRoom
             toRoom
 
+    /// What one colony's declaration narrows to this tick, and the union of it:
+    /// `scanOf`'s whole answer, in four named halves rather than a positional
+    /// four. Declared inside `World` and never auto-opened, so the names below
+    /// cannot be picked up by a record literal that meant `Colony`.
+    type ScanSet =
+        {
+            /// The outposts left after both narrowings — the gate's and the
+            /// chain's (ADR 0043, #259).
+            Outposts: Outpost list
+            /// The errands left after the one narrowing there is (ADR 0060
+            /// decision 1).
+            Errands: Errand list
+            /// The rooms this colony projects for a child of its own, raised or
+            /// re-claimed (ADR 0047 decision 4, #221).
+            Borrowed: string list
+            /// The scan set: this colony's home and all three of those, which
+            /// is the one place that union is spelled.
+            Scanned: string list
+        }
+
     /// The declaration's narrowings and the union they make, for one colony:
     /// the [[outpost]]s the [[stand-down]] gate leaves it (ADR 0043) and its
-    /// home reaches inside the hop budget (`Outpost.withinHopBudget`, ADR 0058), the rooms it is
-    /// bootstrapping for a child of its own (ADR 0047 decision 4), and its scan
-    /// set — its home and both of those. The two outpost narrowings are one
+    /// home reaches inside the hop budget (`Outpost.withinHopBudget`, ADR 0058),
+    /// the [[errand]]s a chain reaches (`Errand.routable`, ADR 0060), the rooms
+    /// it is bootstrapping for a child of its own (ADR 0047 decision 4), and its
+    /// scan set — its home and all of those. The two outpost narrowings are one
     /// clause apiece and answer different questions: the gate is this tick's
     /// and reopens, the border is the declaration's and never does — so a
     /// refused room leaves the scan set for good, taking its furniture, its
     /// pooled rock, its Reserve and the reserver the row would have hired for
     /// it (ADR 0042) with it, which is the whole of "refuse it loudly" that a
     /// scan set can carry. What says so out loud is `ColonyView.Refused`.
+    ///
+    /// An errand is narrowed **once** where an outpost is narrowed twice: the
+    /// [[stand-down]] has nothing to withhold from it (ADR 0060 decision 1 —
+    /// no row hires per errand on a per-tick fact), so the gate never reaches
+    /// it and the chain is the whole of its admission.
+    ///
+    /// A **record** and not a tuple, since ADR 0060 gave the answer a fourth
+    /// member: two of the four are `string list`s standing side by side and
+    /// both callers destructure positionally, so a swapped pair would compile
+    /// in silence and hand the rooms borrowed for a child to the reader that
+    /// asked for the whole scan set. The field names are the check the compiler
+    /// can make and the tuple could not.
     let scanOf
         (maxHops: int)
         (stages: Map<string, ColonyStage>)
@@ -476,10 +509,14 @@ module World =
         (shut: Set<string>)
         (world: World)
         (colony: Colony)
-        : Outpost list * string list * string list =
+        : ScanSet =
         let outposts =
             Outpost.worked shut colony.Outposts
             |> List.filter (Outpost.routable (linked world) maxHops colony.Home)
+
+        let errands =
+            colony.Errands
+            |> List.filter (Errand.routable (linked world) maxHops colony.Home)
 
         // The two halves of what a mother projects for a child of hers, and
         // they are disjoint by construction: a room she is raising is one we
@@ -488,7 +525,12 @@ module World =
             Colony.bootstrapping stages colonies colony
             @ Colony.reclaiming unowned colonies colony
 
-        outposts, borrowed, Colony.roomsProjected outposts borrowed colony.Home
+        {
+            Outposts = outposts
+            Errands = errands
+            Borrowed = borrowed
+            Scanned = Colony.roomsProjected outposts errands borrowed colony.Home
+        }
 
     /// The declared homes that stand empty this tick: ours to take back if
     /// they ever were ours, and the candidates a human means to take. Read off
@@ -511,7 +553,7 @@ module World =
         (world: World)
         (colony: Colony)
         : string list =
-        let _, _, scanned =
+        let scan =
             scanOf
                 tuning.MaxHops
                 (stages tuning colonies world)
@@ -521,7 +563,7 @@ module World =
                 world
                 colony
 
-        scanned
+        scan.Scanned
 
     /// Which colony holds each creep this tick (`Colony.creepColonies`, ADR
     /// 0047 decision 2), decided over every living colony's scan set at once

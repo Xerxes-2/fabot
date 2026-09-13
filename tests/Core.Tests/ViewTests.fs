@@ -214,11 +214,13 @@ let private declared: Colony list =
                         Controller = "ctrl-out", { Room = outpost; X = 7; Y = 7 }
                     }
                 ]
+            Errands = []
             Mother = None
         }
         {
             Home = child
             Outposts = []
+            Errands = []
             Mother = Some mother
         }
     ]
@@ -1480,7 +1482,12 @@ let declarationTests =
                 let view = viewUnder overreaching walledIn mother
 
                 Expect.isTrue
-                    (List.contains tooFar view.Refused)
+                    (view.Refused
+                     |> List.contains
+                         {
+                             RoomName = tooFar
+                             Kind = DeclarationKind.Outpost
+                         })
                     "the room past the budget is refused on the names, as it was"
 
                 Expect.isFalse
@@ -1488,7 +1495,12 @@ let declarationTests =
                     "and the one inside it whose ring nothing can cross is out of the scan set"
 
                 Expect.isTrue
-                    (List.contains outpost view.Refused)
+                    (view.Refused
+                     |> List.contains
+                         {
+                             RoomName = outpost
+                             Kind = DeclarationKind.Outpost
+                         })
                     "named on the layout record rather than dropped in silence"
             }
 
@@ -1506,7 +1518,15 @@ let declarationTests =
                 // is where the line falls, never that there is one.
                 let view = viewUnder overreaching overreachingWorld mother
 
-                Expect.equal view.Refused [ tooFar ] "the refusal names the room a human declared"
+                Expect.equal
+                    view.Refused
+                    [
+                        {
+                            RoomName = tooFar
+                            Kind = DeclarationKind.Outpost
+                        }
+                    ]
+                    "the refusal names the room a human declared, and the kind they declared it as"
 
                 Expect.isFalse
                     (Map.containsKey tooFar view.Spatial.Rooms)
@@ -1536,5 +1556,453 @@ let declarationTests =
                 Expect.isEmpty
                     (viewUnder declared pairWorld mother).Refused
                     "a declaration a Seam reaches refuses nothing, and says so"
+            }
+        ]
+
+// ---- the errand: a declared room with no controller (ADR 0060) ------------
+
+/// A room two crossings south of the mother, and the room a shortest chain to
+/// it crosses. Two hops rather than one deliberately: an errand's room and its
+/// transit rooms enter the scan set by the same union an outpost's do (ADR 0058
+/// as ADR 0060 widens it), and a one-hop errand would project no transit room
+/// at all and so prove nothing about the half of the rule that carries the
+/// walk.
+let private errandRoom = "W12S30"
+let private errandCrossed = "W12S29"
+
+/// The one object the declaration names, and the tile it names it on. An id and
+/// a tile and nothing else, which is the whole of an `Errand` — what the object
+/// *is* and what it holds are the projection's to answer where there is vision
+/// (ADR 0004), and the declaration says neither.
+let private reactor = "reactor-far"
+let private reactorTile = { X = 6; Y = 6 }
+
+/// The mother's declaration with that errand added beside her real outpost.
+/// Beside and not instead, so every assertion below is read against a
+/// declaration of the other kind standing in the same view: a rule that
+/// narrowed *every* room this way would be indistinguishable from one that
+/// narrows the errand's.
+let private errandDeclared: Colony list =
+    declared
+    |> List.map (fun colony ->
+        if colony.Home <> mother then
+            colony
+        else
+            { colony with
+                Errands =
+                    [
+                        {
+                            RoomName = errandRoom
+                            Target = reactor, RoomPos.at errandRoom reactorTile
+                        }
+                    ]
+            })
+
+/// The errand room as a tick **with vision** reads it: everything a sector
+/// centre really carries — its own rocks, a container with a store in it, a
+/// site, and the declared target itself standing there under a structure kind
+/// and holding Thorium. The room is furnished this richly on purpose: the
+/// narrowing under test is what a colony may *carry* of a room it can see, and
+/// a blind room keeps the promise trivially (#286's lesson, one room further
+/// out).
+let private errandSeen =
+    let name, facts =
+        roomOf
+            errandRoom
+            Ownership.Unowned
+            [
+                "src-errand", { X = 3; Y = 3 }, Source
+                "can-errand", { X = 4; Y = 3 }, Structure BuiltKind.Container
+                "site-errand", { X = 4; Y = 4 }, Site BuiltKind.Extension
+                reactor, reactorTile, Structure BuiltKind.Container
+            ]
+        |> withSources [ "src-errand" ]
+        |> withStores [ "can-errand", 1_200; reactor, 40 ]
+        |> withSites [ "site-errand" ]
+
+    name,
+    { facts with
+        Thorium = Map.ofList [ reactor, 400; "can-errand", 90 ]
+        Cooldowns = Map.ofList [ reactor, 7; "can-errand", 3 ]
+    }
+
+/// The pair world with the chain to that room in it, both rooms seen and
+/// furnished. The crossing carries a controller and a rock of its own, which is
+/// what a transit room's promise is about (ADR 0058 decision 2, #286).
+let private errandWorld =
+    { pairWorld with
+        Rooms =
+            pairWorld.Rooms
+            |> Map.add
+                errandCrossed
+                (snd (
+                    roomOf
+                        errandCrossed
+                        Ownership.Unowned
+                        [
+                            "src-crossing", { X = 5; Y = 5 }, Source
+                            "ctrl-crossing", { X = 6; Y = 5 }, Controller
+                        ]
+                    |> withSources [ "src-crossing" ]
+                ))
+            |> Map.add (fst errandSeen) (snd errandSeen)
+    }
+
+/// The same chain with no vision anywhere on it: terrain and a border ring and
+/// nothing else, which is what the shell reads for a declared room it has never
+/// had a creep in (`World.factsOf`'s blind branch, ADR 0031, ADR 0041).
+let private blindErrandWorld =
+    { pairWorld with
+        Rooms = pairWorld.Rooms |> unseen errandCrossed |> unseen errandRoom
+    }
+
+[<Tests>]
+let errandTests =
+    testList
+        "an errand carries the ground, the walk, and the one thing declared in it"
+        [
+            test "the declared target is placed before any body of ours has stood there" {
+                // ADR 0060 decision 1's first question, and ADR 0041's
+                // deadlock one declaration kind wider: a courier has to hold
+                // `Deliver of reactorId` before there is vision, vision needs
+                // a creep there, a creep goes there because a Task exists, and
+                // the Task exists because the target is in the projection. So
+                // the id and the tile are the declaration's and wait for
+                // nothing.
+                let view = viewUnder errandDeclared blindErrandWorld mother
+
+                Expect.isEmpty view.Refused "the premise: a two-hop errand is not refused"
+
+                Expect.isTrue
+                    (Map.containsKey errandRoom view.Spatial.Rooms)
+                    "the errand room is projected"
+
+                Expect.isNonEmpty
+                    (SpatialInfo.layerOf view.Spatial errandRoom).Terrain
+                    "carrying the terrain a walk is floodable over"
+
+                Expect.isNonEmpty
+                    (Map.tryFind errandRoom view.Spatial.Borders |> Option.defaultValue Map.empty)
+                    "and the border ring a Seam is read off"
+
+                Expect.equal
+                    (SpatialInfo.placementOf view.Spatial reactor)
+                    (Some(RoomPos.at errandRoom reactorTile))
+                    "the declared target stands on the tile the declaration names, with no vision at all"
+
+                Expect.isTrue
+                    (Map.containsKey errandCrossed view.Spatial.Rooms)
+                    "and the room the chain crosses is in the set for the walk (ADR 0058)"
+            }
+
+            test "nothing else in the errand room is work, however much vision answers" {
+                // The second half of ADR 0060 decision 1's first answer, and
+                // the narrowing that makes an errand **less** than an outpost.
+                // #286's live failure was a reserver hired against a
+                // controller no declaration names and an Anchor on a rock
+                // nobody declared, because our own bodies walking through were
+                // the vision that filed the room's furniture; this room has
+                // three rocks, a stocked container and a site of its own, and
+                // the colony may work none of them.
+                let view = viewUnder errandDeclared errandWorld mother
+
+                Expect.isFalse
+                    (List.contains "src-errand" (idsOf view))
+                    "its rock is not pooled, whatever vision answered"
+
+                Expect.isFalse
+                    (Map.containsKey "can-errand" view.Spatial.TargetKinds)
+                    "its container is classified by nothing, so no Refill or Withdraw is pooled on it"
+
+                Expect.isFalse
+                    (Map.containsKey "can-errand" view.Spatial.Stores)
+                    "and its store does not ride either"
+
+                Expect.isEmpty
+                    (view.ConstructionSites |> List.filter (fun site -> site.Id = "site-errand"))
+                    "its site is no Build of hers"
+
+                Expect.isEmpty
+                    (Map.tryFind errandRoom view.Spatial.Rooms
+                     |> Option.map (fun layer -> layer.TargetPositions)
+                     |> Option.defaultValue Map.empty
+                     |> Map.filter (fun id _ -> id <> reactor))
+                    "one tile is placed in that room and it is the declared one's"
+            }
+
+            test "and the one target it names is: its store rides, its kind does not" {
+                // The changing half of the declared object — its store, its
+                // Thorium — is vision-paid and absent entry by entry where
+                // there is none (ADR 0004), which is why the body standing
+                // there is the colony's only eye on the room. What does *not*
+                // ride is the kind: every pool is built by sweeping
+                // `TargetKinds`, so an id classified by nothing is priceable
+                // by a Task that names it — the errand's own — and
+                // enumerable by no pool at all.
+                let seen = viewUnder errandDeclared errandWorld mother
+                let blind = viewUnder errandDeclared blindErrandWorld mother
+
+                Expect.equal
+                    (Map.tryFind reactor seen.Spatial.Stores)
+                    (Some 40)
+                    "what the declared target holds is read where there is vision"
+
+                Expect.equal
+                    (Map.tryFind reactor seen.Spatial.Thorium)
+                    (Some 400)
+                    "its Thorium beside it, which is the column the programme is scored out of"
+
+                Expect.isNone
+                    (Map.tryFind reactor blind.Spatial.Stores)
+                    "and absent entry by entry the tick the relay gaps, never zero (ADR 0004)"
+
+                Expect.equal
+                    (SpatialInfo.placementOf blind.Spatial reactor)
+                    (SpatialInfo.placementOf seen.Spatial reactor)
+                    "while the tile is the declaration's either way"
+
+                Expect.isNone
+                    (Map.tryFind reactor seen.Spatial.TargetKinds)
+                    "the kind vision gave it is dropped: no pool that sweeps a kind can name it"
+
+                Expect.isNone
+                    (Map.tryFind reactor seen.Spatial.Hits)
+                    "and its hit count with it, a Repair being pooled off one"
+            }
+
+            test "the errand is projected by the colony that declares it and by no other" {
+                // ADR 0060 decision 1's second question. The room the live
+                // errand names is five and six crossings from the other two
+                // homes, so a price into it from either is `None` and a room
+                // in their projection would be one every rule answers nothing
+                // about — #243's silent failure with a bigger body standing
+                // beside the spawn. The rule is not "the near colony gets it":
+                // it is that a room's name in one colony's list is what makes
+                // it that colony's (ADR 0047).
+                let hers = viewUnder errandDeclared errandWorld mother
+                let his = viewUnder errandDeclared errandWorld child
+
+                Expect.isTrue
+                    (Map.containsKey errandRoom hers.Spatial.Rooms)
+                    "the premise: the declaring colony projects it"
+
+                Expect.isFalse
+                    (Map.containsKey errandRoom his.Spatial.Rooms)
+                    "the colony that declares no errand projects the room of nobody's"
+
+                Expect.isFalse
+                    (Map.containsKey errandCrossed his.Spatial.Rooms)
+                    "nor one room of the way there"
+
+                Expect.isFalse
+                    (List.contains "src-errand" (idsOf his))
+                    "and pools nothing that stands in it"
+            }
+
+            test "an errand no chain reaches leaves the scan set and is named, with its kind" {
+                // ADR 0060 decision 1's third question. Carrying an
+                // unreachable errand is strictly worse than carrying an
+                // unreachable outpost — an outpost with no chain wastes a
+                // reserver and an errand with no chain wastes the whole
+                // programme, the errand's entire content being a walk — so it
+                // is refused exactly as #243 refuses an outpost, and the
+                // refusal says *which kind* it refused, because "W12S30"
+                // under a heading that reads "declared outposts" is a second
+                // silence wearing the first one's clothes.
+                let walledIn =
+                    { errandWorld with
+                        Rooms =
+                            errandWorld.Rooms
+                            |> Map.map (fun name facts ->
+                                if name = mother || name = outpost || name = child then
+                                    facts
+                                else
+                                    { facts with Border = Map.empty })
+                    }
+
+                let view = viewUnder errandDeclared walledIn mother
+
+                Expect.equal
+                    view.Refused
+                    [
+                        {
+                            RoomName = errandRoom
+                            Kind = DeclarationKind.Errand
+                        }
+                    ]
+                    "the errand is named on the layout record as the errand it was declared as"
+
+                Expect.isFalse
+                    (Map.containsKey errandRoom view.Spatial.Rooms)
+                    "and it is out of the scan set, so nothing is projected for it"
+
+                Expect.isFalse
+                    (Map.containsKey errandCrossed view.Spatial.Rooms)
+                    "nor is the room a chain to it would have crossed"
+
+                Expect.isNone
+                    (SpatialInfo.placementOf view.Spatial reactor)
+                    "and the declared target is placed nowhere at all"
+
+                // Pairwise against the same declaration over an unwalled
+                // world: what refuses the room is the terrain and not the
+                // declaration's shape, which is #259's distinction one
+                // declaration kind wider.
+                Expect.isEmpty
+                    (viewUnder errandDeclared errandWorld mother).Refused
+                    "an errand a chain reaches refuses nothing, and says so"
+            }
+
+            test "a refused outpost and a refused errand ride together, each under its own kind" {
+                // The whole reason the kind is on the record: the two
+                // declarations are moved in two different lists, and a reader
+                // told only the room name has to guess which. Both refused in
+                // one view, so the encoder cannot be answering with a constant.
+                let bothWrong =
+                    overreaching
+                    |> List.map (fun colony ->
+                        if colony.Home <> mother then
+                            colony
+                        else
+                            { colony with
+                                Errands =
+                                    [
+                                        {
+                                            RoomName = "W12S34"
+                                            Target = reactor, RoomPos.at "W12S34" reactorTile
+                                        }
+                                    ]
+                            })
+
+                Expect.equal
+                    (viewUnder bothWrong overreachingWorld mother).Refused
+                    [
+                        {
+                            RoomName = tooFar
+                            Kind = DeclarationKind.Outpost
+                        }
+                        {
+                            RoomName = "W12S34"
+                            Kind = DeclarationKind.Errand
+                        }
+                    ]
+                    "the outposts a human wrote first, then the errands, each said as what it is"
+            }
+
+            test "the room a chain to an errand crosses is a transit room and nothing more" {
+                // An errand room is more than a transit room; the rooms on the
+                // way to it are not. This is the line that says the widening
+                // stops at the declared room — ADR 0058 decision 2's promise
+                // is untouched by ADR 0060, and a rule that narrowed the whole
+                // chain the errand's way would pool a crossing's controller
+                // for a colony that declared nothing there.
+                let view = viewUnder errandDeclared errandWorld mother
+
+                Expect.isTrue
+                    (Map.containsKey errandCrossed view.Spatial.Rooms)
+                    "the crossing is projected, which is what the chain is priced over"
+
+                Expect.isNonEmpty
+                    (SpatialInfo.layerOf view.Spatial errandCrossed).Terrain
+                    "carrying its ground"
+
+                Expect.isFalse
+                    (Map.containsKey "ctrl-crossing" view.Spatial.TargetKinds)
+                    "and not its controller, which no declaration of hers names"
+
+                Expect.isFalse (List.contains "src-crossing" (idsOf view)) "nor its rock"
+            }
+
+            test "every errand a human has declared is inside the hop budget" {
+                // The invariant #243 exists for, over the live constant and at
+                // ADR 0060's altitude: red here rather than live, because a
+                // declaration past the budget is accepted by every rule
+                // downstream and worked by none of them. The other half —
+                // whether the terrain leaves a chain — needs the captures and
+                // is asked where they are (`RoomOutpostTests`).
+                Expect.isNonEmpty
+                    (Colony.declared |> List.collect (fun colony -> colony.Errands))
+                    "a declaration nobody made is nothing to check"
+
+                let refused =
+                    Colony.declared
+                    |> List.collect (fun colony ->
+                        colony.Errands
+                        |> List.filter (
+                            Errand.withinHopBudget Tuning.defaults.MaxHops colony.Home >> not
+                        )
+                        |> List.map (fun errand ->
+                            $"{errand.RoomName} is out of {colony.Home}'s reach"))
+
+                Expect.isEmpty
+                    refused
+                    $"""every declared errand is inside the hop budget: {String.concat "; " refused}"""
+            }
+
+            test "every declared errand names a tile of its own room" {
+                // ADR 0052 decision 2: a tile carries the room it is a tile
+                // of, and one filed under another room's name is dropped
+                // rather than written onto this room's coordinate — which
+                // would place the target nowhere and price it at 0, ADR 0004's
+                // escape, so it would *win* its tier. Dropped, the errand has
+                // no target at all, which is the quieter of the two failures
+                // and still one only this line catches.
+                for colony in Colony.declared do
+                    for errand in colony.Errands do
+                        let _, tile = errand.Target
+
+                        Expect.equal
+                            tile.Room
+                            errand.RoomName
+                            $"{colony.Home}: the errand's target is a tile of {errand.RoomName}"
+            }
+
+            test "no room is declared as both an outpost and an errand" {
+                // The invariant `ColonyView.ofWorld`'s branch order rests on,
+                // asserted rather than assumed. The chain there is `bootstrap →
+                // transit → errand → worked`, so a room in both lists takes the
+                // errand branch and is **narrowed** where the outpost wanted it
+                // widened: its source container loses its kind and its store, no
+                // Withdraw, Refill or Repair is pooled on it and its site leaves
+                // `ConstructionSites`, while the reserver row goes on hiring one
+                // body a tick for a room whose haul chain has silently gone —
+                // #243's and #286's silence in reverse, and with nothing on
+                // `Refused` to say so, because no chain is missing.
+                //
+                // The two kinds are disjoint by their own definitions and not by
+                // luck: `Outpost.Controller` is mandatory and an errand exists
+                // for the room that has no controller at all (ADR 0060 decision
+                // 1). So a room in both lists is a human writing a
+                // contradiction, and a contradiction in the constant is caught
+                // where every other one is — here, red before it is deployed,
+                // which is the whole reason `Colony.declared` has tests at this
+                // altitude at all.
+                for colony in Colony.declared do
+                    let outposts = colony.Outposts |> List.map (fun o -> o.RoomName) |> Set.ofList
+                    let errands = colony.Errands |> List.map (fun e -> e.RoomName) |> Set.ofList
+
+                    Expect.isEmpty
+                        (Set.intersect outposts errands |> Set.toList)
+                        $"{colony.Home}: a room declared as both would be narrowed to the errand's one target and mined by nobody"
+
+                // And across colonies, for the same reason one altitude up: the
+                // room would be widened by its declaring colony and narrowed by
+                // the other, and the two projections of it would disagree about
+                // what is in it — which is the disagreement ADR 0047 says one
+                // room projected by two colonies must never have.
+                let allOutposts =
+                    Colony.declared
+                    |> List.collect (fun colony ->
+                        colony.Outposts |> List.map (fun o -> o.RoomName))
+                    |> Set.ofList
+
+                let allErrands =
+                    Colony.declared
+                    |> List.collect (fun colony -> colony.Errands |> List.map (fun e -> e.RoomName))
+                    |> Set.ofList
+
+                Expect.isEmpty
+                    (Set.intersect allOutposts allErrands |> Set.toList)
+                    "no room is any colony's outpost and any colony's errand at once"
             }
         ]

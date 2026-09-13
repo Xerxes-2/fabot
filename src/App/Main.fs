@@ -250,9 +250,10 @@ let loop () =
         // target (ADR 0040). Written every tick, empty or not, and under the
         // home room whose Layout it is (ADR 0047). Beside them the colony's
         // other loss of this tick, taken off the **view** and not the memo
-        // because it is the declaration's rather than the plan's: the declared
-        // outposts this home shares no border with, which the view refused
-        // (#243).
+        // because it is the declaration's rather than the plan's: the
+        // declarations — outposts and errands alike — that no chain of Seams
+        // joins to this home, which the view refused, each under the kind it
+        // was declared as (#243, #259, ADR 0060 decision 1).
         ObserveMemory.saveLayout
             colony.Home
             decision.Memo.UnservedFootings

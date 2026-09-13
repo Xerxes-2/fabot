@@ -113,6 +113,16 @@ let wireVocabularyTests =
                 // enumerated here beside them.
                 roundTrips "FootingKind" (casesOf<FootingKind> ()) footingKindName footingKindOf
 
+                // The Layout channel's fourth vocabulary (ADR 0060 decision
+                // 1): which kind of declaration one refusal names, which the
+                // record has to say now that there are two kinds of room a
+                // human declares and the fix is to move one of two lists.
+                roundTrips
+                    "DeclarationKind"
+                    (casesOf<DeclarationKind> ())
+                    declarationKindName
+                    declarationKindOf
+
                 // The Layout channel's second vocabulary (#107), and its
                 // first carrying one: a trunk goal is the Upgrade Work
                 // Area or a spawn, and the spawn's id rides beside the
@@ -201,6 +211,8 @@ let wireVocabularyTests =
                 Expect.isNone (idleReasonOf "") "the empty name is no IdleReason"
 
                 Expect.isNone (footingKindOf "container") "a near miss is no FootingKind"
+
+                Expect.isNone (declarationKindOf "outposts") "a near miss is no DeclarationKind"
 
                 Expect.isNone (trunkGoalOf sampleName "upgrade") "a near miss is no TrunkGoal"
 

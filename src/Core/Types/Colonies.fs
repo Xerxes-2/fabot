@@ -4,6 +4,116 @@
 [<AutoOpen>]
 module Fabot.Core.Types.Colonies
 
+/// Which kind of declaration one refusal names (ADR 0060 decision 1). There
+/// are two kinds of room a human declares and one rule that refuses either, so
+/// the channel that says a declaration was refused has to say *what* it
+/// refused: "W15S25" printed under a heading that reads "declared outposts that
+/// do not border this home" would be a second silent failure wearing the first
+/// one's clothes.
+[<RequireQualifiedAccess>]
+type DeclarationKind =
+    /// A room this colony mines and does not own (`Outpost`, ADR 0042).
+    | Outpost
+    /// A room this colony walks a body to because it must act on one named
+    /// object standing in it (`Errand`, ADR 0060).
+    | Errand
+
+/// One declaration this colony cannot work, as the [[layout record]] carries
+/// it: the room a human named, and the kind they named it as. Both halves, and
+/// the kind is not decoration — a reader told only the room name has to guess
+/// which of two lists to go and look at, and the two failures are not the same
+/// size.
+///
+/// **The size of each, said here and referred to from everywhere else that
+/// needs it** (ADR 0060 decision 1): an outpost with no chain wastes a
+/// [[reserver]] — one body a tick, hired by a row that hires per declared
+/// outpost, standing beside the spawn for its whole life. An errand with no
+/// chain wastes the **whole programme**, the errand's entire content being a
+/// walk. That is why carrying an unreachable errand is strictly worse than
+/// carrying an unreachable outpost, and it is one sentence rather than five.
+type RefusedDeclaration =
+    {
+        RoomName: string
+        Kind: DeclarationKind
+    }
+
+[<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
+module Declaration =
+    /// Whether a declared room is one its home can reach **at all**: the two
+    /// rooms are inside the hop budget, so a chain of [[seam]]s could join them
+    /// (`RoomName.hopsBetween`, ADR 0058). Not a gate that opens and shuts like
+    /// the [[stand-down]]'s — it is a fact about the declaration a human wrote
+    /// and the constant they wrote it under, and it answers the same on every
+    /// tick of that declaration's life.
+    ///
+    /// Read off the **names**, as `RoomName.neighbouring` was before it and for
+    /// the same reason: this is asked while the scan set is being built, which
+    /// is before there is a projection to read terrain off. So it answers
+    /// whether the declaration is *shaped* like one a route could join, never
+    /// whether one does — a room inside the budget that every chain to is
+    /// walled is priced at `None` by `Atlas.route` and is the case #259 was
+    /// open on, one hop out and now three.
+    ///
+    /// One rule over a room **name**, because both declaration kinds ask it and
+    /// two spellings of it would be free to disagree about which rooms a colony
+    /// can reach (ADR 0060 decision 1).
+    let withinHopBudget (maxHops: int) (home: string) (room: string) : bool =
+        RoomName.hopsBetween home room
+        |> Option.exists (fun hops -> hops >= 1 && hops <= maxHops)
+
+    /// Whether a chain actually joins the two — the same question one room
+    /// further down (#259, ADR 0058). `withinHopBudget` above answers off the
+    /// names and so can be asked of a declaration with no terrain read at all;
+    /// this one asks `linked` per border and so answers whether a creep could
+    /// really walk there. The budget is inside it: `RoomName.routesBy` searches
+    /// no deeper, so a room this accepts is one `Atlas.route` will price.
+    ///
+    /// The two are not the same test and the difference is the whole of #259: a
+    /// room three hops out whose every chain the engine walled is *shaped* like
+    /// a declaration and is not one, and refusing it on the names alone would
+    /// leave it projected, pooled and hired for by a row that hires per
+    /// declared room — #243's silent failure, one budget further out.
+    ///
+    /// Asked of `routesBy` and not of `routeBy`: the search answers **every**
+    /// shortest chain and the price picks one of them (ADR 0059), so "is there
+    /// a chain" is an empty list and not a missing head. The two agree today
+    /// and the one that keeps agreeing is this one.
+    let routable
+        (linked: string -> string -> bool)
+        (maxHops: int)
+        (home: string)
+        (room: string)
+        : bool =
+        withinHopBudget maxHops home room
+        && RoomName.routesBy linked maxHops home room |> List.isEmpty |> not
+
+    /// The declared rooms of one kind that no chain joins to this home, each
+    /// under the kind it was declared as (#243, ADR 0058, ADR 0060). A walk is
+    /// priced over a chain of at most `Tuning.MaxHops` Seams, each leg a flood
+    /// that never leaves its room, so a room further out than that is not a
+    /// badly-priced declaration but an unpriceable one: `pricedAcross` and
+    /// `haulRoundTripTicks` answer `None` for every target in it, and by ADR
+    /// 0004 unpriceable geometry never counts against a Task. Worked anyway,
+    /// such a room is projected, pooled and hired for — ADR 0042's reserver row
+    /// hires one body per declared outpost — and every body bought for it
+    /// stands beside the spawn for its whole life with nothing to say why. So
+    /// the declaration is **refused** here rather than accepted and never
+    /// worked, and the refusal is named: `ColonyView.Refused` carries it to the
+    /// colony's [[layout record]], and the test over `Colony.declared` is what
+    /// makes a human's slip red before it is deployed. Read off the whole
+    /// declaration and not off `worked`'s survivors: a room this refuses is
+    /// wrong whatever the stand-down is doing about it this tick.
+    let refused
+        (linked: string -> string -> bool)
+        (maxHops: int)
+        (home: string)
+        (kind: DeclarationKind)
+        (rooms: string list)
+        : RefusedDeclaration list =
+        rooms
+        |> List.filter (routable linked maxHops home >> not)
+        |> List.map (fun room -> { RoomName = room; Kind = kind })
+
 /// One outpost: a room this colony mines and does not own, inside the hop
 /// budget its home reaches over a chain of Seams (`Tuning.MaxHops`, ADR 0058;
 /// it was a *neighbouring* room until that ADR, and most of them still are).
@@ -44,69 +154,34 @@ module Outpost =
         outposts
         |> List.filter (fun outpost -> not (Set.contains outpost.RoomName shut))
 
-    /// Whether a declared outpost is one its home can work **at all**: the two
-    /// rooms are inside the hop budget, so a chain of [[seam]]s could join them
-    /// (`RoomName.hopsBetween`, ADR 0058). Not a gate that opens and shuts like
-    /// the [[stand-down]]'s — it is a fact about the declaration a human wrote
-    /// and the constant they wrote it under, and it answers the same on every
-    /// tick of that declaration's life.
-    ///
-    /// Read off the **names**, as `RoomName.neighbouring` was before it and for
-    /// the same reason: this is asked while the scan set is being built, which
-    /// is before there is a projection to read terrain off. So it answers
-    /// whether the declaration is *shaped* like one a route could join, never
-    /// whether one does — a room inside the budget that every chain to is
-    /// walled is priced at `None` by `Atlas.route` and is the case #259 is
-    /// open on, one hop out and now three.
+    /// Whether a declared outpost is one its home can work **at all**, off the
+    /// names (`Declaration.withinHopBudget`, ADR 0058). The shared rule read
+    /// through this declaration's own room name, so an outpost and an errand
+    /// cannot disagree about what the budget is.
     let withinHopBudget (maxHops: int) (home: string) (outpost: Outpost) : bool =
-        RoomName.hopsBetween home outpost.RoomName
-        |> Option.exists (fun hops -> hops >= 1 && hops <= maxHops)
+        Declaration.withinHopBudget maxHops home outpost.RoomName
 
-    /// Whether a chain actually joins the two — the same question one room
-    /// further down (#259, ADR 0058). `withinHopBudget` above answers off the
-    /// names and so can be asked of a declaration with no terrain read at all;
-    /// this one asks `linked` per border and so answers whether a creep could
-    /// really walk there. The budget is inside it: `RoomName.routeBy` searches
-    /// no deeper, so a room this accepts is one `Atlas.route` will price.
-    ///
-    /// The two are not the same test and the difference is the whole of #259: a
-    /// room three hops out whose every chain the engine walled is *shaped* like
-    /// a declaration and is not one, and refusing it on the names alone would
-    /// leave it projected, pooled and hired for by a row that hires per
-    /// declared outpost — #243's silent failure, one budget further out.
+    /// Whether a chain actually joins the two (`Declaration.routable`, #259),
+    /// asked of this declaration's room.
     let routable
         (linked: string -> string -> bool)
         (maxHops: int)
         (home: string)
         (outpost: Outpost)
         : bool =
-        withinHopBudget maxHops home outpost
-        && RoomName.routeBy linked maxHops home outpost.RoomName |> Option.isSome
+        Declaration.routable linked maxHops home outpost.RoomName
 
-    /// The declared outposts outside the hop budget, by name (#243, ADR 0058).
-    /// A walk is priced over a chain of at most `Tuning.MaxHops` Seams, each
-    /// leg a flood that never leaves its room, so a room further out than that
-    /// is not a badly-priced outpost but an unpriceable one: `pricedAcross` and
-    /// `haulRoundTripTicks` answer `None` for every target in it, and by ADR
-    /// 0004 unpriceable geometry never counts against a Task. Worked anyway,
-    /// such a room is projected, pooled and hired for — ADR 0042's reserver row
-    /// hires one body per declared outpost — and every body bought for it
-    /// stands beside the spawn for its whole life with nothing to say why. So
-    /// the declaration is **refused** here rather than accepted and never
-    /// worked, and the refusal is named: `ColonyView.Refused` carries it to the
-    /// colony's [[layout record]], and the test over `Colony.declared` is what
-    /// makes a human's slip red before it is deployed. Read off the whole
-    /// declaration and not off `worked`'s survivors: a room this refuses is
-    /// wrong whatever the stand-down is doing about it this tick.
+    /// The declared outposts no chain joins to this home, each named as the
+    /// outpost it was declared as (`Declaration.refused`, #243, ADR 0058).
     let refused
         (linked: string -> string -> bool)
         (maxHops: int)
         (home: string)
         (outposts: Outpost list)
-        : string list =
+        : RefusedDeclaration list =
         outposts
-        |> List.filter (routable linked maxHops home >> not)
         |> List.map (fun outpost -> outpost.RoomName)
+        |> Declaration.refused linked maxHops home DeclarationKind.Outpost
 
     /// The rooms the shell projects this tick: the home room, and every
     /// declared outpost beside it (ADR 0041). One projection covering several
@@ -309,6 +384,214 @@ module Outpost =
             Controller = "6a8caa95dd4872bccd319015", { Room = "W15S28"; X = 25; Y = 31 }
         }
 
+/// One errand: a room a colony declares because it must walk a body there and
+/// act on **one** named object in it, and for no other reason (ADR 0060
+/// decision 1). A room name and that object's engine id and tile, and nothing
+/// else — the second declaration kind, beside `Outpost` and not inside it,
+/// because every reader of an outpost asks a question that presumes a
+/// controller (the reservation, ADR 0042; the [[stand-down]] and its rival
+/// latch, ADR 0043; the reserver row's per-declared-outpost quota; ADR 0056's
+/// guard), and an optional `Controller` would make each of them learn to skip —
+/// each a place the skip can be forgotten. It would also put a room we mine
+/// nothing in on the list of rooms we mine, which is what `Outpost`'s own type
+/// is for.
+///
+/// **More than a [[transit room]] and less than an [[outpost]].** More, because
+/// the errand room's vision is work and the one target it names is the work: it
+/// enters the [[spatial projection]] carrying terrain, a border ring and that
+/// target laid under whatever vision answers, which is exactly the shape ADR
+/// 0041 gave an outpost's sources and controller and for exactly the same
+/// reason — a courier has to hold `Deliver of reactorId` before any body of
+/// ours has stood in the room. Less, because *nothing else* in that room is:
+/// no furniture is laid there beyond the one target, no source or controller of
+/// it is ever pooled however much vision we pay for, and no row hires for it
+/// except the ones the errand's own Tasks belong to. The failure #286 found
+/// live in W14S28 — a reserver hired against a controller no declaration names,
+/// an Anchor on a rock nobody declared — is the failure that narrowing exists
+/// to prevent one room further out.
+///
+/// What does **not** wait on the declaration is everything that changes — the
+/// target's store, its owner — which is the projection's to answer where there
+/// is vision and is absent entry by entry where there is none (ADR 0004). The
+/// narrowing below carries every such entry the shell filed under the declared
+/// id and drops the rest, which is the rule; what the *shell* files for the one
+/// target the live errand names is, today, **nothing at all**, and that is a
+/// hole rather than a tick of darkness: `World.seenFacts` builds `Stores` and
+/// `Thorium` off `isStored`, which is `false` for `BuiltKind.Other` and so for
+/// every `STRUCTURE_*` the kind table lacks; there is no per-object owner
+/// anywhere in this repo (`Owner` is `ControlInfo`'s, the *room*'s); and
+/// `continuousWork` is not a word the tree knows. **#318 is where those facts
+/// arrive** — its "the tick the `reactor` leaf stops reading stale" is blocked
+/// on exactly them — and until they do, the body standing there is the colony's
+/// only eye on the room in intent rather than in fact.
+///
+/// Declared **inside the colony that runs it**, beside `Colony.Outposts`, for
+/// ADR 0047's reason: a room's name in that list is what makes it that colony's
+/// business. The ids are the **engine's own**, as every declaration in this
+/// repo is, because a declaration written in readable names matches nothing on
+/// a live server and does it in silence (ADR 0041).
+type Errand =
+    {
+        RoomName: string
+        /// The one object the errand is for, under the id the engine knows it
+        /// by, and its tile joined to the room it is a tile of (ADR 0052
+        /// decision 2). One and not a list: an errand is declared because there
+        /// is exactly one thing out there to act on, and a second entry would
+        /// be a second errand's.
+        Target: string * RoomPos
+    }
+
+[<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
+module Errand =
+    /// Whether a declared errand is one its home can reach at all, off the
+    /// names (`Declaration.withinHopBudget`, ADR 0058).
+    let withinHopBudget (maxHops: int) (home: string) (errand: Errand) : bool =
+        Declaration.withinHopBudget maxHops home errand.RoomName
+
+    /// Whether a chain of [[seam]]s actually joins the errand's room to this
+    /// home (`Declaration.routable`, #259). Asked in `World.scanOf` on the same
+    /// tick and against the same `linked` an outpost's is, because the two
+    /// refusals are one rule — and it matters more here than there, for the
+    /// reason `RefusedDeclaration` states once and this does not restate.
+    let routable
+        (linked: string -> string -> bool)
+        (maxHops: int)
+        (home: string)
+        (errand: Errand)
+        : bool =
+        Declaration.routable linked maxHops home errand.RoomName
+
+    /// The declared errands no chain joins to this home, each named as the
+    /// errand it was declared as (`Declaration.refused`, ADR 0060 decision 1).
+    let refused
+        (linked: string -> string -> bool)
+        (maxHops: int)
+        (home: string)
+        (errands: Errand list)
+        : RefusedDeclaration list =
+        errands
+        |> List.map (fun errand -> errand.RoomName)
+        |> Declaration.refused linked maxHops home DeclarationKind.Errand
+
+    /// The rooms one colony's errands add to its scan set: each errand's room
+    /// and every room a shortest walk to it could cross (ADR 0058), exactly as
+    /// `Outpost.roomsProjected` unions an outpost's chain and by the same call.
+    /// The rule ADR 0058 stated is unchanged and is what makes an errand
+    /// declarable at all: which rooms are projected is answered off the
+    /// **names**, because the route needs their terrain and their terrain needs
+    /// them projected. Home itself is not in the list — `Colony.roomsProjected`
+    /// puts it there once, for every declaration kind at once.
+    let roomsProjected (errands: Errand list) (home: string) : string list =
+        errands
+        |> List.collect (fun errand ->
+            errand.RoomName :: RoomName.transitBetween home errand.RoomName)
+
+    /// One errand's declared target as a projection entry: the id paired with
+    /// the tile the declaration names, and no kind at all. A declared tile filed
+    /// under another room name is **dropped** here rather than written onto this
+    /// room's coordinate (ADR 0052 decision 2), exactly as an outpost's is.
+    ///
+    /// **No kind, and that is the narrowing.** An outpost's furniture is placed
+    /// *and* classified because the Harvest and Reserve pools are built by
+    /// sweeping the kind census; an errand's target is placed and classified by
+    /// nothing, so it is priceable and walkable by a Task that names its id —
+    /// which the declaration's own Tasks do — and enumerable by no pool that
+    /// sweeps a kind. That is the whole of "no row hires for it except the ones
+    /// the errand's own Tasks belong to" (ADR 0060 decision 1), said in the
+    /// data rather than as a rule each pool has to remember.
+    let private targetOf (errand: Errand) : (string * Pos) option =
+        let id, tile = errand.Target
+
+        if tile.Room = errand.RoomName then
+            Some(id, RoomPos.pos tile)
+        else
+            None
+
+    /// The declared targets, laid into the projection: for every scanned
+    /// errand, its one object at the tile and under the id the declaration
+    /// names — whether or not the colony has vision there. The half of ADR 0041
+    /// that vision may not gate, and the deadlock it breaks: a target's position
+    /// needs vision, vision needs a creep there, a creep goes there because a
+    /// Task exists, and the Task exists because the target is in the projection.
+    /// Absence read onto the declaration as well is what left ADR 0042's chain
+    /// with no first step, because no Task could name the room and so nothing
+    /// ever walked there to get the vision. Vision wins every entry it holds:
+    /// the declaration is laid *under* what the room's `find` families answered.
+    let place (errands: Errand list) (spatial: SpatialInfo) : SpatialInfo =
+        (spatial, errands)
+        ||> List.fold (fun spatial errand ->
+            match Map.tryFind errand.RoomName spatial.Rooms, targetOf errand with
+            | Some layer, Some(id, pos) ->
+                { spatial with
+                    Rooms =
+                        Map.add
+                            errand.RoomName
+                            { layer with
+                                TargetPositions =
+                                    if Map.containsKey id layer.TargetPositions then
+                                        layer.TargetPositions
+                                    else
+                                        Map.add id pos layer.TargetPositions
+                            }
+                            spatial.Rooms
+                }
+            | _ -> spatial)
+
+    /// The ids one errand room's facts may keep: the targets the declarations
+    /// filed under that room name, and nothing else. What the view's own
+    /// narrowing cuts an errand room's vision down to (`ColonyView.ofWorld`) —
+    /// the one target a declaration names is work, and the room's sources, its
+    /// sites and whatever else stands in it are not, however much vision we pay
+    /// for. Empty for a room no errand names, which is the answer every other
+    /// room in the scan set wants.
+    let targetsIn (room: string) (errands: Errand list) : Set<string> =
+        errands
+        |> List.filter (fun errand -> errand.RoomName = room)
+        |> List.choose (targetOf >> Option.map fst)
+        |> Set.ofList
+
+    /// W15S28's errand: the sector Reactor at W15S25 (44,6), declared
+    /// 2026-09-13 off ADR 0060 decision 1 and `docs/research/thorium-season-plan.md`.
+    /// The room is a **sector centre** and has no controller at all, so it can
+    /// never be an `Outpost` — that is the vocabulary hole this kind fills, and
+    /// the distance never was the problem: the reactor is exactly three
+    /// crossings from W15S28, by W15S27 and the Source Keeper room W15S26,
+    /// inside `Tuning.MaxHops`, and W15S28 was sited for that
+    /// (`docs/research/third-colony.md` §4). It is five crossings from W13S28
+    /// and six from W12S28, which is why neither of those colonies declares it
+    /// and neither projects one room of the way there: a price into it from
+    /// either is `None`, and a room in their projection would be one every rule
+    /// answers nothing about.
+    ///
+    /// The id and the tile are the engine's, read off `/api/game/room-objects`
+    /// at **tick 396,515–396,757**, the window
+    /// `docs/research/thorium-season-plan.md` was taken over and the day this
+    /// was declared — dated because every engine-read fact in this tree is, a
+    /// declaration being a claim about a live server at one moment of it.
+    ///
+    /// The reactor's store, its owner and its `continuousWork` are **not** here
+    /// and must not be: they change, so they belong to the projection where
+    /// there is vision and are absent entry by entry where there is none (ADR
+    /// 0004). What has to be said plainly is that today the projection does not
+    /// carry them **either**, and not because the room is dark: `World.seenFacts`
+    /// fills `Stores` and `Thorium` from `isStored`, which is `false` for
+    /// `BuiltKind.Other` and so for every `STRUCTURE_*` outside the kind table;
+    /// no per-object owner exists anywhere in this repo; and `continuousWork`
+    /// appears nowhere in it. They are permanently absent, not absent-when-dark,
+    /// and **#318 is the ticket that lands them** — whoever picks it up is
+    /// looking for a missing `isStored`/owner fact and not for a missing `find`
+    /// sweep, since `builtKindOf` already classifies an unknown structure as
+    /// `Other` and places it harmlessly. Nothing in this repo captures a
+    /// reactor either — `scripts/capture-room.mjs` takes a room's *fixed*
+    /// furniture, which is its sources, its controller and its mineral (ADR
+    /// 0036) — so W15S25's committed capture pins the ground this tile stands
+    /// on and never the object standing on it.
+    let w15s25: Errand =
+        {
+            RoomName = "W15S25"
+            Target = "6a901a3bb8684d0008337ed2", { Room = "W15S25"; X = 44; Y = 6 }
+        }
+
 /// The [[stand-down]] gate's whole answer for one colony this tick (ADR 0043 as
 /// #165 narrows it), derived once off that colony's [[raid log]]
 /// (`Observe.standDown`) and handed to `ColonyView.ofWorld`: two sets rather
@@ -383,6 +666,16 @@ type Colony =
         /// it is independent: one room projected by two colonies at once is
         /// what the mother's outpost declaration already means (ADR 0047).
         Outposts: Outpost list
+        /// The rooms it walks a body to for one named object and for nothing
+        /// else (ADR 0060 decision 1). Beside `Outposts` and never inside it:
+        /// an errand room is not one we mine, and the room this list exists for
+        /// has no controller to be an outpost's. Declared inside the colony
+        /// that runs it, for ADR 0047's reason, and projected by **that colony
+        /// alone** — the errand in force names a room five and six crossings
+        /// from the other two homes, so a price from either is `None` and a
+        /// room in their projection would be one every rule answers nothing
+        /// about. That is not an economy, it is the rule.
+        Errands: Errand list
         /// The home room of the [[mother colony]] that raised this one, for as
         /// long as it is still being raised (ADR 0047 decision 4): the
         /// **bootstrap** window, from the day the child leaves its mother's
@@ -413,6 +706,9 @@ module Colony =
                 // W12S27 alone since W13S28 stood its own spawn (below); the
                 // room is ADR 0042's north outpost, read off the pair above.
                 Outposts = Outpost.adr0042 |> List.filter (fun o -> o.RoomName = "W12S27")
+                // The sector Reactor is six crossings away and no room of the
+                // way there is projected from here (ADR 0060 decision 1).
+                Errands = []
                 Mother = None
             }
             // The second colony (ADR 0047). W13S28 was the first colony's
@@ -464,6 +760,11 @@ module Colony =
                 // 4). Live proof: claimed at t~305,2xx, spawn site placed by
                 // hand, and not one body crossed until this line changed.
                 Outposts = [ Outpost.w13s29 ]
+                // Five crossings to the Reactor, so this colony declares no
+                // errand either — and the 22,000 Thorium it banks is ore
+                // nothing here can deliver, which ADR 0060 decision 3 files as
+                // its own open question and does not answer.
+                Errands = []
                 Mother = Some "W12S28"
             }
             // The third colony (2026-09-10, `docs/research/third-colony.md`).
@@ -477,6 +778,12 @@ module Colony =
             {
                 Home = "W15S28"
                 Outposts = []
+                // And the one errand there is (ADR 0060 decision 1): the
+                // sector Reactor in W15S25, three crossings out by W15S27 and
+                // the Source Keeper room W15S26. This colony declares it
+                // because this colony is the only one that can reach it, which
+                // is the room's whole reason for being where it is.
+                Errands = [ Errand.w15s25 ]
                 Mother = Some "W13S28"
             }
         ]
@@ -490,6 +797,18 @@ module Colony =
         colonies
         |> List.tryFind (fun colony -> colony.Home = home)
         |> Option.map (fun colony -> colony.Outposts)
+        |> Option.defaultValue []
+
+    /// The [[errand]]s one home room runs, on the same rule and for the same
+    /// reason (ADR 0060 decision 1): its own declaration's, and none at all for
+    /// a room nobody declared. Read through this rather than off the field
+    /// wherever the home is a *name*, so a slip in the constant costs the
+    /// colony its errand rather than putting it in a state nothing has a rule
+    /// for.
+    let errandsOf (colonies: Colony list) (home: string) : Errand list =
+        colonies
+        |> List.tryFind (fun colony -> colony.Home = home)
+        |> Option.map (fun colony -> colony.Errands)
         |> Option.defaultValue []
 
     /// Every declared colony's home room, in declaration order. What the
@@ -530,6 +849,10 @@ module Colony =
                 {
                     Home = home
                     Outposts = []
+                    // And no errand: an errand is a walk a human wrote down,
+                    // and an invented one would send a body three rooms out
+                    // for a constant's slip.
+                    Errands = []
                     // Nobody's child: a room the declaration does not
                     // describe is one no human wrote a mother for, and an
                     // invented one would hire pioneers for a constant's slip.
@@ -629,16 +952,23 @@ module Colony =
         colony |> childrenWhere colonies (fun home -> Set.contains home unowned)
 
     /// The rooms one colony projects this tick: its home and its worked
-    /// [[outpost]]s (`Outpost.roomsProjected`), and beside them the rooms it
+    /// [[outpost]]s (`Outpost.roomsProjected`), its [[errand]]s beside them
+    /// (`Errand.roomsProjected`, ADR 0060 decision 1), and the rooms it
     /// bootstraps. The whole scan set in one sentence, here and not in the
     /// shell, because the projection is not the set's only reader — the entity
     /// lists the Task pool is built from are swept over it too.
     let roomsProjected
         (outposts: Outpost list)
+        (errands: Errand list)
         (bootstrap: string list)
         (home: string)
         : string list =
         Outpost.roomsProjected outposts home
+        // An errand's room and its chain, by the same union and the same rule
+        // one hop wider (ADR 0060 decision 1): `World.worldRooms` picks the
+        // room up because a *standing colony declares it*, which is the path an
+        // outpost already takes, and only the declaring colony's set gains it.
+        @ Errand.roomsProjected errands home
         // A borrowed room carries its transit rooms exactly as an outpost does
         // (ADR 0058): the mother works two Tasks in a child of hers, and a
         // Task in a room no chain reaches is priced at `None` — so a nursery

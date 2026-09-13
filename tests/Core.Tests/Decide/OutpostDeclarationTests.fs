@@ -1535,6 +1535,7 @@ let outpostTests =
                 Expect.equal
                     (Colony.roomsProjected
                         (Colony.outpostsOf Colony.declared "W13S28")
+                        (Colony.errandsOf Colony.declared "W13S28")
                         [ "W15S28" ]
                         "W13S28")
                     [ "W13S28"; "W13S29"; "W15S28"; "W14S28" ]

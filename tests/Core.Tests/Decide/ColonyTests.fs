@@ -919,11 +919,13 @@ let private splitPair =
         {
             Home = "W1N1"
             Outposts = []
+            Errands = []
             Mother = None
         }
         {
             Home = "W1N2"
             Outposts = []
+            Errands = []
             Mother = None
         }
     ]
@@ -946,11 +948,13 @@ let private nurseryPair =
                         Controller = "ctrl-out", { Room = "W1N2"; X = 10; Y = 42 }
                     }
                 ]
+            Errands = []
             Mother = None
         }
         {
             Home = "W1N2"
             Outposts = []
+            Errands = []
             Mother = Some "W1N1"
         }
     ]
@@ -964,11 +968,13 @@ let private raisedPair =
         {
             Home = "W1N1"
             Outposts = []
+            Errands = []
             Mother = None
         }
         {
             Home = "W1N2"
             Outposts = []
+            Errands = []
             Mother = Some "W1N1"
         }
     ]
@@ -990,6 +996,7 @@ let private projectionsOf (stages: Map<string, ColonyStage>) (colonies: Colony l
         colony.Home,
         Colony.roomsProjected
             colony.Outposts
+            colony.Errands
             (Colony.bootstrapping stages colonies colony)
             colony.Home)
 
@@ -1523,11 +1530,13 @@ let twoColonyTests =
                         {
                             Home = home
                             Outposts = []
+                            Errands = []
                             Mother = None
                         }
                         {
                             Home = child
                             Outposts = []
+                            Errands = []
                             Mother = Some home
                         }
                     ]
@@ -1536,6 +1545,7 @@ let twoColonyTests =
                     let colonies = raising home child
 
                     Colony.roomsProjected
+                        []
                         []
                         (Colony.bootstrapping
                             (Map.ofList [ child, Nursery ])

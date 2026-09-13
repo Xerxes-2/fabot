@@ -690,9 +690,9 @@ let saveQuotas (home: string) (quotas: Quotas) =
 
 /// Write one colony's losses this tick — the footing targets the Layout could
 /// not serve, the trunks it could not route, the container picks it deferred to
-/// a container already serving their target (ADR 0040), and the declared
-/// [[outpost]]s the colony refuses because its home shares no border with them,
-/// so no [[seam]] can join them to it (#243) — under
+/// a container already serving their target (ADR 0040), and the declarations the
+/// colony refuses because no chain of [[seam]]s joins them to its home (#243,
+/// ADR 0060 decision 1) — under
 /// `observe.colonies.<home>.layout`, leaving every other leaf
 /// alone the way `saveRaids` does. Four lists in one leaf, so a reader asking
 /// what this room lost asks once, which is ADR 0035's own reason for putting
@@ -708,7 +708,7 @@ let saveLayout
     (unserved: UnservedFooting list)
     (unrouted: UnroutedTrunk list)
     (deferred: DeferredContainer list)
-    (refused: string list)
+    (refused: RefusedDeclaration list)
     =
     let layout = createEmpty<obj>
 
@@ -758,11 +758,21 @@ let saveLayout
             o)
         |> List.toArray
 
-    // Room names and nothing else: the room is the whole of what a reader
-    // can act on, since the fix is a human moving the declaration (ADR
-    // 0041's constant), and the home this leaf is filed under is the other
-    // half of the pair already.
-    layout?refused <- refused |> List.toArray
+    // The room and the kind it was declared as (ADR 0060 decision 1). The
+    // room alone was the whole of what a reader could act on while there was
+    // one kind of declaration; with two, a bare "W15S25" under a heading that
+    // reads "declared outposts" is a second silence wearing the first one's
+    // clothes. The fix is still a human moving the declaration (ADR 0041's
+    // constant), and the kind is what says which list to move it in; the home
+    // this leaf is filed under is the other half of the pair already.
+    layout?refused <-
+        refused
+        |> List.map (fun entry ->
+            let o = createEmpty<obj>
+            o?room <- entry.RoomName
+            o?kind <- declarationKindName entry.Kind
+            o)
+        |> List.toArray
 
     writeColonyLeaf home "layout" layout
 

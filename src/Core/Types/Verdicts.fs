@@ -204,6 +204,21 @@ let footingKindOf =
             FootingKind.Storage
         ]
 
+/// The wire spelling of each DeclarationKind, on the Layout channel's Memory
+/// leaf beside `footingKindName` and under the same rule (ADR 0060 decision 1).
+/// The refusal's own row carries it, because a room name under a heading that
+/// reads "declared outposts" says the wrong thing about an [[errand]], and the
+/// operator's next act — which list to move the declaration in — turns on it.
+let declarationKindName =
+    function
+    | DeclarationKind.Outpost -> "outpost"
+    | DeclarationKind.Errand -> "errand"
+
+/// The DeclarationKind a wire name spells, or None for a name this vocabulary
+/// does not have.
+let declarationKindOf =
+    reverseOf declarationKindName [ DeclarationKind.Outpost; DeclarationKind.Errand ]
+
 /// The wire spelling of each TrunkGoal, on the Layout channel's Memory leaf
 /// beside `footingKindName`. A carrying vocabulary, like the two reason
 /// vocabularies: the spawn's id rides beside the name rather than inside it, so

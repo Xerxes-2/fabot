@@ -104,7 +104,8 @@ let outpostDeclarationTests =
                     Colony.declared
                     |> List.collect (fun colony ->
                         Outpost.refused linked Tuning.defaults.MaxHops colony.Home colony.Outposts
-                        |> List.map (fun room -> $"{room} is unreachable from {colony.Home}"))
+                        |> List.map (fun entry ->
+                            $"{entry.RoomName} is unreachable from {colony.Home}"))
 
                 Expect.isEmpty
                     unreachable
@@ -381,6 +382,135 @@ let outpostContainerTests =
                         (List.sort [ Reserve north; Claim west ])
                         "declared, the candidate colony's controller is a Claim and the other outpost is unmoved"
                 | _ -> failtest "the declaration names a controller for each of its outposts"
+            }
+        ]
+
+[<Tests>]
+let errandDeclarationTests =
+    testList
+        "the declared errands against their captures"
+        [
+            test "a chain of real border rings joins every declared errand to its home" {
+                // The other half of the refusal, the half that needs terrain
+                // (ADR 0060 decision 1, #259): `ViewTests` asks the **names**
+                // over the live constant, which is all that altitude can
+                // answer, and this asks the ground. The declaration that
+                // needs it is the reactor's: three crossings out, joined only
+                // if W15S27's and W15S26's rings are both crossable, and a
+                // room the names accept while the ground refuses is an errand
+                // whose entire content — a walk — does not exist.
+                //
+                // `linked` is built the way the shell builds it
+                // (`World.linked`): a ring tile the capture carries whose
+                // terrain is not wall, and a room no capture is loaded for is
+                // joined to nothing, which is what keeps the search inside the
+                // rooms the projection would hold.
+                //
+                // NOTE (#317): these rings are the **raw** captures. The
+                // keeper mask lands on its own ticket and takes tiles out of
+                // W15S26's walkable layer, so this chain is re-checked over
+                // the masked layer there; a mask near a border can empty a
+                // Seam band, and this line is what would go red if it did.
+                let rings =
+                    Colony.declared
+                    |> List.collect (fun colony ->
+                        Outpost.roomsProjected colony.Outposts colony.Home
+                        @ Errand.roomsProjected colony.Errands colony.Home)
+                    |> List.distinct
+                    |> List.map (fun room -> room, (load room).Border)
+                    |> Map.ofList
+
+                let linked fromRoom toRoom =
+                    let walkableIn room tile =
+                        match Map.tryFind room rings with
+                        | Some border ->
+                            match Map.tryFind tile border with
+                            | Some terrain -> terrain <> Wall
+                            | None -> false
+                        | None -> false
+
+                    Seam.joinedBy (walkableIn fromRoom) (walkableIn toRoom) fromRoom toRoom
+
+                Expect.isNonEmpty
+                    (Colony.declared |> List.collect (fun colony -> colony.Errands))
+                    "a declaration nobody made is nothing to check"
+
+                let unreachable =
+                    Colony.declared
+                    |> List.collect (fun colony ->
+                        Errand.refused linked Tuning.defaults.MaxHops colony.Home colony.Errands
+                        |> List.map (fun entry ->
+                            $"{entry.RoomName} is unreachable from {colony.Home}"))
+
+                Expect.isEmpty
+                    unreachable
+                    $"""every declared errand is joined to its home by a chain of Seams: {String.concat "; " unreachable}"""
+
+                // And the chain itself, over the same rings: three crossings
+                // by W15S27 and the Source Keeper room W15S26, which is the
+                // walk ADR 0060 decision 3 measured at 154 steps and the whole
+                // reason the third colony stands where it does. Every shortest
+                // chain and not one of them (ADR 0059): a second chain the
+                // terrain admits would be a price the walker could win at, and
+                // this says there is exactly one.
+                Expect.equal
+                    (RoomName.routesBy linked Tuning.defaults.MaxHops "W15S28" "W15S25")
+                    [ [ "W15S28"; "W15S27"; "W15S26"; "W15S25" ] ]
+                    "the reactor is three crossings from W15S28, by W15S27 and W15S26"
+
+                // The reason no other colony declares it, asserted rather than
+                // asserted-in-a-comment: five and six crossings, so a price
+                // into the room from either is `None` and a room in their
+                // projection would be one every rule answers nothing about.
+                for home, hops in [ "W13S28", 5; "W12S28", 6 ] do
+                    Expect.equal
+                        (RoomName.hopsBetween home "W15S25")
+                        (Some hops)
+                        $"{home} is {hops} crossings from the reactor, outside the hop budget"
+
+                    Expect.isFalse
+                        (Errand.routable linked Tuning.defaults.MaxHops home Errand.w15s25)
+                        $"so {home} could not run this errand even if a human wrote it there"
+            }
+
+            test "every declared errand names a tile its own capture holds as ground" {
+                // What a capture can say about an errand and the only thing it
+                // can: `capture-room.mjs` takes a room's *fixed* furniture —
+                // sources, controller, mineral (ADR 0036) — and a reactor is
+                // none of those, so no committed file carries the id the
+                // declaration names. What it does carry is the ground, and a
+                // declaration whose tile the room walls is a target no Seat
+                // surrounds and no body can ever stand beside.
+                for colony in Colony.declared do
+                    for errand in colony.Errands do
+                        let capture = load errand.RoomName
+                        let id, tile = errand.Target
+                        let pos = RoomPos.pos tile
+
+                        Expect.equal
+                            errand.RoomName
+                            capture.RoomName
+                            "the capture read is the room the declaration names"
+
+                        Expect.equal
+                            (Map.tryFind pos capture.Terrain)
+                            (Some Plain)
+                            $"{errand.RoomName}: the declared target stands on plain ground the server answered with"
+
+                        Expect.isNonEmpty
+                            (neighbourhood pos
+                             |> List.filter (fun tile ->
+                                 match Map.tryFind tile capture.Terrain with
+                                 | Some terrain -> terrain <> Wall
+                                 | None -> false))
+                            $"{errand.RoomName}: with ground beside it for the body that acts on it to stand on"
+
+                        Expect.isFalse
+                            (capture.RealSources
+                             @ (capture.RealController |> Option.toList)
+                             @ capture.RealMinerals
+                             |> List.exists (fun (other, _) -> other = id))
+                            $"{errand.RoomName}: and the id is the errand's own object, not a rock the capture already names"
             }
         ]
 

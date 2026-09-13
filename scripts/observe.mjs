@@ -718,17 +718,19 @@ if (command === "console") {
   //   { unserved: [{ x, y, kind }],
   //     unrouted: [{ source, goal, spawn? }],
   //     deferred: [{ target, source?, pick: { x, y }, serving: { x, y } }],
-  //     refused: [roomName] }
+  //     refused: [{ room, kind }] }
   // Four lists in one leaf, the colony's losses of this tick: the footing
   // targets the fold found no tile for (#77), the trunks the router found
   // no path for (#107), the container picks the plan gave up because
-  // something already serves their target (ADR 0040), and the declared
-  // outposts that do not border this home (#243) — that last one the
-  // declaration's loss rather than the Layout's, on this channel because it
-  // is the same kind of answer: colony-level, this tick's, and with no
-  // creep for a Verdict to name. Read off the room names alone, so it
-  // names the declarations no Seam *can* join and never asks the terrain
-  // whether one does. The current plan's record, not a history: no ring,
+  // something already serves their target (ADR 0040), and the declarations
+  // no chain of Seams joins to this home (#243, #259, ADR 0060) — that last
+  // one the declaration's loss rather than the Layout's, on this channel
+  // because it is the same kind of answer: colony-level, this tick's, and
+  // with no creep for a Verdict to name. Each of its rows says the room
+  // **and the kind it was declared as**, because there are two kinds now —
+  // an outpost a colony mines and an errand it walks a body to for one named
+  // object — and the operator's next act is to move one of two lists. The
+  // current plan's record, not a history: no ring,
   // no fold, the same lists every tick under a stable census. What a list
   // can say is three distinct answers and every one of them matters (ADR
   // 0035). A missing leaf is a missing channel — a bundle
@@ -760,6 +762,38 @@ if (command === "console") {
   const unrouted = listOrFail("unrouted");
   const deferred = listOrFail("deferred");
   const refused = listOrFail("refused");
+  // A refusal used to be a bare room name and is now `{ room, kind }` (ADR
+  // 0060 decision 1). A bundle that predates the kind writes strings here,
+  // and printing one as "(no kind)" beside a room would be this channel
+  // reporting a confident half-answer off a stale deploy — the very thing
+  // `listOrFail` above exists to refuse. So a row of the old shape fails as
+  // loudly as a missing list does, and says which deploy it came from.
+  //
+  // **Both halves, and the kind read through the vocabulary and not merely
+  // typechecked.** `declarationKindName` is a closed table (`Verdicts.fs`,
+  // round-tripped in `WireTests`), so a row whose kind is a string this
+  // channel does not know is a wire shape that has moved under it — and the
+  // operator's whole next act is to open one of the two lists this word
+  // names. Guarding `room` alone and then printing `kind ?? "(no kind)"`
+  // would be the confident half-answer the paragraph above refuses, written
+  // three lines under it.
+  const declarationKinds = ["outpost", "errand"];
+  for (const entry of refused) {
+    if (
+      typeof entry !== "object" ||
+      entry === null ||
+      typeof entry.room !== "string" ||
+      !declarationKinds.includes(entry.kind)
+    ) {
+      fail(
+        `the Layout record at Memory.fabot.observe.colonies.${home}.layout carries a ` +
+          `\`refused\` row that is not { room, kind } with kind one of ` +
+          `${declarationKinds.join("/")}: ${JSON.stringify(entry)}. The bundle ` +
+          "deployed there predates ADR 0060's declaration kinds, or the leaf was hand-edited. " +
+          'Not read as "an outpost".',
+      );
+    }
+  }
 
   // A carrying vocabulary as it reads back: one case spells a name and
   // carries an id beside it, so a row that lost the id says so rather than
@@ -822,24 +856,27 @@ if (command === "console") {
       }
     }
 
-    // A row here is a room a human declared and this colony cannot work:
-    // a Seam joins orthogonal neighbours only (ADR 0041), so nothing in a
-    // room further out can be priced, walked to or worked, and the colony
-    // refuses it rather than hiring a reserver that would stand by the
-    // spawn for its whole life (#243). The fix is a human's — move the
-    // declaration in `Colony.declared`, as the outposts are always moved —
-    // and it is not the bot's to make. An empty list says every
-    // declaration is *shaped* like one a Seam could join, and no more: a
-    // bordering room the engine walled end to end has no band either, and
-    // that is a terrain question this channel does not ask.
+    // A row here is a room a human declared and this colony cannot reach: a
+    // walk is priced over a chain of at most `Tuning.MaxHops` Seams (ADR
+    // 0058), so nothing in a room no such chain joins can be priced, walked
+    // to or worked, and the colony refuses it rather than hiring bodies that
+    // would stand by the spawn for their whole lives (#243, #259). The fix is
+    // a human's — move the declaration in `Colony.declared`, in whichever of
+    // the two lists its kind names — and it is not the bot's to make. An
+    // empty list says every declaration has a chain over the world's own
+    // border rings, which is the question `Outpost.routable` and
+    // `Errand.routable` both ask.
     if (refused.length === 0) {
-      console.log("every declared outpost borders this home");
+      console.log(`every declared outpost and errand is joined to ${home} by a chain of Seams`);
     } else {
       console.log(
-        `${refused.length} declared ${refused.length === 1 ? "outpost that does" : "outposts that do"} not border ${home}:`,
+        `${refused.length} declaration${refused.length === 1 ? "" : "s"} no chain reaches from ${home}:`,
       );
-      for (const room of refused) {
-        console.log(`  ${room}  — not a neighbour of ${home}, so it is worked by nobody`);
+      for (const entry of refused) {
+        console.log(
+          `  ${entry.room}  ${entry.kind} — no chain of Seams reaches it, ` +
+            "so it is worked by nobody",
+        );
       }
     }
   }

@@ -389,10 +389,20 @@ module RoomName =
             search [ fromRoom, [ fromRoom ] ] (Set.singleton fromRoom)
 
     /// The first of those chains — the answer this module gave before #288,
-    /// under `adjacent`'s own order. What a reader takes when it wants to know
-    /// **whether** a walk exists (`Outpost.routable`) or has no price to choose
-    /// a chain with; a reader that prices one takes `routesBy` above and keeps
-    /// the cheapest.
+    /// under `adjacent`'s own order. What a reader takes when it has no price to
+    /// choose a chain with; a reader that prices one takes `routesBy` above and
+    /// keeps the cheapest.
+    ///
+    /// **No production caller today, and the doc says so rather than naming a
+    /// reader that has moved.** `Outpost.routable` asked this until ADR 0060
+    /// decision 1 routed both declaration kinds through `Declaration.routable`,
+    /// which asks `routesBy`: "is there a chain" is an empty list and not a
+    /// missing head, and the list is the one that keeps answering that as the
+    /// tie-breaking moves. What holds this binding in place is the contract over
+    /// it — `AtlasSeamTests` pins that the head of `routesBy` is this answer,
+    /// which is the line that goes red if the search's order ever stops being
+    /// the order it documents. Retire it when that contract has a better home,
+    /// not because the last caller left.
     let routeBy
         (linked: string -> string -> bool)
         (maxHops: int)

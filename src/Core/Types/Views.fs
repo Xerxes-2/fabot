@@ -125,17 +125,23 @@ type ColonyView =
         /// bounded (ADR 0052 decision 7): today the Upgrade and the Build
         /// of a child it is still raising (ADR 0047 decision 4).
         Borrowed: BorrowedWork
-        /// The [[outpost]]s this colony's declaration names that its home
-        /// shares no border with, and that it therefore **refuses**
-        /// (`Outpost.refused`, #243): no [[seam]] joins them, so nothing in
-        /// them can be priced, walked to or worked, and they are out of the
-        /// scan set rather than in it unworkable. Carried on the view because
-        /// the refusal has to be *said*: it is the colony's own reading of its
-        /// declaration, it reaches the operator on the [[layout record]] beside
-        /// the plan's other losses, and the silence it replaces is what #243
-        /// was filed for. Empty is the healthy answer and rides here all the
-        /// same, as the Layout's own loss lists do (ADR 0035).
-        Refused: string list
+        /// The declarations this colony's constant names that no chain of
+        /// [[seam]]s joins to its home, and that it therefore **refuses**
+        /// (`Outpost.refused`, `Errand.refused`, #243, ADR 0060 decision 1):
+        /// nothing in them can be priced, walked to or worked, and they are out
+        /// of the scan set rather than in it unworkable. Carried on the view
+        /// because the refusal has to be *said*: it is the colony's own reading
+        /// of its declaration, it reaches the operator on the [[layout record]]
+        /// beside the plan's other losses, and the silence it replaces is what
+        /// #243 was filed for. Empty is the healthy answer and rides here all
+        /// the same, as the Layout's own loss lists do (ADR 0035).
+        ///
+        /// Each entry carries the **kind** it was declared as and not the room
+        /// name alone, because there are two kinds now and a reader told only
+        /// the room has to guess which list to go and look at — and because the
+        /// two failures are not the same size, which `RefusedDeclaration` sizes
+        /// once and this does not restate.
+        Refused: RefusedDeclaration list
         /// What each room this colony **works** was last seen to carry (#151):
         /// the world's sightings, narrowed to the scan set. The narrowing is
         /// the rule and not housekeeping — a room a [[stand-down]] withholds
@@ -316,6 +322,61 @@ module ColonyView =
             ConstructionSites = []
         }
 
+    /// An **errand** room's facts: a [[transit room]]'s ground and bodies, and
+    /// beside them the one thing a declaration out there names (ADR 0060
+    /// decision 1). More than a transit room and less than an [[outpost]], and
+    /// this is where both halves of that are said.
+    ///
+    /// **More**, because a declared room's vision is work and the one target it
+    /// names is the work: whatever the shell filed under that id — its store,
+    /// its Thorium, its cooldown — rides on the view rather than being cut away
+    /// with the rest of the room. What the declaration itself supplies is laid
+    /// over this afterwards (`Errand.place`), so the target is placed whether or
+    /// not there is vision, and everything about it that *changes* is absent
+    /// entry by entry where there is none (ADR 0004).
+    ///
+    /// That is the **rule**, and it is not yet a live fact for the errand in
+    /// force. `World.seenFacts` fills `Stores` and `Thorium` off `isStored`,
+    /// which is `false` for `BuiltKind.Other` and so for every `STRUCTURE_*`
+    /// outside the kind table — a reactor among them — and nothing in this repo
+    /// reads a per-object owner or a `continuousWork` at all. So what this line
+    /// passes through for W15S25's target today is an empty answer on every
+    /// tick, vision or none, and the `ViewTests` case that proves the vision
+    /// half has to stand the target up as a `Structure Container` to do it.
+    /// **#318** is where the missing facts arrive and where "the body standing
+    /// there is the colony's only eye on it" stops being an intention.
+    ///
+    /// **Less**, because nothing else in that room is work, however much vision
+    /// we pay for: no source of it is pooled, no controller of it is Reserved,
+    /// no site of it is built. The errand in force names a sector centre with
+    /// three sources, an owner-less extractor and no controller at all, and
+    /// what this narrowing prevents is #286's live failure one room further out
+    /// — a row hiring against furniture no declaration names, because our own
+    /// bodies walking through were the vision that filed it.
+    ///
+    /// The kind census stays **empty**, which is the narrowing stated in the
+    /// data rather than as a rule each pool has to remember: every pool is
+    /// built by sweeping `TargetKinds`, so an id that is placed and classified
+    /// by nothing is priceable by a Task that names it — which the errand's own
+    /// Tasks do — and enumerable by no pool at all. The room's hits go with the
+    /// kinds and for the same reason: a Repair is pooled off a hit count, and
+    /// an errand's target is not a thing this colony repairs.
+    let private erranding (targets: Set<string>) (facts: RoomFacts) : RoomFacts =
+        let crossed = transiting facts
+
+        let named map =
+            map |> Map.filter (fun id _ -> Set.contains id targets)
+
+        { crossed with
+            Layer =
+                { crossed.Layer with
+                    TargetPositions = named facts.Layer.TargetPositions
+                }
+            Stores = named facts.Stores
+            Thorium = named facts.Thorium
+            Cooldowns = named facts.Cooldowns
+        }
+
     /// One colony's view of this tick (ADR 0052 decision 1): the rooms it works
     /// cut out of the `World`, the bodies it holds cut out of the world's
     /// creeps, its own bank and controller, and the explicit little it may take
@@ -343,7 +404,7 @@ module ColonyView =
         // The declaration's narrowings and their union, off the one
         // derivation the creep adoption reads too (`World.scanOf`). Written
         // here a second time it would be a second answer free to disagree.
-        let outposts, bootstrap, scanned =
+        let scan =
             World.scanOf
                 tuning.MaxHops
                 stages
@@ -353,17 +414,46 @@ module ColonyView =
                 world
                 colony
 
+        // Named out of the record once rather than read through `scan.` at each
+        // of the dozen sites below, which is the shape this block had while it
+        // was a tuple; what the record buys is that the names are now the
+        // compiler's to check rather than a position's to lose.
+        let outposts = scan.Outposts
+        let errands = scan.Errands
+        let bootstrap = scan.Borrowed
+        let scanned = scan.Scanned
+
+        // The errand rooms as a set, and the `elif` chain below reads it after
+        // the bootstrap and the transit branches and before the worked ones.
+        // **That ordering presumes the two declaration lists name disjoint
+        // rooms**, and they are disjoint by the types' own definitions rather
+        // than by luck: an `Outpost` carries a mandatory `Controller` and an
+        // `Errand` exists for the room that has none. A human who wrote one
+        // room into both lists would be writing a contradiction, and the branch
+        // that won would narrow the room to the errand's one target — taking
+        // the outpost's own container, store and site out of the projection
+        // while the reserver row went on hiring for it, which is #243's and
+        // #286's silence in reverse. It is caught where a contradiction in a
+        // human's constant belongs: red before deploy, over `Colony.declared`
+        // (`ViewTests`, "no room is declared as both"). Not refused at runtime
+        // — `Refused` means "no chain of Seams reaches it" and would say the
+        // wrong thing — and not unioned, which would accept the contradiction
+        // and leave nothing to notice it.
+        let errandRooms = errands |> List.map (fun errand -> errand.RoomName) |> Set.ofList
+
         // The rooms in the set for the walk alone: everything the union added
         // that is neither this colony's home, nor a room it works, nor a room
-        // it raises (`Colony.roomsProjected`, ADR 0058). Derived by
-        // subtraction rather than returned beside the set, because the union is
-        // the one place that rule is spelled and a second derivation would be a
-        // second answer free to disagree.
+        // it runs an errand in, nor a room it raises (`Colony.roomsProjected`,
+        // ADR 0058, ADR 0060). Derived by subtraction rather than returned
+        // beside the set, because the union is the one place that rule is
+        // spelled and a second derivation would be a second answer free to
+        // disagree.
         let transit =
             scanned
             |> List.filter (fun room ->
                 room <> home
                 && not (List.contains room bootstrap)
+                && not (Set.contains room errandRooms)
                 && not (outposts |> List.exists (fun outpost -> outpost.RoomName = room)))
             |> Set.ofList
 
@@ -392,6 +482,24 @@ module ColonyView =
                     room, borrowed (Map.tryFind room stages) facts, remembered
                 elif Set.contains room transit then
                     room, transiting facts, None
+                elif Set.contains room errandRooms then
+                    // The errand room's memory is narrowed by the same rule its
+                    // facts are (#271, ADR 0060 decision 1): the ids the
+                    // declaration names are the ones the grace may hold a body
+                    // to while the room is dark, and an id this colony may not
+                    // work is not one it may be held to either. A room whose
+                    // errands name nothing it ever saw remembers an empty set,
+                    // which is the answer a transit room's `None` gives one
+                    // level down.
+                    let targets = Errand.targetsIn room errands
+
+                    room,
+                    erranding targets facts,
+                    remembered
+                    |> Option.map (fun sighting ->
+                        { sighting with
+                            Targets = Set.intersect sighting.Targets targets
+                        })
                 else
                     room, facts, remembered)
 
@@ -491,6 +599,11 @@ module ColonyView =
                 // (`Outpost.place`, ADR 0041): a source's and a
                 // controller's id and tile do not wait for vision.
                 |> Outpost.place outposts
+                // And the errands' one target apiece, by the same rule and over
+                // the same assembled projection (`Errand.place`, ADR 0060
+                // decision 1): a courier has to hold `Deliver of reactorId`
+                // before any body of ours has stood in that room.
+                |> Errand.place errands
             Declared = Colony.homes colonies
             Stages = stages
             // The bodies in these rooms that are not this colony's, each
@@ -510,7 +623,12 @@ module ColonyView =
             // must name is the room a human declared and this colony cannot
             // work, and by the time the scan set is cut the name is gone
             // (#243).
-            Refused = Outpost.refused (World.linked world) tuning.MaxHops home colony.Outposts
+            // Both declaration kinds, each named as what it was declared as
+            // (ADR 0060 decision 1): the outposts a human wrote first, then the
+            // errands beside them.
+            Refused =
+                Outpost.refused (World.linked world) tuning.MaxHops home colony.Outposts
+                @ Errand.refused (World.linked world) tuning.MaxHops home colony.Errands
             // The world's memory of these rooms and of no others (#151):
             // narrowed by the scan set the [[stand-down]] gate has already
             // cut, so a withheld room's remembered census cannot hold a
