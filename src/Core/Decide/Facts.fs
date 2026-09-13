@@ -146,3 +146,25 @@ let internal weaponRange (hostile: HostileInfo) : int option =
 /// a room stands down, whether safe mode fires, and whether a Reach is derived
 /// at all.
 let internal isArmed (hostile: HostileInfo) : bool = weaponRange hostile |> Option.isSome
+
+/// The [[thorium]] deposits standing in a room this colony **owns** (ADR 0057
+/// decision 2), in id order — the only deposits any rule of this colony may
+/// answer for, and the list both the Task pool and the [[miner]] row's quota are
+/// read off so the two can never disagree about which rock is ours.
+///
+/// **Whose the deposit is, is whose the room is** (#261). `FIND_MINERALS` and
+/// `FIND_STRUCTURES` both carry every owner's, so a scanned neighbour arrives in
+/// the projection with its own deposit, its own extractor and its own container,
+/// and nothing in the shape of those three facts says who built them. The engine
+/// does say: `harvest` refuses a mineral whose extractor belongs to somebody
+/// else, one `ERR_NOT_OWNER` a tick for the whole of a body's life. The room is
+/// the honest join and not a second fact — an extractor needs an **owned** RCL6
+/// room (`checkControllerAvailability` derives `rcl = 0` from a reservation), so
+/// an extractor in a room we own is ours and one in a room we do not is not.
+/// A room the colony cannot see owns nothing here (ADR 0004).
+let internal ourDeposits (view: ColonyView) : string list =
+    SpatialInfo.idsOfKind view.Spatial Mineral
+    |> List.filter (fun id ->
+        SpatialInfo.roomOf view.Spatial id
+        |> Option.bind (fun room -> Map.tryFind room view.RoomControl)
+        |> Option.exists (fun control -> control.Owner = Ownership.Ours))

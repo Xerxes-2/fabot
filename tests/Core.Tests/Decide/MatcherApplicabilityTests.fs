@@ -67,6 +67,70 @@ let partApplicabilityTests =
                     "a body with no Carry part cannot deliver energy"
             }
 
+            test "a deposit's Harvest is for a body with no Carry part, and for nobody else" {
+                // ADR 0057 decision 2's gate, and the whole of it: a Work part
+                // to dig with and **no Carry at all**. That is what keeps an
+                // [[anchor]] off the deposit — it is Work-heavy, it is
+                // applicable to every source Harvest in the pool, and standing
+                // on the mine [[post]] it would fill a store that ages it by
+                // `floor(log10 store.T)` ticks a tick and never empty it, ADR
+                // 0016 having shut its Withdraw and ADR 0046 its Refill.
+                //
+                // Pairwise, one Carry part apart, both bodies standing on the
+                // mine Post so neither is separated by a walk.
+                let holding body =
+                    { mineColony with
+                        Creeps = [ creepWith "h" 0 0 body ]
+                        Spatial = mineColony.Spatial |> withCreepsAt [ "h", minePost ]
+                    }
+                    |> decideOn
+                    |> fun decision -> Map.tryFind "h" decision.Assignments
+
+                Expect.equal
+                    (holding [ Work; Work; Move ])
+                    (Some(taskId (Harvest "min-a")))
+                    "the store-less body takes the deposit"
+
+                Expect.equal
+                    (holding [ Work; Work; Carry; Move ])
+                    None
+                    "and the Anchor-shaped body beside it takes nothing at all"
+            }
+
+            test "a source's Harvest is for a body that can carry the yield, and for nobody else" {
+                // The other half of the same cut (#261). A store-less
+                // [[miner]] reports `FreeCapacity = 0`, so the store disjunct
+                // refuses it — and the vacancy disjunct behind it then offered
+                // it the walk to any source with a Post it had not reached:
+                // Work-heavy, not yet arrived, and every manned Post in the
+                // colony reading as somewhere to go. Live that is 2,200 energy
+                // of Work dribbling into a source container for a whole
+                // 1,500-tick life, `Kept` from the tick it arrives because the
+                // garrison reprieve is positional, while the season's deposit
+                // goes undug and the Anchor row buys a replacement for a Post
+                // `Capacity.garrisoning` will not let it have.
+                //
+                // Pairwise, one Carry part apart, both bodies a walk away from
+                // the Post so the vacancy disjunct is the one under test.
+                let holding body =
+                    { haulColony with
+                        Creeps = [ creepWith "h" 0 0 body ]
+                        Spatial = haulRoom |> withCreepsAt [ "h", { X = 13; Y = 10 } ]
+                    }
+                    |> decideOn
+                    |> fun decision -> Map.tryFind "h" decision.Assignments
+
+                Expect.equal
+                    (holding [ Work; Work; Work; Carry; Move ])
+                    (Some(taskId (Harvest "src-a")))
+                    "the premise: a heavy body with somewhere to put the yield walks to the rock"
+
+                Expect.equal
+                    (holding [ Work; Work; Work; Move ])
+                    None
+                    "and the store-less body beside it is offered no rock at all"
+            }
+
             test "a remembered assignment to a task the body cannot do is released" {
                 let snapshot =
                     { bareRespawn with

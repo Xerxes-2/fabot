@@ -40,6 +40,7 @@
     <Compile Include="Decide/QuotaSourceTests.fs" />
     <Compile Include="Decide/QuotaReserverTests.fs" />
     <Compile Include="Decide/QuotaGuardTests.fs" />
+    <Compile Include="Decide/QuotaMinerTests.fs" />
     <Compile Include="Decide/QuotaUpgraderTests.fs" />
     <Compile Include="Decide/QuotaTuningTests.fs" />
     <Compile Include="Decide/ColonyTests.fs" />

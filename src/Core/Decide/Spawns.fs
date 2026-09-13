@@ -98,6 +98,7 @@ let private castBodyOf
         {
             AnchorCap = anchorCapAt sizing.AnchorPostCaps tile
             ReserverClaims = sizing.ReserverClaims
+            MinerWorkPerMove = sizing.MinerWorkPerMove
         }
         pattern
         view.Bank.Capacity
@@ -265,12 +266,23 @@ let internal planSpawns
                 else
                     None
 
+        // The [[miner]] row's own cut (ADR 0057 decision 2): Work-heavy and no
+        // Carry at all, which is `patternOfParts`' miner arm read as a census,
+        // exactly as `isHaulerBody` and `isReserverBody` above are read as
+        // theirs. It is subtracted from the Anchor row's census rather than
+        // living beside it, because the two rows are the one pair of rows this
+        // colony casts that a single predicate cannot tell apart: both are
+        // Work-heavy, and the Carry part is the whole of the difference.
+        let isMinerBody (creep: CreepInfo) =
+            Atlas.workHeavy atlas creep.Name && partCount creep.Body Carry = 0
+
+        let isAnchorBody (creep: CreepInfo) =
+            Atlas.workHeavy atlas creep.Name && not (isMinerBody creep)
+
         // Every body the anchor row counts, as a list and not only as a
         // number: `emptyPostCaps` below reads the tiles they stand on where the
         // row reads their count, so the census is asked once and the two halves
         // cannot disagree about who is manning a Post.
-        let isAnchorBody (creep: CreepInfo) = Atlas.workHeavy atlas creep.Name
-
         let anchorGarrison = living |> List.filter isAnchorBody
 
         // **The vacancies this row is casting into, richest ceiling first**
@@ -345,6 +357,7 @@ let internal planSpawns
             {
                 AnchorCap = anchorCap
                 ReserverClaims = rows.Reserver
+                MinerWorkPerMove = sizing.MinerWorkPerMove
             }
 
         let rows: SpecialistRow list =
@@ -391,6 +404,26 @@ let internal planSpawns
                     Pattern = haulerPattern
                     Quota = rows.Hauler
                     Census = isHaulerBody
+                }
+                // Behind the three rows that make the colony's energy and carry
+                // it, and ahead of the two that spend it (ADR 0057 decision 2).
+                // The miner is hired off a fact about the **ground** like the
+                // three above it — a deposit standing under an extractor, which
+                // is the shape of an empty [[post]] — so it belongs on that
+                // side of the cascade rather than out of the surplus; and it
+                // produces no energy at all, which is what keeps it behind
+                // them: a colony that bought a miner before the [[anchor]] that
+                // feeds it would spend 2,200 on a body that digs a resource
+                // nothing in the colony eats. Ahead of the [[upgrader]] because
+                // the season's whole score rides on this row and an upgrade
+                // mouth is the surplus by construction. It yields the tick the
+                // bank cannot pay for it, like every row below the floor (ADR
+                // 0050).
+                {
+                    Name = "miner"
+                    Pattern = minerPattern
+                    Quota = rows.Miner
+                    Census = isMinerBody
                 }
                 // Behind the three rows hired off the ground and ahead of the
                 // generalist (ADR 0046): the upgrader spends the surplus those

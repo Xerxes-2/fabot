@@ -266,6 +266,27 @@ let planTasks (view: ColonyView) (threats: Threats) : Task list =
     // position — the Matcher's knowledge, not the creep-blind Planner's.
     let harvests = view.Sources |> List.map (fun s -> Harvest s.Id)
 
+    // And one Harvest per Thorium deposit beside them (ADR 0057 decision 2):
+    // the same act, the same Intent and the same Task kind, widened from a
+    // source to a mineral — which is ADR 0054's own test for refusing a new
+    // kind, so every exhaustive match over `Task` grows no arm. **The Task
+    // exists exactly while the deposit does**, and that is the whole of its
+    // lifecycle: the mod deletes an exhausted deposit outright, so the target
+    // leaves the projection and this list shortens on the same tick the miner
+    // row's quota falls to zero. What the extractor's cooldown decides is not
+    // whether the Task exists but whether this tick's act is issued, and that
+    // gate is the Emitter's — a Task that vanished and returned every sixth
+    // tick would churn the pool for a body that has nowhere else to be.
+    //
+    // **A deposit of ours and never a neighbour's** (#261): `FIND_MINERALS`
+    // carries every owner's and a scanned neighbour arrives with its own
+    // deposit, extractor and container, which the projection cannot tell from
+    // ours by their shape. `harvest` refuses a mineral whose extractor is
+    // somebody else's, so a Task pooled for one is a body dispatched across the
+    // map to answer `ERR_NOT_OWNER` once a tick for a life. `ourDeposits` is
+    // that join, read here and by the [[miner]] row's quota alike.
+    let deposits = ourDeposits view |> List.map Harvest
+
     // The flow's sink, as **one** Task (ADR 0054): the [[refill cluster]] — the
     // colony's spawn and every extension of it — is pooled under the spawn's id
     // and stands while any member has room, so `task-gone` fires when the whole
@@ -442,6 +463,10 @@ let planTasks (view: ColonyView) (threats: Threats) : Task list =
     flees
     @ guards
     @ harvests
+    // Behind the sources' own, which is pool order and so the last rung of the
+    // Matcher's ladder: the two never tie for a body anyway, the deposit's
+    // Harvest reaching only a body with no Carry at all.
+    @ deposits
     // **The piles stand before the Withdraws** (#242). Pool order is the last
     // rung of the Matcher's ladder — what it falls back to once [[priority]],
     // travel cost *and* the crowding load have all three tied, the scored key

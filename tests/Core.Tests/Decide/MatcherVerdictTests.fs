@@ -227,6 +227,111 @@ let sayTests =
                 Expect.isEmpty (actionIntents intents) "out of range: no action Intent yet"
                 Expect.equal (sayIntents intents) [ "w1", "⛏" ] "the bubble still shows the Task"
             }
+
+            test "a miner says nothing on the ticks the extractor's clock holds it" {
+                // ADR 0057 decision 2 writes the bubble out: ⛏ on the ticks it
+                // digs and **nothing on the ticks it waits**, so the one-in-six
+                // rhythm `EXTRACTOR_COOLDOWN` imposes is legible in the viewer
+                // rather than hidden behind a glyph that claims a dig every
+                // tick. Read off the same gate the act is withheld by, so the
+                // bubble and the Intent can never come to disagree. Pairwise,
+                // one number on one clock apart.
+                let sayingAt ticks =
+                    { mineColony with
+                        Creeps = [ miner "m1" ]
+                        Spatial = mineColony.Spatial |> withCreepsAt [ "m1", minePost ]
+                    }
+                    |> onCooldown ticks
+                    |> decideOn
+                    |> fun decision -> sayIntents decision.Intents
+
+                Expect.equal (sayingAt 0) [ "m1", "⛏" ] "a zero clock is a dig, and it says so"
+
+                Expect.isEmpty (sayingAt 3) "and a clock still running says nothing"
+            }
+        ]
+
+[<Tests>]
+let extractorCooldownTests =
+    testList
+        "the extractor's cooldown"
+        [
+            // The miner standing on its own mine [[post]], which is where the
+            // whole of this group is read: nothing here is about a walk.
+            let standing colony =
+                { colony with
+                    Creeps = [ miner "m1" ]
+                    Spatial = colony.Spatial |> withCreepsAt [ "m1", minePost ]
+                }
+
+            let held = taskId (Harvest "min-a")
+
+            test "the harvest is issued on a zero clock and withheld on every other" {
+                // `EXTRACTOR_COOLDOWN` is 5 and the engine runs the intent pass
+                // before the object pass — `extractors/tick.js` writes the 5 at
+                // the end of the harvest tick and decrements it once a tick
+                // after — so successive harvests land **six** ticks apart and
+                // the other five are refused outright. Issuing one anyway is
+                // an `ERR_TIRED` a tick for five ticks in six.
+                let digsAt ticks =
+                    standing mineColony
+                    |> onCooldown ticks
+                    |> decideOn
+                    |> fun decision -> digIntentsFor "m1" decision.Intents
+
+                Expect.equal
+                    (digsAt 0)
+                    [ HarvestSource("m1", "min-a") ]
+                    "a clock reading zero is this tick, and the dig goes out"
+
+                for ticks in 1..5 do
+                    Expect.isEmpty (digsAt ticks) $"and a clock reading {ticks} withholds it"
+            }
+
+            test "a miner keeps its Task through the ticks it cannot dig" {
+                // The gate is in the **Emitter** and never in applicability,
+                // which is the distinction ADR 0013 and ADR 0025 spent two
+                // decisions on: a cooldown is five ticks long and a re-match is
+                // a flood, so a Task that vanished and returned every sixth
+                // tick would churn the pool for a body that has nowhere else to
+                // be and no way to get there. The Task exists exactly while the
+                // deposit does; what the cooldown decides is whether this
+                // tick's act is issued.
+                let sticky = Map.ofList [ "m1", held ]
+
+                let verdictsAt ticks =
+                    standing mineColony
+                    |> onCooldown ticks
+                    |> decideFrom sticky
+                    |> fun decision -> decision.Verdicts
+
+                Expect.contains
+                    (verdictsAt 0)
+                    (Verdict.Kept("m1", held))
+                    "the premise: a digging tick keeps the body on its Task"
+
+                Expect.contains
+                    (verdictsAt 4)
+                    (Verdict.Kept("m1", held))
+                    "and so does a waiting one — the body stands, and the Verdict does not claim it dug"
+            }
+
+            test "a deposit with no extractor standing is dug on no tick at all" {
+                // Held on the same footing and not by a different rule:
+                // `harvest.js` refuses a mineral with no extractor on its tile,
+                // so the act is as impossible as it is on a cooldown tick, and
+                // issuing it would be one `ERR_NOT_FOUND` a tick for as long as
+                // the site takes to build. Pairwise against the case above, one
+                // target kind apart.
+                Expect.isEmpty
+                    (digIntentsFor
+                        "m1"
+                        (decideFrom
+                            (Map.ofList [ "m1", held ])
+                            (standing (mineColony |> withExtractorSite)))
+                            .Intents)
+                    "a site extracts nothing, whatever its clock would have read"
+            }
         ]
 
 [<Tests>]

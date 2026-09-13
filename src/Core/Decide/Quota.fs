@@ -436,6 +436,51 @@ let internal guardsWanted (view: ColonyView) (room: string) : int =
 let internal guardQuota (view: ColonyView) : int =
     guardedOutposts view |> List.sumBy (guardsWanted view)
 
+/// The [[miner]] row's quota (ADR 0057 decision 2): **one body per deposit the
+/// colony can actually dig**, and nothing for one it cannot. Three facts and
+/// all of them read off this tick's projection rather than off anything
+/// remembered, over the deposits that are **ours** (`ourDeposits`, #261):
+///
+/// - the deposit **holds Thorium**. The mod deletes an exhausted deposit
+///   outright (`postProcessObject` on `mineralType == 'T' && !mineralAmount`),
+///   so the ordinary way this falls to zero is the target leaving the
+///   projection altogether — the same fact that retires the Task, the Post and
+///   the row together, which is why ADR 0057 decision 7 writes no stop
+///   condition at all. The amount is read as well as the kind because a
+///   projection that ever carried a deposit at zero would otherwise hire a body
+///   for it for 1,500 ticks.
+/// - the extractor **stands** on the deposit's own tile. A site is 0: an
+///   extractor under construction extracts nothing, `harvest.js` refuses a
+///   mineral with no extractor on it, and a miner cast against a site stands
+///   idle for a life.
+/// - the deposit has a **mine [[post]]**, which is to say its container stands
+///   (#261). The two gates were the extractor's alone and the [[work area]]'s
+///   was the container's, and between them the row bought a body with nowhere
+///   to work: the Layout emits both 5,000-point sites in one tick, so which
+///   finishes first is the builder's accident, and any tick the mine container
+///   is destroyed under a standing extractor re-opens the window. A miner with
+///   an empty Work Area is `Unassigned(NoneReachable)` for 1,500 ticks — or
+///   worse, was applicable to a *source's* Harvest and spent that life
+///   squatting a garrison tile. Read off `Atlas.postsOf`, which is the same
+///   census the Work Area narrows to, so the row and the ground cannot
+///   disagree about whether there is anywhere to stand.
+///
+/// Summed over the deposits, never counted as one: a colony works its home room
+/// and its [[outpost]]s, and only an **owned RCL6** room can hold an extractor
+/// (`checkControllerAvailability` derives `rcl = 0` from a reservation), so an
+/// outpost's deposit contributes the zero this rule gives it rather than a zero
+/// the shape of the sum assumes. Which is an argument about *our* rooms and
+/// never about a neighbour's, and that is what `ourDeposits` answers: a rival's
+/// extractor over a rival's deposit is exactly as visible as our own and the
+/// engine refuses to let us dig it.
+let internal minerQuota (view: ColonyView) atlas : int =
+    ourDeposits view
+    |> List.filter (fun id ->
+        Map.tryFind id view.Spatial.Thorium |> Option.defaultValue 0 > 0
+        && (Atlas.extractorOn atlas id).IsSome
+        && not (Set.isEmpty (Atlas.postsOf atlas id)))
+    |> List.length
+
 /// The reserver row's quota and its sizing, which are one rule with two faces
 /// (ADR 0042, ADR 0006's law that a row arrives with its quota): one reserver
 /// per **declared** outpost, each wanting `ceil((5000 - ticks this colony
@@ -503,12 +548,18 @@ type RowSizing =
         /// `reserverClaimsOf`'s answer this tick — one entry per room the
         /// row hires for, each that room's CLAIM demand.
         ReserverClaims: int list
+        /// `Tuning.MinerWorkPerMove`, carried through to `BodySizing` (ADR 0057
+        /// decision 2): the miner row's sizing rule is not the bank's answer
+        /// alone either, and the third thing it reads is a knob of this
+        /// colony's rather than a fact of the tick.
+        MinerWorkPerMove: int
     }
 
 let internal rowSizingOf (view: ColonyView) atlas : RowSizing =
     {
         AnchorPostCaps = postWorkCapsOf view atlas
         ReserverClaims = reserverClaimsOf view
+        MinerWorkPerMove = view.Tuning.MinerWorkPerMove
     }
 
 /// The colony's surplus over one creep's lifetime: the income the two upgrade
@@ -659,6 +710,10 @@ type QuotaRows =
         Guard: int
         Anchor: int
         Hauler: int
+        /// One [[miner]] per diggable deposit (ADR 0057 decision 2) — 0 for
+        /// every colony that has not reached RCL6 and stood an extractor, which
+        /// is every colony this bot has ever run until this season.
+        Miner: int
         Upgrader: int
         Surplus: int
     }
@@ -680,13 +735,16 @@ let internal quotaRowsOf (view: ColonyView) atlas (sizing: RowSizing) haulerQuot
         // nearest it.
         Anchor = Atlas.postCount atlas
         Hauler = haulerQuota
+        Miner = minerQuota view atlas
         Upgrader = upgraderQuota view atlas surplus
         Surplus = surplus
     }
 
-/// Workforce target (ADR 0012, ADR 0046, ADR 0056): six addends, each a pattern
+/// Workforce target (ADR 0012, ADR 0046, ADR 0056, ADR 0057): seven addends,
+/// each a pattern
 /// row's own colony fact — reservers one per declared outpost, guards one or two
-/// per raided one, Anchors one per Post, haulers the throughput quota, upgraders
+/// per raided one, Anchors one per Post, haulers the throughput quota, miners
+/// one per diggable deposit, upgraders
 /// the surplus divided by a standing body's drain, workers the income arithmetic
 /// that is left and the pioneers a nursery adds to it (ADR 0047) — floored at
 /// `Tuning.MinWorkforce` and derived
@@ -710,7 +768,11 @@ let internal quotaRowsOf (view: ColonyView) atlas (sizing: RowSizing) haulerQuot
 /// of an ordinary life, and a guard left out of the target would have the
 /// deficit read the body it is alive as one of the generalists the income
 /// already paid for — a raid would quietly retire a worker for as long as the
-/// guard stood.
+/// guard stood. **The miner row is an addend on that same argument** (ADR 0057
+/// decision 2) and is likewise charged nowhere else: it is hired off a fact
+/// about the ground — a deposit standing under an extractor — and it produces
+/// no energy at all, so `surplus` has no term that answers for it and a miner
+/// left out of the target would retire a generalist for the whole of its life.
 let internal workforceTarget (view: ColonyView) atlas (tasks: Task list) (rows: QuotaRows) =
     let home = SpatialInfo.homeName view.Spatial
 
@@ -773,6 +835,7 @@ let internal workforceTarget (view: ColonyView) atlas (tasks: Task list) (rows: 
     + rows.Guard
     + rows.Anchor
     + rows.Hauler
+    + rows.Miner
     + rows.Upgrader
     + workerRow
     |> max view.Tuning.MinWorkforce

@@ -73,6 +73,28 @@ let internal applicable
     let spending = has Work && creep.Energy > 0
 
     match task with
+    // **The [[miner]]'s gate, and the whole of it** (ADR 0057 decision 2): a
+    // Work part to dig with and **no Carry at all**. Part arithmetic and
+    // nothing else (ADR 0006), and the one cut no other row of this colony
+    // makes — every other body it casts carries either a Carry or an ATTACK or
+    // a CLAIM — so it is to this Task what `isGuardBody` is to the Guard.
+    //
+    // Not a narrowing of the source arm below but a different sentence, because
+    // every clause that arm is made of is about a **source**: the half-empty
+    // mirror and the full-store reprieve price a store this body does not have,
+    // ADR 0025's empty window is a regeneration a deposit does not have, and
+    // `hasSpareRate` is a rate a deposit does not have either — Thorium never
+    // comes back, so there is no rate to outrun and the only thing rationing
+    // the dig is the extractor's cooldown, which is the Emitter's gate below
+    // and not applicability's.
+    //
+    // And it is why a **body with a Carry part is refused**, which is the
+    // decision rather than an economy: an [[anchor]] released off its own rock
+    // is Work-heavy, is applicable to every Harvest in the pool, and would
+    // stand on the mine [[post]] filling a store that ages it by
+    // `floor(log10 store.T)` ticks a tick — and never empty it, ADR 0016 having
+    // shut its Withdraw and ADR 0046 its Refill.
+    | Harvest rockId when Atlas.isMineral atlas rockId -> has Work && not (has Carry)
     // ADR 0024's full-store reprieve, and beside it the clause that keeps ADR
     // 0048's own Consequence reachable ("stands where it is until it can dig
     // again"). A Work-heavy body never empties — ADR 0016 shut Withdraw and
@@ -101,8 +123,24 @@ let internal applicable
     // body's alone: a heavy body with a free store is offered the walk by the
     // clause above, which is what lets a fresh Anchor be sent to the Post its
     // expiring incumbent is still standing on (ADR 0026).
+    //
+    // **And the cut runs both ways** (#261): a source's Harvest wants a body
+    // with somewhere to put the yield, which is a **Carry part**. ADR 0057
+    // decision 2 cut the deposit's Harvest to a body with none, and the source's
+    // arm left open to every heavy body is the same sentence unfinished: a
+    // store-less [[miner]] reports `FreeCapacity = 0`, so the first disjunct
+    // refuses it — and then the third offers it the walk, because it is
+    // Work-heavy, has not arrived, and every manned Post in the colony reads as
+    // somewhere to go. Live that is 2,200 energy of Work dribbling into a source
+    // container for a whole life, `Kept` from the tick it arrives because
+    // `garrisons` is positional, while the season's deposit is never dug and the
+    // Anchor row buys a replacement for a Post `Capacity.garrisoning` will not
+    // let it have. Every other row this colony casts with a Work part carries
+    // one — the generalist, the [[anchor]] and the [[upgrader]] alike — so the
+    // clause refuses exactly the one body it names.
     | Harvest sourceId ->
         has Work
+        && has Carry
         && (creep.FreeCapacity > 0
             || garrisons atlas creep sourceId
             || (heavy
@@ -427,6 +465,35 @@ let selfHeal (view: ColonyView) (plan: Fabot.Core.IntentPlan.Plan) =
         else
             plan)
 
+/// Whether a Thorium harvest is **held this tick** by the extractor's clock
+/// (ADR 0057 decision 2). `EXTRACTOR_COOLDOWN` is 5 and the engine runs the
+/// intent pass before the object pass — `extractors/tick.js` writes the 5 at the
+/// end of the harvest tick and decrements it once per tick after — so successive
+/// harvests land **six** ticks apart and the other five are refused outright.
+///
+/// **The gate is here and never in applicability**, and the distinction is the
+/// one ADR 0013 and ADR 0025 spent two decisions on. A cooldown is five ticks
+/// long and a re-match is a flood: a Task that vanished and returned every sixth
+/// tick would churn the pool the way ADR 0054's ring of extensions did, for a
+/// body that has nowhere else to be and no way to get there. **The Task exists
+/// exactly while the deposit does; what the cooldown decides is whether this
+/// tick's act is issued** — so the body keeps its Task, stands on its Post, and
+/// the [[verdict]] does not claim it dug.
+///
+/// A deposit with **no extractor standing on it** is held on the same footing
+/// and not by a different rule: `harvest.js` refuses a mineral with no extractor
+/// on its tile, so the act is as impossible as it is on a cooldown tick, and
+/// issuing it would be one `ERR_NOT_FOUND` a tick for as long as the site takes
+/// to build. Every other Task, and every source's Harvest, answers false (ADR
+/// 0004).
+let private heldByCooldown atlas task =
+    match task with
+    | Harvest rockId when Atlas.isMineral atlas rockId ->
+        match Atlas.extractorOn atlas rockId with
+        | Some extractor -> Atlas.cooldownOf atlas extractor > 0
+        | None -> true
+    | _ -> false
+
 /// Action Intent for one assigned creep: emitted when the Atlas judges the
 /// action reachable from the tick-start position, and — for Harvest alone —
 /// only while the source holds energy (ADR 0025). Anticipatory dispatch and the
@@ -449,7 +516,11 @@ let private actionIntents
     match task with
     | Guard room -> guardIntent view atlas creep room |> Option.toList
     | _ ->
-        if mayActNow threats atlas creep.Name task && not drained then
+        if
+            mayActNow threats atlas creep.Name task
+            && not drained
+            && not (heldByCooldown atlas task)
+        then
             intentFor atlas creep task |> Option.toList
         else
             []
@@ -467,11 +538,19 @@ let emit (view: ColonyView) atlas (threats: Threats) (assigned: Map<string, Task
             | None -> [])
 
     // Every assigned creep says its Task's glyph every tick; unassigned
-    // creeps say nothing.
+    // creeps say nothing. One exception, and it is the one ADR 0057 decision 2
+    // writes out: a [[miner]] says ⛏ on the ticks it digs and **nothing on the
+    // ticks it waits**, so the one-in-six rhythm the extractor's cooldown
+    // imposes is legible in the viewer rather than hidden behind a glyph that
+    // claims a dig every tick. Read off the same gate the act is withheld by,
+    // so the two cannot come to disagree **about the cooldown** — the bubble
+    // goes on showing the Task through every other reason an act is withheld,
+    // `mayActNow` and a drained source included, which is what it is for.
     let says =
         view.Creeps
         |> List.choose (fun creep ->
             Map.tryFind creep.Name assigned
+            |> Option.filter (heldByCooldown atlas >> not)
             |> Option.map (fun task -> SayCreep(creep.Name, glyphFor task)))
 
     actions @ says

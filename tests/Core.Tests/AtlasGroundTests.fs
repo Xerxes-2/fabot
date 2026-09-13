@@ -97,6 +97,81 @@ let workAreaForTests =
                     "the full Seat set is the fallback before the first container"
             }
 
+            // The deposit's mirror of the block above: "min-a" embedded in
+            // wall at (20,20) with three open neighbours, the container on one
+            // of them. The miner is the row's block — Work-heavy with no Carry
+            // at all — so it reads through the same heavy arm the Anchor does.
+            let mined kinds creeps =
+                { spatial
+                      [
+                          "min-a", { X = 20; Y = 20 }
+                          "ext-a", { X = 20; Y = 20 }
+                          "can-min", { X = 19; Y = 20 }
+                      ]
+                      [
+                          { X = 19; Y = 20 }, Plain
+                          { X = 21; Y = 20 }, Plain
+                          { X = 20; Y = 21 }, Plain
+                      ] with
+                    TargetKinds = Map.ofList kinds
+                }
+                |> withCreepsAt creeps
+
+            let minerBody name = creepWith name 0 [ Work; Work; Move ]
+
+            let minedKinds =
+                [
+                    "min-a", Mineral
+                    "ext-a", Structure BuiltKind.Extractor
+                    "can-min", Structure BuiltKind.Container
+                ]
+
+            test "a miner digs a deposit from the tile its container stands on" {
+                // ADR 0057 decision 2's Work Area: the [[post]] the mineral
+                // container makes and nothing else. The store-less body has to
+                // stand **on** the container, because a harvest with no room
+                // for the yield drops it on the creep's own tile and a drop
+                // onto a container tile lands in the container.
+                let atlas =
+                    mined minedKinds [ "m", { X = 21; Y = 20 } ]
+                    |> snapshotWith [ minerBody "m" ]
+                    |> ofView
+
+                Expect.equal
+                    (workAreaFor atlas "m" (Harvest "min-a") |> tilesHome atlas)
+                    (Set.singleton { X = 19; Y = 20 })
+                    "the container's Seat alone"
+
+                Expect.equal
+                    (workArea atlas (Harvest "min-a") |> tilesHome atlas)
+                    (Set.ofList [ { X = 19; Y = 20 }; { X = 21; Y = 20 }; { X = 20; Y = 21 } ])
+                    "the body-blind area keeps every Seat, as a source's does"
+            }
+
+            test "a deposit with no container keeps no fallback, even at home" {
+                // Where a **source** with no Post narrows nothing at home (the
+                // case above), a deposit narrows to nothing (ADR 0057 decision
+                // 2). ADR 0020's fallback to the bare Seats is a *bootstrap*
+                // rule and the bootstrap is a source's: a dropped Thorium pile
+                // bleeds `ceil(amount / 1000)` a tick and nothing in this
+                // colony picks one up, so a deposit with no container standing
+                // has nowhere to be dug from and its Harvest reaches nobody.
+                // Pairwise against the source case, one target kind apart.
+                let atlas =
+                    mined [ "min-a", Mineral ] [ "m", { X = 21; Y = 20 } ]
+                    |> snapshotWith [ minerBody "m" ]
+                    |> ofView
+
+                Expect.isNonEmpty
+                    (workArea atlas (Harvest "min-a") |> tilesHome atlas |> Set.toList)
+                    "the premise: the deposit's Seats are there to fall back to"
+
+                Expect.equal
+                    (workAreaFor atlas "m" (Harvest "min-a") |> tilesHome atlas)
+                    Set.empty
+                    "and the miner is offered none of them"
+            }
+
             test "only Harvest narrows: the heavy body's Upgrade area is untouched" {
                 let atlas =
                     posted [ "a", { X = 10; Y = 11 } ] |> snapshotWith [ anchor "a" ] |> ofView
@@ -607,6 +682,43 @@ let workingGroundTests =
                 Expect.equal (postsIn atlas home) Set.empty "and it is no Post"
 
                 Expect.equal (postCount atlas) 0 "so no Anchor is hired to garrison it"
+
+                // What ADR 0057 decision 2 adds on the other side of that
+                // sentence: the tile is a **mine Post** all the same, read off
+                // a census of its own. The deposit's Post and the room's Posts
+                // are two answers on purpose — this one is the [[miner]]'s
+                // standing room and the other is the [[anchor]] row's quota.
+                Expect.equal
+                    (tilesHome atlas (postsOf atlas "min-a"))
+                    (Set.singleton { X = 19; Y = 20 })
+                    "the deposit's own Post is the Seat its container stands on"
+            }
+
+            test "a deposit with no container standing has no Post at all" {
+                // The mine Post is the **built** container's and never its
+                // site: a body cast for a site Post raises the container it
+                // will later dig into (#205), and a miner carries no Carry to
+                // spend into a site with and is shut out of Build by ADR 0046.
+                // So the Post arrives the tick the container stands, and the
+                // pairwise premise is one projection entry.
+                let atlasWith kind =
+                    { spatial
+                          [ "min-a", { X = 20; Y = 20 }; "can-min", { X = 19; Y = 20 } ]
+                          [ { X = 19; Y = 20 }, Plain; { X = 20; Y = 20 }, Wall ] with
+                        TargetKinds = Map.ofList [ "min-a", Mineral; "can-min", kind ]
+                    }
+                    |> snapshotWith []
+                    |> ofView
+
+                Expect.equal
+                    (postsOf (atlasWith (Structure BuiltKind.Container)) "min-a" |> Set.count)
+                    1
+                    "the premise: a standing container makes the Post"
+
+                Expect.equal
+                    (postsOf (atlasWith (Site BuiltKind.Container)) "min-a")
+                    Set.empty
+                    "and a site makes none"
             }
 
             test "a room with neither sources nor a controller works no ground" {

@@ -1241,6 +1241,24 @@ let planPool (view: ColonyView) atlas (tasks: Task list) : PooledTask list =
 
     let capacityOf task =
         match task with
+        // **A deposit's is one Garrison, the Post count, and nothing else**
+        // (ADR 0057 decision 2, #261). The source shape below is three numbers
+        // that sum back to the Seat count, and two of the three are a source's
+        // alone: `Everyone` at the Seats and `Commuters` at the Seats beyond
+        // the Posts admit the light row into the half the garrison is not
+        // draining, and a deposit has no such half — one tile can be dug from,
+        // the container, and every other Seat is a tile a store-less body drops
+        // the Thorium on the ground from. Written as a **cap of zero** rather
+        // than left off: absence is unbounded here, and what this says is that
+        // the Commuter slots are shut and not that nobody counted them.
+        | Harvest rockId when Atlas.isMineral atlas rockId ->
+            let postTiles = Atlas.postsOf atlas rockId
+            let posts = Set.count postTiles
+
+            Capacity.unbounded
+            |> Capacity.cappingMaybe CapScope.Garrisons (if posts = 0 then None else Some posts)
+            |> Capacity.capping CapScope.Commuters 0
+            |> Capacity.garrisoning postTiles
         | Harvest sourceId ->
             let seats = Atlas.seats atlas sourceId
             // One binding, read twice: the number and the tiles are the same

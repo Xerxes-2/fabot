@@ -372,17 +372,19 @@ let quotasRecordTests =
         [
             test "the cascade writes down its rows, and they sum to the target" {
                 // Observability only (ADR 0009): the record the `observe.mjs
-                // quotas` view prints. Six rows in cascade order — the guard
+                // quotas` view prints. Seven rows in cascade order — the guard
                 // at the head of them since ADR 0056, behind only the supply
                 // floor, which is a floor and not a row and so has no line
-                // here; the worker row is what the target leaves after the
+                // here; the [[miner]] between the rows that make the colony's
+                // energy and the rows that spend it since ADR 0057 decision 2;
+                // the worker row is what the target leaves after the
                 // specialists, so the quotas sum to the target; the living
                 // counts partition the fleet.
                 let { Quotas = quotas } = decideOn bareRespawn
 
                 Expect.equal
                     (quotas.Rows |> List.map (fun r -> r.Row))
-                    [ "guard"; "reserver"; "anchor"; "hauler"; "upgrader"; "worker" ]
+                    [ "guard"; "reserver"; "anchor"; "hauler"; "miner"; "upgrader"; "worker" ]
                     "one row per casting row, in the cascade's order"
 
                 Expect.equal

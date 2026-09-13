@@ -110,7 +110,7 @@ let patternTableTests =
         "pattern table"
         [
             test
-                "the worker unit, the Anchor, the hauler, the reserver, the upgrader and the guard are the table's rows" {
+                "the worker unit, the Anchor, the hauler, the reserver, the upgrader, the guard and the miner are the table's rows" {
                 // The reserver joined the table the tick its quota did (ADR
                 // 0006, ADR 0042): a row arrives with the colony fact that
                 // says when it is cast, and `reserverClaimsOf` is that
@@ -133,6 +133,15 @@ let patternTableTests =
                 // Work and no Carry, its five Move there to carry the five
                 // that fight. Ten parts, 750 energy, and their order is the
                 // body's — TOUGH eats damage first, HEAL dies last.
+                //
+                // The [[miner]] is the seventh (ADR 0057 decision 2), and the
+                // one bought for a resource the colony does not eat: Work and
+                // Move and **no Carry at all**, which is the one shape no other
+                // row here takes and so the cut `patternOfParts` tells it from
+                // the Anchor by. Its block is three parts and its rule is not —
+                // one Move per five Work, capped at twenty Work — which is this
+                // table saying again that a row is a name and a sizing rule
+                // before it is a block.
                 Expect.equal
                     patternTable
                     [
@@ -171,6 +180,10 @@ let patternTableTests =
                                     Attack
                                     Heal
                                 ]
+                        }
+                        {
+                            Name = "miner"
+                            Block = [ Work; Work; Move ]
                         }
                     ]
                     "every body the colony casts comes from these rows"

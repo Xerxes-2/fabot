@@ -646,6 +646,102 @@ let digIntentsFor name intents =
         | HarvestSource(creep, _) -> creep = name
         | _ -> false)
 
+/// The tile the mine fixture's Thorium deposit stands on, and the mine
+/// [[post]] beside it: the deposit is embedded in wall where the mod puts one,
+/// and the container on its east Seat is the tile the [[miner]] stands on (ADR
+/// 0057 decision 2).
+let minePos = { X = 10; Y = 10 }
+let minePost = { X = 11; Y = 10 }
+
+/// The mine fixture (ADR 0057 decision 2): a plain corridor y = 10, x = 8..20
+/// with the deposit "min-a" embedded in wall at (10,10) and the spawn standing
+/// at (15,10). The extractor "ext-a" stands on the deposit's **own tile** —
+/// which is the placement rule, the extractor's tile being its target's — and
+/// the mineral container "can-min" on the Seat (11,10). The deposit holds a
+/// whole d3 reading of 22,000 Thorium and the extractor's clock reads zero, so
+/// the fixture as it stands is a colony that may dig this tick; every case
+/// below moves exactly one of those facts.
+///
+/// No sources at all, deliberately: this fixture is about the one rock the
+/// colony harvests that has no regeneration, no store to overflow into and no
+/// [[anchor]] over it, and a source beside it would put a second Harvest in the
+/// pool for every case to have to exclude.
+let mineColony =
+    { bareRespawn with
+        Sources = []
+        Refillables = []
+        Controller = None
+        Spatial =
+            { spatial [] [ for x in 8..20 -> { X = x; Y = 10 }, (if x = 10 then Wall else Plain) ] with
+                Thorium = Map.ofList [ "min-a", 22_000 ]
+                Cooldowns = Map.ofList [ "ext-a", 0 ]
+            }
+            |> withObstacles [ { X = 15; Y = 10 } ]
+            |> withTargets
+                [
+                    "min-a", minePos, Mineral
+                    "ext-a", minePos, Structure BuiltKind.Extractor
+                    "can-min", minePost, Structure BuiltKind.Container
+                    "spawn-1", { X = 15; Y = 10 }, Structure BuiltKind.Spawn
+                ]
+    }
+
+/// The same colony with the extractor **not yet standing**: the kind the
+/// projection files it under moves from a structure to a construction site, and
+/// nothing else does. The pairwise premise of "a site is 0".
+let withExtractorSite (colony: ColonyView) =
+    { colony with
+        Spatial =
+            { colony.Spatial with
+                TargetKinds = Map.add "ext-a" (Site BuiltKind.Extractor) colony.Spatial.TargetKinds
+            }
+    }
+
+/// The same colony with the deposit **gone**, which is what the mod does to an
+/// exhausted one: the target leaves the projection outright, taking its kind,
+/// its tile and its remaining amount with it.
+let withDepositGone (colony: ColonyView) =
+    { colony with
+        Spatial =
+            { colony.Spatial with
+                TargetKinds = Map.remove "min-a" colony.Spatial.TargetKinds
+                Thorium = Map.remove "min-a" colony.Spatial.Thorium
+            }
+            |> withHome (fun layer ->
+                { layer with
+                    TargetPositions = Map.remove "min-a" layer.TargetPositions
+                })
+    }
+
+/// The same colony with the mineral container **not yet standing**, so the
+/// deposit has no mine [[post]] and nowhere for a miner to dig from.
+let withoutMineContainer (colony: ColonyView) =
+    { colony with
+        Spatial =
+            { colony.Spatial with
+                TargetKinds = Map.remove "can-min" colony.Spatial.TargetKinds
+            }
+            |> withHome (fun layer ->
+                { layer with
+                    TargetPositions = Map.remove "can-min" layer.TargetPositions
+                })
+    }
+
+/// The same colony with the extractor's clock reading `ticks` rather than zero
+/// — the five ticks in six on which `harvest.js` refuses the act.
+let onCooldown ticks (colony: ColonyView) =
+    { colony with
+        Spatial =
+            { colony.Spatial with
+                Cooldowns = Map.add "ext-a" ticks colony.Spatial.Cooldowns
+            }
+    }
+
+/// A [[miner]]-bodied creep: the row's own block, Work-heavy with **no Carry at
+/// all**, which is the one shape no other row of this colony casts. Store-less,
+/// so it has neither energy nor free capacity to report.
+let miner name = creepWith name 0 0 [ Work; Work; Move ]
+
 /// The haul fixture (ADR 0012): a plain corridor y = 10, x = 9..21; the
 /// source embedded in wall at (10,10) with Seats (9,10) and (11,10), the
 /// controller standing at (20,10); the source container "can-src" on the

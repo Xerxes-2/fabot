@@ -8,7 +8,10 @@ module Fabot.Core.Types.Intents
 type Intent =
     | SpawnCreep of spawnName: string * body: BodyPart list * creepName: string
     | PlaceConstructionSite of tile: RoomPos * kind: StructureKind
-    | HarvestSource of creepName: string * sourceId: string
+    /// The dig act, over either rock the `Harvest` Task can name (ADR 0057
+    /// decision 2): a source, or a Thorium deposit under an extractor of ours.
+    /// The Intent's name is the frozen one and the field's is the honest one.
+    | HarvestSource of creepName: string * rockId: string
     | TransferEnergyToStructure of creepName: string * structureId: string
     /// The withdraw act, whose target has not been a structure alone since
     /// ADR 0023 widened it: a [[container]], the [[storage]], a tombstone or a

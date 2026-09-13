@@ -87,6 +87,26 @@ let guardPattern =
         Block = [ Tough; Move; Move; Move; Move; Move; Attack; Attack; Attack; Heal ]
     }
 
+/// The [[miner]] row (ADR 0057 decision 2): the store-less Work body that
+/// stands over the mineral container and digs the season's Thorium. The block
+/// is `[Work; Work; Move]` and the sizing rule is one Move per
+/// `Tuning.MinerWorkPerMove` Work, so the block is the row's floor rather than
+/// its ratio.
+///
+/// **No Carry, and that is the decision rather than an economy.** A body
+/// holding Thorium ages by `floor(log10 store.T)` ticks a tick, and a
+/// twenty-Work miner passes ten Thorium in three ticks; a harvest with no room
+/// to put the yield drops it on the creep's own tile, and a drop onto a
+/// container tile lands **in** the container — the same engine rule the
+/// [[anchor]]'s overflow already rides on. Which makes the row Work-heavy with
+/// no Carry at all, the one shape no other row of this colony casts, and so the
+/// cut `patternOfParts` reads it back off.
+let minerPattern =
+    {
+        Name = "miner"
+        Block = [ Work; Work; Move ]
+    }
+
 /// The pattern table: every body the colony casts is a row here, sized by
 /// energy under the row's own sizing rule. A future pattern is one more data
 /// row plus its own quota rule, never a new code path (ADR 0006).
@@ -98,6 +118,7 @@ let patternTable =
         reserverPattern
         upgraderPattern
         guardPattern
+        minerPattern
     ]
 
 let bodyCost body =
@@ -119,14 +140,64 @@ let bodyCost body =
 let internal standingParts (tuning: Tuning) parts =
     partCount parts Carry * tuning.StandingCarryPerWork < partCount parts Work
 
+/// The Work ceiling of the [[miner]] row (ADR 0057 decision 2): twenty, and it
+/// is the **bank's** ceiling rather than the engine's part cap — twenty Work
+/// and four Move is twenty-four parts of fifty, and 2,200 energy of the 2,300 an
+/// RCL6 spawn holds. Past it the arithmetic stops mattering: `WORK / 6` a tick
+/// against a reactor that eats one Thorium a tick means mining was never the
+/// bottleneck, and a larger body only ends the deposit sooner. Stated here and
+/// not in `Tuning`, beside `heldWorkCap` and for its reason: it is the ceiling
+/// one row's sizing rule stops at, which is the same kind of number ADR 0021's
+/// saturation is.
+let internal minerWorkCap = 20
+
+/// The miner row's sizing rule (ADR 0057 decision 2): every part slot the bank
+/// affords spent on Work up to `minerWorkCap`, with one Move per `perMove` of
+/// them — `[16 Work; 4 Move]` at 1,800 and `[20 Work; 4 Move]` at 2,300. Exempt
+/// from ADR 0003's fatigue parity, which is a rule about a body that keeps
+/// moving: this one walks to a tile once and then never leaves it. Never below
+/// the row's own block, like every other row: what a bank too poor to pay for
+/// the cast refuses is the cast, in `castFromBank`, and not the sizing.
+let internal minerBodyFor perMove capacity =
+    // Whole `perMove` Work and the one Move that carries them, then the
+    // remainder on a short group, which pays for its own Move as soon as it
+    // holds a single Work. Counted rather than searched so the rule reads as
+    // the arithmetic it is.
+    let group = perMove * bodyCost [ Work ] + bodyCost [ Move ]
+    let groups = capacity / group |> min (minerWorkCap / perMove)
+
+    let spare =
+        if groups * perMove >= minerWorkCap then
+            0
+        else
+            (capacity - groups * group - bodyCost [ Move ]) / bodyCost [ Work ]
+            |> max 0
+            |> min (minerWorkCap - groups * perMove)
+            |> min (perMove - 1)
+
+    let work = groups * perMove + spare |> max (partCountIn minerPattern.Block Work)
+    let move = (work + perMove - 1) / perMove
+
+    List.replicate work Work @ List.replicate move Move
+
 /// The pattern row a body was cast from, read off the parts alone (ADR 0006):
 /// an ATTACK part is the guard row, a CLAIM part is the reserver row, a
-/// Work-heavy body is the anchor row, a standing body at or under that line is
-/// the upgrader row, no Work beside a Carry is the hauler row, and every other
-/// body is the generalist. The row is what sizes the replacement a lead prices
+/// Work-heavy body with **no Carry at all** is the miner row, a Work-heavy body
+/// with one is the anchor row, a standing body at or under that line is the
+/// upgrader row, no Work beside a Carry is the hauler row, and every other body
+/// is the generalist. The row is what sizes the replacement a lead prices
 /// (ADR 0026), so one rule serves every row.
 ///
-/// Order matters between the anchor and upgrader arms and nowhere else:
+/// The miner arm stands **in front of** the anchor arm and is the whole of what
+/// separates the two (ADR 0057 decision 2): both rows are Work-heavy, and the
+/// Carry part the Anchor buys to pay its walk is the one the miner refuses
+/// because a store holding Thorium ages the body standing in it. Without the
+/// arm a `[20 Work; 4 Move]` reads back as an **Anchor**, fills the Anchor
+/// row's `Living` against a quota counted off the [[post]]s, and retires a
+/// garrison from a rock for its whole life.
+///
+/// Order matters between the miner and anchor arms, above, and between the
+/// anchor and upgrader arms below, and nowhere else:
 /// `6W/1C/1M` satisfies both descriptions, and it is the anchor row that casts
 /// it — a body pinned to a Post by ADR 0020's Work Area is a stronger claim
 /// than standing beside the buffer. The reserver arm is what keeps ADR 0026
@@ -148,6 +219,8 @@ let internal patternOfParts (tuning: Tuning) heavy parts =
         guardPattern
     elif partCount parts BodyPart.Claim > 0 then
         reserverPattern
+    elif heavy && partCount parts Carry = 0 then
+        minerPattern
     elif heavy then
         anchorPattern
     elif standingParts tuning parts then
@@ -343,21 +416,33 @@ type BodySizing =
     {
         AnchorCap: int
         ReserverClaims: int list
+        /// The Work one Move carries on the [[miner]] row — `Tuning`'s own
+        /// number (ADR 0057 decision 2), carried here beside the other two
+        /// because it is the third thing a row's sizing rule reads that the
+        /// bank does not answer. Unlike those two it is a *tunable* rather than
+        /// a fact of the tick, so every caster hands over its colony's own.
+        MinerWorkPerMove: int
     }
 
-/// The sizing a caller holding nothing but a capacity can ask for: both rows at
-/// their **largest** body — the anchor row at the held rock's saturation, the
-/// reserver row untruncated by any demand.
+/// The sizing a caller holding nothing but a capacity can ask for: every row at
+/// its **largest** body — the anchor row at the held rock's saturation, the
+/// reserver row untruncated by any demand, and the miner row at the ratio this
+/// bot ships with. The miner's entry is the one stand-in here that is a tunable
+/// and not a ceiling, and it is honest for the same reason `AnchorCap`'s is: a
+/// caller that holds no colony holds no colony's miner either, and every casting
+/// path that buys one comes through `RowSizing`, which reads `view.Tuning`.
 let largestSizing =
     {
         AnchorCap = heldWorkCap
         ReserverClaims = []
+        MinerWorkPerMove = Tuning.defaults.MinerWorkPerMove
     }
 
 /// Body for a pattern at an energy capacity, under the row's own sizing rule
 /// (ADR 0006): the anchor row spends on Work beside its fixed Carry/Move pair,
 /// the hauler, reserver and guard rows buy whole blocks, the upgrader row buys
-/// Work/Move pairs beside one Carry, and every other row pads its remainder at
+/// Work/Move pairs beside one Carry, the miner row buys Work with one Move per
+/// five of them and no Carry at all, and every other row pads its remainder at
 /// plain fatigue parity — or, if its block holds a part that rule cannot place,
 /// is refused rather than sized into some other body. **The** dispatch over the
 /// pattern, asked by the rows, by the lead's successor and by `bodyFor` below:
@@ -380,6 +465,8 @@ let sizedBodyFor (sizing: BodySizing) pattern capacity =
         guardBodyFor capacity
     elif pattern.Name = upgraderPattern.Name then
         upgraderBodyFor capacity
+    elif pattern.Name = minerPattern.Name then
+        minerBodyFor sizing.MinerWorkPerMove capacity
     else
         parityBodyFor pattern capacity
 

@@ -616,6 +616,34 @@ let mineralsIn (atlas: Atlas) (room: string) : (string * Pos) list =
     targetsOfKind atlas Mineral
     |> List.choose (fun id -> tileIn atlas room id |> Option.map (fun tile -> id, tile))
 
+/// Whether a target id is a Thorium deposit (ADR 0057). The one join between a
+/// Task's bare id and the fact that decides which set of rules answers for it:
+/// a `Harvest` names a rock, and a rock is a source or a deposit, which share
+/// the act and share almost nothing else — no regeneration, no store to
+/// overflow into, and an extractor's cooldown between one dig and the next.
+/// Total (ADR 0004): an id the projection classifies nothing for is no deposit.
+let isMineral (atlas: Atlas) (targetId: string) : bool =
+    Map.tryFind targetId atlas.Spatial.TargetKinds = Some Mineral
+
+/// The extractor standing on a deposit's own tile (ADR 0057 decision 1), whose
+/// cooldown decides whether this tick's harvest is issued at all. The
+/// extractor's tile **is** the mineral's — that is the placement rule — so the
+/// join is a tile equality inside the deposit's own room and never a range.
+/// `None` while only a site stands there, which is the same answer as no
+/// extractor at all: a site extracts nothing. Total (ADR 0004).
+let extractorOn (atlas: Atlas) (mineralId: string) : string option =
+    match Map.tryFind mineralId atlas.TargetAt with
+    | None -> None
+    | Some(room, tile) ->
+        targetsOfKind atlas (Structure BuiltKind.Extractor)
+        |> List.tryFind (fun id -> tileIn atlas room id = Some tile)
+
+/// Ticks before a structure may act again, and 0 for one the projection carries
+/// no clock for — which is what "now" reads as, and the only answer that can be
+/// given for a structure that has no cooldown to spend (ADR 0004).
+let cooldownOf (atlas: Atlas) (targetId: string) : int =
+    Map.tryFind targetId atlas.Spatial.Cooldowns |> Option.defaultValue 0
+
 /// Tiles of one room a construction site cannot go down on today, whatever the
 /// plan wants there. The engine takes one construction site per tile, so a pick
 /// onto an occupied tile is answered ERR_INVALID_TARGET once a tick for as long
@@ -1088,6 +1116,39 @@ let postCount (atlas: Atlas) : int =
 let postContainerTilesIn (atlas: Atlas) (room: string) : Set<Pos> =
     Set.intersect (containerTilesIn atlas room) (postsIn atlas room)
 
+/// The **mine Posts** of one room (ADR 0057 decision 2): every Thorium
+/// deposit's Seat carrying a built container. The tile the [[miner]] stands on
+/// — a store-less body over a container, so the engine's drop lands *in* the
+/// container it is standing on, which is the whole of why the row has no Carry.
+///
+/// Its own census beside `standingPostsIn` and deliberately **not** folded into
+/// it, which is the other half of the choice ADR 0057 decision 1 made when it
+/// kept `mineralGroundIn` out of `seatUnionIn`. `postsIn` is the Anchor row's
+/// unit — `postCount` is that row's whole quota, and `postWorkCapsOf` walks the
+/// **sources** and so sizes a body off the rock a Post seats, a mineral Post
+/// getting no entry there at all and falling to `anchorCapAt`'s
+/// `richestAnchorCap` — and a deposit has no rate to saturate and
+/// hires no Anchor, so a mineral Seat read into that census would hire a
+/// six-Work body with a Carry part to stand on a tile whose whole yield is
+/// Thorium. What the two censuses share is the *shape* — a Seat with a
+/// container on it — and nothing else, which is why they are two names.
+///
+/// The **built** container alone, never its site: a body cast for a site Post
+/// raises the container it will later dig into (#205), and a miner cannot —
+/// ADR 0046 shuts Build to a Work-heavy body and the row carries no Carry to
+/// spend into a site with. So the mine Post arrives the tick the container
+/// stands, and before that the deposit has no standing room and its Harvest
+/// reaches nobody.
+let private minePostsIn (atlas: Atlas) (room: string) : Set<Pos> =
+    let ground = groundOf atlas room
+
+    let seats =
+        mineralsIn atlas room
+        |> List.map (fun (_, tile) -> seatTiles ground tile)
+        |> List.fold Set.union Set.empty
+
+    Set.intersect seats (containerTilesIn atlas room)
+
 /// One source's own Seats that the named census counts as Posts — the join
 /// both readings of "this rock's Posts" are made of, differing in nothing but
 /// which census they intersect with.
@@ -1111,8 +1172,24 @@ let private postsOfBy
 /// body stands on it, whatever that body holds this tick, so the cap's two
 /// halves are read off one census and a Post can never be full as a number
 /// while reading vacant as a tile.
-let private postsOfIn (atlas: Atlas) (sourceId: string) : (string * Set<Pos>) option =
-    postsOfBy postsIn atlas sourceId
+///
+/// **A deposit reads its own census** (ADR 0057 decision 2): the rock is a
+/// source or a Thorium mineral, the Post is a Seat with a container on it
+/// either way, and which census answers is settled here once rather than at
+/// each of the five readers — the Work Area's narrowing, the Emitter's walk
+/// clause, `hasUnmannedPost`, the Task's [[capacity]] and its garrison tiles.
+/// The answer for a deposit was the empty set before this ticket and is the
+/// mine Post now, so nothing a source asks moves.
+///
+/// Three of the five answer for a deposit by being asked: the two Work Area
+/// arms and the [[capacity]], each of which carries a mineral clause of its own
+/// beside the census. The other two — the Emitter's walk disjunct and
+/// `hasUnmannedPost` behind it — are **unreachable** for one, the mineral arm
+/// standing in front of them, and are right about a deposit by never being
+/// asked rather than by answering. Said out loud because the two are where a
+/// later widening would land silently.
+let private postsOfIn (atlas: Atlas) (rockId: string) : (string * Set<Pos>) option =
+    postsOfBy (if isMineral atlas rockId then minePostsIn else postsIn) atlas rockId
 
 let postsOf (atlas: Atlas) (sourceId: string) : Set<RoomPos> = postsOfIn atlas sourceId |> stamped
 
@@ -1192,9 +1269,17 @@ let private sharesRoom (atlas: Atlas) (creep: string) (task: Task) : bool =
 /// is sometimes the one the body is about to build. A source that has a Post
 /// narrows to it even when the projection blocks it — an area with nothing
 /// standable in it makes the Task inapplicable rather than silently widening
-/// back to the Seats. Only Harvest narrows. Memoised per Task. A source with
+/// back to the Seats. Only Harvest narrows. Memoised per Task.
+///
+/// **A Thorium deposit narrows to its own Post and to nothing else, for either
+/// body** (ADR 0057 decision 2, #261): no fallback to the bare Seats for a
+/// heavy body and no Seats-beyond-the-Posts for a light one. So the target's
+/// *kind* separates the answers here as much as the room does, and the rule
+/// below is a source's throughout.
+///
+/// A source with
 /// **no** Post narrows nothing at home and narrows to nothing everywhere else,
-/// and the room is the whole of what separates the two: ADR 0020's fallback to
+/// and the room is the whole of what separates **those two**: ADR 0020's fallback to
 /// the bare Seats is a *bootstrap* rule for the colony's own room, where a
 /// stranded Anchor is a few tiles from a spawn that can replace it, while an
 /// outpost bootstraps through a reserver and a light builder (ADR 0042) and a
@@ -1205,19 +1290,48 @@ let private sharesRoom (atlas: Atlas) (creep: string) (task: Task) : bool =
 /// (ADR 0004).
 let private narrowedArea (atlas: Atlas) (creep: string) (task: Task) : Set<RoomPos> =
     match task with
-    | Harvest sourceId when workHeavy atlas creep ->
+    | Harvest rockId when workHeavy atlas creep ->
         memoised atlas.HeavyAreas task (fun () ->
-            let postTiles = postsOf atlas sourceId
+            let postTiles = postsOf atlas rockId
 
             if not (Set.isEmpty postTiles) then
                 Set.intersect (workArea atlas task) postTiles
+            // **A deposit keeps no fallback at all** (ADR 0057 decision 2).
+            // ADR 0020's fallback to the bare Seats is a *bootstrap* rule and
+            // the bootstrap is a source's: a stranded Anchor at home is a few
+            // tiles from a spawn that can replace it, and the energy it digs
+            // onto the ground is picked up. A deposit bootstraps nothing — a
+            // dropped Thorium pile bleeds `ceil(amount / 1000)` a tick and
+            // nothing in this colony picks one up, the extractor and the
+            // container are planned on the same tick at RCL6, and the only
+            // body that would take the widened area is an [[anchor]] that has
+            // lost its own rock, which would then garrison a deposit with a
+            // Carry part and age under the Thorium it holds. So a deposit with
+            // no container standing has nowhere to be dug from and its Harvest
+            // reaches nobody, which is the same answer ADR 0042 gives an
+            // unposted outpost source one room over.
+            elif isMineral atlas rockId then
+                Set.empty
             else
                 // Absence is home's answer and not an outpost's: only a
                 // source the projection places in another room loses the
                 // fallback.
-                match targetRoom atlas sourceId with
+                match targetRoom atlas rockId with
                 | Some room when room <> atlas.Home -> Set.empty
                 | _ -> workArea atlas task)
+    // **A deposit narrows to nothing for a light body either** (#261). The arm
+    // below is ADR 0051's complement rule and every word of it is a source's:
+    // the Seats beyond the Posts are where the light row digs the half the
+    // garrison is not draining. A deposit has no such half — there is one tile
+    // it can be dug from, the container under the [[miner]]'s feet, and its
+    // bare Seats are exactly the tiles a dig **drops the Thorium on the
+    // ground** from, where it bleeds `ceil(amount / 1000)` a tick and nothing
+    // in this colony picks it up. The body this reaches is real and not
+    // hypothetical: a `[16 Work; 4 Move]` miner loses Work parts head-first to
+    // damage, and at `[3 Work; 4 Move]` it is no longer `workHeavy`, still
+    // answers the Emitter's mineral arm (a Work part and no Carry), and would
+    // be steered deliberately off the container it was standing on.
+    | Harvest rockId when isMineral atlas rockId -> Set.empty
     // A Post's Seat is the garrison's (ADR 0051): a light body's Harvest Work
     // Area is the source's Seats less its Posts — the complement of the heavy
     // arm above, so the two kinds of body stand on disjoint tiles of one source

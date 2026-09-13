@@ -182,6 +182,15 @@ type Tuning =
         /// unbuildable for every other kind, so there is no window for an
         /// extension to take and nothing to hold open.
         ExtractorLevel: int
+        /// The Work parts one Move carries on the **miner** row (ADR 0057
+        /// decision 2). Five, derived at the **2,300 bank**: the body walks to
+        /// one tile once and then never leaves it, so its Move is bought for a
+        /// single commute and not for ADR 0003's fatigue parity, which is a
+        /// rule about a body that keeps moving. Changing it would be a
+        /// different colony — a miner that reaches its Post sooner and digs
+        /// less — where `EXTRACTOR_COOLDOWN` beside it would be a lie about the
+        /// server.
+        MinerWorkPerMove: int
         /// The Layout horizon (ADR 0011, moved to RCL5 by ADR 0039 and to RCL6
         /// by ADR 0055): the whole plan is computed up to this level regardless
         /// of the current one, so today's roads route around tomorrow's
@@ -285,6 +294,7 @@ module Tuning =
             SafeModeDeadline = 3
             StorageLevel = 4
             ExtractorLevel = 6
+            MinerWorkPerMove = 5
             HorizonLevel = 6
             OutpostBuilders = 2
             BootstrapLevel = 3

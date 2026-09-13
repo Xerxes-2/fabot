@@ -68,7 +68,12 @@ type Resource =
 /// A unit of work in this tick's Task pool; creeps are interchangeable
 /// executors that get matched to Tasks.
 type Task =
-    | Harvest of sourceId: string
+    /// Dig a **rock**: an energy source, or a [[thorium]] deposit since ADR 0057
+    /// decision 2 widened the id and nothing else — same act, same Intent, same
+    /// Task kind, so every exhaustive match over `Task` grew no arm. The label
+    /// is `rockId` and not `sourceId` because this field is where a reader looks
+    /// up what the id means, and half of what it can name is not a source.
+    | Harvest of rockId: string
     /// Take stored energy out of a stocked container (ADR 0012), or out of the
     /// Storage a tier below them (ADR 0023) — the haul cycle's intake, judged
     /// over stores rather than energy's name.
