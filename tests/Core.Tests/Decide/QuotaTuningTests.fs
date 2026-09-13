@@ -45,17 +45,67 @@ let tuningTests =
                 let road = bareRespawn |> withHits "road-1" BuiltKind.Road 3000 5000
 
                 Expect.isEmpty
-                    (repairTasks (planTasks road noThreats))
+                    (repairTasks (planTasksOn road noThreats))
                     "three fifths of max is above the shipped half, so the road is left alone"
 
                 Expect.equal
                     (repairTasks (
-                        planTasks
+                        planTasksOn
                             (road |> tunedBy (fun t -> { t with RepairTrigger = 0.7 }))
                             noThreats
                     ))
                     [ "road-1" ]
                     "a trigger of seven tenths and the same road is hungry"
+            }
+
+            test "RepairWholeLine is the fraction a held decaying kind leaves the pool at" {
+                // The second of the two lines (ADR 0061), and it is read only
+                // where a creep holds the Repair — so the pairwise moves the
+                // number with the holder standing, and the unheld case beside
+                // it shows the hungry line is the one that did not move.
+                let road = bareRespawn |> withHits "road-1" BuiltKind.Road 4500 5000
+
+                Expect.isEmpty
+                    (repairTasks (planTasksHolding [ Repair "road-1" ] road))
+                    "nine tenths of max is over the shipped whole line, holder or no holder"
+
+                Expect.equal
+                    (repairTasks (
+                        planTasksHolding
+                            [ Repair "road-1" ]
+                            (road |> tunedBy (fun t -> { t with RepairWholeLine = 0.95 }))
+                    ))
+                    [ "road-1" ]
+                    "a whole line of 0.95 and the same held road is still the holder's job"
+
+                Expect.isEmpty
+                    (repairTasks (
+                        planTasksOn
+                            (road |> tunedBy (fun t -> { t with RepairWholeLine = 0.95 }))
+                            noThreats
+                    ))
+                    "and with nobody holding it the whole line is not read at all: the trigger is"
+            }
+
+            test "the hungry line sits under the whole line, and the whole line at or under max" {
+                // The pair is a pair or the rule is not a ratchet (ADR 0061):
+                // a whole line at or under the trigger leaves the held case
+                // dead and the churn where it was, and one over full hits
+                // leaves a structure pooled it can never reach.
+                Expect.isLessThan
+                    Tuning.defaults.RepairTrigger
+                    Tuning.defaults.RepairWholeLine
+                    "the hungry line is the lower of the two"
+
+                Expect.isLessThanOrEqual
+                    Tuning.defaults.RepairWholeLine
+                    1.0
+                    "and the whole line is a fraction of max that max itself reaches"
+
+                Expect.isGreaterThan
+                    Tuning.defaults.RepairTrigger
+                    Tuning.defaults.RepairRescueLine
+                    "with the rescue line under both: a rescue is a structure past its own trigger"
             }
 
             test "RampartFloor is the hits a rampart is whole at" {
@@ -68,12 +118,12 @@ let tuningTests =
                     bareRespawn |> withLevel 5 |> withHits "ram-1" BuiltKind.Rampart 150_000 300_000
 
                 Expect.isEmpty
-                    (repairTasks (planTasks keep noThreats))
+                    (repairTasks (planTasksOn keep noThreats))
                     "a hundred and fifty thousand is over the shipped floor"
 
                 Expect.equal
                     (repairTasks (
-                        planTasks
+                        planTasksOn
                             (keep |> tunedBy (fun t -> { t with RampartFloor = 200_000 }))
                             noThreats
                     ))
@@ -82,7 +132,7 @@ let tuningTests =
 
                 Expect.isEmpty
                     (repairTasks (
-                        planTasks
+                        planTasksOn
                             (bareRespawn
                              |> withLevel 2
                              |> withHits "ram-1" BuiltKind.Rampart 1 300_000
@@ -96,14 +146,14 @@ let tuningTests =
                 let pile = pileTaskColony 80 []
 
                 Expect.isEmpty
-                    (planTasks pile noThreats
+                    (planTasksOn pile noThreats
                      |> List.filter (function
                          | Pickup _ -> true
                          | _ -> false))
                     "eighty is under the shipped hundred, so the pile is left to decay"
 
                 Expect.equal
-                    (planTasks
+                    (planTasksOn
                         (pile |> tunedBy (fun t -> { t with PickupThreshold = 50 }))
                         noThreats
                      |> List.filter (function

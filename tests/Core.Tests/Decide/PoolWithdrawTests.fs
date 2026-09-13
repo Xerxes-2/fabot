@@ -888,7 +888,7 @@ let thoriumLegTests =
                 // container the store-less [[miner]] drops into; the sink is the
                 // Storage, the one store nothing can stand on and so the one the
                 // contact penalty never reaches.
-                let tasks = planTasks mineHaulColony noThreats
+                let tasks = planTasksOn mineHaulColony noThreats
 
                 Expect.contains
                     tasks
@@ -913,7 +913,7 @@ let thoriumLegTests =
                 // see is that this colony has a mine at all — a hauler walking
                 // home with a load must still have somewhere to put it on the
                 // tick the container it drew from reads zero.
-                let tasks = planTasks (mineHaulColony |> withMineStock 0) noThreats
+                let tasks = planTasksOn (mineHaulColony |> withMineStock 0) noThreats
 
                 Expect.isFalse
                     (List.contains (Withdraw("can-min", Thorium)) tasks)
@@ -937,7 +937,7 @@ let thoriumLegTests =
                 // whole of the window the Layout takes to re-place a destroyed
                 // container — and the row's census, counting it living, cast no
                 // replacement.
-                let tasks = planTasks (mineHaulColony |> withoutMineContainer) noThreats
+                let tasks = planTasksOn (mineHaulColony |> withoutMineContainer) noThreats
 
                 Expect.isFalse
                     (List.contains (Withdraw("can-min", Thorium)) tasks)
@@ -1133,7 +1133,7 @@ let thoriumPileTests =
                 // at `ceil(amount / 1000)` a tick, with no Task in the colony
                 // that could name one. Pairwise on the ground alone: the same
                 // colony without the pile pools no Pickup at all.
-                let piled = planTasks (mineHaulColony |> withMinePile 630) noThreats
+                let piled = planTasksOn (mineHaulColony |> withMinePile 630) noThreats
 
                 Expect.contains
                     piled
@@ -1141,7 +1141,7 @@ let thoriumPileTests =
                     "the pile on the mine post is the container's own intake off the floor"
 
                 Expect.isFalse
-                    (planTasks mineHaulColony noThreats
+                    (planTasksOn mineHaulColony noThreats
                      |> List.exists (function
                          | Pickup _ -> true
                          | _ -> false))
@@ -1264,7 +1264,7 @@ let thoriumPileTests =
                 // the cargo. Inclusive at the line, like the energy pile's.
                 // Pairwise on the amount alone.
                 let pooled units =
-                    planTasks (mineHaulColony |> withMinePile units) noThreats
+                    planTasksOn (mineHaulColony |> withMinePile units) noThreats
                     |> List.contains (Pickup("pile-min", Thorium))
 
                 Expect.isTrue (pooled 100) "a hundred exactly is worth the walk"
@@ -1318,7 +1318,7 @@ let thoriumPileTests =
                     }
 
                 let pooledIn colony =
-                    planTasks colony noThreats |> List.contains (Pickup("pile-r", Thorium))
+                    planTasksOn colony noThreats |> List.contains (Pickup("pile-r", Thorium))
 
                 Expect.isTrue
                     (pooledIn (withPileIn "W1N2" ownedRoom))

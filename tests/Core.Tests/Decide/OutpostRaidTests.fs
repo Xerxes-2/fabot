@@ -769,8 +769,8 @@ let containerSwitchTests =
                 // whole line, so an outpost container's decay drags no home
                 // container's line with it — and nothing here is decayed.
                 Expect.equal
-                    (planTasks switchPosted noThreats)
-                    (planTasks switchUnposted noThreats)
+                    (planTasksOn switchPosted noThreats)
+                    (planTasksOn switchUnposted noThreats)
                     "an empty container standing changes no Task in the pool"
 
                 let stocked =
@@ -782,7 +782,9 @@ let containerSwitchTests =
                     }
 
                 Expect.equal
-                    (List.except (planTasks switchPosted noThreats) (planTasks stocked noThreats))
+                    (List.except
+                        (planTasksOn switchPosted noThreats)
+                        (planTasksOn stocked noThreats))
                     [ Withdraw("can-out", Energy) ]
                     "and stocked it adds exactly one Task, the Withdraw of its own store"
 
@@ -799,7 +801,9 @@ let containerSwitchTests =
                     }
 
                 Expect.equal
-                    (List.except (planTasks switchPosted noThreats) (planTasks decayed noThreats))
+                    (List.except
+                        (planTasksOn switchPosted noThreats)
+                        (planTasksOn decayed noThreats))
                     [ Repair "can-out" ]
                     "and decayed it adds exactly one more, its own Repair across the Seam"
             }

@@ -122,24 +122,68 @@ let internal isIndependent (view: ColonyView) = homeStage view = Some Independen
 /// and a Storage behind it.
 let internal keepsRamparts (view: ColonyView) = isIndependent view
 
+/// The task ids this colony's **living** creeps hold this tick: the one fact
+/// the Planner reads about the assignment table (ADR 0061), derived once in
+/// `Entry` and handed down to the pool. Read as `Set.contains (taskId t) held`
+/// — **spelled forward, never parsed**, so nothing here has to pull a target
+/// out of a string and a `Withdraw` and a `Repair` on one container are
+/// different keys by construction.
+///
+/// **Filtered to the living**, which is the whole of the join: `Assignments`
+/// arrives from Memory and may name a creep that died last tick. The Matcher
+/// drops those silently, but `planTasks` runs first, and a colony must not hold
+/// a Task open on the strength of a body that is not there.
+///
+/// **Not filtered to the Repairs**, though today the Repair line is its only
+/// reader: the table holds task *ids*, and picking the Repairs out of it means
+/// reading a kind out of a string, which is the parsing this seam exists to
+/// avoid. The whole table is the honest set — "these are the Tasks this colony
+/// holds" — and a reader that wants one kind writes the key it wants and asks,
+/// as `isHungry` does. One boolean per candidate is still what any reader gets.
+let internal heldTaskIds (view: ColonyView) (assignments: Assignments) : Set<string> =
+    let living = view.Creeps |> List.map (fun c -> c.Name) |> Set.ofList
+
+    assignments
+    |> Map.toList
+    |> List.choose (fun (name, tid) -> if Set.contains name living then Some tid else None)
+    |> Set.ofList
+
 /// Whether a structure of this kind, carrying these hits, is hungry: its own
-/// whole line, read off the kind (ADR 0034). The decaying kinds sit below a
-/// fraction of max (ADR 0010), a rampart below the floor, the Keep below full —
-/// it does not decay, so below max means damaged. A kind with no line is never
-/// hungry. The floor is capped at the structure's own max so a rampart whose
-/// max is somehow under it can still be whole.
-let private isHungry (tuning: Tuning) kind (hits: HitsInfo) =
+/// line, read off the kind (ADR 0034) and — for the decaying kinds — off
+/// whether anybody is already repairing it (ADR 0061). A rampart sits below its
+/// floor, the Keep below full — it does not decay, so below max means damaged.
+/// A kind with no line is never hungry. The floor is capped at the structure's
+/// own max so a rampart whose max is somehow under it can still be whole.
+///
+/// **The decaying kinds are judged by two numbers and the held fact picks
+/// between them**: a road or a container nobody holds is hungry below
+/// `Tuning.RepairTrigger`, and one a creep is already repairing stays hungry up
+/// to `Tuning.RepairWholeLine`. A single line puts the entry and the exit on
+/// one number, and one repair tick steps across it, so the repair is over the
+/// tick it starts and the holder is released `task-gone` on the next tick's
+/// pool. The substitution happens **here and nowhere else** — `Floor` and
+/// `Full` have no second number to make (ADR 0061 part 2), and the rule is
+/// monotone: the pool with it is a superset of the pool without it.
+let private isHungry (tuning: Tuning) (held: Set<string>) id kind (hits: HitsInfo) =
     match wholeLine kind with
-    | Some WholeLine.Fraction -> float hits.Hits < tuning.RepairTrigger * float hits.HitsMax
+    | Some WholeLine.Fraction ->
+        let line =
+            if Set.contains (taskId (Repair id)) held then
+                tuning.RepairWholeLine
+            else
+                tuning.RepairTrigger
+
+        float hits.Hits < line * float hits.HitsMax
     | Some WholeLine.Floor -> hits.Hits < min tuning.RampartFloor hits.HitsMax
     | Some WholeLine.Full -> hits.Hits < hits.HitsMax
     | None -> false
 
 /// Every structure the projection carries hits for that stands below its kind's
-/// whole line, with its kind, in id order. The one walk over the hits and the
-/// kinds, shared by its two readers: the Repair pool takes all of them, the
-/// safe-mode reflex's Keep arm asks only whether one is of the Keep (ADR 0034).
-let internal hungryStructures (view: ColonyView) : (string * BuiltKind) list =
+/// line, with its kind, in id order — the Repair pool's own walk, and since ADR
+/// 0061 the only reader of it. The held ids are the set the Planner was handed
+/// (`heldTaskIds`); the safe-mode reflex's Keep arm, which used to share this
+/// walk, asks `keepDamaged` instead.
+let internal hungryStructures (view: ColonyView) (held: Set<string>) : (string * BuiltKind) list =
     let ramparts = keepsRamparts view
 
     SpatialInfo.structureHits view.Spatial
@@ -148,8 +192,21 @@ let internal hungryStructures (view: ColonyView) : (string * BuiltKind) list =
         // A rampart below the line the colony keeps them from is not
         // hungry: it is decaying away (#214, `keepsRamparts`).
         | BuiltKind.Rampart when not ramparts -> None
-        | _ when isHungry view.Tuning kind hits -> Some(id, kind)
+        | _ when isHungry view.Tuning held id kind hits -> Some(id, kind)
         | _ -> None)
+
+/// Whether any [[keep]] structure of this colony stands below full hits: the
+/// safe-mode reflex's own question (ADR 0034), asked of the same projected hits
+/// the Repair pool walks. Its own predicate since ADR 0061 and no longer a
+/// filter over `hungryStructures`: **this arm needs no held set**, the Keep's
+/// line being full hits whoever is repairing it, and a question that needs no
+/// answer should not be made to invent one to ask. So "hungry" and "damaged"
+/// stay one fact here however the decaying kinds' two lines move. The cost is
+/// a second walk over a hundred-odd structure hits, which is not a flood
+/// (#171).
+let internal keepDamaged (view: ColonyView) : bool =
+    SpatialInfo.structureHits view.Spatial
+    |> List.exists (fun (_, kind, hits) -> isKeep kind && hits.Hits < hits.HitsMax)
 
 /// The range a hostile can hurt a creep from, or None for one that cannot (ADR
 /// 0033).

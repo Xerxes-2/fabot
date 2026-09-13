@@ -474,11 +474,28 @@ let decideOn colony = decide colony Map.empty Set.empty None
 /// test varies.
 let decideFrom assigned colony = decide colony assigned Set.empty None
 
+/// `planTasksOn` over a colony **whose assignment table holds nothing** — the
+/// tick's pool as a colony with no repair in progress derives it (ADR 0061).
+/// The held set is the one argument all but the held-line tests pass empty and
+/// mean it. Named `…On` like `decideOn` and `poolOn` beside it rather than
+/// shadowing `Planner.planTasks`: a shadow resolves by open order, and the day
+/// the Planner gains a fourth fact the tempting repair is to default it here
+/// and leave every call site compiling with two facts it never named. A test
+/// *about* the two lines calls `planTasksHolding` below.
+let planTasksOn view threats =
+    Planner.planTasks view threats Set.empty
+
+/// `planTasksOn` over a colony whose living creeps hold these Tasks (ADR 0061):
+/// the held set spelled the way the pool reads it, forward through `taskId`,
+/// so a test names the Task and never a string.
+let planTasksHolding (holding: Task list) view =
+    Planner.planTasks view noThreats (holding |> List.map taskId |> Set.ofList)
+
 /// This tick's pool with its priorities and capacities, over the
 /// snapshot's own Atlas — what the Matcher and the mover are both handed
 /// (ADR 0052 decision 6).
 let poolOn snapshot =
-    planPool snapshot (Atlas.ofView snapshot) (planTasks snapshot noThreats)
+    planPool snapshot (Atlas.ofView snapshot) (planTasksOn snapshot noThreats)
 
 /// Run the Resolver at its own seam: assigned Tasks as data over the
 /// snapshot's Atlas; a creep absent from the list is idle. Move Intents

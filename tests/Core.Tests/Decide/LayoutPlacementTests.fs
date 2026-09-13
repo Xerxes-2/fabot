@@ -191,7 +191,7 @@ let plannerTests =
         "planner"
         [
             test "one Harvest task per source" {
-                let tasks = planTasks bareRespawn noThreats
+                let tasks = planTasksOn bareRespawn noThreats
 
                 let harvests =
                     tasks
@@ -216,7 +216,7 @@ let plannerTests =
                     }
 
                 let harvests =
-                    planTasks snapshot noThreats
+                    planTasksOn snapshot noThreats
                     |> List.choose (function
                         | Harvest sourceId -> Some sourceId
                         | _ -> None)
@@ -229,7 +229,7 @@ let plannerTests =
 
             test "a controller yields an Upgrade task" {
                 let upgrades =
-                    planTasks bareRespawn noThreats
+                    planTasksOn bareRespawn noThreats
                     |> List.choose (function
                         | Upgrade id -> Some id
                         | _ -> None)
@@ -238,7 +238,7 @@ let plannerTests =
             }
 
             test "no Upgrade task without a controller" {
-                let tasks = planTasks { bareRespawn with Controller = None } noThreats
+                let tasks = planTasksOn { bareRespawn with Controller = None } noThreats
 
                 let upgrades =
                     tasks
@@ -256,7 +256,7 @@ let plannerTests =
                     }
 
                 let builds =
-                    planTasks snapshot noThreats
+                    planTasksOn snapshot noThreats
                     |> List.choose (function
                         | Build siteId -> Some siteId
                         | _ -> None)
@@ -280,7 +280,7 @@ let plannerTests =
                     }
 
                 let refills =
-                    planTasks snapshot noThreats
+                    planTasksOn snapshot noThreats
                     |> List.choose (function
                         | Refill(structureId, _) -> Some structureId
                         | _ -> None)
@@ -303,7 +303,7 @@ let plannerTests =
                     }
 
                 let refills snapshot =
-                    planTasks snapshot noThreats
+                    planTasksOn snapshot noThreats
                     |> List.choose (function
                         | Refill(structureId, _) -> Some structureId
                         | _ -> None)
@@ -335,7 +335,7 @@ let plannerTests =
                     }
 
                 let refills =
-                    planTasks snapshot noThreats
+                    planTasksOn snapshot noThreats
                     |> List.choose (function
                         | Refill(structureId, _) -> Some structureId
                         | _ -> None)
@@ -359,7 +359,7 @@ let plannerTests =
                     }
 
                 let refills =
-                    planTasks snapshot noThreats
+                    planTasksOn snapshot noThreats
                     |> List.choose (function
                         | Refill(structureId, _) -> Some structureId
                         | _ -> None)

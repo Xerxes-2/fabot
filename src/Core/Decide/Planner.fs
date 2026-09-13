@@ -245,7 +245,23 @@ let internal guardedOutposts (view: ColonyView) : string list =
 
 /// Planner: rebuild this tick's full Task pool from the colony view. Pure and
 /// from scratch every tick — Tasks are never persisted.
-let planTasks (view: ColonyView) (threats: Threats) : Task list =
+///
+/// `held` is the one fact this half reads about the colony's own assignment
+/// table (ADR 0061): the task ids its living creeps hold, derived once in
+/// `Entry` (`heldTaskIds`) and read by the Repair line alone, to pick which of
+/// the decaying kinds' two lines a structure is judged by.
+///
+/// **What it changes is not the Repair line alone**, because the pool this
+/// half returns is read further down: `Quota.workerFloor` stands the worker row
+/// at two while anything at all stands in the Build or Repair pool, so a held
+/// road between the two lines keeps that floor where an empty pool would have
+/// dropped it to one. Masked at the shipped tuning, where `MinWorkforce`
+/// binds first, and true whatever the tuning — a fact the pool carries is a
+/// fact every reader of the pool carries. It narrows ADR
+/// 0025's creep-blindness clause to what that clause's own reason was about —
+/// the Planner still sees no body, no position, no load and no name, and a set
+/// of ids is what keeps it that way where the `Assignments` map would not.
+let planTasks (view: ColonyView) (threats: Threats) (held: Set<string>) : Task list =
     // Flee exists while a Reach does (ADR 0033): one Task for the whole
     // colony, at the head of the pool as its Safety tier is at the head of
     // the ranking. No Reach, no Flee — a quiet tick's pool is the pool it
@@ -263,7 +279,11 @@ let planTasks (view: ColonyView) (threats: Threats) : Task list =
     // Harvest exists for every source, drained or not (ADR 0013, revised by
     // ADR 0025): the task no longer flickers with the source's stock, because
     // whether a dry rock is worth walking to depends on the walker's body and
-    // position — the Matcher's knowledge, not the creep-blind Planner's.
+    // position — the Matcher's knowledge, and none of this half's. That is a
+    // claim about a **body**, and it is the whole of what ADR 0025's clause
+    // said: since ADR 0061 the Planner does read one fact about the assignment
+    // table — which Repairs are held, above — so "the creep-blind Planner" is
+    // no longer true of the Planner in general and stays exactly true here.
     let harvests = view.Sources |> List.map (fun s -> Harvest s.Id)
 
     // And one Harvest per Thorium deposit beside them (ADR 0057 decision 2):
@@ -309,9 +329,11 @@ let planTasks (view: ColonyView) (threats: Threats) : Task list =
 
     let builds = view.ConstructionSites |> List.map (fun site -> Build site.Id)
 
-    // A Repair per repairable structure below its kind's whole line, in id
-    // order (ADR 0010, ADR 0034).
-    let repairs = hungryStructures view |> List.map (fst >> Repair)
+    // A Repair per repairable structure below its kind's line, in id order (ADR
+    // 0010, ADR 0034) — and for the decaying kinds that is two lines since ADR
+    // 0061, the hungry one for a structure nobody holds and the whole one for a
+    // structure somebody is already repairing.
+    let repairs = hungryStructures view held |> List.map (fst >> Repair)
 
     // The ids of one projected kind, in id order. The containers, the
     // Storage and the controllers are all pooled by the projection's kind

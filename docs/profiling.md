@@ -97,6 +97,30 @@ beside the spawn with nowhere to walk; its upgrader seat stands empty at
 every level (not hired under an 800 bank, and one Post's surplus never
 buys a body above it).
 
+## The seeded held Repair
+
+For the same reason, every run seeds **one creep holding a Repair** on a
+road standing between `Tuning.RepairTrigger` and `Tuning.RepairWholeLine`
+(ADR 0061), written into `Memory.fabot.assignments` before the first
+warm-up tick. Such a structure is pooled exactly while somebody holds it,
+so without a seeded holder the held arm of the repair line is a branch no
+scenario executes — and the world is frozen, so a colony left to itself
+never arrives at one between the lines by repairing. The report's `held
+repair` block, printed after the `raid` block, names the creep, the road's
+hits and what the assignment table holds after the last tick: a seed that
+did not survive means the held line was measured for part of the run at
+most. `young` stands at RCL1 and paves nothing, so it furnishes no such
+road and the block says so rather than implying a branch it never ran.
+
+The seed costs the run **one body's ordinary work**: the creep it names
+spends every profiled tick on that one road and harvests, hauls and
+upgrades nothing. So a parent/child A/B over `Memory` is not a like-for-
+like comparison of that creep — on a bundle without the two lines the same
+assignment evaporates on tick 1 and the body goes back to the pool, so the
+seeded creep's whole history differs between the two runs by construction.
+Read a diff of `Memory` with the seeded creep **excluded**; what the seed
+is for is the ms, and the ms of the branch it executes.
+
 ## Furnishing and fleet are derived from the level
 
 Nothing about the room or the fleet is a hand-written count:

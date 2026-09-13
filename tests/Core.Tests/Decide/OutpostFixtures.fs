@@ -559,7 +559,7 @@ let internal healers count =
 /// asking who won it.
 let internal pooledOf colony =
     let atlas = Atlas.ofView colony
-    planPool colony atlas (planTasks colony (threatsOf colony atlas))
+    planPool colony atlas (planTasksOn colony (threatsOf colony atlas))
 
 let internal entryFor task pool =
     pool |> List.tryFind (fun (entry: PooledTask) -> entry.Task = task)
@@ -739,6 +739,6 @@ let internal standingIn room (name, pos) (colony: ColonyView) =
 /// controller and the container `withOutpostRoom` gives it, whose ids all
 /// carry the room's name.
 let internal tasksNaming room colony =
-    planTasks colony noThreats
+    planTasksOn colony noThreats
     |> List.map taskId
     |> List.filter (fun id -> (id: string).Contains(room: string))

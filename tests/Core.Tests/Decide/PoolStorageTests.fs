@@ -23,12 +23,12 @@ let stockTests =
                 let full = stockColony [] (Map.ofList [ "can-ctrl", 2000; "sto-1", 1000000 ])
 
                 Expect.equal
-                    (refillTasks (planTasks hungry noThreats))
+                    (refillTasks (planTasksOn hungry noThreats))
                     [ "sto-1" ]
                     "the stock with room pools the deepest Refill of all"
 
                 Expect.isEmpty
-                    (refillTasks (planTasks full noThreats))
+                    (refillTasks (planTasksOn full noThreats))
                     "a full stock pools no Refill: there is nowhere left to put a load"
             }
 
@@ -126,7 +126,7 @@ let stockGateTests =
                 // forever, and a hauler beside it would cycle energy in and
                 // out of one store.
                 let tasks =
-                    planTasks
+                    planTasksOn
                         (stockColony
                             [ refillable "spawn-1" 0 BuiltKind.Spawn ]
                             (Map.ofList [ "can-ctrl", 2000; "sto-1", 500 ]))
@@ -146,7 +146,7 @@ let stockGateTests =
                 // drawn for — one Withdraw for the one Storage, never one
                 // per hungry sink.
                 let tasks =
-                    planTasks
+                    planTasksOn
                         (stockColony
                             [ refillable "ext-1" 50 BuiltKind.Extension ]
                             (Map.ofList [ "can-ctrl", 2000; "sto-1", 500 ]))
@@ -164,7 +164,7 @@ let stockGateTests =
                 // stock flows to the upgrade buffer when the sources cannot
                 // keep it full (ADR 0023).
                 let tasks =
-                    planTasks
+                    planTasksOn
                         (stockColony
                             [ refillable "spawn-1" 0 BuiltKind.Spawn ]
                             (Map.ofList [ "can-ctrl", 800; "sto-1", 500 ]))
@@ -185,7 +185,7 @@ let stockGateTests =
                 // The stock half of ADR 0012's rule, unchanged: a store with
                 // nothing in it is nobody's intake.
                 let tasks =
-                    planTasks
+                    planTasksOn
                         (stockColony
                             [ refillable "ext-1" 50 BuiltKind.Extension ]
                             (Map.ofList [ "can-ctrl", 800; "sto-1", 0 ]))
@@ -314,7 +314,7 @@ let stockDrawTests =
                         Creeps = [ creepWith "h1" 50 50 [ Carry; Carry; Move ] ]
                     }
 
-                let tasks = planTasks colony noThreats
+                let tasks = planTasksOn colony noThreats
 
                 Expect.contains (withdrawTasks tasks) "sto-1" "the stock is an intake this tick"
                 Expect.contains (refillTasks tasks) "sto-1" "and a sink on the very same tick"

@@ -95,7 +95,7 @@ let claimTests =
                 // Pairwise on the declaration alone: the same room, the
                 // same controller, the same projection, the same neutral
                 // control entry. Only the human's sentence moves.
-                let pooled (colony: ColonyView) = planTasks colony noThreats
+                let pooled (colony: ColonyView) = planTasksOn colony noThreats
 
                 let outpost =
                     let colony = reserveColony []
@@ -142,7 +142,7 @@ let claimTests =
                     { colony with
                         RoomControl = colony.RoomControl |> Map.add "W1N2" control
                     }
-                    |> fun colony -> planTasks colony noThreats
+                    |> fun colony -> planTasksOn colony noThreats
 
                 let unowned = pooledUnder neutralRoom
                 let ours = pooledUnder ownedRoom
@@ -179,7 +179,7 @@ let claimTests =
                             | Some control -> colony.RoomControl |> Map.add "W1N2" control
                             | None -> colony.RoomControl |> Map.remove "W1N2"
                     }
-                    |> fun colony -> planTasks colony noThreats
+                    |> fun colony -> planTasksOn colony noThreats
 
                 for label, control in
                     [ "blind", None; "held by a rival", Some(reservedRoom false 3000) ] do
@@ -199,7 +199,7 @@ let claimTests =
                     { colony with
                         RoomControl = colony.RoomControl |> Map.add "W1N2" (reservedRoom true 4000)
                     }
-                    |> fun colony -> planTasks colony noThreats
+                    |> fun colony -> planTasksOn colony noThreats
 
                 Expect.equal
                     (claimTasks held, reserveTasks held)
@@ -592,7 +592,7 @@ let nurseryTests =
                 // finds a crowd already across the Seam rather than one
                 // starting the fifty-tile walk on the tick it appears.
                 Expect.isEmpty
-                    (planTasks nursery noThreats
+                    (planTasksOn nursery noThreats
                      |> List.filter (function
                          | Build _ -> true
                          | _ -> false))
@@ -1160,7 +1160,7 @@ let bootstrapTests =
                 // this reads on that half is the *room* being in the
                 // projection at all.
                 let pool colony =
-                    planTasks colony noThreats |> List.map taskId |> List.sort
+                    planTasksOn colony noThreats |> List.map taskId |> List.sort
 
                 Expect.containsAll
                     (pool raisingMother)
@@ -1218,7 +1218,7 @@ let bootstrapTests =
                 // Matcher counts only its own holders, exactly as the two
                 // pools over a [[nursery]]'s room do.
                 let pool colony =
-                    planTasks colony noThreats |> List.map taskId
+                    planTasksOn colony noThreats |> List.map taskId
 
                 Expect.contains
                     (pool childRunningItself)
@@ -1898,7 +1898,7 @@ let twoColonyTests =
                 // declaration, which is what makes this a property of the
                 // seam rather than of the fixtures.
                 let pool colony =
-                    planTasks colony noThreats |> List.map taskId
+                    planTasksOn colony noThreats |> List.map taskId
 
                 let mother = pool (motherColony [ motherCast, { X = 10; Y = 2 } ])
                 let child = pool (childColony [ childCast, { X = 10; Y = 44 } ])
@@ -2010,7 +2010,7 @@ let colonyStageTests =
                 // held at RCL2 through both — where the level-reading rule
                 // would have answered "no floor" whatever the stage.
                 let hungry colony =
-                    repairTasks (planTasks colony noThreats)
+                    repairTasks (planTasksOn colony noThreats)
 
                 let ramparted stage =
                     bareRespawn
@@ -2079,7 +2079,7 @@ let colonyStageTests =
                 // counting spawns in the census would answer the census;
                 // these answer the stage.
                 let pool colony =
-                    planTasks colony noThreats |> List.map taskId
+                    planTasksOn colony noThreats |> List.map taskId
 
                 let stagedAs stage colony =
                     { colony with
@@ -2202,7 +2202,7 @@ let colonyStageTests =
                 // while the room is in her scan set, and leaves with the
                 // room.
                 let pool colony =
-                    planTasks colony noThreats |> List.map taskId
+                    planTasksOn colony noThreats |> List.map taskId
 
                 let outgrownInPlace =
                     { raisingMother with
@@ -2300,7 +2300,7 @@ let borrowedRoomBudgetTests =
                 let capOf loads id =
                     let view = twoBuffers loads
 
-                    planPool view (Atlas.ofView view) (planTasks view noThreats)
+                    planPool view (Atlas.ofView view) (planTasksOn view noThreats)
                     |> List.tryPick (fun pooled ->
                         if pooled.Task = Refill(id, Energy) then
                             Capacity.capOf CapScope.Everyone pooled.Capacity

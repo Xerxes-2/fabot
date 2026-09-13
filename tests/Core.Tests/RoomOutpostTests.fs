@@ -362,7 +362,7 @@ let outpostContainerTests =
                 // which controller and never the order a Map's keys came
                 // out in.
                 let pooled homes =
-                    planTasks { colony with Declared = homes } noThreats
+                    planTasks { colony with Declared = homes } noThreats Set.empty
                     |> List.filter (function
                         | Reserve _
                         | Claim _ -> true

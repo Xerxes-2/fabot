@@ -72,19 +72,20 @@ let internal planSafeMode (view: ColonyView) atlas : Intent list =
 
         let claimerInReach = here |> List.exists withinReach
 
-        // Below full hits, off the walk the Repair pool reads: the Keep's whole
-        // line is Full, so "hungry" and "damaged" are one fact and the two
-        // readers cannot drift apart. The Posts and the ramparts are hungry on
-        // their own lines and are not of the Keep.
-        let keepDamaged =
-            not (List.isEmpty here) && hungryStructures view |> List.exists (snd >> isKeep)
+        // A Keep structure below full hits **and** a hostile standing here,
+        // which is this arm's whole condition and why the name says both. The
+        // structure half is `keepDamaged`'s, off the same projected hits the
+        // Repair pool walks and no longer a filter over its pool (ADR 0061 —
+        // the reason is written there, once). The Posts and the ramparts are
+        // hungry on their own lines and are not of the Keep.
+        let dentedKeepUnderHostiles = not (List.isEmpty here) && keepDamaged view
 
         // The undefended arm (ADR 0034 as #217 amends it): a colony with no
         // tower standing fires on the first armed hostile in its room.
         let undefended =
             List.isEmpty (Atlas.placedTowers atlas) && here |> List.exists isArmed
 
-        if claimerInReach || keepDamaged || undefended then
+        if claimerInReach || dentedKeepUnderHostiles || undefended then
             [ ActivateSafeMode controller.Id ]
         else
             []

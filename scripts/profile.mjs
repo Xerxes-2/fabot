@@ -1846,14 +1846,20 @@ function furnishHome({
       }
     }
   }
-  // A couple of roads below half hits, so the Repair family is in the
-  // measurement instead of pooling zero tasks — the stub scenario's rule.
+  // A couple of roads below the **hungry** line, so the Repair family is in
+  // the measurement instead of pooling zero tasks — the stub scenario's rule
+  // — and a couple more standing **between** the two lines of ADR 0061: over
+  // the trigger, under the whole line, so they are pooled exactly while a
+  // creep holds their Repair and not otherwise. The second band is what
+  // `seedHeldRepair` aims a body at; without one in the world the held arm of
+  // `isHungry` is a branch no profile has ever run, which is the harness's
+  // standing rule read onto a new line (ADR 0056, quoted in ADR 0057).
   const roads = roadTiles.map((pos, i) =>
     structure(
       `${prefix}road-${i}`,
       "road",
       pos,
-      i % 8 === 3 ? { hits: 2100 } : {},
+      i % 8 === 3 ? { hits: 2100 } : i % 8 === 5 ? { hits: 3000 } : {},
     ),
   );
 
@@ -2984,6 +2990,39 @@ function printRaid(world) {
   }
 }
 
+// What the seeded held Repair actually did — read off the bundle's own
+// Memory and off nothing this harness derives, exactly as `printRaid` reads
+// the raid. The seed is a claim about a branch, and a claim about a branch
+// that nobody checks is a harness fiction: a body that lost the Task on the
+// first tick leaves the held arm of `isHungry` unexecuted for the whole run,
+// and the ms below would then be a plain tick's under a held Repair's
+// heading. So the line says which creep, which structure, and what the table
+// holds after the last tick.
+function printHeldRepair(seed) {
+  if (!seed) {
+    console.log(
+      "\nheld repair — this scenario furnished no road between the two repair " +
+        "lines with a body able to hold it (ADR 0061), so the held arm of the " +
+        "repair line is a branch this run did not execute",
+    );
+    return;
+  }
+  const standing = globalThis.Memory?.fabot?.assignments?.[seed.creep] ?? null;
+  console.log(
+    `\nheld repair — ${seed.creep} was seeded holding ${seed.task} on a road at ` +
+      `${seed.hits}/${seed.hitsMax} hits, which stands between Tuning.RepairTrigger and ` +
+      "Tuning.RepairWholeLine: these ms include the pool entry, the match and the " +
+      "intent that exist only while somebody holds it (ADR 0061)",
+  );
+  console.log(
+    "  after the last tick the table holds: " +
+      (standing === seed.task
+        ? `${standing} — the band held the body for the whole run`
+        : `${standing ?? "no Task at all"} — the seed did not survive, so the held ` +
+          "line was measured for part of this run at most"),
+  );
+}
+
 function printReport(classes, pooled, world, allTicks) {
   // The level is printed on the first line of every run, tripped trigger
   // or not: the ms below are a colony's only at the level it was built at,
@@ -3387,6 +3426,82 @@ console.log(
       : ""),
 );
 
+// A creep holding a Repair on a structure standing **between** the two repair
+// lines (ADR 0061), written into the bundle's own assignment table before the
+// first warm-up tick. The colony's whole hysteresis lives in that table: such
+// a structure is pooled exactly while somebody holds it, so without a seeded
+// holder the new arm of the repair line is a branch no scenario executes and
+// no profile has seen — the harness's standing rule (ADR 0056, quoted in ADR
+// 0057). Seeded rather than waited for, because the world is frozen: no
+// repair tick lifts a road out of the hungry band here, so a colony left to
+// itself would never arrive at one between the lines.
+//
+// The two fractions mirror `Tuning.RepairTrigger` and `Tuning.RepairWholeLine`
+// and are not read by anything the run measures. A drift between them and the
+// bundle's own numbers shows up in the report as a seed that did not survive,
+// which is why the report reads the table back rather than trusting this.
+const REPAIR_TRIGGER = 0.5;
+const REPAIR_WHOLE_LINE = 0.8;
+
+function seedHeldRepair(world) {
+  // A body the Repair is applicable to (ADR 0010, ADR 0046): a Work part,
+  // energy to spend, and not a [[standing body]] — fewer than one Carry per
+  // four Work is the row that upgrades in place and delivers nothing. The
+  // four mirrors `Tuning.StandingCarryPerWork` the way the fractions above mirror
+  // the repair lines, and drifts the same way: nothing here is read by the
+  // bundle, so a changed ratio shows up as a seed the report says did not
+  // survive rather than as a wrong number in the ms.
+  const canRepair = (creep) => {
+    const parts = creep.body.map((part) => part.type);
+    const work = parts.filter((part) => part === "work").length;
+    const carry = parts.filter((part) => part === "carry").length;
+    return work > 0 && carry * 4 >= work && creep.store.getUsedCapacity() > 0;
+  };
+
+  // Paired **inside one room**, which is the whole of the care this needs: a
+  // body seeded onto a road across a border spends the run walking there, so
+  // the branch would be executed by a colony nobody would recognise. The room
+  // is read off the room's own structure find rather than off the structure,
+  // stub positions carrying no room name of their own.
+  for (const room of world.homeRooms) {
+    const between = room
+      // 107 is FIND_STRUCTURES, spelled as the engine's own number the way
+      // every other find table in this file is.
+      .find(107)
+      .find(
+        (obj) =>
+          obj.structureType === "road" &&
+          obj.hits > REPAIR_TRIGGER * obj.hitsMax &&
+          obj.hits < REPAIR_WHOLE_LINE * obj.hitsMax,
+      );
+    if (!between) continue;
+
+    const holder = world.creeps.find(
+      (creep) => creep.room.name === room.name && canRepair(creep),
+    );
+    if (!holder) continue;
+
+    const task = `repair:${between.id}`;
+    if (!globalThis.Memory.fabot) globalThis.Memory.fabot = {};
+    globalThis.Memory.fabot.assignments = {
+      ...(globalThis.Memory.fabot.assignments ?? {}),
+      [holder.name]: task,
+    };
+
+    return {
+      creep: holder.name,
+      room: room.name,
+      task,
+      hits: between.hits,
+      hitsMax: between.hitsMax,
+    };
+  }
+
+  return null;
+}
+
+const heldRepair = seedHeldRepair(world);
+
 // One counter over warm-up and profiled ticks alike, so the recompute path
 // is JIT-warm before it is measured.
 let tick = 0;
@@ -3514,6 +3629,7 @@ const classes = CENSUS_EVERY
 printReport(classes, pooled, world, ticks.all);
 printDecideByColony(classes, decideMs, ticks, stages);
 printRaid(world);
+printHeldRepair(heldRepair);
 
 // Per room, because ADR 0041 layered the memo by room name: the number to
 // read is one read per room the bundle projected, over the whole run. Read

@@ -765,7 +765,8 @@ let quotaInputTests =
                 // straight back out again, the ADR 0019 cycle over a
                 // border, with the child's own upgraders drinking against
                 // her.
-                let poolFor stage = planTasks (ferryMother stage) noThreats
+                let poolFor stage =
+                    planTasksOn (ferryMother stage) noThreats
 
                 let lending = poolFor Bootstrapping
 
@@ -846,7 +847,7 @@ let quotaInputTests =
                             }
                     }
 
-                let lending = planTasks (stocked Bootstrapping) noThreats
+                let lending = planTasksOn (stocked Bootstrapping) noThreats
 
                 Expect.isTrue
                     (List.contains (Refill("can-child", Energy)) lending)
@@ -863,7 +864,7 @@ let quotaInputTests =
                 Expect.isFalse
                     (List.contains
                         (Withdraw("storage-1", Energy))
-                        (planTasks (stocked Independent) noThreats))
+                        (planTasksOn (stocked Independent) noThreats))
                     "and with nothing to feed, the stock stays shut"
             }
 

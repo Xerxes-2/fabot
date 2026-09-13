@@ -850,10 +850,24 @@ let planPool (view: ColonyView) atlas (tasks: Task list) : PooledTask list =
     //
     // **One body apiece**, because the whole of what a rescue buys is a body
     // that walks out there at all: a second one on the same road is the crowd
-    // #157 exists to prevent, and the walk it makes is the expensive half. It
-    // needs no second visit — a worker's load repairs a hundred hits an energy,
-    // so one trip carries a road from a quarter to over the trigger and out of
-    // the pool, and the Matcher's keep holds it there until it is whole.
+    // #157 exists to prevent, and the walk it makes is the expensive half. A
+    // worker's load repairs a hundred hits an energy, so one trip carries a
+    // plain road from a quarter to over its whole line and out of the pool.
+    //
+    // **What holds it there is the pool and never the Matcher** (ADR 0061, a
+    // correction): `Matcher.fs` has no Repair arm at all, and the generic
+    // anti-thrash keep it does have is conditioned on the Task still being
+    // pooled and the holder still passing the gate cascade — `applicable` for a
+    // Repair is `spending && not standing`, so a body that empties mid-repair
+    // is released `inapplicable` and the structure is left wherever the load
+    // ran out. What keeps a rescued structure in the pool past the hungry line
+    // is that **its holder makes it judged at `RepairWholeLine` instead**, and
+    // the sentence that used to stand here read as true only because the two
+    // lines were one number. The rescue set itself deliberately does not read
+    // the held fact: it asks which far structure is worth a walk, on hits
+    // alone, so a rescue frees its slot at the rescue line while its body works
+    // on to the whole line — the leak ADR 0061 part 5 writes down rather than
+    // hides.
     let rescued =
         tasks
         |> List.choose (function

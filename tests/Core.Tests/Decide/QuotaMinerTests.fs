@@ -464,7 +464,7 @@ let minerGroundTests =
                 Expect.equal (quotaOfRow "miner" rivalMine) (Some 1) "our deposit and not theirs"
 
                 Expect.equal
-                    (planTasks rivalMine noThreats
+                    (planTasksOn rivalMine noThreats
                      |> List.choose (function
                          | Harvest rock -> Some rock
                          | _ -> None))

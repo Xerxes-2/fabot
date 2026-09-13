@@ -1030,7 +1030,7 @@ let colonyViewTests =
                     "unowned, the lost child is a room the mother projects again"
 
                 Expect.contains
-                    (planTasks taken noThreats)
+                    (planTasks taken noThreats Set.empty)
                     (Claim $"ctrl-{child}")
                     "and its controller is a Claim in her pool"
 
@@ -1041,7 +1041,7 @@ let colonyViewTests =
                     "a room somebody else holds is the stand-down's business, not a projection's"
 
                 Expect.isEmpty
-                    (planTasks rival noThreats
+                    (planTasks rival noThreats Set.empty
                      |> List.filter (function
                          | Claim _ -> true
                          | _ -> false))
@@ -1079,7 +1079,9 @@ let colonyViewTests =
                     "and neither is the buffer beside its controller"
 
                 Expect.isFalse
-                    (List.contains (Withdraw("buf-child", Energy)) (planTasks taken noThreats))
+                    (List.contains
+                        (Withdraw("buf-child", Energy))
+                        (planTasks taken noThreats Set.empty))
                     "nothing of that room is an intake of hers"
             }
 
@@ -1101,7 +1103,9 @@ let colonyViewTests =
                     "but its buffer is not a store of hers"
 
                 Expect.isFalse
-                    (List.contains (Withdraw("buf-child", Energy)) (planTasks raising noThreats))
+                    (List.contains
+                        (Withdraw("buf-child", Energy))
+                        (planTasks raising noThreats Set.empty))
                     "so nothing pools a draw on it"
 
                 Expect.equal

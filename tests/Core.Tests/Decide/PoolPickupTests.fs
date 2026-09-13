@@ -284,7 +284,7 @@ let logisticsTests =
         [
             test "a stocked container yields a Withdraw Task; an empty one yields none" {
                 Expect.equal
-                    (withdrawTasks (planTasks haulColony noThreats))
+                    (withdrawTasks (planTasksOn haulColony noThreats))
                     [ "can-ctrl" ]
                     "the stocked buffer enters the pool; the empty source container does not"
             }
@@ -299,7 +299,7 @@ let logisticsTests =
                             }
                     }
 
-                let tasks = planTasks snapshot noThreats
+                let tasks = planTasksOn snapshot noThreats
 
                 Expect.equal
                     (refillTasks tasks)
@@ -321,7 +321,7 @@ let logisticsTests =
                             }
                     }
 
-                let tasks = planTasks snapshot noThreats
+                let tasks = planTasksOn snapshot noThreats
                 Expect.isEmpty (refillTasks tasks) "no room left to refill"
                 Expect.equal (withdrawTasks tasks) [ "can-ctrl" ] "still stocked to draw from"
             }

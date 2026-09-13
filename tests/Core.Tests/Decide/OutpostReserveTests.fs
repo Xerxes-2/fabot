@@ -33,7 +33,7 @@ let reserveTests =
                             }
                     }
 
-                let tasks = planTasks colony noThreats
+                let tasks = planTasksOn colony noThreats
 
                 Expect.equal
                     (reserveTasks tasks)
@@ -43,7 +43,7 @@ let reserveTests =
                 Expect.contains tasks (Upgrade "ctrl-1") "and the colony's own is still Upgraded"
 
                 Expect.isEmpty
-                    (reserveTasks (planTasks bareRespawn noThreats))
+                    (reserveTasks (planTasksOn bareRespawn noThreats))
                     "a colony projecting one room reserves nothing: the pool is the pool it always was"
             }
 
@@ -131,7 +131,7 @@ let reserveTests =
                     }
                     |> withHits "road-1" BuiltKind.Road 100 5000
 
-                let pool = planTasks colony noThreats
+                let pool = planTasksOn colony noThreats
 
                 Expect.equal
                     (pool |> List.map taskId |> List.sort)
@@ -234,7 +234,7 @@ let reserveTests =
                     { colony with
                         RoomControl = colony.RoomControl |> Map.add "W1N2" control
                     }
-                    |> fun colony -> planTasks colony noThreats
+                    |> fun colony -> planTasksOn colony noThreats
                     |> reserveTasks
 
                 Expect.equal

@@ -126,11 +126,57 @@ type Tuning =
         /// many living creeps — two keep the harvest/refill loop running while
         /// one is in transit. A count and not a price, so the same at any bank.
         MinWorkforce: int
-        /// The Repair trigger of the decaying kinds: a road or a container
-        /// enters the pool below this fraction of max hits and leaves it once
-        /// repaired over the line. A tunable, not part of ADR 0010, and bank-
-        /// and stage-blind — a fraction of the structure's own max.
+        /// The **hungry line** of the decaying kinds (ADR 0061): a road or a
+        /// container **nobody holds a Repair on** enters the pool below this
+        /// fraction of max hits. A tunable, not part of ADR 0010, and bank- and
+        /// stage-blind — a fraction of the structure's own max. Since ADR 0061
+        /// it is the entry alone: what a held structure is judged whole at is
+        /// `RepairWholeLine`.
         RepairTrigger: float
+        /// The **whole line** of the decaying kinds (ADR 0061): the fraction of
+        /// max hits a road or a container a creep **is already repairing**
+        /// leaves the pool at. Two lines and not one, because a repair tick is
+        /// `Work × 100` hits whatever the structure's max — 22% of a plain
+        /// road and 0.44% of a container at the live worker's 11 Work — so a
+        /// single line makes every repair a one-tick top-up that goes
+        /// `task-gone` the tick after it started, and leaves a colony's paving
+        /// pinned at the line (live 2026-09-13: 116 roads in W13S28 at a median
+        /// of exactly 50.0%, two source containers at a third of max).
+        ///
+        /// Eight tenths, derived at **RCL6 against a ~1,800 bank and the live
+        /// worker row's 11 Work / 12 Carry / 12 Move**. Unlike `RepairTrigger`
+        /// this number is **not bank-blind**: what it reads below the stage and
+        /// the bank is the 600 energy that body carries, and a smaller bank
+        /// casts a smaller worker that buys fewer of the band's hits per trip.
+        /// A band a **single load** closes is what makes the ratchet a ratchet
+        /// — a body that empties mid-repair is released `inapplicable`, its
+        /// target is unheld the next tick and is judged at the hungry line
+        /// again, wherever the load ran out. At 100 hits an energy a 600-energy
+        /// load is 60,000 hits, against a plain road's whole band of 1,500 hits
+        /// (15 energy) and a swamp road's 7,500 (75): every road this colony
+        /// has closes its band in one trip many times over.
+        ///
+        /// **The container knowingly does not, and that is the price this
+        /// number is chosen at.** 0.3 × 250,000 = 75,000 hits = 750 energy,
+        /// one and a quarter loads, so a container entered at the hungry line
+        /// runs its holder dry around 0.74 and is released `inapplicable`
+        /// rather than `task-gone`; from the live containers' 30% no whole line
+        /// above 0.524 closes in one trip at all. What the two lines exist to
+        /// remove is the **churn**, and that is removed either way — one match
+        /// and one release per repair job instead of per repair tick, and a
+        /// container left at 0.74 is over the hungry line and does not re-enter
+        /// the pool. Dropping the line to 0.74 would make the one-load reading
+        /// true of the container and would cost every road the 0.74–0.8 band it
+        /// closes for three energy, which is 3,000 ticks of passive decay
+        /// apiece; the number is left where the decision put it and re-derived
+        /// on #323 rather than moved here. ADR 0061's landing check reads per
+        /// kind because of this: `task-gone` on the roads, `inapplicable` on
+        /// the container.
+        ///
+        /// The decaying kinds alone (`WholeLine.Fraction`): a [[rampart]] is
+        /// judged against `RampartFloor` and a [[keep]] structure against full
+        /// hits, and neither has a second number to make.
+        RepairWholeLine: float
         /// The **rescue line** (#284): the fraction of max hits a decaying
         /// structure is so far below its own trigger that repairing it stops
         /// being surplus work and becomes a rescue. Travel cost alone orders
@@ -354,6 +400,7 @@ module Tuning =
         {
             MinWorkforce = 2
             RepairTrigger = 0.5
+            RepairWholeLine = 0.8
             RepairRescueLine = 0.25
             RepairRescues = 2
             RampartFloor = 100_000

@@ -367,7 +367,11 @@ let needsOwner =
 [<RequireQualifiedAccess>]
 type WholeLine =
     /// A fraction of max hits: the decaying kinds (ADR 0010) — a road and
-    /// a container are hungry below half of max and whole at it.
+    /// a container. **Two fractions since ADR 0061**, and which one is
+    /// read is the pool's business and not this type's: hungry below
+    /// `Tuning.RepairTrigger` when nobody holds the Repair, whole at
+    /// `Tuning.RepairWholeLine` when somebody does. This is the one arm
+    /// of the three the held fact reaches at all.
     | Fraction
     /// A fixed floor of hits: the rampart (ADR 0034). Half of max is the
     /// wrong shape for a structure whose max is three million at RCL4 and

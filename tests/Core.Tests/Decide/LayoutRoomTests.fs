@@ -16,7 +16,7 @@ let roomLayerTests =
         [
             test "a container belongs to the source and the controller of its own room" {
                 let refills =
-                    planTasks collidingRooms noThreats
+                    planTasksOn collidingRooms noThreats
                     |> List.choose (function
                         | Refill(id, _) -> Some id
                         | _ -> None)
@@ -74,7 +74,7 @@ let roomLayerTests =
                     |> withTarget "can-late" { X = 26; Y = 22 } (Structure BuiltKind.Container)
 
                 let refills =
-                    planTasks late noThreats
+                    planTasksOn late noThreats
                     |> List.choose (function
                         | Refill(id, _) -> Some id
                         | _ -> None)

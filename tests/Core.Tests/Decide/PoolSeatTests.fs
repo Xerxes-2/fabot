@@ -449,13 +449,213 @@ let repairTests =
                 let half = bareRespawn |> withHits "road-1" BuiltKind.Road 2500 5000
 
                 Expect.equal
-                    (repairTasks (planTasks low noThreats))
+                    (repairTasks (planTasksOn low noThreats))
                     [ "road-1" ]
                     "below the trigger: one Repair per ailing road"
 
                 Expect.isEmpty
-                    (repairTasks (planTasks half noThreats))
+                    (repairTasks (planTasksOn half noThreats))
                     "at half hits the road is left alone"
+            }
+
+            test "a road over the hungry line stays pooled while a creep holds its Repair" {
+                // The two lines (ADR 0061): a repair tick is `Work × 100` hits
+                // whatever the structure's max, so one line makes every repair
+                // a one-tick top-up that goes `task-gone` the tick after it
+                // started and leaves the paving pinned at the line. The held
+                // fact — one boolean per candidate, off the assignment table —
+                // picks which line this structure is judged by.
+                let at hits =
+                    bareRespawn |> withHits "road-1" BuiltKind.Road hits 5000
+
+                Expect.equal
+                    (repairTasks (planTasksOn (at 2400) noThreats))
+                    [ "road-1" ]
+                    "under the hungry line, nobody holding: pooled, as it always was"
+
+                Expect.isEmpty
+                    (repairTasks (planTasksOn (at 2600) noThreats))
+                    "over the hungry line, nobody holding: no Task — the entry is unchanged"
+
+                Expect.equal
+                    (repairTasks (planTasksHolding [ Repair "road-1" ] (at 2600)))
+                    [ "road-1" ]
+                    "the same road with a holder is judged at the whole line and stands"
+
+                Expect.isEmpty
+                    (repairTasks (planTasksHolding [ Repair "road-1" ] (at 4100)))
+                    "and past the whole line even a held road is done: four fifths of max"
+            }
+
+            test "the held fact is spelled forward: a Withdraw on a container is no Repair on it" {
+                // The seam's own property (ADR 0061 part 3): the set is read as
+                // `Set.contains (taskId (Repair id))`, written from the
+                // candidate id in hand and never parsed out of a string, so
+                // "held" can never come to mean "somebody is drawing from it".
+                let cont = bareRespawn |> withHits "cont-1" BuiltKind.Container 150000 250000
+
+                Expect.isEmpty
+                    (repairTasks (planTasksHolding [ Withdraw("cont-1", Energy) ] cont))
+                    "a body drawing energy out of the container is not repairing it"
+
+                Expect.equal
+                    (repairTasks (planTasksHolding [ Repair "cont-1" ] cont))
+                    [ "cont-1" ]
+                    "the Repair on the same id is the key that holds it"
+            }
+
+            test "the two lines reach the fraction-judged kinds and no others" {
+                // ADR 0061 part 2: a rampart is judged against a floor and a
+                // Keep structure against full hits, and neither has a second
+                // number to make. Both would move if the fraction rule reached
+                // them — four fifths of a rampart's three-million max is far
+                // over its floor — so the pairwise is the whole test.
+                let colony =
+                    bareRespawn
+                    |> withLevel 5
+                    |> withHits "ram-1" BuiltKind.Rampart 150_000 3_000_000
+                    |> withHits "sto-1" BuiltKind.Storage 1_000_000 1_000_000
+
+                Expect.isEmpty
+                    (repairTasks (planTasksOn colony noThreats))
+                    "a rampart over its floor and a whole Storage ask for nothing"
+
+                Expect.isEmpty
+                    (repairTasks (planTasksHolding [ Repair "ram-1"; Repair "sto-1" ] colony))
+                    "and holding either changes neither: the floor and full hits are one number each"
+
+                // And the same pair from under their lines, where the held set
+                // must not take a Task away either: a rampart under its floor
+                // and a dented Keep structure are pooled identically with and
+                // without a holder.
+                let ailing =
+                    bareRespawn
+                    |> withLevel 5
+                    |> withHits "ram-1" BuiltKind.Rampart 99_999 3_000_000
+                    |> withHits "sto-1" BuiltKind.Storage 999_999 1_000_000
+
+                Expect.equal
+                    (repairTasks (planTasksHolding [ Repair "ram-1"; Repair "sto-1" ] ailing))
+                    (repairTasks (planTasksOn ailing noThreats))
+                    "one hit under the floor and one hit off full: the same pool either way"
+            }
+
+            test "the two-line rule is monotone: holding never empties the pool" {
+                // ADR 0061 part 4. The held line only ever keeps a Task pooled
+                // that would otherwise be gone, so no structure can leave the
+                // pool *earlier* because somebody is repairing it — over every
+                // hits value a road, a container, a rampart and a Keep
+                // structure can carry, in hundredths of their own max.
+                let kinds =
+                    [
+                        "road-1", BuiltKind.Road, 5000
+                        "cont-1", BuiltKind.Container, 250000
+                        "ram-1", BuiltKind.Rampart, 3_000_000
+                        "sto-1", BuiltKind.Storage, 1_000_000
+                    ]
+
+                let holding = kinds |> List.map (fun (id, _, _) -> Repair id)
+
+                let mutable widened = 0
+
+                for step in 0..100 do
+                    let colony =
+                        kinds
+                        |> List.fold
+                            (fun snapshot (id, kind, max) ->
+                                snapshot |> withHits id kind (max * step / 100) max)
+                            (bareRespawn |> withLevel 5)
+
+                    let unheld = repairTasks (planTasksOn colony noThreats) |> Set.ofList
+                    let held = repairTasks (planTasksHolding holding colony) |> Set.ofList
+
+                    Expect.isTrue
+                        (Set.isSubset unheld held)
+                        $"at {step} hundredths of max the unheld pool is a subset of the held one"
+
+                    if held <> unheld then
+                        widened <- widened + 1
+
+                // A subset test alone passes a rule that does nothing at all,
+                // so the sweep also says the two sets **differ** somewhere: the
+                // band is thirty hundredths of the two fraction-judged kinds.
+                Expect.equal
+                    widened
+                    30
+                    "and the held pool is strictly wider across the band, not everywhere and not nowhere"
+            }
+
+            test "an assignment naming a dead creep holds nothing" {
+                // The join is over the **living** (ADR 0061 part 3):
+                // `Assignments` arrives from Memory and may name a creep that
+                // died last tick. The Matcher drops those silently, but
+                // `planTasksOn` runs first, and a colony must not hold a Task
+                // open on the strength of a body that is not there.
+                let snapshot =
+                    { bareRespawn with
+                        Sources = []
+                        Controller = None
+                        Creeps = [ worker "w1" 50 0 ]
+                    }
+                    |> withHits "road-1" BuiltKind.Road 2600 5000
+
+                let ghost = Map.ofList [ "ghost", taskId (Repair "road-1") ]
+
+                Expect.equal
+                    (Map.tryFind "w1" (decideFrom ghost snapshot).Assignments)
+                    None
+                    "the dead creep's Repair pools nothing, so the loaded worker has no work"
+
+                let living = Map.ofList [ "w1", taskId (Repair "road-1") ]
+
+                Expect.equal
+                    (Map.tryFind "w1" (decideFrom living snapshot).Assignments)
+                    (Some(taskId (Repair "road-1")))
+                    "the same table read off a living body keeps the road pooled and its holder on it"
+            }
+
+            test
+                "the ratchet is the assignment: a released holder leaves the road judged by its hits" {
+                // ADR 0061 part 4, and the correction to `Pool.fs`'s `rescued`
+                // comment: nothing in the Matcher holds a Repair to the whole
+                // line. `applicable` is `spending && not standing`, so a body
+                // that empties mid-repair is released `inapplicable` and its
+                // target is unheld the next tick — judged at the hungry line
+                // again, wherever the load ran out, with no memory of the
+                // half-finished job anywhere.
+                let emptied hits =
+                    { bareRespawn with
+                        Sources = []
+                        Controller = None
+                        Creeps = [ worker "w1" 0 50 ]
+                    }
+                    |> withHits "road-1" BuiltKind.Road hits 5000
+
+                let remembered = Map.ofList [ "w1", taskId (Repair "road-1") ]
+
+                Expect.equal
+                    (Map.tryFind "w1" (decideFrom remembered (emptied 3100)).Assignments)
+                    None
+                    "the empty body is released and the next tick's table names it nowhere"
+
+                Expect.isEmpty
+                    (repairTasks (planTasksOn (emptied 3100) noThreats))
+                    "and at 62% of max, unheld, the road is over the hungry line and out of the pool"
+
+                Expect.equal
+                    (repairTasks (planTasksOn (emptied 2000) noThreats))
+                    [ "road-1" ]
+                    "released under the hungry line it is back in the pool, uncapped, for anybody"
+
+                Expect.equal
+                    (poolOn (emptied 2000)
+                     |> List.tryPick (fun entry ->
+                         if entry.Task = Repair "road-1" then
+                             Some(Capacity.capOf CapScope.Everyone entry.Capacity)
+                         else
+                             None))
+                    (Some None)
+                    "at the ordinary surplus rung and uncapped: nothing here needs a cap"
             }
 
             test "a road a quarter from destruction is a rescue: a rung of its own, one body" {
@@ -542,7 +742,7 @@ let repairTests =
                 let whole = bareRespawn |> withHits "road-1" BuiltKind.Road 5000 5000
 
                 Expect.isEmpty
-                    (repairTasks (planTasks whole noThreats))
+                    (repairTasks (planTasksOn whole noThreats))
                     "a whole road needs nothing"
             }
 
@@ -558,7 +758,7 @@ let repairTests =
                     |> withHits "rock-1" BuiltKind.Other 1 5000
 
                 Expect.isEmpty
-                    (repairTasks (planTasks snapshot noThreats))
+                    (repairTasks (planTasksOn snapshot noThreats))
                     "an extension, a link and an unmodelled structure are nobody's Repair"
             }
 
@@ -575,7 +775,7 @@ let repairTests =
                     |> withHits "sto-1" BuiltKind.Storage 4999 5000
 
                 Expect.equal
-                    (repairTasks (planTasks dented noThreats))
+                    (repairTasks (planTasksOn dented noThreats))
                     [ "spawn-1"; "sto-1"; "tower-1" ]
                     "one hit off max is hungry, on every Keep structure"
 
@@ -586,7 +786,7 @@ let repairTests =
                     |> withHits "sto-1" BuiltKind.Storage 5000 5000
 
                 Expect.isEmpty
-                    (repairTasks (planTasks whole noThreats))
+                    (repairTasks (planTasksOn whole noThreats))
                     "a Keep at full hits asks for nothing"
             }
 
@@ -609,21 +809,21 @@ let repairTests =
                 let over = keeping |> withHits "ram-1" BuiltKind.Rampart (max / 2) max
 
                 Expect.equal
-                    (repairTasks (planTasks below noThreats))
+                    (repairTasks (planTasksOn below noThreats))
                     [ "ram-1" ]
                     "one hit under the floor is hungry"
 
                 Expect.isEmpty
-                    (repairTasks (planTasks at noThreats))
+                    (repairTasks (planTasksOn at noThreats))
                     "at the floor the rampart is whole"
 
                 Expect.equal
-                    (repairTasks (planTasks fresh noThreats))
+                    (repairTasks (planTasksOn fresh noThreats))
                     [ "ram-1" ]
                     "a rampart just built stands at 1 hit and is the pool's business at once"
 
                 Expect.isEmpty
-                    (repairTasks (planTasks over noThreats))
+                    (repairTasks (planTasksOn over noThreats))
                     "half of a rampart's max is far over the floor: nothing to do"
             }
 
@@ -640,13 +840,13 @@ let repairTests =
                 let young = bareRespawn |> withLevel 2 |> withHits "ram-1" BuiltKind.Rampart 1 max
 
                 Expect.isEmpty
-                    (repairTasks (planTasks young noThreats))
+                    (repairTasks (planTasksOn young noThreats))
                     "a rampart at 1 hit in an RCL2 room is left to decay"
 
                 let youngRoad = young |> withHits "road-1" BuiltKind.Road 1000 5000
 
                 Expect.equal
-                    (repairTasks (planTasks youngRoad noThreats))
+                    (repairTasks (planTasksOn youngRoad noThreats))
                     [ "road-1" ]
                     "the decaying kinds keep their trigger in the same room"
 
@@ -654,7 +854,7 @@ let repairTests =
                     bareRespawn |> withLevel 3 |> withHits "ram-1" BuiltKind.Rampart (floor - 1) max
 
                 Expect.equal
-                    (repairTasks (planTasks grown noThreats))
+                    (repairTasks (planTasksOn grown noThreats))
                     [ "ram-1" ]
                     "one level up the same rampart is hungry under the same floor"
             }
@@ -733,12 +933,12 @@ let repairTests =
                 let half = bareRespawn |> withHits "cont-1" BuiltKind.Container 125000 250000
 
                 Expect.equal
-                    (repairTasks (planTasks low noThreats))
+                    (repairTasks (planTasksOn low noThreats))
                     [ "cont-1" ]
                     "below the trigger: one Repair per ailing container"
 
                 Expect.isEmpty
-                    (repairTasks (planTasks half noThreats))
+                    (repairTasks (planTasksOn half noThreats))
                     "at half hits the container is left alone"
             }
 
@@ -746,7 +946,7 @@ let repairTests =
                 let whole = bareRespawn |> withHits "cont-1" BuiltKind.Container 250000 250000
 
                 Expect.isEmpty
-                    (repairTasks (planTasks whole noThreats))
+                    (repairTasks (planTasksOn whole noThreats))
                     "a whole container needs nothing"
             }
 

@@ -469,6 +469,67 @@ let verdictTests =
                     "the release names the vanished Task"
             }
 
+            test "a repair runs to the whole line and then releases TaskGone, once per job" {
+                // ADR 0061: the rule does not stop a structure crossing its
+                // whole line, it stops it crossing in one tick. What a holder
+                // buys is the band between the two lines — released nowhere in
+                // it, released `task-gone` past it — so the count that falls is
+                // one release per repair **job** instead of one per repair
+                // **tick**. The pairwise is the two hits values and nothing
+                // else.
+                let repairing hits =
+                    { bareRespawn with
+                        Sources = []
+                        Controller = None
+                        Creeps = [ worker "w1" 50 0 ]
+                    }
+                    |> withHits "road-1" BuiltKind.Road hits 5000
+
+                let sticky = Map.ofList [ "w1", taskId (Repair "road-1") ]
+
+                Expect.equal
+                    (decideFrom sticky (repairing 3900)).Verdicts
+                    [ Verdict.Kept("w1", taskId (Repair "road-1")) ]
+                    "inside the band the holder is kept: the repair is a job, not a reflex"
+
+                Expect.contains
+                    (decideFrom sticky (repairing 4100)).Verdicts
+                    (Verdict.Released("w1", taskId (Repair "road-1"), ReleaseReason.TaskGone))
+                    "past the whole line the Task is gone and `task-gone` is still the reason"
+            }
+
+            test "a holder that empties inside the band is released Inapplicable, not TaskGone" {
+                // The other release of the two lines, and on the dearest
+                // decaying kind it is the **normal** one: `applicable` for a
+                // Repair is `spending && not standing`, so a body that runs dry
+                // mid-band goes `inapplicable` while its target is still
+                // pooled. The container's band is 75,000 hits — 750 energy at a
+                // hundred hits an energy — against the 600 the live worker
+                // carries, so a container entered at the hungry line ends its
+                // job around 0.74 and this is the reason its release names.
+                // Pinned because ADR 0061's own landing check reads the
+                // transition log for `task-gone` alone, and on a container it
+                // will not find one (#323, where the number is re-derived).
+                let emptied =
+                    { bareRespawn with
+                        Sources = []
+                        Controller = None
+                        Creeps = [ worker "w1" 0 50 ]
+                    }
+                    |> withHits "cont-1" BuiltKind.Container 185_000 250_000
+
+                let sticky = Map.ofList [ "w1", taskId (Repair "cont-1") ]
+
+                Expect.contains
+                    (decideFrom sticky emptied).Verdicts
+                    (Verdict.Released(
+                        "w1",
+                        taskId (Repair "cont-1"),
+                        ReleaseReason.Rejected RejectReason.Inapplicable
+                    ))
+                    "an empty store inside the band is inapplicable: the Task is still there"
+            }
+
             test "a Task that left a pool we can see releases; the vision grace is about looking" {
                 // #151's line, drawn from the other side. The grace holds an
                 // assignment whose target left the pool **with the vision

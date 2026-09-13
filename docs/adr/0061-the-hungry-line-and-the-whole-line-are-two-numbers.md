@@ -1,6 +1,6 @@
 # The hungry line and the whole line are two numbers, and the assignment table says which one a target is judged by
 
-**Status: accepted, pending #285.** The decision is the user's on option 1 of that ticket; what follows is the derivation, the seam it is drawn at, and every clause of ADR 0010, ADR 0013, ADR 0025 and ADR 0034 it overrides.
+**Status: accepted, landed in #285.** The decision is the user's on option 1 of that ticket; what follows is the derivation, the seam it is drawn at, and every clause of ADR 0010, ADR 0013, ADR 0025 and ADR 0034 it overrides.
 
 ADR 0010 put a decaying structure's **hungry line and its whole line on one number**: a road is hungry below half of max and whole *at* half. A Task that exists exactly while a condition holds is ADR 0013's own shape and it is right for a rock that is empty or not; applied to a number that a single repair tick steps across, it means the repair is over the tick it starts. The body tops the road up, the structure crosses the line, the Task leaves the pool, and the holder is released `task-gone` on the next tick's pool. #226 measured that as **17 repair `task-gone` releases in ~300 ticks** (t193,888–194,181, whole fleet, after ADR 0054 landed), Repair being the leading source of them once the [[refill cluster]] had taken the extensions out of the count — 11 of the 17 on one W13S28 worker inside a few dozen ticks. #284 split the half of that story it could fix without a decision; this is the half that needs one.
 
