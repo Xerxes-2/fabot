@@ -406,7 +406,7 @@ module ColonyView =
         // here a second time it would be a second answer free to disagree.
         let scan =
             World.scanOf
-                tuning.MaxHops
+                tuning
                 stages
                 (World.unownedHomes colonies world)
                 colonies
@@ -626,9 +626,15 @@ module ColonyView =
             // Both declaration kinds, each named as what it was declared as
             // (ADR 0060 decision 1): the outposts a human wrote first, then the
             // errands beside them.
+            // Asked over the **masked** border rings, which is the layer the
+            // scan set's own narrowing was asked over (`World.scanOf`, ADR 0060
+            // decision 2): a refusal read off raw terrain would name a room the
+            // chain admits, or keep quiet about one it does not.
             Refused =
-                Outpost.refused (World.linked world) tuning.MaxHops home colony.Outposts
-                @ Errand.refused (World.linked world) tuning.MaxHops home colony.Errands
+                let reaches = World.linked (Tuning.keeperMargin tuning) world
+
+                Outpost.refused reaches tuning.MaxHops home colony.Outposts
+                @ Errand.refused reaches tuning.MaxHops home colony.Errands
             // The world's memory of these rooms and of no others (#151):
             // narrowed by the scan set the [[stand-down]] gate has already
             // cut, so a withheld room's remembered census cannot hold a

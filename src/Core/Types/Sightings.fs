@@ -429,6 +429,29 @@ module World =
     and living (colonies: Colony list) (world: World) : Colony list =
         Colony.living (ownedRooms world) (spawnRooms world) colonies
 
+    /// One room's border ring read as a [[seam]]'s near or far side: a tile the
+    /// ring carries whose terrain is not wall and which no declared keeper rock
+    /// masks (`Keepers`, ADR 0060 decision 2). The [[world]]'s reading of the
+    /// answer `terrainWeight` gives the Atlas's ring grid — -1 for a wall and
+    /// for a masked tile, positive for everything else — and written here rather
+    /// than inside `linked` because a second caller has to build the same
+    /// predicate off a committed capture and a hand copy has now had to move in
+    /// lockstep twice (`RoomOutpostTests`, #317). The room rides beside the ring
+    /// because the mask is keyed by room name and the ring is not, and the
+    /// answer comes back as a **closure over one room** because that is how
+    /// both callers use it: the ring is resolved once and read forty-eight
+    /// times, and the declaration's own lookup is resolved with it.
+    let ringWalkable (keeperMargin: int) (room: string) (border: Map<Pos, Terrain>) : Pos -> bool =
+        // Resolved once and asked forty-eight times, the mask included: the
+        // room's declaration is a lookup and the band is a loop, so `maskIn`
+        // takes it here rather than on every tile.
+        let masked = Keepers.maskIn keeperMargin room
+
+        fun tile ->
+            match Map.tryFind tile border with
+            | Some terrain -> terrain <> Wall && not (masked tile)
+            | None -> false
+
     /// Whether a creep could step from one room into the other: the [[world]]'s
     /// own reading of a [[seam]] band, off the border maps it holds per room
     /// and before any [[atlas]] grid exists (ADR 0058). The Atlas answers the
@@ -441,21 +464,19 @@ module World =
     /// there: `World.ofGame` reads terrain for every declared and transit room
     /// whether or not there is vision (ADR 0031, ADR 0041), so what this can
     /// see is exactly what a walk could use.
-    let linked (world: World) (fromRoom: string) (toRoom: string) : bool =
-        // A ring tile the world carries whose terrain is not wall — the same
-        // answer `terrainWeight` gives the Atlas's grid, which is -1 for wall
-        // and positive for everything else. Each room's ring is resolved once
-        // and read forty-eight times, never looked up per tile.
-        let walkableIn (border: Map<Pos, Terrain>) tile =
-            match Map.tryFind tile border with
-            | Some terrain -> terrain <> Wall
-            | None -> false
+    ///
+    /// The [[keeper margin]] is taken off the ring here as the Atlas takes it
+    /// off its own (`Keepers`, ADR 0060 decision 2), which is why the margin is
+    /// an argument: a mask near a room's border can take exit tiles out of a
+    /// band, so a chain that exists over raw terrain may not exist over masked
+    /// terrain — and the routable question has to be asked over the **same**
+    /// masked layer every price will use, or the scan set admits a chain the
+    /// flood cannot walk.
+    let linked (keeperMargin: int) (world: World) (fromRoom: string) (toRoom: string) : bool =
+        let walkableIn room =
+            ringWalkable keeperMargin room (roomOf world room).Border
 
-        Seam.joinedBy
-            (walkableIn (roomOf world fromRoom).Border)
-            (walkableIn (roomOf world toRoom).Border)
-            fromRoom
-            toRoom
+        Seam.joinedBy (walkableIn fromRoom) (walkableIn toRoom) fromRoom toRoom
 
     /// What one colony's declaration narrows to this tick, and the union of it:
     /// `scanOf`'s whole answer, in four named halves rather than a positional
@@ -501,8 +522,12 @@ module World =
     /// in silence and hand the rooms borrowed for a child to the reader that
     /// asked for the whole scan set. The field names are the check the compiler
     /// can make and the tuple could not.
+    ///
+    /// The whole `Tuning` and not the hop budget alone since ADR 0060: the
+    /// chain is searched over the **masked** border rings, so the routable
+    /// question reads `Tuning.keeperMargin` beside `Tuning.MaxHops`.
     let scanOf
-        (maxHops: int)
+        (tuning: Tuning)
         (stages: Map<string, ColonyStage>)
         (unowned: Set<string>)
         (colonies: Colony list)
@@ -512,11 +537,21 @@ module World =
         : ScanSet =
         let outposts =
             Outpost.worked shut colony.Outposts
-            |> List.filter (Outpost.routable (linked world) maxHops colony.Home)
+            |> List.filter (
+                Outpost.routable
+                    (linked (Tuning.keeperMargin tuning) world)
+                    tuning.MaxHops
+                    colony.Home
+            )
 
         let errands =
             colony.Errands
-            |> List.filter (Errand.routable (linked world) maxHops colony.Home)
+            |> List.filter (
+                Errand.routable
+                    (linked (Tuning.keeperMargin tuning) world)
+                    tuning.MaxHops
+                    colony.Home
+            )
 
         // The two halves of what a mother projects for a child of hers, and
         // they are disjoint by construction: a room she is raising is one we
@@ -555,7 +590,7 @@ module World =
         : string list =
         let scan =
             scanOf
-                tuning.MaxHops
+                tuning
                 (stages tuning colonies world)
                 (unownedHomes colonies world)
                 colonies

@@ -52,7 +52,9 @@ type Atlas =
             /// onto the tile — road 1, plain 2, swamp 10; walls, obstacle
             /// structures and tiles outside the projection impassable (ADR
             /// 0001, ADR 0010). The only form the rule has: the single-tile
-            /// query reads this grid too (`weightAt`).
+            /// query reads this grid too (`weightAt`). The [[keeper margin]]
+            /// is already in the ground it is copied from, so a masked tile is
+            /// impassable here without a pass of its own (`Keepers`, ADR 0060).
             Weights: Map<string, int[]>
             /// Raw terrain weight per tile index, per room name: the ground
             /// before a road discounts it and before an obstacle blocks it. A
@@ -61,6 +63,9 @@ type Atlas =
             /// 0001) — and the Layout's three ground readers price off it too:
             /// a site's tile is terrain holding nothing, a swamp under a road
             /// is still swamp, and a trunk is priced before any road discount.
+            /// Raw in every sense but one: the [[keeper margin]] is masked out
+            /// of it, because a keeper's rocks are not ground a body of ours
+            /// counts a Seat on either (`Keepers`, ADR 0060 decision 2).
             Ground: Map<string, int[]>
             /// Terrain weight per tile index of each room's border ring — the
             /// exit rows and columns the layers' ground leaves out (ADR 0036) —
@@ -226,11 +231,29 @@ let ofViewRecalling (walks: WalkTable) (view: ColonyView) : Atlas =
         |> List.map (fun c -> c.Name)
         |> Set.ofList
 
-    let gridOf (foreign: Set<Pos>) (layer: RoomLayer) =
+    // The [[keeper margin]], the one edit this colony makes to a fact about the
+    // world before a rule reads it (`Keepers`, ADR 0060 decision 2). It goes on
+    // the **raw ground**, ahead of the road and obstacle passes and ahead of
+    // the copy the walking grid is made from, so a masked tile is impassable to
+    // every query off either grid and the two cannot disagree about it: a
+    // keeper's rocks are not ground a body of ours stands on, counts a Seat on
+    // or prices a step onto. Derived and not chosen, which is
+    // `Tuning.keeperMargin`'s own doc comment; asked in bulk, because a room
+    // the declaration names none of yields nothing here and costs the tick one
+    // lookup.
+    let keeperMargin = Tuning.keeperMargin tuning
+
+    let maskKeepers (room: string) (grid: int[]) =
+        Keepers.maskedTilesIn keeperMargin room
+        |> List.iter (fun tile -> grid.[indexOf tile] <- -1)
+
+    let gridOf (room: string) (foreign: Set<Pos>) (layer: RoomLayer) =
         let ground = Array.create tileCount -1
 
         layer.Terrain
         |> Map.iter (fun tile terrain -> ground.[indexOf tile] <- terrainWeight terrain)
+
+        maskKeepers room ground
 
         // The walking grid starts as the raw ground and takes the two
         // overriding passes; the ground itself keeps neither, because a
@@ -269,22 +292,32 @@ let ofViewRecalling (walks: WalkTable) (view: ColonyView) : Atlas =
     // its rooms rather than by `Rooms`: a room the projection carries a
     // ring for but no ground, or ground but no ring, is each half a room
     // and answers -1 for the half it has not got (ADR 0004).
-    let ringOf (ring: Map<Pos, Terrain>) =
+    //
+    // The mask runs over the ring too, and it is the half of ADR 0060 decision
+    // 2 that costs something: an exit tile within the margin of a rock is a
+    // tile a body would cross *inside* a keeper's Reach, so it leaves the band,
+    // and a chain that existed over raw terrain may not exist over masked
+    // terrain. `World.linked` masks the same tiles off the world's own border
+    // maps, so the scan set and the price still cannot disagree about which
+    // rooms are joined.
+    let ringOf (room: string) (ring: Map<Pos, Terrain>) =
         let grid = Array.create tileCount -1
 
         ring
         |> Map.iter (fun tile terrain -> grid.[indexOf tile] <- terrainWeight terrain)
 
+        maskKeepers room grid
+
         grid
 
     let grids =
         spatial.Rooms
-        |> Map.map (fun room layer -> gridOf (RoomPos.inRoom room view.Foreign) layer)
+        |> Map.map (fun room layer -> gridOf room (RoomPos.inRoom room view.Foreign) layer)
 
     let ground = grids |> Map.map (fun _ (bare, _, _) -> bare)
     let weights = grids |> Map.map (fun _ (_, grid, _) -> grid)
     let occupied = grids |> Map.map (fun _ (_, _, standing) -> standing)
-    let rings = spatial.Borders |> Map.map (fun _ ring -> ringOf ring)
+    let rings = spatial.Borders |> Map.map ringOf
 
     {
         Spatial = spatial
@@ -2453,7 +2486,12 @@ let firstStepWithin (atlas: Atlas) (creep: string) (goals: Set<RoomPos>) : RoomP
 /// vision (ADR 0031, ADR 0041): no remembered tile enters a walking grid and no
 /// Work Area grows one. Written for the vision grace's crossing creep (#151),
 /// whose target left the projection with its room's vision while the border it
-/// is walking at stayed exactly where it was. Total (ADR 0004): no Seam, no
+/// is walking at stayed exactly where it was. **A crossing counts only where it
+/// lands the body on ground it can walk off again** — the far side's own
+/// reading, taken here exactly as the priced walk takes it (`joinedAcross`,
+/// #317), because a mover with no far leg to price is the one reader that can
+/// otherwise walk a body into a tile it can never leave. Total (ADR 0004): no
+/// Seam, no landing, no
 /// step, and a creep already in the room is not crossing to it.
 ///
 /// **It walks the compass's chain while the price walks the cheapest** (#288,
@@ -2478,7 +2516,31 @@ let stepTowardRoom (atlas: Atlas) (creep: string) (room: string) : RoomPos optio
         | None -> None
         | Some next ->
 
-            match seams atlas creepRoom next with
+            // **A crossing this mover will walk has to land the body somewhere
+            // it can walk on.** The band is a fact about the two border rings
+            // and says nothing about the ground behind the landing tile, which
+            // is why the priced walk asks the far side separately:
+            // `joinedAcross` drops a crossing whose landing has no tile of the
+            // far room's ground beside it, because there is nothing for the far
+            // leg to be reached at. This mover has no far leg — its room is
+            // dark and prices nothing — so it has to ask the same question
+            // itself, and before #317 it did not: it aimed at every crossing
+            // the ring carried, the engine landed the body on a tile with no
+            // ground beside it, and from there no step in any direction was
+            // available and none ever would be. The [[keeper margin]] makes
+            // that arrangement ordinary rather than freak — a rock six tiles
+            // inside a border masks the whole inner row behind an exit row it
+            // does not reach — but the hole is the mover's and not the mask's,
+            // and this is the same reading the price already takes. What the
+            // seam model itself should say about such a crossing is #326's.
+            let farGround = weightsOf atlas next
+
+            let landable =
+                seams atlas creepRoom next
+                |> List.filter (fun (_, landing) ->
+                    not (List.isEmpty (besideExit farGround landing)))
+
+            match landable with
             | [] -> None
             | band ->
                 let ground = weightsOf atlas creepRoom

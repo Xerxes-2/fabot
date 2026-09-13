@@ -64,6 +64,19 @@ module Engine =
     /// RANGED_ATTACK's range: three tiles.
     let rangedRange = 3
 
+    /// The Source Keeper's leash where it comes to rest: `keepers/pretick.js`
+    /// binds each keeper to `memory_sourceId` and moves it to within range **1**
+    /// of that source or mineral, and it never pursues. The engine's own rule
+    /// and no tunable of ours, which is the whole reason a keeper is a hostile
+    /// the map can answer before the tick begins (ADR 0060 decision 2,
+    /// `Keepers`).
+    ///
+    /// A leash and not a tether: the same file adopts a rock within range
+    /// **5** and then walks to range 1 of it, so a keeper freshly cast on its
+    /// lair is outside this for the two to four ticks the walk takes, and the
+    /// mask derived from this number covers the steady state alone (#327).
+    let keeperPin = 1
+
     /// ATTACK_POWER: the hits one ATTACK part takes off a creep at range 1.
     /// The guard row's count rule prices our own damage with it (ADR 0056) —
     /// melee is 0.231 damage per energy against ranged's 0.050, which is why
@@ -425,3 +438,35 @@ module Tuning =
             QuietGap = 50
             VisionGrace = 150
         }
+
+    /// The **[[keeper margin]]**: the tiles masked out of a Source Keeper
+    /// room's walkable ground around every rock a keeper is pinned to
+    /// (`Keepers`, ADR 0060 decision 2). Six today, and **derived rather than
+    /// chosen** — a function beside the record and not a field in it, so a
+    /// human who moves `ReachMargin` moves this too and cannot re-open the
+    /// decision in silence:
+    ///
+    ///     the keeper's pin (1) + its longest weapon (3) + ReachMargin (2)
+    ///
+    /// Five is the right number for **survival** — a keeper's longest reach is
+    /// ranged 3, so a tile 6 from its rock is at least 5 from the keeper and
+    /// out of range — and it is the wrong number for what this buys. ADR 0033's
+    /// Reach is `weapon + ReachMargin`, which is 5 for a RANGED_ATTACK body, so
+    /// a tile at 5 from a keeper is *inside* that Reach: at a margin of five a
+    /// courier crossing the room is a creep inside a Reach, [[flee]] is
+    /// applicable to it, and the whole decision buys nothing.
+    ///
+    /// At six, a walkable tile is at least 7 from every rock, at least 6 from
+    /// every **pinned** keeper, and so outside its Reach — no Work Area is
+    /// subtracted to empty out there, no body of ours stands inside a Reach,
+    /// and Flee is inapplicable in that room by geometry rather than by
+    /// exempting any row from ADR 0033. ADR 0060 wrote "by construction" and
+    /// that is one word too strong: it holds for the steady state, which a
+    /// keeper is in on almost every tick but not on the two to four after each
+    /// respawn, when it is walking from its lair to the rock it just adopted
+    /// (`Engine.keeperPin`, #327). No larger margin repairs it — past seven
+    /// W15S26 cannot be crossed at all — so the exposure is a decision and not
+    /// an oversight, and ADR 0033 covers what is left because nothing here
+    /// takes a keeper off any hostile list.
+    let keeperMargin (tuning: Tuning) : int =
+        Engine.keeperPin + Engine.rangedRange + tuning.ReachMargin

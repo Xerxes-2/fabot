@@ -177,6 +177,40 @@ let tuningTests =
                     "one more tile of margin and the same tile is inside the Reach"
             }
 
+            test "the keeper margin is derived from the Reach margin and never written down" {
+                // ADR 0060 decision 2. Five is the right number for survival
+                // and the wrong one for what this buys: ADR 0033's Reach is
+                // `weapon + ReachMargin`, so a tile at five from a keeper is
+                // *inside* the Reach a RANGED_ATTACK body derives, Flee is
+                // applicable to a courier crossing after all, and the decision
+                // buys nothing. The margin is one tile past that by
+                // construction, and what is pinned here is the **relation** and
+                // not the digit — a human who moved `ReachMargin` and not the
+                // margin would re-open the decision in silence.
+                let reachOf (tuning: Tuning) = Engine.rangedRange + tuning.ReachMargin
+
+                for margin in 0..5 do
+                    let tuning =
+                        { Tuning.defaults with
+                            ReachMargin = margin
+                        }
+
+                    Expect.isGreaterThan
+                        (Tuning.keeperMargin tuning)
+                        (reachOf tuning)
+                        $"a tile at the margin is outside the Reach of a keeper pinned within one of its rock (ReachMargin = {margin})"
+
+                    Expect.equal
+                        (Tuning.keeperMargin tuning)
+                        (Engine.keeperPin + reachOf tuning)
+                        "the keeper's pin, its longest weapon, and the Reach margin"
+
+                Expect.equal
+                    (Tuning.keeperMargin Tuning.defaults)
+                    6
+                    "1 + 3 + 2 at the numbers this bot ships with"
+            }
+
             test "StandingCarryPerWork is the line a delivery stops being work at" {
                 // Read through the supply floor (ADR 0050), which is the
                 // rule that asks whether anything the colony holds can put

@@ -731,3 +731,100 @@ let internal corridorTransit =
     { RoomLayer.empty with
         Terrain = Map.ofList (plainLine [ for y in 1..48 -> { X = 25; Y = y } ])
     }
+
+/// The Source Keeper room the chain to the sector Reactor crosses, under its
+/// **own declared name** and over ground the test invents: every tile of the
+/// fifty-by-fifty window plain, ring included, and nothing else in it.
+///
+/// The room name is the load-bearing half and the terrain is deliberately not:
+/// the [[keeper margin]] is declared by room name and read wherever that room
+/// is projected (`Keepers`, ADR 0060 decision 2), so it is terrain-blind by
+/// construction — which is what lets an invented ground under a real name say
+/// something true about the real declaration. The three rooms are all captured
+/// (`tests/Core.Tests/rooms/`), and a case that needs the server's terrain
+/// belongs in `RoomSeamTests` with the rest of them: what is here is the half
+/// that is true of the *declaration* whatever the ground turns out to be, and
+/// keeping the two apart is what stops a green band from meaning either one.
+let internal keeperRoom =
+    let plain window =
+        Map.ofList
+            [
+                for x in window do
+                    for y in window -> { X = x; Y = y }, Plain
+            ]
+
+    let ring =
+        Map.ofList
+            [
+                for x in 0..49 do
+                    for y in 0..49 do
+                        if x = 0 || x = 49 || y = 0 || y = 49 then
+                            { X = x; Y = y }, Plain
+            ]
+
+    { SpatialInfo.empty with
+        RoomName = Some "W15S26"
+        Rooms =
+            Map.ofList
+                [
+                    "W15S26",
+                    { RoomLayer.empty with
+                        Terrain = plain [ 1..48 ]
+                        // The room's three sources, at the tiles the
+                        // declaration names them at: rocks a keeper is pinned
+                        // to are also rocks a Seat could be counted on, and the
+                        // count is what says the mask reached the terrain grid
+                        // and not the walking grid alone.
+                        TargetPositions =
+                            Map.ofList
+                                [
+                                    "sk-src-0", { X = 11; Y = 16 }
+                                    "sk-src-1", { X = 4; Y = 33 }
+                                    "sk-src-2", { X = 39; Y = 34 }
+                                ]
+                    }
+                    // The two rooms the chain joins it to, each carrying the
+                    // same invented ground, so a band over this room's border
+                    // is a fact about the mask alone.
+                    "W15S27",
+                    { RoomLayer.empty with
+                        Terrain = plain [ 1..48 ]
+                    }
+                    "W15S25",
+                    { RoomLayer.empty with
+                        Terrain = plain [ 1..48 ]
+                    }
+                ]
+        // W15S28 rides at the far end so the whole three-hop chain to the
+        // Reactor's room can be asked for over the masked rings, and W16S26
+        // beside it for its west border alone: the mask reaches that ring where
+        // it reaches neither of the chain's two, which is the consequence worth
+        // a test rather than a paragraph.
+        Borders =
+            Map.ofList
+                [
+                    "W15S28", ring
+                    "W15S27", ring
+                    "W15S26", ring
+                    "W15S25", ring
+                    "W16S26", ring
+                ]
+        TargetKinds = Map.ofList [ "sk-src-0", Source; "sk-src-1", Source; "sk-src-2", Source ]
+    }
+
+/// The same projection with one ordinary body standing in one of its rooms —
+/// what the *mover* reads, where `keeperRoom` alone is what the grids and the
+/// bands do. A creep is the only thing `Atlas.stepTowardRoom` needs beyond the
+/// geometry, and where it stands is the whole of what a stranding case varies
+/// (#317).
+let internal keeperRoomStanding (room: string) (tile: Pos) =
+    { keeperRoom with
+        RoomName = Some room
+        Rooms =
+            keeperRoom.Rooms
+            |> Map.add
+                room
+                { SpatialInfo.layerOf keeperRoom room with
+                    CreepPositions = Map.ofList [ "w", tile ]
+                }
+    }

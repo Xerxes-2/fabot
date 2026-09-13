@@ -1831,3 +1831,112 @@ let layeredThreatTests =
                     "the same raider on the same coordinate at home is shot"
             }
         ]
+
+[<Tests>]
+let keeperTests =
+    testList
+        "keepers"
+        [
+            // The Source Keeper room the chain to the sector Reactor crosses,
+            // as a colony that merely walks through it sees it: **beside** the
+            // colony's own home and never as it, because a room with no
+            // controller is a room no colony can ever be homed in (ADR 0047,
+            // ADR 0052) and the whole subject here is the room we pass through.
+            // It is the layering that makes the difference say anything — a
+            // Reach is filed by the room its Threat stands in (ADR 0041), and
+            // the rampart subtraction ADR 0033 grants is a fact about a room we
+            // own, which this is not. The ground is the test's and the **name**
+            // is the declaration's, which is all the mask reads (`Keepers`, ADR
+            // 0060 decision 2); the room's real terrain is
+            // `AtlasSeamTests`'s, over the capture (`rooms/W15S26.room`).
+            let crossing hostiles =
+                let colony = atLevel 2 (openRoom 8)
+
+                { colony with
+                    Spatial =
+                        { colony.Spatial with
+                            Rooms =
+                                colony.Spatial.Rooms
+                                |> Map.add
+                                    "W15S26"
+                                    { RoomLayer.empty with
+                                        Terrain =
+                                            Map.ofList
+                                                [
+                                                    for x in 1..48 do
+                                                        for y in 1..48 -> { X = x; Y = y }, Plain
+                                                ]
+                                    }
+                        }
+                    Hostiles = hostiles
+                }
+
+            let threatsIn hostiles =
+                let colony = crossing hostiles
+                threatsOf colony (Atlas.ofView colony)
+
+            // A keeper's body, as `keepers/pretick.js` casts it: the ranged
+            // weapon is the one that decides the Reach (ADR 0033), and it is
+            // the longest thing about it.
+            let keeper at =
+                hostileIn "W15S26" at [ Tough; Move; Attack; RangedAttack; Heal ]
+
+            test
+                "no walkable tile of a keeper room is inside the Reach of a keeper the engine has pinned" {
+                // ADR 0060 decision 2's second acceptance criterion, pinned
+                // **pairwise**: one keeper at a time, on every tile the engine
+                // could pin it to — within range 1 of each declared rock — and
+                // the Reach it derives against the ground the colony would
+                // actually walk. This is the whole of what the mask buys: Flee
+                // is inapplicable out here by geometry and not by exempting
+                // the courier or the re-claimer from ADR 0033.
+                //
+                // **Pinned**, which is the steady state and not every tick, and
+                // the title says so: a keeper cast on its lair adopts a rock
+                // within five and walks to range 1 of it, and the sweep below
+                // covers none of the tiles on that walk. It is not an omission
+                // to be widened here — over W15S26's real terrain 24 of those
+                // tiles do reach ground we walk, and no larger margin crosses
+                // the room at all (#327).
+                let walkable = Atlas.walkableTilesIn (Atlas.ofView (crossing [])) "W15S26"
+
+                Expect.isNonEmpty walkable "the room is ground a body can cross at all"
+
+                for rock in Keepers.centresIn "W15S26" do
+                    for pin in tilesWithin Engine.keeperPin rock do
+                        let reach = Threats.reachIn (threatsIn [ keeper pin ]) "W15S26"
+
+                        Expect.isEmpty
+                            (Set.intersect walkable reach)
+                            $"a keeper pinned at ({pin.X},{pin.Y}) off the rock at ({rock.X},{rock.Y}) reaches no tile we walk on"
+            }
+
+            test
+                "the keeper is still a Threat and still derives a Reach: the ground changed, not the list" {
+                // The override of #286's reasoning is for the ground and for
+                // nothing else (ADR 0060 decision 2). A keeper is still a
+                // hostile, still derives a Reach and is still the [[raid
+                // log]]'s business — what changed is that the Reach covers no
+                // tile of ours, so there is nothing left for Flee to answer.
+                let lair = { X = 35; Y = 11 }
+                let threats = threatsIn [ keeper lair ]
+
+                Expect.isNonEmpty
+                    (Threats.reachIn threats "W15S26")
+                    "the keeper's Reach is derived like any other hostile's"
+
+                Expect.isTrue
+                    (Set.contains lair (Threats.reachIn threats "W15S26"))
+                    "and it covers the tile it stands on, masked though that tile is"
+
+                Expect.equal
+                    (Threats.safeIn threats "W15S26")
+                    (Atlas.walkableTilesIn (Atlas.ofView (crossing [])) "W15S26"
+                     |> RoomPos.setAt "W15S26")
+                    "and the safe set is the whole walkable ground: the Reach subtracts nothing, because there is nothing of ours to subtract from"
+
+                Expect.isEmpty
+                    (Threats.ringIn threats "W15S26")
+                    "and a Guard cast on it would have nowhere of ours to stand either (ADR 0056)"
+            }
+        ]

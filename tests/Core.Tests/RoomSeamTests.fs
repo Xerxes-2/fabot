@@ -525,3 +525,203 @@ let cornerChainTests =
                     "and the corner the compass names really is the dearer one on these captures, or the case proves nothing"
             }
         ]
+
+[<Tests>]
+let keeperMaskTests =
+    testList
+        "the keeper mask on real terrain"
+        [
+            // The three rooms of the chain from W15S28 to the sector Reactor's
+            // room, as the server has them (ADR 0036): `AtlasSeamTests`' own
+            // keeper cases run over invented plain, because the mask is keyed
+            // by room name and terrain-blind, and these are the half that only
+            // the capture can say. W15S26's mineral and its three sources are
+            // the capture's own rows, so the declaration in `Keepers` is
+            // checked against the engine here rather than trusted (#317).
+            let chain = [ "W15S28"; "W15S27"; "W15S26"; "W15S25" ]
+            let keeperRoom = load "W15S26"
+
+            // The margin rides on `ReachMargin`, which is the whole point of
+            // deriving it: one plus three plus this. Five, six and seven are
+            // therefore `ReachMargin` of one, two and three, and the numbers
+            // this bot ships with are the middle one.
+            let atlasAt reachMargin =
+                let captures = chain |> List.map load
+
+                let view =
+                    { SpatialInfo.empty with
+                        RoomName = Some "W15S28"
+                        Rooms =
+                            captures
+                            |> List.map (fun capture ->
+                                capture.RoomName,
+                                { RoomLayer.empty with
+                                    Terrain = capture.Terrain
+                                })
+                            |> Map.ofList
+                        Borders =
+                            captures
+                            |> List.map (fun capture -> capture.RoomName, capture.Border)
+                            |> Map.ofList
+                    }
+                    |> AtlasFixtures.snapshotWith []
+
+                { view with
+                    Tuning =
+                        { Tuning.defaults with
+                            ReachMargin = reachMargin
+                        }
+                }
+                |> ofView
+
+            let marginOf reachMargin =
+                Tuning.keeperMargin
+                    { Tuning.defaults with
+                        ReachMargin = reachMargin
+                    }
+
+            // W15S26's own exit tiles on one side, as `World.linked` reads
+            // them: a ring tile the capture carries whose terrain is not wall
+            // and which no declared rock masks. No neighbour is needed — which
+            // of this room's exits survive the mask is a fact about this room.
+            let survivingExits margin (onSide: Pos -> bool) =
+                keeperRoom.Border
+                |> Map.toList
+                |> List.filter (fun (tile, terrain) ->
+                    onSide tile && terrain <> Wall && not (Keepers.masked margin "W15S26" tile))
+                |> List.map fst
+
+            test "the declaration's rocks are the engine's own, tile for tile" {
+                // The one datum in `Keepers.centres` that came off a live read
+                // rather than out of a committed file, made checkable: three
+                // sources and a mineral, which is four of the eight centres.
+                // The four lairs are not here because `capture-room.mjs` keeps
+                // sources, controllers and minerals alone — widening it is
+                // #316's, and until then the lairs stay a hand-read fact.
+                let declared = Keepers.centresIn "W15S26" |> Set.ofList
+
+                for _, tile in keeperRoom.Rocks do
+                    Expect.isTrue
+                        (Set.contains tile declared)
+                        $"the rock at ({tile.X},{tile.Y}) is a declared keeper centre"
+
+                Expect.equal
+                    keeperRoom.Rocks.Length
+                    4
+                    "and the capture holds no rock the declaration has not got: three sources and the mineral"
+
+                Expect.isTrue
+                    (Set.contains { X = 38; Y = 7 } declared)
+                    "the mineral at (38,7) above all, which is the tile every orphaned north crossing traces to"
+            }
+
+            test "the mask takes a third of W15S26's ground and the chain still crosses it" {
+                // ADR 0060 decision 2's first and third acceptance criteria,
+                // over the terrain the courier will actually walk. The chain is
+                // three crossings, which is `Tuning.MaxHops` exactly, so there
+                // is no slack for a detour round a room the mask closed.
+                let raw =
+                    keeperRoom.Terrain
+                    |> Map.toList
+                    |> List.filter (fun (_, terrain) -> terrain <> Wall)
+                    |> List.length
+
+                Expect.equal raw 1568 "the room's walkable ground before the mask"
+
+                Expect.equal
+                    (walkableTilesIn (atlasAt 2) "W15S26" |> Set.count)
+                    1005
+                    "and 563 of those tiles are inside six of a rock"
+
+                Expect.equal
+                    (routes (atlasAt 2) "W15S28" "W15S25")
+                    [ [ "W15S28"; "W15S27"; "W15S26"; "W15S25" ] ]
+                    "the chain to the Reactor's room, straight up the column, over the masked layer"
+            }
+
+            test "six costs the crossing nothing that five did not, and eight closes the room" {
+                // The acceptance criterion ADR 0060 left `Unverified`: only
+                // five was measured, and only against one lair. The bands are
+                // the measurement — the north one is where the mask first
+                // bites, and it does not bite at six.
+                let northBand margin =
+                    survivingExits margin (fun tile -> tile.Y = 0)
+
+                let southBand margin =
+                    survivingExits margin (fun tile -> tile.Y = Seam.exitEdge)
+
+                Expect.equal
+                    (northBand 0).Length
+                    20
+                    "the north border carries twenty exits over raw terrain"
+
+                Expect.equal (southBand 0).Length 20 "and the south border twenty"
+
+                for reachMargin in 1..2 do
+                    Expect.equal
+                        (northBand (marginOf reachMargin)).Length
+                        20
+                        $"the mask at {marginOf reachMargin} takes no north crossing"
+
+                    Expect.equal
+                        (southBand (marginOf reachMargin)).Length
+                        20
+                        $"nor any south one, so a crossing at {marginOf reachMargin} costs what one at five costs"
+
+                Expect.equal
+                    (northBand (marginOf 3)).Length
+                    11
+                    "seven is where it starts to cost: nine of the twenty go"
+
+                // What eight does is *not* asserted here, and the reason is
+                // worth the line: measured over this capture the room's ground
+                // is cut in two at eight, and `routes` goes on answering with a
+                // chain — because it reads the rings, where ten crossings
+                // survive. That is #326's silent failure and not a fact about
+                // the margin, so the number lives in #327's table beside the
+                // decision it belongs to.
+                Expect.equal
+                    (southBand (marginOf 3)).Length
+                    20
+                    "the south border is clear even at seven, the nearest rock being far from that row"
+            }
+
+            test "a rock behind a border leaves the crossing and takes the ground it lands on" {
+                // #317's stranding, on the terrain it was found over rather
+                // than on the fixture's plain. The mineral at (38,7) is seven
+                // from the y = 0 ring and six from the y = 1 ground, so seven
+                // of the twenty north crossings survive the mask with nothing
+                // behind them; the lair at (42,39) does the same to the east
+                // border and orphans **every** exit it leaves. The band is a
+                // fact about two rings and cannot see this, which is why the
+                // movers ask the far side's ground themselves and why what the
+                // band itself should say is #326's.
+                let atlas = atlasAt 2
+                let margin = marginOf 2
+
+                let orphans onSide =
+                    survivingExits margin onSide
+                    |> List.filter (fun tile ->
+                        List.isEmpty (adjacentWalkableIn atlas "W15S26" tile))
+
+                Expect.equal
+                    (orphans (fun tile -> tile.Y = 0) |> List.map (fun tile -> tile.X))
+                    [ 37; 38; 39; 40; 41; 42; 43 ]
+                    "north: seven of the twenty land a body where it can never step again"
+
+                Expect.isEmpty
+                    (orphans (fun tile -> tile.Y = Seam.exitEdge))
+                    "south: none, the nearest rock being further than the margin from that row"
+
+                let east = survivingExits margin (fun tile -> tile.X = Seam.exitEdge)
+
+                Expect.equal east.Length 7 "east: seven exits survive the mask"
+
+                Expect.equal
+                    (orphans (fun tile -> tile.X = Seam.exitEdge) |> List.length)
+                    7
+                    "and all seven are orphans, so W15S26 -> W16S26 is a join no body can use"
+
+                Expect.isEmpty (orphans (fun tile -> tile.X = 0)) "west: none"
+            }
+        ]

@@ -1173,3 +1173,180 @@ let routeTests =
                     "and a room joined to nothing is reached by no chain"
             }
         ]
+
+[<Tests>]
+let keeperSeamTests =
+    testList
+        "seams over the keeper mask"
+        [
+            // The margin the colony ships, and the room it is declared for.
+            let margin = Tuning.keeperMargin Tuning.defaults
+            // One Atlas per case rather than one for the list: the Atlas
+            // memoises on mutable tables and Expecto runs these in parallel
+            // (#310).
+            let masked () = keeperRoom |> snapshotWith [] |> ofView
+
+            // The crossings of one of W15S26's four borders, by the coordinate
+            // that runs along it.
+            let band into along =
+                seams (masked ()) "W15S26" into |> List.map (fst >> along) |> Set.ofList
+
+            test "the chain's two borders lose no crossing to the mask" {
+                // The acceptance criterion ADR 0060 decision 2 flags as the one
+                // that could bite: masking *ground* can take exit tiles out of a
+                // band, so a chain that exists over raw terrain may not exist
+                // over masked terrain. It does not here, and the reason is a
+                // fact about the declaration rather than about the terrain —
+                // the nearest rock to either the north or the south ring is
+                // further than the margin — which is why the invented plain
+                // ring under the real name is enough to say it.
+                let alongX (tile: Pos) = tile.X
+
+                Expect.equal
+                    (band "W15S25" alongX)
+                    (Set.ofList [ 1..48 ])
+                    "north, into the Reactor's room: every crossing the ring carries"
+
+                Expect.equal
+                    (band "W15S27" alongX)
+                    (Set.ofList [ 1..48 ])
+                    "south, back toward W15S28: the same"
+
+                Expect.isEmpty
+                    ([ 1..48 ]
+                     |> List.filter (fun x ->
+                         Keepers.masked margin "W15S26" { X = x; Y = 0 }
+                         || Keepers.masked margin "W15S26" { X = x; Y = 49 }))
+                    "no rock of W15S26 is within the margin of its north or south exit row"
+            }
+
+            test "the chain from W15S28 to the Reactor's room still exists over the masked layer" {
+                // ADR 0060 decision 2's third acceptance criterion, asked of
+                // the query every price is chosen with (`Atlas.routes`, ADR
+                // 0058): three crossings by way of W15S27 and the keeper room,
+                // which is `Tuning.MaxHops` exactly and leaves no slack for a
+                // detour. The rooms' rings are the fixture's and the mask over
+                // the middle one is the declaration's, so what this pins is
+                // that the mask does not cut the chain — the terrain's own say
+                // arrives with the captures (#316).
+                Expect.equal
+                    (routes (masked ()) "W15S28" "W15S25")
+                    [ [ "W15S28"; "W15S27"; "W15S26"; "W15S25" ] ]
+                    "one chain of three crossings, straight up the column"
+
+                Expect.equal
+                    (route (masked ()) "W15S26" "W15S25")
+                    (Some [ "W15S26"; "W15S25" ])
+                    "and the crossing out of the keeper room is still a crossing"
+            }
+
+            test "a rock near a border does take exit tiles out of that band" {
+                // The consequence stated rather than discovered, and it is
+                // real one border over: the west lair at (6,17), the west
+                // source at (4,33) and the south-west lair at (5,36) each reach
+                // the x = 0 ring, so two runs of it stop being crossings. The
+                // band survives; a chain that had needed one of those tiles
+                // would not. What is pinned here is the mask's own reach over a
+                // ring that is plain end to end, which is the half that is true
+                // of the declaration whatever the ground turns out to be. What
+                // the server's own terrain does with it is `RoomSeamTests`',
+                // over the capture: eight of this border's forty-eight exits
+                // survive and none of them is orphaned, against the east
+                // border's seven surviving and all seven orphaned.
+                let alongY (tile: Pos) = tile.Y
+
+                let lost = Set.difference (Set.ofList [ 1..48 ]) (band "W16S26" alongY)
+
+                Expect.equal
+                    lost
+                    (Set.union (Set.ofList [ 11..23 ]) (Set.ofList [ 27..42 ]))
+                    "the tiles within six of the west lair at (6,17), the west source at (4,33) and the south-west lair at (5,36)"
+
+                Expect.isNonEmpty
+                    (seams (masked ()) "W15S26" "W16S26")
+                    "and the band is narrowed rather than closed"
+            }
+
+            test "the mask narrows a band the same way for the route search and for the price" {
+                // `World.linked` reads the world's own border maps before any
+                // grid exists and `Atlas.seams` reads the ring grids; both mask
+                // the same tiles, so the scan set cannot admit a chain the
+                // flood refuses to walk (ADR 0058's invariant, ADR 0060's
+                // second consequence). Pinned against the ring the Atlas was
+                // laid from, which is the only input either reader has.
+                let crossable room tile =
+                    // The shell's own reading, less the mask: `World.linked`'s
+                    // `walkableIn`, spelled over the fixture's ring.
+                    Map.containsKey tile (Map.find room keeperRoom.Borders)
+                    && not (Keepers.masked margin room tile)
+
+                for into in [ "W15S25"; "W15S27"; "W16S26" ] do
+                    Expect.equal
+                        (seams (masked ()) "W15S26" into)
+                        (Seam.bandBy (crossable "W15S26") (crossable into) "W15S26" into)
+                        $"W15S26 -> {into}: one band, whichever layer answers it"
+            }
+
+            // A body standing in the room north of the keeper room, walking
+            // south toward W15S27 — #316's leg, taken the way the vision grace
+            // takes it: no price, because the room it is aimed at is dark.
+            let walkingSouthFrom tile =
+                keeperRoomStanding "W15S25" tile |> snapshotWith [ worker "w" ] |> ofView
+
+            test "a crossing the mask orphans is not one the compass aims a body at" {
+                // #317's stranding, reproduced and then closed. The mineral at
+                // (38,7) is seven tiles from the north exit row, so the row
+                // stays a band — and six from the ground row behind it, so the
+                // ground behind eleven of those crossings is gone. A body the
+                // engine lands on one of them has no walkable neighbour in any
+                // direction and no step out of the room for the rest of its
+                // life: `Atlas.stepTowardRoom` has no far leg to price, so
+                // before this it asked the ring alone and the ring cannot see
+                // the row behind it.
+                // Standing where all three crossings it could step onto are
+                // orphaned, so the answer cannot be one of them by accident of
+                // the band's (X, Y) order.
+                let atlas = walkingSouthFrom { X = 38; Y = 48 }
+
+                for x in 37..39 do
+                    Expect.isTrue
+                        (seams atlas "W15S25" "W15S26"
+                         |> List.exists (fun (_, there) -> there = { X = x; Y = 0 }))
+                        $"the premise: the ring still carries the crossing at x = {x}, the mineral being seven from it"
+
+                    Expect.isEmpty
+                        (adjacentWalkableIn atlas "W15S26" { X = x; Y = 0 })
+                        $"and it lands a body on ({x},0), which has nothing beside it: the mineral is six from the row behind"
+
+                let step = stepTowardRoom atlas "w" "W15S27"
+
+                Expect.isSome
+                    step
+                    "it still walks: the band survives either side of the orphaned run"
+
+                Expect.isFalse
+                    (step
+                     |> Option.exists (fun tile ->
+                         tile.Y = Seam.exitEdge
+                         && List.isEmpty (adjacentWalkableIn atlas "W15S26" { X = tile.X; Y = 0 })))
+                    "and never onto a crossing that strands it, though it is standing beside three of them"
+            }
+
+            test "every crossing the compass aims at lands a body on ground it can leave" {
+                // The rule rather than the instance, swept across the run the
+                // mask orphans and a tile either side of it: whatever the mover
+                // answers, a body that obeys it can take a step the tick after.
+                // This is the far side's own reading, and it is the one the
+                // priced walk has always taken (`joinedAcross`) — what #317
+                // fixed is that the one mover with no price to take it did not.
+                for x in 31..45 do
+                    let atlas = walkingSouthFrom { X = x; Y = 48 }
+
+                    match stepTowardRoom atlas "w" "W15S27" with
+                    | Some step when step.Y = Seam.exitEdge ->
+                        Expect.isNonEmpty
+                            (adjacentWalkableIn atlas "W15S26" { X = step.X; Y = 0 })
+                            $"standing at ({x},48), the crossing at x = {step.X} lands on ground with a step off it"
+                    | _ -> ()
+            }
+        ]

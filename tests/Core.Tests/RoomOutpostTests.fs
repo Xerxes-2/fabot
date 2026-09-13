@@ -76,11 +76,16 @@ let outpostDeclarationTests =
                 // projected, pooled and hired for by a row that hires per
                 // declared outpost.
                 //
-                // `linked` is built the way the shell builds it
-                // (`World.linked`): a ring tile the capture carries whose
-                // terrain is not wall, and a room no capture is loaded for
-                // is joined to nothing — which is what keeps the search
-                // inside the rooms the projection would hold.
+                // `linked` is built the way the shell builds it, out of the
+                // shell's own predicate (`World.ringWalkable`) and not a copy
+                // of it: a ring tile the capture carries whose terrain is not
+                // wall and which no keeper's rock masks (ADR 0060 decision 2).
+                // A room no capture is loaded for is joined to nothing — which
+                // is what keeps the search inside the rooms the projection
+                // would hold. No room declared today is a Source Keeper room,
+                // so the mask takes nothing here; calling the real predicate is
+                // what makes that a fact about the rule rather than about the
+                // copy, which has twice had to move in lockstep with it.
                 let rings =
                     Colony.declared
                     |> List.collect (fun colony ->
@@ -93,9 +98,11 @@ let outpostDeclarationTests =
                     let walkableIn room tile =
                         match Map.tryFind room rings with
                         | Some border ->
-                            match Map.tryFind tile border with
-                            | Some terrain -> terrain <> Wall
-                            | None -> false
+                            World.ringWalkable
+                                (Tuning.keeperMargin Tuning.defaults)
+                                room
+                                border
+                                tile
                         | None -> false
 
                     Seam.joinedBy (walkableIn fromRoom) (walkableIn toRoom) fromRoom toRoom

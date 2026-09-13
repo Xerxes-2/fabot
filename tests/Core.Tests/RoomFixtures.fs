@@ -60,6 +60,15 @@ type RoomCapture =
         /// The Thorium deposits under the engine's own ids, as
         /// `RealSources` is.
         RealMinerals: (string * Pos) list
+        /// Every **rock** the capture found, whatever it is made of: each
+        /// source and each mineral, ordinary ore included, under the engine's
+        /// own ids. The one list above that is not a cut the shell makes —
+        /// `Minerals` drops the room's ordinary ore because no rule projects
+        /// it, and a Source Keeper is pinned to it all the same
+        /// (`Keepers.centres`, ADR 0060 decision 2). What this exists for is
+        /// to make the declared keeper centres checkable against the server
+        /// instead of against the hand that typed them (#317).
+        Rocks: (string * Pos) list
     }
 
 /// A captured room projected as a `SpatialInfo`, beside the ids the
@@ -191,6 +200,12 @@ let load (roomName: string) : RoomCapture =
     let controller = ofKind "controller" "-" |> List.tryHead
     let minerals = ofKind "mineral" (resourceName Thorium)
 
+    let rocks =
+        objects
+        |> Array.filter (fun ((kind, _), _) -> kind = "source" || kind = "mineral")
+        |> Array.map snd
+        |> List.ofArray
+
     {
         RoomName = field "room"
         Shard = field "shard"
@@ -203,6 +218,7 @@ let load (roomName: string) : RoomCapture =
         RealSources = sources
         RealController = controller
         RealMinerals = minerals
+        Rocks = rocks
     }
 
 /// The captured room with a spawn standing on it. The spawn is always the

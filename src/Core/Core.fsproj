@@ -8,6 +8,7 @@
     <Compile Include="Types/Rules.fs" />
     <Compile Include="Types/Rooms.fs" />
     <Compile Include="Types/Geometry.fs" />
+    <Compile Include="Types/Keepers.fs" />
     <Compile Include="Types/Projection.fs" />
     <Compile Include="Types/Colonies.fs" />
     <Compile Include="Types/Sightings.fs" />

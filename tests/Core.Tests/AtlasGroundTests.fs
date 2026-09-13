@@ -982,3 +982,123 @@ let consistencyTests =
                     "standing tiles never exceed Seats"
             }
         ]
+
+[<Tests>]
+let keeperMaskTests =
+    testList
+        "atlas keeper mask"
+        [
+            // The declared centres of the one Source Keeper room the chain to
+            // the sector Reactor crosses, and the margin the colony ships.
+            let centres = Keepers.centresIn "W15S26"
+            let margin = Tuning.keeperMargin Tuning.defaults
+            // One Atlas per case rather than one for the list: the Atlas
+            // memoises on mutable tables and Expecto runs these in parallel
+            // (#310).
+            let masked () = keeperRoom |> snapshotWith [] |> ofView
+
+            test "every tile within the margin of a declared rock is off the walkable ground" {
+                // ADR 0060 decision 2's first acceptance criterion. The ground
+                // under this room is plain everywhere, so every tile missing
+                // from the walkable set is missing because of the mask and for
+                // no other reason.
+                let walkable = walkableTilesIn (masked ()) "W15S26"
+
+                Expect.isNonEmpty centres "W15S26's rocks are declared"
+
+                let inside =
+                    walkable
+                    |> Set.filter (fun tile ->
+                        centres |> List.exists (fun centre -> range centre tile <= margin))
+
+                Expect.isEmpty
+                    inside
+                    "no walkable tile of a keeper room lies within the margin of one of its rocks"
+
+                Expect.isTrue
+                    (walkable
+                     |> Set.exists (fun tile ->
+                         centres |> List.exists (fun centre -> range centre tile = margin + 1)))
+                    "and the tile one step past the margin is ground, so the mask is a margin and not the room"
+            }
+
+            test "a masked tile is impassable to the grid, the ring and the ground alike" {
+                // "Impassable to every query" is one fact and not three: the
+                // mask goes on the raw ground before the walking grid is copied
+                // from it, so a Seat counted off terrain, a step priced off the
+                // walking grid and a crossing read off the border ring all
+                // answer the same way about the same tile.
+                let lair = { X = 35; Y = 11 }
+                let ringTile = { X = 0; Y = 20 }
+
+                Expect.isTrue
+                    (List.contains lair centres)
+                    "the north-east lair is a declared centre"
+
+                Expect.equal
+                    (stepWeights (masked ()) "W15S26").[lair.X * 50 + lair.Y]
+                    -1
+                    "the rock itself is not a tile a body steps onto"
+
+                Expect.isEmpty
+                    (adjacentWalkableIn (masked ()) "W15S26" lair)
+                    "and neither is anything beside it"
+
+                Expect.equal
+                    (seats (masked ()) "sk-src-0")
+                    (Some 0)
+                    "and a declared rock inside the mask counts no Seat, a Seat being counted off terrain alone (ADR 0001)"
+
+                Expect.isTrue
+                    (Keepers.masked margin "W15S26" ringTile)
+                    "(0,20) is within six of the west lair at (6,17)"
+
+                Expect.isEmpty
+                    (seams (masked ()) "W15S26" "W16S26"
+                     |> List.filter (fun (here, _) -> here = ringTile))
+                    "so it is no crossing either, though the ring carries plain terrain for it"
+            }
+
+            test "a room the declaration names none of keeps every tile of its ground" {
+                // The mask is keyed by room name and reaches nothing else (ADR
+                // 0004): W15S27 carries the identical invented ground and loses
+                // nothing, which is what says the missing tiles next door are
+                // the declaration's doing and not the fixture's.
+                Expect.isEmpty (Keepers.centresIn "W15S27") "W15S27 declares no keeper rock"
+
+                Expect.equal
+                    (walkableTilesIn (masked ()) "W15S27" |> Set.count)
+                    (48 * 48)
+                    "every tile of the plain window is ground"
+
+                Expect.isLessThan
+                    (walkableTilesIn (masked ()) "W15S26" |> Set.count)
+                    (48 * 48)
+                    "and the keeper room's is short by the mask"
+            }
+
+            test "the bulk mask and the per-tile rule are the same rule" {
+                // The grids are laid from `maskedTilesIn` and the route search
+                // asks `masked` per ring tile; a disagreement between the two
+                // would be a tile the price walks and the scan set refuses, or
+                // the other way about.
+                let bulk = Keepers.maskedTilesIn margin "W15S26" |> Set.ofList
+
+                let pointwise =
+                    Set.ofList
+                        [
+                            for x in 0..49 do
+                                for y in 0..49 do
+                                    if Keepers.masked margin "W15S26" { X = x; Y = y } then
+                                        { X = x; Y = y }
+                        ]
+
+                Expect.equal bulk pointwise "one rule, two shapes"
+
+                Expect.isEmpty
+                    (bulk
+                     |> Set.filter (fun tile ->
+                         tile.X < 0 || tile.X > 49 || tile.Y < 0 || tile.Y > 49))
+                    "and the bulk form is clamped to the grid it indexes"
+            }
+        ]
