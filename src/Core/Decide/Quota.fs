@@ -567,7 +567,8 @@ let internal minerQuota (view: ColonyView) atlas : int =
 
 /// The reserver row's quota and its sizing, which are one rule with two faces
 /// (ADR 0042, ADR 0006's law that a row arrives with its quota): one reserver
-/// per **declared** outpost, each wanting `ceil((5000 - ticks this colony
+/// per declared outpost this colony may actually reserve, each wanting
+/// `ceil((5000 - ticks this colony
 /// holds) / 600)` CLAIM parts. The list's length is the quota; each entry is
 /// what that outpost's body asks for. No state is kept between ticks — the
 /// deficit recomputes from the reservation itself. A **candidate colony** takes
@@ -576,9 +577,26 @@ let internal minerQuota (view: ColonyView) atlas : int =
 /// colony's is the Claim; the body is the same `[Claim; Move]` either way,
 /// which is why this is one row and not two. A declared **[[errand]]** takes a
 /// third entry beside them, also of a single block (#318) — the row's third
-/// face, and the same body once more. Which rooms count is
-/// `declaredOutposts`, the derivation this row shares with the guard row. The
-/// *rooms* drop out and every cast this tick is sized at the largest demand in
+/// face, and the same body once more.
+///
+/// Which rooms count is `reservableOutposts`, which is `declaredOutposts` — the
+/// set the [[guard]] row and the scan set still read whole — less the rooms
+/// whose controller **somebody else's CLAIM parts hold** (#333). The engine
+/// refuses `reserveController` on such a controller as flatly as on an owned
+/// one, so a body hired for one stands adjacent and is refused every tick of
+/// its life: W12S27 bought two of them over the 617 ticks the ticket watched —
+/// `reserver-411079`, then `reserver-411698`, the reservation unmoved between
+/// them — and was on course to buy four or five more before the 4,999 ticks an
+/// invader core's reservation outlives its core ran out, at 1,950 energy a head
+/// against a [[storage]] holding no energy at all. The same read takes the
+/// controller out of the Reserve pool, so this is one refusal and not a row
+/// that can be undone by the Matcher. It is asked of the room's **record**
+/// where no vision answers for it, which is what makes the cadence above stop
+/// rather than slow: the reserver is the only body such a room ever holds, so a
+/// read off vision alone would go dark the tick the last one died and hire the
+/// next (`Planner.reservableControllers`).
+///
+/// The *rooms* drop out and every cast this tick is sized at the largest demand in
 /// the list: the quota counts bodies, and which controller each finished body
 /// holds is the Matcher's, priced by travel cost. Over-buying is the safe
 /// direction (ADR 0026), and the bank truncates it anyway. **The bank must
@@ -607,7 +625,7 @@ let internal reserverClaimsOf (view: ColonyView) : int list =
         []
     else
         let reserved =
-            declaredOutposts view
+            reservableOutposts view
             |> List.map (fun room ->
                 ceilDiv (Engine.reservationCap - heldTicks room) Engine.claimLifetime |> max 1)
 

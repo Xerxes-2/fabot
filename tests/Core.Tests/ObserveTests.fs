@@ -355,6 +355,7 @@ let quiet: ColonyView =
         // The Raid fold prices no source, so who holds the room is nothing
         // it reads (ADR 0042).
         RoomControl = Map.empty
+        HeldOutposts = Set.empty
         ConstructionSites = []
         Creeps = []
         Hostiles = []
@@ -1341,6 +1342,13 @@ let shutAt tick state =
 let recheckedAt tick state =
     (standDown Tuning.defaults tick state).Rechecked
 
+/// The gate's third set (#333), which withholds no room at all: the outposts
+/// somebody else's reservation was standing on at the last look and whose hold
+/// this tick is still short of. What the view hands to
+/// `Planner.reservableControllers` on the ticks vision answers for nothing.
+let heldAt tick state =
+    (standDown Tuning.defaults tick state).HeldOutposts
+
 [<Tests>]
 let outpostTests =
     testList
@@ -2062,6 +2070,224 @@ let clocklessTests =
                         }
 
                 Expect.isEmpty home.RivalHeld "the room we own is not a room somebody took"
+            }
+        ]
+
+[<Tests>]
+let holdTests =
+    testList
+        "raid fold: the reservation somebody else is standing on"
+        [
+            test "a hold that is not ours is recorded against the tick it runs out on" {
+                // #333's record, and the three answers `ReservationHolder`
+                // gives read one at a time. What goes in the leaf is the
+                // fact the reserver row now refuses to hire against — the
+                // engine answers ERR_INVALID_TARGET on a controller anybody
+                // but us holds — so the channel can say *why* a declared
+                // outpost is being mined and not reserved.
+                //
+                // The tick is absolute, the engine's countdown being
+                // relative: 100 + 4,000. Stored as read it would date a hold
+                // to the start of the world.
+                let recorded holder =
+                    (RaidState.empty
+                     |> raidTick 100 (quiet |> visible outpostRoom (heldBy holder 4000)))
+                        .Holds
+
+                Expect.equal
+                    (recorded ReservationHolder.Invader)
+                    (Map.ofList
+                        [
+                            outpostRoom,
+                            {
+                                Holder = ReservationHolder.Invader
+                                Until = 4100
+                            }
+                        ])
+                    "the Invader's hold — W12S27's own case, the core long since collapsed"
+
+                Expect.equal
+                    (recorded ReservationHolder.Rival)
+                    (Map.ofList
+                        [
+                            outpostRoom,
+                            {
+                                Holder = ReservationHolder.Rival
+                                Until = 4100
+                            }
+                        ])
+                    "and another player's, which the engine refuses us in exactly the same words"
+
+                Expect.isEmpty
+                    (recorded ReservationHolder.Ours)
+                    "our own hold is the steady state of every outpost and is recorded nowhere"
+
+                Expect.isEmpty
+                    (RaidState.empty |> raidTick 100 (quiet |> visible outpostRoom None)).Holds
+                    "and an unreserved controller is the room the row hires for: no entry either"
+            }
+
+            test "the hold outlives the vision that read it, and ends itself" {
+                // The two rules the record is kept on, which are the latch's
+                // first and the ring's second. A tick without vision leaves
+                // the conclusion standing — the colony is blind in most of
+                // these rooms most of the time, and re-reading the entry off
+                // nothing would clear it the tick after it was written. And
+                // the entry ends on the tick it named, no look being needed
+                // to know a countdown has run out (ADR 0043's re-entry rule).
+                let taken =
+                    RaidState.empty
+                    |> raidTick
+                        100
+                        (quiet |> visible outpostRoom (heldBy ReservationHolder.Invader 4000))
+
+                let blind =
+                    (taken, [ 101..130 ]) ||> List.fold (fun state t -> state |> raidTick t quiet)
+
+                Expect.equal
+                    blind.Holds
+                    taken.Holds
+                    "thirty blind ticks leave the last look's conclusion exactly where it stood"
+
+                let atEnd =
+                    (taken, [ 4099; 4100 ]) ||> List.fold (fun state t -> state |> raidTick t quiet)
+
+                Expect.isEmpty
+                    atEnd.Holds
+                    "and on the tick the engine's countdown reaches, the record retires itself"
+
+                let short = taken |> raidTick 4099 quiet
+
+                Expect.equal
+                    short.Holds
+                    taken.Holds
+                    "one tick short of it the hold is still standing, blind or not"
+            }
+
+            test "a look that finds the controller free takes the room back out" {
+                // The other direction, on the same evidence rule: a tick
+                // with vision decides the room either way, so the entry that
+                // matters is the last look's and never the first. Pinned
+                // *before* the clock runs out, or the expiry above would be
+                // what cleared it and this would pass on the wrong reason.
+                let freed =
+                    RaidState.empty
+                    |> raidTick
+                        100
+                        (quiet |> visible outpostRoom (heldBy ReservationHolder.Invader 4000))
+                    |> raidTick 101 (quiet |> visible outpostRoom None)
+
+                Expect.isEmpty
+                    freed.Holds
+                    "the controller the colony can see is nobody else's again"
+
+                // And a hold re-read is re-clocked: the engine counts down at
+                // one a tick, so the same hold read 40 ticks later names the
+                // same absolute tick, and a *fresh* hold names a later one.
+                let reread =
+                    RaidState.empty
+                    |> raidTick
+                        100
+                        (quiet |> visible outpostRoom (heldBy ReservationHolder.Invader 4000))
+                    |> raidTick
+                        140
+                        (quiet |> visible outpostRoom (heldBy ReservationHolder.Invader 3960))
+
+                Expect.equal
+                    reread.Holds
+                    (Map.ofList
+                        [
+                            outpostRoom,
+                            {
+                                Holder = ReservationHolder.Invader
+                                Until = 4100
+                            }
+                        ])
+                    "the same hold, forty ticks of it spent, still ends on the tick it always did"
+            }
+
+            test "the Invader's hold withdraws nothing, and a rival's withdraws the room as well" {
+                // The line this record is drawn on, and the whole reason it
+                // is a third shape rather than a row of the ring — but the
+                // line is the **Invader's** alone, and saying it of "somebody
+                // else" would be false of the other half of the very
+                // predicate the record is folded on (`heldByOther`).
+                //
+                // The Invader's leftover hold is the new case: no core stands
+                // over it, ADR 0043's ring is clocked off cores, and #165's
+                // rival clause does not answer for the NPC. So the room is
+                // mined and only the *reservation* is refused. Written as a
+                // stand-down it would have withdrawn the room, which is the
+                // architectural question #333 leaves for a human.
+                //
+                // A rival's identical hold is a clocked stand-down already
+                // (#165) — the same control entry opens an episode and the
+                // gate shuts the room — so for that holder the record says
+                // *why* a room that is withheld anyway is also unreservable,
+                // and nothing about a room the colony goes on mining. Pinned
+                // pairwise, one holder apart, because the sentence in the
+                // docs is written one way and is true only one way.
+                let heldByWhom holder =
+                    RaidState.empty
+                    |> raidTick 100 (quiet |> visible outpostRoom (heldBy holder 4000))
+
+                let invader = heldByWhom ReservationHolder.Invader
+                let rival = heldByWhom ReservationHolder.Rival
+
+                Expect.isEmpty invader.Outposts "the Invader's leftover hold opens no episode"
+
+                Expect.isEmpty invader.RivalHeld "and latches nothing: the engine ends this hold"
+
+                Expect.isEmpty (shutAt 101 invader) "so the gate withholds that room from nothing"
+
+                Expect.equal
+                    (heldAt 101 invader)
+                    (Set.singleton outpostRoom)
+                    "what it does narrow is the reservation, on every blind tick of the hold"
+
+                Expect.isNonEmpty
+                    rival.Outposts
+                    "a rival's identical hold is #165's episode: the same entry opens a stand-down"
+
+                Expect.equal
+                    (shutAt 101 rival)
+                    (Set.singleton outpostRoom)
+                    "so that room is withheld from the work, and is not one the colony goes on mining"
+
+                Expect.equal
+                    (heldAt 101 rival)
+                    (Set.singleton outpostRoom)
+                    "and it is in this set too: the two families name one room and say different things"
+            }
+
+            test "the gate stops holding a reservation on the tick the engine's countdown reaches" {
+                // What the gate does with the record, which is the half the
+                // rule the ticket is about actually reads
+                // (`Planner.reservableControllers` through
+                // `ColonyView.HeldOutposts`). The set is the standing holds
+                // and nothing else: `tick < Until`, the same test the fold
+                // retires an entry on and `observe.mjs` prints one under, so
+                // a leaf the fold has not caught up with — no tick with
+                // vision since the hold ended — cannot withhold a
+                // reservation the engine would now accept.
+                let taken =
+                    RaidState.empty
+                    |> raidTick
+                        100
+                        (quiet |> visible outpostRoom (heldBy ReservationHolder.Invader 4000))
+
+                Expect.equal
+                    (heldAt 4099 taken)
+                    (Set.singleton outpostRoom)
+                    "one tick short of the end the hold stands, blind ever since it was read"
+
+                Expect.isEmpty
+                    (heldAt 4100 taken)
+                    "and on the tick the countdown reaches, the room is ours to reserve again"
+
+                Expect.isEmpty
+                    (heldAt 101 RaidState.empty)
+                    "a colony with no log at all holds nothing out of its own pool"
             }
         ]
 

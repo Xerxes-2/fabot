@@ -275,3 +275,24 @@ module RoomControlInfo =
     /// different clocks.
     let heldBy (holder: ReservationHolder) (control: RoomControlInfo) : ReservationInfo option =
         control.Reservation |> Option.filter (fun held -> held.Holder = holder)
+
+    /// The reservation this room carries **if it is somebody else's** — the
+    /// Invader's or another player's alike — and None where nothing reserves
+    /// it or we do. The one question the *engine* asks before it answers
+    /// `reserveController` or `createConstructionSite`: both are refused on a
+    /// controller anybody but us holds, and neither cares which of the two it
+    /// is (#333). So this is deliberately not `heldBy` twice over: the rules
+    /// above it derive **clocks**, which the Invader's hold and a player's
+    /// genuinely disagree about, and this one derives a **refusal**, which
+    /// they do not. Three readers. Two are the halves of one sentence about
+    /// what this colony may do with a controller it can see: which ones it may
+    /// reserve at all (`reservableControllers`), and which of them a
+    /// [[candidate colony]] may claim (`claimTargets`). The third is the
+    /// [[raid log]]'s fold (`Observe.foldRaids`), which writes the same
+    /// judgement down under its room's name so the first of those two can
+    /// still be answered on the thousands of ticks nothing is looking
+    /// (`RaidState.Holds`, #333) — one predicate, or the record and the rule
+    /// could disagree about which rooms are refused.
+    let heldByOther (control: RoomControlInfo) : ReservationInfo option =
+        control.Reservation
+        |> Option.filter (fun held -> held.Holder <> ReservationHolder.Ours)

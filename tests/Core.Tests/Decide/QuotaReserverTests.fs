@@ -417,10 +417,19 @@ let reserverRowTests =
                 // neutral rate — a hold somebody else owns is not one this
                 // row can measure its deficit from.
                 //
+                // Since #333 that zero is not what the row *acts* on: the
+                // room leaves the row's list altogether, because the engine
+                // refuses `reserveController` on a controller somebody else
+                // holds and the nine parts this used to buy were nine parts
+                // of refusal. What the deficit rule still has to get right
+                // is the case below it — no reservation at all — and the
+                // case above, our own hold, which is where the `Ours` read
+                // is now the only reading that can be taken at all.
+                //
                 // Read at a bank that affords the whole deficit and not at
                 // the live 1,800, where two parts and nine both truncate to
-                // two and the pair could not tell the `Ours` filter from
-                // its absence.
+                // two and the pair could not tell a full deficit from a
+                // slipped one.
                 let castWith control =
                     let colony = reserverColony [ northOutpost true ] (surplusFleet 3) control
 
@@ -435,10 +444,18 @@ let reserverRowTests =
                     [ twoBlocks ]
                     "1,000 ticks lost of ours is two parts"
 
-                Expect.equal
+                Expect.isEmpty
                     (castWith [ "W1N2", reservedRoom false 4000 ])
-                    [ nineBlocks ]
-                    "the same 4,000 in a rival's name is a deficit of the whole 5,000: nine parts"
+                    "the same 4,000 in a rival's name hires nobody at all: the act is refused (#333)"
+
+                // Both holders, because the predicate under this is
+                // `heldByOther` and a `= Rival` version of it would pass
+                // every other assertion in this file while leaving W12S27's
+                // own holder — the NPC Invader, whose core is long gone —
+                // buying a body every 600 ticks.
+                Expect.isEmpty
+                    (castWith [ "W1N2", coreReservedRoom 4000 ])
+                    "and the Invader's hold reads alike: it is the holder the ticket was filed on"
 
                 Expect.equal
                     (castWith [])

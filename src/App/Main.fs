@@ -107,9 +107,10 @@ let loop () =
     // The gate's answer for each colony, derived once from that colony's log:
     // the scan set, the furniture and the pooled rocks all narrow through it
     // inside `ColonyView.ofWorld`, and a second derivation would be a second
-    // answer free to disagree. Both halves of it ride in one record — the rooms
-    // withdrawn from, and the latched rooms this tick looks into once (#165) —
-    // for the same reason.
+    // answer free to disagree. All three of its sets ride in one record — the
+    // rooms withdrawn from, the latched rooms this tick looks into once (#165),
+    // and the rooms somebody else's reservation still stands on (#333) — for
+    // the same reason.
     let gates =
         raids |> Map.map (fun _ log -> Observe.standDown Tuning.defaults world.Time log)
 

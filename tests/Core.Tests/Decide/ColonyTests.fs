@@ -167,9 +167,19 @@ let claimTests =
                 // engine answers ERR_INVALID_TARGET on a controller
                 // somebody else reserves, so a Claim pooled there would
                 // walk a body fifty tiles to stand still for its whole
-                // 600-tick life. Which room a rival's hold costs the
-                // colony is ADR 0043's [[stand-down]] to decide, and until
-                // it does the controller is the Reserve it always was.
+                // 600-tick life.
+                //
+                // Where the two halves part is what is left **behind** the
+                // Claim. A blind room keeps its Reserve — absence
+                // classifies nothing, and the reserver is the creep whose
+                // walk buys the look (#131). A room somebody else reserves
+                // keeps neither, since #333: the engine refuses
+                // `reserveController` on that controller for the same
+                // ERR_INVALID_TARGET reason it refuses the claim, so the
+                // Reserve that used to stand here was a Task no body could
+                // ever execute. Which is the *same* read in both places
+                // (`RoomControlInfo.heldByOther`), asked once for the claim
+                // and once for the reservation.
                 let pooledWith control =
                     let colony = candidateColony []
 
@@ -181,14 +191,19 @@ let claimTests =
                     }
                     |> fun colony -> planTasksOn colony noThreats
 
-                for label, control in
-                    [ "blind", None; "held by a rival", Some(reservedRoom false 3000) ] do
-                    let tasks = pooledWith control
+                let blind = pooledWith None
 
-                    Expect.equal
-                        (claimTasks tasks, reserveTasks tasks)
-                        ([], [ "ctrl-out" ])
-                        $"{label}: nothing to claim, and the controller keeps its Reserve"
+                Expect.equal
+                    (claimTasks blind, reserveTasks blind)
+                    ([], [ "ctrl-out" ])
+                    "blind: nothing to claim, and the controller keeps the Reserve that buys the look"
+
+                let heldByRival = pooledWith (Some(reservedRoom false 3000))
+
+                Expect.equal
+                    (claimTasks heldByRival, reserveTasks heldByRival)
+                    ([], [])
+                    "held by a rival: nothing to claim, and nothing to reserve either"
 
                 // Our own reservation is the ordinary case and not a bar:
                 // the room the colony has been holding at ten a tick is

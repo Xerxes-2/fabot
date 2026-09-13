@@ -32,6 +32,40 @@ let guardRowTests =
                     "and the lone smallMelee nine raids in ten arrive as hires exactly one"
             }
 
+            test "a raid in an outpost somebody else reserves still hires its guard" {
+                // The line #333's refusal is drawn at, pinned from the side
+                // it must **not** cross. A controller under somebody else's
+                // reservation stops being a controller this colony can
+                // reserve — the reserver row hires nobody for it and the
+                // Reserve leaves the pool — and it stops being nothing else.
+                // The room is still in the scan set, its rock is still
+                // pooled and this colony's bodies still stand in it, so a
+                // raid there is still a raid on a room the colony works.
+                //
+                // Whether such a room should stay declared at all is the
+                // architectural question #333 leaves for a human; until it
+                // is answered, a guard withdrawn here would be that question
+                // decided by accident, in the row that was only asked to
+                // stop buying reservers.
+                //
+                // Pairwise on the one control entry, the raid held fixed.
+                let raidedUnder control =
+                    { guardColony (raidOf 0) [] with
+                        RoomControl =
+                            (guardColony (raidOf 0) []).RoomControl |> Map.add "W1N2" control
+                    }
+
+                Expect.equal
+                    (guardQuotaOf (raidedUnder (reservedRoom true 5_000)))
+                    (Some 1)
+                    "the premise: held by us, this raid hires one guard"
+
+                Expect.equal
+                    (guardQuotaOf (raidedUnder (coreReservedRoom 4_999)))
+                    (Some 1)
+                    "and the Invader's leftover hold costs that guard nothing"
+            }
+
             test "a hostile that reaches nothing is no reason to hire" {
                 // The gate is ADR 0033's [[threat]] and never "a hostile": a
                 // `smallHealer` carries neither ATTACK nor RANGED_ATTACK, so

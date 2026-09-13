@@ -294,6 +294,28 @@ let standDownBasisName =
     | StandDownBasis.RivalReservation -> "rival-reservation"
     | StandDownBasis.InvaderRaid -> "invader-raid"
 
+/// The wire spelling of each ReservationHolder, on the Raid log's Memory leaf
+/// (#333). Only two of the three are ever written — the leaf records the rooms
+/// whose controller **somebody else** holds, ours being the state that needs no
+/// record — but the name is spelt for all three under the rule every vocabulary
+/// here keeps: one spelling, reversed by the table below and round-tripped
+/// against the union itself by `Core.Tests`, so a fourth holder added without a
+/// name is a red test rather than a room that decodes to nothing.
+let reservationHolderName =
+    function
+    | ReservationHolder.Ours -> "ours"
+    | ReservationHolder.Invader -> "invader"
+    | ReservationHolder.Rival -> "rival"
+
+/// The ReservationHolder a wire name spells, or None for a name this
+/// vocabulary does not have — an entry whose holder will not read back cannot
+/// say who is standing on the room, and the shell drops that entry rather than
+/// naming the wrong player.
+let reservationHolderOf =
+    reverseOf
+        reservationHolderName
+        [ ReservationHolder.Ours; ReservationHolder.Invader; ReservationHolder.Rival ]
+
 /// The StandDownBasis a wire name spells, or None for a name this
 /// vocabulary does not have — a row whose basis will not read back is a
 /// stand-down that cannot say why, and the shell drops that row rather

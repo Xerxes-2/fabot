@@ -395,6 +395,62 @@ let private decodeOutpost (raw: obj) : OutpostEpisode =
             | None -> failwith "unknown wire name"
     }
 
+// One room held by somebody else's reservation on the wire (#333):
+// `{ holder, until }` — whose CLAIM parts stand on the controller, and the
+// absolute tick the engine's countdown ends on. Under the room's own key like
+// the latch below it and not a row of the ring: the ring's rows withdraw a
+// room, and this one withdraws only the reservation on it.
+let private encodeHold (hold: OutpostHold) =
+    let o = createEmpty<obj>
+    o?holder <- reservationHolderName hold.Holder
+    o?until <- hold.Until
+    o
+
+// `encodeHold`'s partner, and — like `decodeLatch` — a checker rather than a
+// cast. Both fields answer for the entry: a `holder` this vocabulary does not
+// have would name the wrong player, and an `until` that is not a number would
+// read as a tick and hold the room in the record for ever, `view.Time < until`
+// comparing against a string being false in the one direction that never ends.
+// An entry that will not read **costs a body** (`holdMapOf`, ADR 0028): the
+// room drops out of the record, and the record is what the Reserve pool and
+// the reserver row are narrowed by on the ticks nothing is looking into the
+// room (`ColonyView.HeldOutposts`, #333) — so the room reads as reservable and
+// the row buys the deficit. That is why the wire guard in `observe.mjs` fails
+// the whole command over one such entry instead of printing the room open: the
+// bot drops what it cannot decode, and the operator is the only one who can be
+// told. Dropping it is still the right shape here — the next tick with vision
+// writes the entry back — but it is a loss and not a free one.
+let private decodeHold (raw: obj) : OutpostHold =
+    if isNull raw || jsTypeof raw <> "object" then
+        failwith "not a hold"
+    else
+        let holder =
+            match reservationHolderOf (string raw?holder) with
+            | Some holder -> holder
+            | None -> failwith "unknown wire name"
+
+        if jsTypeof raw?until <> "number" then
+            failwith "not a tick"
+        else
+            {
+                Holder = holder
+                Until = unbox<int> raw?until
+            }
+
+// The hold map read back, entry by entry as the latch map is and for the same
+// reason: one unreadable entry must not take the leaf's whole history with it.
+let private holdMapOf (raw: obj) : Map<string, OutpostHold> =
+    if isNull raw then
+        Map.empty
+    else
+        objectEntries raw
+        |> Array.choose (fun (key, value) ->
+            try
+                Some(key, decodeHold value)
+            with _ ->
+                None)
+        |> Map.ofArray
+
 // One latched room on the wire (#275): `{ since, lastLooked }` — the tick the
 // gate shut on, and the tick the last look into the room was taken on, which is
 // what the stride to the next look is measured from.
@@ -602,6 +658,12 @@ let loadRaids (home: string) : RaidState =
             // rechecks is counted from. An empty map is honest — the room is
             // still scanned, so the next look with vision re-decides it.
             RivalHeld = latchMapOf raids?rivalHeld
+            // The rooms somebody else's reservation stands on (#333),
+            // absent from a bundle that predates the read and an empty
+            // map being what that says: the rule the reserver row obeys
+            // is read off the view every tick, so an empty record costs
+            // the colony nothing and the operator one tick of silence.
+            Holds = holdMapOf raids?holds
             Living = raids?living |> unbox<string[]> |> Set.ofArray
             // The damage baseline, absent from a bundle written
             // before it existed: an empty baseline charges the next
@@ -621,6 +683,11 @@ let saveRaids (home: string) (state: RaidState) =
     // window, expiry or basis — this withdrawal has none — so the entry stays a
     // pair of dates under the room's own key rather than a row of the ring.
     raids?rivalHeld <- state.RivalHeld |> Map.toSeq |> hashOf encodeLatch
+    // Room name to whose reservation stands on its controller and the tick
+    // that hold ends (#333). A clock and no window or basis — this withdraws
+    // nothing, so there is no episode to date — and under the room's own key,
+    // one hold per controller being all the engine allows.
+    raids?holds <- state.Holds |> Map.toSeq |> hashOf encodeHold
     raids?living <- state.Living |> Set.toArray
     raids?hits <- state.Hits |> Map.toSeq |> hashOf box
     writeColonyLeaf home "raids" raids

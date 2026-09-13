@@ -14,8 +14,11 @@
 //   observe.mjs raids              the Raid log's episodes, newest first
 //   observe.mjs outposts           every outpost the Raid log knows: shut or
 //                                  open right now, the tick a stand-down runs
-//                                  to, the deadline that tick was read off, and
-//                                  the rooms another player took, shut by no clock
+//                                  to, the deadline that tick was read off, the
+//                                  rooms another player took, shut by no clock,
+//                                  and the rooms somebody else's reservation
+//                                  stands on — mined, not reserved, withheld
+//                                  from nothing
 //   observe.mjs layout             what this colony could not deliver this tick:
 //                                  the Layout's losses, and the declared outposts
 //                                  that do not border this home
@@ -296,7 +299,8 @@ if (command === "console") {
   // The wire shape written by ObserveMemory.fs, a key of its own beside
   // `episodes` in the same leaf:
   //   { outposts: [{ room, opened, last, expiry, basis }],
-  //     rivalHeld: { <room>: { since, lastLooked } } }
+  //     rivalHeld: { <room>: { since, lastLooked } },
+  //     holds: { <room>: { holder, until } } }
   // One `outposts` row per clocked [[stand-down]]: the room it shuts, the
   // window (opened, and the last tick the threat was actually seen there),
   // the absolute tick the stand-down runs to, and which deadline that tick
@@ -329,6 +333,30 @@ if (command === "console") {
   // holds it through the ticks without, because the gate's own effect is to
   // take that vision away, and the stride exists because that effect would
   // otherwise make the conclusion permanent.
+  //
+  // `holds` is the third shape and the third thing a room can be (#333), and
+  // it is neither of the two above: a controller under **somebody else's
+  // reservation** — the NPC Invader's or another player's — withdraws no room
+  // of its own. What the engine refuses is `reserveController` on that
+  // controller and `createConstructionSite` in that room, so the reserver row
+  // hires nobody for it and the room raises no container. The entry is whose
+  // hold it is and the absolute tick it ends on, kept through the blind ticks
+  // like `rivalHeld` and retiring itself on that tick like a clocked row,
+  // because the engine is counting it down at one a tick.
+  //
+  // Whether the *room* is still worked depends on the holder, and the lines
+  // below say which: the **Invader's** leftover hold withdraws nothing — the
+  // room stays in the scan set, its rock stays pooled and the colony goes on
+  // mining it — while a **rival's** identical reservation is also #165's
+  // clocked stand-down, opened off the same control entry, so that room is
+  // withheld as well and carries a row of the ring above saying so.
+  //
+  // It is printed because W12S27 spent 5,000 ticks being called `open` here
+  // while the row bought it a 1,950-energy reserver every 600 of them: an
+  // invader core collapsed, ADR 0043's stand-down ended with the core, and
+  // the reservation the core had taken outlived it by CONTROLLER_RESERVE_MAX.
+  // "Open" was a true statement about the stand-down and a false one about
+  // the room, which is the only thing an operator reads it for.
   const { home, stored } = await raidLeaf();
   // The list is guarded in its own right, the way each of the Layout
   // record's three is: a leaf carrying `episodes` and no `outposts` is a
@@ -360,6 +388,19 @@ if (command === "console") {
         "`rivalHeld` map — the deployed bundle predates ADR 0043's clockless withdrawal, " +
         "the leaf was " +
         'hand-edited, or its wire shape has moved. Not read as "no room was taken".',
+    );
+  }
+  // And the third half, guarded in its own right for the third time (#333).
+  // A leaf carrying the two maps above and no `holds` is a bundle predating
+  // the read — one whose reserver row is still buying bodies for a controller
+  // the engine refuses — and reading it as "nothing is held" would print
+  // exactly the `open` this command stopped saying.
+  if (stored.holds === null || typeof stored.holds !== "object" || Array.isArray(stored.holds)) {
+    fail(
+      `the Raid log at Memory.fabot.observe.colonies.${home}.raids carries no ` +
+        "`holds` map — the deployed bundle predates #333's read of the reservation, the leaf " +
+        'was hand-edited, or its wire shape has moved. Not read as "every outpost is ours to ' +
+        'reserve".',
     );
   }
   // Each entry carries two ticks since #275 — `{ since, lastLooked }`: the
@@ -405,6 +446,47 @@ if (command === "console") {
       return badShape();
     }
     return { room, since: entry.since, lastLooked };
+  });
+
+  // Whose CLAIM parts a hold belongs to, exactly as `reservationHolderName`
+  // spells it on the wire (Core's Verdicts.fs). `ours` is in the vocabulary
+  // and never in this map — the bot records only the holds that are not ours —
+  // so a leaf carrying one is a hand edit, and it is named rather than refused:
+  // what the line says about such a room is still true of the room, and what
+  // it says about the holder is what the leaf says.
+  const HOLDER = {
+    ours: "this colony's own CLAIM parts (which the bot never records here)",
+    invader: "the NPC Invader — the hold a level-0 core takes and leaves behind it",
+    rival: "another player's CLAIM parts",
+  };
+
+  // The rooms whose controller somebody else is standing on (#333), read the
+  // way the clocked rows are: an entry off the wire shape stops the command
+  // rather than being dropped. Same asymmetry, same reason — the bot drops
+  // what it cannot decode, so the room an unreadable entry named is one the
+  // reserver row may be buying bodies for right now, and this is the command
+  // that would have said so.
+  const holds = Object.entries(stored.holds).map(([room, entry]) => {
+    const badShape = () =>
+      fail(
+        `the entry at Memory.fabot.observe.colonies.${home}.raids.holds.${room} is off the ` +
+          `wire shape: ${JSON.stringify(entry)} — the leaf was hand-edited, or its wire ` +
+          "shape has moved. " +
+          'Not read as "that room is ours to reserve": the bot drops an entry it cannot ' +
+          "decode, so this room may be costing a reserver a tick.",
+      );
+
+    if (entry === null || typeof entry !== "object" || Array.isArray(entry)) {
+      return badShape();
+    }
+    // An own-key test for the reason the basis table gives: every object
+    // literal answers `toString` and `constructor` with a function, so a
+    // prototype name off the wire would read as a known holder here while
+    // Core's decoder answers `None` and drops the entry.
+    if (!Object.hasOwn(HOLDER, entry.holder) || typeof entry.until !== "number") {
+      return badShape();
+    }
+    return { room, holder: entry.holder, until: entry.until };
   });
 
   // The clock the rows are read against. Off the server rather than off the
@@ -528,7 +610,13 @@ if (command === "console") {
     // has already failed the whole command above.
     console.log(
       JSON.stringify(
-        { now, sector: SECTOR, outposts: stored.outposts, rivalHeld: stored.rivalHeld },
+        {
+          now,
+          sector: SECTOR,
+          outposts: stored.outposts,
+          rivalHeld: stored.rivalHeld,
+          holds: stored.holds,
+        },
         null,
         2,
       ),
@@ -537,11 +625,84 @@ if (command === "console") {
     console.log(`colony ${home}, now ${tickOf(now)}`);
     console.log("");
 
-    if (rows.length === 0 && rivalHeld.length === 0) {
+    // A hold whose tick has passed is a record the bot has not folded away
+    // yet — the clock is the engine's and it ran out without anybody looking
+    // (ADR 0043's re-entry rule), so the room is ours to reserve again and
+    // saying otherwise would be this command's own version of the lie it was
+    // written to stop. `now < until` and nothing else, which is
+    // `standingDown`'s test over the other clock.
+    const standing = holds.filter((hold) => now < hold.until);
+    const reservedRooms = standing.map((hold) => hold.room);
+
+    // Which rooms the gate is actually withholding right now — a running
+    // clocked row, or the clockless latch. A hold is not one of them and says
+    // so out loud, but the three families can name one room at once: a rival's
+    // reservation is *both* a hold here and a clocked stand-down (#165), and a
+    // hold line telling an operator "the room is mined" over a row telling him
+    // it is withheld is the same kind of false line this ticket is about.
+    const heldRooms = rivalHeld.map((held) => held.room);
+
+    const shutNow = new Set([
+      ...heldRooms,
+      ...rows.filter((row) => now < row.expiry).map((row) => row.room),
+    ]);
+
+    if (rows.length === 0 && rivalHeld.length === 0 && standing.length === 0) {
       console.log("the Raid log records no stand-down: no outpost is shut");
       console.log("");
     } else {
-      // The clockless withdrawals first, and they answer for their room
+      // Somebody else's reservation first, above both withdrawals, because it
+      // is the one of the three that says nothing about the gate: the room is
+      // worked, and an operator reading a clocked row or an `open` line under
+      // it has to know that the reservation on that room is not ours before
+      // either line means what it looks like.
+      for (const hold of [...standing].sort((a, b) => a.room.localeCompare(b.room))) {
+        console.log(
+          `${hold.room}  mined, not reserved — somebody else's reservation stands on its ` +
+            `controller until ${tickOf(hold.until)}, ${ticks(hold.until - now)} to go`,
+        );
+        console.log(`  held by ${HOLDER[hold.holder]}`);
+        console.log(
+          "  the engine refuses reserveController on a controller anybody else holds, and " +
+            "createConstructionSite",
+        );
+        console.log(
+          "  in the room with it — so the reserver row hires nobody for this room and it " +
+            "raises no container (#333).",
+        );
+        // The row reads this same record, which is why the line above is a
+        // statement about the row and not only about the engine: a tick with
+        // vision answers for the room itself, and on every blind tick the
+        // standing hold is what the Reserve pool and the reserver row are
+        // narrowed by (`ColonyView.HeldOutposts`). Without that read the
+        // refusal would take its own evidence away — the reserver is the only
+        // body such a room ever holds — and the row would buy another the tick
+        // after each one died.
+        if (shutNow.has(hold.room)) {
+          console.log(
+            "  this room is withheld as well, by the line printed under this one — the hold " +
+              "is not what withholds it",
+          );
+        } else {
+          console.log(
+            "  the room itself is not withheld: its rock is pooled and its bodies stand " +
+              "in it. Its sources yield",
+          );
+          console.log("  the neutral five a tick until the hold runs out (ADR 0042).");
+          console.log(
+            `  Nothing need be done: the engine counts this down at one a tick. On ` +
+              `${tickOf(hold.until)} this record retires itself and the row hires one body,`,
+          );
+          console.log(
+            "  whose walk is what re-reads the controller — so a holder that has renewed " +
+              "costs that one body and is",
+          );
+          console.log("  written down again, not a reserver every 600 ticks.");
+        }
+        console.log("");
+      }
+
+      // Then the clockless withdrawals, and they answer for their room
       // whatever the clocked rows say about it: a room another player holds
       // is shut by a rule with no expiry, so a spent stand-down sitting in
       // the ring beside it must not print that room as open.
@@ -551,8 +712,6 @@ if (command === "console") {
       // controller on one tick, and an operator told "no clock is running"
       // while the log holds an expiry and a basis has lost exactly the trace
       // ADR 0043 asks this channel to keep (#117's US-20).
-      const heldRooms = rivalHeld.map((held) => held.room);
-
       for (const held of [...rivalHeld].sort((a, b) => a.room.localeCompare(b.room))) {
         console.log(`${held.room}  shut since ${tickOf(held.since)}, and no clock is running`);
         console.log("  because another player owns it — not a threat that passes,");
@@ -601,11 +760,16 @@ if (command === "console") {
         const running = mine.filter((row) => now < row.expiry).sort((a, b) => b.expiry - a.expiry);
         const spent = mine.filter((row) => now >= row.expiry).sort((a, b) => b.expiry - a.expiry);
 
-        // A room the clockless half already answered for gets its clocked
-        // rows as a continuation of that answer rather than a second
-        // headline: the gate above it has no expiry to run out, so "open"
-        // here would contradict the line four rows up.
-        const alsoHeld = heldRooms.includes(room);
+        // A room either of the halves above already answered for gets its
+        // clocked rows as a continuation of that answer rather than a second
+        // headline. For the clockless withdrawal because the gate above it has
+        // no expiry to run out, so "open" here would contradict the line four
+        // rows up; for a hold (#333) because "open" is a statement about the
+        // stand-down that an operator reads as a statement about the room, and
+        // the room is one the colony is mining and not reserving. The clocked
+        // rows still print: W12S27's spent stand-down is exactly the row that
+        // dates the core whose reservation is still standing.
+        const alsoHeld = heldRooms.includes(room) || reservedRooms.includes(room);
 
         if (running.length > 0) {
           const row = running[0];
@@ -643,8 +807,12 @@ if (command === "console") {
     // be listed as open — said out loud rather than left to be read as
     // "these are all of them".
     console.log(
-      "rows are the stand-downs the log holds; a declared outpost that has never been shut " +
-        "has no row and is not named above.",
+      "rows are the stand-downs the log holds, and the holds beside them are the rooms last " +
+        "seen under somebody else's reservation;",
+    );
+    console.log(
+      "a declared outpost that has never been shut and is ours to reserve has neither, and " +
+        "is not named above.",
     );
     console.log("");
 

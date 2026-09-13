@@ -20,6 +20,7 @@ let snapshotWith creeps spatial =
         // Who holds a room prices its sources (ADR 0042) and the Atlas
         // prices nothing: geometry is all it reads.
         RoomControl = Map.empty
+        HeldOutposts = Set.empty
         ConstructionSites = []
         Creeps = creeps
         Hostiles = []

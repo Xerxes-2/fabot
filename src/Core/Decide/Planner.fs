@@ -78,8 +78,7 @@ let internal claimTargets (view: ColonyView) : (string * string) list =
         match Map.tryFind room view.RoomControl with
         | Some control ->
             control.Owner = Ownership.Unowned
-            && control.Reservation
-               |> Option.forall (fun held -> held.Holder = ReservationHolder.Ours)
+            && RoomControlInfo.heldByOther control |> Option.isNone
         | None -> false
 
     let candidate room =
@@ -163,19 +162,19 @@ let internal ferryBuffers (view: ColonyView) : Set<string> =
                 |> Option.exists (fun room -> Set.contains room rooms)))
         |> Set.ofList
 
-/// The controllers this colony may hold a [[reserve]] on: every controller the
-/// projection carries that is not this colony's home, stands in no room somebody
-/// owns, and is no [[candidate colony]]'s — whose controller carries a Claim
-/// rather than a Reserve (ADR 0047). The engine refuses `reserveController` on
-/// an owned room, so an owned room's controller is one this colony is
-/// withdrawing from rather than mining.
+/// The controllers of the rooms this colony works as [[outpost]]s: every
+/// controller the projection carries that is not this colony's home, stands in
+/// no room somebody owns, and is no [[candidate colony]]'s — whose controller
+/// carries a Claim rather than a Reserve (ADR 0047). The engine refuses
+/// `reserveController` on an owned room, so an owned room's controller is one
+/// this colony is withdrawing from rather than mining.
 ///
 /// **Ids and not rooms**, because a controller the projection does not place
 /// names no room and is still ours to reserve (ADR 0004) — it is the Reserve
 /// pool that reads it that way, while `declaredOutposts` takes the rooms and
-/// loses the unplaced one. One scan for both, or the rows and the pool could
-/// disagree about which rooms are ours to work.
-let private reservableControllers (view: ColonyView) : string list =
+/// loses the unplaced one. One scan for all three readers, or the rows and the
+/// pool could disagree about which rooms are ours to work.
+let private outpostControllers (view: ColonyView) : string list =
     let home = view.Controller |> Option.map (fun c -> c.Id)
     let claimed = claimTargets view |> List.map fst |> Set.ofList
 
@@ -185,11 +184,74 @@ let private reservableControllers (view: ColonyView) : string list =
         && not (Set.contains id claimed)
         && not (SpatialInfo.roomOf view.Spatial id |> Option.exists (roomHasOwner view)))
 
-/// The declared [[outpost]]s this colony works this tick — the rooms two rows
-/// are hired per, written once because a paraphrase would let the reserver row
-/// and the guard row disagree about which rooms are ours to work (ADR 0042, ADR
-/// 0056). A room qualifies by carrying **a controller of its own in the
-/// projection** that is not this colony's home: an outpost's declaration names
+/// Those of them this colony may actually hold a [[reserve]] on this tick: the
+/// ones **nobody else's CLAIM parts are holding** (#333). The engine refuses
+/// `reserveController` on a controller anybody but us reserves, exactly as it
+/// refuses one anybody owns, so a body hired for such a room walks there to
+/// stand adjacent and be refused for the whole of its 600-tick life — which is
+/// what W12S27 cost, at 1,950 energy a body, for the 4,999 ticks an invader
+/// core's reservation outlived the core ADR 0043's [[stand-down]] was clocked
+/// off. The hold moved by 0.
+///
+/// One read for the row and the pool, which is #181's ownership clause said
+/// again about the other half of the same refusal: the Reserve pool offers
+/// exactly these ids and the reserver row hires exactly one body per room they
+/// stand in, so a reserver bought for the colony's *other* outpost cannot be
+/// handed this controller by travel cost and spend its life on it anyway.
+///
+/// **Two reads and not one, because vision is the thing the refusal takes
+/// away.** `RoomControl` carries only the rooms vision answered for this tick,
+/// and in a room like W12S27 — no container, so no [[post]] and no [[miner]] —
+/// the reserver is the only body that ever stands there. Read off vision alone
+/// the rule is self-erasing: the reserver arrives, the entry appears, the Task
+/// vanishes under it, and the idle body holds the vision until it dies, at
+/// which point the room goes dark and the row hires the whole nine-block
+/// deficit again. That is one body per reserver lifetime, which is the cadence
+/// #333 measured live — `reserver-411079` then `reserver-411698`, 619 ticks
+/// apart — and it is the spend the ticket was filed about, not the intent.
+///
+/// So the order is: **a tick with vision decides the room either way**, and a
+/// tick without it reads what the last look concluded (`view.HeldOutposts`,
+/// `RaidState.Holds` through `StandDown`). Vision first and never the record
+/// first: the record is the previous tick's, so a look that finds the
+/// controller free — somebody `attackController`ed it, or our own reserver got
+/// there first — must be allowed to open the room on the tick it takes.
+///
+/// A room with **no control entry and no record** is reservable, and that
+/// direction is load-bearing: it is a declared outpost nothing looked into and
+/// nothing has ever concluded anything about, and the reserver is the creep
+/// whose walk buys the look (#131's deadlock, ADR 0004 — absence classifies
+/// nothing). Read the other way round the row would hire nobody, nothing would
+/// walk there, and the entry would never arrive. What #131 asks for is that the
+/// *unknown* room is walked to; a room the colony has looked into and written
+/// an end tick for is not unknown, and the engine's own countdown retires the
+/// record with no look needed (`Observe.standDown`).
+///
+/// What this does **not** narrow is `declaredOutposts`. The guard row and the
+/// scan set read that one, and a room somebody else reserves is still a room
+/// this colony mines: its rock is pooled and its bodies stand in it, so a raid
+/// there is still a raid on a room the colony works. Whether such a room should
+/// stay declared at all is the question #333 leaves for a human, and it is not
+/// this rule's to answer by omission.
+let private reservableControllers (view: ColonyView) : string list =
+    outpostControllers view
+    |> List.filter (fun id ->
+        match SpatialInfo.roomOf view.Spatial id with
+        // A controller the projection does not place names no room, and a room
+        // name is what both reads below are keyed by — so it stays pooled (ADR
+        // 0004), exactly as it did before either read existed.
+        | None -> true
+        | Some room ->
+            match Map.tryFind room view.RoomControl with
+            | Some control -> RoomControlInfo.heldByOther control |> Option.isNone
+            | None -> not (Set.contains room view.HeldOutposts))
+
+/// The declared [[outpost]]s this colony works this tick — the rooms the
+/// [[guard]] row is hired per and the rooms the reserver row starts from,
+/// written once because a paraphrase would let the two disagree about which
+/// rooms are ours to work (ADR 0042, ADR 0056). A room qualifies by carrying
+/// **a controller of its own in the projection** that is not this colony's
+/// home: an outpost's declaration names
 /// its controller and a room with none is no candidate outpost at all. It must
 /// be unowned — a room somebody holds is one this colony is withdrawing from,
 /// not mining — and it must not be a [[candidate colony]]'s, whose controller
@@ -210,13 +272,29 @@ let private reservableControllers (view: ColonyView) : string list =
 /// Off the projection itself (`SpatialInfo.placementOf`) and not off the
 /// [[atlas]]'s join of it, which answers alike: the [[guard]]'s own Task is
 /// pooled by `planTasks`, and the Planner's first half is handed the view and
-/// no Atlas (ADR 0056 decision 2). One derivation for the two rows and the
-/// pool, or the three of them could disagree about which rooms are ours.
+/// no Atlas (ADR 0056 decision 2). One derivation under the two rows and the
+/// pool, or the three of them could disagree about which rooms are ours — and
+/// where they *do* differ since #333, they differ by one named narrowing and
+/// not by a second scan.
 ///
-/// The derivation itself is `reservableControllers`: the two rows want its
-/// rooms and the Reserve pool wants its ids, and that difference is all the
-/// difference there is between them.
+/// The derivation itself is `outpostControllers`: this takes its rooms, the
+/// Reserve pool takes its ids once `reservableControllers` has dropped the
+/// controllers somebody else holds, and the reserver row takes the rooms of
+/// *that*. One scan, narrowed once, so no reader can be looking at a different
+/// set of outposts than its neighbour.
 let internal declaredOutposts (view: ColonyView) : string list =
+    outpostControllers view
+    |> List.choose (SpatialInfo.roomOf view.Spatial)
+    |> List.distinct
+
+/// The declared [[outpost]]s the reserver row hires for: `declaredOutposts`
+/// less the rooms whose controller somebody else's CLAIM parts hold — this
+/// tick's vision where there is any, and the last look's standing record where
+/// there is none (#333).
+/// The rooms of `reservableControllers`, which is what makes the row and the
+/// Reserve pool one answer rather than two — the row hires one body per room
+/// the pool offers a controller in, and no more.
+let internal reservableOutposts (view: ColonyView) : string list =
     reservableControllers view
     |> List.choose (SpatialInfo.roomOf view.Spatial)
     |> List.distinct
@@ -380,10 +458,14 @@ let planTasks (view: ColonyView) (threats: Threats) (held: Set<string>) : Task l
     // never off the declared outposts (ADR 0041), so a room a stand-down keeps
     // out of the scan set (ADR 0043) leaves this pool with it rather than
     // through a second gate free to disagree. The colony's own controller is
-    // excluded by id, and every controller in a room that carries an owner by
-    // the same `roomHasOwner` the reserver row drops the room with, since the
-    // engine refuses reserveController on any owned room. A controller the
-    // projection does not place names no room and stays pooled (ADR 0004).
+    // excluded by id, and two reads drop the rest, both of them the reserver
+    // row's own so the pool and the row cannot disagree (`roomHasOwner` and
+    // `heldByOther`, through `reservableControllers`): the engine refuses
+    // reserveController on any owned room, and equally on a controller
+    // somebody else's CLAIM parts are holding (#333) — the second read off
+    // this tick's vision where there is any and off the last look's record
+    // where there is none. A controller the projection does not place names no
+    // room and stays pooled (ADR 0004).
     let reserves = reservableControllers view |> List.map Reserve
 
     // The haul cycle's intake (ADR 0012), shaped over the projection's

@@ -281,6 +281,186 @@ let reserveTests =
                     (Some(taskId (Reserve "ctrl-out")))
                     "owned, the near controller is no Task and the body crosses to the neutral one"
             }
+
+            test "a controller somebody else reserves is no Task and hires nobody" {
+                // #333, measured live at W12S27 over t411,226–t411,878. An
+                // invader core collapsed and ADR 0043's stand-down ended
+                // with it — the gate reads the *core*'s clock — but the
+                // reservation the core had taken outlives the core by
+                // `CONTROLLER_RESERVE_MAX`, 4,999 ticks. In that window
+                // `reserveController` is refused every tick, because a
+                // controller somebody else holds is not a legal target, and
+                // the row went on re-casting `[claim ×3, move ×3]` — 1,950
+                // energy a body, two of them measured over the 617 ticks the
+                // ticket watched and four or five more still to come — against
+                // a Storage holding zero energy. The reservation moved by 0.
+                //
+                // The same read as #181's ownership clause one fact over,
+                // and it lands in the same place for the same reason: the
+                // pool offers exactly the controllers the row hires for, or
+                // a reserver bought for the *other* outpost would be handed
+                // this one by travel cost and the refusal would buy nothing.
+                //
+                // **One holder at a time**, because a colony carrying two
+                // of them proves nothing about either: the Invader's hold
+                // is the live case and a rival's reads the same way, each
+                // pinned against its own unreserved control entry.
+                let castsUnder control =
+                    reserverColony [ northOutpost true ] (surplusFleet 3) [ "W1N2", control ]
+                    |> decideOn
+                    |> fun result -> reserverCasts result.Intents
+
+                let pooledUnder control =
+                    reserverColony [ northOutpost true ] (surplusFleet 3) [ "W1N2", control ]
+                    |> fun colony -> planTasksOn colony noThreats
+                    |> reserveTasks
+
+                // The Invader's leftover hold — the room the ticket was
+                // filed on, at the ticks it was filed at.
+                Expect.isEmpty
+                    (castsUnder (coreReservedRoom 4_999))
+                    "the Invader's reservation outliving its core hires no reserver"
+
+                Expect.isEmpty
+                    (pooledUnder (coreReservedRoom 4_999))
+                    "and its controller is no Reserve, so no other room's reserver is sent to it"
+
+                Expect.equal
+                    (castsUnder neutralRoom |> List.length)
+                    1
+                    "the same room unreserved hires the one body it always did"
+
+                Expect.equal
+                    (pooledUnder neutralRoom)
+                    [ "ctrl-W1N2" ]
+                    "and its controller is the Reserve it always was"
+
+                // A rival's hold, alone, against our own. A rival's
+                // reservation is also a clocked stand-down (#165) and would
+                // withdraw the room on the *next* tick; this is the same
+                // tick, where the row used to hire and the pool used to
+                // offer.
+                Expect.isEmpty
+                    (castsUnder (reservedRoom false 4_999))
+                    "another player's reservation reads the same way — the engine refuses us alike"
+
+                Expect.isEmpty
+                    (pooledUnder (reservedRoom false 4_999))
+                    "and takes its controller out of the pool with it"
+
+                Expect.equal
+                    (castsUnder (reservedRoom true 4_000) |> List.length)
+                    1
+                    "our own hold is the steady state of every outpost and is not touched"
+
+                Expect.equal
+                    (pooledUnder (reservedRoom true 4_000))
+                    [ "ctrl-W1N2" ]
+                    "the room we are already holding is the room we go on holding"
+            }
+
+            test "a room with no control entry is still the room the row exists to go and see" {
+                // The direction this read may **not** be wrong in (#131's
+                // deadlock, restated for #333): a declared outpost nothing
+                // looked into this tick carries no `RoomControl` entry, and
+                // absence classifies nothing (ADR 0004). Read as "somebody
+                // might hold it" the row would hire nobody, nothing would
+                // walk there, no vision would arrive and the entry would
+                // never appear — the chain deadlocked on its own caution.
+                //
+                // Pinned beside the hold above because the two are one
+                // rule's two answers and a predicate written the other way
+                // round would pass every case in the test above.
+                let casts =
+                    reserverColony [ northOutpost true ] (surplusFleet 3) []
+                    |> decideOn
+                    |> fun result -> reserverCasts result.Intents
+
+                Expect.equal
+                    (List.length casts)
+                    1
+                    "blind, the outpost hires the one body whose walk is what buys the look"
+            }
+
+            test "a hold the colony has already read is not re-bought the tick its reserver dies" {
+                // #333's actual **spend**, and the half a vision-gated read
+                // cannot stop. `RoomControl` carries this tick's vision
+                // alone, and W12S27 holds no body of ours but the reserver
+                // itself — no container, so no [[post]] and no [[miner]]. So
+                // a rule read off vision alone erases itself: the reserver
+                // arrives, the entry appears, its Task vanishes under it, the
+                // idle `[Claim; Move]` body holds the vision for the rest of
+                // its 600 ticks, and on the first dark tick after it dies the
+                // row buys the whole nine-block deficit again. One body per
+                // reserver lifetime, which is the cadence the ticket measured
+                // live: `reserver-411079`, then `reserver-411698`, 619 ticks
+                // apart, with the reservation unmoved between them.
+                //
+                // The record is what closes it. The look that saw the hold
+                // wrote it and the tick it ends on into the [[raid log]];
+                // `Observe.standDown` hands that forward every tick; and the
+                // blind ticks read it. Driven end to end from the fold rather
+                // than from a hand-built set, because the thing under test is
+                // that the two halves agree about which tick the hold ends.
+                let log =
+                    Observe.RaidState.empty
+                    // No world roster, for the reason the gate tests below
+                    // give: one tick folded off an empty log has no `Living`
+                    // baseline, so nothing reads as a loss (#191).
+                    |> Observe.foldRaids
+                        Observe.capEpisodes
+                        Set.empty
+                        { incomeColony with
+                            Time = 100
+                            RoomControl = Map.ofList [ "W1N2", coreReservedRoom 4_999 ]
+                        }
+
+                let blindAt t =
+                    { reserverColony [ northOutpost true ] (surplusFleet 3) [] with
+                        HeldOutposts = (Observe.standDown Tuning.defaults t log).HeldOutposts
+                    }
+
+                Expect.isEmpty
+                    (reserverCasts (decideOn (blindAt 101)).Intents)
+                    "the tick after the look, blind again, the row hires nobody: the record answers"
+
+                Expect.isEmpty
+                    (reserveTasks (planTasksOn (blindAt 5_098) noThreats))
+                    "and the controller is out of the pool for every blind tick of the hold"
+
+                Expect.equal
+                    (reserverCasts (decideOn (blindAt 5_099)).Intents |> List.length)
+                    1
+                    "on the tick the engine's own countdown runs out the row hires again, unlooked at"
+            }
+
+            test "a look that finds the controller free overrules the record beside it" {
+                // Vision first and the record second, never the other way
+                // round. The record is the *previous* tick's conclusion and a
+                // control entry is this tick's fact, so a hold that ended
+                // early — somebody else's `attackController`, a server rolled
+                // back — must be allowed to open the room on the tick the
+                // look is taken rather than on the tick the record named.
+                //
+                // Pinned pairwise against the same stale record read blind,
+                // which is the only other input: a predicate that consulted
+                // the record first would pass the second half and fail here.
+                let castsUnder control =
+                    { reserverColony [ northOutpost true ] (surplusFleet 3) control with
+                        HeldOutposts = Set.singleton "W1N2"
+                    }
+                    |> decideOn
+                    |> fun result -> reserverCasts result.Intents
+
+                Expect.equal
+                    (castsUnder [ "W1N2", neutralRoom ] |> List.length)
+                    1
+                    "a tick with vision on a free controller hires, whatever the last look wrote"
+
+                Expect.isEmpty
+                    (castsUnder [])
+                    "and blind, that same record is the whole of the answer"
+            }
         ]
 
 [<Tests>]

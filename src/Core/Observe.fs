@@ -286,6 +286,57 @@ type RivalLatch =
         LastLooked: int
     }
 
+/// One [[outpost]] whose controller **somebody else's CLAIM parts hold**, as
+/// the colony last read it (#333): whose, and the tick the hold runs out on.
+/// Neither a stand-down nor a latch, and deliberately neither.
+///
+/// Not a **stand-down**: a row of the ring above withdraws its room from the
+/// scan set, and what this one costs is the *reservation* and nothing else —
+/// `reserveController` is refused on the controller and `createConstructionSite`
+/// in the room, so the reserver row hires nobody for it
+/// (`Planner.reservableControllers`) and the room raises no [[container]].
+/// Whether a room in that state should stay declared at all is a question for a
+/// human, and a row in the ring would have answered it by accident.
+///
+/// **Of the Invader's hold that is the whole story; of a rival's it is half.**
+/// The two holders are one refusal to the engine and this record folds them
+/// alike, but a *rival*'s reservation is also #165's clocked stand-down, opened
+/// off this very control entry, so that room is withheld as well and is not one
+/// the colony goes on mining. The Invader's is the case with no other record in
+/// it: ADR 0043's ring is clocked off cores, the core is gone, and the hold it
+/// left behind belongs to nobody else's clause. So "the room is still mined, its
+/// rock pooled and its bodies standing in it" is said of the Invader's hold and
+/// must not be generalised to "somebody else's" — it is the sentence #333 was
+/// filed on and it is false one holder over.
+///
+/// Not a **latch**: the engine is counting this hold down at one a tick, so
+/// `Until` is an absolute tick and the record ends itself — ADR 0043's "re-entry
+/// is a clock running out, never a look", which is what lets the entry outlive
+/// the vision that read it. `RivalHeld` beside it is the one withdrawal with no
+/// such tick.
+///
+/// A record to be read and never a signal sent — with ADR 0028's one standing
+/// exception widened by one rule: `Observe.standDown` already *acts* on this
+/// leaf, and since #333 the set it derives from here rides the view beside
+/// `RoomControl` and narrows the Reserve pool on the ticks vision answers for
+/// nothing (`ColonyView.HeldOutposts`). It has to: `RoomControl` is this tick's
+/// vision, the reserver is the only body most of these rooms ever hold, and a
+/// rule read off vision alone would hire one more reserver every time the last
+/// one died. This is also what `observe.mjs outposts` prints, so that a room the
+/// colony is not reserving stops being announced as `open`.
+type OutpostHold =
+    {
+        /// Whose CLAIM parts hold it — the Invader's, or another player's.
+        /// `Ours` never reaches this map: a hold of our own is the steady
+        /// state every outpost is supposed to be in.
+        Holder: ReservationHolder
+        /// The **absolute** tick the hold runs out on: this colony's clock
+        /// plus the engine's own countdown on the tick the look was taken.
+        /// Absolute like an episode's `Expiry` and for its reason — stored
+        /// as read it would date the hold to a tick long past.
+        Until: int
+    }
+
 /// The whole persisted Raid log.
 type RaidState =
     {
@@ -328,6 +379,33 @@ type RaidState =
         /// reads is per-room and carried across ticks too, and is heap-only
         /// (#151).
         RivalHeld: Map<string, RivalLatch>
+        /// The rooms whose controller, on the last tick the colony could see
+        /// it, was **reserved by somebody else** — the Invader's leftover
+        /// hold or another player's — each against the tick that hold runs
+        /// out on (#333). The third shape in this leaf and the third thing
+        /// it means: a row of `Outposts` withdraws its room, an entry of
+        /// `RivalHeld` withdraws it for good, and an entry here withdraws
+        /// **no room of its own**: what it takes away is the *reservation*.
+        /// For the Invader's leftover hold that is the whole effect, the room
+        /// going on being mined; for a rival's the same control entry has
+        /// already opened a #165 stand-down, so that room is withheld by the
+        /// ring and this entry only says why the hold on it is not ours.
+        ///
+        /// It records the fact the reserver row and the Reserve pool read
+        /// before they hire on a blind tick (`ColonyView.HeldOutposts` through
+        /// `standDown`) — the engine refuses `reserveController` on a
+        /// controller anybody else holds — and it is what lets the channel say
+        /// why a declared outpost is being mined and not reserved, instead of
+        /// printing it `open`.
+        ///
+        /// Carried between ticks for `RivalHeld`'s reason and ended for the
+        /// ring's: a tick with vision decides the room either way, a tick
+        /// without leaves the last conclusion standing, and the conclusion
+        /// expires by itself when `Until` passes, no look being needed to
+        /// know a countdown has run out (ADR 0043). No ring and no cap — the
+        /// map is bounded by the rooms the colony scans, as the latch map
+        /// beside it is.
+        Holds: Map<string, OutpostHold>
         /// The owned creep names the previous tick projected, less the ones
         /// whose life ran out on it: the baseline this tick's losses are read
         /// against. Carried only while an episode is open, so a creep that
@@ -355,6 +433,7 @@ module RaidState =
             Episodes = []
             Outposts = []
             RivalHeld = Map.empty
+            Holds = Map.empty
             Living = Set.empty
             Hits = Map.empty
         }
@@ -671,6 +750,15 @@ let private lookDue (tuning: Tuning) (tick: int) (latch: RivalLatch) =
 /// 0004) — and what it does with `Rechecked` is read those rooms' controllers
 /// and nothing else of them (`ColonyView.ofWorld`).
 ///
+/// Since #333 a third set rides beside them and it is **not** a withdrawal:
+/// `HeldOutposts`, the rooms whose controller somebody else's CLAIM parts were
+/// standing on at the last look and whose hold this tick is still short of.
+/// What the shell does with it is hand it to the same view, where the Reserve
+/// pool and the reserver row read it on the ticks vision does not answer
+/// (`Planner.reservableControllers`) — the room goes on being mined either way.
+/// Read off the same log and the same tick as the two above for their reason: a
+/// second derivation is a second answer free to disagree.
+///
 /// `Shut` is every room a stand-down's clock is still running in, and every room
 /// the colony last saw in another player's ownership. `Rechecked` is the second of
 /// those families alone, and only once a whole `Tuning.RivalRecheck` has passed
@@ -692,6 +780,20 @@ let standDown (tuning: Tuning) (tick: int) (state: RaidState) : StandDown =
             state.RivalHeld
             |> Map.toList
             |> List.filter (snd >> lookDue tuning tick)
+            |> List.map fst
+            |> Set.ofList
+        // The standing holds, on the same test `observe.mjs` prints them under
+        // and `foldRaids` keeps them by: `tick < Until` and nothing else. An
+        // entry whose tick has passed is a hold the engine has already counted
+        // out — the room is ours to reserve again with nobody having gone to
+        // look, which is ADR 0043's re-entry rule reached through a record —
+        // and the fold drops it on the next tick with vision. Filtered here as
+        // well so the gate cannot withhold a reservation on a leaf the fold has
+        // not caught up with.
+        HeldOutposts =
+            state.Holds
+            |> Map.toList
+            |> List.filter (fun (_, hold) -> tick < hold.Until)
             |> List.map fst
             |> Set.ofList
     }
@@ -897,6 +999,34 @@ let foldRaids (cap: int) (alive: Set<string>) (view: ColonyView) (prior: RaidSta
                             rooms
                 else
                     Map.remove room rooms)
+        // The rooms somebody else's reservation stands on (#333), read off the
+        // same control entries the latch above reads and kept on the same two
+        // rules — a tick with vision decides a room either way, and a tick
+        // without leaves the last conclusion standing, because the colony is
+        // blind in most of these rooms most of the time.
+        //
+        // Where this parts from the latch is how it ends: the engine is
+        // counting the hold down at one a tick, so the entry ends itself on
+        // the tick it named and no look is needed to retire it (ADR 0043's
+        // re-entry rule, reached through a record rather than a gate). An
+        // expired entry is dropped here rather than filtered by every reader,
+        // so the leaf cannot accumulate holds that ended hours ago and the
+        // channel cannot print one as if it were still standing.
+        Holds =
+            let standing = prior.Holds |> Map.filter (fun _ hold -> view.Time < hold.Until)
+
+            (standing, view.RoomControl)
+            ||> Map.fold (fun rooms room control ->
+                match RoomControlInfo.heldByOther control with
+                | Some held ->
+                    Map.add
+                        room
+                        {
+                            Holder = held.Holder
+                            Until = view.Time + held.TicksToEnd
+                        }
+                        rooms
+                | None -> Map.remove room rooms)
         Living = if Option.isSome episode then surviving else Set.empty
         // The damage baseline, carried on the same condition the damage is
         // charged on (#201): an open episode *and* a hostile in the room the

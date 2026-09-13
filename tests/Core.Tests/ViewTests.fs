@@ -857,7 +857,7 @@ let colonyViewTests =
                     ColonyView.ofWorld
                         Tuning.defaults
                         declared
-                        {
+                        { StandDown.none with
                             Shut = Set.singleton outpost
                             Rechecked = Set.singleton outpost
                         }
@@ -903,7 +903,7 @@ let colonyViewTests =
                     ColonyView.ofWorld
                         Tuning.defaults
                         declared
-                        {
+                        { StandDown.none with
                             Shut = Set.singleton outpost
                             Rechecked = Set.singleton outpost
                         }

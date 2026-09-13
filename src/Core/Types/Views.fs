@@ -77,6 +77,26 @@ type ColonyView =
         /// the look moves no decision and only the next [[raid log]] is any
         /// wiser for it.
         RoomControl: Map<string, RoomControlInfo>
+        /// The rooms this colony last saw **somebody else's reservation** on,
+        /// whose hold has not run out yet (`StandDown.HeldOutposts`, #333).
+        /// `RoomControl`'s memory and its complement: that map is this tick's
+        /// vision and this set is what the last look concluded, carried on the
+        /// view because the one rule that needs it — which controllers this
+        /// colony may reserve (`Planner.reservableControllers`) — is asked on
+        /// thousands of ticks in a row where no body of ours stands in the
+        /// room to answer it.
+        ///
+        /// A conclusion and not a fact, which is the one place a view carries
+        /// one, and it is carried for the reason ADR 0043's latch is: the
+        /// refusal's own effect is to withdraw the body whose vision read it,
+        /// so a rule that re-read it off vision alone would hire the body back
+        /// the tick after it died, for ever. Unlike the latch it needs no look
+        /// to end — the engine counts a reservation down at one a tick, so the
+        /// record dates itself and `Observe.standDown` drops it on the tick it
+        /// named. **Vision overrules it**: a room with a `RoomControl` entry is
+        /// decided by that entry either way, and this set is read only where
+        /// there is none.
+        HeldOutposts: Set<string>
         /// Our construction sites in every room this colony works and has
         /// vision in: the Build pool is this list one to one, so an outpost's
         /// site is a Task like the home room's, and a bootstrapped child's site
@@ -422,7 +442,9 @@ module ColonyView =
     /// the answer back. Five facts are handed in and none is decided here: the
     /// **tunables** (decision 5), the **declaration**, the **gate** the
     /// [[stand-down]] derives off the previous tick's [[raid log]] (ADR 0043 —
-    /// Memory's answer, not the world's), the **holders** `World.creepColonies`
+    /// Memory's answer, not the world's, and since #333 it carries what that
+    /// log remembers of somebody else's reservations beside the two sets it
+    /// withholds rooms by), the **holders** `World.creepColonies`
     /// cut over every living colony's scan set at once, and the **world**
     /// itself.
     let ofWorld
@@ -604,6 +626,13 @@ module ColonyView =
                 collected (fun facts -> facts.Sources) |> Outpost.pooledSources scanned outposts
             Controller = homeFacts.Controller
             RoomControl = control
+            // The gate's third set, verbatim (#333). Not narrowed to the
+            // declaration the way `Rechecked` is: that one *admits* a look and
+            // a hand-edited room name would buy the colony a look into a room
+            // it never declared, while this one only ever takes a controller
+            // out of a pool it was in, and the reader intersects it with the
+            // projected outposts anyway.
+            HeldOutposts = gate.HeldOutposts
             ConstructionSites = collected (fun facts -> facts.ConstructionSites)
             Creeps = mine |> List.map (fun creep -> creep.Info)
             Hostiles = collected (fun facts -> facts.Hostiles)

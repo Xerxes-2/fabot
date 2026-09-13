@@ -163,6 +163,7 @@ let bareRespawn =
         Sources = [ source "src-a"; source "src-b" ]
         Controller = Some(controllerAt 1)
         RoomControl = homeControl
+        HeldOutposts = Set.empty
         ConstructionSites = []
         Creeps = []
         Hostiles = []

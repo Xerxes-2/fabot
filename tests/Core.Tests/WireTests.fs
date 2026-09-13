@@ -160,6 +160,18 @@ let wireVocabularyTests =
                     (casesOf<StandDownBasis> ())
                     standDownBasisName
                     standDownBasisOf
+
+                // The Raid log's second vocabulary (#333): whose CLAIM parts
+                // stand on an [[outpost]]'s controller, carried on the leaf's
+                // hold map so the channel can name the player a room is not
+                // ours to reserve because of. All three cases are spelt
+                // though only two are ever written — a vocabulary with a
+                // hole in it is one a later reader falls through.
+                roundTrips
+                    "ReservationHolder"
+                    (casesOf<ReservationHolder> ())
+                    reservationHolderName
+                    reservationHolderOf
             }
 
             test "the engine vocabularies round-trip over their own lists" {

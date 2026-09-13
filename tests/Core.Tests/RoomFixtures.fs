@@ -797,6 +797,7 @@ let colonyAt (capture: RoomCapture) (level: int) (bank: int) : ColonyView =
                     SafeModeAvailable = 1
                     SafeModeActive = false
                 }
+        HeldOutposts = Set.empty
         RoomControl =
             Map.ofList
                 [

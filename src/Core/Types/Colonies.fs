@@ -592,18 +592,24 @@ module Errand =
             Target = "6a901a3bb8684d0008337ed2", { Room = "W15S25"; X = 44; Y = 6 }
         }
 
-/// The [[stand-down]] gate's whole answer for one colony this tick (ADR 0043 as
-/// #165 narrows it), derived once off that colony's [[raid log]]
-/// (`Observe.standDown`) and handed to `ColonyView.ofWorld`: two sets rather
-/// than one, because after #165 the gate has two strengths and not one. A room
-/// is withdrawn from the work the colony does, and a room whose withdrawal
-/// **latched** on another player's ownership is looked into all the same, once
-/// a whole `Tuning.RivalRecheck` has passed since the last look (#275), so the
+/// What this colony's [[raid log]] says about the rooms it declares, this tick
+/// (ADR 0043 as #165 narrows it and #333 widens it), derived once off that log
+/// (`Observe.standDown`) and handed to `ColonyView.ofWorld`: three sets rather
+/// than one, because the log now answers three questions and not one. A room is
+/// withdrawn from the work the colony does; a room whose withdrawal **latched**
+/// on another player's ownership is looked into all the same, once a whole
+/// `Tuning.RivalRecheck` has passed since the last look (#275), so the
 /// conclusion that shut it can be contradicted by the only thing that ever
-/// could — a tick with vision. One
-/// record and not two derivations: the two answers are read off one log and one
+/// could — a tick with vision; and a room the colony goes on working is
+/// remembered as one whose controller it may not reserve. One
+/// record and not three derivations: the answers are read off one log and one
 /// tick, and split apart they would be free to disagree about which rooms the
 /// colony has withdrawn from.
+///
+/// The name is ADR 0043's and is now narrower than the record — two of the
+/// three sets are a stand-down's, and `HeldOutposts` is deliberately not one.
+/// It is left as written rather than renamed under an accepted ADR: what the
+/// field docs owe a reader is which of them withdraws a room, and they say so.
 type StandDown =
     {
         /// Every room the gate withholds from the declaration this colony works
@@ -620,17 +626,36 @@ type StandDown =
         /// row, which is what keeps ADR 0043's withdrawal in force on the very
         /// tick the gate is being questioned.
         Rechecked: Set<string>
+        /// The declared [[outpost]]s whose controller **somebody else's CLAIM
+        /// parts were standing on** at the last look, and whose hold has not
+        /// run out on this tick (`RaidState.Holds`, #333). Held in the
+        /// reservation sense `RoomControlInfo.heldByOther` carries, and not in
+        /// `RaidState.RivalHeld`'s ownership sense — the two words collide in
+        /// this leaf and nowhere else.
+        ///
+        /// The one set here that **withdraws nothing**: the room is worked, its
+        /// rock is pooled and its bodies stand in it. What it narrows is the
+        /// Reserve pool and the reserver row, and only on the ticks the colony
+        /// is blind in the room (`Planner.reservableControllers`) — a tick with
+        /// vision answers for itself and this set is not consulted at all. That
+        /// is the whole of why it is carried: `RoomControl` is this tick's
+        /// vision, the reserver is the only body most of these rooms ever hold,
+        /// and a rule that read the refusal off vision alone would hire one
+        /// more reserver every time the last one died (#333's live cadence, one
+        /// body per 600 ticks).
+        HeldOutposts: Set<string>
     }
 
 [<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
 module StandDown =
-    /// The open gate: nothing withheld and nothing to look into — what a colony
-    /// with no [[raid log]] yet, and every colony on an ordinary tick, decides
-    /// under.
+    /// The open gate: nothing withheld, nothing to look into and nobody else's
+    /// reservation remembered — what a colony with no [[raid log]] yet, and
+    /// every colony on an ordinary tick, decides under.
     let none =
         {
             Shut = Set.empty
             Rechecked = Set.empty
+            HeldOutposts = Set.empty
         }
 
 /// Where one colony stands in its life (ADR 0052 decision 3). Three answers to
