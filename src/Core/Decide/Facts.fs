@@ -31,7 +31,11 @@ let taskId =
     | Upgrade controllerId -> $"upgrade:{controllerId}"
     | Reserve controllerId -> $"reserve:{controllerId}"
     | Claim controllerId -> $"claim:{controllerId}"
-    | Pickup pileId -> $"pickup:{pileId}"
+    // The same suffix on the third Task to name a resource (#311). An energy
+    // pile's id is byte-identical to the one #167 froze, for `resourceSuffix`'s
+    // own reason — a pile outlives a tick and an assignment to it is a Memory
+    // key — and the Thorium pile beside it is a distinct id at the same tile.
+    | Pickup(pileId, resource) -> $"pickup:{pileId}{resourceSuffix resource}"
     // One Flee for the whole colony: it has no target to be identified by,
     // and every creep inside a Reach is running from the same thing.
     | Flee -> "flee"
@@ -168,27 +172,64 @@ let internal weaponRange (hostile: HostileInfo) : int option =
 /// at all.
 let internal isArmed (hostile: HostileInfo) : bool = weaponRange hostile |> Option.isSome
 
+/// Whether a projected target stands in a room this player **owns**, which is
+/// how every rule of the season's ore answers "is this ours?" (#261, #311).
+/// `FIND_MINERALS`, `FIND_STRUCTURES` and `FIND_DROPPED_RESOURCES` all carry
+/// every owner's, and nothing in the shape of a deposit, an extractor, a
+/// container or a pile says who put it there. The engine does say, once, and it
+/// says it about the **room**: an extractor needs an owned RCL6 room
+/// (`checkControllerAvailability` derives `rcl = 0` from a reservation), so an
+/// extractor standing in a room we own is ours and one standing in a room we do
+/// not is not.
+///
+/// For a **pile** the same join answers one step weaker and still answers
+/// enough. It does not say a [[miner]] of ours dug it — any creep at all may
+/// `drop()`, and a deposit that is gone leaves its pile behind — it says the
+/// floor under it is ours, which is the only question a Pickup asks. Ore
+/// somebody else abandoned in a room of ours is ore we may sweep, and at the
+/// [[storage]]'s draw tier the body that goes for it is one with nothing better
+/// to do anyway.
+///
+/// Written once because its readers — the deposits just below, and the piles
+/// `ourThoriumPiles` takes off the projection's kind census — would otherwise
+/// be two copies of one sentence free to disagree about whose a room is.
+/// A room the colony cannot see owns nothing here (ADR 0004).
+let internal inARoomWeOwn (view: ColonyView) (id: string) : bool =
+    SpatialInfo.roomOf view.Spatial id
+    |> Option.bind (fun room -> Map.tryFind room view.RoomControl)
+    |> Option.exists (fun control -> control.Owner = Ownership.Ours)
+
 /// The [[thorium]] deposits standing in a room this colony **owns** (ADR 0057
 /// decision 2), in id order — the only deposits any rule of this colony may
 /// answer for, and the list both the Task pool and the [[miner]] row's quota are
 /// read off so the two can never disagree about which rock is ours.
 ///
-/// **Whose the deposit is, is whose the room is** (#261). `FIND_MINERALS` and
-/// `FIND_STRUCTURES` both carry every owner's, so a scanned neighbour arrives in
-/// the projection with its own deposit, its own extractor and its own container,
-/// and nothing in the shape of those three facts says who built them. The engine
-/// does say: `harvest` refuses a mineral whose extractor belongs to somebody
-/// else, one `ERR_NOT_OWNER` a tick for the whole of a body's life. The room is
-/// the honest join and not a second fact — an extractor needs an **owned** RCL6
-/// room (`checkControllerAvailability` derives `rcl = 0` from a reservation), so
-/// an extractor in a room we own is ours and one in a room we do not is not.
-/// A room the colony cannot see owns nothing here (ADR 0004).
+/// **Whose the deposit is, is whose the room is** (#261) — the join written out
+/// in `inARoomWeOwn` above, and read here rather than restated. What this list
+/// adds is why getting it wrong is expensive: a scanned neighbour arrives in the
+/// projection with its own deposit, its own extractor and its own container, and
+/// `harvest` refuses a mineral whose extractor belongs to somebody else — one
+/// `ERR_NOT_OWNER` a tick for the whole of a body's life.
 let internal ourDeposits (view: ColonyView) : string list =
-    SpatialInfo.idsOfKind view.Spatial Mineral
-    |> List.filter (fun id ->
-        SpatialInfo.roomOf view.Spatial id
-        |> Option.bind (fun room -> Map.tryFind room view.RoomControl)
-        |> Option.exists (fun control -> control.Owner = Ownership.Ours))
+    SpatialInfo.idsOfKind view.Spatial Mineral |> List.filter (inARoomWeOwn view)
+
+/// The [[thorium]] **on the ground** in a room this colony owns, in id order
+/// (#311): the dig that landed on the floor rather than in the mineral
+/// [[container]], because the container was at its 2,000 cap on the tick the
+/// [[miner]] swung. Ours by the room and by nothing on the pile, which carries
+/// no owner: `inARoomWeOwn` above is where that argument is written, including
+/// what it does and does not buy for a pile.
+///
+/// Off the projection's kind census and not off the deposits, deliberately: a
+/// pile is not seated on anything, and a mine whose container is destroyed
+/// mid-haul goes on dropping onto a tile the deposit census would still name
+/// but the container census no longer does. What the pool then does with the
+/// list is the Withdraw's arithmetic — an amount over a threshold, capped by a
+/// load — because a pile with no store in it is the mineral container with the
+/// store taken away.
+let internal ourThoriumPiles (view: ColonyView) : string list =
+    SpatialInfo.idsOfKind view.Spatial (Dropped Thorium)
+    |> List.filter (inARoomWeOwn view)
 
 /// The **mineral [[container]]s** of this colony's own deposits, in deposit
 /// order (ADR 0057 decision 3): the built container standing on a deposit's

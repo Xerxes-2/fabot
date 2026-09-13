@@ -789,6 +789,22 @@ let withMineStock units (colony: ColonyView) =
             }
     }
 
+/// The same colony with `units` of the season's ore lying **on the mine post**
+/// (#311) — the pile "pile-min" on (11,10), which is the mineral container's own
+/// tile, because that is where it lands: the [[miner]] stands on the container
+/// and the engine drops its dig on the floor of that tile the moment the
+/// container is at its 2,000 cap. The kind carries the resource and the amount
+/// rides in the Thorium column beside the container's, a pile holding its
+/// amount in `object[resourceType]` and never in a `store`.
+let withMinePile units (colony: ColonyView) =
+    { colony with
+        Spatial =
+            { colony.Spatial with
+                Thorium = Map.add "pile-min" units colony.Spatial.Thorium
+            }
+            |> withTargets [ "pile-min", minePost, Dropped Thorium ]
+    }
+
 /// The haul fixture (ADR 0012): a plain corridor y = 10, x = 9..21; the
 /// source embedded in wall at (10,10) with Seats (9,10) and (11,10), the
 /// controller standing at (20,10); the source container "can-src" on the
@@ -857,7 +873,7 @@ let pileTaskColony amount (creeps: (string * Pos) list) =
             { spatial [] crowdField with
                 Stores = Map.ofList [ "pile-a", amount ]
             }
-            |> withTargets [ "pile-a", { X = 10; Y = 10 }, Dropped ]
+            |> withTargets [ "pile-a", { X = 10; Y = 10 }, (Dropped Energy) ]
             |> withCreepsAt creeps
     }
 

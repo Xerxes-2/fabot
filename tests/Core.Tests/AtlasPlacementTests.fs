@@ -211,7 +211,8 @@ let placementQueryTests =
                     { spatial
                           [ "pile-b", { X = 10; Y = 11 }; "pile-a", { X = 10; Y = 10 } ]
                           [ { X = 10; Y = 10 }, Plain; { X = 10; Y = 11 }, Plain ] with
-                        TargetKinds = Map.ofList [ "pile-a", Dropped; "pile-b", Dropped ]
+                        TargetKinds =
+                            Map.ofList [ "pile-a", (Dropped Energy); "pile-b", (Dropped Energy) ]
                     }
                     |> snapshotWith []
                     |> ofView

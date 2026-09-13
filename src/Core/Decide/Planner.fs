@@ -406,9 +406,9 @@ let planTasks (view: ColonyView) (threats: Threats) : Task list =
     // whether the pile is at somebody's feet already is a fact about a creep,
     // and the Planner is creep-blind by construction (ADR 0013).
     let pickups =
-        idsOfKind Dropped
+        idsOfKind (Dropped Energy)
         |> List.filter (fun id -> stored id >= view.Tuning.PickupThreshold)
-        |> List.map Pickup
+        |> List.map (fun id -> Pickup(id, Energy))
 
     // The haul cycle's outflow: the controller container is one more Refill
     // target (ADR 0010's target layering, widened by ADR 0012). Which container
@@ -461,6 +461,48 @@ let planTasks (view: ColonyView) (threats: Threats) : Task list =
         mineralContainers
         |> List.filter (fun id -> SpatialInfo.heldIn view.Spatial Thorium id > 0)
         |> List.map (fun id -> Withdraw(id, Thorium))
+
+    // **And the same intake off the floor** (#311). A mineral container caps at
+    // 2,000 and refills in ~600 ticks at a full [[miner]]'s 3.33 a tick, so
+    // every tick the haul lags the next dig lands on the ground instead — a
+    // pile that decays at `ceil(amount / 1000)` a tick and that, until this
+    // list existed, no Task in the colony could name. Live at ~t401,850 that
+    // was ~630 on W12S28's mine tile and ~300 on W13S28's, bleeding, with a
+    // hauler row standing by.
+    //
+    // The energy Pickup's own two rules, read down the Thorium column: our
+    // ground (`ourThoriumPiles`), and an amount at or over
+    // `Tuning.PickupThreshold` — one threshold and not a second knob, on that
+    // field's own argument in `Rules.fs`, which is where it is made. What is
+    // this list's to say is the consequence: a Thorium pile under the line is
+    // left where it lies and is gone inside `amount` ticks by its own decay.
+    // The [[pickup reflex]] is no fallback for it either — the reflex is
+    // energy-only by construction (`Atlas.droppedEnergyIn`), a body carrying
+    // one resource at a time being a rule a reflex cannot ask about.
+    //
+    // **No borrowed-room filter beside it**, where `mineralContainers` above
+    // carries one (ADR 0047 decision 1): the two answer the same question by
+    // different mechanisms, and the pile's is one step earlier. A child's floor
+    // is not `borrowable` at all (`ColonyView.borrowable` refuses `Dropped _`),
+    // so a pile in a room the mother lends never reaches her `TargetKinds` and
+    // `ourThoriumPiles` cannot return one. The container is in her projection
+    // and has to be filtered; the pile is not there to filter.
+    //
+    // **Pooling it is not collecting it** (#306): the rank is `StockDraw`, so
+    // the pile waits for a hauler with no Feeding-tier work left, and a busy
+    // colony has none for long stretches — which is the same pressure #306 reads
+    // from the container's end, and its question to answer, not this list's.
+    // What the [[hauler unit]]'s quota prices is the [[miner]]'s output into the
+    // *container* (`Quota.mineRows`) and it is not widened for the floor: the
+    // term is gated on `depositIsDiggable`, so the tick a deposit runs dry the
+    // term goes to zero with a pile possibly still standing. Survivable — a pile
+    // is a finite remainder and the row it is left to is the row already hired —
+    // and still not a reason for a second term.
+    let minePickups =
+        ourThoriumPiles view
+        |> List.filter (fun id ->
+            SpatialInfo.heldIn view.Spatial Thorium id >= view.Tuning.PickupThreshold)
+        |> List.map (fun id -> Pickup(id, Thorium))
 
     // The sink, pooled off the **Storage alone** and off no fact about the mine
     // (#262): the Planner is creep-blind (ADR 0013), so what gates this is the
@@ -546,5 +588,14 @@ let planTasks (view: ColonyView) (threats: Threats) : Task list =
     // Storage's own two Tasks, which no body of the colony is ever applicable to
     // at the same time as one of these (a body holding Thorium has no energy,
     // and an empty one has no Thorium).
+    //
+    // The piles stand before the Withdraws here for the reason they do above
+    // (#242, #311): the two are one resource at one rank taken by one body, and
+    // of two copies tied on [[priority]], [[travel cost]] and crowding alike the
+    // one to take is the one that is going away — a pile bleeds
+    // `ceil(amount / 1000)` a tick where the container beside it bleeds
+    // nothing. That tie is the live case and not a hypothetical: the pile lies
+    // on the mine [[post]], which is the container's own tile.
+    @ minePickups
     @ mineWithdraws
     @ mineRefills

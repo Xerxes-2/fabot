@@ -60,7 +60,7 @@ let holdersOf task assignments =
 let pickups intents =
     intents
     |> List.choose (function
-        | PickupEnergy(creep, pile) -> Some(creep, pile)
+        | PickupPile(creep, pile) -> Some(creep, pile)
         | _ -> None)
 
 /// A colony around a dropped energy pile at (10, 10) on open ground, with
@@ -76,7 +76,7 @@ let pileColony creeps positions =
                       for x in 8..12 do
                           for y in 8..12 -> { X = x; Y = y }, Plain
                   ] with
-                TargetKinds = Map.ofList [ "pile-1", Dropped ]
+                TargetKinds = Map.ofList [ "pile-1", (Dropped Energy) ]
             }
             |> withCreepsAt positions
     }
@@ -108,7 +108,7 @@ let internal withPileRoom room piles positions (colony: ColonyView) =
                         colony.Spatial.Rooms
                 TargetKinds =
                     (colony.Spatial.TargetKinds, piles)
-                    ||> List.fold (fun kinds (id, _) -> Map.add id Dropped kinds)
+                    ||> List.fold (fun kinds (id, _) -> Map.add id (Dropped Energy) kinds)
             }
     }
 
@@ -326,7 +326,11 @@ let bufferCrowdColony bufferStock =
 let pickersOf assignments pileId =
     assignments
     |> Map.toList
-    |> List.choose (fun (name, tid) -> if tid = taskId (Pickup pileId) then Some name else None)
+    |> List.choose (fun (name, tid) ->
+        if tid = taskId (Pickup(pileId, Energy)) then
+            Some name
+        else
+            None)
 
 /// The same field with a tombstone at (10,10) holding the given energy and
 /// nothing else standing anywhere (#167). Deliberately not in `Obstacles`:
@@ -369,7 +373,7 @@ let sameTilePileColony pilePos =
             |> withTargets
                 [
                     "can-a", { X = 10; Y = 10 }, Structure BuiltKind.Container
-                    "pile-a", pilePos, Dropped
+                    "pile-a", pilePos, (Dropped Energy)
                 ]
             |> withCreepsAt [ "h1", { X = 10; Y = 11 } ]
     }
@@ -391,7 +395,7 @@ let internal pileDownTheLane containerStock pileAmount =
             |> withTargets
                 [
                     "can-a", { X = 10; Y = 10 }, Structure BuiltKind.Container
-                    "pile-a", { X = 16; Y = 10 }, Dropped
+                    "pile-a", { X = 16; Y = 10 }, (Dropped Energy)
                 ]
             |> withCreepsAt [ "h1", { X = 11; Y = 10 } ]
     }
@@ -414,7 +418,7 @@ let internal pileAgainstAHungrySpawn bankEnergy pileAmount =
             |> withTargets
                 [
                     "spawn-1", { X = 12; Y = 10 }, Structure BuiltKind.Spawn
-                    "pile-a", { X = 30; Y = 10 }, Dropped
+                    "pile-a", { X = 30; Y = 10 }, (Dropped Energy)
                 ]
             |> withCreepsAt [ "h1", { X = 11; Y = 10 } ]
     }
@@ -436,7 +440,7 @@ let internal pileAgainstATombstone pileAmount =
             |> withTargets
                 [
                     "tomb-a", { X = 12; Y = 10 }, Tombstone
-                    "pile-a", { X = 30; Y = 10 }, Dropped
+                    "pile-a", { X = 30; Y = 10 }, (Dropped Energy)
                 ]
             |> withCreepsAt [ "h1", { X = 11; Y = 10 } ]
     }

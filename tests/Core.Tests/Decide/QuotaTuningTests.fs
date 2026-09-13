@@ -109,7 +109,7 @@ let tuningTests =
                      |> List.filter (function
                          | Pickup _ -> true
                          | _ -> false))
-                    [ Pickup "pile-a" ]
+                    [ Pickup("pile-a", Energy) ]
                     "a threshold of fifty and the same pile is worth the walk"
             }
 

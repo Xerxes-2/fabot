@@ -829,12 +829,14 @@ let roomTests =
                 // have to come out of one layer or a pile at home and a
                 // creep in the outpost on the same coordinate read as range
                 // 0 (ADR 0041). The kind census stays flat and world-unique
-                // — both ids are Dropped here — and it is the join to a
+                // — both ids are Dropped Energy here — and it is the join to a
                 // *named* room's positions that separates them.
                 let home =
                     { SpatialInfo.empty with
                         RoomName = Some "W1N1"
-                        TargetKinds = Map.ofList [ "pile-home", Dropped; "pile-out", Dropped ]
+                        TargetKinds =
+                            Map.ofList
+                                [ "pile-home", (Dropped Energy); "pile-out", (Dropped Energy) ]
                     }
                     |> withHome (fun layer ->
                         { layer with

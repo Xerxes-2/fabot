@@ -576,7 +576,7 @@ let intakeRoomTests =
                             }
                             |> withTargets
                                 [
-                                    "pile-1", { X = 12; Y = 10 }, Dropped
+                                    "pile-1", { X = 12; Y = 10 }, (Dropped Energy)
                                     "ext-1", { X = 16; Y = 10 }, Structure BuiltKind.Extension
                                 ]
                             |> withCreepsAt [ "h", { X = 13; Y = 10 } ]
@@ -597,7 +597,7 @@ let intakeRoomTests =
 
                 Expect.equal
                     (matched 100)
-                    (Some(taskId (Pickup "pile-1")))
+                    (Some(taskId (Pickup("pile-1", Energy))))
                     "two hundred free: the pile is taken first"
             }
         ]
@@ -759,8 +759,8 @@ let intakeDecayTests =
                     "a tombstone ends, so its hundred and fifty is drawn by the body that is asking"
 
                 Expect.equal
-                    (matched Dropped)
-                    (Some(taskId (Pickup "store-1")))
+                    (matched (Dropped Energy))
+                    (Some(taskId (Pickup("store-1", Energy))))
                     "and the pile the line was never carried to is picked up by the same body"
             }
 
@@ -884,7 +884,7 @@ let selfHealTests =
                         UpgradeController("patient", "controller")
                         TransferEnergyToStructure("patient", "store", Energy)
                         WithdrawFromStore("patient", "store", Energy, None)
-                        PickupEnergy("patient", "pile")
+                        PickupPile("patient", "pile")
                         ClaimController("patient", "controller")
                         ReserveController("patient", "controller")
                         MoveCreep("patient", Top)

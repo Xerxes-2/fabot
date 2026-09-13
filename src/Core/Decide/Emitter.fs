@@ -302,7 +302,19 @@ let internal applicable
     // its work than drawing a container is. The buffer clause has no
     // counterpart here: ADR 0019 shuts a Work-less body out of the
     // *controller's* container, and a pile is nobody's buffer.
-    | Pickup _ -> has Carry && halfEmpty && not carryingThorium && not heavy && not standing
+    //
+    // **The Thorium arm is the Withdraw's Thorium arm minus the same clause**
+    // (#311, ADR 0057 decision 3): an **empty** body and not #232's half-empty
+    // one, because a body carries one resource at a time and a pile of ore is
+    // the mineral container's own load lying on the floor. It keeps the two
+    // body gates the energy arm keeps — ADR 0016's comparative clause, a
+    // Work-heavy body's intake being digging, and #206's, a trip to the mine
+    // being the commute the [[standing body]] row was shaped never to make —
+    // and it drops `worthTheTrip` for this Task's own stated reason: a pile
+    // decays and a store does not, so there is no later body to leave it for.
+    | Pickup(_, Thorium) -> has Carry && emptyHanded && not heavy && not standing
+    | Pickup(_, Energy) ->
+        has Carry && halfEmpty && not carryingThorium && not heavy && not standing
     // Its two body clauses are read a second time out of line by
     // `canRefill`, beside Withdraw's (ADR 0050) — the Energy clause is not,
     // being a state and not a fact about the body.
@@ -409,7 +421,9 @@ let private intentFor atlas (creep: CreepInfo) task =
     // vocabulary, whether the energy was underfoot already or was the reason the
     // creep came. Which is why an arriving picker spells it twice and `decide`
     // keeps one — this Task owns its own act, and the reflex is what gives way.
-    | Pickup pileId -> Some(PickupEnergy(creep.Name, pileId))
+    // One act for both resources: the engine's `pickup` takes the object and
+    // no resource argument, the pile being one resource already (#311).
+    | Pickup(pileId, _) -> Some(PickupPile(creep.Name, pileId))
     // One Task, one act, and — since ADR 0054 — sometimes many structures: a
     // [[refill cluster]]'s Refill names a place, and *which* member of it the
     // energy lands in is settled here, at arrival, off the tile the body

@@ -45,7 +45,7 @@ let private channel =
     | UpgradeController(name, _) -> Some(name, Upgrade)
     | ReserveController(name, _) -> Some(name, Reserve)
     | ClaimController(name, _) -> Some(name, Claim)
-    | PickupEnergy(name, _) -> Some(name, Pickup)
+    | PickupPile(name, _) -> Some(name, Pickup)
     | MoveCreep(name, _) -> Some(name, Move)
     | SayCreep(name, _) -> Some(name, Say)
     | SpawnCreep _

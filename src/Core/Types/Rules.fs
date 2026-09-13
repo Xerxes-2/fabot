@@ -151,9 +151,16 @@ type Tuning =
         /// per tick. No hysteresis, one Repair visit clearing the line.
         RampartFloor: int
         /// The pile a Pickup is worth walking for: a dropped pile enters the
-        /// pool at this many energy and never below it. A hundred, derived at
+        /// pool at this many units and never below it. A hundred, derived at
         /// the **300 bank** — two Carry parts' worth, the smallest load that
         /// pays for a walk made for the pile alone.
+        ///
+        /// One number over **both** resources (#311), because what it prices is
+        /// the trip and not the cargo: a walk made for a pile alone has to
+        /// carry more than two Carry parts' worth whatever is in it. A Thorium
+        /// pile under the line is left where it lies and is gone inside
+        /// `amount` ticks by its own decay, the penalty being a flat one a tick
+        /// below a thousand.
         PickupThreshold: int
         /// The Reach margin (ADR 0033): the tiles a Threat's weapon range is
         /// widened by — one for the hostile's next step, one for our own tick

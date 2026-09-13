@@ -124,7 +124,7 @@ let reserveTests =
                                     Map.ofList
                                         [
                                             "cont-1", Structure BuiltKind.Container
-                                            "pile-1", Dropped
+                                            "pile-1", (Dropped Energy)
                                         ]
                                 Stores = Map.ofList [ "cont-1", 500; "pile-1", 150 ]
                             }
@@ -139,7 +139,7 @@ let reserveTests =
                         [
                             taskId (Harvest "src-a")
                             taskId (Withdraw("cont-1", Energy))
-                            taskId (Pickup "pile-1")
+                            taskId (Pickup("pile-1", Energy))
                             taskId (Refill("spawn-1", Energy))
                             taskId (Build "site-1")
                             taskId (Repair "road-1")

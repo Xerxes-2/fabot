@@ -293,12 +293,12 @@ let private safetyTier task =
 let private roomOfWork atlas task =
     match task with
     | Harvest id
-    | Pickup id
     | Build id
     | Repair id
     | Upgrade id
     | Reserve id
     | Claim id -> Atlas.targetRoom atlas id
+    | Pickup(id, _)
     | Withdraw(id, _)
     | Refill(id, _) -> Atlas.targetRoom atlas id
     | Guard room -> Some room
@@ -1035,13 +1035,28 @@ let planPool (view: ColonyView) atlas (tasks: Task list) : PooledTask list =
                 StockDraw
             else
                 Feeding
+        // **A Thorium pile ranks where the Thorium container does** (#311,
+        // reading ADR 0057 decision 3 the way `Withdraw(_, Thorium)` above
+        // reads it): the pile *is* that container's next dig, landed on the
+        // floor because the store was full, so the two are one intake of one
+        // resource and ranking them apart would be the colony saying that where
+        // the ore sits changes what it is worth. `StockDraw` and never Feeding,
+        // for decision 3's own reason: an empty hauler beside the mine must not
+        // take the season's ore ahead of the energy the spawn is waiting on.
+        // Above the surplus all the same, which is what makes it a trip worth
+        // making — the pile bleeds `ceil(amount / 1000)` a tick, and a rank
+        // below Build and Repair would leave it to decay through every tick the
+        // colony had a site open. **Both arms spelled**, as the Withdraw's two
+        // above are: a third resource is a build error here and not a silent
+        // Feeding rank.
+        | Pickup(_, Thorium) -> StockDraw
         // A pile is flow and not stock: it is the haul cycle's energy lying
         // where it fell — an Anchor's overflow, a death drop — so it feeds the
         // colony on the tier the containers do, and which of the two an empty
         // carrier goes for is travel cost's call — for every pile but the two
         // `priorityOf` steps up a rung, the one lying on a drawable store and
         // the one holding half a [[hauler unit]]'s load (#216 R5, #242).
-        | Pickup _ -> Feeding
+        | Pickup(_, Energy) -> Feeding
         | Refill(structureId, _) ->
             let isTower =
                 view.Refillables
@@ -1165,8 +1180,10 @@ let planPool (view: ColonyView) atlas (tasks: Task list) : PooledTask list =
     // forty tiles off is no reason to leave the 1,500 under a body's feet.
     // **Below a bank of 450 there is no smaller pile.** The row's cast carries
     // `100 * (bank / 150)`, so at RCL1's 300 half a load is a hundred —
-    // `Tuning.PickupThreshold` itself — and every pile the pool holds takes the
-    // rung; the distance-only rung exists only once the cast outgrows twice the
+    // `Tuning.PickupThreshold` itself — and every **energy** pile the pool holds
+    // takes the rung (the Thorium arm takes neither of these two, for the reason
+    // spelled at `step` below); the distance-only rung exists only once the
+    // cast outgrows twice the
     // threshold, from RCL2 up. The line is the one #242 pinned, and whether a
     // bootstrapping colony's one body should walk off its rock for a
     // threshold-sized pile is that question's own issue and not this one's.
@@ -1191,7 +1208,26 @@ let planPool (view: ColonyView) atlas (tasks: Task list) : PooledTask list =
         // its own here.
         let step =
             match task with
-            | Pickup pileId ->
+            // **The energy pile's rungs, and the energy pile's alone** (#311).
+            // Both clauses are sentences about the Feeding tier — the first
+            // orders a pile against the store under it, and `drawableTiles`
+            // holds only Feeding-tier Withdraws, so a mineral container's tile
+            // is not in it at all; the second says half a hauler load on the
+            // ground is a trip of its own, which is an argument about the
+            // *energy* economy's ordering. A Thorium pile is the only Task on
+            // its rank that any body of the colony is ever applicable to at the
+            // same time as the Thorium container, and the pool's order already
+            // settles that pair, so it takes the plain rung of its tier and the
+            // wildcard below answers it.
+            //
+            // And a rung would not merely be redundant, it would **breach the
+            // line #311 was filed on**. A rung inside `StockDraw` steps up from
+            // a tier the [[storage]]'s own *energy* Withdraw already sits on at
+            // `OnTheTier`, so a lifted pile would outrank the colony drawing its
+            // own bank — energy-economy work, which the issue's own sentence
+            // says the season's ore never goes ahead of. The rungless rank is
+            // the rule and not an omission.
+            | Pickup(pileId, Energy) ->
                 let overADrawableStore =
                     SpatialInfo.placementOf view.Spatial pileId
                     |> Option.exists (fun tile -> Set.contains tile drawableTiles)
@@ -1326,7 +1362,13 @@ let planPool (view: ColonyView) atlas (tasks: Task list) : PooledTask list =
                 |> Capacity.capping CapScope.Generalists (ceilDiv stock workerLoad)
             else
                 Capacity.total (ceilDiv stock haulerLoad)
-        | Pickup pileId -> Capacity.total (ceilDiv (stored pileId) haulerLoad)
+        // Read down the resource's own column like the Withdraw above it
+        // (#311): a pile holds one resource and its amount is filed under that
+        // resource's map, so the pile that is 630 of Thorium admits the loads
+        // 630 of Thorium divides into and the energy it holds none of admits
+        // nobody.
+        | Pickup(pileId, resource) ->
+            Capacity.total (ceilDiv (SpatialInfo.heldIn view.Spatial resource pileId) haulerLoad)
         // **The [[refill cluster]] is bounded by what it can still hold** (ADR
         // 0054, amending ADR 0029 for this one Task): as many bodies as the
         // ring's free energy divides into loads, so a second one joins only

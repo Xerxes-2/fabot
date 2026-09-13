@@ -48,7 +48,26 @@ type Intent =
     /// controller takes the room for this player. Range 1, like the engine's
     /// other four touching acts.
     | ClaimController of creepName: string * controllerId: string
-    | PickupEnergy of creepName: string * resourceId: string
+    /// The pickup act: a creep within range 1 of a dropped pile takes as much
+    /// of it as its store has room for. Named for the **pile** and not for
+    /// energy since #311, the way #183 renamed the Withdraw's: the engine's
+    /// `pickup` takes the object and no resource argument, so one call answers
+    /// for an energy pile and a Thorium one alike, and a log line that said
+    /// energy while the body walked off with the season's ore was a lie the
+    /// reader had to reconcile.
+    ///
+    /// **Why this one moved where `HarvestSource` and
+    /// `TransferEnergyToStructure` are frozen**: the freeze is a rule about
+    /// *readers* and not about names. Those two spellings are already out in
+    /// the world — a human greps them — so renaming them would cost somebody a
+    /// reconciliation the honesty is not worth. This one had no reader at all:
+    /// no `PickupEnergy` was written anywhere outside this module, and the one
+    /// spelling that *is* persisted, the Task id a Memory key carries, is
+    /// `Facts.taskId`'s `pickup:<id>` and has not moved a byte (#167). A name
+    /// with a reader stays a lie; a name with none is corrected. That is #183's
+    /// `WithdrawFromStore` precedent read out, and it is the whole of the
+    /// difference between this paragraph and the one above.
+    | PickupPile of creepName: string * resourceId: string
     /// The melee act (ADR 0056): a body with ATTACK parts standing within
     /// range 1 of a hostile creep deals `Engine.attackPower` a part. The
     /// [[guard]]'s own act, and the one Intent that names a creep this colony

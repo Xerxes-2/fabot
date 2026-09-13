@@ -83,14 +83,32 @@ type Task =
     /// today is an `Energy` one, and the mineral [[container]] is the one
     /// `Thorium` store there is.
     | Withdraw of storeId: string * resource: Resource
-    /// Walk to a dropped energy pile and take it. The Task half of what the
+    /// Walk to a dropped pile and take it. The Task half of what the
     /// [[pickup reflex]] does by hand: the reflex takes what is already within
     /// range 1 of a creep standing there for its own reasons, and this is what
     /// sends a creep to a pile no reflex will ever reach. Pooled on the pile's
     /// amount alone and only from a threshold (`Tuning.PickupThreshold`).
-    /// Feeding tier and hauler-shaped, the same as the Withdraw beside it:
-    /// which of the two an empty carrier goes for is travel cost's call.
-    | Pickup of pileId: string
+    /// Hauler-shaped like the Withdraw beside it and **ranked down the same
+    /// column that Withdraw is**: the `Energy` arm is Feeding-tier intake, and
+    /// which of the two an empty carrier goes for is travel cost's call; the
+    /// `Thorium` arm is drawn on the [[storage]]'s own tier instead, gated on an
+    /// **empty** body rather than on #232's half-empty one, so no travel cost
+    /// ever sets it against an energy intake — a rank is settled before a price
+    /// is asked. One Task with two arms, and nothing said of one holds for the
+    /// other unless it says so.
+    ///
+    /// The **resource** is the Withdraw's argument on the one target that keeps
+    /// no store to read it off (#311). A dropped pile holds its amount in
+    /// `object[resourceType]` and not in a `store` — which is why the contact
+    /// penalty never reaches one (`docs/research/thorium-reactor.md` §2) — so a
+    /// pile *is* one resource, and the Task has to say which: the engine's own
+    /// `pickup` takes no argument, and every rule that ranks this Task, caps it
+    /// or asks which body may hold it needs the answer. Every pile the colony
+    /// had before the extractor stood is an `Energy` one; a `Thorium` one is
+    /// the [[miner]]'s dig landing on the floor because the mineral
+    /// [[container]] under it is already full, which is ADR 0057 decision 3's
+    /// intake with the store taken away.
+    | Pickup of pileId: string * resource: Resource
     /// Deliver energy into an energy-hungry structure (ADR 0010, widened by ADR
     /// 0012 and ADR 0023): a tower, the upgrade [[buffer]], the [[storage]], a
     /// [[ferry]]'s sink — and the flow's own sink, which since ADR 0054 is not

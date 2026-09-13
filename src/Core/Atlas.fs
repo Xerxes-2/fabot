@@ -525,12 +525,19 @@ let pendingIn (atlas: Atlas) (room: string) (kind: BuiltKind) : int =
 let placedTowers (atlas: Atlas) : (string * RoomPos) list =
     placedOfKindIn atlas atlas.Home (Structure BuiltKind.Tower)
 
-/// Dropped energy piles one room's layer places: id and tile, in id order. The
-/// pickup reflex's whole view of a pile — no amount is projected, since a pile
-/// worth more than one carry is several trips, which is a Task's arithmetic and
-/// not a reflex's.
+/// Dropped **energy** piles one room's layer places: id and tile, in id order.
+/// The pickup reflex's whole view of a pile — no amount is projected, since a
+/// pile worth more than one carry is several trips, which is a Task's
+/// arithmetic and not a reflex's.
+///
+/// Energy by the kind it asks for and not by accident (#311): the reflex runs
+/// beside the pipeline and asks nothing of `applicable`, so a Thorium pile in
+/// this census would be scooped by whatever body happened to stand beside it —
+/// including one already carrying energy, which is the mixed load ADR 0057
+/// decision 3 forbids. The season's ore is reached by a Task that can be gated
+/// on an empty body, and by nothing else.
 let droppedEnergyIn (atlas: Atlas) (room: string) : (string * RoomPos) list =
-    placedOfKindIn atlas room Dropped
+    placedOfKindIn atlas room (Dropped Energy)
 
 /// Tiles holding a built road in the named room — the projection's road
 /// census, one half of what the Layout's road gap subtracts (ADR 0011). The
@@ -788,8 +795,8 @@ let private actionOn =
     function
     | Harvest id
     | Reserve id
-    | Claim id
-    | Pickup id -> Some(id, 1)
+    | Claim id -> Some(id, 1)
+    | Pickup(id, _)
     | Withdraw(id, _)
     | Refill(id, _) -> Some(id, 1)
     | Build id
@@ -1304,8 +1311,9 @@ let private narrowedArea (atlas: Atlas) (creep: string) (task: Task) : Set<RoomP
             // the bootstrap is a source's: a stranded Anchor at home is a few
             // tiles from a spawn that can replace it, and the energy it digs
             // onto the ground is picked up. A deposit bootstraps nothing — a
-            // dropped Thorium pile bleeds `ceil(amount / 1000)` a tick and
-            // nothing in this colony picks one up, the extractor and the
+            // dropped Thorium pile bleeds `ceil(amount / 1000)` a tick for the
+            // whole of the walk #311's Pickup sends a hauler on, where the
+            // energy the Anchor drops waits for free, the extractor and the
             // container are planned on the same tick at RCL6, and the only
             // body that would take the widened area is an [[anchor]] that has
             // lost its own rock, which would then garrison a deposit with a

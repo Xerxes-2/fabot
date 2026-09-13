@@ -51,6 +51,37 @@ let pickupReflexTests =
                     "room in the store is not hunger while the season's ore is in it"
             }
 
+            test "a pile of the season's ore is no reflex's, whoever is standing on it" {
+                // The mirror of the case above (#311). The reflex asks nothing
+                // of `applicable`, so it cannot ask the one question the season's
+                // ore turns on — whether the body is carrying **anything** — and
+                // a reflex that swept a Thorium pile would put ore into whatever
+                // happened to be standing there, energy and all. So the census it
+                // reads is energy by kind (`Atlas.droppedEnergyIn`), and the ore
+                // on the floor is reached by the Pickup Task, which can be gated
+                // on an empty body, and by nothing else. Pairwise against "an
+                // adjacent creep with free capacity picks up" on the pile's
+                // resource alone: the same empty body, the same tile.
+                let snapshot =
+                    pileColony [ worker "w1" 0 50 ] [ "w1", { X = 10; Y = 11 } ]
+                    |> fun colony ->
+                        { colony with
+                            Spatial =
+                                { colony.Spatial with
+                                    TargetKinds =
+                                        Map.add
+                                            "pile-1"
+                                            (Dropped Thorium)
+                                            colony.Spatial.TargetKinds
+                                    Stores = Map.remove "pile-1" colony.Spatial.Stores
+                                    Thorium = Map.add "pile-1" 50 colony.Spatial.Thorium
+                                }
+                        }
+
+                let { Intents = intents } = decideOn snapshot
+                Expect.isEmpty (pickups intents) "an empty store is not a licence to hold ore"
+            }
+
             test "a pile out of reach draws nobody — the reflex never moves a creep" {
                 let snapshot = pileColony [ worker "w1" 0 50 ] [ "w1", { X = 10; Y = 13 } ]
                 let { Intents = intents } = decideOn snapshot
@@ -111,7 +142,8 @@ let pickupReflexTests =
                     { colony with
                         Spatial =
                             { colony.Spatial with
-                                TargetKinds = Map.add "pile-2" Dropped colony.Spatial.TargetKinds
+                                TargetKinds =
+                                    Map.add "pile-2" (Dropped Energy) colony.Spatial.TargetKinds
                             }
                             |> withHome (fun layer ->
                                 { layer with
@@ -143,7 +175,7 @@ let pickupReflexTests =
 
                 Expect.equal
                     (Map.tryFind "w1" decision.Assignments)
-                    (Some(taskId (Pickup "pile-1")))
+                    (Some(taskId (Pickup("pile-1", Energy))))
                     "the stocked first pile is the assigned task"
 
                 Expect.equal
@@ -163,7 +195,10 @@ let pickupReflexTests =
                 let bare = atLevel 2 (openRoom 3)
 
                 let strewn =
-                    atLevel 2 (openRoom 3 |> withTargets [ "pile-1", { X = 24; Y = 24 }, Dropped ])
+                    atLevel
+                        2
+                        (openRoom 3
+                         |> withTargets [ "pile-1", { X = 24; Y = 24 }, (Dropped Energy) ])
 
                 let placedWith = decideOn strewn
                 let placedWithout = decideOn bare

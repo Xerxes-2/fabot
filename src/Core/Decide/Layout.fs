@@ -894,7 +894,7 @@ let internal planPickups (view: ColonyView) atlas : Intent list =
                     piles
                     |> List.choose (fun (pile, tile) ->
                         if RoomPos.range pos tile |> Option.exists (fun r -> r <= 1) then
-                            Some(PickupEnergy(name, pile))
+                            Some(PickupPile(name, pile))
                         else
                             None)
                     |> List.tryLast

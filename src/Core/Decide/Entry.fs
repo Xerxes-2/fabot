@@ -255,14 +255,14 @@ let decideUnarbitrated
     let taskPickers =
         taskIntents
         |> List.choose (function
-            | PickupEnergy(name, _) -> Some name
+            | PickupPile(name, _) -> Some name
             | _ -> None)
         |> Set.ofList
 
     let pickupIntents =
         planPickups view atlas
         |> List.filter (function
-            | PickupEnergy(name, _) -> not (Set.contains name taskPickers)
+            | PickupPile(name, _) -> not (Set.contains name taskPickers)
             | _ -> true)
 
     let intents =

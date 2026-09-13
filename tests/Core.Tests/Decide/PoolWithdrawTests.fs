@@ -248,7 +248,7 @@ let pickupTaskTests =
 
                 Expect.equal
                     (matched (pileDownTheLane 800 600))
-                    (Some(taskId (Pickup "pile-a"), MatchFactor.Rank))
+                    (Some(taskId (Pickup("pile-a", Energy)), MatchFactor.Rank))
                     "half the row's load five tiles off beats eight hundred at its feet"
 
                 // The pairwise control: the same colony, the same distance,
@@ -301,7 +301,7 @@ let pickupTaskTests =
                 // rank is settled before a price is asked.
                 Expect.equal
                     (matched (pileAgainstAHungrySpawn 1800 600))
-                    (Some(taskId (Pickup "pile-a"), MatchFactor.Rank))
+                    (Some(taskId (Pickup("pile-a", Energy)), MatchFactor.Rank))
                     "half a load on the ground outranks the hungry spawn at the body's feet"
 
                 Expect.equal
@@ -315,7 +315,7 @@ let pickupTaskTests =
                 // ends outright.
                 Expect.equal
                     (matched (pileAgainstATombstone 600))
-                    (Some(taskId (Pickup "pile-a"), MatchFactor.Rank))
+                    (Some(taskId (Pickup("pile-a", Energy)), MatchFactor.Rank))
                     "and it outranks a tombstone's 1,500 one tile away"
 
                 Expect.equal
@@ -345,7 +345,7 @@ let pickupTaskTests =
 
                 Expect.equal
                     (matched (pileAgainstAHungrySpawn 300 100))
-                    (Some(taskId (Pickup "pile-a"), MatchFactor.Rank))
+                    (Some(taskId (Pickup("pile-a", Energy)), MatchFactor.Rank))
                     "at RCL1 a threshold-sized pile nineteen tiles off takes the rung"
 
                 Expect.equal
@@ -368,7 +368,7 @@ let pickupTaskTests =
 
                 Expect.equal
                     (Map.tryFind "h1" together)
-                    (Some(taskId (Pickup "pile-a")))
+                    (Some(taskId (Pickup("pile-a", Energy))))
                     "one tile, two stores: the decaying one first"
 
                 // The pairwise control: the same hauler, the same container,
@@ -437,7 +437,7 @@ let pickupTaskTests =
                                 [
                                     "can-near", { X = 10; Y = 10 }, Structure BuiltKind.Container
                                     "can-far", { X = 30; Y = 10 }, Structure BuiltKind.Container
-                                    "pile-a", { X = 10; Y = 10 }, Dropped
+                                    "pile-a", { X = 10; Y = 10 }, (Dropped Energy)
                                 ]
                             |> withCreepsAt [ "h1", { X = 10; Y = 11 }; "h2", { X = 14; Y = 10 } ]
                     }
@@ -446,7 +446,7 @@ let pickupTaskTests =
 
                 Expect.equal
                     (Map.tryFind "h1" assignments)
-                    (Some(taskId (Pickup "pile-a")))
+                    (Some(taskId (Pickup("pile-a", Energy))))
                     "the pile's own hauler still takes the decaying copy first"
 
                 // The pile's capacity is its amount over one load — one
@@ -468,7 +468,7 @@ let pickupTaskTests =
 
                 Expect.equal
                     (Map.tryFind "h1" walk.Assignments)
-                    (Some(taskId (Pickup "pile-a")))
+                    (Some(taskId (Pickup("pile-a", Energy))))
                     "150 on the ground is worth ten tiles of walking"
 
                 Expect.isEmpty
@@ -501,7 +501,7 @@ let pickupTaskTests =
 
                 Expect.equal
                     (assignmentAt 100)
-                    (Some(taskId (Pickup "pile-a")))
+                    (Some(taskId (Pickup("pile-a", Energy))))
                     "at the line, pooled"
 
                 Expect.equal (assignmentAt 99) None "one energy short of it, not"
@@ -525,7 +525,7 @@ let pickupTaskTests =
 
                 Expect.equal
                     (Map.tryFind "h1" assignments)
-                    (Some(taskId (Pickup "pile-a")))
+                    (Some(taskId (Pickup("pile-a", Energy))))
                     "standing on its doorstep it still holds the Task"
 
                 Expect.equal
@@ -570,20 +570,24 @@ let pickupTaskTests =
                 // hundredth of the decay a pile spends on its own, or the
                 // first of two hired haulers arriving — is gone, and the
                 // walk already spent bought nothing.
-                let held = Map.ofList [ "h1", taskId (Pickup "pile-a") ]
+                let held = Map.ofList [ "h1", taskId (Pickup("pile-a", Energy)) ]
 
                 let standing = decideFrom held (pileTaskColony 100 [ "h1", { X = 20; Y = 10 } ])
 
                 Expect.contains
                     standing.Verdicts
-                    (Verdict.Kept("h1", taskId (Pickup "pile-a")))
+                    (Verdict.Kept("h1", taskId (Pickup("pile-a", Energy))))
                     "at the line the walk stands"
 
                 let decayed = decideFrom held (pileTaskColony 99 [ "h1", { X = 20; Y = 10 } ])
 
                 Expect.contains
                     decayed.Verdicts
-                    (Verdict.Released("h1", taskId (Pickup "pile-a"), ReleaseReason.TaskGone))
+                    (Verdict.Released(
+                        "h1",
+                        taskId (Pickup("pile-a", Energy)),
+                        ReleaseReason.TaskGone
+                    ))
                     "one energy under it, ten tiles from home, and the trip is over"
             }
 
@@ -629,7 +633,7 @@ let pickupTaskTests =
 
                 Expect.equal
                     (Map.tryFind "a1" balanced)
-                    (Some(taskId (Pickup "pile-a")))
+                    (Some(taskId (Pickup("pile-a", Energy))))
                     "the same body at Work <= Move picks it up"
             }
 
@@ -710,7 +714,7 @@ let pickupTaskTests =
                             }
                             |> withTargets
                                 [
-                                    "pile-a", { X = 10; Y = 10 }, Dropped
+                                    "pile-a", { X = 10; Y = 10 }, (Dropped Energy)
                                     "can-far", { X = 30; Y = 10 }, Structure BuiltKind.Container
                                 ]
                             |> withCreepsAt [ "h1", { X = 20; Y = 10 } ]
@@ -720,7 +724,13 @@ let pickupTaskTests =
 
                 Expect.equal
                     verdicts
-                    [ Verdict.Matched("h1", taskId (Pickup "pile-a"), MatchFactor.PoolOrder) ]
+                    [
+                        Verdict.Matched(
+                            "h1",
+                            taskId (Pickup("pile-a", Energy)),
+                            MatchFactor.PoolOrder
+                        )
+                    ]
                     "ten tiles either way: pool order broke the tie, not rank"
             }
 
@@ -743,7 +753,7 @@ let pickupTaskTests =
                             }
                             |> withTargets
                                 [
-                                    "pile-a", { X = 30; Y = 10 }, Dropped
+                                    "pile-a", { X = 30; Y = 10 }, (Dropped Energy)
                                     "sto-c", { X = 13; Y = 10 }, Structure BuiltKind.Storage
                                 ]
                             |> withHome (fun layer ->
@@ -757,7 +767,7 @@ let pickupTaskTests =
 
                 Expect.equal
                     verdicts
-                    [ Verdict.Matched("h1", taskId (Pickup "pile-a"), MatchFactor.Rank) ]
+                    [ Verdict.Matched("h1", taskId (Pickup("pile-a", Energy)), MatchFactor.Rank) ]
                     "the feeding tier beats the stock draw whatever the distance"
             }
 
@@ -1029,5 +1039,184 @@ let thoriumLegTests =
                     (intentsFor (hauler "h1" 0 200 |> carrying 150) { X = 13; Y = 10 })
                     (TransferEnergyToStructure("h1", "sto-1", Thorium))
                     "and the pour names the Storage and the same resource back"
+            }
+        ]
+
+/// `Fixtures.withMinePile`'s pile in **energy** rather than in the season's ore,
+/// one fact apart: the same tile, the same amount, filed under the energy column
+/// the kind now names. The pairwise premise for the case about where a Thorium
+/// pile ranks, and private to it — the shared tier is for what a second *domain*
+/// reads, and the one question this answers is a pool question.
+let private withMineEnergyPile units (colony: ColonyView) =
+    { colony with
+        Spatial =
+            { colony.Spatial with
+                Stores = Map.add "pile-min" units colony.Spatial.Stores
+            }
+            |> withTargets [ "pile-min", minePost, Dropped Energy ]
+    }
+
+[<Tests>]
+let thoriumPileTests =
+    testList
+        "the Thorium pile's pool"
+        [
+            test "the ore on the ground is a Pickup, and the energy pile's id is untouched" {
+                // #311: a mineral container caps at 2,000 and the [[miner]]
+                // stands on it, so every tick the haul lags the next dig lands
+                // on the floor of that same tile as a dropped pile — 630 on
+                // W12S28's mine tile and ~300 on W13S28's at t401,850, decaying
+                // at `ceil(amount / 1000)` a tick, with no Task in the colony
+                // that could name one. Pairwise on the ground alone: the same
+                // colony without the pile pools no Pickup at all.
+                let piled = planTasks (mineHaulColony |> withMinePile 630) noThreats
+
+                Expect.contains
+                    piled
+                    (Pickup("pile-min", Thorium))
+                    "the pile on the mine post is the container's own intake off the floor"
+
+                Expect.isFalse
+                    (planTasks mineHaulColony noThreats
+                     |> List.exists (function
+                         | Pickup _ -> true
+                         | _ -> false))
+                    "the premise: no pile, no Pickup"
+
+                // The id carries the resource and the energy spelling is frozen
+                // where #167 left it, a Task id being a Memory key.
+                Expect.equal
+                    (taskId (Pickup("pile-min", Thorium)))
+                    "pickup:pile-min:Thorium"
+                    "the Thorium pile is its own identity on that tile"
+
+                Expect.equal
+                    (taskId (Pickup("pile-min", Energy)))
+                    "pickup:pile-min"
+                    "and an energy pile's id has not moved a byte"
+            }
+
+            test "a Thorium pile is drawn on the Storage's tier; the same pile in energy is flow" {
+                // Where the pile ranks, pairwise on the **resource alone**: the
+                // same tile, the same 630, the same body. ADR 0057 decision 3
+                // put the Thorium *container* at `StockDraw` so that an empty
+                // hauler beside the mine never takes the season's ore ahead of
+                // the energy the spawn is waiting on, and a pile is that
+                // container's next dig lying on the floor — one intake of one
+                // resource, so ranking the two apart would be the colony saying
+                // that where the ore sits changes what it is worth. Above the
+                // surplus all the same, which is what makes the trip worth
+                // making: the pile bleeds and a Build site does not.
+                let rankIn colony task =
+                    poolOn colony
+                    |> List.tryPick (fun pooled ->
+                        if pooled.Task = task then Some pooled.Priority else None)
+
+                Expect.equal
+                    (rankIn (mineHaulColony |> withMineEnergyPile 630) (Pickup("pile-min", Energy)))
+                    (Some(priorityOfTier Feeding + rankOfRung OneRungUp))
+                    "the premise: an energy pile feeds the economy, and 630 is a trip of its own"
+
+                Expect.equal
+                    (rankIn (mineHaulColony |> withMinePile 630) (Pickup("pile-min", Thorium)))
+                    (Some(priorityOfTier StockDraw))
+                    "and the season's ore is drawn on the Storage's own tier, rungless"
+            }
+
+            test "the pile that overflowed the container is taken before the container" {
+                // The two are one resource at one rank on one tile, so
+                // [[priority]], [[travel cost]] and crowding load all three tie
+                // and the pool's order is what is left — `MatchFactor.PoolOrder`
+                // — and the piles stand before the Withdraws in it (#242). Of
+                // two copies of the same ore the one to take is the one that is
+                // going away: the pile loses `ceil(amount / 1000)` a tick and
+                // the container beside it loses nothing.
+                let piled = mineHaulColony |> withMinePile 600
+
+                let colony =
+                    { piled with
+                        Creeps = [ hauler "h1" 0 200 ]
+                        Spatial = piled.Spatial |> withCreepsAt [ "h1", { X = 12; Y = 10 } ]
+                    }
+
+                Expect.equal
+                    ((decideOn colony).Verdicts
+                     |> List.tryPick (function
+                         | Verdict.Matched("h1", tid, factor) -> Some(tid, factor)
+                         | _ -> None))
+                    (Some(taskId (Pickup("pile-min", Thorium)), MatchFactor.PoolOrder))
+                    "the decaying copy first, and the pool's order is what says so"
+            }
+
+            test "a pile past the threshold is pooled; one under it is left to decay" {
+                // `Tuning.PickupThreshold`, the energy pile's own number read
+                // down the second column (#167, #311): one threshold and not a
+                // second knob, because what it prices is the **trip** and not
+                // the cargo. Inclusive at the line, like the energy pile's.
+                // Pairwise on the amount alone.
+                let pooled units =
+                    planTasks (mineHaulColony |> withMinePile units) noThreats
+                    |> List.contains (Pickup("pile-min", Thorium))
+
+                Expect.isTrue (pooled 100) "a hundred exactly is worth the walk"
+                Expect.isFalse (pooled 99) "one under it is left where it lies"
+            }
+
+            test "the pile's capacity is counted off its own column" {
+                // #161's cap, read the way the Thorium Withdraw beside it reads
+                // it: the amount of *that* resource over one [[hauler unit]]'s
+                // load, which is 200 at this bank. The energy the pile holds
+                // none of admits nobody, which is why the pile never reaches the
+                // energy Pickup's pool at all.
+                let seatsAt units =
+                    poolOn (mineHaulColony |> withMinePile units)
+                    |> List.tryPick (fun pooled ->
+                        if pooled.Task = Pickup("pile-min", Thorium) then
+                            Capacity.capOf CapScope.Everyone pooled.Capacity
+                        else
+                            None)
+
+                Expect.equal (seatsAt 600) (Some 3) "six hundred of Thorium is three loads"
+                Expect.equal (seatsAt 200) (Some 1) "one load is one seat"
+            }
+
+            test "a pile in a room somebody else owns is nobody's" {
+                // Whose the ore is, is whose the room is (#261, #311). A pile
+                // carries no owner at all, and `FIND_DROPPED_RESOURCES` answers
+                // for every player's — but an extractor needs an **owned** RCL6
+                // room, so the only Thorium that can be lying in a room we own
+                // is Thorium a miner of ours dug. Pairwise on the room's owner
+                // alone: the same pile, the same amount, filed one room over.
+                let withPileIn room control =
+                    { mineHaulColony with
+                        RoomControl = Map.add room control mineHaulColony.RoomControl
+                        Spatial =
+                            { mineHaulColony.Spatial with
+                                TargetKinds =
+                                    Map.add
+                                        "pile-r"
+                                        (Dropped Thorium)
+                                        mineHaulColony.Spatial.TargetKinds
+                                Thorium = Map.add "pile-r" 630 mineHaulColony.Spatial.Thorium
+                            }
+                            |> withNeighbour
+                                room
+                                { RoomLayer.empty with
+                                    Terrain =
+                                        Map.ofList [ for x in 8..12 -> { X = x; Y = 10 }, Plain ]
+                                    TargetPositions = Map.ofList [ "pile-r", minePost ]
+                                }
+                    }
+
+                let pooledIn colony =
+                    planTasks colony noThreats |> List.contains (Pickup("pile-r", Thorium))
+
+                Expect.isTrue
+                    (pooledIn (withPileIn "W1N2" ownedRoom))
+                    "the premise: a room of ours, and its floor is ours to sweep"
+
+                Expect.isFalse
+                    (pooledIn (withPileIn "W1N2" rivalRoom))
+                    "another player's mine bleeding is not this colony's trip"
             }
         ]

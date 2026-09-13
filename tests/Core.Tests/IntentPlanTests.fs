@@ -17,7 +17,7 @@ let private candidates name =
         UpgradeController(name, "controller")
         TransferEnergyToStructure(name, "store", Energy)
         WithdrawFromStore(name, "store", Energy, None)
-        PickupEnergy(name, "pile")
+        PickupPile(name, "pile")
         ReserveController(name, "controller")
         ClaimController(name, "controller")
         MoveCreep(name, Top)
@@ -65,7 +65,7 @@ let tests =
                             "channels belong to actors"
             }
             test "different targets still overwrite the same method" {
-                match create [ PickupEnergy("hauler", "one"); PickupEnergy("hauler", "two") ] with
+                match create [ PickupPile("hauler", "one"); PickupPile("hauler", "two") ] with
                 | Ok _ -> failtest "two pickup targets must not become an executable plan"
                 | Error conflict -> Expect.equal conflict.Creep "hauler" "identify the actor"
             }

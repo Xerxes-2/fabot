@@ -20,11 +20,25 @@ type TargetKind =
     | Controller
     | Structure of BuiltKind
     | Site of BuiltKind
-    /// A dropped energy pile. Two readers: the [[pickup reflex]], which takes
-    /// what is already at a creep's feet and reads no amount, and the Pickup
-    /// Task (#167), which walks a hauler to a pile big enough to be worth the
-    /// trip and reads the amount out of `SpatialInfo.Stores`.
-    | Dropped
+    /// A dropped pile, and **which resource it is** (#311). Two readers: the
+    /// [[pickup reflex]], which takes what is already at a creep's feet and
+    /// reads no amount, and the Pickup Task (#167), which walks a hauler to a
+    /// pile big enough to be worth the trip and reads the amount out of that
+    /// resource's own column — `SpatialInfo.Stores` for energy and
+    /// `SpatialInfo.Thorium` beside it.
+    ///
+    /// The resource rides **in** the kind rather than beside it, because a pile
+    /// holds exactly one: the engine's dropped resource keeps its amount in
+    /// `object[resourceType]` and not in a `store`, so two resources on one
+    /// tile are two objects with two ids — and that same missing `store` is why
+    /// a pile costs a standing creep no TTL where the [[container]] beside it
+    /// does (`docs/research/thorium-reactor.md` §2). `Mineral` below carries no
+    /// resource for the opposite reason, and the difference is the whole of why
+    /// one case is parameterised and the other is not: the shell can filter
+    /// `FIND_MINERALS` down to the one deposit this colony ever digs, and
+    /// filtering `FIND_DROPPED_RESOURCES` the same way is what left the
+    /// season's ore on the floor with no Task that could ever name it (#311).
+    | Dropped of resource: Resource
     /// A tombstone or a ruin: a store with a clock on it. One kind for both
     /// engine objects, because the only thing any reader decides on is that it
     /// holds energy and will be gone, and `Withdraw` is the verb for either.
@@ -48,7 +62,7 @@ type TargetKind =
 /// happened to die (ADR 0011's determinism).
 let isTransient =
     function
-    | Dropped
+    | Dropped _
     | Tombstone -> true
     | Source
     | Controller
@@ -155,17 +169,20 @@ type SpatialInfo =
         /// Target id -> energy currently stored: the stock the logistics Tasks
         /// judge a store by. The containers (ADR 0012) and the Storage (ADR
         /// 0023) are the standing stores, and the two transient ones are here
-        /// on the same key — a tombstone's or a ruin's energy, and a pile's
-        /// amount.
+        /// on the same key — a tombstone's or a ruin's energy, and an **energy**
+        /// pile's amount. A Thorium pile's rides in `Thorium` below, the way
+        /// every other holding of it does (#311).
         Stores: Map<string, int>
         /// Target id -> Thorium currently held there (ADR 0057 decision 3): the
-        /// mineral container's, the [[storage]]'s, and the deposit's own
-        /// remaining amount — every store the shell classifies to a modelled
-        /// kind, plus the rock. The sector Reactor is **not** among them today
-        /// and the ADR's sentence naming it is a forward one: it classifies to
-        /// `BuiltKind.Other`, which holds no store at all, so it arrives here
-        /// on the ticket that models the kind and gives its store a reader. A
-        /// **second id-keyed map beside
+        /// mineral container's, the [[storage]]'s, the deposit's own remaining
+        /// amount, and — since #311 — a dropped Thorium pile's, which is the
+        /// one entry here whose target holds no `store` at all and so the one
+        /// the contact penalty never prices. Every store the shell classifies
+        /// to a modelled kind, plus the rock and the floor. The sector Reactor
+        /// is **not** among them today and the ADR's sentence naming it is a
+        /// forward one: it classifies to `BuiltKind.Other`, which holds no store
+        /// at all, so it arrives here on the ticket that models the kind and
+        /// gives its store a reader. A **second id-keyed map beside
         /// `Stores`** and deliberately not a `Map<string, Map<Resource, int>>`,
         /// which would make every existing energy reader ask a question it
         /// never asks and give a bug somewhere to answer it wrongly. Two

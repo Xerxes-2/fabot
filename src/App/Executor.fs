@@ -103,7 +103,7 @@ let private execute (intent: Intent) : Outcome =
     // line is the only place a human sees it.
     | ClaimController(creepName, controllerId) ->
         withCreepTarget creepName controllerId (fun c t -> c.claimController t)
-    | PickupEnergy(creepName, resourceId) ->
+    | PickupPile(creepName, resourceId) ->
         withCreepTarget creepName resourceId (fun c t -> c.pickup t)
     // The Guard's attack and the shared self-heal reflex. The hostile belongs
     // to somebody

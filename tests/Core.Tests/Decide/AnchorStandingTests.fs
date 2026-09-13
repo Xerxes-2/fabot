@@ -230,7 +230,7 @@ let standingBodyTests =
                             |> withTargets
                                 [
                                     "sto-1", { X = 18; Y = 10 }, Structure BuiltKind.Storage
-                                    "pile-1", { X = 18; Y = 11 }, Dropped
+                                    "pile-1", { X = 18; Y = 11 }, (Dropped Energy)
                                 ]
                             |> withCreepsAt [ (creep: CreepInfo).Name, { X = 14; Y = 10 } ]
                     }
@@ -269,7 +269,7 @@ let standingBodyTests =
 
                 Expect.isTrue
                     (workerAssigned = Some(taskId (Withdraw("sto-1", Energy)))
-                     || workerAssigned = Some(taskId (Pickup "pile-1")))
+                     || workerAssigned = Some(taskId (Pickup("pile-1", Energy))))
                     "the generalist, one Carry per Work, walks to whichever intake is cheaper"
             }
 

@@ -401,7 +401,7 @@ let censusSignatureTests =
                                 Stores = Map.ofList [ "ext-1", 50 ]
                             }
                             |> withCreepsAt [ "w1", { X = 20; Y = 25 } ]
-                            |> withTargets [ "pile-1", { X = 22; Y = 25 }, Dropped ]
+                            |> withTargets [ "pile-1", { X = 22; Y = 25 }, (Dropped Energy) ]
                     }
 
                 Expect.equal

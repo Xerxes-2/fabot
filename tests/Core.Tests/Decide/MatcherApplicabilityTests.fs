@@ -483,4 +483,42 @@ let thoriumApplicabilityTests =
                     (Some(taskId (Refill("sto-1", Thorium))))
                     "which the ground behind it going away does not take from it"
             }
+
+            test "the ore on the ground wants an empty carrier, like the container's own draw" {
+                // #311: a Thorium Pickup is the container's Withdraw with the
+                // store taken away, so its gate is that arm's gate — an
+                // **empty** body and not #232's half-empty one, a body carrying
+                // one resource at a time. What it drops is `worthTheTrip`, which
+                // a pile has never been priced by: a pile decays and a store
+                // does not.
+                //
+                // Pairwise on the body's store alone, with the mineral container
+                // emptied so the pile is the only Thorium in the colony and the
+                // pair cannot be won by the store beside it.
+                let piled = mineHaulColony |> withMineStock 0 |> withMinePile 630
+
+                let matchedWith body =
+                    let colony =
+                        { piled with
+                            Creeps = [ body ]
+                            Spatial = piled.Spatial |> withCreepsAt [ "h1", { X = 12; Y = 10 } ]
+                        }
+
+                    Map.tryFind "h1" (decideOn colony).Assignments
+
+                Expect.equal
+                    (matchedWith (hauler "h1" 0 200))
+                    (Some(taskId (Pickup("pile-min", Thorium))))
+                    "nothing aboard is what makes a body the pile's"
+
+                Expect.equal
+                    (matchedWith (hauler "h1" 100 100))
+                    (Some(taskId (Refill("sto-1", Energy))))
+                    "half a load of energy aboard, and the body is a delivery and not an intake"
+
+                Expect.equal
+                    (matchedWith (hauler "h1" 0 200 |> carrying 150))
+                    (Some(taskId (Refill("sto-1", Thorium))))
+                    "and one already holding ore has one Task: put it down"
+            }
         ]

@@ -170,12 +170,30 @@ let private seenFacts
 
     let sources = room.find findSources |> Array.map (fun o -> o :?> ISource)
 
-    // Dropped energy piles: position, kind and amount, which is what the
-    // Pickup Task's threshold and its capacity are read off (#167).
+    // Dropped piles: position, kind and amount, which is what the Pickup
+    // Task's threshold and its capacity are read off (#167).
+    //
+    // **Both of the colony's resources and not energy alone** (#311). The
+    // filter here used to be `resourceType = "energy"`, so a Thorium pile
+    // reached neither `Stores`, nor `Dropped`, nor the [[pickup reflex]] — the
+    // shell did not carry it as a fact at all, and nothing downstream could
+    // have pooled a Task for it however much it wanted to. That is what left
+    // ~630 on W12S28's mine tile and ~300 on W13S28's decaying at
+    // `ceil(amount / 1000)` a tick with the hauler row standing by. Classified
+    // rather than filtered, the way every other engine string in this file is:
+    // the resource rides into the projection on the kind, and a pile of
+    // anything else — a stronghold's loot, another player's drop — is filtered
+    // out here, where `Resource` says what this colony has a decision about.
     let dropped =
         room.find findDroppedResources
         |> Array.map (fun o -> o :?> IResource)
-        |> Array.filter (fun r -> r.resourceType = resourceName Energy)
+        |> Array.choose (fun r ->
+            if r.resourceType = resourceName Energy then
+                Some(r, Energy)
+            elif r.resourceType = resourceName Thorium then
+                Some(r, Thorium)
+            else
+                None)
 
     // The stores with a clock on them (#167): a dead creep's tombstone and a
     // destroyed structure's ruin, projected as one kind because a Withdraw
@@ -226,7 +244,7 @@ let private seenFacts
                                 structures |> Array.map (fun (st, _) -> st.id, posOf st.pos)
                                 sites |> Array.map (fun (site, _) -> site.id, posOf site.pos)
                                 controllers |> Array.map (fun c -> c.id, posOf c.pos)
-                                dropped |> Array.map (fun r -> r.id, posOf r.pos)
+                                dropped |> Array.map (fun (r, _) -> r.id, posOf r.pos)
                                 tombstones |> Array.map (fun r -> r.id, posOf r.pos)
                                 minerals |> Array.map (fun m -> m.id, posOf m.pos)
                             ]
@@ -294,7 +312,7 @@ let private seenFacts
                         structures |> Array.map (fun (st, kind) -> st.id, Structure kind)
                         sites |> Array.map (fun (site, kind) -> site.id, Site kind)
                         controllers |> Array.map (fun c -> c.id, Controller)
-                        dropped |> Array.map (fun r -> r.id, Dropped)
+                        dropped |> Array.map (fun (r, resource) -> r.id, Dropped resource)
                         // A tombstone stands on the tile its creep died on and
                         // a ruin where its structure stood.
                         tombstones |> Array.map (fun r -> r.id, Tombstone)
@@ -324,7 +342,9 @@ let private seenFacts
                         st.id, st.store.getUsedCapacity (resourceName Energy))
                     tombstones
                     |> Array.map (fun r -> r.id, r.store.getUsedCapacity (resourceName Energy))
-                    dropped |> Array.map (fun r -> r.id, r.amount)
+                    dropped
+                    |> Array.choose (fun (r, resource) ->
+                        if resource = Energy then Some(r.id, r.amount) else None)
                 ]
             |> Map.ofArray
         // The Thorium beside it (ADR 0057 decision 3): what each store holds of
@@ -341,6 +361,14 @@ let private seenFacts
                     |> Array.map (fun (st, _) ->
                         st.id, st.store.getUsedCapacity (resourceName Thorium))
                     minerals |> Array.map (fun m -> m.id, m.mineralAmount)
+                    // And the floor (#311): a dropped pile holds its amount in
+                    // `object[resourceType]` rather than in a `store`, which is
+                    // why the mod's contact penalty skips it — and why the
+                    // amount is read off `r.amount` here exactly as an energy
+                    // pile's is, one column over.
+                    dropped
+                    |> Array.choose (fun (r, resource) ->
+                        if resource = Thorium then Some(r.id, r.amount) else None)
                 ]
             |> Array.filter (fun (_, held) -> held > 0)
             |> Map.ofArray

@@ -171,7 +171,9 @@ module ColonyView =
         | Site _
         | Structure BuiltKind.Spawn -> true
         | Source
-        | Dropped
+        // A pile of either resource: a child's floor is the child's, and the
+        // season's ore lying in her room is hers as much as her deposit is.
+        | Dropped _
         | Tombstone
         // A child's deposit is the child's: the mother's [[pioneer]]s build
         // and upgrade out there and mine nothing, so a mineral of the room
