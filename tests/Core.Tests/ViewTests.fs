@@ -2054,3 +2054,316 @@ let errandTests =
                     "no room is any colony's outpost and any colony's errand at once"
             }
         ]
+
+// ---- the scan set over the masked layer (ADR 0060 decision 2, #317) -------
+
+/// The chain the live errand walks, as the server has it (ADR 0036): W15S28,
+/// the two rooms a shortest walk crosses, and the sector centre the Reactor
+/// stands in. Real terrain, because what every case below turns on is what the
+/// [[keeper margin]] does to a **border ring**, and W15S26 is the one room
+/// this repo declares keeper rocks for (`Keepers.centres`, `rooms/W15S26.room`).
+let private liveChain = [ "W15S28"; "W15S27"; "W15S26"; "W15S25" ]
+
+/// The Source Keeper room the mask is declared in, and the sector centre
+/// `Errand.w15s25` names.
+let private keeperRoom = "W15S26"
+let private reactorRoom = "W15S25"
+
+/// The home the declarations below are declared from — the one room in this
+/// world whose ground is invented, and the reason the cases can be read at the
+/// margin the bot actually ships.
+///
+/// **Why not W15S28, the live home.** At the shipped six the mask reaches
+/// exactly one of W15S26's four rings. The north ring's nearest declared
+/// centre is the mineral at (38,7) and the east ring's is the lair at (42,39),
+/// both **seven** away; the south ring's nearest is ten away; and the west
+/// ring loses y ∈ 11..23 and 27..42 to the lairs at (6,17) and (5,36) and the
+/// source at (4,33) (`AtlasSeamTests`, "a rock near a border does take exit
+/// tiles out of that band"). So the shipped margin closes no crossing of the
+/// live chain — the `List.pairwise` loop below asserts exactly that, and it is
+/// the line that goes red if a re-capture or a new rock ever changes it — and
+/// the single border at which six can close one is W15S26's **west** one,
+/// which faces W16S26 (`RoomName.offsetOf`; the x = 49 column faces W14S26,
+/// #336).
+///
+/// W16S26 has no capture, so its ring is written here rather than loaded. That
+/// is this repo's own idiom for the mask and not a licence taken: the margin is
+/// declared by **room name** and is terrain-blind by construction, which is
+/// what lets invented ground under a real name say something true about the
+/// real declaration (`AtlasFixtures.keeperRoom` says the same in its own
+/// words). What the invention buys is the whole point of it: the disagreement
+/// between the raw and the masked reading lands at `Tuning.defaults`, so every
+/// refusal below is the one this bot ships, and the knob is only ever the
+/// control.
+let private keeperHome = "W16S26"
+
+/// That invented ring: W16S26's east column — the one `Seam.pairsAcross` pairs
+/// with W15S26's x = 0 column — open across y ∈ 19..23 and walled everywhere
+/// else. Those five tiles are the disagreement and the whole of it: W15S26's
+/// own west ring carries them over raw terrain, the lair at (6,17) masks every
+/// one of them at the shipped six, and the eight raw crossings that survive the
+/// mask there (y ∈ 3..10) are walled on this side, so no pair is left.
+let private homeRing: Map<Pos, Terrain> =
+    Map.ofList
+        [
+            for x in 0..49 do
+                for y in 0..49 do
+                    if x = 0 || x = 49 || y = 0 || y = 49 then
+                        { X = x; Y = y }, (if x = 49 && y >= 19 && y <= 23 then Plain else Wall)
+        ]
+
+/// The world those five rooms make: a border ring apiece and nothing else at
+/// all. The ring is what the shell reads for a declared or transit room whether
+/// or not there is vision (ADR 0031, ADR 0041), and `scanOf` reads the rings and
+/// nothing besides — so a world carrying terrain, a tick or a census would only
+/// be a world with more to get wrong.
+///
+/// A **function**, and not because #310's rule reaches it: that rule is an
+/// Atlas's, and a `World` is `Map` and `list` the whole way down, so a
+/// module-level one would be safe to share and `ParallelSafetyTests` would have
+/// nothing to say about it. It is a function so the four captures are read by
+/// the tests that ask for them instead of at module load.
+let private keeperWorld () : World =
+    { World.empty with
+        Rooms =
+            (keeperHome,
+             { RoomFacts.empty with
+                 Border = homeRing
+             })
+            :: (liveChain
+                |> List.map (fun name ->
+                    name,
+                    { RoomFacts.empty with
+                        Border = (RoomFixtures.load name).Border
+                    }))
+            |> Map.ofList
+    }
+
+/// The one tuning below that is not the server's, and it is the **control**:
+/// what the refusals are read under is `Tuning.defaults`. Five is the last
+/// margin at which the crossing survives — the lair at (6,17) is six from the
+/// x = 0 column and masks nothing on it below that — so this is the same
+/// fixture with the mask pulled off that one ring and nothing else moved. The
+/// margin is a `Tuning` knob and is swept as one here, exactly as
+/// `RoomSeamTests` sweeps it: 1 + 3 + `ReachMargin`, so one is five.
+let private reachingTuning = { Tuning.defaults with ReachMargin = 1 }
+
+/// The same room declared as each kind, so the two cases below differ in the
+/// clause of `scanOf` that reads them and in nothing else.
+///
+/// The errand is the **live** one. The outpost is not and could not be: W15S25
+/// is a sector centre with no controller, which is the vocabulary hole ADR 0060
+/// decision 1 opened the `Errand` kind for — so this is that room written into
+/// `Outposts` by a human's hand, which is the slip the two kinds exist to keep
+/// apart, and it carries the capture's own rocks with a controller the fixture
+/// names because the room has none to name. Neither half is read by the
+/// narrowing: `Outpost.routable` asks the room name.
+let private reactorAsOutpost () : Outpost =
+    let capture = RoomFixtures.load reactorRoom
+
+    {
+        RoomName = reactorRoom
+        Sources =
+            capture.RealSources
+            |> List.map (fun (id, pos) ->
+                id,
+                {
+                    Room = reactorRoom
+                    X = pos.X
+                    Y = pos.Y
+                })
+        Controller = "ctrl-W15S25", { Room = reactorRoom; X = 31; Y = 22 }
+    }
+
+/// Every room the scan set carries when the declaration is admitted: the home,
+/// the declared room, and **both** rooms a shortest two-hop walk could pass
+/// through. W16S25 is the second of those and this world holds no facts for it
+/// — which is right and is ADR 0058's own rule: the transit set is answered off
+/// the names, because the route needs the rooms' terrain and the terrain needs
+/// them projected (`RoomName.transitBetween`).
+let private admittedScan =
+    [ keeperHome; reactorRoom; keeperRoom; "W16S25" ] |> List.sort
+
+/// One colony's scan set off that world, under whichever tuning is handed in.
+/// No stage, no unowned home and no [[stand-down]]: the borrowed half of the
+/// answer is a child's and this colony has none, so every room in `Scanned`
+/// beyond the home is one of the two narrowed clauses' doing.
+let private scanUnder tuning (colony: Colony) =
+    World.scanOf tuning Map.empty Set.empty [ colony ] Set.empty (keeperWorld ()) colony
+
+let private declaringOutpost outpost : Colony =
+    {
+        Home = keeperHome
+        Outposts = [ outpost ]
+        Errands = []
+        Mother = None
+    }
+
+let private declaringErrand errand : Colony =
+    {
+        Home = keeperHome
+        Outposts = []
+        Errands = [ errand ]
+        Mother = None
+    }
+
+[<Tests>]
+let scanSetMaskTests =
+    testList
+        "the scan set is narrowed over the layer the price is taken over"
+        [
+            test "the keeper mask closes at the shipped margin a crossing the raw rings leave open" {
+                // Everything below rests on this, so it is asserted rather than
+                // assumed: a fixture that stopped exhibiting the disagreement
+                // would leave every case green having checked nothing.
+                //
+                // `World.linked` is the one predicate `scanOf` narrows both
+                // declaration kinds by, and the margin is its first argument —
+                // which is the whole of #317: the routable question has to be
+                // asked over the **same** masked layer every price is taken
+                // over, or the scan set admits a chain the flood cannot walk.
+                // That the price half reads the same mask is `AtlasSeamTests`'
+                // ("the mask narrows a band the same way for the route search
+                // and for the price"); what is pinned here is the wiring, at
+                // `scanOf`'s own altitude.
+                let world = keeperWorld ()
+
+                Expect.isTrue
+                    (World.linked 0 world keeperHome keeperRoom)
+                    "over raw rings the home's five exits face open ground in the Source Keeper room"
+
+                Expect.isFalse
+                    (World.linked (Tuning.keeperMargin Tuning.defaults) world keeperHome keeperRoom)
+                    "and at the margin the bot ships it faces none, the lair behind that column taking every one"
+
+                Expect.isTrue
+                    (World.linked (Tuning.keeperMargin reachingTuning) world keeperHome keeperRoom)
+                    "one margin below, the same crossing is open: what closed it is the mask and not the ring"
+
+                Expect.isTrue
+                    (World.linked (Tuning.keeperMargin Tuning.defaults) world keeperRoom reactorRoom)
+                    "the rest of the way is open at the shipped margin, so the closed crossing is the first alone"
+
+                // Zero is the raw reading here and not merely a small margin:
+                // it masks the eight declared centres themselves and no other
+                // tile, and not one of them lies on a ring of its room.
+                //
+                // The live chain, said out loud beside the invented crossing:
+                // no border of it is the mask's at six, which is why the
+                // disagreement had to be built against an invented far side and
+                // is also the line that would go red if a re-capture or a new
+                // keeper rock ever closed the chain the errand really walks.
+                for near, far in List.pairwise liveChain do
+                    Expect.isTrue
+                        (World.linked (Tuning.keeperMargin Tuning.defaults) world near far)
+                        $"{near} -> {far}: the shipped margin closes no crossing of the live errand's chain"
+            }
+
+            test "an outpost the raw ring reaches and the masked layer does not leaves the scan set" {
+                // `scanOf`'s **outpost** clause, at its own altitude and at the
+                // shipped margin. The room is inside the hop budget and every
+                // chain to it is joined over raw terrain, so a narrowing that
+                // asked the raw layer would admit it — and admitted, it would
+                // be projected, its rocks pooled and a reserver hired for it
+                // every tick by the row that hires per declared outpost (ADR
+                // 0042), for a room whose price is `None` because the flood the
+                // price is taken over cannot cross the ring the mask closed.
+                //
+                // The declaration carries no errand, so this case is the
+                // outpost clause's and no other's.
+                let colony = declaringOutpost (reactorAsOutpost ())
+                let scan = scanUnder Tuning.defaults colony
+
+                Expect.isEmpty
+                    scan.Outposts
+                    "the outpost clause narrows it away over the masked layer"
+
+                Expect.equal
+                    scan.Scanned
+                    [ keeperHome ]
+                    "so the scan set is the home alone: no outpost room, and no crossing on the way to one"
+
+                // The other half of "refuse it loudly", and the third call site
+                // that reads this margin: `ColonyView.Refused` is built off its
+                // own `World.linked (Tuning.keeperMargin tuning)`
+                // (`Views.fs`), so a margin dropped there would leave the room
+                // out of the scan set **and** out of the channel that names what
+                // was refused — the silent failure ADR 0060 decision 1 exists
+                // to rule out, wearing the first one's clothes.
+                Expect.equal
+                    (viewUnder [ colony ] (keeperWorld ()) keeperHome).Refused
+                    [
+                        {
+                            RoomName = reactorRoom
+                            Kind = DeclarationKind.Outpost
+                        }
+                    ]
+                    "and the view names it out loud, under the kind it was declared as"
+
+                // And the control, which is what says the refusal is the
+                // margin's doing and not a broken fixture: the same
+                // declaration, the same world, one margin below the shipped
+                // six — and it is admitted, with the rooms the chain could
+                // cross.
+                let admitted = scanUnder reachingTuning colony
+
+                Expect.equal
+                    (admitted.Outposts |> List.map (fun outpost -> outpost.RoomName))
+                    [ reactorRoom ]
+                    "at a margin that closes no crossing the very same declaration is worked"
+
+                Expect.equal
+                    (admitted.Scanned |> List.sort)
+                    admittedScan
+                    "and its room and its transit rooms enter the scan set"
+            }
+
+            test "an errand the raw ring reaches and the masked layer does not leaves the scan set" {
+                // `scanOf`'s **errand** clause, the same case one clause over —
+                // and the kind for which it matters more, because an outpost
+                // with no chain wastes a reserver and an errand with no chain
+                // wastes the whole programme, the errand's entire content being
+                // a walk (ADR 0060 decision 1, `RefusedDeclaration`).
+                //
+                // The live declaration, and the declaration carries no outpost,
+                // so this case is the errand clause's and no other's.
+                let colony = declaringErrand Errand.w15s25
+                let scan = scanUnder Tuning.defaults colony
+
+                Expect.isEmpty
+                    scan.Errands
+                    "the errand clause narrows it away over the masked layer"
+
+                Expect.equal
+                    scan.Scanned
+                    [ keeperHome ]
+                    "so nothing of the Reactor's room, and nothing of the way to it, is projected"
+
+                // This is the sentence ADR 0060 decision 1 leans on when it
+                // calls an unreachable errand "refused loudly": the loudness is
+                // `ColonyView.Refused`'s, and the refusing is `scanOf`'s — and
+                // the two read the same margin off the same tuning or the room
+                // vanishes in silence.
+                Expect.equal
+                    (viewUnder [ colony ] (keeperWorld ()) keeperHome).Refused
+                    [
+                        {
+                            RoomName = reactorRoom
+                            Kind = DeclarationKind.Errand
+                        }
+                    ]
+                    "and the view names it out loud, under the kind it was declared as"
+
+                let admitted = scanUnder reachingTuning colony
+
+                Expect.equal
+                    (admitted.Errands |> List.map (fun errand -> errand.RoomName))
+                    [ reactorRoom ]
+                    "at a margin that closes no crossing the very same declaration is run"
+
+                Expect.equal
+                    (admitted.Scanned |> List.sort)
+                    admittedScan
+                    "and its room and its transit rooms enter the scan set"
+            }
+        ]
