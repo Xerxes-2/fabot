@@ -488,10 +488,12 @@ let planTasks (view: ColonyView) (threats: Threats) : Task list =
     // `ourThoriumPiles` cannot return one. The container is in her projection
     // and has to be filtered; the pile is not there to filter.
     //
-    // **Pooling it is not collecting it** (#306): the rank is `StockDraw`, so
-    // the pile waits for a hauler with no Feeding-tier work left, and a busy
-    // colony has none for long stretches — which is the same pressure #306 reads
-    // from the container's end, and its question to answer, not this list's.
+    // **Pooling it was not collecting it, and #306 is what made it so.** Ranked
+    // at a rungless `StockDraw` this list tied the [[storage]]'s own energy
+    // Withdraw and lost every travel-cost tie to it, so a colony with energy
+    // banked swept its floor never. #306 gives the ore a rung inside that tier —
+    // the pile one, the container that is feeding it two — and the two ends of
+    // that ticket's pressure are answered together in `Pool.priorityOf`.
     // What the [[hauler unit]]'s quota prices is the [[miner]]'s output into the
     // *container* (`Quota.mineRows`) and it is not widened for the floor: the
     // term is gated on `depositIsDiggable`, so the tick a deposit runs dry the
@@ -584,18 +586,27 @@ let planTasks (view: ColonyView) (threats: Threats) : Task list =
     @ storageWithdraws
     // Last, which costs the pair nothing: pool order is the Matcher's final
     // tie-break and reaches only an exact tie in [[priority]], [[travel cost]]
-    // and crowding load alike — and the Thorium pair shares its rank with the
-    // Storage's own two Tasks, which no body of the colony is ever applicable to
-    // at the same time as one of these (a body holding Thorium has no energy,
-    // and an empty one has no Thorium).
+    // and crowding load alike. The Thorium pair shares the [[storage]]'s tier
+    // with the Storage's own two Tasks, and **one of those three pairings is
+    // live** — this is the whole of #306 and the sentence that let #262 and
+    // #311 believe otherwise: a body holding Thorium is applicable to neither
+    // of the Storage's energy Tasks, but an **empty** one is applicable to
+    // `Withdraw(mineralContainer, Thorium)` and `Withdraw(storage, Energy)` at
+    // the same time, which is exactly the pair a hauler standing on the bank
+    // chooses between. Since #306 that pair is decided by [[priority]] and not
+    // by pool order at all — the lifted mine outranks the bank — and where the
+    // mine is under the cliff the bank's own travel cost wins, as it did
+    // before. The `Refill(storage, Thorium)` half is the disjoint one: a body
+    // with ore aboard applies to no energy Task in the colony.
     //
     // The piles stand before the Withdraws here for the reason they do above
-    // (#242, #311): the two are one resource at one rank taken by one body, and
-    // of two copies tied on [[priority]], [[travel cost]] and crowding alike the
-    // one to take is the one that is going away — a pile bleeds
-    // `ceil(amount / 1000)` a tick where the container beside it bleeds
-    // nothing. That tie is the live case and not a hypothetical: the pile lies
-    // on the mine [[post]], which is the container's own tile.
+    // (#242, #311) — of two copies of one resource on one tile the one to take
+    // is the one that is going away — but since #306 gave each of them a rung
+    // of its own the [[priority]] decides this pair outright, in both
+    // directions: the pile over a container under the contact cliff, the
+    // container over the pile once it is past it. So the order below carries
+    // nothing for this pair and is written the way the energy lists above are
+    // written, which is the only claim made for it.
     @ minePickups
     @ mineWithdraws
     @ mineRefills

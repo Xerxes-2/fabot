@@ -269,7 +269,25 @@ let internal applicable
         let worthTheTrip =
             stock * 2 >= creep.FreeCapacity
             || (Map.tryFind storeId view.Spatial.TargetKinds |> Option.exists isTransient)
-            || pooled.Priority >= priorityOfTier StockDraw
+            // The **tier** and not the bare rank (#306): a rung orders a Task
+            // inside its tier and never leaves it (`tierRungs`/`priorityStep`),
+            // so the shallowest rank `StockDraw` owns is half a tier above it,
+            // and the mineral container lifted two rungs for bleeding onto the
+            // floor is the stock-tier intake it always was. Read as a
+            // comparison against the tier's own rank this clause goes quietly
+            // false on exactly the container it exists to keep drawable —
+            // **latently**, and the word is exact: the Thorium arm below admits
+            // an *empty* body only, the first disjunct is then
+            // `stock * 2 >= carry`, and the widest carrier this colony casts is
+            // 1,600 (sixteen hauler blocks at the engine's fifty parts), so at
+            // the 1,000 the lift fires at the first disjunct is already true for
+            // every body that can ask. Falsifying this one would want a body
+            // over 2,000 of carry, which no row of ours sizes. Written as the
+            // tier all the same, because the clause's own reason is a fact about
+            // the tier — there is no intake below the Storage's — and a
+            // disjunct that is right by an arithmetic coincidence two rows away
+            // is the kind of thing a wider body silently breaks.
+            || pooled.Priority >= priorityOfTier StockDraw - tierRungs / 2
             || (buffer && standing)
 
         // **The Thorium arm is a different sentence** (ADR 0057 decision 3),

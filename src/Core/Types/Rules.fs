@@ -225,18 +225,43 @@ type Tuning =
         /// number is a knob of this colony's where `EXTRACTOR_COOLDOWN` beside
         /// it would be a lie about the server.
         ///
-        /// It is a **policy assumption and not a bound**, and the two ways it
-        /// is optimistic are written down rather than discovered: over one
-        /// 600-tick fill at 3.33 T/tick the tile stands at `p = 0` for three
-        /// ticks, `p = 1` for twenty-seven, `p = 2` for 270 and `p = 3` for
-        /// 300, which averages **3.44**; and #306 records the container
-        /// standing *full* at 2,000 — `p = 3`, so `1 + p = 4` — in a colony
-        /// whose haulers never reach the Thorium draw's tier. Three is
-        /// therefore a floor on a cadence nothing in the code enforces, and
-        /// what it costs while it is wrong is an upgrade mouth the mine is
-        /// really paying for. The number moves with #306's answer and not
-        /// before it (#313).
+        /// It is a **policy assumption and not a bound**, and since #306 the
+        /// policy is one the code states: the draw is escalated two rungs at
+        /// `MineContactCliff` below, so the haul it assumes is the haul the
+        /// ladder now asks for, and a container drawn there cycles 0..999 at a
+        /// mean `1 + p` of ≈2.9 — ≈3.0 counting the window it goes on filling
+        /// through while a hauler walks in. **Three stands**; the honest four
+        /// of a container left at its 2,000 cap is the state #306 ended, and the
+        /// 3.44 once written here was the arithmetic of a fill run all the way
+        /// to that cap.
+        ///
+        /// It is a floor and not a bound all the same, and #313 is **unblocked
+        /// rather than settled** by that: the rung wins only *within*
+        /// `StockDraw`, so a colony saturated on Feeding-tier work still leaves
+        /// the container to fill, and what #313 has to decide is what to charge
+        /// for that colony rather than for this one.
         MineContactAgeing: int
+        /// The load on the mine tile at which the colony escalates the mineral
+        /// container's [[withdraw]] two rungs (#306) — the line the field above
+        /// is the other end of, which is why the two stand together here and
+        /// neither is an `Engine` binding. The **engine** fact is the formula
+        /// (`thorium.js`, `docs/research/thorium-reactor.md` §2): `p = floor(log10
+        /// total)` over everything with a `store` on the tile, a body burning
+        /// `1 + p` ticks of life a tick, and a cliff at *every* decade. Which
+        /// decade the haul is run at is this colony's policy and no constant of
+        /// the server's — there is no `CONTACT_PENALTY_CLIFF` to name.
+        ///
+        /// A thousand, on the arithmetic of the two states rather than on the
+        /// decade being the tidiest: drawn here the container cycles 0..999 and
+        /// the [[miner]] over it averages `1 + p ≈ 2.9` (≈3.0 counting the
+        /// window the container goes on filling while a hauler walks in), which
+        /// is the three `MineContactAgeing` is written for; left to the 2,000
+        /// cap it cycles 500..2,000 — one 1,500-carry load off the cap — and
+        /// ~300 of those ~450 ticks stand over the cliff, averaging **3.67** and
+        /// buying the row a third more bodies for the same ore. Moving it up a
+        /// decade would be the second of those, and moving it down spends trips
+        /// on a container that is not yet bleeding.
+        MineContactCliff: int
         /// The Layout horizon (ADR 0011, moved to RCL5 by ADR 0039 and to RCL6
         /// by ADR 0055): the whole plan is computed up to this level regardless
         /// of the current one, so today's roads route around tomorrow's
@@ -342,6 +367,7 @@ module Tuning =
             ExtractorLevel = 6
             MinerWorkPerMove = 5
             MineContactAgeing = 3
+            MineContactCliff = 1000
             HorizonLevel = 6
             OutpostBuilders = 2
             BootstrapLevel = 3

@@ -987,6 +987,70 @@ let thoriumLegTests =
                     "the sink is the Storage's deepest tier, below every energy sink"
             }
 
+            test "past the contact cliff the mine's draw takes the full container's two rungs" {
+                // #306, amending ADR 0057 decision 3. Decision 3 ranked the
+                // draw at `StockDraw` so that the season's ore never went ahead
+                // of the energy the spawn is waiting on — and the **Storage's
+                // own energy Withdraw sits on that same tier** (ADR 0023), so a
+                // rungless mine loses the travel-cost tie to the bank in the
+                // middle of the room every tick a colony has energy banked.
+                // Live at t402,520 that is W13S28: 486k of energy, no Thorium,
+                // and a container standing at its 2,000 cap.
+                //
+                // The rung the energy tier already has for exactly this — a full
+                // [[container]] whose income is going away — read down the ore's
+                // column, and fired at the **contact cliff** rather than at the
+                // cap, because at a thousand the tile has already turned
+                // `p = 3` and the [[miner]] over it is burning a fourth tick of
+                // life a tick. Pairwise on the stock alone, one unit either side
+                // of the line.
+                // The bank, and a mouth for it: the Storage's own Withdraw is
+                // pooled only where the colony has somewhere to put the energy
+                // (ADR 0023), which is the shape of every colony this ticket is
+                // about — W13S28 has a whole refill cluster.
+                let banked =
+                    { mineHaulColony with
+                        Refillables = [ refillable "spawn-1" 50 BuiltKind.Spawn ]
+                        Spatial =
+                            { mineHaulColony.Spatial with
+                                Stores = Map.add "sto-1" 485_916 mineHaulColony.Spatial.Stores
+                            }
+                    }
+
+                let rankIn colony task =
+                    poolOn colony
+                    |> List.tryPick (fun pooled ->
+                        if pooled.Task = task then Some pooled.Priority else None)
+
+                Expect.equal
+                    (rankIn (banked |> withMineStock 999) (Withdraw("can-min", Thorium)))
+                    (Some(priorityOfTier StockDraw))
+                    "the premise: under the cliff the draw is decision 3's rungless intake"
+
+                Expect.equal
+                    (rankIn
+                        (banked |> withMineStock Tuning.defaults.MineContactCliff)
+                        (Withdraw("can-min", Thorium)))
+                    (Some(priorityOfTier StockDraw + rankOfRung TwoRungsUp))
+                    "at the cliff it takes the full energy container's own two rungs"
+
+                Expect.equal
+                    (rankIn
+                        (banked |> withMineStock Tuning.defaults.MineContactCliff)
+                        (Withdraw("sto-1", Energy)))
+                    (Some(priorityOfTier StockDraw))
+                    "and what the lift steps over is the bank's own draw, rungless on that tier"
+
+                // The line the lift does **not** cross, which is the one
+                // decision 3 actually drew: every energy Task the spawn is
+                // waiting on is Feeding-tier, a whole tier shallower, and a rung
+                // never leaves its tier.
+                Expect.isGreaterThan
+                    (priorityOfTier StockDraw + rankOfRung TwoRungsUp)
+                    (priorityOfTier Feeding)
+                    "the lifted draw is still deeper than the shallowest energy flow"
+            }
+
             test "the Thorium draw is capped by its own column and not by the energy one" {
                 // #161's cap read down ADR 0057 decision 3's second column: the
                 // store answers the number its holding of *that* resource
@@ -1096,17 +1160,28 @@ let thoriumPileTests =
                     "and an energy pile's id has not moved a byte"
             }
 
-            test "a Thorium pile is drawn on the Storage's tier; the same pile in energy is flow" {
+            test
+                "a Thorium pile is drawn on the Storage's tier, one rung up; the energy pile is flow" {
                 // Where the pile ranks, pairwise on the **resource alone**: the
                 // same tile, the same 630, the same body. ADR 0057 decision 3
                 // put the Thorium *container* at `StockDraw` so that an empty
                 // hauler beside the mine never takes the season's ore ahead of
                 // the energy the spawn is waiting on, and a pile is that
                 // container's next dig lying on the floor — one intake of one
-                // resource, so ranking the two apart would be the colony saying
-                // that where the ore sits changes what it is worth. Above the
-                // surplus all the same, which is what makes the trip worth
-                // making: the pile bleeds and a Build site does not.
+                // resource, so ranking the two apart by *tier* would be the
+                // colony saying that where the ore sits changes what it is
+                // worth.
+                //
+                // The **rung** it takes inside that tier is #306's, and it is
+                // neither of the energy pile's two clauses: it inherits no
+                // same-tile clause (`drawableTiles` holds Feeding-tier
+                // Withdraws alone) and no worth-a-trip line (which this pile
+                // would fail at a hundred units). It is one sentence about the
+                // resource — ore on the floor bleeds `ceil(amount / 1000)` a
+                // tick, nothing else on this tier bleeds at all, and there is
+                // no second copy of season score. Rungless it tied the
+                // Storage's own energy draw and lost every travel-cost tie to
+                // it, which is #306's starvation read from the floor's end.
                 let rankIn colony task =
                     poolOn colony
                     |> List.tryPick (fun pooled ->
@@ -1119,33 +1194,67 @@ let thoriumPileTests =
 
                 Expect.equal
                     (rankIn (mineHaulColony |> withMinePile 630) (Pickup("pile-min", Thorium)))
-                    (Some(priorityOfTier StockDraw))
-                    "and the season's ore is drawn on the Storage's own tier, rungless"
-            }
+                    (Some(priorityOfTier StockDraw + rankOfRung OneRungUp))
+                    "and the season's ore is drawn on the Storage's tier, one rung over the bank"
 
-            test "the pile that overflowed the container is taken before the container" {
-                // The two are one resource at one rank on one tile, so
-                // [[priority]], [[travel cost]] and crowding load all three tie
-                // and the pool's order is what is left — `MatchFactor.PoolOrder`
-                // — and the piles stand before the Withdraws in it (#242). Of
-                // two copies of the same ore the one to take is the one that is
-                // going away: the pile loses `ceil(amount / 1000)` a tick and
-                // the container beside it loses nothing.
-                let piled = mineHaulColony |> withMinePile 600
-
-                let colony =
-                    { piled with
-                        Creeps = [ hauler "h1" 0 200 ]
-                        Spatial = piled.Spatial |> withCreepsAt [ "h1", { X = 12; Y = 10 } ]
-                    }
+                // The rung is **unconditional**, and this is the case that says
+                // so rather than a word in a comment: neither of the energy
+                // pile's two clauses would grant it here. There is no mineral
+                // container at all — so nothing drawable lies under the pile,
+                // and the ore is ours by the **room**, which is also how a
+                // hauler dying mid-route leaves one on a road tile — and a
+                // hundred units is well under half a [[hauler unit]]'s load at
+                // the 2,300 bank a colony standing an extractor has, which is
+                // the line the energy column refuses the rung at.
+                let atMineBank (colony: ColonyView) = { colony with Bank = bank 2300 2300 }
 
                 Expect.equal
-                    ((decideOn colony).Verdicts
-                     |> List.tryPick (function
-                         | Verdict.Matched("h1", tid, factor) -> Some(tid, factor)
-                         | _ -> None))
-                    (Some(taskId (Pickup("pile-min", Thorium)), MatchFactor.PoolOrder))
-                    "the decaying copy first, and the pool's order is what says so"
+                    (rankIn
+                        (mineHaulColony |> atMineBank |> withoutMineContainer |> withMinePile 100)
+                        (Pickup("pile-min", Thorium)))
+                    (Some(priorityOfTier StockDraw + rankOfRung OneRungUp))
+                    "ore on the floor takes the rung with no store under it and no trip's worth in it"
+            }
+
+            test "the full container is drawn before the pile it overflowed onto" {
+                // The order inside the mine's own tile, and it is #242's lesson
+                // read down the ore's column: with the pile above the full
+                // container the haulers chased the small copy all day and never
+                // drew the store beside it, so every pickup bred the next pile.
+                // Two rungs against one says the same thing here — draining the
+                // container is what *stops* the floor filling, and the pile is
+                // a finite remainder that the next body takes.
+                //
+                // Pairwise on the container's stock alone: the same pile, the
+                // same body on the same tile, the container either side of the
+                // contact cliff. Under it the pair no longer ties at all — the
+                // pile's own rung decides, and the copy that is going away is
+                // taken first.
+                let matchIn colony =
+                    let colony =
+                        { colony with
+                            Creeps = [ hauler "h1" 0 200 ]
+                            Spatial = colony.Spatial |> withCreepsAt [ "h1", { X = 12; Y = 10 } ]
+                        }
+
+                    (decideOn colony).Verdicts
+                    |> List.tryPick (function
+                        | Verdict.Matched("h1", tid, factor) -> Some(tid, factor)
+                        | _ -> None)
+
+                Expect.equal
+                    (matchIn (mineHaulColony |> withMinePile 600))
+                    (Some(taskId (Pickup("pile-min", Thorium)), MatchFactor.Rank))
+                    "a container under the cliff is not bleeding, so the decaying copy goes first"
+
+                Expect.equal
+                    (matchIn (
+                        mineHaulColony
+                        |> withMineStock Tuning.defaults.MineContactCliff
+                        |> withMinePile 600
+                    ))
+                    (Some(taskId (Withdraw("can-min", Thorium)), MatchFactor.Rank))
+                    "past it the store that is feeding the floor is drained first"
             }
 
             test "a pile past the threshold is pooled; one under it is left to decay" {

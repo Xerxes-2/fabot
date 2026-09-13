@@ -728,12 +728,17 @@ type Rung =
     /// No rung at all: the tier's own rank, which is where most Tasks sit.
     | OnTheTier
     /// One rung up: the [[pickup]] whose pile is the copy that is going away
-    /// (#216 R5, #242), and the [[build]] on a site in the colony's own home
-    /// room (#234).
+    /// (#216 R5, #242), the [[build]] on a site in the colony's own home room
+    /// (#234), and — inside the [[storage]]'s own tier and unconditionally — the
+    /// [[pickup]] of a [[thorium]] pile, which is season score bleeding on the
+    /// floor with no second copy anywhere (#306).
     | OneRungUp
     /// Two rungs up: a full source [[container]]'s [[withdraw]], whose income
-    /// is going away (#216 R5), and the rescued [[repair]] inside Surplus
-    /// (#284).
+    /// is going away (#216 R5), the rescued [[repair]] inside Surplus (#284),
+    /// and the mineral [[container]]'s [[withdraw]] once it is over the contact
+    /// cliff — the same fact as the first of those, read down the ore's column
+    /// and fired a decade early because the [[miner]] on its tile pays for it in
+    /// its own life (#306).
     | TwoRungsUp
 
 /// What a rung is worth on the ladder — `priorityOfTier`'s twin for the steps
@@ -1181,9 +1186,10 @@ let planPool (view: ColonyView) atlas (tasks: Task list) : PooledTask list =
     // **Below a bank of 450 there is no smaller pile.** The row's cast carries
     // `100 * (bank / 150)`, so at RCL1's 300 half a load is a hundred —
     // `Tuning.PickupThreshold` itself — and every **energy** pile the pool holds
-    // takes the rung (the Thorium arm takes neither of these two, for the reason
-    // spelled at `step` below); the distance-only rung exists only once the
-    // cast outgrows twice the
+    // takes the rung (the Thorium arm asks neither of these two questions and
+    // inherits neither answer — it carries an unconditional rung of its own,
+    // on its own argument, at `step` below); the
+    // distance-only rung exists only once the cast outgrows twice the
     // threshold, from RCL2 up. The line is the one #242 pinned, and whether a
     // bootstrapping colony's one body should walk off its rock for a
     // threshold-sized pile is that question's own issue and not this one's.
@@ -1208,25 +1214,15 @@ let planPool (view: ColonyView) atlas (tasks: Task list) : PooledTask list =
         // its own here.
         let step =
             match task with
-            // **The energy pile's rungs, and the energy pile's alone** (#311).
+            // **The energy pile's rungs, read down the energy column** (#311).
             // Both clauses are sentences about the Feeding tier — the first
             // orders a pile against the store under it, and `drawableTiles`
             // holds only Feeding-tier Withdraws, so a mineral container's tile
             // is not in it at all; the second says half a hauler load on the
             // ground is a trip of its own, which is an argument about the
-            // *energy* economy's ordering. A Thorium pile is the only Task on
-            // its rank that any body of the colony is ever applicable to at the
-            // same time as the Thorium container, and the pool's order already
-            // settles that pair, so it takes the plain rung of its tier and the
-            // wildcard below answers it.
-            //
-            // And a rung would not merely be redundant, it would **breach the
-            // line #311 was filed on**. A rung inside `StockDraw` steps up from
-            // a tier the [[storage]]'s own *energy* Withdraw already sits on at
-            // `OnTheTier`, so a lifted pile would outrank the colony drawing its
-            // own bank — energy-economy work, which the issue's own sentence
-            // says the season's ore never goes ahead of. The rungless rank is
-            // the rule and not an omission.
+            // *energy* economy's ordering. The ore's own arm is below and
+            // inherits neither clause: it is lifted unconditionally, on a
+            // sentence about the resource rather than about the tile under it.
             | Pickup(pileId, Energy) ->
                 let overADrawableStore =
                     SpatialInfo.placementOf view.Spatial pileId
@@ -1238,12 +1234,114 @@ let planPool (view: ColonyView) atlas (tasks: Task list) : PooledTask list =
                     OneRungUp
                 else
                     OnTheTier
-            // Only an **energy** container's Withdraw ever reads Feeding, so
-            // this rung is the energy one it always was: what is going away is
-            // the [[anchor]]'s next dig onto a full store, and a deposit's
-            // container is drawn on the Storage's own tier below it.
-            | Withdraw(storeId, _) when tier = Feeding && stored storeId >= Engine.containerCapacity ->
+            // The energy one it always was: what is going away is the
+            // [[anchor]]'s next dig onto a full store, and a deposit's container
+            // is drawn on the Storage's own tier below it. The resource is spelt
+            // out beside the tier rather than left to `tierOf`'s unconditional
+            // `StockDraw` for Thorium, so that this arm and the ore's below are
+            // visibly disjoint where they are written.
+            | Withdraw(storeId, Energy) when
+                tier = Feeding && stored storeId >= Engine.containerCapacity
+                ->
                 TwoRungsUp
+            // **The same rule about the same fact, one column over** (#306,
+            // amending ADR 0057 decision 3). The rung above exists because a
+            // full store sends the next dig onto the floor; a mineral container
+            // does that too, and it charges a second time for it — the
+            // [[miner]] stands on the store's own tile, so `thorium.js`'s
+            // `p = floor(log10 store.T)` takes a fourth tick of the body's life
+            // every tick past the contact cliff, and the row buys a third more
+            // bodies for the same ore — a 375-tick life against the 500 the
+            // programme is priced at. Declining the escalation for Thorium
+            // was the asymmetry, not granting it: live at t402,520 a colony with
+            // 486k banked had drawn its mine **not once** in 700 ticks while the
+            // colony beside it with an empty Storage had banked 3,600.
+            //
+            // **What the lift steps over, and what that costs, plainly**: the
+            // [[storage]]'s own energy Withdraw, which shares this tier (ADR
+            // 0023) and is the rival that was winning every travel-cost tie. An
+            // empty carrier standing on the bank fetches ore instead of topping
+            // itself up, and the bound on how many do so at once is the pool's
+            // own pair of capacities — `ceil(stock / haulerLoad)` on the
+            // container plus `ceil(amount / haulerLoad)` on the pile — which is
+            // **widest exactly when the mine has backed up**, the state the
+            // ticket was filed about: at #306's live W13S28 (2,000 in the
+            // container, 838 on the floor, a 1,500-carry cast at an RCL6 bank)
+            // that is **three** bodies off the energy rotation at once and not
+            // one. It falls to one as soon as the mine is drawn.
+            //
+            // The lift does **not** cross a tier, and decision 3's sentence is
+            // restated rather than leaned on: it is true that every energy Task
+            // the spawn is waiting on is Feeding-tier work a whole tier
+            // shallower, and false that this puts the spawn ahead of the ore in
+            // every state, because **an empty body is applicable to no
+            // Refill**. What turns an empty body into a spawn refill is an
+            // intake, and in the state where a spawn really waits — the source
+            // containers dry — the only intake left is the Storage's own draw,
+            // which is what this rung now beats. So the ore does go ahead of the
+            // energy the spawn is waiting on, one hop earlier in the cycle than
+            // decision 3 looks at. Accepted and not overlooked (#315, filed with
+            // the reproduction): a hauler cycle is short, the bound above is a
+            // handful of bodies for as long as the mine is backed up, and the
+            // alternative — gating the lift on the colony having no unmet
+            // Feeding-tier demand — restores #306 exactly, a healthy colony
+            // having such demand on nearly every tick, which is the whole
+            // starvation this rung exists to end.
+            //
+            // **The cliff and not the cap**, and on the arithmetic rather than
+            // on the rank alone. Lifted at 2,000 the container cycles 500..2,000
+            // — one 1,500 load off the cap — at 3.33 T/tick, ~450 ticks of which
+            // ~300 stand over the cliff, so the [[miner]] on the tile averages
+            // `1 + p ≈ 3.67`. Lifted at the cliff it cycles 0..999 and averages
+            // ≈2.9 — ≈3.0 counting the walk-in window the container goes on
+            // filling through — which is the `p = 2` band
+            // `Tuning.MineContactAgeing`'s three is written for and #313 reads.
+            // A lift at the cap would leave the row buying a third more bodies
+            // for the same ore, and the trips cost nothing extra either way: a
+            // load is a load.
+            //
+            // `Withdraw(_, Thorium)` is the mineral container's alone, as the
+            // `tierOf` arm above already assumes — `Planner.mineWithdraws` pools
+            // it off `mineralContainers` and nothing else, the delivery's draw
+            // on the Storage being an Emitter Intent and never a pooled Task.
+            | Withdraw(storeId, Thorium) when
+                SpatialInfo.heldIn view.Spatial Thorium storeId >= view.Tuning.MineContactCliff
+                ->
+                TwoRungsUp
+            // **And the floor under it, one rung lower** (#306). The pile is the
+            // container's next dig that has already landed, so it earns the lift
+            // for the bleeding half of the same argument — rungless it tied the
+            // Storage's energy draw and lost the same travel-cost tie the
+            // container did, and #311 shipped it knowing that. One rung and not
+            // two, which is #242's lesson in the ore's column: with the pile
+            // above the full container the haulers chased the small copy and
+            // never drew the store that was making it, so every pickup bred the
+            // next pile. Draining the container is what stops the floor filling;
+            // the pile is a finite remainder the next body takes.
+            //
+            // **Unconditional, and on its own argument rather than on the
+            // energy pile's two.** Neither of those clauses is inherited here,
+            // and saying they "answer yes by construction" would be false in
+            // code both times: `drawableTiles` is built from Feeding-tier
+            // Withdraws alone, so a mineral container's tile is not in it at all
+            // (the comment thirty lines above says so outright), and the
+            // worth-a-trip line is `stored * 2 >= haulerLoad`, which a
+            // hundred-unit pile fails at every bank the extractor stands at. Nor
+            // is this pile guaranteed to lie on the container: `minePickups`
+            // filters on the amount and the ore is ours by the **room**, so a
+            // hauler that dies mid-route leaves a pile on a road tile and that
+            // pile takes this rung too — rightly.
+            //
+            // What holds instead is one sentence about the resource and not
+            // about the tile: **ore on the floor is going away and nothing else
+            // on this tier is.** A Thorium pile bleeds `ceil(amount / 1000)` a
+            // tick, the [[storage]]'s energy Withdraw beside it on the tier
+            // bleeds nothing, and the colony has no second copy of what decays —
+            // it is season score, not energy the economy re-earns every tick.
+            // That is why the rung needs no size clause where the energy pile's
+            // does: the energy pile is weighed against a whole economy of rival
+            // intakes and this ore is weighed against nothing.
+            | Pickup(_, Thorium) -> OneRungUp
             | Build siteId when tier = Surplus && isHomeSite view atlas siteId -> OneRungUp
             // Over the home site as well as over the Upgrade (#284): a site is
             // work the colony chose to start, and a structure a quarter from

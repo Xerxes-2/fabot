@@ -996,6 +996,61 @@ let rankTierTests =
                     "with nothing standing to build, the same load goes into the controller"
             }
 
+            test "a bleeding mineral container outbids the bank the body is standing on" {
+                // #306, live at t402,520 and the whole of the ticket: W13S28 had
+                // banked 485,916 energy and **no** Thorium with its mineral
+                // container standing full at 2,000 and a ground pile growing
+                // under the [[miner]], while W12S28 — the same code, an empty
+                // Storage — had banked 3,600. Both draws rank at `StockDraw`
+                // (ADR 0023, ADR 0057 decision 3), so travel cost decided, and
+                // the bank is always the nearer of the two: a healthy colony
+                // never drew its own mine, and the healthier it was the worse it
+                // got.
+                //
+                // Pairwise on the mine's stock alone, with the body put on the
+                // **Storage's** own Seat so the ore has to win on rank and can
+                // never win on distance.
+                let banked stock =
+                    let stocked = mineHaulColony |> withMineStock stock
+
+                    let colony =
+                        { stocked with
+                            Creeps = [ hauler "h1" 0 200 ]
+                            // A mouth for the bank: the Storage's own Withdraw
+                            // is pooled only where the colony has somewhere to
+                            // put the energy (ADR 0023). The spawn is unplaced
+                            // and its Refill unreachable, which is deliberate —
+                            // an **empty** body is applicable to neither Refill
+                            // nor cluster, so the pair this case is about is the
+                            // only pair there is.
+                            Refillables = [ refillable "spawn-1" 50 BuiltKind.Spawn ]
+                        }
+
+                    { colony with
+                        Spatial =
+                            { colony.Spatial with
+                                Stores = Map.add "sto-1" 485_916 colony.Spatial.Stores
+                            }
+                            |> withCreepsAt [ "h1", { X = 13; Y = 10 } ]
+                    }
+
+                let haulerTakes colony =
+                    (decideOn colony).Verdicts
+                    |> List.tryPick (function
+                        | Verdict.Matched("h1", task, factor) -> Some(task, factor)
+                        | _ -> None)
+
+                Expect.equal
+                    (haulerTakes (banked 999))
+                    (Some(taskId (Withdraw("sto-1", Energy)), MatchFactor.TravelCost))
+                    "the premise: tied on rank, the bank underfoot takes the body every time"
+
+                Expect.equal
+                    (haulerTakes (banked Tuning.defaults.MineContactCliff))
+                    (Some(taskId (Withdraw("can-min", Thorium)), MatchFactor.Rank))
+                    "past the contact cliff the ore outranks the bank and the mine is drawn"
+            }
+
             test "the downgrade deadline still outranks a site" {
                 // The rung is one step inside the surplus tier and the
                 // deadline is a whole tier above the shallowest work there is
