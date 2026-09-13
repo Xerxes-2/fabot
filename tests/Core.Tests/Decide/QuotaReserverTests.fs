@@ -564,3 +564,116 @@ let reserverRowTests =
                     "the same room, owned by this colony, is no longer a room to reserve"
             }
         ]
+
+[<Tests>]
+let reclaimerRowTests =
+    testList
+        "the re-claimer: the reserver row's third face"
+        [
+            test "a declared errand hires one CLAIM body of one block, and the bank gate is 650" {
+                // ADR 0057 decision 5 as ADR 0060 decision 3 re-cuts it, and
+                // the ticket's own start condition: cast the tick the colony
+                // affords 650 and a chain exists, with **no extractor, no road
+                // and no banked Thorium** — the three ADR 0057 decision 7 made
+                // the row wait for, retired because the flag on W15S25 is a
+                // rival's already and every Thorium delivered under it scores
+                // for him.
+                //
+                // One block, for the claim's reason one room further out: the
+                // reactor is taken by one touch of one CLAIM part, and the
+                // engine checks no ownership and runs no cooldown, so a second
+                // block buys a body that holds the same flag no faster.
+                //
+                // Pairwise on the declaration alone — same room, same fleet,
+                // same bank, same empty outpost list — and then pairwise on the
+                // bank alone, which is where the 650 is.
+                let castsAt capacity errand =
+                    let colony = reserverColony [] (surplusFleet 2) []
+
+                    (if errand then withReactorErrand colony else colony)
+                    |> fun colony ->
+                        { colony with
+                            Bank = bank capacity capacity
+                        }
+                    |> fun colony -> reserverCasts (decideOn colony).Intents
+
+                Expect.isEmpty
+                    (castsAt 650 false)
+                    "the premise: with no outpost and no errand this colony hires no CLAIM body at all"
+
+                Expect.equal
+                    (castsAt 650 true)
+                    [ oneBlock ]
+                    "the errand is the whole hire, and one block is the whole of it"
+
+                Expect.isEmpty
+                    (castsAt 600 true)
+                    "fifty short of a block, the row hires nobody and yields the tick (ADR 0050)"
+            }
+
+        ]
+
+[<Tests>]
+let reclaimerChargeTests =
+    testList
+        "the re-claimer is an addend of the target and a term of the surplus"
+        [
+            test "the seat is added to the target, and its replacement is deducted from the income" {
+                // #304's argument reaching this row verbatim, which is what the
+                // ticket asks for and what its resolve left the note about: the
+                // re-claimer is hired off a fact about the **ground** — a
+                // declaration and a chain of [[seam]]s — and it earns no energy
+                // at all, so it is an addend of the [[workforce target]] like
+                // the four rows beside it *and* a term of `surplusOverLifetime`,
+                // not the [[guard]]'s "an addend, charged nowhere else". The
+                // guard's excuse is that it is 0 for the whole of an ordinary
+                // life; a resident on a sector centre is 1 for the whole of the
+                // season.
+                //
+                // Both halves are visible and each at its own bank, because a
+                // worker unit is several CLAIM bodies wide and one bank
+                // therefore shows one of them:
+                //
+                // - at the RCL5 bank of 1,800 the charge falls inside a
+                //   generalist's rounding and the **addend** is the whole of
+                //   what moves: the target rises by exactly one;
+                // - at 1,300 it crosses one, and the **charge** is what moves:
+                //   a generalist is retired to pay for the body, so the target
+                //   does not rise at all.
+                //
+                // The charge is `reserverCost`'s own expression and not a
+                // second one — the errand's entry joins `reserverClaimsOf`'s
+                // list, so the addend and the charge are one number (which is
+                // why `RowSizing` carries it) and it is scaled onto a CLAIM
+                // body's 600-tick life by the term that was already there.
+                let atBank capacity =
+                    let plain = reserverColony [] (surplusFleet 2) []
+
+                    let plain =
+                        { plain with
+                            Bank = bank 40000 capacity
+                        }
+
+                    let quotas colony = (decideOn colony).Quotas
+
+                    let workerRow colony =
+                        (quotas colony).Rows
+                        |> List.tryFind (fun row -> row.Row = "worker")
+                        |> Option.map (fun row -> row.Quota)
+
+                    (quotas plain).Target,
+                    workerRow plain,
+                    (quotas (withReactorErrand plain)).Target,
+                    workerRow (withReactorErrand plain)
+
+                Expect.equal
+                    (atBank 1800)
+                    (5, Some 2, 6, Some 2)
+                    "at 1,800 the seat is a place of its own and the generalist row is unmoved"
+
+                Expect.equal
+                    (atBank 1300)
+                    (7, Some 4, 7, Some 3)
+                    "at 1,300 the same seat costs a generalist, so the target does not rise"
+            }
+        ]

@@ -51,6 +51,7 @@
     <Compile Include="Decide/OutpostHaulTests.fs" />
     <Compile Include="Decide/OutpostRaidTests.fs" />
     <Compile Include="Decide/OutpostReserveTests.fs" />
+    <Compile Include="Decide/ErrandTests.fs" />
     <Compile Include="Decide/ThreatTests.fs" />
     <Compile Include="Decide/AnchorFixtures.fs" />
     <Compile Include="Decide/AnchorPinTests.fs" />

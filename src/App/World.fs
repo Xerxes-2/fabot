@@ -218,6 +218,22 @@ let private seenFacts
         |> Array.map (fun o -> o :?> IMineral)
         |> Array.filter (fun m -> m.mineralType = resourceName Thorium)
 
+    // The sector Reactors standing here (#318), and the **only** sweep that can
+    // answer with one: `mod-season5` registers the reactor through
+    // `registerCustomObjectPrototype` with `findConstant: FIND_REACTORS`, and
+    // the engine's own `game.js` files a custom object into that find cache and
+    // into no other — it is not in `structureTypes`, so `FIND_STRUCTURES` has
+    // never carried it and `builtKindOf` has never seen its `structureType`.
+    // ADR 0060 decision 1's comment said the object was "placed and classified
+    // harmlessly already" and that what was missing was an `isStored` fact;
+    // that was wrong in the same direction twice, and this is the sweep it said
+    // was not needed.
+    //
+    // The array is normally empty: one room in a sector holds a reactor at all,
+    // and this colony has vision of that room only while its [[re-claimer]] is
+    // standing in it.
+    let reactors = room.find findReactors |> Array.map (fun o -> o :?> IReactor)
+
     // The controller travels through FIND_STRUCTURES on live servers, but
     // is projected explicitly so nothing depends on that detail.
     let controllers =
@@ -383,6 +399,33 @@ let private seenFacts
             structures
             |> Array.filter (fun (_, kind) -> kind = BuiltKind.Extractor)
             |> Array.map (fun (st, _) -> st.id, st.cooldown)
+            |> Map.ofArray
+        // Whose each object we read an owner off is (#318) — the reactors, and
+        // nothing else, because the [[reclaim]]'s act is the one decision in
+        // this tree that asks an *object* whose it is (ADR 0007). The three
+        // answers are read off `my` and `owner` in the order the controller's
+        // are and for the same reason: the mod's `my` is
+        // `o.user ? o.user == user._id : undefined`, so it is **undefined** and
+        // not false on a reactor nobody owns, and `owner` separates the other
+        // two.
+        //
+        // Neither the reactor's tile nor a kind for it is filed here, and both
+        // omissions are load-bearing. The tile is the **declaration**'s
+        // (`Errand.place`, ADR 0060 decision 1), which is what lets a Task name
+        // the target before any body of ours has stood in the room; and the
+        // kind is *nobody's* — an id classified by nothing is priceable by a
+        // Task that names it and enumerable by no pool that sweeps a kind,
+        // which is the whole of "no row hires for it except the ones the
+        // errand's own Tasks belong to". A `TargetKind` written here would undo
+        // that from the far side of the narrowing, where the view's `erranding`
+        // cut could not put it back.
+        Owners =
+            reactors
+            |> Array.map (fun r ->
+                r.id,
+                if not (isNull (box r.my)) && r.my then Ownership.Ours
+                elif isNull (box r.owner) then Ownership.Unowned
+                else Ownership.Rival)
             |> Map.ofArray
         // Who holds the room, home included (ADR 0042). A seen room with
         // no controller at all gets a truthful entry: nobody owns or

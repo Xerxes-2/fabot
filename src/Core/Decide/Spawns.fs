@@ -141,6 +141,21 @@ let private leadOf (view: ColonyView) atlas (sizing: RowSizing) (creep: CreepInf
 /// its lead, so it will be dead before a replacement cast now could stand where
 /// it stands. It leaves the workforce's living count and its row's gap, which
 /// is what casts the successor while it still works.
+///
+/// **The [[errand]]'s relay is this rule and no addition to it** (ADR 0057
+/// decision 5, #318). The lead already prices the successor's walk over
+/// `Atlas.routes`' chain, so a [[re-claimer]] three crossings out is led by its
+/// oven plus that walk — 160 ticks over the committed captures — and the
+/// cadence ADR 0057 had to write as a constant falls out of it. What the lead
+/// does **not** buy is the two bodies standing out there together: the seat is
+/// `Reclaim`'s capacity of one, and the [[matcher]] counts the incumbent
+/// against a candidate at that candidate's *arrival* (ADR 0026), so the relief
+/// is admitted exactly when it would land after the incumbent is dead. The
+/// relay therefore hands over **at death** and the seat gaps about a tick,
+/// never a walk. Leading the incumbent further would not change that — it buys
+/// a body cast earlier that stands beside the spawn holding no Task, which is
+/// why #318 withdrew the knob that tried it rather than shipping a number with
+/// no effect.
 let internal expiring (view: ColonyView) atlas (sizing: RowSizing) (creep: CreepInfo) =
     creep.TicksToLive <= leadOf view atlas sizing creep
 

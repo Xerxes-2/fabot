@@ -47,6 +47,11 @@ let snapshotWith creeps spatial =
         // And nothing refused: the outposts these fixtures name border
         // their home, which is what makes a Seam band to price over (#243).
         Refused = []
+        // And no [[errand]]: an errand is a room a human declared because
+        // one named object out there has to be acted on (ADR 0060 decision
+        // 1), and this fixture declares none — so no Reclaim is pooled and
+        // no seat of the reserver row is the re-claimer's (#318).
+        Errands = []
         // And nothing remembered of a room it cannot see: the sighting map
         // is the Matcher's alone and the Atlas prices nothing off it (#151).
         Sightings = Map.empty

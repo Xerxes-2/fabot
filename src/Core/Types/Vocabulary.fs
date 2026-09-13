@@ -137,6 +137,26 @@ type Task =
     /// GCL level and asks the colony to run the room, which is a human's
     /// decision written in `Colony.declared`.
     | Claim of controllerId: string
+    /// Taking the sector **Reactor** for this player with CLAIM parts (ADR 0057
+    /// decision 5, re-cut by ADR 0060 decision 3): the [[errand]]'s own Task,
+    /// one per declared errand, and the first act of the season's scoring
+    /// programme rather than its last — the flag is already planted by a rival,
+    /// and every Thorium delivered while it stands scores for him.
+    ///
+    /// **Not `Claim` above, and the difference is the engine's.**
+    /// `claimController` spends a GCL level, needs a takeable controller and is
+    /// finished the tick it succeeds; `claimReactor` spends nothing, has no
+    /// cooldown and **no ownership precondition at all**, and leaves
+    /// `launchTime` untouched — so a theft is undone on the tick it is seen and
+    /// the streak survives the exchange, continuity depending on the store and
+    /// not on the owner. The room W15S25 stands in has no controller for either
+    /// of the other two CLAIM Tasks to name.
+    ///
+    /// **The act fires only on a tick the reactor is not ours.** Every other
+    /// tick the body holds the Task, stands on the ring and says nothing, which
+    /// is what resident means — and what makes it the colony's only vision of a
+    /// room three crossings out.
+    | Reclaim of reactorId: string
     /// Getting out of a Threat's Reach (ADR 0033). The one Task with no
     /// target and no action: its Work Area is the tiles no Threat can
     /// hurt, and the Emitter issues movement for it and nothing else.

@@ -187,6 +187,12 @@ type RoomFacts =
         /// extractor's cooldown, which is the one clock a decision of ours
         /// reads off a structure (ADR 0057 decision 2).
         Cooldowns: Map<string, int>
+        /// Whose each **object** standing here is (#318) — the per-object twin
+        /// of `Control`'s room ownership, and the fact the sector Reactor's room
+        /// has no controller to answer with. Filled for the reactors alone
+        /// today, for the reason `SpatialInfo.Owners` gives, and merged into a
+        /// view's projection id-keyed and unlayered like the stores beside it.
+        Owners: Map<string, Ownership>
         /// Who holds the room, and whether its safe mode is running (ADR
         /// 0042) — `None` for a room nothing looked into this tick, which
         /// is not the same fact as a room nobody holds (ADR 0004).
@@ -244,6 +250,7 @@ module RoomFacts =
             Stores = Map.empty
             Thorium = Map.empty
             Cooldowns = Map.empty
+            Owners = Map.empty
             Control = None
             Controller = None
             Energy = { Available = 0; Capacity = 0 }

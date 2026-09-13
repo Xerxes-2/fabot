@@ -574,7 +574,9 @@ let internal minerQuota (view: ColonyView) atlas : int =
 /// one more entry, of a single block (ADR 0047), and its room leaves the
 /// reservation demands, because a controller carries one Task and a candidate
 /// colony's is the Claim; the body is the same `[Claim; Move]` either way,
-/// which is why this is one row and not two. Which rooms count is
+/// which is why this is one row and not two. A declared **[[errand]]** takes a
+/// third entry beside them, also of a single block (#318) — the row's third
+/// face, and the same body once more. Which rooms count is
 /// `declaredOutposts`, the derivation this row shares with the guard row. The
 /// *rooms* drop out and every cast this tick is sized at the largest demand in
 /// the list: the quota counts bodies, and which controller each finished body
@@ -609,7 +611,40 @@ let internal reserverClaimsOf (view: ColonyView) : int list =
             |> List.map (fun room ->
                 ceilDiv (Engine.reservationCap - heldTicks room) Engine.claimLifetime |> max 1)
 
-        reserved @ (claims |> List.map (fun _ -> 1))
+        reserved
+        @ (claims |> List.map (fun _ -> 1))
+        // And the **[[re-claimer]]**, which is this row's third face (ADR 0057
+        // decision 5, ADR 0060 decision 3): one resident per declared
+        // [[errand]], each asking for one block, for the claim's reason one
+        // room further out — the reactor is taken by one touch of one CLAIM
+        // part, and a second block buys a body that walks no faster and holds
+        // the same flag. `patternOfParts` reads a `[Claim; Move]` back as a
+        // reserver whatever it was bought for (ADR 0006: a second pattern row
+        // would be the same block under a second name), so a row of its own
+        // would be a census no predicate can tell from this one's — which is
+        // the defect the [[miner]]'s own arm exists to have prevented — and
+        // folding it here is what gets it cast in the row's own order, led by
+        // `castBodyOf`'s reserver arm and **charged in `surplusOverLifetime`
+        // beside the reserver's**, scaled onto a CLAIM body's 600-tick life
+        // rather than a worker's 1,500. That charge is #304's argument reaching
+        // this row verbatim: it is hired off a fact about the ground — a
+        // declaration and a chain — and it earns no energy at all.
+        //
+        // **One entry and never two while a relief is in flight.** The cadence
+        // is not here: the quota counts the seats the errand wants, and the
+        // relief is cast by the incumbent leaving `living` at its own [[lead]]
+        // (`Spawns.expiring`), which already prices the successor's walk over
+        // the chain. Written as a cadence here instead, the row would have to
+        // tell a re-claimer from a reserver in the living census to know
+        // whether the seat was filled, and the two are the same body.
+        //
+        // The **start condition is the bank gate above and the chain**, and
+        // nothing else: no extractor, no road and no banked Thorium (ADR 0060
+        // decision 3 retiring ADR 0057 decision 7's first clause). The flag is
+        // already planted by a rival, so the claim is the first act of the
+        // programme rather than its last, and `view.Errands` carries only the
+        // errands a chain of [[seam]]s reaches.
+        @ (view.Errands |> List.map (fun _ -> 1))
 
 /// The facts the rows whose sizing is not the bank's answer alone read, derived
 /// once for the tick (ADR 0042): the anchor row's Work ceilings, the reserver
@@ -680,6 +715,14 @@ let internal surplusOverLifetime (view: ColonyView) atlas (sizing: RowSizing) ha
     // rest of this sum is written in (ADR 0042): a reserver is replaced two and
     // a half times over one worker's life, and charging it once would hire an
     // upgrade mouth the reservation is really paying for.
+    //
+    // **Every entry at the largest**, the [[errand]]'s one-block seat included
+    // (#318): beside a slipped reservation the re-claimer is *cast* at the
+    // bigger body — `castBodyOf`'s reserver arm reads the same `List.max` — so
+    // it is charged at the body it is bought at and not at the block it asked
+    // for. That is the claimer's precedent one room further out and it
+    // over-buys in the safe direction (ADR 0026); what it costs on the day a
+    // W15S28 outpost slips is filed rather than absorbed here.
     let reserverCost =
         if List.isEmpty reserverClaims then
             0

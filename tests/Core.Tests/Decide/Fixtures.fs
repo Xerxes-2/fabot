@@ -194,6 +194,11 @@ let bareRespawn =
         // And nothing refused: "W1N2" borders "W1N1", so the declaration
         // this colony is cut from is one a Seam reaches (#243).
         Refused = []
+        // And no [[errand]]: an errand is a room a human declared because
+        // one named object out there has to be acted on (ADR 0060 decision
+        // 1), and this fixture declares none — so no Reclaim is pooled and
+        // no seat of the reserver row is the re-claimer's (#318).
+        Errands = []
         // And nothing remembered of a room it cannot see (#151): a fixture
         // is a tick with vision wherever it lays a fact, so an empty
         // sighting map is what every case here decides under, and the
@@ -1687,6 +1692,96 @@ let reserverCasts intents =
 /// standing at its 5,000 cap asks for: the deficit is zero and the floor
 /// is one.
 let oneBlock = [ BodyPart.Claim; Move ]
+
+/// The [[errand]] the suites in this directory run: W1N2, and the sector
+/// Reactor standing at (25,44) in it under the engine id a declaration names
+/// (ADR 0060 decision 1). **One** crossing rather than the live three, because
+/// no case in `Decide` is about the walk — `RoomSeamTests` prices that over the
+/// committed captures, which is the only place it can be priced honestly.
+///
+/// One spelling for the two domains that read it (#318): `ErrandTests` asks
+/// what the declaration *buys* — the Task, who may hold it, the act it fires —
+/// and `QuotaReserverTests` asks what it *costs*. A second spelling of the same
+/// room is a fixture that can drift away from the rule it stands in for.
+let reactorErrand: Errand =
+    {
+        RoomName = "W1N2"
+        Target = "reactor-1", RoomPos.at "W1N2" { X = 25; Y = 44 }
+    }
+
+/// The declared target's id and tile, and the ring tile due south of it that a
+/// re-claimer makes its act from — pulled out because a case that names one
+/// names the others.
+let reactorId = fst reactorErrand.Target
+let reactorTile = { X = 25; Y = 44 }
+let reactorRing = { X = 25; Y = 43 }
+
+/// A plain floor around the reactor, wide enough that its range-1 ring is
+/// walkable and that a body three tiles off has somewhere to stand and a walk
+/// to price.
+let private errandFloor =
+    [
+        for x in 22..28 do
+            for y in 40..47 do
+                { X = x; Y = y }, Plain
+    ]
+
+/// The colony with that errand declared and its room's floor laid, the target
+/// placed **kind-less** the way `Errand.place` places it — which is what keeps
+/// it enumerable by no pool that sweeps a kind. Nothing else of the programme
+/// stands: no extractor, no road, no banked Thorium, which is ADR 0060 decision
+/// 3's whole re-ordering — the rival's flag is already on the reactor, so the
+/// claim is the first act of the delivery and not its last.
+///
+/// Merges into whatever layer that room already carries, so bodies may be stood
+/// in it before or after.
+let withReactorErrand (colony: ColonyView) =
+    let existing = SpatialInfo.layerOf colony.Spatial reactorErrand.RoomName
+
+    { colony with
+        Errands = [ reactorErrand ]
+        Spatial =
+            colony.Spatial
+            |> withNeighbour
+                reactorErrand.RoomName
+                { existing with
+                    Terrain = Map.ofList errandFloor
+                    TargetPositions = Map.add reactorId reactorTile existing.TargetPositions
+                }
+    }
+
+/// Our own bodies standing in the errand room, filed into its layer (ADR
+/// 0041): a creep the projection places nowhere stands in no room at all, and a
+/// re-claimer that stands nowhere holds no Task and makes no act.
+let standingInErrand (ours: (CreepInfo * Pos) list) (colony: ColonyView) =
+    let layer = SpatialInfo.layerOf colony.Spatial reactorErrand.RoomName
+
+    { colony with
+        Creeps = colony.Creeps @ (ours |> List.map fst)
+        Spatial =
+            colony.Spatial
+            |> withNeighbour
+                reactorErrand.RoomName
+                { layer with
+                    CreepPositions =
+                        ours |> List.map (fun (creep, pos) -> creep.Name, pos) |> Map.ofList
+                }
+    }
+
+/// And whose the declared target is this tick, which is the fact the
+/// [[reclaim]]'s act is gated on (#318). `None` leaves the entry out
+/// altogether, which is what a gapped relay reads and what the act treats as
+/// *not ours* (ADR 0004).
+let withReactorOwner owner (colony: ColonyView) =
+    { colony with
+        Spatial =
+            { colony.Spatial with
+                Owners =
+                    match owner with
+                    | Some who -> Map.add reactorId who colony.Spatial.Owners
+                    | None -> colony.Spatial.Owners
+            }
+    }
 
 /// The buffer lane (ADR 0046): a plain corridor three rows deep, the
 /// controller standing at (10,10) — an obstacle, as a projected one is —

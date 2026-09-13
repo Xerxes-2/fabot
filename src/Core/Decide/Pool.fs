@@ -196,6 +196,10 @@ let internal restockWait (view: ColonyView) task =
     // 0042).
     | Reserve _
     | Claim _
+    // A reactor is always there to be taken: the act has no cooldown and no
+    // ownership precondition at all, so there is no tick to be early of (ADR
+    // 0060 decision 3).
+    | Reclaim _
     // A [[threat]] standing in a room is there to be hit the tick a guard
     // arrives and every tick before: a fight has no restock (ADR 0056).
     | Guard _
@@ -278,7 +282,8 @@ let private safetyTier task =
     | Repair _
     | Upgrade _
     | Reserve _
-    | Claim _ -> false
+    | Claim _
+    | Reclaim _ -> false
 
 /// The room a Task's Work Area lies in: its target's, since the area is that
 /// target's surroundings and empty across a border (ADR 0020, ADR 0041) — so the
@@ -297,7 +302,8 @@ let private roomOfWork atlas task =
     | Repair id
     | Upgrade id
     | Reserve id
-    | Claim id -> Atlas.targetRoom atlas id
+    | Claim id
+    | Reclaim id -> Atlas.targetRoom atlas id
     | Pickup(id, _)
     | Withdraw(id, _)
     | Refill(id, _) -> Atlas.targetRoom atlas id
@@ -1036,6 +1042,15 @@ let planPool (view: ColonyView) atlas (tasks: Task list) : PooledTask list =
         // is five a tick or ten, and a claim decides whether there is going to
         // be a second colony at all.
         | Claim _ -> Feeding
+        // And beside both, on the strongest form of the same argument (ADR
+        // 0057 decision 5, ADR 0060 decision 3): a reservation decides whether
+        // one room's income is five a tick or ten, a claim decides whether
+        // there is a second colony, and the [[reclaim]] decides whether the
+        // season's whole score accrues to this colony or to the rival whose
+        // flag is standing on the sector centre right now. It is not Safety
+        // tier: nothing out there is killing the body, and a Task ranked there
+        // would be offered to it ahead of running from a keeper.
+        | Reclaim _ -> Feeding
         // **The Thorium pair ranks at the [[storage]]'s tier** (ADR 0057
         // decision 3, reading ADR 0023): the draw at `StockDraw` here and the
         // sink at `Stock` below, which the Refill arm reaches through the kind
@@ -1456,8 +1471,27 @@ let planPool (view: ColonyView) atlas (tasks: Task list) : PooledTask list =
         // second body there buys nothing while the other outpost stays at five
         // a tick; for the Claim beside it the second body buys even less, a
         // room being claimed by one touch of one CLAIM part.
+        // And one holder per reactor beside them (ADR 0057 decision 5): the
+        // flag is taken by one touch of one CLAIM part, so a second body out
+        // there buys nothing and the row is *a relay and never a garrison of
+        // two*.
+        //
+        // **Which is also what settles when the relay hands over, and it hands
+        // over at death** (#318). This cap is counted at the candidate's
+        // arrival (ADR 0026), so the incumbent blocks the relief exactly while
+        // it would still be alive when the relief lands: the relief takes the
+        // Task — and so walks at all, an unassigned body having no Work Area to
+        // be walked to — only once the incumbent can no longer outlive its
+        // walk. The seat therefore gaps about a tick and never the length of a
+        // walk, which is the whole of what ADR 0057 decision 5's *"overlaps
+        // rather than gaps"* was defending (its own Consequences price the two
+        // cases at *"one tick, while the relay stands; 575 if it has gapped"*).
+        // A real overlap would take a second seat here for the handover window
+        // — a change to ADR 0026's arrival machinery for every bounded Task —
+        // and is filed rather than taken.
         | Reserve _
-        | Claim _ -> Capacity.total 1
+        | Claim _
+        | Reclaim _ -> Capacity.total 1
         // **Capped by its store's stock of the resource it names** (#161, read
         // down ADR 0057 decision 3's second column): a store answers the number
         // its own holding of *that* resource divides into loads, so the mineral

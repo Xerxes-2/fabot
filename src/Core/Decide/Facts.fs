@@ -31,6 +31,10 @@ let taskId =
     | Upgrade controllerId -> $"upgrade:{controllerId}"
     | Reserve controllerId -> $"reserve:{controllerId}"
     | Claim controllerId -> $"claim:{controllerId}"
+    // One Reclaim per declared [[errand]], identified by the object the
+    // declaration names — which is the engine's own id, so the Memory key
+    // survives every tick the room is dark and the relay has gapped.
+    | Reclaim reactorId -> $"reclaim:{reactorId}"
     // The same suffix on the third Task to name a resource (#311). An energy
     // pile's id is byte-identical to the one #167 froze, for `resourceSuffix`'s
     // own reason — a pile outlives a tick and an assignment to it is a Memory

@@ -873,6 +873,11 @@ let colonyAt (capture: RoomCapture) (level: int) (bank: int) : ColonyView =
         // These fixtures declare their outposts by hand and every one of
         // them borders its home, so nothing is refused (#243).
         Refused = []
+        // And no [[errand]]: an errand is a room a human declared because
+        // one named object out there has to be acted on (ADR 0060 decision
+        // 1), and this fixture declares none — so no Reclaim is pooled and
+        // no seat of the reserver row is the re-claimer's (#318).
+        Errands = []
         // And nothing remembered of a room it cannot see: these captures
         // are ticks with vision in every room they carry (#151).
         Sightings = Map.empty

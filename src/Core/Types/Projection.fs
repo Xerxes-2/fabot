@@ -198,6 +198,32 @@ type SpatialInfo =
         /// stores, and absent per entry: a structure with no clock on it has
         /// no entry here, and 0 means "now", which is a different answer.
         Cooldowns: Map<string, int>
+        /// Target id -> whose that **object** is (ADR 0057 decision 6, #318):
+        /// the per-object twin of `RoomControlInfo.Owner`, which is a fact
+        /// about a *room* read off its controller and answers nothing at all
+        /// for a sector centre, there being no controller there to read.
+        ///
+        /// The same closed three answers and never a username, for
+        /// `Ownership`'s own stated reason: "ours" and "somebody else's" answer
+        /// one question, and the two names that would have to be compared are
+        /// the shell's to know. Absent per entry is "we cannot see it" (ADR
+        /// 0004) — which for the errand's target is every tick the relay gaps,
+        /// the body standing there being the only vision of the room — and the
+        /// one reader treats that absence as **not ours**, because a withheld
+        /// act on a missing fact leaves a rival's flag standing a tick longer.
+        ///
+        /// **Filled for the sector Reactor and for nothing else today**, which
+        /// is ADR 0007's rule and not an economy: the field list grows the tick
+        /// a decision reads it, and the one decision that reads an object's
+        /// owner is [[reclaim]]'s act. A reactor is the only object the shell
+        /// sweeps for it because a reactor is the only object it *can* be swept
+        /// for at all — the mod registers it as a custom object under
+        /// `FIND_REACTORS` (`reactor.roomObject.js`), so it reaches neither
+        /// `FIND_STRUCTURES` nor any other sweep this bot already makes, and
+        /// the sweep that finds it finds nothing else. The day a structure's
+        /// owner has a reader it joins this map; nothing about the shape has to
+        /// move.
+        Owners: Map<string, Ownership>
     }
 
 [<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
@@ -213,6 +239,7 @@ module SpatialInfo =
             Stores = Map.empty
             Thorium = Map.empty
             Cooldowns = Map.empty
+            Owners = Map.empty
         }
 
     /// The name the projection's own room is filed under: `RoomName`, and the
@@ -295,3 +322,14 @@ module SpatialInfo =
         match resource with
         | Energy -> storedIn spatial id
         | Thorium -> spatial.Thorium |> Map.tryFind id |> Option.defaultValue 0
+
+    /// Whether one **object** is ours this tick, which is the only question
+    /// `Owners` has a reader for (#318): an entry that says `Ours`, and false
+    /// for all three of the other answers — a rival's, nobody's, and the entry
+    /// missing altogether. Absence reads as *not ours* on purpose and not by
+    /// accident (ADR 0004): the only object this is asked about is the sector
+    /// Reactor, the only vision of it is a body of ours standing on its ring,
+    /// and a withheld act on a fact we cannot see would leave whoever planted
+    /// the flag holding it for another tick at 5 score a tick.
+    let ownsTarget (spatial: SpatialInfo) (id: string) : bool =
+        Map.tryFind id spatial.Owners = Some Ownership.Ours

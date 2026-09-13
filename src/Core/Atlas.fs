@@ -828,7 +828,13 @@ let private actionOn =
     function
     | Harvest id
     | Reserve id
-    | Claim id -> Some(id, 1)
+    | Claim id
+    // `claimReactor` is a Chebyshev-1 act like the two CLAIM acts beside it:
+    // the engine checks `target.pos.isNearTo(this.pos)` and the processor
+    // re-checks `|dx| <= 1 && |dy| <= 1` (`creep.claimReactor.js`, ADR 0060
+    // decision 3). So the [[work area]] is the reactor's own ring, which is
+    // nine plain tiles in W15S25.
+    | Reclaim id -> Some(id, 1)
     | Pickup(id, _)
     | Withdraw(id, _)
     | Refill(id, _) -> Some(id, 1)

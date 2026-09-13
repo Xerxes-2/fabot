@@ -207,13 +207,22 @@ type ReservationInfo =
         TicksToEnd: int
     }
 
-/// Whose a room's controller is, as the colony reads it: three answers and not
-/// a username. Two of them are what ADR 0042 prices a source from — ours is
-/// the held rate, nobody's is half — and the third is what ADR 0043's
-/// clockless withdrawal is judged on, the one trigger the engine gives no end
-/// for (#165). A closed vocabulary rather than a pair of booleans, because
-/// "ours" and "somebody else's" answer one question. "We cannot see" is the
-/// absence of the whole entry (ADR 0004).
+/// Whose a thing is, as the colony reads it: three answers and not a username.
+/// A closed vocabulary rather than a pair of booleans, because "ours" and
+/// "somebody else's" answer one question, and the two names that would have to
+/// be compared are the shell's to know. "We cannot see" is the absence of the
+/// whole entry (ADR 0004).
+///
+/// **Two senses, one vocabulary.** A *room*'s, read off its controller
+/// (`RoomControlInfo.Owner`): two of the answers are what ADR 0042 prices a
+/// source from — ours is the held rate, nobody's is half — and the third is
+/// what ADR 0043's clockless withdrawal is judged on, the one trigger the
+/// engine gives no end for (#165). And since #318 one *object*'s
+/// (`SpatialInfo.Owners`), which is what a sector centre needs, there being no
+/// controller in that room to read a room answer off at all. The clauses below
+/// are written in the room sense because it is the older and the busier one;
+/// the object sense reads them one scale down, and `Ownership` is deliberately
+/// not split into two types, the question being the same question.
 [<RequireQualifiedAccess>]
 type Ownership =
     /// Nobody owns the controller — the shape every neutral room and every

@@ -725,3 +725,101 @@ let keeperMaskTests =
                 Expect.isEmpty (orphans (fun tile -> tile.X = 0)) "west: none"
             }
         ]
+
+[<Tests>]
+let reclaimerRelayTests =
+    testList
+        "the re-claimer's cadence, over the terrain it will actually walk"
+        [
+            test
+                "the walk to the Reactor's ring is the 154 ADR 0060 measured, and the cadence falls out of it" {
+                // ADR 0060 decision 3's own number, re-derived here off the
+                // committed captures instead of being written into `Tuning`
+                // (ADR 0036: real terrain is a counterexample generator, and a
+                // constant measured once is a constant nothing re-checks).
+                //
+                // The origin is the ADR's own: W15S28's Thorium seat at
+                // (29,12), which is where it measured **154 steps and three
+                // room transitions** from. That is the ADR's measurement and
+                // not a [[lead]]'s: a lead is priced from beside the spawn, and
+                // these captures are terrain only — no spawn of ours stands in
+                // any of them — so what is pinned here is the *walk* the live
+                // lead will be built on, from the tile the ADR used, to a tile
+                // adjacent to the reactor at (44,6).
+                //
+                // The arithmetic the answer feeds, which is the whole of the
+                // cadence and is why no interval is written down:
+                //
+                //   lead    = 3 ticks a part × 2 parts + the walk
+                //   cast at = the incumbent's life falling to that lead
+                //   cadence = CREEP_CLAIM_LIFE_TIME (600) − the lead
+                //
+                // And **no overlap term**, because there is no overlap to have
+                // (#318): `Reclaim` admits one holder, counted at the
+                // candidate's arrival (ADR 0026), so the relief takes the seat
+                // only once the incumbent can no longer outlive its walk — the
+                // relay hands over at death and the seat gaps about a tick.
+                // `ErrandTests` pins that half at `decide` level.
+                //
+                // ADR 0057's 300 was the six-hop home's; this is W15S28's.
+                let chain = [ "W15S28"; "W15S27"; "W15S26"; "W15S25" ]
+                let captures = chain |> List.map load
+
+                let atlas =
+                    { SpatialInfo.empty with
+                        RoomName = Some "W15S28"
+                        Rooms =
+                            captures
+                            |> List.map (fun capture ->
+                                capture.RoomName,
+                                { RoomLayer.empty with
+                                    Terrain = capture.Terrain
+                                })
+                            |> Map.ofList
+                        Borders =
+                            captures
+                            |> List.map (fun capture -> capture.RoomName, capture.Border)
+                            |> Map.ofList
+                    }
+                    |> AtlasFixtures.snapshotWith []
+                    |> ofView
+
+                let body = [ BodyPart.Claim; Move ]
+
+                let walk =
+                    castWalkTicks
+                        atlas
+                        body
+                        { X = 29; Y = 12 }
+                        (RoomPos.at "W15S25" { X = 44; Y = 6 })
+
+                match walk with
+                | None -> failtest "the chain the Atlas answers with has to price this walk"
+                | Some ticks ->
+                    // A `[Claim; Move]` body is one fatigue part against one
+                    // Move, so it walks a plain tile in one tick and pays
+                    // extra for a swamp. **160 ticks** against the ADR's 154
+                    // *steps* — two different units, and the gap is not six
+                    // extra steps: it is what the swamp on the way and the
+                    // [[keeper margin]]'s detour charge over the masked layer,
+                    // which is the reason to price the walk rather than to
+                    // write the ADR's number down.
+                    Expect.equal
+                        ticks
+                        160
+                        "the walk from W15S28's Thorium seat to the Reactor's ring"
+
+                    let lead = Engine.spawnTicksPerPart * List.length body + ticks
+
+                    Expect.equal lead 166 "the [[lead]]: six ticks of oven and the walk"
+
+                    // The cadence, which is the ticket's number and is nobody's
+                    // constant: the incumbent leaves the living census at its
+                    // own lead, so one cast follows another by a life less that
+                    // lead.
+                    Expect.equal
+                        (Engine.claimLifetime - lead)
+                        434
+                        "so the cadence is 434 — ADR 0060 decision 3's ~420, derived off this Atlas's walk rather than asserted"
+            }
+        ]

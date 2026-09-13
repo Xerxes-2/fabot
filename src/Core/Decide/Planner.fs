@@ -362,6 +362,16 @@ let planTasks (view: ColonyView) (threats: Threats) (held: Set<string>) : Task l
     // the one rule that says which those are (`claimTargets`).
     let claims = claimTargets view |> List.map (fst >> Claim)
 
+    // One Reclaim per declared [[errand]] (ADR 0057 decision 5, ADR 0060
+    // decision 3), read off the **declaration** and off no kind census at all.
+    // That is the narrowing said in the pool rather than as a rule each sweep
+    // has to remember: `Errand.place` lays the target under its engine id with
+    // no `TargetKind`, so every pool built by sweeping kinds passes it over,
+    // and the one list that can name it is the errand list this view carries.
+    // A refused errand is already out of that list (`World.scanOf`), so a room
+    // no chain of [[seam]]s reaches pools nothing and hires nobody.
+    let reclaims = view.Errands |> List.map (fun errand -> Reclaim(fst errand.Target))
+
     // One Reserve per projected controller that is not the colony's own (ADR
     // 0042): a neutral controller held by CLAIM parts pays its room's sources
     // ten a tick instead of five, and the hold decays by one a tick, so the
@@ -602,6 +612,7 @@ let planTasks (view: ColonyView) (threats: Threats) (held: Set<string>) : Task l
     @ upgrades
     @ reserves
     @ claims
+    @ reclaims
     @ containerRefills
     @ ferryRefills
     @ storageRefills

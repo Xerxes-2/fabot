@@ -103,6 +103,16 @@ let private execute (intent: Intent) : Outcome =
     // line is the only place a human sees it.
     | ClaimController(creepName, controllerId) ->
         withCreepTarget creepName controllerId (fun c t -> c.claimController t)
+    // The re-claim (ADR 0057 decision 5). The target is the [[errand]]'s
+    // declared id, placed in the projection with no vision at all (ADR 0060
+    // decision 1), so `getObjectById` can answer nothing for it on a tick the
+    // body has not arrived — which is the shared guard's ActorMissing and is
+    // what a relay that has gapped looks like from here. Unlike the claim above
+    // this act has no precondition the decision layer has no model of: the
+    // engine checks a live CLAIM part and Chebyshev 1, and the Emitter gates on
+    // both.
+    | ClaimReactor(creepName, reactorId) ->
+        withCreepTarget creepName reactorId (fun c t -> c.claimReactor t)
     | PickupPile(creepName, resourceId) ->
         withCreepTarget creepName resourceId (fun c t -> c.pickup t)
     // The Guard's attack and the shared self-heal reflex. The hostile belongs

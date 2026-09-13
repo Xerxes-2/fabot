@@ -49,6 +49,20 @@ let findDroppedResources = 106
 /// classified.
 let findMinerals = 116
 
+/// The season mod's `FIND_REACTORS` constant (`reactor.roomObject.js` sets
+/// `config.common.constants.FIND_REACTORS = 10051`). The **only** sweep that
+/// can answer with a reactor: the mod registers it through
+/// `registerCustomObjectPrototype`, so the engine files it in the find cache
+/// under this constant alone and in none of the built-in ones — a reactor
+/// reaches no `FIND_STRUCTURES` pass, carries no `structureType`, and so is
+/// invisible to every other sweep this shell makes (ADR 0060 decision 1's
+/// comment on the errand's missing facts, corrected).
+///
+/// The number and not the global, like every other find constant in this file:
+/// the mod's constants are runtime globals and a binding to one is a binding to
+/// the mod's own version. Ten thousand and fifty-one is what 1.0.3 sets.
+let findReactors = 10051
+
 /// Screeps `FIND_TOMBSTONES` constant: what a creep leaves behind when it
 /// dies, holding whatever it carried (#167).
 let findTombstones = 118
@@ -216,6 +230,27 @@ type IController =
     abstract pos: IRoomPosition
     abstract activateSafeMode: unit -> int
 
+/// The sector **Reactor** (ADR 0057, `mod-season5/src/reactor.roomObject.js`):
+/// the season's scoring sink, one per sector centre, indestructible — it
+/// carries no `hits` at all — and walkable. Only the two facts a decision reads
+/// are bound: its id, and whether it is ours.
+///
+/// `my` is the mod's own accessor, `o.user ? o.user == runtimeData.user._id :
+/// undefined` — so it is **undefined** on a reactor nobody owns, exactly as a
+/// controller's is, and the three answers are read off `my` and `owner`
+/// together the way a room's ownership already is. `store`, `owner.username`,
+/// `continuousWork` and even `pos` are not bound: nothing decides on them yet,
+/// and the field list grows the tick a decision reads one (ADR 0007). The tile
+/// in particular never will be read here — it is the **declaration**'s
+/// (`Errand.place`, ADR 0060 decision 1), which is what lets a Task name the
+/// target before any body of ours has stood in the room.
+type IReactor =
+    abstract id: string
+    /// True when this reactor is ours; undefined on one nobody owns.
+    abstract my: bool
+    /// Whose it is; undefined on an unowned one.
+    abstract owner: IOwner
+
 type ITower =
     abstract attack: target: obj -> int
 
@@ -286,6 +321,13 @@ type ICreep =
     /// 1, one CLAIM part, and refused — ERR_GCL_NOT_ENOUGH — while every
     /// GCL level this account has is already spent on a room.
     abstract claimController: target: obj -> int
+    /// Take the sector Reactor for this player (ADR 0057 decision 5). The
+    /// season mod's own custom intent and not an engine method: range 1, one
+    /// live CLAIM part, **no cooldown and no ownership precondition** — so it
+    /// is made against a rival's flag on the same terms as against none, and it
+    /// leaves `launchTime` alone, which is why a steal in either direction
+    /// costs the streak nothing.
+    abstract claimReactor: target: obj -> int
     abstract pickup: target: obj -> int
     /// Hit a creep at range 1 for `ATTACK_POWER` per ATTACK part (ADR 0056).
     /// The [[guard]]'s act, and the only one this colony aims at a body it

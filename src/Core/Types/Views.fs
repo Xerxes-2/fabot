@@ -110,6 +110,26 @@ type ColonyView =
         /// own is declared, whether we own one is seen, and a view carries
         /// facts rather than conclusions.
         Declared: string list
+        /// The [[errand]]s this colony runs this tick, after the one narrowing
+        /// there is (`Errand.routable`, ADR 0060 decision 1): a room name and
+        /// the engine id and tile of the one object out there we act on.
+        ///
+        /// Carried on the view and not re-read from the constant, for
+        /// `Declared`'s own reason and one more of its own: the list here is
+        /// the **refused ones removed**, so a rule that reads it can neither
+        /// pool a Task nor hire a body for a room no chain of [[seam]]s
+        /// reaches. Two rules read it — the [[reclaim]] Task's pool and the
+        /// re-claimer's seat on the reserver row — and they are exactly the
+        /// "no row hires for it except the ones the errand's own Tasks belong
+        /// to" that ADR 0060 decision 1 states and `Errand.place`'s kind-less
+        /// target enforces from the other side: nothing here is found by
+        /// sweeping a kind, so nothing else can find it at all.
+        ///
+        /// Empty for every colony that declares none, which is two of the three
+        /// today: the reactor is five and six crossings from W12S28 and W13S28,
+        /// outside `Tuning.MaxHops`, and a room they cannot price is a room they
+        /// do not project.
+        Errands: Errand list
         /// The [[stage]] of every room that is a colony of ours this tick
         /// (`World.stages`, ADR 0052 decision 3) — this colony's own and its
         /// children's alike, the same map handed to every colony because a
@@ -256,6 +276,11 @@ module ColonyView =
             // the miner that reads it is hers.
             Thorium = Map.empty
             Cooldowns = Map.empty
+            // And whose the child's objects are (#318), for the same reason
+            // one rung up: what a mother may *act* on in a child's room is the
+            // explicit list `borrowable` holds, and no act of hers turns on an
+            // object's owner out there.
+            Owners = Map.empty
             Sources = []
         }
 
@@ -316,6 +341,12 @@ module ColonyView =
             // out with the stores they stand beside.
             Thorium = Map.empty
             Cooldowns = Map.empty
+            // And whose an object standing here is (#318), by the same test:
+            // it is what an Emitter gates an act on, so it is work. A room we
+            // merely cross holds nothing of ours to act on, and the ownership
+            // that *does* survive a crossing is the **room**'s, which rides on
+            // `Control` and is deliberately kept.
+            Owners = Map.empty
             Controller = None
             Refillables = []
             Sources = []
@@ -335,16 +366,19 @@ module ColonyView =
     /// not there is vision, and everything about it that *changes* is absent
     /// entry by entry where there is none (ADR 0004).
     ///
-    /// That is the **rule**, and it is not yet a live fact for the errand in
-    /// force. `World.seenFacts` fills `Stores` and `Thorium` off `isStored`,
-    /// which is `false` for `BuiltKind.Other` and so for every `STRUCTURE_*`
-    /// outside the kind table — a reactor among them — and nothing in this repo
-    /// reads a per-object owner or a `continuousWork` at all. So what this line
-    /// passes through for W15S25's target today is an empty answer on every
-    /// tick, vision or none, and the `ViewTests` case that proves the vision
-    /// half has to stand the target up as a `Structure Container` to do it.
-    /// **#318** is where the missing facts arrive and where "the body standing
-    /// there is the colony's only eye on it" stops being an intention.
+    /// **One of those facts is live and two are not** (#318). `Owners` is: the
+    /// shell sweeps `FIND_REACTORS` and files whose the reactor is, so "the body
+    /// standing there is the colony's only eye on it" is now a fact and not an
+    /// intention — a relay that gaps drops the entry and the act that reads it
+    /// treats the absence as *not ours*. What still does not ride is the
+    /// reactor's **store**: `World.seenFacts` fills `Stores` and `Thorium` off
+    /// `isStored`, which asks a `BuiltKind`, and a reactor has none — the mod
+    /// registers it as a **custom object**, so it reaches no `FIND_STRUCTURES`
+    /// sweep at all and arrives only through `FIND_REACTORS`. Nor does
+    /// `continuousWork`, which is not a word this tree knows. Both wait on the
+    /// ticket whose decision reads them — the courier's, and the `reactor` leaf's
+    /// — which is ADR 0007's rule and the reason this line grew one map and not
+    /// three.
     ///
     /// **Less**, because nothing else in that room is work, however much vision
     /// we pay for: no source of it is pooled, no controller of it is Reserved,
@@ -375,6 +409,7 @@ module ColonyView =
             Stores = named facts.Stores
             Thorium = named facts.Thorium
             Cooldowns = named facts.Cooldowns
+            Owners = named facts.Owners
         }
 
     /// One colony's view of this tick (ADR 0052 decision 1): the rooms it works
@@ -593,6 +628,7 @@ module ColonyView =
                     Stores = mergedBy (fun facts -> facts.Stores)
                     Thorium = mergedBy (fun facts -> facts.Thorium)
                     Cooldowns = mergedBy (fun facts -> facts.Cooldowns)
+                    Owners = mergedBy (fun facts -> facts.Owners)
                 }
                 // The declared furniture goes in last, over the whole
                 // assembled projection rather than room by room inside it
@@ -605,6 +641,13 @@ module ColonyView =
                 // before any body of ours has stood in that room.
                 |> Errand.place errands
             Declared = Colony.homes colonies
+            // The scan set's own errand list and never `colony.Errands` read a
+            // second time (ADR 0060 decision 1): a refused errand has left the
+            // scan set, so nothing of it is projected — and a rule that pooled
+            // a Task off the declaration instead would name a target in a room
+            // the projection does not hold, which is #243's silence with a
+            // bigger body standing beside the spawn.
+            Errands = errands
             Stages = stages
             // The bodies in these rooms that are not this colony's, each
             // tile joined to the room it stands in (ADR 0052 decision 2): a

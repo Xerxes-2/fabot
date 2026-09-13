@@ -29,6 +29,10 @@ type private Channel =
     | Upgrade
     | Reserve
     | Claim
+    /// The season mod's own intent slot: `claimReactor` is registered as a
+    /// custom intent type and written to `scope.intents` under its own name, so
+    /// it neither overwrites nor is overwritten by `claimController` beside it.
+    | Reclaim
     | Pickup
     | Move
     | Say
@@ -45,6 +49,7 @@ let private channel =
     | UpgradeController(name, _) -> Some(name, Upgrade)
     | ReserveController(name, _) -> Some(name, Reserve)
     | ClaimController(name, _) -> Some(name, Claim)
+    | ClaimReactor(name, _) -> Some(name, Reclaim)
     | PickupPile(name, _) -> Some(name, Pickup)
     | MoveCreep(name, _) -> Some(name, Move)
     | SayCreep(name, _) -> Some(name, Say)

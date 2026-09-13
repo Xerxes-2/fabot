@@ -151,6 +151,12 @@ let private withThorium (world: World) (room: string) : World =
                             |> Map.add $"ext-{room}" (Structure BuiltKind.Extractor)
                         Thorium = Map.ofList [ $"min-{room}", 22_000 ]
                         Cooldowns = Map.ofList [ $"ext-{room}", 3 ]
+                        // And an owner on the extractor (#318), so the cut can
+                        // be asked about the per-object ownership as well as
+                        // about the stores: whose an object standing here is is
+                        // a fact an Emitter gates an act on, and a room we
+                        // merely cross holds nothing of ours to act on.
+                        Owners = Map.ofList [ $"ext-{room}", Ownership.Ours ]
                     }))
     }
 
@@ -1318,6 +1324,10 @@ let transitTests =
                 Expect.isFalse
                     (Map.containsKey $"ext-{crossed}" view.Spatial.Cooldowns)
                     "nor the clock on an extractor she will never harvest through"
+
+                Expect.isFalse
+                    (Map.containsKey $"ext-{crossed}" view.Spatial.Owners)
+                    "nor whose it is, which is what an act out there would be gated on (#318)"
             }
 
             test "and a room the chain crosses is remembered no more than it is worked" {
@@ -1624,6 +1634,11 @@ let private errandSeen =
     { facts with
         Thorium = Map.ofList [ reactor, 400; "can-errand", 90 ]
         Cooldowns = Map.ofList [ reactor, 7; "can-errand", 3 ]
+        // Whose the declared target is, which is the fact #318 added and the
+        // one the [[reclaim]]'s act is gated on. A rival's, because that is the
+        // live board: W15S25 is `Odiodin`'s and every Thorium delivered under
+        // his flag scores for him.
+        Owners = Map.ofList [ reactor, Ownership.Rival; "can-errand", Ownership.Ours ]
     }
 
 /// The pair world with the chain to that room in it, both rooms seen and
@@ -1768,6 +1783,24 @@ let errandTests =
                 Expect.isNone
                     (Map.tryFind reactor seen.Spatial.Hits)
                     "and its hit count with it, a Repair being pooled off one"
+
+                // The owner is the third changing entry and the one #318 put
+                // there: the act that takes the flag back is gated on it, so it
+                // is work by the same test the store and the Thorium pass, and
+                // it rides for the **declared** id and for nothing else in that
+                // room — the container beside it carries one and does not.
+                Expect.equal
+                    (Map.tryFind reactor seen.Spatial.Owners)
+                    (Some Ownership.Rival)
+                    "whose the declared target is, read where there is vision"
+
+                Expect.isNone
+                    (Map.tryFind "can-errand" seen.Spatial.Owners)
+                    "and nothing else of that room's is carried, ownership included"
+
+                Expect.isNone
+                    (Map.tryFind reactor blind.Spatial.Owners)
+                    "absent the tick the relay gaps, which the act reads as *not ours* (ADR 0004)"
             }
 
             test "the errand is projected by the colony that declares it and by no other" {
@@ -1797,6 +1830,17 @@ let errandTests =
                 Expect.isFalse
                     (List.contains "src-errand" (idsOf his))
                     "and pools nothing that stands in it"
+
+                // And the list itself, which is what the Task pool and the
+                // re-claimer's seat are read off (#318): one colony carries the
+                // declaration and the other carries none, so no rule of his can
+                // name a target three crossings past his own budget.
+                Expect.equal
+                    (hers.Errands |> List.map (fun errand -> errand.RoomName))
+                    [ errandRoom ]
+                    "the declaring colony carries the errand on its view"
+
+                Expect.isEmpty his.Errands "and the colony that declares none carries none"
             }
 
             test "an errand no chain reaches leaves the scan set and is named, with its kind" {
@@ -1843,6 +1887,10 @@ let errandTests =
                 Expect.isNone
                     (SpatialInfo.placementOf view.Spatial reactor)
                     "and the declared target is placed nowhere at all"
+
+                Expect.isEmpty
+                    view.Errands
+                    "and it is out of the errand list, so no Reclaim is pooled and no body hired (#318)"
 
                 // Pairwise against the same declaration over an unwalled
                 // world: what refuses the room is the terrain and not the

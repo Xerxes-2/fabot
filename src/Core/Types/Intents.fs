@@ -48,6 +48,22 @@ type Intent =
     /// controller takes the room for this player. Range 1, like the engine's
     /// other four touching acts.
     | ClaimController of creepName: string * controllerId: string
+    /// The re-claim act (ADR 0057 decision 5, ADR 0060 decision 3): a CLAIM
+    /// body standing beside the sector **Reactor** takes it for this player.
+    /// Range 1, like the engine's other five touching acts, and a **custom
+    /// intent** of the season mod rather than one of the engine's own —
+    /// `creep.claimReactor.js` registers `claimReactor` on the Creep prototype
+    /// and handles it in `processObjectIntents`, where it does exactly one
+    /// thing: `bulk.update(target, {user: object.user})`.
+    ///
+    /// What that one line is worth knowing for: there is **no cooldown, no
+    /// ownership precondition, and `launchTime` is untouched**. So the act is
+    /// never refused for having been made recently, is made against a rival's
+    /// flag as readily as against none, and does not break the streak it takes
+    /// — continuity of the reactor's score depends on its store never emptying
+    /// and not on who owns it. A theft is undone on the tick it is seen, and we
+    /// are stolen from on the same terms.
+    | ClaimReactor of creepName: string * reactorId: string
     /// The pickup act: a creep within range 1 of a dropped pile takes as much
     /// of it as its store has room for. Named for the **pile** and not for
     /// energy since #311, the way #183 renamed the Withdraw's: the engine's

@@ -390,6 +390,15 @@ let internal applicable
     // The same part arithmetic, for the same reason (ADR 0047): the engine's
     // `claimController` is a CLAIM part's act, and a claimer carries nothing.
     | Claim _ -> has BodyPart.Claim
+    // And once more for the third CLAIM act (ADR 0057 decision 5): the engine's
+    // `claimReactor` checks a live CLAIM part and nothing else about the body —
+    // not its store, not its owner's standing, not a cooldown — so the gate is
+    // the same one sentence. Applicability is **not** where the ownership is
+    // read: the Task exists and is held for the whole of a body's residence,
+    // and what the reactor's owner decides is whether this tick's act is issued
+    // (`intentFor`). Read here instead, a body whose flag was safe would be
+    // released the tick it took it and would walk three rooms home.
+    | Reclaim _ -> has BodyPart.Claim
     // The same part arithmetic once more (ADR 0006, ADR 0056): an ATTACK part
     // is what makes a body a Fighter and the only thing that kills an invader,
     // and a body carrying one asks for no energy state — it spends nothing. No
@@ -419,10 +428,15 @@ let internal applicable
     // colony was handed rather than cast answers both.
     | Flee -> not (isGuardBody creep) && not heavy && standsInReach threats atlas creep.Name
 
-/// The action Intent a Task asks of a creep, or None for a Task with no
-/// action: Flee is movement and nothing else (ADR 0033), and the Emitter
-/// issues it none.
-let private intentFor atlas (creep: CreepInfo) task =
+/// The action Intent a Task asks of a creep, and `None` where this tick asks
+/// for none. Two different reasons answer `None`, and they are not the same
+/// case: [[flee]] has **no action at all** — it is movement and nothing else
+/// (ADR 0033), so it answers `None` on every tick it is held — while
+/// [[reclaim]] has an action and withholds it on the ticks the reactor is
+/// already ours (ADR 0057 decision 5). The view is a parameter for the second
+/// of those: it is the one act gated on a fact about its *target* rather than
+/// on the body holding the Task.
+let private intentFor (view: ColonyView) atlas (creep: CreepInfo) task =
     match task with
     | Harvest sourceId -> Some(HarvestSource(creep.Name, sourceId))
     // The same Intent for a tombstone or a ruin as for a container (#167):
@@ -455,6 +469,24 @@ let private intentFor atlas (creep: CreepInfo) task =
     | Upgrade controllerId -> Some(UpgradeController(creep.Name, controllerId))
     | Reserve controllerId -> Some(ReserveController(creep.Name, controllerId))
     | Claim controllerId -> Some(ClaimController(creep.Name, controllerId))
+    // **The one act gated on a fact about its target rather than on the body**
+    // (ADR 0057 decision 5): it is issued on a tick the reactor is not ours and
+    // on no other, and every other tick the resident stands on the ring and
+    // says nothing. The engine would take the act either way — `claimReactor`
+    // has no ownership precondition and no cooldown, and setting `user` to the
+    // user it already holds changes nothing — so what this buys is not
+    // correctness but legibility: an act in the Executor's log is a flag that
+    // had been taken from us, and a re-claimer that spoke every tick would make
+    // the one tick that mattered unreadable.
+    //
+    // Absence is **not ours** (`SpatialInfo.ownsTarget`, ADR 0004): the body
+    // standing here is the colony's only vision of the room, and a tick with no
+    // answer is a tick to act rather than a tick to wait.
+    | Reclaim reactorId ->
+        if SpatialInfo.ownsTarget view.Spatial reactorId then
+            None
+        else
+            Some(ClaimReactor(creep.Name, reactorId))
     | Flee -> None
     // The Guard's attack names a hostile chosen at arrival, rather than a
     // placed Task target (`guardIntent`). Healing is the shared reflex's act.
@@ -473,6 +505,14 @@ let private glyphFor =
     | Upgrade _ -> "⚡"
     | Reserve _ -> "🚩"
     | Claim _ -> "🏴"
+    // The reactor's own glyph, and it is said on **every** tick the Task is
+    // held and not only on the ticks the act fires — where the [[miner]]'s is
+    // withheld on a cooldown tick (ADR 0057 decision 2). The two are not the
+    // same case: a miner's silence makes a one-in-six rhythm legible, where a
+    // re-claimer's would make the row invisible for the 99.9% of its life that
+    // *is* the work. Standing there holding the Task is the whole of what this
+    // body is for, so the bubble says so.
+    | Reclaim _ -> "☢️"
     | Flee -> "🏃"
     | Guard _ -> "⚔️"
 
@@ -614,7 +654,7 @@ let private actionIntents
             && not drained
             && not (heldByCooldown atlas task)
         then
-            intentFor atlas creep task |> Option.toList
+            intentFor view atlas creep task |> Option.toList
         else
             []
 
