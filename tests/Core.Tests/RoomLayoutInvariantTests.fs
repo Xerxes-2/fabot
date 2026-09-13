@@ -135,8 +135,8 @@ let invariantTests =
                 // Upgrade tile eats a tile an Anchor or an upgrader stands
                 // on, and nothing they do is worth that.
                 let onWorkingGround (case: Case) =
-                    let working = workingGroundIn case.Atlas case.Room.Name
-                    clusteredTiles case.Placed |> Set.exists (fun tile -> Set.contains tile working)
+                    clusteredTiles case.Placed
+                    |> Set.exists (fun tile -> Set.contains tile case.WorkingGround)
 
                 Expect.isEmpty
                     (violations onWorkingGround)
@@ -155,10 +155,8 @@ let invariantTests =
                 // A trunk is a paved line, so every tile of it has to be
                 // walkable ground: a road on a wall is not a road.
                 let pavesTheImpassable (case: Case) =
-                    let walkable = walkableTilesIn case.Atlas case.Room.Name
-
                     tilesOfKind Road case.Placed
-                    |> List.exists (fun tile -> not (Set.contains tile walkable))
+                    |> List.exists (fun tile -> not (Set.contains tile case.Walkable))
 
                 Expect.isEmpty
                     (violations pavesTheImpassable)

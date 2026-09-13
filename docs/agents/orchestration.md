@@ -59,6 +59,12 @@ Fixtures sit in three tiers, and a fixture starts at the narrowest one that hold
 - `Fixtures.fs`, the tick a second **domain** wants it — the shared surface, so everything
   in it is a name every suite must keep working.
 
+A fixture that carries an **Atlas** is a `let private` **function** at whichever tier it
+sits, and it captures no Atlas of its own: a binding that is a value compiles to a static
+initialised once per process, Expecto's lists run in parallel, and an Atlas memoises onto
+mutable `Dictionary` tables, so one shared between two lists is two threads writing one
+table (#310, `AGENTS.md` § Code hygiene). `ParallelSafetyTests` fails the build on one.
+
 Each suite keeps its own `[<Tests>] let …Tests = testList "…"` entries. There is no wrapping
 `testList` over the directory — a wrapper would prefix every test name, and the names are
 the contract `dotnet test --list-tests` is diffed on. Splitting a file therefore never

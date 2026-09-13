@@ -67,6 +67,7 @@
     <Compile Include="RoomOutpostTests.fs" />
     <Compile Include="RoomFloodTests.fs" />
     <Compile Include="RoomColonyTests.fs" />
+    <Compile Include="ParallelSafetyTests.fs" />
   </ItemGroup>
   <ItemGroup>
     <Content Include="rooms/*.room" CopyToOutputDirectory="PreserveNewest" />

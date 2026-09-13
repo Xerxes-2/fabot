@@ -287,7 +287,23 @@ type internal Case =
         /// reason: a trunk goal names its spawn (#107).
         SpawnId: string
         ControllerId: string option
-        Atlas: Atlas
+        // The three fields below are Atlas censuses taken while the case is
+        // built, and are here instead of the Atlas itself for the reason
+        // `ParallelSafetyTests` states and enforces (#310): a case is a value
+        // every invariant in every list shares, and an Atlas shared that way
+        // is Expecto's parallel tests writing one Dictionary. They are plain
+        // sets, taken once per case instead of once per case per invariant.
+
+        /// The room's ground an Anchor or an upgrader works from
+        /// (`workingGroundIn`), which the clustered ordering may not take.
+        WorkingGround: Set<Pos>
+        /// The room's tiles a creep can stand on (`walkableTilesIn`), which
+        /// every paved tile has to be one of.
+        Walkable: Set<Pos>
+        /// The controller's Upgrade Work Area in this room, empty for a room
+        /// the projection places no controller in: one of the two goals a
+        /// trunk is drawn to (#107).
+        UpgradeArea: Set<Pos>
         /// The sites the Layout asks for this tick.
         Placed: (Pos * StructureKind) list
         Unserved: UnservedFooting list
@@ -368,7 +384,14 @@ let internal sweep =
                                     |> Option.map (fun tile -> id, RoomPos.pos tile))
                             SpawnId = (List.head colony.Spawns).Id
                             ControllerId = loaded.ControllerId
-                            Atlas = atlas
+                            WorkingGround = workingGroundIn atlas room.Name
+                            Walkable = walkableTilesIn atlas room.Name
+                            UpgradeArea =
+                                loaded.ControllerId
+                                |> Option.map (fun controllerId ->
+                                    workArea atlas (Upgrade controllerId)
+                                    |> RoomPos.inRoom room.Name)
+                                |> Option.defaultValue Set.empty
                             Placed = placed
                             Unserved = first.Memo.UnservedFootings
                             Served = first.Memo.ServedFootings
@@ -415,13 +438,12 @@ let internal violations pick =
 let internal unroutedByRoads (case: Case) : UnroutedTrunk list =
     match case.ControllerId with
     | None -> []
-    | Some controllerId ->
+    | Some _ ->
         let roads = tilesOfKind Road case.Placed |> Set.ofList
 
         let goals =
             [
-                TrunkGoal.UpgradeArea,
-                workArea case.Atlas (Upgrade controllerId) |> RoomPos.inRoom case.Room.Name
+                TrunkGoal.UpgradeArea, case.UpgradeArea
                 TrunkGoal.Spawn case.SpawnId, Set.singleton case.Spawn
             ]
 

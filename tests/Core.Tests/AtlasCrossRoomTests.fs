@@ -52,7 +52,10 @@ let private twoExitAcross farRing =
         [ worker "w" ]
 
 /// Both crossings open — the fixture the two prices and the step are pinned on.
-let private twoExitBothOpen =
+/// A **function** and not a value, like every Atlas fixture in this suite, for
+/// the reason `ParallelSafetyTests` states and enforces (#310): each test
+/// builds its own, and the fixture captures no Atlas of its own either.
+let private twoExitBothOpen () =
     twoExitAcross
         [
             { X = 25; Y = 49 }, Plain
@@ -170,7 +173,7 @@ let crossRoomTests =
                 // tests that stand on it are the price's and the mover's, and
                 // agreeing on the ground is the whole of what they compare.
                 let across = twoExitAcross
-                let bothOpen = twoExitBothOpen
+                let bothOpen = twoExitBothOpen ()
 
                 Expect.hasLength (seams bothOpen "W1N1" "W1N2") 2 "the premise: two crossings"
 
@@ -825,7 +828,7 @@ let crossRoomStepTests =
                 // tests that stand on it are the price's and the mover's, and
                 // agreeing on the ground is the whole of what they compare.
                 let across = twoExitAcross
-                let bothOpen = twoExitBothOpen
+                let bothOpen = twoExitBothOpen ()
 
                 Expect.equal
                     (walkTicks bothOpen "w" (Harvest "src-out"))
@@ -1620,14 +1623,18 @@ let private cornerOfFour homeRing =
     |> ofView
 
 /// Both corners reachable — the fixture every case below is really about.
-let private bothCorners =
+/// Functions and not values, for the reason `twoExitBothOpen` is one (#310):
+/// each case below builds the corners it reads.
+let private cornersBothOpen () =
     cornerOfFour [ { X = 25; Y = 0 }, Plain; { X = 0; Y = 25 }, Plain ]
 
 /// Only the compass's corner, the home room's west border walled end to end.
-let private northCornerOnly = cornerOfFour [ { X = 25; Y = 0 }, Plain ]
+let private cornersNorthOnly () =
+    cornerOfFour [ { X = 25; Y = 0 }, Plain ]
 
 /// Only the cheap corner, the north border walled instead.
-let private westCornerOnly = cornerOfFour [ { X = 0; Y = 25 }, Plain ]
+let private cornersWestOnly () =
+    cornerOfFour [ { X = 0; Y = 25 }, Plain ]
 
 /// A body that feels a swamp on both legs: one Work part beside the Carry,
 /// where the [[hauler unit]]'s empty leg generates no fatigue at all and
@@ -1655,6 +1662,10 @@ let cornerTests =
         "atlas multi-hop corner"
         [
             test "an L-shaped target is priced on the cheapest chain, not the compass's" {
+                let bothCorners = cornersBothOpen ()
+                let northCornerOnly = cornersNorthOnly ()
+                let westCornerOnly = cornersWestOnly ()
+
                 // #288: two chains of the same hop length are not two chains
                 // of the same price — the room the walk turns the corner in
                 // decides how long the legs are — so the price is taken over
@@ -1700,6 +1711,9 @@ let cornerTests =
             }
 
             test "the mover crosses at the corner the price was paid at" {
+                let bothCorners = cornersBothOpen ()
+                let northCornerOnly = cornersNorthOnly ()
+
                 // ADR 0030's law over the chain the price chose: a mover
                 // that followed the compass while the price followed the
                 // terrain would walk the creep out of the wrong border of
@@ -1716,6 +1730,8 @@ let cornerTests =
             }
 
             test "the vision-grace mover still walks the compass's chain" {
+                let bothCorners = cornersBothOpen ()
+
                 // #297, standing and pinned rather than fixed here: the mover
                 // of #151's vision grace has no price to choose a chain with —
                 // its target's room is dark — so it takes the first chain and
@@ -1730,6 +1746,10 @@ let cornerTests =
             }
 
             test "the round trip is priced on the cheapest chain, both legs of it" {
+                let bothCorners = cornersBothOpen ()
+                let northCornerOnly = cornersNorthOnly ()
+                let westCornerOnly = cornersWestOnly ()
+
                 // ADR 0049 sums these into the hauler quota, which is what
                 // makes the tie-break an energy bill and not a cosmetic one
                 // (#288): the dear chain hires bodies for a haul nobody
@@ -1751,6 +1771,10 @@ let cornerTests =
             }
 
             test "the round trip's two legs are cheapest on one chain, never on two" {
+                let bothCorners = cornersBothOpen ()
+                let northCornerOnly = cornersNorthOnly ()
+                let westCornerOnly = cornersWestOnly ()
+
                 // #288 with its sign flipped: a hauler's loaded leg is
                 // cheapest round the plain corner and its empty leg, which
                 // generates no fatigue and so crosses swamp for nothing, is
@@ -1784,6 +1808,10 @@ let cornerTests =
             }
 
             test "the cast walk takes the cheapest chain too" {
+                let bothCorners = cornersBothOpen ()
+                let northCornerOnly = cornersNorthOnly ()
+                let westCornerOnly = cornersWestOnly ()
+
                 // `castWalkTicks` folds the same chain forwards (ADR 0030,
                 // ADR 0058), so a lead over an L is the same choice made
                 // over a table of every tile at once.
