@@ -52,7 +52,7 @@ let invariantTests =
                 // Storage. A three-source room holds five.
                 let miscounts (case: Case) =
                     let containers =
-                        if case.Room.PlansControllerContainer then
+                        if plansBuffer case.Room.Buffer case.Spawn then
                             case.SourceCount + 1
                         else
                             case.SourceCount
@@ -294,6 +294,143 @@ let knownLossTests =
                         case.Unrouted
                         |> List.forall (fun trunk -> trunk.Goal = TrunkGoal.Spawn case.SpawnId))
                     "and names the spawn alone: the controller's trunk is routed and paved"
+            }
+
+            test "W15S28 loses its buffer to the same paved pocket, and RCL is not why (#331)" {
+                // #104's mechanism, reached by a room we own and live in.
+                // W15S28 stands at RCL5 with no [[upgrade buffer]] and no
+                // site for one, so `upgraderQuota` hires nobody (ADR 0046
+                // point 3) and the colony climbs on what the worker row
+                // carries past the controller.
+                //
+                // The first thing this pins is what the cause is *not*. ADR
+                // 0046 point 3 says in as many words that "the container
+                // plan places the buffer under no level gate of its own, so
+                // 'no buffer yet' is a fact about the room and not about
+                // RCL" — and the room is planned here at the level it stands
+                // at and at the level it is trying to reach, which is the
+                // experiment that says so rather than the sentence.
+                //
+                // What the cause *is* comes out of the room's shape and the
+                // spawn's together. The controller container must be an
+                // Upgrade Work Area tile off the road plan and beside a
+                // trunk (ADR 0012), and this area is three quarters swamp.
+                // Every swamp in it is paved, which takes those tiles; the
+                // trunk stops at the first area tile it reaches, which takes
+                // the ones it enters by; and the plain tiles left over stand
+                // at the far end of the pocket, beside paving but beside no
+                // trunk. So the fold returns `None` — and the two clauses
+                // that empty it are asserted apart below, because relaxing
+                // either one alone would fill it and they are two different
+                // decisions (#104's own "judgement this needs", still
+                // unmade).
+                //
+                // "And the spawn's together" is the sweep's finding and the
+                // reason this room joined it: from the other thirty-three
+                // tiles swept here the cluster grows elsewhere, the trunk
+                // enters the area from another side, and the buffer is
+                // planned. The tile below is the one the live colony stands
+                // on — read off the live room, as the extractor table's are
+                // further down this file, because a capture records a room's
+                // fixed furniture and never a base (ADR 0036).
+                let capture = load "W15S28"
+                let loaded = project capture { X = 18; Y = 30 } None
+                let controllerId = Option.get loaded.ControllerId
+
+                let planAt level =
+                    let colony = colonyOf loaded level
+                    let decision = decide colony Map.empty Set.empty None
+                    ofView colony, placementsOf decision.Intents, decision.Memo
+
+                let atLevel = [ 5; 6 ] |> List.map (fun level -> level, planAt level)
+
+                for level, (atlas, placed, memo) in atLevel do
+                    let area = workArea atlas (Upgrade controllerId) |> RoomPos.inRoom "W15S28"
+
+                    // The plan's own paving, read off the sites it asks for:
+                    // a swept colony starts with no road standing and no road
+                    // pending, so this tick's gap is the whole plan. The
+                    // trunks are what is left of it once the Work Area's own
+                    // swamps are taken out — the only two things the Layout
+                    // paves (ADR 0011).
+                    let roadPlan = tilesOfKind Road placed |> Set.ofList
+                    let swamps = area |> Set.filter (isSwampIn atlas "W15S28")
+                    let trunks = Set.difference roadPlan swamps
+
+                    let besideATrunk tile =
+                        trunks |> Set.exists (fun t -> range tile t = 1)
+
+                    // The premise, not the expectation: this is a pocket, and
+                    // the capture is what says so.
+                    Expect.isTrue
+                        (Set.count swamps * 2 > Set.count area)
+                        $"RCL{level}: the Upgrade Work Area is mostly swamp"
+
+                    // The loss. Both halves of it — no buffer, and one fewer
+                    // footing target than sources + 2 (ADR 0022, ADR 0027) —
+                    // and the silence, which is the part #104 said should not
+                    // survive: a target never constructed is never unserved.
+                    Expect.isEmpty
+                        (tilesOfKind Container placed
+                         |> List.filter (fun tile -> Set.contains tile area))
+                        $"RCL{level}: no container site anywhere in the Upgrade Work Area"
+
+                    Expect.isEmpty
+                        ((memo.ServedFootings |> List.map (fun footing -> footing.Kind))
+                         @ (memo.UnservedFootings |> List.map (fun footing -> footing.Kind))
+                         |> List.filter (fun kind -> kind = FootingKind.ControllerContainer))
+                        $"RCL{level}: and no controller-container footing, served or recorded"
+
+                    // The cause, stated as the rule the Layout applies: an
+                    // area tile off the road plan and beside a trunk.
+                    Expect.isEmpty
+                        (area
+                         |> Set.filter (fun tile ->
+                             not (Set.contains tile roadPlan) && besideATrunk tile))
+                        $"RCL{level}: the rule's candidate set is empty"
+
+                    // And the two clauses that empty it, each on its own.
+                    // Delete this test the day either one is decided — and
+                    // decide it, because the room has candidates under both.
+                    Expect.isNonEmpty
+                        (area
+                         |> Set.filter (fun tile ->
+                             not (Set.contains tile trunks) && besideATrunk tile))
+                        $"RCL{level}: paved swamps beside the trunk, refused for being paved"
+
+                    Expect.isNonEmpty
+                        (area
+                         |> Set.filter (fun tile ->
+                             not (Set.contains tile roadPlan)
+                             && roadPlan |> Set.exists (fun t -> range tile t = 1)))
+                        $"RCL{level}: plain tiles beside the paving, refused for being off the trunk"
+
+                // And the two levels plan the same room: the level the
+                // colony stands at and the level it cannot reach without
+                // this buffer differ in the deposit's own container and in
+                // nothing about the controller's (ADR 0057 decision 1).
+                let record (_, (_, placed, memo)) =
+                    tilesOfKind Road placed |> Set.ofList, memo.ServedFootings
+
+                Expect.equal
+                    (atLevel |> List.map record |> List.distinct |> List.length)
+                    1
+                    "the trunks and the footings are the same at RCL5 and at RCL6"
+
+                // And the sweep's half of the same finding, which is what
+                // keeps the sentence above honest: the loss is this spawn's
+                // and not the room's, so the fixture records it per tile and
+                // the day it lands here it lands for the tile that matters.
+                let cases = sweep.Value |> List.filter (fun case -> case.Room.Name = "W15S28")
+
+                Expect.isNonEmpty cases "W15S28 is swept"
+
+                Expect.equal
+                    (cases
+                     |> List.filter (fun case -> List.length case.Containers = case.SourceCount)
+                     |> List.map (fun case -> case.Spawn))
+                    [ { X = 18; Y = 30 } ]
+                    "and the live colony's own tile is the only spawn in the room that loses it"
             }
         ]
 

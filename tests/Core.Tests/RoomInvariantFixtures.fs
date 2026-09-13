@@ -16,6 +16,31 @@ open Fabot.Core.Decide
 open Fabot.Core.Tests.RoomFixtures
 open Fabot.Core.Tests.Decide
 
+/// Which spawns a captured room plans its controller container from — the
+/// #104 loss, which #331 found is not always a whole room's (`Nowhere`) and
+/// not always none of it (`Everywhere`). The middle case is what W15S28
+/// showed: the Upgrade Work Area's paving and the trunk's entry into it are
+/// both functions of where the cluster grew, so the same terrain keeps the
+/// buffer from most spawns and loses it from one — and the one it loses it
+/// from is the tile the live colony stands on.
+type internal Buffer =
+    /// The rule holds: every swept spawn plans a buffer.
+    | Everywhere
+    /// No spawn does, because the room's Upgrade Work Area holds no tile
+    /// the rule could ever pick (W12S27, #104).
+    | Nowhere
+    /// These spawns do not, and the rest of the room's do (W15S28, #331).
+    /// Per tile for #105's reason: whichever of them a fix reaches first
+    /// should be the one that says so.
+    | NotFrom of Pos list
+
+/// Whether the room is expected to plan a buffer from this spawn.
+let internal plansBuffer (buffer: Buffer) (spawn: Pos) =
+    match buffer with
+    | Everywhere -> true
+    | Nowhere -> false
+    | NotFrom tiles -> not (List.contains spawn tiles)
+
 /// One captured room and everything the sweep knows about it beyond the
 /// file: the controller a room without one borrows, the spawn tiles worth
 /// sweeping that the stride misses, and the losses already found there,
@@ -34,12 +59,12 @@ type internal Room =
         FallbackController: Pos option
         /// Spawn tiles swept on top of the stride's.
         AlsoSweep: Pos list
-        /// #104: this room's controller sits in a pocket whose whole
-        /// Upgrade Work Area is swamp. Every candidate for the controller
-        /// container is paved, so the room plans no buffer and holds one
-        /// fewer footing target than sources + 2 — and records neither,
-        /// because a target that is never constructed is never unserved.
-        PlansControllerContainer: bool
+        /// #104: this room's controller sits in a swamp pocket, so every
+        /// candidate for the controller container is paved and the room
+        /// plans no buffer — holding one fewer footing target than
+        /// sources + 2, and recording neither, because a target that is
+        /// never constructed is never unserved.
+        Buffer: Buffer
         /// #105: spawn tiles whose doorstep the clustered reservation
         /// seals, so a source's trunk cannot be routed and is dropped
         /// whole. Excluded from the trunk invariant and asserted to be
@@ -52,12 +77,15 @@ let internal noLosses =
         Name = ""
         FallbackController = None
         AlsoSweep = []
-        PlansControllerContainer = true
+        Buffer = Everywhere
         SealedDoorsteps = []
     }
 
 /// Ours, two ordinary claimable neighbours (#83's remote targets), and a
-/// three-source sector centre.
+/// three-source sector centre. "Ours" is three rooms since ADR 0047, and the
+/// third of them joined the sweep with #331 — which is how that ticket's loss
+/// turned out to be one spawn's and not the room's, a claim only a sweep can
+/// make and a single-spawn test would have got wrong.
 let internal rooms =
     [
         // The one room whose plan can be compared against a live colony,
@@ -74,11 +102,24 @@ let internal rooms =
         // suite cannot see is a loss nobody reproduces.
         { noLosses with
             Name = "W12S27"
-            PlansControllerContainer = false
+            Buffer = Nowhere
             AlsoSweep = [ { X = 32; Y = 2 } ]
             SealedDoorsteps = [ { X = 6; Y = 18 }; { X = 32; Y = 2 } ]
         }
         { noLosses with Name = "W13S28" }
+        // #331: the third home, and the second room to lose its buffer to
+        // #104's mechanism — but from one spawn tile in thirty-four, and
+        // that tile is the one the live colony stands on. It is swept for
+        // W12S28's reason, so that the plan can be compared against a
+        // colony that exists; what the other thirty-three say is that the
+        // room's terrain is not the whole cause and the cluster's own
+        // growth is the rest of it. Every other invariant in the suite
+        // holds over this room from every spawn, this one included.
+        { noLosses with
+            Name = "W15S28"
+            Buffer = NotFrom [ { X = 18; Y = 30 } ]
+            AlsoSweep = [ { X = 18; Y = 30 } ]
+        }
         // The plain tile nearest the centroid of its three sources.
         { noLosses with
             Name = "W15S25"
