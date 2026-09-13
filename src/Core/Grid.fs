@@ -89,24 +89,6 @@ let internal inGrid (tile: Pos) =
     && tile.Y >= 0
     && tile.Y < Engine.roomSide
 
-/// The eight tiles touching this one, in (X, Y) order — the order every answer
-/// derived from them is listed in. Written out rather than generated, this
-/// being the innermost list the Atlas builds.
-let internal neighbours pos =
-    let x = pos.X
-    let y = pos.Y
-
-    [
-        { X = x - 1; Y = y - 1 }
-        { X = x - 1; Y = y }
-        { X = x - 1; Y = y + 1 }
-        { X = x; Y = y - 1 }
-        { X = x; Y = y + 1 }
-        { X = x + 1; Y = y - 1 }
-        { X = x + 1; Y = y }
-        { X = x + 1; Y = y + 1 }
-    ]
-
 /// The weight of raw ground (ADR 0010): plain 2, swamp 10, wall impassable —
 /// written as the -1 the weight table marks impassable with. The one place
 /// the engine's terrain prices live, so no grid drifts from another.

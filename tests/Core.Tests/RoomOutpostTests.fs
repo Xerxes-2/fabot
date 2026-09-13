@@ -91,13 +91,13 @@ let outpostDeclarationTests =
                     |> List.collect (fun colony ->
                         Outpost.roomsProjected colony.Outposts colony.Home)
                     |> List.distinct
-                    |> List.map (fun room -> room, (load room).Border)
+                    |> List.map (fun room -> room, ((load room).Border, (load room).Terrain))
                     |> Map.ofList
 
                 let linked fromRoom toRoom =
                     let walkableIn room tile =
                         match Map.tryFind room rings with
-                        | Some border ->
+                        | Some(border, _) ->
                             World.ringWalkable
                                 (Tuning.keeperMargin Tuning.defaults)
                                 room
@@ -105,7 +105,26 @@ let outpostDeclarationTests =
                                 tile
                         | None -> false
 
-                    Seam.joinedBy (walkableIn fromRoom) (walkableIn toRoom) fromRoom toRoom
+                    // The far room's ground beside the landing tile (ADR
+                    // 0062), read off the same captures and through the same
+                    // shipped predicate: a crossing the ring keeps and the
+                    // ground behind has gone from is a join no body can use.
+                    let groundIn room tile =
+                        match Map.tryFind room rings with
+                        | Some(_, terrain) ->
+                            World.groundWalkable
+                                (Tuning.keeperMargin Tuning.defaults)
+                                room
+                                terrain
+                                tile
+                        | None -> false
+
+                    Seam.joinedBy
+                        (walkableIn fromRoom)
+                        (walkableIn toRoom)
+                        (groundIn toRoom)
+                        fromRoom
+                        toRoom
 
                 let unreachable =
                     Colony.declared
@@ -413,30 +432,58 @@ let errandDeclarationTests =
                 // joined to nothing, which is what keeps the search inside the
                 // rooms the projection would hold.
                 //
-                // NOTE (#317): these rings are the **raw** captures. The
-                // keeper mask lands on its own ticket and takes tiles out of
-                // W15S26's walkable layer, so this chain is re-checked over
-                // the masked layer there; a mask near a border can empty a
-                // Seam band, and this line is what would go red if it did.
+                // NOTE: these rings and this ground are the **raw** captures,
+                // and that is now a deliberate control rather than a gap
+                // waiting on a ticket. The [[keeper margin]] shipped with ADR
+                // 0060 decision 2 and takes tiles out of W15S26's layers; ADR
+                // 0062 then made a band ask the far room's ground as well. Both
+                // are re-checked over the **masked** layer in `RoomSeamTests`
+                // and `ViewTests`, and what this case says is the other half:
+                // over raw terrain the live chain is joined, so a red line here
+                // is the terrain moving and a red line there is the mask
+                // moving. Over raw terrain no capture in this repo orphans a
+                // crossing at all (ADR 0062's own measurement), which is what
+                // makes this the same assertion it was before that ADR.
+                //
+                // The hand-rolled predicates below are #337's to delete, and
+                // this case doubled their surface rather than closing it: the
+                // outpost case above calls the shipped `World.ringWalkable` and
+                // `World.groundWalkable`, and this one cannot, because those
+                // take a margin and what is wanted here is no mask at all.
                 let rings =
                     Colony.declared
                     |> List.collect (fun colony ->
                         Outpost.roomsProjected colony.Outposts colony.Home
                         @ Errand.roomsProjected colony.Errands colony.Home)
                     |> List.distinct
-                    |> List.map (fun room -> room, (load room).Border)
+                    |> List.map (fun room -> room, ((load room).Border, (load room).Terrain))
                     |> Map.ofList
 
                 let linked fromRoom toRoom =
-                    let walkableIn room tile =
-                        match Map.tryFind room rings with
-                        | Some border ->
-                            match Map.tryFind tile border with
-                            | Some terrain -> terrain <> Wall
-                            | None -> false
+                    let nonWall (layer: Map<Pos, Terrain>) tile =
+                        match Map.tryFind tile layer with
+                        | Some terrain -> terrain <> Wall
                         | None -> false
 
-                    Seam.joinedBy (walkableIn fromRoom) (walkableIn toRoom) fromRoom toRoom
+                    let walkableIn room tile =
+                        match Map.tryFind room rings with
+                        | Some(border, _) -> nonWall border tile
+                        | None -> false
+
+                    // The far room's ground beside the landing (ADR 0062),
+                    // raw like the ring above it, for the reason the header
+                    // gives.
+                    let groundIn room tile =
+                        match Map.tryFind room rings with
+                        | Some(_, terrain) -> nonWall terrain tile
+                        | None -> false
+
+                    Seam.joinedBy
+                        (walkableIn fromRoom)
+                        (walkableIn toRoom)
+                        (groundIn toRoom)
+                        fromRoom
+                        toRoom
 
                 Expect.isNonEmpty
                     (Colony.declared |> List.collect (fun colony -> colony.Errands))

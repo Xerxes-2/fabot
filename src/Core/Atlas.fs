@@ -107,11 +107,16 @@ type Atlas =
                  >
             /// Memoised room chains per ordered room pair — every chain of the
             /// fewest crossings a walk between them could take, ends included
-            /// (ADR 0058, #288). Answered off the border rings alone, so it is
-            /// settled before any flood is forced and a pair with no chain
-            /// costs the tick one search and no grid. The empty list is an
-            /// answer and is memoised as one: a pair beyond the hop budget is
-            /// asked about once per creep that prices toward it.
+            /// (ADR 0058, #288). Answered off the border rings and the raw
+            /// ground behind them (ADR 0062) and off no walking grid at all, so
+            /// it is settled before any flood is forced and a pair with no
+            /// chain costs the tick one search and no grid. **Ordered**, and
+            /// since that ADR the order is load-bearing rather than merely
+            /// careful: a band asks the *far* room's ground, so the two entries
+            /// of a swapped pair are two questions and may answer differently.
+            /// The empty list is an answer and is memoised as one: a pair
+            /// beyond the hop budget is asked about once per creep that prices
+            /// toward it.
             Routes: System.Collections.Generic.Dictionary<string * string, string list list>
             /// Memoised traffic-blind cast walk out of a spawner's tile, per
             /// (spawner tile, fatigue factor, goal's room), for bodies the view
@@ -292,6 +297,14 @@ let ofViewRecalling (walks: WalkTable) (view: ColonyView) : Atlas =
     // its rooms rather than by `Rooms`: a room the projection carries a
     // ring for but no ground, or ground but no ring, is each half a room
     // and answers -1 for the half it has not got (ADR 0004).
+    //
+    // Since ADR 0062 the first of those two is no longer half a room but a
+    // room **nothing can be joined to**: a band asks the far room's ground
+    // behind the landing, and a room with a ring and no ground answers that
+    // question no for all forty-eight pairs. The shell never builds one —
+    // `World.ofGame` reads terrain and the border ring for every declared and
+    // transit room off one memoised read — so this stays what it always was, a
+    // totality rule and not a shape any live tick produces.
     //
     // The mask runs over the ring too, and it is the half of ADR 0060 decision
     // 2 that costs something: an exit tile within the margin of a rock is a
@@ -1500,16 +1513,34 @@ let private ringWalkable (atlas: Atlas) (room: string) : Pos -> bool =
     let ring = ringOf atlas room
     fun tile -> walkableAt ring tile
 
+/// How the Atlas reads the **ground** a landing tile is left beside (ADR 0062):
+/// off the raw terrain grid, which is the room's terrain with the [[keeper
+/// margin]] taken off it and nothing else. The grid the walking one is copied
+/// from, and deliberately not the walking one: a band is geometry, and a road
+/// laid or a rampart raised this tick must not change which rooms are joined,
+/// or the scan set would move with the furniture. The residual — a landing
+/// whose only ground neighbours are blocked by a structure — is the price's to
+/// drop, as it always was, and ADR 0062 names it.
+let private groundWalkable (atlas: Atlas) (room: string) : Pos -> bool =
+    let ground = groundOf atlas room
+    fun tile -> walkableAt ground tile
+
 /// The Seam band joining two rooms: the passable exit-tile pairs, each this
 /// room's border tile beside the tile it lands a creep on in the neighbour (ADR
-/// 0041). The third kind of geometry beside the Seat and the Post — those are
+/// 0041), the landing having ground of the neighbour's own beside it (ADR
+/// 0062). The third kind of geometry beside the Seat and the Post — those are
 /// tiles a creep works from, a Seam is one it can only pass through — and never
 /// a tile anything offers to stand on: it is answered from the border layer,
 /// which enters no walking grid, walkable or buildable set and no Work Area, so
 /// the Matcher cannot pick one and have the engine empty it the tick a creep
 /// arrives. Deterministic (X, Y) order, total (ADR 0004).
 let seams (atlas: Atlas) (fromRoom: string) (toRoom: string) : (Pos * Pos) list =
-    Seam.bandBy (ringWalkable atlas fromRoom) (ringWalkable atlas toRoom) fromRoom toRoom
+    Seam.bandBy
+        (ringWalkable atlas fromRoom)
+        (ringWalkable atlas toRoom)
+        (groundWalkable atlas toRoom)
+        fromRoom
+        toRoom
 
 /// Every chain of rooms a walk from one room to another could cross at the
 /// fewest crossings, ends included, and empty where the projection joins them
@@ -1543,7 +1574,12 @@ let routes (atlas: Atlas) (fromRoom: string) (toRoom: string) : string list list
     memoised atlas.Routes (fromRoom, toRoom) (fun () ->
         RoomName.routesBy
             (fun here there ->
-                Seam.joinedBy (ringWalkable atlas here) (ringWalkable atlas there) here there)
+                Seam.joinedBy
+                    (ringWalkable atlas here)
+                    (ringWalkable atlas there)
+                    (groundWalkable atlas there)
+                    here
+                    there)
             atlas.Tuning.MaxHops
             fromRoom
             toRoom)
@@ -1713,6 +1749,19 @@ let private hopsAlong (chain: string list) : Hop list =
 /// convention `joinedAcross` states in full. The room the seeds are for comes
 /// back beside them, because the fold's next step is over that room and
 /// deriving it twice is how the two could disagree.
+///
+/// So this is the one reader that consumes a band in the direction opposite to
+/// the one it asked for, and since ADR 0062 a band is **directed** — worth the
+/// sentence, because it looks like a bug and is not. The band is always
+/// `seams hop.From hop.To`, and its third predicate keeps a pair only where
+/// `hop.To`'s own ground lies beside the landing. A **backward** fold walks
+/// `To → From`, and that is exactly the ground such a walk needs to reach the
+/// exit tile from: the ADR's filter is the far room's ground either way, and
+/// which room is "far" swaps with the direction the pair is read in. The other
+/// end is `besideExit seedGround` below, which is the seed room's ground beside
+/// the tile the walk lands on, forwards or backwards. Both legs are therefore
+/// asked of both directions, and the band's own direction adds nothing here and
+/// takes nothing away.
 let private carriedAcross
     (atlas: Atlas)
     (factor: FatigueFactor)
@@ -2523,28 +2572,28 @@ let stepTowardRoom (atlas: Atlas) (creep: string) (room: string) : RoomPos optio
         | Some next ->
 
             // **A crossing this mover will walk has to land the body somewhere
-            // it can walk on.** The band is a fact about the two border rings
-            // and says nothing about the ground behind the landing tile, which
-            // is why the priced walk asks the far side separately:
-            // `joinedAcross` drops a crossing whose landing has no tile of the
-            // far room's ground beside it, because there is nothing for the far
-            // leg to be reached at. This mover has no far leg — its room is
-            // dark and prices nothing — so it has to ask the same question
-            // itself, and before #317 it did not: it aimed at every crossing
-            // the ring carried, the engine landed the body on a tile with no
-            // ground beside it, and from there no step in any direction was
-            // available and none ever would be. The [[keeper margin]] makes
-            // that arrangement ordinary rather than freak — a rock six tiles
-            // inside a border masks the whole inner row behind an exit row it
-            // does not reach — but the hole is the mover's and not the mask's,
-            // and this is the same reading the price already takes. What the
-            // seam model itself should say about such a crossing is #326's.
+            // it can walk on.** Since ADR 0062 the band says most of that
+            // itself: `seams` drops a crossing whose landing has no tile of the
+            // far room's *terrain* beside it, which is the [[keeper margin]]'s
+            // own artefact and what #317 found here (a rock six tiles inside a
+            // border masks the row behind an exit row it does not reach, so the
+            // ring keeps crossings whose ground is gone).
+            //
+            // What survives that is the half a band must not carry: the band is
+            // geometry and reads the raw ground, so a landing whose only ground
+            // neighbours are held by **structures** is still a crossing, and it
+            // is still one this mover cannot use. `joinedAcross` drops it on
+            // the far leg for the same reason — there is nothing for the flood
+            // to be reached at — and this mover has no far leg, its room being
+            // dark, so it asks the walking grid itself. The question is
+            // `Seam.landsOnGround`'s, asked over a different grid, so the two
+            // readings cannot drift on what "beside" means.
             let farGround = weightsOf atlas next
 
             let landable =
                 seams atlas creepRoom next
                 |> List.filter (fun (_, landing) ->
-                    not (List.isEmpty (besideExit farGround landing)))
+                    Seam.landsOnGround (walkableAt farGround) landing)
 
             match landable with
             | [] -> None
@@ -2630,7 +2679,19 @@ let firstStepIgnoringTraffic
 /// sums into the hauler quota, so it would size the fleet for a haul nobody
 /// makes. The two legs are two *pricings* of one walk — loaded and empty, which
 /// is why the leg back is flooded in the same direction — so the chain they
-/// share is the one thing about them that is not a body's business. What that
+/// share is the one thing about them that is not a body's business.
+///
+/// Since ADR 0062 that sharing costs something it did not cost before, and the
+/// cost is named here rather than hidden: a band is **directed**, so the leg
+/// back is walked over the reverse bands and priced over the forward ones. The
+/// crossing the return really takes may be one of fewer, and the price is then
+/// an under-estimate of the walk rather than a different walk — the same kind
+/// of approximation the shared chain already was (#288), one border deeper.
+/// What it is *not* free to be is `None` against a walk that exists, or a price
+/// against a walk that does not: `Declaration.routable` admits a declaration
+/// only where a chain runs **both** ways (ADR 0062), so every container this is
+/// ever asked about sits in a room `routes` answers for in this direction.
+/// What that
 /// costs where there really are several: this leg's far field is `chainedInto`
 /// direct and not `farFieldAlong`'s memo — the quota prices a body and not a
 /// creep, and there is no creep to key one on — so a second chain is a second

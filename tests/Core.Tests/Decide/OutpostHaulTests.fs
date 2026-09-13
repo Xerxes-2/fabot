@@ -334,7 +334,25 @@ let outpostContainerTests =
                 // the same clustered picks, the same trunks, the same
                 // containers, the same footings — and gains exactly one
                 // site, in the other room.
-                let alone = trunkColony 4
+                // ADR 0062: a crossing into the home room lands a body on that
+                // room's ring, from which it has to step onto the room's own
+                // ground — and the trunk fixture's ground stops fourteen tiles
+                // short of its own north border, which is a room the shell
+                // never builds. The container's Seat is picked on the walk out
+                // to that border, so without this the outpost would have no
+                // band to walk toward and no container at all. Laid on
+                // **both** colonies, so the Layout comparison below stays like
+                // for like.
+                let reachingItsBorder (colony: ColonyView) =
+                    colony
+                    |> withOutpostLayer "W1N1" (fun layer ->
+                        { layer with
+                            Terrain =
+                                (layer.Terrain, [ for y in 1..14 -> { X = 10; Y = y } ])
+                                ||> List.fold (fun terrain tile -> Map.add tile Plain terrain)
+                        })
+
+                let alone = reachingItsBorder (trunkColony 4)
 
                 let withOutpost =
                     alone

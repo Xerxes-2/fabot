@@ -404,32 +404,101 @@ let internal storeRingView =
             ]
     }
 
-/// A projection carrying border rings under room names — the Seam query's
-/// whole input, and nothing else, so a test that names three exit tiles
+/// A projection carrying border rings under room names, each room's interior
+/// plain — the Seam query's whole input, so a test that names three exit tiles
 /// documents the rule the way `spatial`'s three ground tiles do. A tile a
 /// ring leaves out is impassable, exactly as a tile missing from the
 /// ground is.
+///
+/// The plain interior is not decoration: since ADR 0062 a crossing is only a
+/// crossing when the landing tile has ground of the far room's beside it, and
+/// a room the shell builds always has ground behind its ring. Laying all of it
+/// keeps these cases varying the **ring** alone, which is what each of them is
+/// about.
 let bordered rings =
+    let plain =
+        Map.ofList
+            [
+                for x in 1..48 do
+                    for y in 1..48 -> { X = x; Y = y }, Plain
+            ]
+
     { SpatialInfo.empty with
         Borders = rings |> List.map (fun (room, tiles) -> room, Map.ofList tiles) |> Map.ofList
+        Rooms =
+            rings
+            |> List.map (fun (room, _) -> room, { RoomLayer.empty with Terrain = plain })
+            |> Map.ofList
     }
+
+/// The one tile of ground a far room is given behind each of its ring tiles —
+/// set **diagonally** behind it, and inside the room's own 1..48 ground.
+///
+/// Since ADR 0062 a landing with no ground beside it is not a crossing at all,
+/// so a far room whose ring is bare answers an empty band and there is no near
+/// walk left to price. One tile is all a band needs, and `landsOnGround` counts
+/// diagonals, so one tile set diagonally is as legal a fixture as one set
+/// square on — the choice between them says nothing and no case below turns on
+/// it. What every case does turn on is that the room has **some** ground: a
+/// case that wants a genuinely groundless far room builds its own projection
+/// and says so, because this helper can no longer give it one.
+///
+/// `None` where the diagonal would leave the room's own 1..48 ground — a ring
+/// tile at the low end of its edge (`x = 1` on a y-row, `y = 1` on a column),
+/// where the tile behind and one back is the ring again. Such an exit gets no
+/// ground and so drops out of every band built on this fixture, silently: no
+/// case places one today, and one that did would be green for the wrong reason.
+let private diagonallyBehind (tile: Pos) : Pos option =
+    let inside (pos: Pos) =
+        if pos.X >= 1 && pos.X <= 48 && pos.Y >= 1 && pos.Y <= 48 then
+            Some pos
+        else
+            None
+
+    if tile.Y = 0 then
+        inside { X = tile.X - 1; Y = 1 }
+    elif tile.Y = Seam.exitEdge then
+        inside
+            {
+                X = tile.X - 1
+                Y = Seam.exitEdge - 1
+            }
+    elif tile.X = 0 then
+        inside { X = 1; Y = tile.Y - 1 }
+    elif tile.X = Seam.exitEdge then
+        inside
+            {
+                X = Seam.exitEdge - 1
+                Y = tile.Y - 1
+            }
+    else
+        None
 
 /// A projection carrying one room's ground and any number of rooms' border
 /// rings — the whole input a walk out to a Seam reads. The ground is
 /// W12S28's, because the walk runs inside one room and stops at its
-/// border; the far room needs a ring and nothing else, exactly as `seams`
-/// needs of it.
+/// border; every other room gets its ring and `diagonallyBehind`'s single
+/// ground tile per exit, which is the least a band can be answered over.
 let internal seamGround ground rings =
     { SpatialInfo.empty with
         RoomName = Some "W12S28"
         Rooms =
-            Map.ofList
-                [
-                    "W12S28",
-                    { RoomLayer.empty with
-                        Terrain = Map.ofList ground
-                    }
-                ]
+            rings
+            |> List.map (fun (room, tiles) ->
+                room,
+                { RoomLayer.empty with
+                    Terrain =
+                        tiles
+                        |> List.choose (fun (tile, _) -> diagonallyBehind tile)
+                        |> List.map (fun tile -> tile, Plain)
+                        |> Map.ofList
+                })
+            |> Map.ofList
+            |> Map.add
+                "W12S28"
+                { RoomLayer.empty with
+                    Terrain = Map.ofList ground
+                }
         Borders = rings |> List.map (fun (room, tiles) -> room, Map.ofList tiles) |> Map.ofList
     }
     |> snapshotWith []
@@ -797,6 +866,20 @@ let internal keeperRoom =
                         Terrain = plain [ 1..48 ]
                     }
                     "W15S25",
+                    { RoomLayer.empty with
+                        Terrain = plain [ 1..48 ]
+                    }
+                    // And the two rooms that ride at the ends, each with the
+                    // same invented ground: since ADR 0062 a room the
+                    // projection carries a ring for and no ground is a room
+                    // every crossing into it strands a body in, and the shell
+                    // never builds one — `World.ofGame` reads a room's terrain
+                    // wherever it reads its ring.
+                    "W15S28",
+                    { RoomLayer.empty with
+                        Terrain = plain [ 1..48 ]
+                    }
+                    "W16S26",
                     { RoomLayer.empty with
                         Terrain = plain [ 1..48 ]
                     }

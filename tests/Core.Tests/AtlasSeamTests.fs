@@ -271,6 +271,21 @@ let seamTests =
                                     Map.ofList [ for x in 0..2 -> { X = x; Y = 49 }, Plain ]
                                 ]
                     }
+                    |> fun view ->
+                        // The neighbour's own ground behind its landing row
+                        // (ADR 0062): a bare ring answers no band at all now,
+                        // and what this case is about is the corner, not the
+                        // far room.
+                        { view with
+                            Rooms =
+                                view.Rooms
+                                |> Map.add
+                                    "W12S27"
+                                    { RoomLayer.empty with
+                                        Terrain =
+                                            Map.ofList [ for x in 1..3 -> { X = x; Y = 48 }, Plain ]
+                                    }
+                        }
                     |> snapshotWith []
                     |> ofView
 
@@ -382,13 +397,44 @@ let seamWalkTests =
                 let atlas =
                     seamGround (({ X = 30; Y = 30 }, Plain) :: toNorthExit) (northExit Plain)
 
+                // The groundless room gets a projection of its own, and that
+                // is ADR 0062's doing: `seamGround` now gives every ring room
+                // the one tile of ground a band cannot be answered without, so
+                // no room in the fixture above is carried without ground any
+                // more. Here W12S27 is — its ring and nothing behind it, which
+                // is a world the shell does not build and is exactly what this
+                // clause is the totality case for.
+                let groundless =
+                    { SpatialInfo.empty with
+                        RoomName = Some "W12S28"
+                        Rooms =
+                            Map.ofList
+                                [
+                                    "W12S28",
+                                    { RoomLayer.empty with
+                                        Terrain = Map.ofList toNorthExit
+                                    }
+                                    "W12S27", RoomLayer.empty
+                                ]
+                        Borders =
+                            northExit Plain
+                            |> List.map (fun (room, tiles) -> room, Map.ofList tiles)
+                            |> Map.ofList
+                    }
+                    |> snapshotWith []
+                    |> ofView
+
                 Expect.equal
                     (seamWalkTicks atlas "W12S28" "W15S25" { X = 10; Y = 1 })
                     None
                     "a room four sectors away shares no border, so there is nothing to walk to"
 
+                Expect.isEmpty
+                    (walkableTilesIn groundless "W12S27")
+                    "the premise: that room's whole ground is absent, and not merely the one tile below"
+
                 Expect.equal
-                    (seamWalkTicks atlas "W12S27" "W12S28" { X = 10; Y = 48 })
+                    (seamWalkTicks groundless "W12S27" "W12S28" { X = 10; Y = 48 })
                     None
                     "and a room the projection carries no ground for reaches no exit of its own"
 
@@ -1280,10 +1326,27 @@ let keeperSeamTests =
                     Map.containsKey tile (Map.find room keeperRoom.Borders)
                     && not (Keepers.masked margin room tile)
 
+                // And the far room's ground behind the landing (ADR 0062), the
+                // world's own reading of it: the layer's terrain, less the
+                // mask. The third predicate the band now takes, spelled here as
+                // `World.groundWalkable` spells it — over a fixture whose every
+                // terrain entry is Plain, so "the layer carries this tile" and
+                // the shipped predicate's "the layer carries it and it is not
+                // wall" are the same question, exactly as the ring predicate
+                // above takes the same latitude.
+                let grounded room tile =
+                    Map.containsKey tile (SpatialInfo.layerOf keeperRoom room).Terrain
+                    && not (Keepers.masked margin room tile)
+
                 for into in [ "W15S25"; "W15S27"; "W16S26" ] do
                     Expect.equal
                         (seams (masked ()) "W15S26" into)
-                        (Seam.bandBy (crossable "W15S26") (crossable into) "W15S26" into)
+                        (Seam.bandBy
+                            (crossable "W15S26")
+                            (crossable into)
+                            (grounded into)
+                            "W15S26"
+                            into)
                         $"W15S26 -> {into}: one band, whichever layer answers it"
             }
 
@@ -1293,30 +1356,38 @@ let keeperSeamTests =
             let walkingSouthFrom tile =
                 keeperRoomStanding "W15S25" tile |> snapshotWith [ worker "w" ] |> ofView
 
-            test "a crossing the mask orphans is not one the compass aims a body at" {
-                // #317's stranding, reproduced and then closed. The mineral at
-                // (38,7) is seven tiles from the north exit row, so the row
-                // stays a band — and six from the ground row behind it, so the
-                // ground behind eleven of those crossings is gone. A body the
-                // engine lands on one of them has no walkable neighbour in any
-                // direction and no step out of the room for the rest of its
-                // life: `Atlas.stepTowardRoom` has no far leg to price, so
-                // before this it asked the ring alone and the ring cannot see
-                // the row behind it.
+            test
+                "a crossing the mask orphans is no crossing at all, and the compass never aims at one" {
+                // #317's stranding, reproduced and then closed at the model
+                // (ADR 0062). The mineral at (38,7) is seven tiles from the
+                // north exit row, so the **ring** keeps that row — and six
+                // from the ground row behind it, so the ground behind eleven
+                // of those crossings is gone. A body the engine lands on one
+                // of them has no walkable neighbour in any direction and no
+                // step out of the room for the rest of its life.
+                //
+                // Until ADR 0062 the band said such a pair was a crossing and
+                // three readers each had to remember the far side for
+                // themselves; now the band itself drops it, and this is where
+                // the ring's answer and the band's are shown to differ.
                 // Standing where all three crossings it could step onto are
-                // orphaned, so the answer cannot be one of them by accident of
-                // the band's (X, Y) order.
+                // orphaned, so the mover's answer cannot be one of them by
+                // accident of the band's (X, Y) order.
                 let atlas = walkingSouthFrom { X = 38; Y = 48 }
 
                 for x in 37..39 do
-                    Expect.isTrue
-                        (seams atlas "W15S25" "W15S26"
-                         |> List.exists (fun (_, there) -> there = { X = x; Y = 0 }))
-                        $"the premise: the ring still carries the crossing at x = {x}, the mineral being seven from it"
+                    Expect.isFalse
+                        (Keepers.masked margin "W15S26" { X = x; Y = 0 })
+                        $"the premise: the ring still carries ({x},0), the mineral being seven from that row"
 
                     Expect.isEmpty
                         (adjacentWalkableIn atlas "W15S26" { X = x; Y = 0 })
                         $"and it lands a body on ({x},0), which has nothing beside it: the mineral is six from the row behind"
+
+                    Expect.isFalse
+                        (seams atlas "W15S25" "W15S26"
+                         |> List.exists (fun (_, there) -> there = { X = x; Y = 0 }))
+                        $"so the band does not carry the crossing at x = {x}: a landing with no ground beside it is no crossing"
 
                 let step = stepTowardRoom atlas "w" "W15S27"
 
@@ -1348,5 +1419,67 @@ let keeperSeamTests =
                             (adjacentWalkableIn atlas "W15S26" { X = step.X; Y = 0 })
                             $"standing at ({x},48), the crossing at x = {step.X} lands on ground with a step off it"
                     | _ -> ()
+            }
+        ]
+
+[<Tests>]
+let landingTests =
+    testList
+        "what a crossing's landing has beside it"
+        [
+            test
+                "a landing whose ground is built over is still a crossing, and the grace mover still drops it" {
+                // The half of #317's filter ADR 0062 does **not** absorb, and
+                // the reason `Atlas.stepTowardRoom` keeps one.
+                //
+                // The band reads the far room's **raw ground**, deliberately:
+                // a band is geometry, and if a road laid or a rampart raised
+                // this tick could change which rooms are joined, the scan set
+                // would move with the furniture. So a landing whose only ground
+                // neighbours are held by obstacle structures is a crossing
+                // still — and it is one no body can step off all the same.
+                // `joinedAcross` drops it on the far leg, there being nothing
+                // for the flood to be reached at; the vision-grace mover has no
+                // far leg, its target room being dark, so it asks the walking
+                // grid itself.
+                let projection =
+                    bordered
+                        [
+                            "W12S28", [ { X = 10; Y = 0 }, Plain; { X = 14; Y = 0 }, Plain ]
+                            "W12S27", [ { X = 10; Y = 49 }, Plain; { X = 14; Y = 49 }, Plain ]
+                        ]
+
+                let atlas =
+                    { projection with
+                        RoomName = Some "W12S28"
+                        Rooms =
+                            projection.Rooms
+                            |> Map.add
+                                "W12S28"
+                                { SpatialInfo.layerOf projection "W12S28" with
+                                    CreepPositions = Map.ofList [ "w", { X = 10; Y = 1 } ]
+                                }
+                            |> Map.add
+                                "W12S27"
+                                { SpatialInfo.layerOf projection "W12S27" with
+                                    Obstacles = Set.ofList [ for x in 9..11 -> { X = x; Y = 48 } ]
+                                }
+                    }
+                    |> snapshotWith [ worker "w" ]
+                    |> ofView
+
+                Expect.equal
+                    (seams atlas "W12S28" "W12S27" |> List.map fst)
+                    [ { X = 10; Y = 0 }; { X = 14; Y = 0 } ]
+                    "the band keeps both crossings: the ground behind (10,49) is terrain, whatever stands on it"
+
+                Expect.isEmpty
+                    (adjacentWalkableIn atlas "W12S27" { X = 10; Y = 49 })
+                    "and yet nothing walkable lies beside that landing, the three tiles behind it being built over"
+
+                Expect.equal
+                    (stepTowardRoom atlas "w" "W12S27")
+                    (Some(RoomPos.at "W12S28" { X = 11; Y = 1 }))
+                    "so the mover walks toward the other crossing, though the body is standing beside this one"
             }
         ]

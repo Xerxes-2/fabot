@@ -78,6 +78,32 @@ module Declaration =
     /// shortest chain and the price picks one of them (ADR 0059), so "is there
     /// a chain" is an empty list and not a missing head. The two agree today
     /// and the one that keeps agreeing is this one.
+    ///
+    /// And asked **both ways** since ADR 0062, which is where that ADR's
+    /// directed band reaches admission. `linked A B` and `linked B A` are two
+    /// questions about two different rooms' ground and are free to answer
+    /// differently, while `routesBy` expands away from `home` alone — so a
+    /// chain out is no longer a chain back, and a room joined outbound by
+    /// orphaned landings on the return would be admitted, projected, pooled
+    /// and hired for while every body bought for it walked out and stayed
+    /// there. What a declaration buys is a **round trip**: the reserver walks
+    /// out, the hauler comes back loaded, the errand brings its ore home. So
+    /// the chain home is asked for beside the chain out, and `refused` below
+    /// keeps the invariant it states — `pricedAcross` and `haulRoundTripTicks`
+    /// answer `None` for every target it names — which the inbound half is
+    /// what makes true: `haulRoundTripTicks` prices off
+    /// `Atlas.routes container.Room sink.Room`, the direction this clause and
+    /// no other admits.
+    ///
+    /// Two searches and not one symmetric `linked`, deliberately. `linked` is
+    /// the [[world]]'s reading of one band and `Atlas.seams` is the
+    /// [[atlas]]'s reading of the same one; ADR 0058's invariant is that those
+    /// two cannot disagree, and folding the round trip into `linked` would put
+    /// the scan set's predicate one layer away from the price's. The round
+    /// trip is admission's question, so it is asked where admission is
+    /// decided — and asking it twice also lets the two legs take **different**
+    /// chains, which is what a directed relation permits and a symmetric
+    /// predicate would have forbidden.
     let routable
         (linked: string -> string -> bool)
         (maxHops: int)
@@ -86,6 +112,7 @@ module Declaration =
         : bool =
         withinHopBudget maxHops home room
         && RoomName.routesBy linked maxHops home room |> List.isEmpty |> not
+        && RoomName.routesBy linked maxHops room home |> List.isEmpty |> not
 
     /// The declared rooms of one kind that no chain joins to this home, each
     /// under the kind it was declared as (#243, ADR 0058, ADR 0060). A walk is

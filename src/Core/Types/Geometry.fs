@@ -103,6 +103,33 @@ let tilesWithin (radius: int) (center: Pos) : Pos list =
             for y in center.Y - radius .. center.Y + radius -> { X = x; Y = y }
     ]
 
+/// The eight tiles touching this one, in (X, Y) order — the order every answer
+/// derived from them is listed in. Written out rather than generated, this
+/// being the innermost list the Atlas builds. **Unclamped**, like
+/// `tilesWithin`: a tile on a room edge yields coordinates off the grid, and
+/// every caller drops those through the walkability test it was applying
+/// anyway.
+///
+/// It lives here rather than beside the [[atlas]]'s grids because the [[seam]]
+/// needs it too (ADR 0062): a crossing is only a crossing when the landing tile
+/// has one of the far room's ground tiles beside it, and "beside" has to be the
+/// same eight tiles the flood steps through or the band and the price would be
+/// free to disagree about a diagonal.
+let internal neighbours (pos: Pos) : Pos list =
+    let x = pos.X
+    let y = pos.Y
+
+    [
+        { X = x - 1; Y = y - 1 }
+        { X = x - 1; Y = y }
+        { X = x - 1; Y = y + 1 }
+        { X = x; Y = y - 1 }
+        { X = x; Y = y + 1 }
+        { X = x + 1; Y = y - 1 }
+        { X = x + 1; Y = y }
+        { X = x + 1; Y = y + 1 }
+    ]
+
 [<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
 module RoomPos =
     /// The grid coordinate, for indexing that room's own tables — always
@@ -418,6 +445,13 @@ module RoomName =
 /// and the scan set over the [[world]]'s own border maps, before any grid
 /// exists (ADR 0058). One definition, so the two cannot disagree about which
 /// pair of rooms a creep can walk between.
+///
+/// Since ADR 0062 a band is a fact about two rings **and the far room's
+/// ground**: the engine puts a body down on the landing tile, and a landing
+/// with no ground beside it is a crossing nothing can walk out of. Both readers
+/// therefore hand in a third predicate, and the world's half is why it reaches
+/// past its border maps into the terrain it already holds for every room a
+/// chain could cross.
 module Seam =
     /// The far exit row and column of a room — index 49, the outer of the two
     /// the projection's ground stops short of (ADR 0036).
@@ -442,21 +476,50 @@ module Seam =
         | 1, 0 -> [ for y in alongEdge -> { X = exitEdge; Y = y }, { X = 0; Y = y } ]
         | _ -> []
 
+    /// Whether a body the engine puts down on a landing tile has anywhere to
+    /// go: one tile of the far room's own **ground** beside it (ADR 0062).
+    ///
+    /// The border ring is not ground and nothing stands on it (ADR 0036, ADR
+    /// 0041), so a landing with no ground beside it is a tile a body arrives on
+    /// and never leaves — an **orphan**. Until ADR 0062 the band was a fact
+    /// about two rings alone and could not see this, so three readers each
+    /// remembered the far side separately and one of them forgot (#317, #326).
+    ///
+    /// `farGround` is the caller's reading of the far room's ground. The two
+    /// readings the **band** is built on are the [[atlas]]'s raw terrain grid
+    /// and the [[world]]'s own terrain map, each with the [[keeper margin]]
+    /// already taken off it and neither carrying a structure — a band is
+    /// geometry, and ADR 0062 decision 2 is why. A third caller asks the same
+    /// question over a stricter grid and is not building a band with it:
+    /// `Atlas.stepTowardRoom` hands it the **walking** grid, roads and
+    /// obstacles and all, because it is the one mover with no far leg to drop a
+    /// built-over landing for it (ADR 0059's exception, #317). This function is
+    /// what makes "beside" one answer across all three; what each reading
+    /// counts as ground is the caller's own. Diagonals count,
+    /// because the engine lets a creep step off its landing tile diagonally,
+    /// which is the same eight tiles `neighbours` gives every flood.
+    let landsOnGround (farGround: Pos -> bool) (landing: Pos) : bool =
+        neighbours landing |> List.exists farGround
+
     /// The Seam band joining two rooms: the passable exit-tile pairs, each the
     /// first room's border tile beside the tile it lands a creep on in the
-    /// second. `walkable` is the caller's reading of one room's border ring —
-    /// a tile the ring carries and whose terrain is not wall. Deterministic
-    /// (X, Y) order, total (ADR 0004).
+    /// second. `nearWalkable` and `farWalkable` are the caller's reading of one
+    /// room's border ring — a tile the ring carries and whose terrain is not
+    /// wall — and `farGround` its reading of the far room's ground, which is
+    /// what says the landing is a tile a body can leave (ADR 0062).
+    /// Deterministic (X, Y) order, total (ADR 0004).
     let bandBy
         (nearWalkable: Pos -> bool)
         (farWalkable: Pos -> bool)
+        (farGround: Pos -> bool)
         (fromRoom: string)
         (toRoom: string)
         : (Pos * Pos) list =
         match RoomName.offsetOf fromRoom toRoom with
         | Some offset ->
             pairsAcross offset
-            |> List.filter (fun (here, there) -> nearWalkable here && farWalkable there)
+            |> List.filter (fun (here, there) ->
+                nearWalkable here && farWalkable there && landsOnGround farGround there)
         | None -> []
 
     /// Whether *any* crossing joins the two rooms — the band's existence
@@ -464,14 +527,21 @@ module Seam =
     /// (ADR 0058), and it short-circuits on the first passable pair, where
     /// `bandBy` would build all forty-eight and then be asked if the list is
     /// empty.
+    ///
+    /// The ring tests run before the ground one, and that ordering is the whole
+    /// of what the third predicate costs: eight lookups are paid only for a
+    /// pair both rings already passed, which on a walled border is none of the
+    /// forty-eight (ADR 0062).
     let joinedBy
         (nearWalkable: Pos -> bool)
         (farWalkable: Pos -> bool)
+        (farGround: Pos -> bool)
         (fromRoom: string)
         (toRoom: string)
         : bool =
         match RoomName.offsetOf fromRoom toRoom with
         | Some offset ->
             pairsAcross offset
-            |> List.exists (fun (here, there) -> nearWalkable here && farWalkable there)
+            |> List.exists (fun (here, there) ->
+                nearWalkable here && farWalkable there && landsOnGround farGround there)
         | None -> false

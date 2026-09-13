@@ -21,12 +21,27 @@ let private outpost = "W12S27"
 let private child = "W13S28"
 
 /// A ten-by-ten patch of plain ground: enough for a tile to be placed on
-/// and for the borrowed layer's geometry to be visibly kept.
+/// and for the borrowed layer's geometry to be visibly kept — with the inner
+/// frame of the room laid plain beside it.
+///
+/// The frame is ADR 0062's: a crossing lands a body on the far room's ring and
+/// the body has to step off it onto that room's own ground, so a room whose
+/// ground stops ten tiles in is a room every crossing but the handful beside
+/// the patch strands a body in, and the shell never builds one — terrain is
+/// read for every projected room whether or not there is vision. It is the
+/// row behind each exit row and nothing more, so what the patch is for is
+/// untouched.
 let private ground =
     Map.ofList
         [
             for x in 1..10 do
                 for y in 1..10 -> { X = x; Y = y }, Plain
+
+            for i in 1 .. Seam.exitEdge - 1 do
+                yield { X = i; Y = 1 }, Plain
+                yield { X = i; Y = Seam.exitEdge - 1 }, Plain
+                yield { X = 1; Y = i }, Plain
+                yield { X = Seam.exitEdge - 1; Y = i }, Plain
         ]
 
 /// The border ring every room in a real world carries, because terrain is read
@@ -2112,11 +2127,16 @@ let private homeRing: Map<Pos, Terrain> =
                         { X = x; Y = y }, (if x = 49 && y >= 19 && y <= 23 then Plain else Wall)
         ]
 
-/// The world those five rooms make: a border ring apiece and nothing else at
-/// all. The ring is what the shell reads for a declared or transit room whether
-/// or not there is vision (ADR 0031, ADR 0041), and `scanOf` reads the rings and
-/// nothing besides — so a world carrying terrain, a tick or a census would only
-/// be a world with more to get wrong.
+/// The world those five rooms make: a border ring and the ground behind it
+/// apiece, and nothing else at all. Both are what the shell reads for a
+/// declared or transit room whether or not there is vision (ADR 0031, ADR
+/// 0041), and since ADR 0062 `scanOf` reads both — the ring for whether the
+/// engine lands a body across the border, the ground for whether the body can
+/// then step off the landing — so a world carrying a tick or a census would
+/// only be a world with more to get wrong.
+///
+/// The captures bring their own ground; `keeperHome`'s is invented plain, like
+/// its ring, and for the same reason.
 ///
 /// A **function**, and not because #310's rule reaches it: that rule is an
 /// Atlas's, and a `World` is `Map` and `list` the whole way down, so a
@@ -2129,12 +2149,27 @@ let private keeperWorld () : World =
             (keeperHome,
              { RoomFacts.empty with
                  Border = homeRing
+                 Layer =
+                     { RoomLayer.empty with
+                         Terrain =
+                             Map.ofList
+                                 [
+                                     for x in 1..48 do
+                                         for y in 1..48 -> { X = x; Y = y }, Plain
+                                 ]
+                     }
              })
             :: (liveChain
                 |> List.map (fun name ->
+                    let capture = RoomFixtures.load name
+
                     name,
                     { RoomFacts.empty with
-                        Border = (RoomFixtures.load name).Border
+                        Border = capture.Border
+                        Layer =
+                            { RoomLayer.empty with
+                                Terrain = capture.Terrain
+                            }
                     }))
             |> Map.ofList
     }
@@ -2365,5 +2400,98 @@ let scanSetMaskTests =
                     (admitted.Scanned |> List.sort)
                     admittedScan
                     "and its room and its transit rooms enter the scan set"
+            }
+
+            test "a join whose every landing is orphaned is no join, and `linked` now says so" {
+                // ADR 0062 at `World.linked`'s own altitude, over the border
+                // where the mask takes the whole band: W15S26's x = 49 column,
+                // which faces **W14S26** (`RoomName.offsetOf`; #336 corrects
+                // the name `RoomSeamTests` used to print). The lair at (42,39)
+                // masks x = 48 for y = 33..45 and stops one tile short of
+                // x = 49, so seven exits survive on the ring with nothing at
+                // all behind them.
+                //
+                // Before that ADR this answered **true**: `linked` read the two
+                // rings, `Atlas.routes` returned a chain through it, and the
+                // flood then priced `None` because `joinedAcross` dropped every
+                // crossing of the band — the #243/#259 silent failure, arriving
+                // through a join the scan set had asserted.
+                //
+                // The far side is the capture's, mask and all. The near side is
+                // invented as open as a room can be, exactly as `keeperHome`'s
+                // is and for the same reason: nothing on this side may be what
+                // closes the band, or the case would prove nothing about the
+                // far side's ground.
+                let capture = RoomFixtures.load keeperRoom
+
+                let openRoom: RoomFacts =
+                    { RoomFacts.empty with
+                        Border =
+                            Map.ofList
+                                [
+                                    for x in 0 .. Seam.exitEdge do
+                                        for y in 0 .. Seam.exitEdge do
+                                            if
+                                                x = 0
+                                                || x = Seam.exitEdge
+                                                || y = 0
+                                                || y = Seam.exitEdge
+                                            then
+                                                { X = x; Y = y }, Plain
+                                ]
+                        Layer =
+                            { RoomLayer.empty with
+                                Terrain =
+                                    Map.ofList
+                                        [
+                                            for x in 1 .. Seam.exitEdge - 1 do
+                                                for y in 1 .. Seam.exitEdge - 1 ->
+                                                    { X = x; Y = y }, Plain
+                                        ]
+                            }
+                    }
+
+                let world =
+                    { World.empty with
+                        Rooms =
+                            Map.ofList
+                                [
+                                    "W14S26", openRoom
+                                    keeperRoom,
+                                    { RoomFacts.empty with
+                                        Border = capture.Border
+                                        Layer =
+                                            { RoomLayer.empty with
+                                                Terrain = capture.Terrain
+                                            }
+                                    }
+                                ]
+                    }
+
+                let margin = Tuning.keeperMargin Tuning.defaults
+
+                Expect.equal
+                    (Seam.bandBy
+                        (World.ringWalkable margin "W14S26" openRoom.Border)
+                        (World.ringWalkable margin keeperRoom capture.Border)
+                        (fun _ -> true)
+                        "W14S26"
+                        keeperRoom
+                     |> List.length)
+                    7
+                    "the premise: the two rings leave seven crossings open at the shipped margin"
+
+                Expect.isFalse
+                    (World.linked margin world "W14S26" keeperRoom)
+                    "and every one of the seven lands a body where it can never step again, so the rooms are not joined"
+
+                // The other way round is a different question and keeps its own
+                // answer: those same exits are W15S26's to leave, and the room
+                // they land in has ground behind its ring. A band is directed
+                // since ADR 0062, because the ground it asks about is the far
+                // room's.
+                Expect.isTrue
+                    (World.linked margin world keeperRoom "W14S26")
+                    "the crossing out of the keeper room is still a crossing: the far side there has ground"
             }
         ]

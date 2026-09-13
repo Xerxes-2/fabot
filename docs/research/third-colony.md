@@ -16,7 +16,7 @@ Date: 2026-09-10（tick 302,458–302,650，`shardSeason`）。本文所有房�
 ## Summary
 
 - **第三个 colony 选 W15S28，mother 是 W13S28，走 ADR 0047 的 candidate-colony 路径。** 2 source（`10,19`、`6,30`）、controller `25,31`、Thorium **d3 22,000** @`29,12`、常规矿 O d3 70,000。已写进 `Colony.declared`（W13S28 的 outpost 列表 + 自己的一条 entry）。
-- **选它的决定性理由是 hop 预算，不是能量。** 从 W15S28 到 sector Reactor W15S25 是 **3 hop**（W15S27 → W15S26(SK) → W15S25，三道接缝实测 20 / 20 / 20 格全开），正好等于 `Tuning.MaxHops = 3`；从 W12S28 是 6 hop、从 W13S28 是 5 hop，**两个 home 都在 ADR 0058 的 chain 模型之外**。ADR 0057 决策 4 当初要写死 `Tuning.ReactorRoute` 就是因为这个距离。
+- **选它的决定性理由是 hop 预算，不是能量。** 从 W15S28 到 sector Reactor W15S25 是 **3 hop**（W15S27 → W15S26(SK) → W15S25，三道接缝去程各 20 格；回程第三道只有 13 格 —— 见 §10 的更正），正好等于 `Tuning.MaxHops = 3`；从 W12S28 是 6 hop、从 W13S28 是 5 hop，**两个 home 都在 ADR 0058 的 chain 模型之外**。ADR 0057 决策 4 当初要写死 `Tuning.ReactorRoute` 就是因为这个距离。
 - **两个 home 都已 RCL6，但一个 extractor 都没建 —— 钍至今一克没挖。** W12S28 storage 487（在猛升级）、W13S28 storage 143,316；各 40 extension、2 tower、1 spawn。ADR 0057 的 44,000 可达储量在**#251 落地之前是 0**。
 - **GCL 5,939,008 ⇒ GCL3，第三个房是最后一格。** 第四个房要 11,190,000（`(n−1)^2.2 × 10^6`），现在只到 53%。所以这一枪没有第二次机会。
 - **CPU 有余量，而且这次的代价量过了**：`observe cpu` 100 tick 均值 21.53 ms、峰值 40.95 ms（t302,515），ADR 0041 的 revisit 门（均值 >50 或单 tick >80）没触发，limit 100。profile harness 的 `pair` 场景在这条 declaration 前后各跑三轮 100 tick（各自的干净 workspace）：**前 5.38–5.89 ms，后 5.52–5.94 ms** —— 两个区间重叠，所以这条 declaration 多出来的那点（两个房的地形层：W15S28 与 transit 的 W14S28，加它们的 route）**在这个 harness 的 100 tick 噪声里分辨不出来**，不要把它读成 +6%。第三个 colony 多一次 `decide` 与一份 Layout 要等它自己的 spawn 立起来才算，账上放得下。
@@ -99,7 +99,7 @@ hop 数是房名网格上的正交步数（`RoomName.hopsBetween` 的口径）�
 | W14S28 ↔ W15S28 | 29 | 第二跳 |
 | W15S28 ↔ W15S27 | 20 | 到 Reactor 第一跳 |
 | W15S27 ↔ W15S26 | 20 | 第二跳（进 SK 房） |
-| W15S26 ↔ W15S25 | 20 | 第三跳（进 Reactor 房） |
+| W15S26 ↔ W15S25 | 20 | 第三跳（进 Reactor 房）。**回程 W15S25 → W15S26 是 13，不是 20** —— 见 §10 |
 | W15S28 ↔ W15S29 | 26 | 将来的 outpost |
 | W15S28 ↔ W16S28 | **0** | **整边全墙 —— W16S28 永远不能当 W15S28 的 outpost** |
 | W14S28 ↔ W14S29 | 44 | W14S29 归谁的问题（见 §6） |
@@ -108,7 +108,7 @@ hop 数是房名网格上的正交步数（`RoomName.hopsBetween` 的口径）�
 
 **必须诚实说清楚这一节买到的是什么，不是什么。**
 
-- **买到的**：W15S28 的 storage 到 Reactor 房里的任何目标，`Atlas.route` 能找出 chain（3 hop，且 `transitBetween` 的矩形就是这条直线，沿途三道接缝各 20 格全开，不需要绕墙），`pricedAcrossInto` / `haulRoundTripTicks` / `castWalkTicks` 能给出价（ADR 0058 决策 3）。**从两个 home 出发这件事今天做不到**，除非把 MaxHops 从 3 抬到 5–6，而那正是 ADR 0041 用"三十几次加法而不是三十几次 flood"论证过要控制的东西。
+- **买到的**：W15S28 的 storage 到 Reactor 房里的任何目标，`Atlas.route` 能找出 chain（3 hop，且 `transitBetween` 的矩形就是这条直线，去程沿途三道接缝各 20 格，不需要绕墙（回程第三道 13 格，仍然通 —— §10）），`pricedAcrossInto` / `haulRoundTripTicks` / `castWalkTicks` 能给出价（ADR 0058 决策 3）。**从两个 home 出发这件事今天做不到**，除非把 MaxHops 从 3 抬到 5–6，而那正是 ADR 0041 用"三十几次加法而不是三十几次 flood"论证过要控制的东西。
 - **没买到的**：**投递本身还没实现**。ADR 0057 的 #251 一颗砖都没落地（两个房 extractor = 0），而且 **Reactor 房 W15S25 没有 controller，永远不能写成一个 `Outpost`** —— `Outpost.Controller` 必填。所以"3 hop"意味着的是"现有的 Seam-chain 定价模型能覆盖这段路"，不是"declare 一下就能送钍"。#251 / #263 仍然需要自己的词汇（一个不叫 outpost 的远程目标），本文不替它设计。
 
 ## 5. 风险
@@ -172,3 +172,23 @@ controller 6a8caa95dd4872bccd319015  {W15S28; 25,31}
 - **W11S26 的地形**未复测（沿用旧文的"三面全墙"）。
 - **W14S23 是否仍在 Odiodin 的 reservation 下**未确认（今日 `map-stats` 读不到该房的 `own`/`rsv`）。
 - **`checkExit` 对 0 格接缝的邻房算不算合法出口**未核（§5 末）。
+
+## 10. 更正：接缝数是有方向的，而且要减掉落地无地的那些（2026-09-14，#326 / ADR 0062）
+
+本文 Summary、§4 的接缝表与 §4 末那段都写着到 Reactor 的三道接缝 **"20 / 20 / 20 格全开"**。那是 `seams.mjs` 当日按**两侧 border ring 都非 wall** 数出来的，也正是当时 `Seam.bandBy` 的口径 —— 而这个口径看不见落地格背后那一排地。引擎把身体放在**对面房的 border ring 上**，它必须从那格迈到那个房自己的地上，否则哪儿也去不了。ADR 0062 把这件事写进了模型：`bandBy` / `joinedBy` 现在多收一个谓词，问的是**对面房的 ground**。
+
+按 shipped 的 [[keeper margin]] 6、对 committed capture（`tests/Core.Tests/rooms/W15S26.room`）重数，三道接缝是**有方向的**：
+
+| 跳 | 去程（往 Reactor） | 回程 |
+|---|---|---|
+| W15S28 ↔ W15S27 | 20 | 20 |
+| W15S27 ↔ W15S26 | 20 | 20 |
+| W15S26 ↔ W15S25 | 20 | **13** |
+
+差别只在最后一跳的回程：落地格是 W15S26 自己的 y = 0 排，而 (38,7) 的矿离那一排 **7** 格（所以 ring 保住 20 格），离它背后的 y = 1 地排只有 **6** 格（所以其中 x = 37..43 七格的地被 mask 掉了）。这七格是**孤儿**：ring 认、`World.linked` 认、`Atlas.routes` 认，而任何落上去的身体再也迈不出一步。`RoomSeamTests` 的 *"an orphaned crossing is no crossing"* 是这张表的出处。
+
+**链路本身没有变**：`Atlas.routes "W15S28" "W15S25"` 仍然只答一条链，`castWalkTicks` 仍然是 160 tick（`RoomSeamTests` 的 re-claimer cadence 一行未改、仍然绿）。变的是这份文档不该再说"全开"。
+
+同一次重数还说明了 W15S26 的**东**边（x = 49 列，对面是 W14S26，不是 W16S26 —— #336）：ring 在 margin 6 下留下 7 格，而 (42,39) 的 lair 把 x = 48 的 y = 33..45 整段 mask 掉并且**正好**停在 x = 49 前一格，所以那 7 格**全是**孤儿。ADR 0062 之后 `World.linked "W14S26" "W15S26"` 答 **false**；在那之前它答 true，而没有身体走得了。本文没有把 W14S26 列为候选或 transit 房，所以这一条不改本文任何结论。
+
+**方向性还有一个后果，落在"能不能 declare"上**：`RoomName.routesBy` 只从 home 往外展开，所以 ADR 0062 之前每一个准入读者（`Outpost.routable`、`Errand.routable`、`ColonyView.Refused`）问的都只是**去程**那一半。ADR 0062 决策 4 把 `Declaration.routable` 改成两头都问 —— 一个"进得去出不来"的房现在会被**大声拒绝**，而不是照样雇人、走出去、然后 `haulRoundTripTicks` 悄悄给 `None`。对本文的结论没有影响：W15S28 → W15S25 这条链**两个方向都有链**（回程最后一跳 13 格仍然通），所以 `Errand.w15s25` 照旧被准入。

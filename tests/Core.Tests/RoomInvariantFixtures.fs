@@ -577,14 +577,33 @@ let internal borders =
         }
     ]
 
-/// The Atlas over two captures' border rings and nothing else: the Seam is
-/// answered from the border layer alone, so this is its whole input, and
-/// every tile in it is the server's own. `Terrain` stays empty — a room
-/// with no ground at all still has its exits, which is the separation
-/// under test.
+/// The Atlas over two captures' border rings **and their ground**: a Seam is
+/// answered from the border layer and from the ground behind the landing tile
+/// (ADR 0041, ADR 0062), so this is its whole input, and every tile in it is
+/// the server's own.
+///
+/// The ground used to be left out here, on the reading that *"a room with no
+/// ground at all still has its exits"*. ADR 0062 retires that reading: the
+/// engine puts a body down on the landing tile, and a room with no ground is a
+/// room every crossing into it strands a body in. It is also a room the shell
+/// cannot build — `World.ofGame` reads terrain for every room it reads a ring
+/// for — which is the same way five `ViewTests` fixtures got more faithful
+/// under ADR 0058.
 let internal acrossFrom (near: RoomCapture) (far: RoomCapture) =
     { SpatialInfo.empty with
         Borders = Map.ofList [ near.RoomName, near.Border; far.RoomName, far.Border ]
+        Rooms =
+            Map.ofList
+                [
+                    near.RoomName,
+                    { RoomLayer.empty with
+                        Terrain = near.Terrain
+                    }
+                    far.RoomName,
+                    { RoomLayer.empty with
+                        Terrain = far.Terrain
+                    }
+                ]
     }
     |> AtlasFixtures.snapshotWith []
     |> ofView

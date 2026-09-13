@@ -459,6 +459,30 @@ module World =
             | Some terrain -> terrain <> Wall && not (masked tile)
             | None -> false
 
+    /// The same reading one layer in: a tile of a room's own **ground** a body
+    /// could stand on — terrain the layer carries that is not wall and which no
+    /// declared keeper rock masks (ADR 0062). The [[world]]'s half of the
+    /// landing test `Atlas.seams` answers off its own raw terrain grid,
+    /// and it is terrain alone for the reason that one gives: a band is
+    /// geometry, so a structure raised this tick must not move it.
+    ///
+    /// This is where the world reaches past its border maps, which is the cost
+    /// ADR 0062 accepted. It costs no new plumbing: `World.ofGame` already
+    /// reads terrain for every declared and transit room whether or not there
+    /// is vision (ADR 0031, ADR 0041), so the ground behind a landing tile has
+    /// been in hand on every tick the ring was.
+    let groundWalkable
+        (keeperMargin: int)
+        (room: string)
+        (terrain: Map<Pos, Terrain>)
+        : Pos -> bool =
+        let masked = Keepers.maskIn keeperMargin room
+
+        fun tile ->
+            match Map.tryFind tile terrain with
+            | Some ground -> ground <> Wall && not (masked tile)
+            | None -> false
+
     /// Whether a creep could step from one room into the other: the [[world]]'s
     /// own reading of a [[seam]] band, off the border maps it holds per room
     /// and before any [[atlas]] grid exists (ADR 0058). The Atlas answers the
@@ -479,11 +503,25 @@ module World =
     /// terrain — and the routable question has to be asked over the **same**
     /// masked layer every price will use, or the scan set admits a chain the
     /// flood cannot walk.
+    ///
+    /// Since ADR 0062 the far side is asked **twice**: its ring, for whether
+    /// the engine lands a body there at all, and its ground, for whether the
+    /// body can then step off the landing. That is the mask's own artefact —
+    /// a rock six tiles inside a border masks the row behind an exit row it
+    /// does not reach, so a ring keeps crossings whose ground is gone — and
+    /// before that ADR this answered **true** for W15S26 and the room across
+    /// its east border, where every one of the seven surviving crossings is
+    /// such an orphan (#326).
     let linked (keeperMargin: int) (world: World) (fromRoom: string) (toRoom: string) : bool =
         let walkableIn room =
             ringWalkable keeperMargin room (roomOf world room).Border
 
-        Seam.joinedBy (walkableIn fromRoom) (walkableIn toRoom) fromRoom toRoom
+        Seam.joinedBy
+            (walkableIn fromRoom)
+            (walkableIn toRoom)
+            (groundWalkable keeperMargin toRoom (roomOf world toRoom).Layer.Terrain)
+            fromRoom
+            toRoom
 
     /// What one colony's declaration narrows to this tick, and the union of it:
     /// `scanOf`'s whole answer, in four named halves rather than a positional

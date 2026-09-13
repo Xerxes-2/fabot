@@ -114,8 +114,19 @@ let seamTests =
             }
 
             test "the band reads the same from the neighbour's side, every pair swapped" {
-                // Adjacency has no preferred end: the same crossing, asked
-                // from the other room, is the same tiles the other way round.
+                // Adjacency has no preferred end **on these captures**, and
+                // since ADR 0062 that is the captures' fact and not the model's
+                // rule. A band asks the *far* room's ground behind the landing,
+                // so `seams A B` and `seams B A` are two questions about two
+                // different rooms and are free to answer differently — which on
+                // W15S26's east border they do, and `RoomSeamTests`' keeper
+                // list is where that is pinned. Not one of the pairs in
+                // `borders` is a keeper room's, and over raw terrain no capture
+                // in this repo orphans a landing at all (ADR 0062's own
+                // measurement), so every one of them is symmetric and this says
+                // so. What would go red if a re-capture ever orphaned one is
+                // this line, and the right answer then is to name the direction
+                // rather than to relax the equality.
                 for border in borders do
                     let near = load border.From
                     let far = load border.To
@@ -673,18 +684,74 @@ let keeperMaskTests =
                     11
                     "seven is where it starts to cost: nine of the twenty go"
 
-                // What eight does is *not* asserted here, and the reason is
-                // worth the line: measured over this capture the room's ground
-                // is cut in two at eight, and `routes` goes on answering with a
-                // chain — because it reads the rings, where ten crossings
-                // survive. That is #326's silent failure and not a fact about
-                // the margin, so the number lives in #327's table beside the
-                // decision it belongs to.
+                // The count at eight is still *not* asserted here — that number
+                // is #327's table's, beside the decision it belongs to — but
+                // what eight does is, because ADR 0062 is read as having closed
+                // it and it has not. The note this comment used to carry said
+                // the chain at eight survives "because it reads the rings",
+                // and that reason has moved: the band asks the ground behind
+                // the landing now, and at eight the north border orphans
+                // **nothing**. The room's *interior* is what is cut in two —
+                // the two bands are open and no walk joins them — and no
+                // landing-neighbour predicate can see a severed transit room.
+                // So this is a second silent failure wearing #326's clothes,
+                // and it is the one ADR 0062 lists under what it does not
+                // decide.
                 Expect.equal
                     (southBand (marginOf 3)).Length
                     20
                     "the south border is clear even at seven, the nearest rock being far from that row"
             }
+
+            test
+                "a margin that severs the room's middle leaves the chain standing and the price gone" {
+                // The hole ADR 0062 does **not** close, pinned so that a
+                // reading of that ADR cannot mistake it for closed. Eight is no
+                // knob this bot ships — `Tuning.defaults` is six and
+                // `RoomSeamTests`' own case above is why — so this asserts a
+                // shape and no count: at a margin that cuts W15S26 across the
+                // middle, every crossing the north border keeps has ground
+                // beside it, `Atlas.routes` answers the full chain, and the
+                // walk over it prices `None`.
+                //
+                // That is #243/#259's silent failure again, one layer in from
+                // the landing: ADR 0062 made the band ask whether a body can
+                // step **off** its landing, and nothing yet asks whether the
+                // two bands of a transit room are joined to each other.
+                let atlas = atlasAt 4
+                let margin = marginOf 4
+
+                let north = survivingExits margin (fun tile -> tile.Y = 0)
+
+                Expect.isNonEmpty
+                    north
+                    "the premise: the ring still carries crossings at this margin"
+
+                Expect.isEmpty
+                    (north
+                     |> List.filter (fun tile ->
+                         List.isEmpty (adjacentWalkableIn atlas "W15S26" tile)))
+                    "and not one of them is an orphan, so ADR 0062's predicate takes none of them"
+
+                Expect.equal
+                    (seams atlas "W15S25" "W15S26" |> List.length)
+                    north.Length
+                    "so the band is the ring, crossing for crossing"
+
+                Expect.equal
+                    (routes atlas "W15S28" "W15S25")
+                    [ [ "W15S28"; "W15S27"; "W15S26"; "W15S25" ] ]
+                    "and the route search walks that band and answers the chain it always answered"
+
+                Expect.isNone
+                    (castWalkTicks
+                        atlas
+                        [ BodyPart.Claim; Move ]
+                        { X = 29; Y = 12 }
+                        (RoomPos.at "W15S25" { X = 44; Y = 6 }))
+                    "while the price over that very chain is None: the room's own middle is where the walk stops"
+            }
+
 
             test "a rock behind a border leaves the crossing and takes the ground it lands on" {
                 // #317's stranding, on the terrain it was found over rather
@@ -692,10 +759,17 @@ let keeperMaskTests =
                 // from the y = 0 ring and six from the y = 1 ground, so seven
                 // of the twenty north crossings survive the mask with nothing
                 // behind them; the lair at (42,39) does the same to the east
-                // border and orphans **every** exit it leaves. The band is a
-                // fact about two rings and cannot see this, which is why the
-                // movers ask the far side's ground themselves and why what the
-                // band itself should say is #326's.
+                // border and orphans **every** exit it leaves.
+                //
+                // What is read here is the **ring** and the ground beside it,
+                // one beside the other, and that is deliberate: the two cases
+                // below take the band's own answer, and this one takes the
+                // facts the band is built out of, so a fixture that stopped
+                // exhibiting the orphan would red here rather than leave them
+                // green having checked nothing. Until ADR 0062 these two
+                // readings were the whole disagreement — the band saw the ring
+                // and only the movers asked the ground (#317). The band asks it
+                // now.
                 let atlas = atlasAt 2
                 let margin = marginOf 2
 
@@ -720,9 +794,231 @@ let keeperMaskTests =
                 Expect.equal
                     (orphans (fun tile -> tile.X = Seam.exitEdge) |> List.length)
                     7
-                    "and all seven are orphans, so W15S26 -> W16S26 is a join no body can use"
+                    "and all seven are orphans: the whole of that border lands a body where it can never step again"
 
                 Expect.isEmpty (orphans (fun tile -> tile.X = 0)) "west: none"
+            }
+
+            test
+                "an orphaned crossing is no crossing: the north band drops the run and keeps the rest" {
+                // ADR 0062, over the terrain that generated it. The **ring**
+                // answer and the **band** answer are both taken here, because
+                // the whole of what that ADR changes is that they may now
+                // differ: the row of twenty exits the mask leaves open carries
+                // seven landings the mask has taken the ground from, and a
+                // landing with no ground beside it is a tile a body arrives on
+                // and never leaves.
+                //
+                // The direction is the one the landings belong to: W15S26's
+                // y = 0 row is what a crossing **out of W15S25** lands on.
+                let atlas = atlasAt 2
+                let margin = marginOf 2
+
+                let landings = seams atlas "W15S25" "W15S26" |> List.map (fun (_, there) -> there.X)
+
+                Expect.equal
+                    (survivingExits margin (fun tile -> tile.Y = 0) |> List.length)
+                    20
+                    "the ring still carries twenty: the mineral at (38,7) is seven from that row"
+
+                Expect.equal
+                    landings
+                    [ 20; 21; 22; 23; 24; 25; 26; 27; 28; 44; 45; 46; 47 ]
+                    "and the band carries thirteen: the seven at x = 37..43 are orphans and are gone"
+
+                // The converse, said in the same breath, or the clause would
+                // be indistinguishable from one that dropped the whole band:
+                // every crossing left lands a body on ground it can step onto,
+                // and every crossing dropped was one with none.
+                for x in landings do
+                    Expect.isNonEmpty
+                        (adjacentWalkableIn atlas "W15S26" { X = x; Y = 0 })
+                        $"the crossing at x = {x} lands on ground with a step off it"
+
+                for x in 37..43 do
+                    Expect.isTrue
+                        (survivingExits margin (fun tile -> tile.Y = 0)
+                         |> List.contains { X = x; Y = 0 })
+                        $"the ring keeps ({x},0)"
+
+                    Expect.isEmpty
+                        (adjacentWalkableIn atlas "W15S26" { X = x; Y = 0 })
+                        $"and nothing of the room's own ground lies beside it, which is why the band does not"
+            }
+
+            test "the east band is orphaned end to end, so the model answers no band at all" {
+                // The border where the whole band goes. The lair at (42,39)
+                // masks x = 48 for y = 33..45 and stops one tile short of
+                // x = 49, so seven exits survive on the ring and not one of
+                // them has ground behind it.
+                //
+                // The neighbour across W15S26's x = 49 column is **W14S26**
+                // (`RoomName.offsetOf`; #336 corrects the name this file used
+                // to print), and no capture exists for it — so its side is
+                // given as open as a ring can be. Nothing on the near side is
+                // therefore what closes the band, and the two readings below
+                // differ in the one predicate ADR 0062 added.
+                let margin = marginOf 2
+                let capture = load "W15S26"
+
+                let ringOf tile =
+                    match Map.tryFind tile capture.Border with
+                    | Some terrain -> terrain <> Wall && not (Keepers.masked margin "W15S26" tile)
+                    | None -> false
+
+                let groundOf tile =
+                    match Map.tryFind tile capture.Terrain with
+                    | Some terrain -> terrain <> Wall && not (Keepers.masked margin "W15S26" tile)
+                    | None -> false
+
+                let ringOnly = Seam.bandBy (fun _ -> true) ringOf (fun _ -> true) "W14S26" "W15S26"
+
+                Expect.equal
+                    (ringOnly |> List.map (fun (_, there) -> there.Y))
+                    [ 36; 37; 38; 39; 40; 41; 42 ]
+                    "the rings alone answer seven crossings, which is what the band said before ADR 0062"
+
+                Expect.isEmpty
+                    (Seam.bandBy (fun _ -> true) ringOf groundOf "W14S26" "W15S26")
+                    "and with the far room's ground asked for, none of the seven is a crossing"
+
+                // The ground each of them would land on, read out, so the
+                // emptiness above is the mask's doing and not a mis-built
+                // predicate.
+                for _, landing in ringOnly do
+                    Expect.isEmpty
+                        (tilesWithin 1 landing |> List.filter groundOf)
+                        $"({landing.X},{landing.Y}) has no ground of W15S26's beside it"
+            }
+
+            test "the price's reader and the scan set's answer alike at that border, each way round" {
+                // ADR 0058's invariant — the scan set and the price cannot
+                // disagree about which rooms are joined — asked in **both**
+                // directions, which is what ADR 0062 made a second question.
+                // The case above takes `Seam.bandBy` by hand; this one takes
+                // the two shipped readers, `Atlas.seams`/`Atlas.routes` off the
+                // grids and `World.linked` off the border maps, and puts their
+                // answers beside each other. Without it the Atlas's half of
+                // ADR 0062 is pinned nowhere: the third predicate can be struck
+                // out of `Atlas.routes` and every other case in this repo stays
+                // green.
+                //
+                // The same geometry as above: W15S26's capture with its mask,
+                // and W14S26 across its x = 49 column invented as open as a
+                // room can be, so nothing on that side is what closes a band.
+                let margin = marginOf 2
+                let capture = load "W15S26"
+
+                let openRing =
+                    Map.ofList
+                        [
+                            for x in 0 .. Seam.exitEdge do
+                                for y in 0 .. Seam.exitEdge do
+                                    if x = 0 || x = Seam.exitEdge || y = 0 || y = Seam.exitEdge then
+                                        { X = x; Y = y }, Plain
+                        ]
+
+                let openGround =
+                    Map.ofList
+                        [
+                            for x in 1 .. Seam.exitEdge - 1 do
+                                for y in 1 .. Seam.exitEdge - 1 -> { X = x; Y = y }, Plain
+                        ]
+
+                let rooms =
+                    [
+                        "W14S26", (openRing, openGround)
+                        "W15S26", (capture.Border, capture.Terrain)
+                        "W15S27", ((load "W15S27").Border, (load "W15S27").Terrain)
+                    ]
+
+                let atlas =
+                    { SpatialInfo.empty with
+                        RoomName = Some "W15S27"
+                        Rooms =
+                            rooms
+                            |> List.map (fun (room, (_, terrain)) ->
+                                room,
+                                { RoomLayer.empty with
+                                    Terrain = terrain
+                                })
+                            |> Map.ofList
+                        Borders =
+                            rooms |> List.map (fun (room, (ring, _)) -> room, ring) |> Map.ofList
+                    }
+                    |> AtlasFixtures.snapshotWith []
+                    |> ofView
+
+                let world =
+                    { World.empty with
+                        Rooms =
+                            rooms
+                            |> List.map (fun (room, (ring, terrain)) ->
+                                room,
+                                { RoomFacts.empty with
+                                    Border = ring
+                                    Layer =
+                                        { RoomLayer.empty with
+                                            Terrain = terrain
+                                        }
+                                })
+                            |> Map.ofList
+                    }
+
+                let linked = World.linked margin world
+
+                // Out of the keeper room the crossing stands: the landings are
+                // W14S26's invented plain. Into it not one of the seven does.
+                Expect.isNonEmpty
+                    (seams atlas "W15S26" "W14S26")
+                    "out of the keeper room the Atlas answers a band"
+
+                Expect.isTrue
+                    (linked "W15S26" "W14S26")
+                    "and the world says the same rooms are joined"
+
+                Expect.isEmpty
+                    (seams atlas "W14S26" "W15S26")
+                    "into it the Atlas answers none: every landing the mask leaves is an orphan"
+
+                Expect.isFalse (linked "W14S26" "W15S26") "and the world says the same"
+
+                // And the chain the search builds off that relation, which is
+                // the reader ADR 0062's predicate reaches through and the one
+                // nothing else in this repo covers.
+                Expect.equal
+                    (routes atlas "W15S27" "W14S26")
+                    [ [ "W15S27"; "W15S26"; "W14S26" ] ]
+                    "a chain runs out of W15S27 into W14S26 by way of the keeper room"
+
+                Expect.equal
+                    (routes atlas "W14S26" "W15S27")
+                    []
+                    "and none runs back, which is the whole of what a directed band is"
+
+                // What a colony would have done with that. `routesBy` expands
+                // away from **home** and nowhere else, so every reader that
+                // narrows a declaration was asking the half that says yes: a
+                // colony at W15S27 declaring anything in W14S26 would have been
+                // admitted, its reserver and its miners hired and walked out,
+                // while `haulRoundTripTicks` asked `routes` in the direction
+                // above that answers `[]` and priced `None`. That is #243's
+                // silent failure in the direction ADR 0062 had just taught the
+                // model to see, and `Declaration.routable` is where it is
+                // closed: a declaration buys a **round trip**.
+                Expect.isTrue
+                    (RoomName.routesBy linked Tuning.defaults.MaxHops "W15S27" "W14S26"
+                     |> List.isEmpty
+                     |> not)
+                    "the premise: the outbound half, which admission asked alone, says yes"
+
+                Expect.isEmpty
+                    (RoomName.routesBy linked Tuning.defaults.MaxHops "W14S26" "W15S27")
+                    "and the way home, which it did not ask, has no chain at all"
+
+                Expect.isFalse
+                    (Declaration.routable linked Tuning.defaults.MaxHops "W15S27" "W14S26")
+                    "so W15S27 may not declare W14S26: the way out is open and the way home is not"
             }
         ]
 
