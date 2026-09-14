@@ -321,15 +321,25 @@ type Tuning =
         /// decade would be the second of those, and moving it down spends trips
         /// on a container that is not yet bleeding.
         MineContactCliff: int
-        /// The Layout horizon (ADR 0011, moved to RCL5 by ADR 0039 and to RCL6
-        /// by ADR 0055): the whole plan is computed up to this level regardless
-        /// of the current one, so today's roads route around tomorrow's
-        /// structures. One level of lookahead, and it is moved **before** the
-        /// room reaches it: the clustered kinds are sized here and only
-        /// filtered at the current level, so a room standing at RCL6 under a
-        /// horizon of 5 computes an extension gap of zero and plans none of the
-        /// ten the engine just unlocked.
-        HorizonLevel: int
+        /// **How far ahead** the Layout reserves, in controller levels (ADR
+        /// 0011, ADR 0063): the horizon is `controller.Level + this`, so the
+        /// whole plan is computed one level above the room's own and today's
+        /// roads route around tomorrow's structures. The lookahead is the half
+        /// of the horizon this bot chose; the level it is added to is read off
+        /// the server, and that is why the *level* is no longer a field here
+        /// (`Tuning.horizonOf` derives the horizon, ADR 0063 replacing ADR
+        /// 0039's and ADR 0055's absolute constants).
+        ///
+        /// One, which is ADR 0011's standing bargain re-stated relatively and
+        /// unchanged by ADR 0063: reserving four levels out taxes today's
+        /// trunks with detours for a colony that may never get there. Zero is a
+        /// meaningful setting and means no lookahead at all — the clustered
+        /// kinds sized at the level they are filtered at — which is what the
+        /// horizon existed to avoid, and what a *stale* absolute constant used
+        /// to produce by accident: sized at 6 and filtered at 7, an RCL7 room
+        /// computed an extension gap of zero and planned none of the ten the
+        /// engine had just unlocked (#341).
+        HorizonLookahead: int
         /// How many creeps the colony has building in its [[outpost]]s at once
         /// — a budget over every site out there together and never a per-site
         /// number, the Planner placing one container site per unserved outpost
@@ -428,7 +438,7 @@ module Tuning =
             MinerWorkPerMove = 5
             MineContactAgeing = 3
             MineContactCliff = 1000
-            HorizonLevel = 6
+            HorizonLookahead = 1
             OutpostBuilders = 2
             BootstrapLevel = 3
             MaxHops = 3
@@ -470,3 +480,40 @@ module Tuning =
     /// takes a keeper off any hostile list.
     let keeperMargin (tuning: Tuning) : int =
         Engine.keeperPin + Engine.rangedRange + tuning.ReachMargin
+
+    /// The **Layout horizon**: the controller level the clustered kinds are
+    /// *sized* at, where the level they are *filtered* at is the room's own
+    /// (ADR 0011, ADR 0063). Derived rather than chosen, for `keeperMargin`'s
+    /// reason and one of its own — a function beside the record and not a
+    /// field in it:
+    ///
+    ///     max 0 (controller.Level + HorizonLookahead)
+    ///
+    /// The horizon had been an absolute constant since ADR 0011, and an
+    /// absolute constant naming a level the room will reach is a number that
+    /// goes stale the tick the room reaches it. It did, three times: ADR 0011
+    /// set it at RCL4, ADR 0039 moved it to RCL5, ADR 0055 to RCL6, and #341
+    /// caught the fourth — W12S28 standing at RCL7 under a horizon of 6,
+    /// computing an extension gap of `40 − 40 = 0` and asking for none of the
+    /// ten the engine had unlocked. Derived off the level, there is no fourth
+    /// time: the horizon moves when the room does, on the same tick, without a
+    /// human in the loop.
+    ///
+    /// It stops moving on its own at the **top**, and needs no clamp to: RCL8
+    /// asks for a horizon of 9, and `allowanceOf`'s catch-all answers 9 exactly
+    /// what it answers 8, so a maxed room reserves its own terminal allowance
+    /// and nothing beyond it.
+    ///
+    /// The **bottom** is clamped, because `allowanceOf`'s catch-all is
+    /// two-sided and answers a *negative* level the same sixty extensions and
+    /// six towers it answers RCL8: without the clamp a lookahead of −2 or lower
+    /// would hand a young room the **widest** window in the table instead of
+    /// the narrowest, which is the opposite of what the field says it does. A
+    /// horizon of zero allows no clustered structure at all, which is the floor
+    /// the level itself has, and `QuotaTuningTests` reads the clamp at a
+    /// lookahead that reaches past it.
+    ///
+    /// A level is a server fact and the lookahead is this bot's choice, which
+    /// is the cut ADR 0052 decision 5 draws through `Tuning`: the chosen half
+    /// stays a field, the read half never becomes one.
+    let horizonOf (tuning: Tuning) (level: int) : int = max 0 (level + tuning.HorizonLookahead)

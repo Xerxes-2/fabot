@@ -301,10 +301,14 @@ let tuningTests =
                     "read at a level the engine allows none, the reservation is empty and nothing is placed"
             }
 
-            test "HorizonLevel is the level the clustered kinds are sized at" {
-                // Read at the horizon's own level, where the sizing is the
-                // whole answer: the placement filter is wide open at RCL6, so
-                // what the room asks for is what the reservation held.
+            test "HorizonLookahead is how far above its own level a room is sized at" {
+                // Read at a level whose placement filter is wide open for what
+                // the reservation holds, so what the room asks for is what the
+                // sizing gave it. The reservation is always the wider of the
+                // two — the lookahead only ever adds — so the *placement* is
+                // the current level's allowance whenever the lookahead is
+                // positive, and the lookahead's own arithmetic is read below
+                // where it can bite: at zero, and below.
                 let colony = atLevel 6 (openRoom 6)
 
                 let placed tuned =
@@ -315,23 +319,71 @@ let tuningTests =
 
                 let towers, extensions = placed colony
 
-                Expect.equal towers 2 "the shipped horizon of six sizes two towers"
+                Expect.equal
+                    towers
+                    2
+                    "RCL6 allows two towers and the placement filter is the level's"
+
                 Expect.equal extensions 40 "and forty extensions, which RCL6 unlocks in full"
 
-                // The horizon left behind, one field moved (ADR 0055): the
-                // same RCL6 room under the shipped-yesterday five sizes thirty
-                // and plans none of the ten the engine unlocked. That is the
-                // failure this constant exists to prevent, and it is why the
-                // move lands before the room does.
+                // The shipped lookahead of one sizes this RCL6 room at seven —
+                // three towers and fifty extensions reserved — and RCL7's third
+                // tower therefore takes a clustered pick ahead of the
+                // extensions even though no third tower may be placed yet. That
+                // is the reservation doing its job a level early, and above
+                // zero it is invisible in a *count*: the placement filter is
+                // the level's either way, so what a positive lookahead moves is
+                // which tiles the counts land on and never how many.
                 Expect.equal
-                    (placed (colony |> tunedBy (fun t -> { t with HorizonLevel = 5 })))
+                    (placed (colony |> tunedBy (fun t -> { t with HorizonLookahead = 0 })))
+                    (2, 40)
+                    "no lookahead sizes the room at its own level, which RCL6 places in full — the horizon buying nothing"
+
+                // So the shipped value is read where it does move: the tiles.
+                // Without this the test distinguishes `1` from negatives only,
+                // and every lookahead from 0 upwards answers `(2, 40)` here —
+                // which would make the field look inert when it is not.
+                let extensionTiles tuned =
+                    sitesOfKind Extension (decideOn tuned).Intents
+
+                Expect.notEqual
+                    (extensionTiles (colony |> tunedBy (fun t -> { t with HorizonLookahead = 0 })))
+                    (extensionTiles colony)
+                    "and one level of lookahead moves the tiles the forty land on, which is what it buys"
+
+                // A **negative** lookahead is the stale absolute constant of
+                // ADR 0055 written relatively, and it reproduces #341 exactly:
+                // sized a level below the room, the RCL6 gap for the ten
+                // extensions RCL6 unlocked is zero and the room asks for none
+                // of them. Pinned because it is the failure the derivation
+                // exists to make unreachable — no setting of the *level* can
+                // produce it any more, only a human setting this field below
+                // zero.
+                Expect.equal
+                    (placed (colony |> tunedBy (fun t -> { t with HorizonLookahead = -1 })))
                     (2, 30)
-                    "a horizon of five sizes the RCL5 cluster, and an RCL6 room may place no more than it planned"
+                    "sized a level behind, an RCL6 room plans none of the ten the engine unlocked — #341's shape"
 
                 Expect.equal
-                    (placed (colony |> tunedBy (fun t -> { t with HorizonLevel = 2 })))
+                    (placed (colony |> tunedBy (fun t -> { t with HorizonLookahead = -4 })))
                     (0, 5)
-                    "a horizon of two reserves an RCL2 room's cluster, and the room may place no more than it planned"
+                    "four levels behind reserves an RCL2 room's cluster, and the room may place no more than it planned"
+
+                // And the floor under all of it. `allowanceOf`'s catch-all is
+                // two-sided — it answers a *negative* level the sixty
+                // extensions and six towers it answers RCL8 — so a lookahead
+                // that reaches past zero would hand the youngest room the
+                // **widest** window in the table instead of the narrowest,
+                // which is backwards for a field whose whole meaning is "how
+                // far ahead". `Tuning.horizonOf` clamps at zero, and a horizon
+                // of zero allows no clustered structure at all.
+                Expect.equal
+                    (placed (
+                        atLevel 2 (openRoom 6)
+                        |> tunedBy (fun t -> { t with HorizonLookahead = -8 })
+                    ))
+                    (0, 0)
+                    "a lookahead reaching below zero reserves nothing, rather than reserving RCL8's sixty"
             }
 
             test "OutpostBuilders is the crowd the outpost may take" {

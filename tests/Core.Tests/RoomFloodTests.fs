@@ -547,7 +547,7 @@ let roadGateTests =
     /// stride's first tile, which is a premise and not an answer: what the
     /// gate is read off is the level, and the spawn only has to be the
     /// same in both runs.
-    let placedAt roomName level =
+    let colonyAt roomName level =
         let room = rooms |> List.find (fun room -> room.Name = roomName)
         let capture = load roomName
 
@@ -556,9 +556,10 @@ let roadGateTests =
             | live :: _ -> live
             | [] -> spawnTiles room capture |> List.head
 
-        let loaded = project capture spawn room.FallbackController
+        colonyOf (project capture spawn room.FallbackController) level
 
-        decide (colonyOf loaded level) Map.empty Set.empty None
+    let placedAt roomName level =
+        decide (colonyAt roomName level) Map.empty Set.empty None
         |> fun result -> placementsOf result.Intents
 
     testList
@@ -582,15 +583,51 @@ let roadGateTests =
 
             test "the road gap is all the level withheld, and it drops whole" {
                 // The gate is a filter on the placement and never on the
-                // plan (ADR 0011's "computed whole"), so the set that
-                // arrives at RCL3 is the set the room wanted all along —
-                // pinned as level-invariance above the line rather than as
-                // a tile list, since the plan is the room's answer and not
-                // the test's.
-                Expect.equal
-                    (tilesOfKind Road (placedAt "W13S28" 4) |> Set.ofList)
-                    (tilesOfKind Road (placedAt "W13S28" 3) |> Set.ofList)
-                    "nothing above the line moves: RCL4 places what RCL3 places"
+                // plan (ADR 0011's "computed whole"), and what "drops
+                // whole" means is that the tick the gate opens leaves
+                // nothing owed: pave the set RCL3 asks for and the same
+                // room at the same level asks for no road at all. A gate
+                // that paced would hand out the rest on the tick after.
+                //
+                // This used to be pinned as **level-invariance** above the
+                // line — RCL4 places what RCL3 places — and that pin is no
+                // longer available, for a reason that is the horizon's and
+                // not the gate's. Since ADR 0063 the clustered reservation
+                // is sized at the room's own level plus one, so RCL4
+                // reserves a tower and ten extensions more than RCL3 and
+                // the router routes around them: planned from `6,6` this
+                // room paves 32 tiles at RCL3 and 29 at RCL4, the three it
+                // drops (`10,4 11,3 12,2`) being a corner the wider
+                // reservation makes it cut rather than a trunk it loses.
+                // The gate is unchanged; the plan it filters is a function
+                // of the level now, which is what ADR 0063 decided. The
+                // mother's own invariance — W12S28 paving the same set from
+                // RCL3 to RCL5 — is pinned two tests down and still holds.
+                let placed = tilesOfKind Road (placedAt "W13S28" 3)
+
+                Expect.isNonEmpty placed "RCL3 asks for the trunk set"
+
+                // The same room and the same spawn `placedAt` chose, taken
+                // through the same builder rather than re-derived here: the
+                // two halves of a "pave it and nothing is owed" pin have to
+                // be one room, and a second derivation of the spawn would
+                // stop being one the day W13S28 gains an `AlsoSweep` tile.
+                let colony = colonyAt "W13S28" 3
+
+                let paved =
+                    { colony with
+                        Spatial =
+                            colony.Spatial
+                            |> withHome (fun layer ->
+                                { layer with
+                                    Roads = Set.union layer.Roads (Set.ofList placed)
+                                })
+                    }
+
+                Expect.isEmpty
+                    (decide paved Map.empty Set.empty None
+                     |> fun result -> placementsOf result.Intents |> tilesOfKind Road)
+                    "and once they stand nothing is owed: the gap dropped whole, it was not paced"
             }
 
             test "a bootstrapping room still gets its containers — they wait on no road" {

@@ -119,6 +119,14 @@ let censusSignature (view: ColonyView) : string =
         |> List.sort
         |> String.concat ";"
 
+    // The home controller's level. Two of the Layout's readings of it since
+    // ADR 0063 and not one: it gates the allowance the placement filters on,
+    // and — derived, `Tuning.horizonOf` — it is the horizon the clustered
+    // reservation is *sized* at. So a level-up moves which tiles the plan
+    // holds and not only which of them go up this tick, and a memo not keyed
+    // here would hand a room that had just levelled yesterday's reservation:
+    // #341's own failure, arriving through the memo instead of through a
+    // constant.
     let level =
         view.Controller
         |> Option.map (fun c -> string c.Level)

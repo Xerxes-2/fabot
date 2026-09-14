@@ -1,5 +1,6 @@
-/// The Layout's invariants on real terrain, the losses the sweep found,
-/// and the clustered horizon at RCL6 (ADR 0055).
+/// The Layout's invariants on real terrain, the losses the sweep found —
+/// the road a level-up abandons among them — and the derived clustered
+/// horizon, `controller.Level + 1` (ADR 0063).
 module Fabot.Core.Tests.RoomLayoutInvariantTests
 
 open Expecto
@@ -181,18 +182,45 @@ let invariantTests =
                     "a room asking two structures onto one tile"
             }
 
-            test "a level never takes a clustered tile back" {
-                // What climbing the ladder changes is only which reserved
-                // tiles the placement filter lets through, so nothing a
-                // colony was already building should move because it
-                // levelled up. The whole ladder — 1 to 2 to 3 to 4 to 5 to
-                // 8, 680 level pairs across this sweep — was checked once
-                // by hand and holds everywhere; the 2-to-4 pair is the one
-                // pinned here, because it is the one that costs a plan.
-                let shrinks (case: Case) =
-                    not (Set.isSubset case.ClusterAtRcl2 (clusteredTiles case.Placed))
+            test "a level-up asks for exactly what the level unlocks, less what stands" {
+                // #341's own invariant, generalised off the three rooms the
+                // ticket named and onto every spawn of every capture. A room
+                // built out at the sweep's level and then levelled asks, per
+                // kind, for the next level's whole allowance minus the census
+                // already standing — which is what `gapAt` computes and what a
+                // horizon left behind the room destroys: sized at 6 and
+                // filtered at 7, W12S28's extension gap was `40 − 40 = 0` and
+                // the room asked for none of the ten RCL7 unlocked.
+                //
+                // This replaces `a level never takes a clustered tile back`,
+                // which asserted that a level-up plans nothing onto a standing
+                // structure's tile. That was true and said nothing: it did not
+                // red when the horizon was reverted to a constant, nor with
+                // the rampart exclusion it carried removed, because
+                // `withBuilt` makes a standing tile an obstacle, the ordering
+                // drops occupied tiles and the router routes around obstacles
+                // — three mechanisms pinned elsewhere, and between them
+                // nothing in this sweep can ever plan onto one. The claim
+                // below is not implied by them: it fails the moment the
+                // horizon falls below the room's own level, at any spawn.
+                //
+                // Read against the **engine's** table and not against a second
+                // plan of the same room: a horizon that is wrong in the same
+                // direction at both levels satisfies "the levelled plan is the
+                // bare one less what stands" perfectly, and a room that asks
+                // for ten of the twenty extensions RCL5 allows is still a room
+                // that has stopped growing. The numbers below are
+                // `allowanceOf`'s RCL4 and RCL5 rows — 20 and 30 extensions,
+                // 1 and 2 towers — which is the engine's arithmetic and not
+                // terrain's, so ADR 0036's ban on expected values off real
+                // captures is not touched: no tile is named.
+                let entitled = [ Tower, 1, 2 - 1; StructureKind.Extension, 20, 30 - 20 ]
 
-                Expect.isEmpty (violations shrinks) "a room dropping a clustered tile as it levels"
+                let shortchanged (case: Case) = case.LevelUpAsks <> entitled
+
+                Expect.isEmpty
+                    (violations shortchanged)
+                    "a room that levels and asks for less than the level unlocked it"
             }
 
             test "the dropped trunks the Layout records are the ones its roads show" {
@@ -258,11 +286,14 @@ let knownLossTests =
                 // is dropped in silence. The working-ground exclusion
                 // guards Seats and the Upgrade area; nothing guards the
                 // spawn's own doorstep. 32,2 is the same mechanism reached
-                // from the other side: that tile routed everything until
-                // the horizon moved to RCL6 (ADR 0055) and the reservation
-                // widened by ten tiles onto its corridor out. The pin is
-                // per tile so that whichever of them a fix reaches first
-                // says so.
+                // from the other side, and since ADR 0063 it is reached at
+                // a *level* rather than at a commit: that tile routes at
+                // RCL4 and seals from RCL5 up, where the room's own horizon
+                // is the six ADR 0055 imposed everywhere. It is therefore
+                // no longer in `SealedDoorsteps` — the sweep plans at RCL4
+                // — and the test below this one holds it on its own, at
+                // every level from 5 to 8. The pins stay per tile so that
+                // whichever of them a fix reaches first says so.
                 let sealed' =
                     sweep.Value
                     |> List.filter (fun case -> List.contains case.Spawn case.Room.SealedDoorsteps)
@@ -292,6 +323,73 @@ let knownLossTests =
                         case.Unrouted
                         |> List.forall (fun trunk -> trunk.Goal = TrunkGoal.Spawn case.SpawnId))
                     "and names the spawn alone: the controller's trunk is routed and paved"
+            }
+
+            test
+                "the doorstep 32,2 seals only once the room's own level widens the reservation (#105)" {
+                // The same loss as above, reached from the other side, and
+                // now a function of the room's **level** rather than of a
+                // constant. ADR 0055 widened every room's reservation to
+                // RCL6's forty tiles whatever level it stood at, which is
+                // what closed this spawn's corridor out and put the tile in
+                // `SealedDoorsteps` beside 6,18. ADR 0063 derives the
+                // horizon, so the corridor closes when the room grows into
+                // it and not before: at RCL4 the trunks route, and from RCL5
+                // — where the horizon is 6 and the reservation is the one
+                // ADR 0055 imposed everywhere — src-0's spawn trunk is
+                // dropped whole.
+                //
+                // Pinned rather than deleted because #105 is still open and
+                // this is still its mechanism: the working-ground exclusion
+                // guards Seats and the Upgrade area, and nothing guards the
+                // spawn's own doorstep. What the derivation bought is that a
+                // room pays for it at the level it reaches, not at RCL1.
+                let loaded = project (load "W12S27") { X = 32; Y = 2 } None
+
+                let unroutedAt level =
+                    decide (colonyOf loaded level) Map.empty Set.empty None
+                    |> fun decision -> decision.Memo.UnroutedTrunks
+
+                Expect.isEmpty
+                    (unroutedAt 4)
+                    "at RCL4 the horizon is 5, the corridor is open and every trunk routes"
+
+                for level in 5..8 do
+                    Expect.all
+                        (unroutedAt level)
+                        (fun trunk -> trunk.Goal = TrunkGoal.Spawn "spawn-1")
+                        $"at RCL{level} the loss is the spawn trunk's alone, as it is from 6,18"
+
+                    Expect.isNonEmpty
+                        (unroutedAt level)
+                        $"at RCL{level} the reservation seals the doorstep; delete this when #105 lands"
+
+                // And what the level that seals it costs in pavement, which
+                // is the worst road churn anywhere in the sweep and the
+                // reason the loss is priced here and not only named. At RCL4
+                // this spawn routes every trunk and paves 95 tiles; at RCL5
+                // the corridor closes, `src-0`'s spawn trunk is dropped
+                // whole, and the plan wants 35. A room that built out at RCL4
+                // has laid some 28,500 energy of road and walks away from 60
+                // tiles of it on the tick it levels — and goes on repairing
+                // them, because `Facts.hungryStructures` reads the standing
+                // structures and never the plan.
+                let pavedAt level =
+                    decide (colonyOf loaded level) Map.empty Set.empty None
+                    |> fun decision ->
+                        placementsOf decision.Intents |> tilesOfKind Road |> Set.ofList
+
+                Expect.equal (Set.count (pavedAt 4)) 95 "RCL4 routes out of the pocket and paves 95"
+
+                Expect.equal
+                    (Set.count (pavedAt 5))
+                    35
+                    "RCL5 seals it and plans 35: the trunk is not re-routed, it is gone"
+
+                Expect.equal
+                    (Set.count (Set.difference (pavedAt 4) (pavedAt 5)))
+                    60
+                    "60 paved tiles — some 18,000 energy — orphaned by one level-up"
             }
 
             test "W15S28 loses its buffer to the same paved pocket, and RCL is not why (#331)" {
@@ -403,17 +501,35 @@ let knownLossTests =
                              && roadPlan |> Set.exists (fun t -> range tile t = 1)))
                         $"RCL{level}: plain tiles beside the paving, refused for being off the trunk"
 
-                // And the two levels plan the same room: the level the
-                // colony stands at and the level it cannot reach without
-                // this buffer differ in the deposit's own container and in
-                // nothing about the controller's (ADR 0057 decision 1).
-                let record (_, (_, placed, memo)) =
-                    tilesOfKind Road placed |> Set.ofList, memo.ServedFootings
+                // And the two levels plan the same room, in the sense the
+                // finding above needs: the level the colony stands at and
+                // the level it cannot reach without this buffer differ in
+                // the deposit's own container and in nothing about the
+                // controller's (ADR 0057 decision 1).
+                //
+                // The footings are identical. The *paving* is not, and since
+                // ADR 0063 it cannot be: RCL6's horizon is 7 where RCL5's is
+                // 6, so the reservation is ten tiles and a tower wider and
+                // the router detours around it — four tiles moved, `10,26
+                // 11,27 12,28 21,25` for `10,27 11,28 12,29 22,25`, and the
+                // same 57 paved either way. That is ADR 0055's own
+                // consequence arriving per level instead of per commit, and
+                // it is asserted rather than waved past: a detour that
+                // *lengthened* the trunk, or one that moved a footing, would
+                // be a different finding than this test's.
+                let footings (_, (_, _, memo)) = memo.ServedFootings
 
                 Expect.equal
-                    (atLevel |> List.map record |> List.distinct |> List.length)
+                    (atLevel |> List.map footings |> List.distinct |> List.length)
                     1
-                    "the trunks and the footings are the same at RCL5 and at RCL6"
+                    "the footings are the same at RCL5 and at RCL6"
+
+                let paved (_, (_, placed, _)) = tilesOfKind Road placed |> Set.ofList
+
+                Expect.equal
+                    (atLevel |> List.map (paved >> Set.count) |> List.distinct |> List.length)
+                    1
+                    "and the wider reservation costs the trunks a detour, not a longer road"
 
                 // And the sweep's half of the same finding, which is what
                 // keeps the sentence above honest: the loss is this spawn's
@@ -430,115 +546,304 @@ let knownLossTests =
                     [ { X = 18; Y = 30 } ]
                     "and the live colony's own tile is the only spawn in the room that loses it"
             }
+
+            test "a level-up abandons paved road, and one pick of the container it moves (#341)" {
+                // The price ADR 0063 charges and the one ADR 0039's rejection
+                // predicted. Under an absolute horizon the reservation was
+                // level-blind, so a bare room's road plan was identical at
+                // every level *by construction* and a level-up could not
+                // orphan a road. Derived, it can: the reservation widens on
+                // the tick the room levels, the router re-routes around the
+                // wider window, and the tiles the old route paved are tiles
+                // nothing plans any more. `Facts.hungryStructures` walks
+                // every standing structure with no reference to the road
+                // plan, so an orphan is not written off once — it stays in
+                // the [[repair]] pool and draws upkeep for as long as it
+                // stands.
+                //
+                // Measured here rather than claimed, on **real terrain** and
+                // at the levels the live colonies stand at, because the
+                // openRoom ladder in `LayoutPlacementTests` runs on
+                // featureless ground where a trunk barely exists and the
+                // sweep's own level-up is RCL4's. Recorded as a loss and not
+                // as a rule: these numbers are what the derivation costs
+                // today, and a layout change that moves them should say so
+                // here.
+                let plannedFrom roomName spawn level =
+                    let room = rooms |> List.find (fun room -> room.Name = roomName)
+                    let loaded = project (load roomName) spawn room.FallbackController
+                    loaded, decide (colonyOf loaded level) Map.empty Set.empty None
+
+                let paved placed = tilesOfKind Road placed |> Set.ofList
+
+                // A source container is planned onto the [[seat]] nearest its
+                // trunk, and on the first tick it defers to the road site it
+                // shares ground with (ADR 0040) — so the picks are read off
+                // each plan with its own roads already standing, which is the
+                // state the level-up actually finds the room in.
+                let picksOf roomName colony placed =
+                    decide
+                        (colony |> withRoadsStanding roomName (paved placed))
+                        Map.empty
+                        Set.empty
+                        None
+                    |> fun decision ->
+                        placementsOf decision.Intents |> tilesOfKind Container |> Set.ofList
+
+                let levelUp roomName spawn level =
+                    let loaded, before = plannedFrom roomName spawn level
+                    let placed = placementsOf before.Intents
+                    let levelled = colonyOf loaded (level + 1) |> withBuilt (standingCluster placed)
+                    let after = decide levelled Map.empty Set.empty None
+                    let placedAfter = placementsOf after.Intents
+
+                    (placed, picksOf roomName (colonyOf loaded level) placed),
+                    (placedAfter, picksOf roomName levelled placedAfter)
+
+                // W13S28 from `36,42`, RCL6 to RCL7 — the transition W12S28
+                // made on the day #341 was filed, in a room the colony owns.
+                // `36,42` is one of the sweep's **stride** tiles and not the
+                // spawn W13S28 stands on: this room carries no `AlsoSweep`
+                // entry, unlike W12S28 and W15S28, so no test here plans it
+                // from its live tile. Pinned because it is the largest churn
+                // the sweep finds in a room we own, which is what makes it
+                // worth a number — not because the colony will pay it. From
+                // the child's own Spawn2 at `16,12` this transition abandons
+                // **nothing**; the live exposure is W15S28's four tiles
+                // below, and ADR 0063 records both readings.
+                let (before, picksBefore), (after, picksAfter) =
+                    levelUp "W13S28" { X = 36; Y = 42 } 6
+
+                Expect.equal (Set.count (paved before)) 111 "RCL6 paves 111 tiles from 36,42"
+
+                Expect.equal
+                    (Set.count (paved after))
+                    92
+                    "and the levelled room plans 92: a shorter trunk set, not a superset"
+
+                Expect.equal
+                    (Set.count (Set.difference (paved before) (paved after)))
+                    34
+                    "34 paved tiles — some 10,200 energy — are abandoned by the level-up"
+
+                // And the container the room already dug. A source container
+                // is planned onto the Seat nearest its trunk, so a trunk that
+                // moves can move the pick out from under a **standing**
+                // container: a second 5,000-energy site, the [[anchor]]'s
+                // [[post]] moving with it, and an orphan at the old tile. The
+                // level-blind reservation could not do this from a level-up.
+                Expect.isNonEmpty
+                    (Set.difference picksBefore picksAfter)
+                    "and a source container's pick moves with the trunk that chose it"
+
+                // W15S28 from `18,30`, the live spawn, RCL5 to RCL6: the
+                // colony's own next level-up, and the four-tile detour ADR
+                // 0063 measured — which is the *small* end of this loss and
+                // is why the room above is pinned beside it.
+                let (before, _), (after, _) = levelUp "W15S28" { X = 18; Y = 30 } 5
+
+                Expect.equal
+                    (Set.count (Set.difference (paved before) (paved after)))
+                    4
+                    "W15S28's own next level-up abandons four"
+
+                // The sweep's half: a ratchet and not a golden number. Every
+                // (room, spawn) the suite plans, built out at RCL4 and
+                // levelled to RCL5, counted together — so a layout change
+                // that makes the derivation churn *more* road fails here,
+                // and one that makes it churn less does not.
+                let abandoned =
+                    sweep.Value |> List.sumBy (fun case -> List.length case.LevelUpAbandons)
+
+                let churning =
+                    sweep.Value |> List.filter (fun case -> not (List.isEmpty case.LevelUpAbandons))
+
+                Expect.isNonEmpty
+                    churning
+                    "the churn is real across the sweep; this is a cost pin, not a green light"
+
+                Expect.isLessThanOrEqual
+                    (List.length churning)
+                    37
+                    "no more than the 37 of the sweep's RCL4 spawns that abandon road today"
+
+                Expect.isLessThanOrEqual
+                    abandoned
+                    152
+                    "and no more than the 152 tiles — some 45,600 energy — they abandon between them"
+            }
         ]
 
 // ---- the horizon, re-derived on the room that is about to reach it ------
 
-/// ADR 0055's re-derivation, kept as a test rather than only as prose: the
-/// horizon moves to RCL6 **before** W12S28 gets there, and what has to hold
-/// on the far side of that move is that the room plans the ten extensions
-/// RCL6 unlocks without moving one of the thirty it already stands on.
-/// Planned from `12,40`, the tile the live spawn occupies, because a
+/// ADR 0063's re-derivation, kept as a test rather than only as prose. The
+/// horizon is no longer a constant a human moves before the room arrives —
+/// it is `controller.Level + 1`, so it arrives *with* the room — and what
+/// has to hold on the far side of that move is what had to hold on the far
+/// side of ADR 0039's and ADR 0055's: the room asks for everything the new
+/// level unlocks, and moves nothing it already stands on.
+///
+/// Re-derived on W12S28 at RCL7, which is the live room #341 was found on
+/// and the widest window this change opens anywhere — `allowanceOf` answers
+/// anything above 7 with sixty extensions and six towers, so an RCL7 room's
+/// horizon of 8 reserves for sixty and six where it reserved for forty and
+/// two. Planned from `12,40`, the tile the live spawn occupies, because a
 /// horizon is re-derived on the room it is being moved for (ADR 0039) —
 /// which is also why this list sits outside the sweep: the sweep is the
 /// general rule over every spawn, and this is the one room's arithmetic.
 [<Tests>]
 let horizonTests =
     testList
-        "the clustered horizon at RCL6"
+        "the derived clustered horizon"
         [
-            test "W12S28 at RCL6 plans forty extensions: the thirty standing, and ten more" {
+            test "W12S28 at RCL7 asks for the ten extensions and the third tower the level unlocks" {
                 let loaded = project (load "W12S28") { X = 12; Y = 40 } None
-                let colony = colonyOf loaded 6
 
-                let extensionsOf (view: ColonyView) =
+                let planOf (view: ColonyView) =
                     decide view Map.empty Set.empty None
-                    |> fun decision -> placementsOf decision.Intents |> tilesOfKind Extension
+                    |> fun decision -> placementsOf decision.Intents
 
-                // The room as ADR 0039's horizon left it: thirty extensions,
-                // which is what stands in W12S28 the tick RCL6 lands.
-                let thirty = extensionsOf (colony |> atHorizon 5)
-                Expect.hasLength thirty 30 "the horizon of five sizes RCL5's whole allowance"
+                // The room as the shipped-yesterday constant left it: RCL6
+                // under a horizon of 6, which is a lookahead of none — forty
+                // extensions and two towers, the census #341 measured standing
+                // in W12S28 live at t427,931.
+                let shipped = planOf (colonyOf loaded 6 |> atLookahead 0)
+                let forty = tilesOfKind Extension shipped
+                let two = tilesOfKind Tower shipped
 
-                let forty = extensionsOf colony
+                Expect.hasLength forty 40 "RCL6 under no lookahead is the forty the live room built"
+                Expect.hasLength two 2 "and the two towers standing beside them"
+
+                // That room, levelled. Nothing about the colony moves but the
+                // controller's own level, which is the whole of what the
+                // derived horizon reads.
+                let standing =
+                    (forty |> List.map (fun tile -> tile, BuiltKind.Extension))
+                    @ (two |> List.map (fun tile -> tile, BuiltKind.Tower))
+
+                let levelled = colonyOf loaded 7 |> withBuilt standing
+                let placed = planOf levelled
 
                 Expect.hasLength
-                    forty
-                    40
-                    "the shipped horizon sizes RCL6's, so an empty room plans all forty at once"
+                    (tilesOfKind Extension placed)
+                    10
+                    "the ten RCL7 unlocks, asked for on the tick the level lands"
 
-                // The ten the level adds, asked for by a room that has
-                // already built the thirty. This is the acceptance criterion
-                // and the failure the move exists to prevent: under a horizon
-                // of five this same room computes a gap of zero and asks for
-                // nothing at all, and the bank stays at 1,800.
-                let standing = colony |> withExtensions thirty
-                let ten = extensionsOf standing
+                Expect.hasLength (tilesOfKind Tower placed) 1 "and the third tower RCL7 unlocks"
 
-                Expect.hasLength ten 10 "the ten RCL6 unlocks, and only those"
+                // #341 itself, reproduced by the only setting that can still
+                // produce it: a lookahead of −1 is the stale absolute horizon
+                // of 6 met by an RCL7 room, and it plans nothing at all.
+                let stale = planOf (levelled |> atLookahead -1)
 
                 Expect.isEmpty
-                    (extensionsOf (standing |> atHorizon 5))
-                    "the horizon left behind plans none of them: a room that stops growing in silence"
+                    (tilesOfKind Extension stale)
+                    "sized a level behind, the room asks for none of the ten — #341, on the room it was found on"
 
-                // And the thirty do not move. A standing structure is a
-                // target, so its tile is out of the ordering and its slot off
-                // the plan; the ten are picks the ordering had never reached.
-                Expect.equal
-                    (Set.union (Set.ofList thirty) (Set.ofList ten))
-                    (Set.ofList forty)
-                    "the thirty standing plus the ten asked for are the forty the horizon planned"
+                Expect.isEmpty (tilesOfKind Tower stale) "and none of the third tower either"
+
+                // And nothing standing moves. A standing structure is a
+                // target, so its tile is out of the ordering entirely; this is
+                // the claim the ticket asked to be measured rather than
+                // assumed, and it is measured against every kind the Layout
+                // places and not the clustered ones alone.
+                // A **rampart** is the one kind that may share a standing
+                // structure's tile, and is meant to: ADR 0034 covers every
+                // Keep structure with one. Every other kind sharing a tile
+                // would be the plan eating the colony's own buildings.
+                let standingTiles = standing |> List.map fst |> Set.ofList
+
+                Expect.isEmpty
+                    (placed
+                     |> List.filter (fun (tile, kind) ->
+                         kind <> Rampart && Set.contains tile standingTiles))
+                    "no tile a structure already stands on is planned for anything else"
             }
 
             test "the ten new picks take no working ground and move no trunk" {
-                // The question ADR 0039 left for this level: W12S28's north
-                // band (rows 35–37) is spoken for by the RCL5 cluster, so does
-                // the room still have cluster space for ten more, and does the
-                // overflow tread on a Seat or on the Upgrade Work Area (ADR
-                // 0022)? It grows a ring out — north to row 34 and east to
-                // column 17 — and the working-ground exclusion is what keeps
-                // it off the ground the colony stands on. The trunks are the
-                // other half of the price: a wider reservation is a router
-                // with more tiles to dodge, and on this room it dodges none.
+                // ADR 0055 asked this of the ten RCL6 added and ADR 0063 asks
+                // it again of RCL7's, on the widest window the derivation ever
+                // opens: does the overflow tread on a Seat or on the Upgrade
+                // Work Area (ADR 0022), and what does a router with sixty
+                // reserved tiles to dodge instead of forty pave? It grows a
+                // ring further out — row 33 and column 18 — the
+                // working-ground exclusion keeps it off the ground the colony
+                // stands on, and the trunks do not move at all.
                 let loaded = project (load "W12S28") { X = 12; Y = 40 } None
-                let colony = colonyOf loaded 6
+                let colony = colonyOf loaded 7
                 let atlas = ofView colony
 
                 let planOf (view: ColonyView) =
                     decide view Map.empty Set.empty None
                     |> fun decision -> placementsOf decision.Intents, decision.Memo
 
-                let placedFive, memoFive = planOf (colony |> atHorizon 5)
-                let placedSix, memoSix = planOf colony
+                let stalePlaced, staleMemo = planOf (colony |> atLookahead -1)
+                let placed, memo = planOf colony
 
                 let added =
                     Set.difference
-                        (tilesOfKind Extension placedSix |> Set.ofList)
-                        (tilesOfKind Extension placedFive |> Set.ofList)
-
-                Expect.hasLength
-                    added
-                    10
-                    "ten tiles the wider horizon reaches and the narrower does not"
+                        (tilesOfKind Extension placed |> Set.ofList)
+                        (tilesOfKind Extension stalePlaced |> Set.ofList)
 
                 Expect.isEmpty
                     (Set.intersect added (workingGroundIn atlas "W12S28"))
                     "no new pick on a Seat or in the Upgrade Work Area"
 
                 Expect.equal
-                    (tilesOfKind Road placedSix |> Set.ofList)
-                    (tilesOfKind Road placedFive |> Set.ofList)
+                    (tilesOfKind Road placed |> Set.ofList)
+                    (tilesOfKind Road stalePlaced |> Set.ofList)
                     "the trunks pave the same tiles under both horizons — the same set, not the same length"
 
                 Expect.equal
-                    memoSix.ServedFootings
-                    memoFive.ServedFootings
+                    memo.ServedFootings
+                    staleMemo.ServedFootings
                     "and the Link footings sit on the tiles the narrower horizon gave them"
 
                 Expect.isEmpty
-                    memoSix.UnservedFootings
+                    memo.UnservedFootings
                     "no footing target goes unserved at the wider horizon"
             }
+
+            // No captured room asks for less than its own level allows, at
+            // any level any of them can stand at. This is #341 stated as a
+            // property rather than as one room's arithmetic, and it is the
+            // one an absolute constant could never satisfy: at RCL7 under a
+            // horizon of 6 W12S28 asked for nothing, and at RCL8 under a
+            // horizon of 7 it would have asked for nothing again. Every level
+            // from the first that allows an extension to the last, over all
+            // three rooms the colony stands in.
+            for room, spawn in
+                [
+                    "W12S28", { X = 12; Y = 40 }
+                    "W13S28", { X = 16; Y = 12 }
+                    "W15S28", { X = 18; Y = 30 }
+                ] do
+                test $"{room} asks for its whole allowance at every level it can stand at" {
+                    let loaded = project (load room) spawn None
+
+                    let placedAt level =
+                        decide (colonyOf loaded level) Map.empty Set.empty None
+                        |> fun decision -> placementsOf decision.Intents
+
+                    // The engine's own table, from RCL2 where the first
+                    // extension is unlocked to RCL8 where the last is. Written
+                    // out rather than read off `allowanceOf`, which is the
+                    // private function under test: a second derivation, not
+                    // the same one twice (ADR 0035).
+                    for level, extensions, towers in
+                        [ 2, 5, 0; 3, 10, 1; 4, 20, 1; 5, 30, 2; 6, 40, 2; 7, 50, 3; 8, 60, 6 ] do
+                        let placed = placedAt level
+
+                        Expect.hasLength
+                            (tilesOfKind Extension placed)
+                            extensions
+                            $"RCL{level} allows {extensions} extensions and the room asks for all of them"
+
+                        Expect.hasLength
+                            (tilesOfKind Tower placed)
+                            towers
+                            $"RCL{level} allows {towers} towers and the room asks for all of them"
+                }
         ]
 
 // ---- the extractor and its container, on the rooms that hold a deposit ---

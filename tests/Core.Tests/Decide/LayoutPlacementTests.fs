@@ -380,24 +380,34 @@ let placementTests =
                 let { Intents = intents } = decideOn (atLevel 2 (openRoom 3))
 
                 // The nearest checkerboard tile (24,24) is the Storage's pick
-                // and (24,26) and (26,24) are the two towers' — reservations,
-                // not sites: RCL2 allows no tower, but their picks still come
-                // first in the one ordering — so the extensions start three
-                // tiles in. A golden value of the horizon, not an assertion
-                // about the ordering: the rule is unchanged, the list moved.
-                // It survived the move to RCL6 (ADR 0055) because that move
-                // widens the window's *tail* — RCL6 allows no third tower, so
-                // the picks ahead of the extensions are the same two.
+                // and (24,26) is the one tower's — a reservation, not a site:
+                // RCL2 allows no tower, but its pick still comes first in the
+                // one ordering — so the extensions start two tiles in. A
+                // golden value of the horizon, not an assertion about the
+                // ordering: the rule is unchanged, the list moved.
+                //
+                // It moved under every horizon this number has had. Under the
+                // absolute constants of ADR 0039 and ADR 0055 an RCL2 room
+                // reserved for *two* towers, because the horizon it read was
+                // five or six whatever level the room stood at, and the
+                // extensions started three tiles in. Derived (ADR 0063) an
+                // RCL2 room's horizon is 3, which allows one tower, so the
+                // second tower's pick — `26,24` — is an extension's again and
+                // `25,23` falls off the end. That is the derivation's other
+                // half, and the one no ticket asked for: the horizon narrows
+                // for a young room as readily as it widens for an old one, and
+                // a young room reserving for a tower two levels away was
+                // holding a tile it had no use for.
                 Expect.equal
                     (sitesOfKind Extension intents)
                     [
+                        { X = 26; Y = 24 }
                         { X = 26; Y = 26 }
                         { X = 23; Y = 23 }
                         { X = 23; Y = 25 }
                         { X = 23; Y = 27 }
-                        { X = 25; Y = 23 }
                     ]
-                    "the last diagonal neighbour, then rank-2 checkerboard tiles"
+                    "the last two diagonal neighbours, then rank-2 checkerboard tiles"
 
                 for (room, _, kind) in placementIntents intents do
                     Expect.equal room "W1N1" "sites go in the spawn's room"
@@ -409,7 +419,7 @@ let placementTests =
 
             test "RCL5 on open terrain plans the whole level: 30 extensions, two towers" {
                 // The current level's own filter, with the horizon a level
-                // ahead of it (ADR 0055): a room at RCL5 places what RCL5
+                // ahead of it (ADR 0063): a room at RCL5 places what RCL5
                 // unlocks and no more, however far the reservation reaches.
                 // The room is a ring wider than the fixtures beside it because
                 // thirty extensions, two towers, the Storage and the footings
@@ -429,14 +439,14 @@ let placementTests =
 
             test "RCL6 on open terrain plans the whole level: 40 extensions, two towers" {
                 // The clustered kinds are sized at the horizon and filtered at
-                // the current level, so a room standing at the horizon's own
-                // level plans everything the engine unlocked there (ADR 0039,
-                // ADR 0055). A horizon left behind computes a gap of zero here
-                // — the thirty of RCL5 already standing — and asks for none of
-                // the ten RCL6 adds, which is why the constant moves before
-                // the room reaches the level and not after. A ring wider again
-                // than the RCL5 fixture: forty extensions, two towers, the
-                // Storage and the footings want the tiles.
+                // the current level, so a room standing anywhere plans
+                // everything the engine unlocked there (ADR 0011, ADR 0063). A
+                // horizon left *behind* the room computes a gap of zero here —
+                // the thirty of RCL5 already standing — and asks for none of
+                // the ten RCL6 adds, which is #341 and is what deriving the
+                // horizon off the room's own level makes unreachable. A ring
+                // wider again than the RCL5 fixture: forty extensions, two
+                // towers, the Storage and the footings want the tiles.
                 let { Intents = intents } = decideOn (atLevel 6 (openRoom 6))
 
                 Expect.hasLength
@@ -444,30 +454,91 @@ let placementTests =
                     40
                     "RCL6's whole extension allowance, the ten that level adds included"
 
+                // The horizon here is **7** and holds three tower tiles; what
+                // allows only two is the placement filter, which is the room's
+                // own level. That is the sized/filtered split stated where it
+                // is easiest to get backwards: the third tile is reserved and
+                // not placed, and it is reserved so that the trunks routed
+                // this tick already avoid it.
                 Expect.hasLength
                     (sitesOfKind Tower intents)
                     2
-                    "RCL6 allows no third tower, so the horizon holds two tiles and not three"
+                    "RCL6 places two towers, though its horizon reserves a tile for a third"
 
-                // What the ordering owes the level below it, and what a
-                // knob's own test cannot say: the filter only ever *adds*.
-                // The same room a level down places thirty of these forty
-                // tiles and no fortieth of its own, so the ten RCL6 unlocks
-                // are picks the ordering had not reached rather than a
-                // reshuffle of the thirty already standing.
+                // And the level below places what its own level unlocks, not
+                // what the horizon reserved.
                 let { Intents = below } = decideOn (atLevel 5 (openRoom 6))
 
-                Expect.isTrue
-                    (Set.isSubset
-                        (sitesOfKind Extension below |> Set.ofList)
-                        (sitesOfKind Extension intents |> Set.ofList))
-                    "RCL5's thirty are thirty of RCL6's forty, on the same tiles"
-
-                Expect.hasLength
-                    (sitesOfKind Extension below)
-                    30
-                    "and the level below places what its own level unlocks, not what the horizon reserved"
+                Expect.hasLength (sitesOfKind Extension below) 30 "RCL5 places its own thirty"
             }
+
+            // What the ordering owes the level below it, and what a knob's own
+            // test cannot say: the plan a room *built out* under one level's
+            // horizon only ever grows when the level moves. Every step of the
+            // ladder, because ADR 0063 makes the horizon move with the room
+            // and the question "what does a level-up do to the plan" is now
+            // asked on every tick a room levels rather than on the one
+            // commit a human moved a constant.
+            //
+            // Built out is the load-bearing word, and the distinction #341's
+            // measurement turned on. Two *bare* rooms at neighbouring levels
+            // do not nest: an empty RCL6 room reserves three tower tiles where
+            // an empty RCL5 room reserves two, so its extension list starts one
+            // pick later. A room that grew through those levels has its towers
+            // and its extensions *standing*, their tiles are out of the
+            // ordering entirely, and `gapAt` subtracts them from the horizon's
+            // allowance — so the reservation widens at the tail and nothing
+            // already placed is re-planned. That is the claim a colony cares
+            // about, and it is the one asserted here.
+            // Both clustered kinds at every rung, because the tower's
+            // allowance steps on rungs the extensions' does not (0→1 at RCL3,
+            // 1→2 at RCL5, 2→3 at RCL7) and jumps 3→6 at RCL8, which is the
+            // largest step in `allowanceOf` and the one the derived horizon
+            // opens widest. A ladder that read extensions alone would let the
+            // RCL7→8 rung swallow three towers silently.
+            for level, adds, towers in [ 2, 5, 1; 3, 10, 0; 4, 10, 1; 5, 10, 0; 6, 10, 1; 7, 10, 3 ] do
+                test $"a room built out at RCL{level} asks for exactly what RCL{level + 1} adds" {
+                    let room = openRoom 8
+                    let { Intents = before } = decideOn (atLevel level room)
+                    let standing = sitesOfKind Extension before @ sitesOfKind Tower before
+
+                    let built =
+                        room
+                        |> withTargets (
+                            (sitesOfKind Extension before
+                             |> List.mapi (fun i tile ->
+                                 $"ext-{i}", tile, Structure BuiltKind.Extension))
+                            @ (sitesOfKind Tower before
+                               |> List.mapi (fun i tile ->
+                                   $"tower-{i}", tile, Structure BuiltKind.Tower))
+                        )
+                        |> withHome (fun layer ->
+                            { layer with
+                                Obstacles = Set.union layer.Obstacles (Set.ofList standing)
+                            })
+
+                    let { Intents = after } = decideOn (atLevel (level + 1) built)
+
+                    Expect.hasLength
+                        (sitesOfKind Extension after)
+                        adds
+                        $"RCL{level + 1} adds {adds} extensions and the room asks for all of them"
+
+                    Expect.hasLength
+                        (sitesOfKind Tower after)
+                        towers
+                        $"and the {towers} tower(s) RCL{level + 1} adds, on the same ladder"
+
+                    // A **rampart** is the one kind that may share a standing
+                    // structure's tile, and is meant to: ADR 0034 covers every
+                    // Keep structure with one. Every other kind sharing a tile
+                    // would be the plan eating the colony's own buildings.
+                    Expect.isEmpty
+                        (placementIntents after
+                         |> List.filter (fun (_, tile, kind) ->
+                             kind <> Rampart && List.contains tile standing))
+                        "and no tile a structure already stands on is planned for anything else"
+                }
 
             test "below RCL2 no placement Intents are emitted" {
                 let { Intents = intents } = decideOn (atLevel 1 (openRoom 3))
@@ -556,15 +627,21 @@ let placementTests =
                     (List.contains { X = 24; Y = 24 } (placedTiles intents))
                     "a target's tile is never chosen"
 
-                // One short of RCL2's cap, and that is the horizon's price
-                // paid at today's level (ADR 0039): the controller's own
-                // Upgrade Work Area is working ground, so this room offers
-                // seven tiles, and the second tower's reservation sits ahead
-                // of the extensions in the one ordering.
+                // RCL2's cap in full, and this is the horizon's price *not*
+                // paid — the one thing the derivation gives back. ADR 0039
+                // recorded this room as the place a cramped colony pays for
+                // the lookahead at today's level: the controller's own Upgrade
+                // Work Area is working ground, so the room offers seven tiles,
+                // and under an absolute horizon of five or six *two* towers'
+                // reservations sat ahead of the extensions in the one
+                // ordering, leaving four. Derived (ADR 0063) this room's
+                // horizon is 3, which allows one tower, and the fifth
+                // extension has its tile back. A cramped room now pays for one
+                // level of lookahead and never for four.
                 Expect.hasLength
                     (sitesOfKind Extension intents)
-                    4
-                    "the cap is not reached: no tile is spare for the second tower's reservation"
+                    5
+                    "the cap is reached: one tower a level away is all this room reserves for"
             }
 
             test "no placement Intents without a projected room" {

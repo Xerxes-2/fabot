@@ -235,9 +235,17 @@ let internal planLayout
         // horizon; the Storage is not one of them and reads none (ADR 0022) —
         // its whole allowance is held from level 0, because once an extension
         // takes that tile it never comes back.
+        //
+        // The horizon is **this room's own level plus the lookahead** (ADR
+        // 0063), which is why it is read here beside the level the placement
+        // filters at rather than off a constant: the two are the same level
+        // read twice, `Tuning.HorizonLookahead` apart, and an absolute constant
+        // is the thing that went stale three levels running (#341).
+        let horizon = Tuning.horizonOf view.Tuning controller.Level
+
         let storageSlots = gapAt BuiltKind.Storage view.Tuning.StorageLevel
-        let towerSlots = gapAt BuiltKind.Tower view.Tuning.HorizonLevel
-        let extensionSlots = gapAt BuiltKind.Extension view.Tuning.HorizonLevel
+        let towerSlots = gapAt BuiltKind.Tower horizon
+        let extensionSlots = gapAt BuiltKind.Extension horizon
 
         // The Link footings cannot be named here — their targets are the
         // container picks, which are derived from the trunks the reservation is

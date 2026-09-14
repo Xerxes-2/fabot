@@ -94,17 +94,21 @@ let internal rooms =
             Name = "W12S28"
             AlsoSweep = [ { X = 12; Y = 40 } ]
         }
-        // 32,2 is swept on top of the stride because the wider RCL6
-        // reservation (ADR 0055) seals it: the tile is one of three in this
-        // room — 31,1 and 33,1 are the others — that route every trunk at
-        // a horizon of five and drop src-0's spawn trunk at six. The
-        // reservation grew, #105's mechanism did the rest, and a loss the
-        // suite cannot see is a loss nobody reproduces.
+        // 32,2 is swept on top of the stride because a wide enough
+        // reservation seals it: the tile is one of three in this room —
+        // 31,1 and 33,1 are the others — that route every trunk at a
+        // horizon of five and drop src-0's spawn trunk at six. It is
+        // **not** in `SealedDoorsteps`, because the sweep plans at RCL4 and
+        // since ADR 0063 an RCL4 room's horizon is 5: the tile routes here.
+        // It seals from RCL5 up, which `the doorstep 32,2 seals only once
+        // the room's own level widens the reservation` pins on its own,
+        // beside the level that does it. A loss the suite cannot see is a
+        // loss nobody reproduces, so the sweep keeps sweeping the tile.
         { noLosses with
             Name = "W12S27"
             Buffer = Nowhere
             AlsoSweep = [ { X = 32; Y = 2 } ]
-            SealedDoorsteps = [ { X = 6; Y = 18 }; { X = 32; Y = 2 } ]
+            SealedDoorsteps = [ { X = 6; Y = 18 } ]
         }
         { noLosses with Name = "W13S28" }
         // #331: the third home, and the second room to lose its buffer to
@@ -270,6 +274,63 @@ let internal clusteredTiles placed =
     @ tilesOfKind Extension placed
     |> Set.ofList
 
+/// The same room with a list of clustered structures standing on it —
+/// filed through the shared builders, which is where a tile-shaped
+/// container has lived since ADR 0041's contract step, and made obstacles
+/// the way the shell makes a standing structure one. The tiles are the
+/// Layout's own picks rather than a person's, so the fixture stays a
+/// counterexample generator and never a table of expected values.
+///
+/// The kind travels with the tile because #341's re-derivation is the first
+/// to need a room built out in more than one kind: W12S28 stands at RCL7
+/// with forty extensions *and* two towers, and a model that stood only the
+/// extensions would hand the third tower a tile one of the first two is on.
+let internal withBuilt (built: (Pos * BuiltKind) list) (colony: ColonyView) =
+    { colony with
+        Spatial =
+            colony.Spatial
+            |> Fixtures.withTargets (
+                built
+                |> List.mapi (fun index (tile, kind) -> $"built-{index}", tile, Structure kind)
+            )
+            |> withHome (fun layer ->
+                { layer with
+                    Obstacles = Set.union layer.Obstacles (built |> List.map fst |> Set.ofList)
+                })
+    }
+
+/// The same room with a set of roads already paved. Tiles live under a room
+/// name and nowhere else (ADR 0041), so the roads go onto that room's own
+/// layer; what reads them is the container rule, which defers a container to
+/// a road *site* sharing its tile and so answers differently once the road
+/// stands (ADR 0040).
+let internal withRoadsStanding (name: string) (roads: Set<Pos>) (colony: ColonyView) =
+    { colony with
+        Spatial =
+            { colony.Spatial with
+                Rooms =
+                    Map.add
+                        name
+                        { SpatialInfo.layerOf colony.Spatial name with
+                            Roads = roads
+                        }
+                        colony.Spatial.Rooms
+            }
+    }
+
+/// The clustered kinds of a plan, paired with the `BuiltKind` that stands
+/// on them, ready for `withBuilt`. The kind travels with the tile because
+/// the census `gapAt` subtracts is per kind: extensions standing where the
+/// plan expects towers would be a different room, not this one a level on.
+let internal standingCluster placed =
+    placed
+    |> List.choose (fun (tile, kind) ->
+        match kind with
+        | Storage -> Some(tile, BuiltKind.Storage)
+        | Tower -> Some(tile, BuiltKind.Tower)
+        | StructureKind.Extension -> Some(tile, BuiltKind.Extension)
+        | _ -> None)
+
 // ---- the sweep ----------------------------------------------------------
 
 /// One room planned from one spawn tile, at the level the whole Layout
@@ -330,17 +391,60 @@ type internal Case =
         /// plan that was computed (ADR 0017). The memo path is the one
         /// worth testing: that a pure function is pure is not news.
         RecallsIdentically: bool
-        /// The clustered tiles the same room plans at RCL2. The
-        /// reservation is level-blind by construction — the tower's and
-        /// the extensions' slots are both sized at the horizon, not at
-        /// today's level — so what this pins is that the *placement*
-        /// filter only ever adds.
-        ClusterAtRcl2: Set<Pos>
+        /// What the same room asks for after it has **built out** at the
+        /// sweep's own level and then levelled once: the clustered counts
+        /// it stood up at the sweep's own level, and what it asks for after
+        /// levelling once. The claim they carry is the one a colony cares
+        /// about and the one #341 broke — *the level-up asks for exactly
+        /// what the engine unlocks, less what stands* — stated per kind,
+        /// because the gap `gapAt` computes is per kind, and read against
+        /// `allowanceOf`'s own table rather than against a second plan: a
+        /// horizon that is wrong the same way at both levels satisfies a
+        /// plan-against-plan comparison and fails this one.
+        ///
+        /// Stated over a room that **built out** rather than over two bare
+        /// rooms at two levels, which is the distinction ADR 0063 forces.
+        /// The reservation used to be level-blind — sized at one constant
+        /// horizon whatever level the room stood at — so two bare plans at
+        /// two levels nested and the sweep could compare them directly.
+        /// Derived, they do not: a bare RCL5 room reserves two tower tiles
+        /// where a bare RCL4 room reserves one, so its extension picks
+        /// start one tile later. What survives is that a structure already
+        /// standing keeps its tile and its slot: `gapAt` subtracts the
+        /// census from the horizon's allowance and the ordering excludes
+        /// the tile outright, so the window widens at its tail.
+        ///
+        /// The tile-overlap form this replaces asserted nothing: `withBuilt`
+        /// registers a standing tile as an obstacle as well as a target,
+        /// `buildableTilesIn` drops occupied tiles from the ordering and the
+        /// router routes around obstacles, so across the whole sweep nothing
+        /// is ever planned onto a standing structure — with or without the
+        /// horizon derivation, and with or without the rampart exclusion the
+        /// old assertion carried (#341 review).
+        LevelUpAsks: (StructureKind * int * int) list
+        /// The road tiles this room paves at the sweep's level that the
+        /// **same room, one level up with its cluster standing**, no longer
+        /// plans: pavement the colony bought and the level-up walks away
+        /// from. Zero by construction under an absolute horizon — the
+        /// reservation was level-blind, so the road plan was too — and not
+        /// zero since ADR 0063, which is the price the derivation charges
+        /// and the reason this field exists (#341).
+        LevelUpAbandons: Pos list
     }
 
 /// Every (room, spawn) the suite sweeps, planned once. The invariants read
 /// the same plan: re-deriving it per invariant would pay the tick's
 /// dearest step many times over for one answer.
+///
+/// The sweep's level is **4**, and since ADR 0063 that is a horizon choice
+/// as well as a level: it plans at a horizon of 5, which is narrower than
+/// any room the colony stands in. So the widest window this bot ever opens
+/// — an RCL7 room's horizon of 8, sixty extensions and six towers — is
+/// exercised only by the per-room ladders in `RoomLayoutInvariantTests` and
+/// `LayoutPlacementTests`, one spawn each, and never over a sweep. Recorded
+/// rather than fixed: the honest lever is fewer plans per case and not more
+/// levels (ADR 0036), and a second level here would double the sweep's cost
+/// for a window three of the five rooms will never reach.
 let internal sweep =
     lazy
         [
@@ -354,24 +458,20 @@ let internal sweep =
                     let first = decide colony Map.empty Set.empty None
                     let placed = placementsOf first.Intents
                     let recalled = decide colony Map.empty Set.empty (Some first.Memo)
-                    let early = decide (colonyOf loaded 2) Map.empty Set.empty None
+
+                    // This room built out at the sweep's own level and then
+                    // levelled once: the level-up a colony actually takes,
+                    // rather than the 2-to-4 jump no room makes in one tick.
+                    // The cluster that stands is this case's own plan, already
+                    // computed, so the whole ladder costs one plan.
+                    let standing = standingCluster placed
+
+                    let levelled =
+                        decide (colonyOf loaded 5 |> withBuilt standing) Map.empty Set.empty None
 
                     let withRoads =
-                        { colony with
-                            Spatial =
-                                { colony.Spatial with
-                                    // The captured room's own layer, roads
-                                    // and all: tiles live under a room name
-                                    // and nowhere else (ADR 0041).
-                                    Rooms =
-                                        Map.add
-                                            room.Name
-                                            { SpatialInfo.layerOf colony.Spatial room.Name with
-                                                Roads = tilesOfKind Road placed |> Set.ofList
-                                            }
-                                            colony.Spatial.Rooms
-                                }
-                        }
+                        colony
+                        |> withRoadsStanding room.Name (tilesOfKind Road placed |> Set.ofList)
 
                     yield
                         {
@@ -406,7 +506,21 @@ let internal sweep =
                                 && recalled.Memo.UnservedFootings = first.Memo.UnservedFootings
                                 && recalled.Memo.ServedFootings = first.Memo.ServedFootings
                                 && recalled.Memo.UnroutedTrunks = first.Memo.UnroutedTrunks
-                            ClusterAtRcl2 = clusteredTiles (placementsOf early.Intents)
+                            LevelUpAsks =
+                                [
+                                    for kind in [ Tower; StructureKind.Extension ] do
+                                        yield
+                                            kind,
+                                            List.length (tilesOfKind kind placed),
+                                            List.length (
+                                                tilesOfKind kind (placementsOf levelled.Intents)
+                                            )
+                                ]
+                            LevelUpAbandons =
+                                Set.difference
+                                    (tilesOfKind Road placed |> Set.ofList)
+                                    (tilesOfKind Road (placementsOf levelled.Intents) |> Set.ofList)
+                                |> Set.toList
                         }
         ]
 
@@ -488,35 +602,19 @@ let internal unroutedByRoads (case: Case) : UnroutedTrunk list =
 /// pair-wise answer it now reads off rather than flooding a second time.
 let internal trunksCarryEverySource (case: Case) = List.isEmpty (unroutedByRoads case)
 
-/// The colony with one Tuning field moved, which is the only way a horizon
-/// is compared against another: the constant is a human's, and a plan that
-/// read the level would break ADR 0027's determinism (ADR 0039).
-let internal atHorizon horizon (colony: ColonyView) =
+/// The colony with the one Tuning field a horizon still has moved, which is
+/// how one horizon is compared against another (ADR 0063): the horizon
+/// itself is derived — `controller.Level + HorizonLookahead` — so the
+/// comparison is made on the lookahead, and `atLookahead 0` is the plan a
+/// room with no lookahead at all would compute. A test that wants an
+/// absolute horizon asks for it by arithmetic on the colony's own level,
+/// which is the whole point of the move: there is no constant left to set.
+let internal atLookahead lookahead (colony: ColonyView) =
     { colony with
         Tuning =
             { colony.Tuning with
-                HorizonLevel = horizon
+                HorizonLookahead = lookahead
             }
-    }
-
-/// The same room with a list of extensions standing on it — filed through
-/// the shared builders, which is where a tile-shaped container has lived
-/// since ADR 0041's contract step, and made obstacles the way the shell
-/// makes a standing structure one. The tiles are the Layout's own picks
-/// rather than a person's, so the fixture stays a counterexample generator
-/// and never a table of expected values.
-let internal withExtensions (tiles: Pos list) (colony: ColonyView) =
-    { colony with
-        Spatial =
-            colony.Spatial
-            |> Fixtures.withTargets (
-                tiles
-                |> List.mapi (fun index tile -> $"ext-{index}", tile, Structure BuiltKind.Extension)
-            )
-            |> withHome (fun layer ->
-                { layer with
-                    Obstacles = Set.union layer.Obstacles (Set.ofList tiles)
-                })
     }
 
 /// One border two captured rooms share, spelled the way a person reads a

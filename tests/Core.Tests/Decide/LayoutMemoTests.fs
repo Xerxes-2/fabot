@@ -188,10 +188,19 @@ let censusSignatureTests =
             }
 
             test "the controller level moves the signature" {
+                // The level was always a signature input because it gates the
+                // allowances the placement filters on. Since ADR 0063 it is a
+                // signature input **twice over**: the clustered reservation is
+                // sized at `controller.Level + 1`, so the level decides which
+                // tiles the plan holds and not only which of them it places
+                // this tick. A memo not keyed on the level would hand a room
+                // that levelled up yesterday's reservation — which is #341
+                // wearing a different hat, and is why this test's reason is
+                // worth restating rather than leaving as the allowance's.
                 Expect.notEqual
                     (censusSignature (trunkColony 3))
                     (censusSignature (trunkColony 2))
-                    "the level gates allowances, so it is a signature input"
+                    "the level sizes the reservation and gates the placement, so it is a signature input"
             }
 
             test "a second room's standing container joins the signature under its own name" {
@@ -779,6 +788,16 @@ let planMemoTests =
                     (placementIntents decision.Intents)
                     (placementIntents fresh.Intents)
                     "a stale memo recomputes to exactly the fresh plan"
+
+                // And the recompute is not a formality: the two levels plan
+                // differently, so a memo that survived the level-up would be
+                // observably wrong rather than merely stale (ADR 0063 — the
+                // horizon is derived from the level, so the level moving moves
+                // the reservation and not only the placement filter).
+                Expect.notEqual
+                    (placementIntents fresh.Intents)
+                    (placementIntents (decideOn (trunkColony 2)).Intents)
+                    "the level-up is a plan change, which is what the memo has to notice"
             }
 
             test "the memo's hauler quota feeds spawn planning; a stale one is discarded" {
