@@ -1325,6 +1325,28 @@ let ownedByRival room (colony: ColonyView) =
                 }
     }
 
+/// The outpost room as a declared one: its controller is placed and classified
+/// in the projection, which is the fact both the guard row and the raid
+/// stand-down use to distinguish work from a room the colony merely crosses.
+let withDeclaredOutpost room (colony: ColonyView) =
+    let controller = $"ctrl-{room}"
+    let layer = SpatialInfo.layerOf colony.Spatial room
+
+    { colony with
+        Spatial =
+            { colony.Spatial with
+                Rooms =
+                    Map.add
+                        room
+                        { layer with
+                            TargetPositions =
+                                Map.add controller { X = 25; Y = 25 } layer.TargetPositions
+                        }
+                        colony.Spatial.Rooms
+                TargetKinds = Map.add controller Controller colony.Spatial.TargetKinds
+            }
+    }
+
 /// The recorded stand-downs as (room, opened, last seen, expiry, basis),
 /// oldest first — the whole of what the outpost family records.
 let standDowns (state: RaidState) =
@@ -1370,7 +1392,7 @@ let outpostTests =
                 // raid that shut it on sight would hide its own hostiles and
                 // buy no guard at all. Pairwise on the raid's size alone.
                 let raidIn hostiles =
-                    { quiet with
+                    { (quiet |> withDeclaredOutpost outpostRoom) with
                         Hostiles = hostiles |> List.mapi (raiderIn outpostRoom)
                     }
 
@@ -1407,7 +1429,7 @@ let outpostTests =
 
             test "two melee blocks cannot use self-heal to win an equal exchange" {
                 let raid attacks =
-                    { quiet with
+                    { (quiet |> withDeclaredOutpost outpostRoom) with
                         Hostiles =
                             List.replicate
                                 2
@@ -1423,6 +1445,30 @@ let outpostTests =
                     (standDowns (RaidState.empty |> raidTick 100 (raid 3)))
                     [ outpostRoom, 100, 100, 1600, StandDownBasis.InvaderRaid ]
                     "equal 180 damage and 2,000 hits is not a win; fictitious self-heal must not keep the room open"
+            }
+
+            test "a transit-room hostile opens no stand-down, regardless of owner" {
+                // #324. W15S26 is projected only because the Errand's chain
+                // crosses it. Its hostiles stay in the view so a walker can
+                // Flee, but this gate can neither garrison the room nor
+                // withhold any work in it. The ordinary Invader is the
+                // asymmetric case: filtering only the expected Source Keeper
+                // would make this half fail.
+                let transitRoom = "W15S26"
+                let overwhelming = List.replicate 5 [ Attack; Attack; Attack; Move; Move; Move ]
+
+                let raidBy owner =
+                    { quiet with
+                        Hostiles =
+                            overwhelming
+                            |> List.mapi (raiderIn transitRoom)
+                            |> List.map (fun hostile -> { hostile with Owner = owner })
+                    }
+
+                for owner in [ "Source Keeper"; "Invader"; "Shibdib" ] do
+                    Expect.isEmpty
+                        (standDowns (RaidState.empty |> raidTick 100 (raidBy owner)))
+                        $"{owner} in a room the colony only crosses is no stand-down"
             }
 
             test "an invader core opens a stand-down that runs to its collapse timer" {

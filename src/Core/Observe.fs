@@ -606,8 +606,7 @@ let private rivalDeadlines (view: ColonyView) =
 /// an [[errand]] (#348): its target room can hold a raid two guards would beat,
 /// but no guard is ever hired there because the row is per declared outpost.
 /// Such a room is a withdrawal regardless of the hypothetical exchange. The
-/// expected Source Keepers are not that raid — they remain the transit-room
-/// question #324/#325 own rather than shutting the errand's target.
+/// expected Source Keepers are not that raid.
 ///
 /// For an outpost, the old answer stands and keeps this from cancelling ADR
 /// 0056 before it fights. Standing a room down withdraws it from the scan set,
@@ -619,9 +618,18 @@ let private rivalDeadlines (view: ColonyView) =
 /// melee attacks exclude self-healing. A raid two guards beat is a fight; a
 /// raid two guards lose is a room to leave, and it is left for exactly as long
 /// as the raid has to live.
+///
+/// A [[transit room]] is neither answer (#324, ADR 0065). Its hostiles remain
+/// on the view so a walker can Flee, but the colony pools no work and hires no
+/// guard there, so the stand-down has nothing to withhold. This boundary reads
+/// the same declared-outpost derivation as the guard row rather than matching
+/// the hostile's owner: an Invader or player in a transit-only room is no more
+/// actionable by this gate than a Source Keeper is.
 let private raidDeadlines (view: ColonyView) =
     let errandRooms =
         view.Errands |> List.map (fun errand -> errand.RoomName) |> Set.ofList
+
+    let outpostRooms = Fabot.Core.Decide.Planner.declaredOutposts view |> Set.ofList
 
     view.Hostiles
     |> List.filter (fun h -> h.Pos.Room <> SpatialInfo.homeName view.Spatial)
@@ -631,9 +639,11 @@ let private raidDeadlines (view: ColonyView) =
 
         if Set.contains room errandRooms then
             armed |> List.exists (fun hostile -> hostile.Owner <> "Source Keeper")
-        else
+        else if Set.contains room outpostRooms then
             not (List.isEmpty armed)
-            && not (Decide.Quota.guardBlocksBeat view room Engine.guardCap))
+            && not (Decide.Quota.guardBlocksBeat view room Engine.guardCap)
+        else
+            false)
     |> List.map (fun (room, hostiles) ->
         let raid =
             if Set.contains room errandRooms then
