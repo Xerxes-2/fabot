@@ -1858,6 +1858,54 @@ let errandTests =
                 Expect.isEmpty his.Errands "and the colony that declares none carries none"
             }
 
+            test "a stand-down on the target withholds the errand, not one on its transit room" {
+                let viewWith shut =
+                    let colony = errandDeclared |> List.find (fun colony -> colony.Home = mother)
+
+                    let gate = { StandDown.none with Shut = shut }
+
+                    let holders =
+                        World.creepColonies
+                            Tuning.defaults
+                            errandDeclared
+                            (World.living errandDeclared errandWorld)
+                            (Map.ofList [ mother, shut ])
+                            errandWorld
+
+                    ColonyView.ofWorld
+                        Tuning.defaults
+                        errandDeclared
+                        gate
+                        holders
+                        errandWorld
+                        colony
+
+                let withheld = viewWith (Set.singleton errandRoom)
+
+                Expect.isEmpty
+                    withheld.Errands
+                    "the target-room gate withholds the declaration as a unit"
+
+                Expect.isFalse
+                    (Map.containsKey errandRoom withheld.Spatial.Rooms)
+                    "so its target room leaves the projection"
+
+                Expect.isNone
+                    (SpatialInfo.placementOf withheld.Spatial reactor)
+                    "and the declared target is placed nowhere"
+
+                let transitShut = viewWith (Set.singleton errandCrossed)
+
+                Expect.equal
+                    (transitShut.Errands |> List.map (fun errand -> errand.RoomName))
+                    [ errandRoom ]
+                    "a shut transit room does not decide the Errand's target-room rule (#324/#325)"
+
+                Expect.isTrue
+                    (Map.containsKey errandRoom transitShut.Spatial.Rooms)
+                    "so the same unchanged declaration remains projected"
+            }
+
             test "an errand no chain reaches leaves the scan set and is named, with its kind" {
                 // ADR 0060 decision 1's third question. Carrying an
                 // unreachable errand is strictly worse than carrying an

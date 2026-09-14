@@ -556,10 +556,12 @@ module World =
     /// it (ADR 0042) with it, which is the whole of "refuse it loudly" that a
     /// scan set can carry. What says so out loud is `ColonyView.Refused`.
     ///
-    /// An errand is narrowed **once** where an outpost is narrowed twice: the
-    /// [[stand-down]] has nothing to withhold from it (ADR 0060 decision 1 —
-    /// no row hires per errand on a per-tick fact), so the gate never reaches
-    /// it and the chain is the whole of its admission.
+    /// An errand is narrowed by the chain and by a stand-down on its **own
+    /// target room** (#348). The latter is the room no guard row serves: an
+    /// armed player standing there is a withdrawal rather than a hypothetical
+    /// fight, and withholding the declaration removes its target, its Reclaim
+    /// and the reserver-row seat together. A shut transit room does not reach
+    /// this clause — that broader route question remains #324/#325's.
     ///
     /// A **record** and not a tuple, since ADR 0060 gave the answer a fourth
     /// member: two of the four are `string list`s standing side by side and
@@ -591,6 +593,7 @@ module World =
 
         let errands =
             colony.Errands
+            |> List.filter (fun errand -> not (Set.contains errand.RoomName shut))
             |> List.filter (
                 Errand.routable
                     (linked (Tuning.keeperMargin tuning) world)

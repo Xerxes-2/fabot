@@ -77,6 +77,278 @@ let private reclaimIntents (colony: ColonyView) =
         | ClaimReactor(name, id) -> Some(name, id)
         | _ -> None)
 
+/// Shibdib's live W15S25 defender at t444,287: enough ranged damage to kill
+/// the 200-hit re-claimer, and enough healing that the guard arithmetic wants
+/// two blocks rather than one. The exact body is the independent premise that
+/// distinguishes this incident from an overwhelming raid the existing
+/// stand-down already handles.
+let private liveDefender =
+    List.replicate 5 BodyPart.RangedAttack @ List.replicate 6 Move @ [ Heal ]
+
+[<Tests>]
+let errandStandDownTests =
+    testList
+        "an armed player in the errand room is a withdrawal, not a fight no guard can join"
+        [
+            test "the guard-cap comparison cannot excuse a room the guard row does not serve" {
+                let tick = 100
+
+                let defender =
+                    { hostileIn errandRoom { X = 29; Y = 28 } liveDefender with
+                        Owner = "Shibdib"
+                        TicksToLive = 600
+                    }
+
+                let keeper =
+                    { hostileIn errandRoom { X = 20; Y = 20 } [ RangedAttack; Move ] with
+                        Owner = "Source Keeper"
+                        TicksToLive = 1500
+                    }
+
+                let colony =
+                    { (bareHome |> errandColony (Some Ownership.Ours) []) with
+                        Time = tick
+                        Hostiles = [ defender; keeper ]
+                    }
+
+                Expect.isTrue
+                    (guardBlocksBeat colony errandRoom Engine.guardCap)
+                    "the premise: two guard blocks beat this body, which is why the old deadline opened nothing"
+
+                let log =
+                    Observe.RaidState.empty
+                    |> Observe.foldRaids Observe.capEpisodes Set.empty colony
+
+                Expect.contains
+                    (Observe.standDown Tuning.defaults (tick + 1) log).Shut
+                    errandRoom
+                    "an errand has no guard row, so the hostile's own remaining life is its withdrawal clock"
+
+                Expect.contains
+                    (Observe.standDown Tuning.defaults (tick + defender.TicksToLive - 1) log).Shut
+                    errandRoom
+                    "one tick short of the player's deadline the withdrawal still holds, not extended by the keeper"
+
+                Expect.isFalse
+                    (Set.contains
+                        errandRoom
+                        (Observe.standDown Tuning.defaults (tick + defender.TicksToLive) log).Shut)
+                    "on the deadline the unchanged declaration may return"
+            }
+
+            test
+                "the owner and declaration kind are the asymmetry: a Source Keeper is expected, and an Outpost can fight" {
+                let tick = 100
+
+                let defender owner =
+                    { hostileIn errandRoom { X = 29; Y = 28 } liveDefender with
+                        Owner = owner
+                        TicksToLive = 600
+                    }
+
+                let folded colony =
+                    Observe.RaidState.empty
+                    |> Observe.foldRaids Observe.capEpisodes Set.empty { colony with Time = tick }
+                    |> Observe.standDown Tuning.defaults (tick + 1)
+                    |> fun gate -> gate.Shut
+
+                let errandRaid =
+                    { (bareHome |> errandColony (Some Ownership.Ours) []) with
+                        Hostiles = [ defender "Shibdib" ]
+                    }
+
+                let expectedKeeper =
+                    { errandRaid with
+                        Hostiles = [ defender "Source Keeper" ]
+                    }
+
+                let guardServedRoom =
+                    { errandRaid with
+                        Errands = []
+                        RoomControl = Map.add errandRoom neutralRoom errandRaid.RoomControl
+                    }
+                    |> withOutpostRoom errandRoom { X = 25; Y = 25 } false
+
+                Expect.isFalse
+                    (Set.contains errandRoom (folded expectedKeeper))
+                    "a Source Keeper is the expected transit hazard, not a player raid on the target"
+
+                Expect.isTrue
+                    (guardBlocksBeat guardServedRoom errandRoom Engine.guardCap)
+                    "the premise: the declared Outpost can buy the two blocks that win this exchange"
+
+                Expect.isFalse
+                    (Set.contains errandRoom (folded guardServedRoom))
+                    "so the same player body in an Outpost keeps the existing fight answer"
+            }
+
+            test "the target-room withdrawal removes the errand from the scan until its clock ends" {
+                let ground =
+                    Map.ofList
+                        [
+                            for x in 1 .. Seam.exitEdge - 1 do
+                                for y in 1 .. Seam.exitEdge - 1 -> { X = x; Y = y }, Plain
+                        ]
+
+                let ring =
+                    Map.ofList
+                        [
+                            for i in 0 .. Seam.exitEdge do
+                                yield { X = i; Y = 0 }, Plain
+                                yield { X = i; Y = Seam.exitEdge }, Plain
+                                yield { X = 0; Y = i }, Plain
+                                yield { X = Seam.exitEdge; Y = i }, Plain
+                        ]
+
+                let room =
+                    { RoomFacts.empty with
+                        Layer =
+                            { RoomLayer.empty with
+                                Terrain = ground
+                            }
+                        Border = ring
+                    }
+
+                let home =
+                    { room with
+                        Layer =
+                            { room.Layer with
+                                TargetPositions =
+                                    Map.ofList
+                                        [ spawn.Id, { X = 25; Y = 25 }; "w1", { X = 24; Y = 25 } ]
+                            }
+                        TargetKinds = Map.ofList [ spawn.Id, Structure BuiltKind.Spawn ]
+                        Control = Some ownedRoom
+                        Controller = Some(controllerAt 5)
+                        Spawns = [ spawn ]
+                        Energy = bank 650 650
+                    }
+
+                let colony =
+                    {
+                        Home = "W1N1"
+                        Outposts = []
+                        Errands = [ reactorErrand ]
+                        Mother = None
+                    }
+
+                let world =
+                    {
+                        Time = 101
+                        Rooms = Map.ofList [ colony.Home, home; errandRoom, room ]
+                        Creeps =
+                            [
+                                {
+                                    Room = colony.Home
+                                    Info = worker "w1" 0 50
+                                }
+                            ]
+                        Sightings = Map.empty
+                    }
+
+                let view shut =
+                    ColonyView.ofWorld
+                        Tuning.defaults
+                        [ colony ]
+                        { StandDown.none with Shut = shut }
+                        (Map.ofList [ "w1", colony.Home ])
+                        world
+                        colony
+
+                let admitted = view Set.empty
+
+                let defender =
+                    { hostileIn errandRoom { X = 29; Y = 28 } liveDefender with
+                        Owner = "Shibdib"
+                        TicksToLive = 600
+                    }
+
+                let log =
+                    Observe.RaidState.empty
+                    |> Observe.foldRaids
+                        Observe.capEpisodes
+                        Set.empty
+                        { admitted with
+                            Time = 100
+                            Hostiles = [ defender ]
+                        }
+
+                let gateAt tick =
+                    (Observe.standDown Tuning.defaults tick log).Shut
+
+                let withdrawn = view (gateAt 101)
+                let restored = view (gateAt 700)
+
+                Expect.equal
+                    (reclaimsOf admitted)
+                    [ Reclaim reactor ]
+                    "admitted, the declaration pools its Reclaim"
+
+                Expect.equal
+                    (reserverCasts (decideOn admitted).Intents)
+                    [ oneBlock ]
+                    "so its open reserver-row seat really casts the replacement the incident observed"
+
+                Expect.isEmpty (reclaimsOf withdrawn) "withdrawn, no Reclaim remains in the pool"
+
+                Expect.isEmpty
+                    (reserverCasts (decideOn withdrawn).Intents)
+                    "and no errand seat remains, so Spawn3 does not replace the body the defender killed"
+
+                Expect.equal
+                    (reclaimsOf restored)
+                    [ Reclaim reactor ]
+                    "on the hostile's exact deadline the unchanged declaration pools its Reclaim again"
+
+                let reclaimerName = "reserver-100-Spawn1"
+
+                let occupiedWorld =
+                    { world with
+                        Rooms =
+                            world.Rooms
+                            |> Map.add
+                                errandRoom
+                                { room with
+                                    Layer =
+                                        { room.Layer with
+                                            CreepPositions =
+                                                Map.ofList [ reclaimerName, { X = 29; Y = 29 } ]
+                                        }
+                                }
+                        Creeps =
+                            world.Creeps
+                            @ [
+                                {
+                                    Room = errandRoom
+                                    Info = claimer reclaimerName
+                                }
+                            ]
+                    }
+
+                let withdrawnWithHolder =
+                    ColonyView.ofWorld
+                        Tuning.defaults
+                        [ colony ]
+                        { StandDown.none with
+                            Shut = gateAt 101
+                        }
+                        (Map.ofList [ "w1", colony.Home; reclaimerName, colony.Home ])
+                        occupiedWorld
+                        colony
+
+                let held = Map.ofList [ reclaimerName, taskId (Reclaim reactor) ]
+                let decision = decideFrom held withdrawnWithHolder
+
+                Expect.isFalse
+                    (Map.containsKey reclaimerName decision.Assignments)
+                    "anti-thrash cannot retain the Reclaim after the declaration leaves the view"
+
+                Expect.isEmpty
+                    (moveIntents decision.Intents |> List.filter (fst >> (=) reclaimerName))
+                    "and the released re-claimer is not moved toward the shut target"
+            }
+        ]
+
 [<Tests>]
 let errandTaskTests =
     testList

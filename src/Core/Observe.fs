@@ -601,29 +601,47 @@ let private rivalDeadlines (view: ColonyView) =
 /// room is ours again. No floor and no fallback: this deadline is read, not
 /// chosen.
 ///
-/// **And it is read only for a raid the guard row's cap cannot beat**, which is
-/// what keeps this from cancelling ADR 0056 before it fights. Standing a room
-/// down withdraws it from the scan set, so a raid that shut the room the tick
-/// it appeared would hide its own hostiles and no guard would ever be hired: a
-/// withdrawal and a garrison are the same room's two answers, and this is where
-/// they are told apart. The arithmetic is `guardsWanted`'s own, at the cap:
-/// two blocks' damage against the raid's armed hits, and two blocks' hits
-/// against the raid's full damage: melee attacks exclude self-healing. A raid two
-/// guards beat is a fight; a raid two guards lose is a room to leave, and it is
-/// left for exactly as long as the raid has to live.
+/// **And it is read only for a raid the guard row's cap cannot beat**, where
+/// the room is one the guard row actually serves. That last clause matters for
+/// an [[errand]] (#348): its target room can hold a raid two guards would beat,
+/// but no guard is ever hired there because the row is per declared outpost.
+/// Such a room is a withdrawal regardless of the hypothetical exchange. The
+/// expected Source Keepers are not that raid — they remain the transit-room
+/// question #324/#325 own rather than shutting the errand's target.
+///
+/// For an outpost, the old answer stands and keeps this from cancelling ADR
+/// 0056 before it fights. Standing a room down withdraws it from the scan set,
+/// so a raid that shut the room the tick it appeared would hide its own
+/// hostiles and no guard would ever be hired: a withdrawal and a garrison are
+/// the same room's two answers, and this is where they are told apart. The
+/// arithmetic is `guardsWanted`'s own, at the cap: two blocks' damage against
+/// the raid's armed hits, and two blocks' hits against the raid's full damage:
+/// melee attacks exclude self-healing. A raid two guards beat is a fight; a
+/// raid two guards lose is a room to leave, and it is left for exactly as long
+/// as the raid has to live.
 let private raidDeadlines (view: ColonyView) =
+    let errandRooms =
+        view.Errands |> List.map (fun errand -> errand.RoomName) |> Set.ofList
+
     view.Hostiles
-    |> List.filter Decide.Facts.isArmed
     |> List.filter (fun h -> h.Pos.Room <> SpatialInfo.homeName view.Spatial)
-    |> List.map (fun h -> h.Pos.Room)
-    |> List.distinct
-    |> List.filter (fun room -> not (Decide.Quota.guardBlocksBeat view room Engine.guardCap))
-    |> List.map (fun room ->
-        let life =
-            view.Hostiles
-            |> List.filter (fun h -> h.Pos.Room = room)
-            |> List.map (fun h -> h.TicksToLive)
-            |> List.max
+    |> List.groupBy (fun h -> h.Pos.Room)
+    |> List.filter (fun (room, hostiles) ->
+        let armed = hostiles |> List.filter Decide.Facts.isArmed
+
+        if Set.contains room errandRooms then
+            armed |> List.exists (fun hostile -> hostile.Owner <> "Source Keeper")
+        else
+            not (List.isEmpty armed)
+            && not (Decide.Quota.guardBlocksBeat view room Engine.guardCap))
+    |> List.map (fun (room, hostiles) ->
+        let raid =
+            if Set.contains room errandRooms then
+                hostiles |> List.filter (fun hostile -> hostile.Owner <> "Source Keeper")
+            else
+                hostiles
+
+        let life = raid |> List.map (fun h -> h.TicksToLive) |> List.max
 
         room, (view.Time + life, StandDownBasis.InvaderRaid))
 
