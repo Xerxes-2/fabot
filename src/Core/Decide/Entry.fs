@@ -122,11 +122,20 @@ let censusSignature (view: ColonyView) : string =
     // The home controller's level. Two of the Layout's readings of it since
     // ADR 0063 and not one: it gates the allowance the placement filters on,
     // and — derived, `Tuning.horizonOf` — it is the horizon the clustered
-    // reservation is *sized* at. So a level-up moves which tiles the plan
-    // holds and not only which of them go up this tick, and a memo not keyed
-    // here would hand a room that had just levelled yesterday's reservation:
-    // #341's own failure, arriving through the memo instead of through a
-    // constant.
+    // *placement* is sized at. So a level-up moves which tiles the plan holds
+    // and not only which of them go up this tick, and a memo not keyed here
+    // would hand a room that had just levelled yesterday's cluster: #341's own
+    // failure, arriving through the memo instead of through a constant.
+    //
+    // The **road** half stopped reading the level with ADR 0064 — the
+    // reservation the trunks dodge is sized at `allowanceOf`'s ceiling — so
+    // one of the three readings above is gone. The other two remain, so the
+    // key is no looser than it was: every level-up still moves the plan,
+    // through the allowance gate and through the placement horizon, and the
+    // level is read here for the bank Capacity the hauler quota prices
+    // besides (ADR 0017, ADR 0044). What is worth knowing is that removing
+    // this key would now be wrong for the *cluster* alone and not for the
+    // roads.
     let level =
         view.Controller
         |> Option.map (fun c -> string c.Level)

@@ -321,22 +321,30 @@ type Tuning =
         /// decade would be the second of those, and moving it down spends trips
         /// on a container that is not yet bleeding.
         MineContactCliff: int
-        /// **How far ahead** the Layout reserves, in controller levels (ADR
-        /// 0011, ADR 0063): the horizon is `controller.Level + this`, so the
-        /// whole plan is computed one level above the room's own and today's
-        /// roads route around tomorrow's structures. The lookahead is the half
-        /// of the horizon this bot chose; the level it is added to is read off
-        /// the server, and that is why the *level* is no longer a field here
-        /// (`Tuning.horizonOf` derives the horizon, ADR 0063 replacing ADR
-        /// 0039's and ADR 0055's absolute constants).
+        /// **How far ahead** the Layout *places*, in controller levels (ADR
+        /// 0011, ADR 0063, ADR 0064): the horizon is `controller.Level + this`,
+        /// so the clustered kinds are sized one level above the room's own and
+        /// a room that levels tonight has already drawn the tiles tomorrow
+        /// unlocks. The lookahead is the half of the horizon this bot chose;
+        /// the level it is added to is read off the server, and that is why the
+        /// *level* is no longer a field here (`Tuning.horizonOf` derives the
+        /// horizon, ADR 0063 replacing ADR 0039's and ADR 0055's absolute
+        /// constants).
+        ///
+        /// It is **not** what the trunks route around. Since ADR 0064 the road
+        /// reservation is sized at `allowanceOf`'s ceiling and reads no level
+        /// and no lookahead at all, so moving this field moves which tiles the
+        /// cluster takes and never which tiles the roads avoid — a road plan
+        /// that moved with the level was 589 orphaned tiles over the capture
+        /// sweep (#341, #342).
         ///
         /// One, which is ADR 0011's standing bargain re-stated relatively and
-        /// unchanged by ADR 0063: reserving four levels out taxes today's
-        /// trunks with detours for a colony that may never get there. Zero is a
-        /// meaningful setting and means no lookahead at all — the clustered
-        /// kinds sized at the level they are filtered at — which is what the
-        /// horizon existed to avoid, and what a *stale* absolute constant used
-        /// to produce by accident: sized at 6 and filtered at 7, an RCL7 room
+        /// unchanged by ADR 0063: placing four levels out draws tiles for a
+        /// colony that may never get there. Zero is a meaningful setting and
+        /// means no lookahead at all — the clustered kinds sized at the level
+        /// they are filtered at — which is what the horizon existed to avoid,
+        /// and what a *stale* absolute constant used to produce by accident:
+        /// sized at 6 and filtered at 7, an RCL7 room
         /// computed an extension gap of zero and planned none of the ten the
         /// engine had just unlocked (#341).
         HorizonLookahead: int
@@ -482,10 +490,11 @@ module Tuning =
         Engine.keeperPin + Engine.rangedRange + tuning.ReachMargin
 
     /// The **Layout horizon**: the controller level the clustered kinds are
-    /// *sized* at, where the level they are *filtered* at is the room's own
-    /// (ADR 0011, ADR 0063). Derived rather than chosen, for `keeperMargin`'s
-    /// reason and one of its own — a function beside the record and not a
-    /// field in it:
+    /// *placed* at, where the level they are *filtered* at is the room's own
+    /// (ADR 0011, ADR 0063). It sizes the placement alone — the reservation the
+    /// trunks route around is `Layout.allowanceCeiling`'s and reads no level
+    /// (ADR 0064). Derived rather than chosen, for `keeperMargin`'s reason and
+    /// one of its own — a function beside the record and not a field in it:
     ///
     ///     max 0 (controller.Level + HorizonLookahead)
     ///
@@ -501,14 +510,18 @@ module Tuning =
     ///
     /// It stops moving on its own at the **top**, and needs no clamp to: RCL8
     /// asks for a horizon of 9, and `allowanceOf`'s catch-all answers 9 exactly
-    /// what it answers 8, so a maxed room reserves its own terminal allowance
-    /// and nothing beyond it.
+    /// what it answers 8, so a maxed room places its own terminal allowance
+    /// and nothing beyond it — the level `Layout.allowanceCeiling` climbs to,
+    /// reached here from below instead of read off the table.
     ///
     /// The **bottom** is clamped, because `allowanceOf`'s catch-all is
     /// two-sided and answers a *negative* level the same sixty extensions and
     /// six towers it answers RCL8: without the clamp a lookahead of −2 or lower
     /// would hand a young room the **widest** window in the table instead of
-    /// the narrowest, which is the opposite of what the field says it does. A
+    /// the narrowest, and place sixty extensions in a room the engine allows
+    /// five. That is the opposite of what the field says it does — and it is a
+    /// claim about the *placement* only, since ADR 0064: the reservation is the
+    /// widest window at every level by design, and no lookahead reaches it. A
     /// horizon of zero allows no clustered structure at all, which is the floor
     /// the level itself has, and `QuotaTuningTests` reads the clamp at a
     /// lookahead that reaches past it.

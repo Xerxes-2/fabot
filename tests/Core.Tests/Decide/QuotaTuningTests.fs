@@ -302,12 +302,15 @@ let tuningTests =
             }
 
             test "HorizonLookahead is how far above its own level a room is sized at" {
-                // Read at a level whose placement filter is wide open for what
-                // the reservation holds, so what the room asks for is what the
-                // sizing gave it. The reservation is always the wider of the
-                // two — the lookahead only ever adds — so the *placement* is
-                // the current level's allowance whenever the lookahead is
-                // positive, and the lookahead's own arithmetic is read below
+                // What the field sizes is the **clustered placement**: since
+                // ADR 0064 the reservation the trunks route around is sized at
+                // `allowanceOf`'s ceiling and reads neither the level nor this
+                // field, so the lookahead's whole reach is the window the tower
+                // and extension picks are drawn from. That window is never
+                // wider than the reservation — `allowanceOf` stops growing at
+                // the ceiling — so a positive lookahead is invisible in a
+                // *count*, the placement filter still being the current level's
+                // allowance, and the lookahead's own arithmetic is read below
                 // where it can bite: at zero, and below.
                 let colony = atLevel 6 (openRoom 6)
 
@@ -326,14 +329,15 @@ let tuningTests =
 
                 Expect.equal extensions 40 "and forty extensions, which RCL6 unlocks in full"
 
-                // The shipped lookahead of one sizes this RCL6 room at seven —
-                // three towers and fifty extensions reserved — and RCL7's third
-                // tower therefore takes a clustered pick ahead of the
-                // extensions even though no third tower may be placed yet. That
-                // is the reservation doing its job a level early, and above
-                // zero it is invisible in a *count*: the placement filter is
-                // the level's either way, so what a positive lookahead moves is
-                // which tiles the counts land on and never how many.
+                // The shipped lookahead of one sizes this RCL6 room's cluster
+                // at seven — three towers and fifty extensions drawn from the
+                // ordering — and RCL7's third tower therefore takes a clustered
+                // pick ahead of the extensions even though no third tower may
+                // be placed yet. That is the lookahead doing its job a level
+                // early, and above zero it is invisible in a *count*: the
+                // placement filter is the level's either way, so what a
+                // positive lookahead moves is which tiles the counts land on
+                // and never how many.
                 Expect.equal
                     (placed (colony |> tunedBy (fun t -> { t with HorizonLookahead = 0 })))
                     (2, 40)
@@ -383,7 +387,7 @@ let tuningTests =
                         |> tunedBy (fun t -> { t with HorizonLookahead = -8 })
                     ))
                     (0, 0)
-                    "a lookahead reaching below zero reserves nothing, rather than reserving RCL8's sixty"
+                    "a lookahead reaching below zero sizes the cluster at nothing, rather than at RCL8's sixty"
             }
 
             test "OutpostBuilders is the crowd the outpost may take" {

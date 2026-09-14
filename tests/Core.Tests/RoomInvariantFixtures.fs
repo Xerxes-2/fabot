@@ -94,21 +94,20 @@ let internal rooms =
             Name = "W12S28"
             AlsoSweep = [ { X = 12; Y = 40 } ]
         }
-        // 32,2 is swept on top of the stride because a wide enough
-        // reservation seals it: the tile is one of three in this room —
-        // 31,1 and 33,1 are the others — that route every trunk at a
-        // horizon of five and drop src-0's spawn trunk at six. It is
-        // **not** in `SealedDoorsteps`, because the sweep plans at RCL4 and
-        // since ADR 0063 an RCL4 room's horizon is 5: the tile routes here.
-        // It seals from RCL5 up, which `the doorstep 32,2 seals only once
-        // the room's own level widens the reservation` pins on its own,
-        // beside the level that does it. A loss the suite cannot see is a
-        // loss nobody reproduces, so the sweep keeps sweeping the tile.
+        // 32,2 is swept on top of the stride because the reservation seals
+        // it: the tile is one of three in this room — 31,1 and 33,1 are the
+        // others — whose corridor out the clustered window closes. It is
+        // back in `SealedDoorsteps` with ADR 0064, which is where ADR 0055
+        // put it and where the reservation ceasing to read the level puts it
+        // again: sealed at every level from 3 to 8 rather than at RCL5 and
+        // above, so the sweep's own RCL4 sees it. A loss the suite cannot
+        // see is a loss nobody reproduces, so the sweep keeps sweeping the
+        // tile.
         { noLosses with
             Name = "W12S27"
             Buffer = Nowhere
             AlsoSweep = [ { X = 32; Y = 2 } ]
-            SealedDoorsteps = [ { X = 6; Y = 18 } ]
+            SealedDoorsteps = [ { X = 6; Y = 18 }; { X = 32; Y = 2 } ]
         }
         { noLosses with Name = "W13S28" }
         // #331: the third home, and the second room to lose its buffer to
@@ -425,10 +424,15 @@ type internal Case =
         /// The road tiles this room paves at the sweep's level that the
         /// **same room, one level up with its cluster standing**, no longer
         /// plans: pavement the colony bought and the level-up walks away
-        /// from. Zero by construction under an absolute horizon — the
-        /// reservation was level-blind, so the road plan was too — and not
-        /// zero since ADR 0063, which is the price the derivation charges
-        /// and the reason this field exists (#341).
+        /// from. Zero by construction whenever the reservation is
+        /// level-blind, because the road plan is then level-blind with it —
+        /// which it was under ADR 0055's constant, was **not** under ADR
+        /// 0063's derived horizon (589 tiles over the sweep, the price that
+        /// made this field exist, #341), and is again under ADR 0064, whose
+        /// reservation is sized at `allowanceOf`'s ceiling and reads no
+        /// level at all. So the field records an invariant now rather than
+        /// a loss: not a ratchet on how much road a level-up may orphan,
+        /// but that it orphans none.
         LevelUpAbandons: Pos list
     }
 
@@ -436,15 +440,18 @@ type internal Case =
 /// the same plan: re-deriving it per invariant would pay the tick's
 /// dearest step many times over for one answer.
 ///
-/// The sweep's level is **4**, and since ADR 0063 that is a horizon choice
-/// as well as a level: it plans at a horizon of 5, which is narrower than
-/// any room the colony stands in. So the widest window this bot ever opens
-/// — an RCL7 room's horizon of 8, sixty extensions and six towers — is
-/// exercised only by the per-room ladders in `RoomLayoutInvariantTests` and
-/// `LayoutPlacementTests`, one spawn each, and never over a sweep. Recorded
-/// rather than fixed: the honest lever is fewer plans per case and not more
-/// levels (ADR 0036), and a second level here would double the sweep's cost
-/// for a window three of the five rooms will never reach.
+/// The sweep's level is **4**, and since ADR 0064 that chooses one window
+/// and not two. The *placement* is the level's own — a horizon of 5,
+/// narrower than any room the colony stands in — so the widest **placement**
+/// this bot ever makes, an RCL7 room's horizon of 8, is exercised only by
+/// the per-room ladders in `RoomLayoutInvariantTests` and
+/// `LayoutPlacementTests`, one spawn each, and never over a sweep. The
+/// *reservation* every case here routes its trunks around is already the
+/// widest one there is: sixty extensions and six towers, `allowanceOf`'s
+/// ceiling, at RCL4 exactly as at RCL8. Recorded rather than fixed: the
+/// honest lever is fewer plans per case and not more levels (ADR 0036), and
+/// a second level here would double the sweep's cost for a placement window
+/// three of the five rooms will never reach.
 let internal sweep =
     lazy
         [

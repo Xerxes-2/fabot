@@ -204,18 +204,35 @@ let withPlanPending colony =
 /// W12S28's `10,43` shape, synthesised (#77): the pocket source's only
 /// Seat is its container's pick, and every one of the eight tiles beside
 /// that pick is spoken for — four wall, the source itself, the one trunk
-/// road out, and two standing extensions, which is the live room's own
-/// tile table in proportion. The extensions are the live loss: `11,43`
+/// road out (the diagonal, see below) and two standing extensions, which
+/// is the live room's own tile table in proportion. The extensions are the live loss: `11,43`
 /// took one in the RCL4 burst, planned by a bundle that did not yet hold
 /// footings back. Nothing is left for the fold to reserve, so this room's
 /// guarantee is short by one — and `pocketColony`, the same room without
 /// the seal, is the control that serves all four.
+///
+/// The trunk leaves the Seat by the **diagonal** `22,29` since ADR 0064,
+/// and the two extensions stand on `22,30` and `22,31` rather than either
+/// side of an orthogonal exit. The seal is the same eight tiles and the
+/// same proportions; what moved is which of them the road is. The
+/// reservation is level-blind again and sized at `allowanceOf`'s ceiling,
+/// so it reaches five tiles out from the spawn — far enough to take
+/// `22,30`, which is on the spawn's own checkerboard colour. A corridor
+/// the cluster can claim is a corridor the trunk cannot use, and the
+/// source would be cut off rather than sealed: no trunk, no container
+/// pick, no footing target, and the shortfall this fixture exists to
+/// record would vanish by having nothing to fall short of. `22,29` is on
+/// the *other* colour, so no reservation at any level can take it and the
+/// trunk arrives at every level this fixture is ever run at. Under the
+/// shipped `level + 1` reservation the orthogonal exit survived to RCL5
+/// and was claimed from RCL6 up, so the old fixture was a level away from
+/// the same silence.
 let sealedPocketColony level =
     let colony = pocketColony level
     let sealedTiles = [ { X = 21; Y = 29 }; { X = 21; Y = 31 } ]
 
     let standingExtensions =
-        [ "ext-3", { X = 22; Y = 29 }; "ext-4", { X = 22; Y = 31 } ]
+        [ "ext-3", { X = 22; Y = 30 }; "ext-4", { X = 22; Y = 31 } ]
 
     let walled =
         colony.Spatial

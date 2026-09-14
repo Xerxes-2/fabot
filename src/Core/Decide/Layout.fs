@@ -142,6 +142,55 @@ let private allowanceOf kind level =
     | BuiltKind.Storage, _ -> 1
     | _ -> 0
 
+/// The kinds the clustered horizon sizes, and the ones the ceiling below is
+/// read over. The Storage is not one of them: it reads no horizon at all and
+/// holds its whole allowance from level 0 (ADR 0022).
+let private clusteredKinds = [ BuiltKind.Extension; BuiltKind.Tower ]
+
+/// The level past which `allowanceOf` stops growing — the smallest level at
+/// which every clustered kind already answers what its catch-all row answers,
+/// so that no level above it asks for one tile more. Read **off the table**
+/// and never written down: a level named in a constant is the thing that went
+/// stale three times running (ADR 0063, #341), and writing `8` here would be
+/// the same mistake with a different number — the table is what moves the day
+/// the engine adds a level, and this climbs to wherever it stopped.
+///
+/// The catch-all row is reached by asking for a level nothing can exceed;
+/// the climb then finds the first level that already answers it, per kind
+/// jointly, because it is the joint window the reservation is sized at.
+///
+/// Two premises, and the table is what has to keep them — neither is checked
+/// here, because a check that fails at module load is a bot that never boots:
+///
+/// - **Every clustered kind has a wildcard row of its own.** That is what
+///   terminates the climb. The table's trailing `| _ -> 0` satisfies the
+///   weaker "every row ends in a wildcard" vacuously while leaving a kind
+///   whose own rows still grow, and an unbounded row (`Extension, l -> l * 10`)
+///   makes the climb diverge rather than answer.
+/// - **Every clustered kind's row is non-decreasing in the level.** That is
+///   what makes the ceiling an actual ceiling, and so what makes the
+///   reservation never narrower than the placement. A kind whose peak sits
+///   below its wildcard would reserve less at the ceiling than it places at a
+///   lower horizon.
+///
+/// `terminal` asks for `Int32.MaxValue` and not an arithmetic expression on
+/// it, deliberately: a future `when` guard doing arithmetic on `level` is the
+/// one place .NET's wrapping int and Fable's JS number would answer this
+/// differently, and the suite and the bot would disagree about the ceiling.
+let private allowanceCeiling =
+    let terminal kind = allowanceOf kind System.Int32.MaxValue
+
+    let rec climb level =
+        if
+            clusteredKinds
+            |> List.forall (fun kind -> allowanceOf kind level = terminal kind)
+        then
+            level
+        else
+            climb (level + 1)
+
+    climb 0
+
 /// Whether the Layout places **road sites** at all this tick (ADR 0011 as #209
 /// amends it): only for an `Independent` colony. Not an engine unlock — the
 /// engine allows a road at RCL1 — but the stage below which a road is the wrong
@@ -231,7 +280,7 @@ let internal planLayout
 
         // The still-unclaimed slots, Storage first and tower next: a built or
         // pending structure keeps its tile out of the ordering (it is a target)
-        // and its slot off the plan. The clustered kinds are sized at the
+        // and its slot off the plan. The clustered kinds are **placed** at the
         // horizon; the Storage is not one of them and reads none (ADR 0022) —
         // its whole allowance is held from level 0, because once an extension
         // takes that tile it never comes back.
@@ -240,12 +289,33 @@ let internal planLayout
         // 0063), which is why it is read here beside the level the placement
         // filters at rather than off a constant: the two are the same level
         // read twice, `Tuning.HorizonLookahead` apart, and an absolute constant
-        // is the thing that went stale three levels running (#341).
+        // is the thing that went stale three levels running (#341). It sizes
+        // the placement alone since ADR 0064; the reservation below reads the
+        // ceiling instead and no level at all.
         let horizon = Tuning.horizonOf view.Tuning controller.Level
 
         let storageSlots = gapAt BuiltKind.Storage view.Tuning.StorageLevel
         let towerSlots = gapAt BuiltKind.Tower horizon
         let extensionSlots = gapAt BuiltKind.Extension horizon
+
+        // The same two kinds sized at the **ceiling** instead, which is what
+        // the trunk router dodges (ADR 0064). The horizon is the level the
+        // cluster is *placed* at and has to move with the room; the
+        // reservation has no such need, and a reservation that moves is a
+        // trunk re-routed and a paved road orphaned once per level — 589
+        // tiles over the sweep ADR 0063 priced. Sized at the ceiling it is a
+        // function of the terrain and of this room's own census, and of no
+        // level at all — so a bare room's road plan is identical at every
+        // level by construction and ADR 0027's invariant holds for the roads
+        // again. A built-out room's narrows as the census grows, which is the
+        // same tile leaving the window as the ordering drops it.
+        //
+        // It is never narrower than the placement's: `allowanceOf` never
+        // decreases and the ceiling is where it stops, so the tiles the
+        // cluster draws from are inside the reservation at every level and
+        // at every lookahead.
+        let reservedTowerSlots = gapAt BuiltKind.Tower allowanceCeiling
+        let reservedExtensionSlots = gapAt BuiltKind.Extension allowanceCeiling
 
         // The Link footings cannot be named here — their targets are the
         // container picks, which are derived from the trunks the reservation is
@@ -257,7 +327,9 @@ let internal planLayout
 
         let clustered =
             ordering
-            |> List.truncate (storageSlots + towerSlots + extensionSlots + footingSlots)
+            |> List.truncate (
+                storageSlots + reservedTowerSlots + reservedExtensionSlots + footingSlots
+            )
 
         let storagePick = ordering |> List.truncate storageSlots
 
@@ -584,6 +656,10 @@ let internal planLayout
         // footings held out — a footing outranks both — and the Storage's pick
         // held out with them: it outranks the footings, which are anchored on
         // it.
+        // `towerSlots`/`extensionSlots` and not the `reserved…` pair beside
+        // them: this is the **placement**, sized at the horizon and so at this
+        // room's own level, inside the reservation the trunks already dodged
+        // (ADR 0064).
         let clusterPicks =
             ordering
             |> List.filter (fun tile ->

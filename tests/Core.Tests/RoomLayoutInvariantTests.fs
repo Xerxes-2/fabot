@@ -1,6 +1,9 @@
-/// The Layout's invariants on real terrain, the losses the sweep found —
-/// the road a level-up abandons among them — and the derived clustered
-/// horizon, `controller.Level + 1` (ADR 0063).
+/// The Layout's invariants on real terrain, the losses the sweep found, and
+/// the derived clustered horizon, `controller.Level + 1` (ADR 0063) — which
+/// sizes the *placement* alone since ADR 0064, the reservation the trunks
+/// route around being sized at `allowanceOf`'s ceiling and reading no level,
+/// so the road a level-up used to abandon is an invariant here rather than a
+/// loss.
 module Fabot.Core.Tests.RoomLayoutInvariantTests
 
 open Expecto
@@ -142,6 +145,46 @@ let invariantTests =
                 Expect.isEmpty
                     (violations onWorkingGround)
                     "a room clustering onto ground the colony works from"
+            }
+
+            test "a maxed room's whole cluster is inside the reservation its trunks dodged" {
+                // The rule ADR 0064 rests on and nothing pinned: the
+                // reservation is never narrower than the placement, so the
+                // tiles the cluster draws from at any level are tiles the
+                // trunk router already routed around. A reservation narrower
+                // than the placement plants a tower or an extension on a tile
+                // the same plan paves — which is the *decisive* argument
+                // against the rejected constant-6 rule (164 such collisions
+                // across 118 cases at RCL7 and RCL8), and which nothing in
+                // this suite would have caught it doing.
+                //
+                // Read at RCL8, because that is where the placement is widest
+                // and the slack thinnest: the reservation carries one spare
+                // tile per Link footing (ADR 0027), `sources + 2` of them,
+                // and that slack hides a narrowing of up to three tower slots
+                // on every case here. What it does not hide is four — and
+                // these two spawns are the counterexamples a probe over all
+                // 171 found, which is what real terrain is for (ADR 0036).
+                // Pinned as two named cases rather than swept: the sweep's
+                // budget is plans per case and this would add a sixth level
+                // to all 171 for two answers.
+                let collisionsAt roomName spawn =
+                    let room = rooms |> List.find (fun room -> room.Name = roomName)
+                    let loaded = project (load roomName) spawn room.FallbackController
+
+                    let placed =
+                        decide (colonyOf loaded 8) Map.empty Set.empty None
+                        |> fun decision -> placementsOf decision.Intents
+
+                    Set.intersect (tilesOfKind Road placed |> Set.ofList) (clusteredTiles placed)
+
+                Expect.isEmpty
+                    (collisionsAt "W13S28" { X = 18; Y = 12 })
+                    "W13S28 beside its live spawn: no clustered tile on a tile the same plan paves"
+
+                Expect.isEmpty
+                    (collisionsAt "W15S25" { X = 24; Y = 6 })
+                    "and the other tile a narrowed reservation plants a structure on the road at"
             }
 
             test "the trunks carry every source to the spawn and the controller" {
@@ -286,14 +329,23 @@ let knownLossTests =
                 // is dropped in silence. The working-ground exclusion
                 // guards Seats and the Upgrade area; nothing guards the
                 // spawn's own doorstep. 32,2 is the same mechanism reached
-                // from the other side, and since ADR 0063 it is reached at
-                // a *level* rather than at a commit: that tile routes at
-                // RCL4 and seals from RCL5 up, where the room's own horizon
-                // is the six ADR 0055 imposed everywhere. It is therefore
-                // no longer in `SealedDoorsteps` — the sweep plans at RCL4
-                // — and the test below this one holds it on its own, at
-                // every level from 5 to 8. The pins stay per tile so that
-                // whichever of them a fix reaches first says so.
+                // from the other side, and since ADR 0064 it is reached at
+                // every level again: the reservation is sized at
+                // `allowanceOf`'s ceiling and reads no level, so the tile is
+                // back in `SealedDoorsteps` beside 6,18 and the sweep's own
+                // RCL4 sees it. The test below this one holds it level by
+                // level from 3 to 8.
+                //
+                // This pins **accepted behaviour** and not a pending fix.
+                // #105 is closed (2026-09-08) and so is the recording half it
+                // was split into (#107, shipped): triage measured the doorstep
+                // exclusion, found it moves the live colony's Storage and five
+                // hand-built fixtures and amends ADR 0011 and ADR 0022, and
+                // judged it a decision rather than a repair — then closed the
+                // ticket without taking it. So there is no landing to wait
+                // for. The pins stay per tile because the loss is per tile:
+                // whichever of them a future rule reaches first says so by
+                // going red.
                 let sealed' =
                     sweep.Value
                     |> List.filter (fun case -> List.contains case.Spawn case.Room.SealedDoorsteps)
@@ -303,7 +355,7 @@ let knownLossTests =
                 Expect.all
                     sealed'
                     (trunksCarryEverySource >> not)
-                    "the trunk is still dropped; delete the pin and the exclusion when #105 lands"
+                    "the trunk is still dropped — the exclusion records that, and comes out with the rule that fixes it"
 
                 // And the drop is no longer silent (#107). The loss is per
                 // (source, goal), which this room is the live counterexample
@@ -325,36 +377,42 @@ let knownLossTests =
                     "and names the spawn alone: the controller's trunk is routed and paved"
             }
 
-            test
-                "the doorstep 32,2 seals only once the room's own level widens the reservation (#105)" {
-                // The same loss as above, reached from the other side, and
-                // now a function of the room's **level** rather than of a
-                // constant. ADR 0055 widened every room's reservation to
-                // RCL6's forty tiles whatever level it stood at, which is
-                // what closed this spawn's corridor out and put the tile in
-                // `SealedDoorsteps` beside 6,18. ADR 0063 derives the
-                // horizon, so the corridor closes when the room grows into
-                // it and not before: at RCL4 the trunks route, and from RCL5
-                // — where the horizon is 6 and the reservation is the one
-                // ADR 0055 imposed everywhere — src-0's spawn trunk is
-                // dropped whole.
+            test "the doorstep 32,2 is sealed at every level, and no level-up pays for it (#105)" {
+                // The same loss as above, reached from the other side, and a
+                // function of the terrain alone again. ADR 0055 widened every
+                // room's reservation to RCL6's forty tiles whatever level it
+                // stood at, which closed this spawn's corridor out and put the
+                // tile in `SealedDoorsteps` beside 6,18. ADR 0063 derived the
+                // horizon and the corridor started opening at the low levels:
+                // the room paved its way out at RCL4 and walked away from the
+                // pavement on the tick it reached RCL5 — 95 tiles down to 35,
+                // 60 orphaned, the worst churn the sweep found anywhere.
+                // ADR 0064 sizes the reservation at `allowanceOf`'s ceiling
+                // and stops it reading the level at all, so the corridor is
+                // closed at RCL3 exactly as at RCL8 and the 95 is never laid.
                 //
-                // Pinned rather than deleted because #105 is still open and
-                // this is still its mechanism: the working-ground exclusion
-                // guards Seats and the Upgrade area, and nothing guards the
-                // spawn's own doorstep. What the derivation bought is that a
-                // room pays for it at the level it reaches, not at RCL1.
+                // This is the ticket's one measured regression stated as a
+                // test: the tile seals two levels earlier than it did
+                // yesterday, and what it buys is that nothing is bought and
+                // abandoned. No colony stands on `32,2`, and the set of spawns
+                // that ever drop a trunk is unchanged under all three rules.
+                //
+                // Pinned rather than deleted because the mechanism stands
+                // even though the ticket does not: the working-ground
+                // exclusion guards Seats and the Upgrade area, and nothing
+                // guards the spawn's own doorstep. #105 was closed on
+                // 2026-09-08 having measured the exclusion and judged it a
+                // decision rather than a fix, and #107 — the recording half it
+                // was split into — shipped, which is why the loss below is
+                // read off `UnroutedTrunks` rather than off a hole in the road
+                // plan. Nothing is going to land here; this is the record.
                 let loaded = project (load "W12S27") { X = 32; Y = 2 } None
 
                 let unroutedAt level =
                     decide (colonyOf loaded level) Map.empty Set.empty None
                     |> fun decision -> decision.Memo.UnroutedTrunks
 
-                Expect.isEmpty
-                    (unroutedAt 4)
-                    "at RCL4 the horizon is 5, the corridor is open and every trunk routes"
-
-                for level in 5..8 do
+                for level in 3..8 do
                     Expect.all
                         (unroutedAt level)
                         (fun trunk -> trunk.Goal = TrunkGoal.Spawn "spawn-1")
@@ -362,34 +420,27 @@ let knownLossTests =
 
                     Expect.isNonEmpty
                         (unroutedAt level)
-                        $"at RCL{level} the reservation seals the doorstep; delete this when #105 lands"
+                        $"at RCL{level} the reservation seals the doorstep, and the room routes out of it nowhere"
 
-                // And what the level that seals it costs in pavement, which
-                // is the worst road churn anywhere in the sweep and the
-                // reason the loss is priced here and not only named. At RCL4
-                // this spawn routes every trunk and paves 95 tiles; at RCL5
-                // the corridor closes, `src-0`'s spawn trunk is dropped
-                // whole, and the plan wants 35. A room that built out at RCL4
-                // has laid some 28,500 energy of road and walks away from 60
-                // tiles of it on the tick it levels — and goes on repairing
-                // them, because `Facts.hungryStructures` reads the standing
-                // structures and never the plan.
+                // And what it costs in pavement, which is the number this
+                // pin carried while the loss was level-dependent and is kept
+                // here restated rather than dropped: the 95 tiles RCL4 used
+                // to lay and the 60 the level-up used to orphan are both
+                // gone, because the plan is the sealed one from the start.
                 let pavedAt level =
                     decide (colonyOf loaded level) Map.empty Set.empty None
                     |> fun decision ->
                         placementsOf decision.Intents |> tilesOfKind Road |> Set.ofList
 
-                Expect.equal (Set.count (pavedAt 4)) 95 "RCL4 routes out of the pocket and paves 95"
+                for level in 3..8 do
+                    Expect.equal
+                        (Set.count (pavedAt level))
+                        35
+                        $"RCL{level} plans the sealed room's 35 tiles: the 95 is never laid"
 
-                Expect.equal
-                    (Set.count (pavedAt 5))
-                    35
-                    "RCL5 seals it and plans 35: the trunk is not re-routed, it is gone"
-
-                Expect.equal
-                    (Set.count (Set.difference (pavedAt 4) (pavedAt 5)))
-                    60
-                    "60 paved tiles — some 18,000 energy — orphaned by one level-up"
+                Expect.isEmpty
+                    (Set.difference (pavedAt 4) (pavedAt 5))
+                    "and the RCL4 → RCL5 level-up that orphaned 60 tiles orphans none"
             }
 
             test "W15S28 loses its buffer to the same paved pocket, and RCL is not why (#331)" {
@@ -547,28 +598,34 @@ let knownLossTests =
                     "and the live colony's own tile is the only spawn in the room that loses it"
             }
 
-            test "a level-up abandons paved road, and one pick of the container it moves (#341)" {
-                // The price ADR 0063 charges and the one ADR 0039's rejection
-                // predicted. Under an absolute horizon the reservation was
-                // level-blind, so a bare room's road plan was identical at
-                // every level *by construction* and a level-up could not
-                // orphan a road. Derived, it can: the reservation widens on
-                // the tick the room levels, the router re-routes around the
-                // wider window, and the tiles the old route paved are tiles
-                // nothing plans any more. `Facts.hungryStructures` walks
-                // every standing structure with no reference to the road
-                // plan, so an orphan is not written off once — it stays in
-                // the [[repair]] pool and draws upkeep for as long as it
-                // stands.
+            test "a level-up abandons no paved road, and moves no container's pick (#344)" {
+                // The invariant ADR 0064 restores, standing where ADR 0063's
+                // recorded loss stood. A reservation that is a function of
+                // the level is a road plan that is a function of the level:
+                // the window widens on the tick the room levels, the router
+                // re-routes around it, and the tiles the old route paved are
+                // tiles nothing plans any more — 589 of them over this sweep,
+                // some 176,700 energy, plus ten source-container picks moved
+                // out from under a standing container. `Facts.hungryStructures`
+                // walks every standing structure with no reference to the road
+                // plan, so an orphan is not written off once: it stays in the
+                // [[repair]] pool and draws upkeep for as long as it stands
+                // (#342).
                 //
-                // Measured here rather than claimed, on **real terrain** and
-                // at the levels the live colonies stand at, because the
-                // openRoom ladder in `LayoutPlacementTests` runs on
-                // featureless ground where a trunk barely exists and the
-                // sweep's own level-up is RCL4's. Recorded as a loss and not
-                // as a rule: these numbers are what the derivation costs
-                // today, and a layout change that moves them should say so
-                // here.
+                // Sized at `allowanceOf`'s ceiling the reservation reads no
+                // level, so a bare room's road plan is identical at every
+                // level **by construction** and a level-up cannot orphan a
+                // road. That is ADR 0027's determinism invariant, which
+                // ADR 0039 raised against a derived horizon and ADR 0063
+                // priced rather than met, holding for the roads again.
+                //
+                // Stated as a rule and not as a ratchet, which is the whole
+                // difference: a bound of "no more than 152 tiles" is green on
+                // a change that churns 151, and by construction the number
+                // here is zero. Measured on **real terrain** and at the
+                // levels the live colonies stand at, because the openRoom
+                // ladder in `LayoutPlacementTests` runs on featureless ground
+                // where a trunk barely exists.
                 let plannedFrom roomName spawn level =
                     let room = rooms |> List.find (fun room -> room.Name = roomName)
                     let loaded = project (load roomName) spawn room.FallbackController
@@ -601,76 +658,87 @@ let knownLossTests =
                     (placedAfter, picksOf roomName levelled placedAfter)
 
                 // W13S28 from `36,42`, RCL6 to RCL7 — the transition W12S28
-                // made on the day #341 was filed, in a room the colony owns.
+                // made on the day #341 was filed, in a room the colony owns,
+                // and the largest churn ADR 0063 found in one: 111 paved
+                // tiles became 92, 34 abandoned, some 10,200 energy, and a
+                // source container's pick moved with the trunk that chose it.
+                // The room now plans the 92 from the start and the level-up
+                // is free.
+                //
                 // `36,42` is one of the sweep's **stride** tiles and not the
                 // spawn W13S28 stands on: this room carries no `AlsoSweep`
                 // entry, unlike W12S28 and W15S28, so no test here plans it
-                // from its live tile. Pinned because it is the largest churn
-                // the sweep finds in a room we own, which is what makes it
-                // worth a number — not because the colony will pay it. From
-                // the child's own Spawn2 at `16,12` this transition abandons
-                // **nothing**; the live exposure is W15S28's four tiles
-                // below, and ADR 0063 records both readings.
+                // from its live tile and no claim about the live colony rests
+                // on this number (#345).
                 let (before, picksBefore), (after, picksAfter) =
                     levelUp "W13S28" { X = 36; Y = 42 } 6
 
-                Expect.equal (Set.count (paved before)) 111 "RCL6 paves 111 tiles from 36,42"
-
                 Expect.equal
-                    (Set.count (paved after))
+                    (Set.count (paved before))
                     92
-                    "and the levelled room plans 92: a shorter trunk set, not a superset"
+                    "RCL6 paves from 36,42 the 92 tiles RCL7 wants, not the 111 it used to"
 
                 Expect.equal
-                    (Set.count (Set.difference (paved before) (paved after)))
-                    34
-                    "34 paved tiles — some 10,200 energy — are abandoned by the level-up"
+                    (paved before)
+                    (paved after)
+                    "and the levelled room plans the same set: not a superset, the same tiles"
 
-                // And the container the room already dug. A source container
-                // is planned onto the Seat nearest its trunk, so a trunk that
-                // moves can move the pick out from under a **standing**
-                // container: a second 5,000-energy site, the [[anchor]]'s
-                // [[post]] moving with it, and an orphan at the old tile. The
-                // level-blind reservation could not do this from a level-up.
-                Expect.isNonEmpty
-                    (Set.difference picksBefore picksAfter)
-                    "and a source container's pick moves with the trunk that chose it"
+                Expect.equal
+                    picksBefore
+                    picksAfter
+                    "no source container's pick moves out from under the container that stands on it"
 
                 // W15S28 from `18,30`, the live spawn, RCL5 to RCL6: the
-                // colony's own next level-up, and the four-tile detour ADR
-                // 0063 measured — which is the *small* end of this loss and
-                // is why the room above is pinned beside it.
+                // colony's own next level-up, which ADR 0063 priced at a
+                // four-tile detour and which is now nothing at all.
                 let (before, _), (after, _) = levelUp "W15S28" { X = 18; Y = 30 } 5
 
                 Expect.equal
-                    (Set.count (Set.difference (paved before) (paved after)))
-                    4
-                    "W15S28's own next level-up abandons four"
+                    (paved before)
+                    (paved after)
+                    "W15S28's own next level-up abandons nothing and lays nothing"
 
-                // The sweep's half: a ratchet and not a golden number. Every
-                // (room, spawn) the suite plans, built out at RCL4 and
-                // levelled to RCL5, counted together — so a layout change
-                // that makes the derivation churn *more* road fails here,
-                // and one that makes it churn less does not.
-                let abandoned =
-                    sweep.Value |> List.sumBy (fun case -> List.length case.LevelUpAbandons)
+                // Two more transitions, chosen because the sweep cannot reach
+                // them. The sweep plans RCL4 → RCL5 and one transition is all
+                // it can afford (ADR 0036: the honest lever is fewer plans per
+                // case, not more levels), so a reservation re-coupled to the
+                // level at a band the sweep never crosses would leave every
+                // assertion above green. The tower half is exactly that hole:
+                // `allowanceOf` moves the tower allowance at 5 and again at 7
+                // and 8, so a tower reservation read off the horizon churns at
+                // RCL6 → 7 and not at RCL4 → 5. These are the two worst cases
+                // it produces — twenty tiles and six, and the six carry a
+                // source container's pick off `16,44` with them (#344 review).
+                let (before, picksBefore), (after, picksAfter) =
+                    levelUp "W15S28" { X = 18; Y = 12 } 6
 
-                let churning =
-                    sweep.Value |> List.filter (fun case -> not (List.isEmpty case.LevelUpAbandons))
+                Expect.equal
+                    (paved before)
+                    (paved after)
+                    "an RCL6 → 7 level-up abandons nothing either: the tower allowance moves there, the reservation does not"
 
-                Expect.isNonEmpty
-                    churning
-                    "the churn is real across the sweep; this is a cost pin, not a green light"
+                Expect.equal picksBefore picksAfter "and no pick moves across it"
 
-                Expect.isLessThanOrEqual
-                    (List.length churning)
-                    37
-                    "no more than the 37 of the sweep's RCL4 spawns that abandon road today"
+                let (before, picksBefore), (after, picksAfter) =
+                    levelUp "W12S27" { X = 18; Y = 30 } 6
 
-                Expect.isLessThanOrEqual
-                    abandoned
-                    152
-                    "and no more than the 152 tiles — some 45,600 energy — they abandon between them"
+                Expect.equal
+                    (paved before)
+                    (paved after)
+                    "nor in the room whose corridors are narrow enough to re-route on one reserved tile"
+
+                Expect.equal picksBefore picksAfter "and `16,44` keeps the container standing on it"
+
+                // And the sweep's half, over every (room, spawn) the suite
+                // plans, built out at RCL4 and levelled to RCL5. An
+                // invariant and not a ratchet: zero, stated as zero.
+                Expect.isEmpty
+                    (sweep.Value |> List.collect (fun case -> case.LevelUpAbandons))
+                    "no spawn of any capture abandons a paved tile when its room levels"
+
+                Expect.isEmpty
+                    (violations (fun case -> not (List.isEmpty case.LevelUpAbandons)))
+                    "and the claim is the whole sweep's, named case by case when it breaks"
             }
         ]
 
@@ -684,10 +752,11 @@ let knownLossTests =
 /// level unlocks, and moves nothing it already stands on.
 ///
 /// Re-derived on W12S28 at RCL7, which is the live room #341 was found on
-/// and the widest window this change opens anywhere — `allowanceOf` answers
-/// anything above 7 with sixty extensions and six towers, so an RCL7 room's
-/// horizon of 8 reserves for sixty and six where it reserved for forty and
-/// two. Planned from `12,40`, the tile the live spawn occupies, because a
+/// and the widest **placement** window this change opens anywhere —
+/// `allowanceOf` answers anything above 7 with sixty extensions and six
+/// towers, so an RCL7 room's horizon of 8 draws from sixty and six where it
+/// drew from forty and two. The *reservation* is that same sixty and six at
+/// every level and was never the thing widening here (ADR 0064). Planned from `12,40`, the tile the live spawn occupies, because a
 /// horizon is re-derived on the room it is being moved for (ADR 0039) —
 /// which is also why this list sits outside the sweep: the sweep is the
 /// general rule over every spawn, and this is the one room's arithmetic.

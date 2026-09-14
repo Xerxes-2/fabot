@@ -190,17 +190,25 @@ let censusSignatureTests =
             test "the controller level moves the signature" {
                 // The level was always a signature input because it gates the
                 // allowances the placement filters on. Since ADR 0063 it is a
-                // signature input **twice over**: the clustered reservation is
-                // sized at `controller.Level + 1`, so the level decides which
-                // tiles the plan holds and not only which of them it places
-                // this tick. A memo not keyed on the level would hand a room
-                // that levelled up yesterday's reservation — which is #341
-                // wearing a different hat, and is why this test's reason is
-                // worth restating rather than leaving as the allowance's.
+                // signature input **twice over**: the clustered window is sized
+                // at `controller.Level + 1`, so the level decides which tiles
+                // the cluster holds and not only which of them it places this
+                // tick. A memo not keyed on the level would hand a room that
+                // levelled up yesterday's cluster — which is #341 wearing a
+                // different hat, and is why this test's reason is worth
+                // restating rather than leaving as the allowance's.
+                //
+                // The **road** half stopped reading the level with ADR 0064:
+                // the reservation the trunks route around is sized at
+                // `allowanceOf`'s ceiling. That retires one of the level's
+                // three readings and none of the other two, so the key is
+                // exactly as tight as it was and the claim this test makes is
+                // unchanged — what moved is that it is now the *cluster*
+                // alone this key is load-bearing for.
                 Expect.notEqual
                     (censusSignature (trunkColony 3))
                     (censusSignature (trunkColony 2))
-                    "the level sizes the reservation and gates the placement, so it is a signature input"
+                    "the level sizes the cluster and gates the placement, so it is a signature input"
             }
 
             test "a second room's standing container joins the signature under its own name" {
@@ -793,7 +801,10 @@ let planMemoTests =
                 // differently, so a memo that survived the level-up would be
                 // observably wrong rather than merely stale (ADR 0063 — the
                 // horizon is derived from the level, so the level moving moves
-                // the reservation and not only the placement filter).
+                // which tiles the cluster holds and not only the placement
+                // filter. The roads are level-blind again since ADR 0064, so
+                // the difference the recompute has to notice is the cluster's
+                // alone).
                 Expect.notEqual
                     (placementIntents fresh.Intents)
                     (placementIntents (decideOn (trunkColony 2)).Intents)

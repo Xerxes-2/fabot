@@ -388,16 +388,20 @@ let placementTests =
                 //
                 // It moved under every horizon this number has had. Under the
                 // absolute constants of ADR 0039 and ADR 0055 an RCL2 room
-                // reserved for *two* towers, because the horizon it read was
-                // five or six whatever level the room stood at, and the
-                // extensions started three tiles in. Derived (ADR 0063) an
-                // RCL2 room's horizon is 3, which allows one tower, so the
-                // second tower's pick — `26,24` — is an extension's again and
-                // `25,23` falls off the end. That is the derivation's other
-                // half, and the one no ticket asked for: the horizon narrows
-                // for a young room as readily as it widens for an old one, and
-                // a young room reserving for a tower two levels away was
-                // holding a tile it had no use for.
+                // *drew* two tower tiles, because the horizon it read was five
+                // or six whatever level the room stood at, and the extensions
+                // started three tiles in. Derived (ADR 0063) an RCL2 room's
+                // horizon is 3, which allows one tower, so the second tower's
+                // pick — `26,24` — is an extension's again and `25,23` falls
+                // off the end. That is the derivation's other half, and the
+                // one no ticket asked for: the horizon narrows for a young room
+                // as readily as it widens for an old one.
+                //
+                // None of that is about the **reservation**, which since ADR
+                // 0064 is the same six towers and sixty extensions at RCL2 as
+                // at RCL8 — this room's trunks already dodge the tile RCL5
+                // will place a second tower on. What the narrowing costs a
+                // young room is one drawn tile, not one reserved one.
                 Expect.equal
                     (sitesOfKind Extension intents)
                     [
@@ -454,19 +458,20 @@ let placementTests =
                     40
                     "RCL6's whole extension allowance, the ten that level adds included"
 
-                // The horizon here is **7** and holds three tower tiles; what
+                // The horizon here is **7** and draws three tower tiles; what
                 // allows only two is the placement filter, which is the room's
                 // own level. That is the sized/filtered split stated where it
-                // is easiest to get backwards: the third tile is reserved and
-                // not placed, and it is reserved so that the trunks routed
-                // this tick already avoid it.
+                // is easiest to get backwards: the third tile is drawn and not
+                // placed. The trunks routed this tick avoid it for a reason of
+                // their own — the reservation is the ceiling's six towers (ADR
+                // 0064), so they avoid the sixth as readily as the third.
                 Expect.hasLength
                     (sitesOfKind Tower intents)
                     2
-                    "RCL6 places two towers, though its horizon reserves a tile for a third"
+                    "RCL6 places two towers, though its horizon draws a tile for a third"
 
                 // And the level below places what its own level unlocks, not
-                // what the horizon reserved.
+                // what the horizon drew.
                 let { Intents = below } = decideOn (atLevel 5 (openRoom 6))
 
                 Expect.hasLength (sitesOfKind Extension below) 30 "RCL5 places its own thirty"

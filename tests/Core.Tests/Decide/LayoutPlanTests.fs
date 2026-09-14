@@ -107,7 +107,7 @@ let layoutTests =
                     "the Layout is deterministic — sites never jitter between computations"
             }
 
-            test "trunks route around every horizon reservation" {
+            test "trunks route around the whole reservation, ceiling-wide" {
                 // Read from the road gate up, where the sites are placed
                 // (#209): below it the plan is still routed whole but
                 // nothing of it reaches the ground, so the road *sites* are
@@ -117,17 +117,27 @@ let layoutTests =
                 let rcl4 = decideOn (trunkColony 4)
                 let roads = sitesOfKind Road rcl3.Intents |> Set.ofList
 
-                // Read off the horizon's own level, where the whole
-                // reservation is on the ground — the second tower and the
-                // twenty extensions RCL5 and RCL6 add included (ADR 0039, ADR
-                // 0055). Below it the check only ever saw the part the level
-                // had placed, so this level moves with the horizon.
-                let cluster = clusterTiles (decideOn (trunkColony 6)).Intents
+                // Read off the level where the whole **reservation** stands,
+                // which since ADR 0064 is `allowanceOf`'s ceiling and not the
+                // horizon: an RCL7 room places sixty extensions and six
+                // towers, and that is every tile the router dodged. Read at
+                // RCL6 — the level this checked while the two windows were the
+                // same one — the cluster is 41 tiles against a 65-tile
+                // reservation and 24 reserved tiles go unchecked, so the
+                // weaker form passes a reservation narrowed under the
+                // placement (#344 review).
+                let cluster = clusterTiles (decideOn (trunkColony 8)).Intents
 
+                // True by construction since ADR 0064 and not by luck: the
+                // reservation the router dodges is sized at `allowanceOf`'s
+                // ceiling and reads no level, so two levels of the same room
+                // route the same trunks. Under ADR 0063's derived reservation
+                // this pair happened to agree on featureless ground while real
+                // terrain churned 589 tiles across the capture sweep (#344).
                 Expect.equal
                     (sitesOfKind Road rcl4.Intents |> Set.ofList)
                     roads
-                    "the road plan is the same at every level — the horizon never moves"
+                    "the road plan is the same at every level — the horizon moves, the reservation does not"
 
                 Expect.isEmpty
                     (Set.intersect roads cluster)
@@ -769,7 +779,7 @@ let extractorTests =
             test "the extractor is planned on the deposit's own tile, from RCL6 and not before" {
                 // ADR 0057 decision 1: `CONTROLLER_STRUCTURES.extractor` is 1
                 // at RCL6, 7 and 8 and 0 below, and the Layout filters at the
-                // **current** level rather than reserving at the horizon —
+                // **current** level rather than drawing it at the horizon —
                 // the deposit is a wall tile off the clustered checkerboard,
                 // so there is no window an extension can take.
                 for level in 1..5 do
@@ -1253,14 +1263,39 @@ let linkFootingTests =
                 Expect.isEmpty
                     (served |> List.filter (fun target -> List.contains target unserved))
                     "no target is both served and unserved"
+
+                // And the same split at every level the fixture can be run
+                // at, which is the premise the whole #77 record rests on and
+                // which nothing used to state. The seal only records a
+                // shortfall while the trunk still reaches the pocket: let a
+                // reservation claim the corridor out and the source is *cut
+                // off* rather than sealed, there is no container pick, no
+                // footing target and no shortfall to fall short of — a
+                // fixture that has gone silent while every assertion above it
+                // stays green. It is not hypothetical: under ADR 0063's
+                // derived reservation the orthogonal `22,30` exit this fixture
+                // used to leave by was claimed from RCL6 up, one level above
+                // the only level anything instantiated it at. `22,29` is on
+                // the other checkerboard colour and no reservation at any
+                // level can take it (ADR 0064) — stated here as the behaviour
+                // and not as the arithmetic, so moving the spawn to an odd
+                // tile reds this rather than emptying it.
+                for level in 3..8 do
+                    let { Memo = memo } = decideOn (sealedPocketColony level)
+
+                    Expect.hasLength
+                        memo.UnservedFootings
+                        1
+                        $"RCL{level} still seals the pocket source rather than cutting it off"
             }
 
             test "a target with no candidate is recorded by tile and kind, never dropped" {
                 // W12S28's `10,43`, synthesised: the pocket source's
-                // container pick has wall on five sides, its own source on
-                // the sixth, the trunk road out on the seventh and a
-                // standing extension on the last, so the fold has nothing
-                // to reserve for it. That used to fall through to `taken`
+                // container pick has wall on four sides, its own source on
+                // the fifth, the trunk road out on the sixth and a standing
+                // extension on each of the last two, so the fold has nothing
+                // to reserve for it — the count `sealedPocketColony`'s own
+                // doc gives, which this said differently until #344. That used to fall through to `taken`
                 // and leave the room three footings where the ADRs promise
                 // four, with no signal anywhere (#77). The room's other
                 // three targets are absent from the list, which is the
