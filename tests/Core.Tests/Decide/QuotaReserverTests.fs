@@ -628,6 +628,65 @@ let reclaimerRowTests =
                     "fifty short of a block, the row hires nobody and yields the tick (ADR 0050)"
             }
 
+            test "the relief is cast while the incumbent still stands, and the overlap is the knob" {
+                // The relay (ADR 0057 decision 5): a relay and never a
+                // garrison of two, and it overlaps rather than gaps because
+                // the body out there is the colony's only vision of the room
+                // and the only thing holding its flag.
+                //
+                // This fixture's chain is unpriceable, which isolates the
+                // overlap from the ordinary oven-plus-walk lead. The threshold
+                // is therefore the knob itself.
+                let atLife overlap life =
+                    let incumbent = reserver "rc" |> withLife life
+
+                    let colony =
+                        reserverColony [] (surplusFleet 2 @ [ incumbent ]) [] |> withReactorErrand
+
+                    { colony with
+                        Tuning =
+                            { colony.Tuning with
+                                ReclaimerOverlap = overlap
+                            }
+                    }
+                    |> standingIn reactorErrand.RoomName [ incumbent, reactorRing ]
+                    |> fun colony -> reserverCasts (decideOn colony).Intents
+
+                Expect.isEmpty
+                    (atLife 25 26)
+                    "one tick above the overlap the incumbent is the row's one body"
+
+                Expect.equal
+                    (atLife 25 25)
+                    [ oneBlock ]
+                    "at it the relief is cast while the incumbent still holds the flag"
+
+                Expect.isEmpty (atLife 10 25) "a shorter overlap leaves the same body counted"
+            }
+
+            test "a body at home is not led by the errand's overlap" {
+                // The overlap is a property of the seat the body is handing
+                // over, not of every CLAIM body produced by the shared row.
+                let atRoom room tile =
+                    let incumbent = reserver "rc" |> withLife 25
+
+                    reserverColony [] (surplusFleet 2 @ [ incumbent ]) []
+                    |> withReactorErrand
+                    |> standingIn room [ incumbent, tile ]
+                    |> fun colony -> reserverCasts (decideOn colony).Intents
+
+                let home = SpatialInfo.homeName (reserverColony [] (surplusFleet 2) []).Spatial
+
+                Expect.isEmpty
+                    (atRoom home { X = 22; Y = 10 })
+                    "at home, twenty-five ticks of life is outside this body's ordinary lead"
+
+                Expect.equal
+                    (atRoom reactorErrand.RoomName reactorRing)
+                    [ oneBlock ]
+                    "out on the errand, the same body is already outside the count"
+            }
+
         ]
 
 [<Tests>]

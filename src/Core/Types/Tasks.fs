@@ -108,6 +108,11 @@ type Capacity =
         /// builders' budget does not price because that budget prices a
         /// commute and this body made none. Empty for every other Task.
         Exempt: Set<RoomPos>
+        /// Ticks for which a relief and its incumbent are meant to coexist at
+        /// this Task (#329). Zero keeps ADR 0026's ordinary arrival-counted
+        /// cap. A positive window releases the incumbent's slot early enough
+        /// for the candidate to arrive with this much incumbent life left.
+        Handover: int
     }
 
 [<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
@@ -119,6 +124,7 @@ module Capacity =
             Caps = Map.empty
             Garrison = Set.empty
             Exempt = Set.empty
+            Handover = 0
         }
 
     /// One crowd's cap written onto a Task.
@@ -140,6 +146,11 @@ module Capacity =
 
     /// The tiles a candidate standing on is outside every cap (#205).
     let exempting tiles (capacity: Capacity) = { capacity with Exempt = tiles }
+
+    /// Admit a relief early enough to overlap its incumbent for this many
+    /// ticks. The cap remains the permanent seat count; this is only its
+    /// handover window (#329).
+    let handingOver ticks (capacity: Capacity) = { capacity with Handover = ticks }
 
     /// One number over every class: a Seat count, a store's stock divided
     /// by one load, one holder per controller.

@@ -486,32 +486,19 @@ let errandTaskTests =
                     "one holder, whichever of the two travel cost picks"
             }
 
-            test "the seat is handed over at death, which is what the cap counted at arrival means" {
-                // **The relay's actual handover, pinned because the row was
-                // nearly shipped with a knob asserting the opposite** (#318).
-                // `Reclaim`'s capacity is one and ADR 0026 counts a holder
-                // against a candidate at that *candidate's arrival*, so the
-                // incumbent blocks the relief exactly while it would still be
-                // alive when the relief lands. The relief is admitted — and so
-                // walks at all, an unassigned body having no Work Area to be
-                // walked to — only once the incumbent can no longer outlive its
-                // walk, and lands as the incumbent dies.
-                //
-                // The two do hold the Task together for that last stretch, and
-                // that is the cap doing its job rather than leaking: a cap
-                // counted at arrival admits two bodies whose stays do not
-                // overlap. What it never admits is two bodies *standing* there,
-                // which is the "relay and never a garrison of two" the case
-                // above pins.
+            test "the relief is admitted in time to land with the handover window left" {
+                // The one task-specific exception to ADR 0026 (#329): a
+                // Reclaim incumbent stops consuming the handover seat when a
+                // candidate can land with `ReclaimerOverlap` ticks of its life
+                // left. Ordinary capped Tasks continue to count a holder that
+                // survives through the candidate's arrival.
                 //
                 // Three plain tiles between the relief and the ring, so the
-                // walk is three ticks for a one-fatigue-part body, and the
-                // incumbent's life is swept across it. That is the whole shape
-                // of the live relay at a fiftieth of the distance, and it is
-                // why the overlap knob #318 nearly shipped was withdrawn
-                // rather than tuned: leading the incumbent further casts the relief
-                // earlier, this line does not move, and the extra ticks are
-                // spent beside the spawn holding no Task at all.
+                // walk is three ticks for a one-fatigue-part body. Twenty-nine
+                // ticks of incumbent life would leave 26 at arrival and still
+                // blocks; twenty-eight leaves the chosen 25-tick overlap and
+                // admits the relief. The permanent cap remains one: the case
+                // above puts two fresh bodies on the ring and admits only one.
                 let relayAt life =
                     let colony =
                         bareHome
@@ -526,14 +513,14 @@ let errandTaskTests =
                     |> List.filter (fun name -> colony |> holds name (Reclaim reactor))
 
                 Expect.equal
-                    (relayAt 3)
+                    (relayAt 29)
                     [ "rc" ]
-                    "with three ticks left the incumbent still outlives the relief's three-tick walk, so the relief is offered nothing and stands where it is"
+                    "one tick outside the handover window, the incumbent is still the one resident"
 
                 Expect.equal
-                    (relayAt 2)
+                    (relayAt 28)
                     [ "rc"; "relief" ]
-                    "one tick under it the relief is let in beside the incumbent — which is the handover, and it lands as the incumbent dies"
+                    "at the boundary the relief departs and will land with 25 ticks of overlap"
             }
         ]
 

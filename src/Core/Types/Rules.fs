@@ -334,6 +334,12 @@ type Tuning =
         /// 154-unit route, so 636 leaves 363 ticks in the Reactor's 999-tick
         /// buffer and absorbs that leg with 45 to spare.
         DeliveryInterval: int
+        /// Ticks the [[re-claimer]] relief is meant to stand beside its
+        /// incumbent (#329). Added both to the incumbent's replacement lead
+        /// and to `Reclaim`'s capacity handover window; either half alone is
+        /// inert. Twenty-five preserves ADR 0057's chosen disruption margin
+        /// while the oven and route remain derived from the Atlas.
+        ReclaimerOverlap: int
         /// **How far ahead** the Layout *places*, in controller levels (ADR
         /// 0011, ADR 0063, ADR 0064): the horizon is `controller.Level + this`,
         /// so the clustered kinds are sized one level above the room's own and
@@ -461,6 +467,7 @@ module Tuning =
             MineContactCliff = 1000
             ReactorLoad = 999
             DeliveryInterval = 636
+            ReclaimerOverlap = 25
             HorizonLookahead = 1
             OutpostBuilders = 2
             BootstrapLevel = 3

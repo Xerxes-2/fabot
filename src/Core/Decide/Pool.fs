@@ -1473,27 +1473,14 @@ let planPool (view: ColonyView) atlas (tasks: Task list) : PooledTask list =
         // second body there buys nothing while the other outpost stays at five
         // a tick; for the Claim beside it the second body buys even less, a
         // room being claimed by one touch of one CLAIM part.
-        // And one holder per reactor beside them (ADR 0057 decision 5): the
-        // flag is taken by one touch of one CLAIM part, so a second body out
-        // there buys nothing and the row is *a relay and never a garrison of
-        // two*.
-        //
-        // **Which is also what settles when the relay hands over, and it hands
-        // over at death** (#318). This cap is counted at the candidate's
-        // arrival (ADR 0026), so the incumbent blocks the relief exactly while
-        // it would still be alive when the relief lands: the relief takes the
-        // Task — and so walks at all, an unassigned body having no Work Area to
-        // be walked to — only once the incumbent can no longer outlive its
-        // walk. The seat therefore gaps about a tick and never the length of a
-        // walk, which is the whole of what ADR 0057 decision 5's *"overlaps
-        // rather than gaps"* was defending (its own Consequences price the two
-        // cases at *"one tick, while the relay stands; 575 if it has gapped"*).
-        // A real overlap would take a second seat here for the handover window
-        // — a change to ADR 0026's arrival machinery for every bounded Task —
-        // and is filed rather than taken.
         | Reserve _
-        | Claim _
-        | Reclaim _ -> Capacity.total 1
+        | Claim _ -> Capacity.total 1
+        // One permanent holder per reactor, with ADR 0069's temporary
+        // handover window. The window belongs to the Capacity rather than this
+        // Task kind in the Matcher: a fresh second resident still buys nothing,
+        // while a relief that arrives with exactly this much incumbent life is
+        // admitted.
+        | Reclaim _ -> Capacity.total 1 |> Capacity.handingOver view.Tuning.ReclaimerOverlap
         // **Capped by its store's stock of the resource it names** (#161, read
         // down ADR 0057 decision 3's second column): a store answers the number
         // its own holding of *that* resource divides into loads, so the mineral

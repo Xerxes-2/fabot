@@ -60,17 +60,28 @@ let matchCreeps
         | None -> true
         | Some ticks -> life |> Option.forall (fun remaining -> remaining >= ticks)
 
-    let overlaps (candidate: CreepInfo) task arrival name =
-        outlives arrival (Map.tryFind name lives)
+    let outlivesHandover handover arrival life =
+        match arrival with
+        | None -> true
+        | Some ticks ->
+            life
+            |> Option.forall (fun remaining ->
+                if handover = 0 then
+                    remaining >= ticks
+                else
+                    remaining > ticks + handover)
+
+    let overlaps (candidate: CreepInfo) task handover arrival name =
+        outlivesHandover handover arrival (Map.tryFind name lives)
         && outlives (Atlas.walkTicks atlas name task) (Some candidate.TicksToLive)
 
-    let holdersAt (acc: Assignments) (candidate: CreepInfo) task arrival =
+    let holdersAt (acc: Assignments) (candidate: CreepInfo) task handover arrival =
         let tid = taskId task
 
         acc
         |> Map.toList
         |> List.choose (fun (name, assigned) ->
-            if assigned = tid && overlaps candidate task arrival name then
+            if assigned = tid && overlaps candidate task handover arrival name then
                 Some name
             else
                 None)
@@ -107,7 +118,7 @@ let matchCreeps
                 if
                     name <> candidate.Name
                     && Set.contains tile tiles
-                    && overlaps candidate task arrival name
+                    && overlaps candidate task 0 arrival name
                 then
                     Some name
                 else
@@ -133,7 +144,7 @@ let matchCreeps
             // assignment map nor pay for an arrival (ADR 0029).
             true
         else
-            let holders = holdersAt acc creep pooled.Task arrival.Value
+            let holders = holdersAt acc creep pooled.Task capacity.Handover arrival.Value
             let cls = classOf creep.Name
 
             let inClass wanted =

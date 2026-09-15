@@ -1028,7 +1028,7 @@ let reclaimerRelayTests =
         "the re-claimer's cadence, over the terrain it will actually walk"
         [
             test
-                "the walk to the Reactor's ring is the 154 ADR 0060 measured, and the cadence falls out of it" {
+                "the walk to the Reactor's ring and the overlapping cadence fall out of the terrain" {
                 // ADR 0060 decision 3's own number, re-derived here off the
                 // committed captures instead of being written into `Tuning`
                 // (ADR 0036: real terrain is a counterexample generator, and a
@@ -1046,16 +1046,13 @@ let reclaimerRelayTests =
                 // The arithmetic the answer feeds, which is the whole of the
                 // cadence and is why no interval is written down:
                 //
-                //   lead    = 3 ticks a part × 2 parts + the walk
-                //   cast at = the incumbent's life falling to that lead
-                //   cadence = CREEP_CLAIM_LIFE_TIME (600) − the lead
+                //   lead      = 3 ticks a part × 2 parts + the walk
+                //   relief at = lead + Tuning.ReclaimerOverlap (25) of life
+                //   cadence   = CREEP_CLAIM_LIFE_TIME (600) − relief at
                 //
-                // And **no overlap term**, because there is no overlap to have
-                // (#318): `Reclaim` admits one holder, counted at the
-                // candidate's arrival (ADR 0026), so the relief takes the seat
-                // only once the incumbent can no longer outlive its walk — the
-                // relay hands over at death and the seat gaps about a tick.
-                // `ErrandTests` pins that half at `decide` level.
+                // `QuotaReserverTests` pins the cast threshold and
+                // `ErrandTests` pins admission at arrival; this real-terrain
+                // case ensures both are fed the same overlap.
                 //
                 // ADR 0057's 300 was the six-hop home's; this is W15S28's.
                 let chain = [ "W15S28"; "W15S27"; "W15S26"; "W15S25" ]
@@ -1145,17 +1142,24 @@ let reclaimerRelayTests =
                         "the walk from W15S28's Thorium seat to the Reactor's ring"
 
                     let lead = Engine.spawnTicksPerPart * List.length body + ticks
+                    let relief = lead + Tuning.defaults.ReclaimerOverlap
 
                     Expect.equal lead 166 "the [[lead]]: six ticks of oven and the walk"
 
-                    // The cadence, which is the ticket's number and is nobody's
-                    // constant: the incumbent leaves the living census at its
-                    // own lead, so one cast follows another by a life less that
-                    // lead.
                     Expect.equal
-                        (Engine.claimLifetime - lead)
-                        434
-                        "so the cadence is 434 — ADR 0060 decision 3's ~420, derived off this Atlas's walk rather than asserted"
+                        relief
+                        191
+                        "the incumbent leaves the row at its lead plus the handover window"
+
+                    Expect.equal
+                        (relief - lead)
+                        25
+                        "the relief reaches the ring with 25 predecessor ticks left"
+
+                    Expect.equal
+                        (Engine.claimLifetime - relief)
+                        409
+                        "so the cast cadence is 409, derived rather than configured"
 
                     // The courier's separate clock (#319): the accepted route
                     // measurement is 151 movement steps plus three room

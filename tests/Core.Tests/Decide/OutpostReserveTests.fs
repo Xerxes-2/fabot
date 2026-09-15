@@ -215,6 +215,25 @@ let reserveTests =
                     "the two reservers hold the two declared controllers, one each"
             }
 
+            test "a Reserve holder alive at the candidate's arrival still blocks it" {
+                // ADR 0026's equality boundary remains the rule for ordinary
+                // bounded Tasks: only the Reactor relay has ADR 0069's
+                // handover window. The candidate is three ticks from the
+                // controller's ring and the incumbent has exactly three ticks
+                // left, so they would meet rather than overlap.
+                let incumbent = reserver "a-old" |> withLife 3
+                let candidate = reserver "z-new"
+
+                let { Assignments = assignments } =
+                    reserveColony [ incumbent, { X = 10; Y = 44 }; candidate, { X = 10; Y = 40 } ]
+                    |> decideOn
+
+                Expect.equal
+                    (assignments |> Map.toList)
+                    [ "a-old", taskId (Reserve "ctrl-out") ]
+                    "equality still spends the Reserve's one seat on the incumbent"
+            }
+
             test "a controller in a room this colony owns is not pooled at all" {
                 // The other half of #181's fact, at the seam it is decided
                 // on: the engine refuses reserveController on a room we

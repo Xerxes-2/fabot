@@ -148,25 +148,23 @@ let private leadOf (view: ColonyView) atlas (sizing: RowSizing) (creep: CreepInf
             | [] -> 0
             | leads -> List.min leads
 
-/// Whether a creep is expiring (ADR 0026): its remaining life is at or under
-/// its lead, so it will be dead before a replacement cast now could stand where
-/// it stands. It leaves the workforce's living count and its row's gap, which
-/// is what casts the successor while it still works.
-///
-/// **The [[errand]]'s relay is this rule and no addition to it** (ADR 0057
-/// decision 5, #318). The lead already prices the successor's walk over
-/// `Atlas.routes`' chain, so a [[re-claimer]] three crossings out is led by its
-/// oven plus that walk — 160 ticks over the committed captures — and the
-/// cadence ADR 0057 had to write as a constant falls out of it. What the lead
-/// does **not** buy is the two bodies standing out there together: the seat is
-/// `Reclaim`'s capacity of one, and the [[matcher]] counts the incumbent
-/// against a candidate at that candidate's *arrival* (ADR 0026), so the relief
-/// is admitted exactly when it would land after the incumbent is dead. The
-/// relay therefore hands over **at death** and the seat gaps about a tick,
-/// never a walk. Leading the incumbent further would not change that — it buys
-/// a body cast earlier that stands beside the spawn holding no Task, which is
-/// why #318 withdrew the knob that tried it rather than shipping a number with
-/// no effect.
+/// The extra life an incumbent standing in a declared [[errand]] room must
+/// retain before it still counts in its spawn row. This is a property of the
+/// remote seat, not of a CLAIM body: a reserver or claimer at home keeps the
+/// ordinary lead even though it shares the re-claimer's row.
+let private errandOverlap (view: ColonyView) atlas (creep: CreepInfo) =
+    match Atlas.creepRoom atlas creep.Name with
+    | Some room when view.Errands |> List.exists (fun errand -> errand.RoomName = room) ->
+        view.Tuning.ReclaimerOverlap
+    | _ -> 0
+
+/// Whether a creep is expiring (ADR 0026, ADR 0069): its remaining life is at
+/// or under its lead, so it leaves the workforce's living count and its row's
+/// gap. An incumbent already standing in an [[errand]] room additionally
+/// leaves that count one handover window early. Together with `Reclaim`'s
+/// matching capacity, this casts and admits the relief early enough for both
+/// bodies to stand at the remote seat for that window while permanent capacity
+/// remains one.
 let internal expiring (view: ColonyView) atlas (sizing: RowSizing) (creep: CreepInfo) =
     if patternOf view.Tuning atlas creep = courierPattern then
         // A courier is economically spent after one 636-tick delivery slot,
@@ -175,7 +173,8 @@ let internal expiring (view: ColonyView) atlas (sizing: RowSizing) (creep: Creep
         // second Source Keeper crossing by the same body.
         creep.TicksToLive <= Engine.creepLifetime - view.Tuning.DeliveryInterval
     else
-        creep.TicksToLive <= leadOf view atlas sizing creep
+        creep.TicksToLive
+        <= leadOf view atlas sizing creep + errandOverlap view atlas creep
 
 /// One specialist row of the spawn cascade, stated once: the name the `quotas`
 /// view files it under (ADR 0009), the pattern it casts, how many bodies it
