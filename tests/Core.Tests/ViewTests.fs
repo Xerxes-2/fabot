@@ -1858,7 +1858,7 @@ let errandTests =
                 Expect.isEmpty his.Errands "and the colony that declares none carries none"
             }
 
-            test "a stand-down on the target withholds the errand, not one on its transit room" {
+            test "a stand-down withholds its target-room errand, not a route crossing" {
                 let viewWith shut =
                     let colony = errandDeclared |> List.find (fun colony -> colony.Home = mother)
 
@@ -1899,7 +1899,7 @@ let errandTests =
                 Expect.equal
                     (transitShut.Errands |> List.map (fun errand -> errand.RoomName))
                     [ errandRoom ]
-                    "a shut transit room does not decide the Errand's target-room rule (#324/#325)"
+                    "the stand-down withdraws work in its room; it is no lock on a route crossing it (#325)"
 
                 Expect.isTrue
                     (Map.containsKey errandRoom transitShut.Spatial.Rooms)

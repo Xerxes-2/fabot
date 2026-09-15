@@ -1,0 +1,7 @@
+# A stand-down is not a route lock
+
+ADR 0043's [[stand-down]] withdraws the work a colony declared in one room: the room leaves the [[spatial projection]], so its tasks, quotas and bodies' destination disappear together. An [[errand]] made the other possible reading visible because its whole value is a walk through rooms where it declares no work (#325).
+
+We decided **a stand-down does not propagate through a route**. An Errand is withheld when its own target room is shut (ADR 0064), and not when one of its [[transit room]]s is. A room that is both a transit room and a stood-down [[outpost]] loses the outpost work that gave the gate meaning, while the Errand's chain and target remain projected. This supersedes ADR 0064 and ADR 0065 only where their closing paragraphs leave #325's route question open.
+
+The concrete Source Keeper failure no longer supplies a reason to overload the gate: ADR 0065 prevents a transit-only room from opening a stand-down at all. A hostile seen while crossing still enters the [[colony view]], derives a [[reach]] and can match the body to [[flee]]. Propagating the outpost's coarse clock to the route would instead stop Reactor supply for as long as unrelated work in a crossing room is withdrawn. The loaded courier's exposure and lifetime arithmetic remain #319's decision; a future route-availability policy would need its own fact and timing rather than borrowing `StandDown.Shut`.

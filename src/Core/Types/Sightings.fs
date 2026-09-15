@@ -560,8 +560,10 @@ module World =
     /// target room** (#348). The latter is the room no guard row serves: an
     /// armed player standing there is a withdrawal rather than a hypothetical
     /// fight, and withholding the declaration removes its target, its Reclaim
-    /// and the reserver-row seat together. A shut transit room does not reach
-    /// this clause — that broader route question remains #324/#325's.
+    /// and the reserver-row seat together. A shut transit room deliberately
+    /// does not reach this clause (#325, ADR 0066): the gate withdraws work in
+    /// the room it names and is not a route lock. The body crossing that room
+    /// reads its live Threat and Flee instead.
     ///
     /// A **record** and not a tuple, since ADR 0060 gave the answer a fourth
     /// member: two of the four are `string list`s standing side by side and
