@@ -179,10 +179,10 @@ type SpatialInfo =
         /// one entry here whose target holds no `store` at all and so the one
         /// the contact penalty never prices. Every store the shell classifies
         /// to a modelled kind, plus the rock and the floor. The sector Reactor
-        /// is **not** among them today and the ADR's sentence naming it is a
-        /// forward one: it classifies to `BuiltKind.Other`, which holds no store
-        /// at all, so it arrives here on the ticket that models the kind and
-        /// gives its store a reader. A **second id-keyed map beside
+        /// is deliberately **not** among them: its store and streak ride the
+        /// dedicated `RoomFacts.Reactors` row that the global observation
+        /// channel reads, while decisions keep this projection limited to the
+        /// resource stores their Tasks can name. A **second id-keyed map beside
         /// `Stores`** and deliberately not a `Map<string, Map<Resource, int>>`,
         /// which would make every existing energy reader ask a question it
         /// never asks and give a bug somewhere to answer it wrongly. Two

@@ -3132,9 +3132,9 @@ function buildReactorWorld() {
   // `Outpost` and why `furnishOutpost` above cannot stand it.
   const errandCapture = loadCapture(errand.room);
   const errandSources = registerSources(errandCapture, register);
-  // The reactor itself: an id, an owner, and nothing else that decides. It is
-  // indestructible and carries no `hits`, and its tile is the
-  // **declaration**'s and never a fact read here.
+  // The reactor itself: the decision reads its id and owner; the observation
+  // channel also reads its Thorium store and continuity clock (#320). It is
+  // indestructible and carries no `hits`, and its tile is the declaration's.
   //
   // `my` is **false** and not `undefined`, which is the mod's own accessor
   // answering about a reactor somebody else holds: `my: o => o.user ? o.user ==
@@ -3149,6 +3149,8 @@ function buildReactorWorld() {
     id: errand.id,
     my: false,
     owner: { username: REACTOR_RIVAL },
+    store: store({ capacity: 1000, thorium: 0 }),
+    continuousWork: 0,
     pos: errand.tile,
   });
   const errandRoom = stubRoom({
@@ -4297,6 +4299,17 @@ const DECLARATION_PROBE = `
 }
 `;
 
+// The Reactor Memory codec's compiled boundary. This probe exists only to
+// exercise the actual App codec — including Fable's dynamic-object access —
+// without adding a .NET test project for bindings that run only as JavaScript.
+const REACTOR_CODEC_PROBE = `
+// ---- appended by scripts/profile.mjs: the Reactor observe codec ------------
+globalThis.__fabotReactorCodec = {
+  load: loadReactor,
+  save: saveReactor,
+};
+`;
+
 // The bindings the two appended probes above reach, each checked before the
 // bundle is loaded rather than after, so a rename in the shell or a Fable
 // upgrade names itself instead of surfacing as "the stub world holds no
@@ -4338,6 +4351,16 @@ const PROBE_BINDINGS = [
     "src/Core/Types/Keepers.fs's `maskedTilesIn`",
     "how much ground the mask takes out of a room the chain crosses (#321)",
   ],
+  [
+    "function loadReactor(",
+    "src/App/ObserveMemory.fs's `loadReactor`",
+    "round-tripping and degrading the Reactor observation leaf (#320)",
+  ],
+  [
+    "function saveReactor(",
+    "src/App/ObserveMemory.fs's `saveReactor`",
+    "round-tripping and degrading the Reactor observation leaf (#320)",
+  ],
 ];
 
 // The bundle as the engine would load it, plus the probe above. Written
@@ -4374,7 +4397,7 @@ function loadBundle(file) {
   const probedFile = path.join(probed, path.basename(file));
   writeFileSync(
     probedFile,
-    source + DECIDE_PROBE + WORLD_ROOMS_PROBE + DECLARATION_PROBE,
+    source + DECIDE_PROBE + WORLD_ROOMS_PROBE + DECLARATION_PROBE + REACTOR_CODEC_PROBE,
   );
   const { loop } = createRequire(import.meta.url)(probedFile);
   return { loop, decideCalls: () => globalThis.__fabotDecideCalls };
@@ -4405,6 +4428,53 @@ const world = buildWorld();
 const { game, terrainReads } = buildGame(world);
 globalThis.Game = game;
 globalThis.Memory = {};
+
+// The seven fields cross the real compiled codec in both directions. The
+// rival name deliberately collides with the `ours` sentinel unless the wire
+// value is tagged. The other three cases pin per-leaf degradation: absence, a
+// pre-channel plain-name owner, and a malformed empty rival tag all become one
+// complete empty record rather than a mixture of old and new fields.
+if (scenario === "reactor") {
+  const codec = globalThis.__fabotReactorCodec;
+  const roundTrip = {
+    owner: "rival:ours",
+    storeT: 987,
+    continuousWork: 65432,
+    seen: 12345,
+    bankedT: 3210,
+    lastDelivery: 12340,
+    dryTicks: 17,
+  };
+  const empty = {
+    owner: "none",
+    storeT: 0,
+    continuousWork: 0,
+    seen: null,
+    bankedT: 0,
+    lastDelivery: null,
+    dryTicks: 0,
+  };
+  const check = (input, expected, label) => {
+    globalThis.Memory =
+      input === undefined ? {} : { fabot: { observe: { reactor: input } } };
+    codec.save(codec.load());
+    const actual = globalThis.Memory.fabot.observe.reactor;
+    if (JSON.stringify(actual) !== JSON.stringify(expected)) {
+      throw new Error(
+        `the Reactor observe codec failed ${label}: expected ${JSON.stringify(expected)}, got ` +
+          JSON.stringify(actual),
+      );
+    }
+  };
+
+  check(roundTrip, roundTrip, "the seven-field round trip");
+  check(undefined, empty, "absent-leaf degradation");
+  check({ ...roundTrip, owner: "Odiodin" }, empty, "legacy-leaf degradation");
+  const missingSeen = { ...roundTrip };
+  delete missingSeen.seen;
+  check(missingSeen, empty, "malformed-leaf degradation");
+  globalThis.Memory = {};
+}
 
 // Harness self-check, before a tick is ever run: the terrain query answers
 // by room name. Each room is counted by its own wall tiles read back

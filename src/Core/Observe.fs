@@ -143,6 +143,68 @@ let fold
         name, step cap tick (Map.tryFind name grouped |> Option.defaultValue []) log)
     |> Map.ofSeq
 
+/// One visible reading of the sector Reactor programme. The shell derives it
+/// from the one declared Reactor and the Storage of the colony feeding it;
+/// `None` at the fold boundary means the room is blind (#320).
+type ReactorReading =
+    {
+        Owner: ReactorOwner
+        StoreT: int
+        ContinuousWork: int
+        BankedT: int
+        /// A Thorium transfer Intent aimed at this Reactor was issued this
+        /// tick. Store growth is independent evidence handled by the fold.
+        DeliveryIssued: bool
+    }
+
+/// The flat, durable Reactor observation state. `Seen = None` is the empty
+/// state; the remaining zeroes then carry no claim about a tick nobody saw.
+type ReactorState =
+    {
+        Owner: ReactorOwner
+        StoreT: int
+        ContinuousWork: int
+        Seen: int option
+        BankedT: int
+        LastDelivery: int option
+        DryTicks: int
+    }
+
+[<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
+module ReactorState =
+    let empty =
+        {
+            Owner = ReactorOwner.Unowned
+            StoreT = 0
+            ContinuousWork = 0
+            Seen = None
+            BankedT = 0
+            LastDelivery = None
+            DryTicks = 0
+        }
+
+/// Fold a visible Reactor reading into the programme record. A blind tick
+/// retains the last sample exactly. A delivery is evidenced by a transfer
+/// Intent or by store growth from an earlier sample; the empty state's zero is
+/// deliberately not a baseline, so first sight never invents a delivery.
+let foldReactor (tick: int) (reading: ReactorReading option) (prior: ReactorState) : ReactorState =
+    match reading with
+    | None -> prior
+    | Some current ->
+        let delivered =
+            current.DeliveryIssued
+            || (Option.isSome prior.Seen && current.StoreT > prior.StoreT)
+
+        {
+            Owner = current.Owner
+            StoreT = current.StoreT
+            ContinuousWork = current.ContinuousWork
+            Seen = Some tick
+            BankedT = current.BankedT
+            LastDelivery = if delivered then Some tick else prior.LastDelivery
+            DryTicks = prior.DryTicks + if current.StoreT = 0 then 1 else 0
+        }
+
 /// One row of an episode's roster (ADR 0028): one hostile, who owns it
 /// and what it is made of, counted from the view's verbatim part
 /// list. A row, not the roster — the roster is the map of these.

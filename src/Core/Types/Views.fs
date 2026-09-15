@@ -367,6 +367,7 @@ module ColonyView =
             // that *does* survive a crossing is the **room**'s, which rides on
             // `Control` and is deliberately kept.
             Owners = Map.empty
+            Reactors = []
             Controller = None
             Refillables = []
             Sources = []
@@ -386,19 +387,12 @@ module ColonyView =
     /// not there is vision, and everything about it that *changes* is absent
     /// entry by entry where there is none (ADR 0004).
     ///
-    /// **One of those facts is live and two are not** (#318). `Owners` is: the
-    /// shell sweeps `FIND_REACTORS` and files whose the reactor is, so "the body
-    /// standing there is the colony's only eye on it" is now a fact and not an
-    /// intention — a relay that gaps drops the entry and the act that reads it
-    /// treats the absence as *not ours*. What still does not ride is the
-    /// reactor's **store**: `World.seenFacts` fills `Stores` and `Thorium` off
-    /// `isStored`, which asks a `BuiltKind`, and a reactor has none — the mod
-    /// registers it as a **custom object**, so it reaches no `FIND_STRUCTURES`
-    /// sweep at all and arrives only through `FIND_REACTORS`. Nor does
-    /// `continuousWork`, which is not a word this tree knows. Both wait on the
-    /// ticket whose decision reads them — the courier's, and the `reactor` leaf's
-    /// — which is ADR 0007's rule and the reason this line grew one map and not
-    /// three.
+    /// The shell sweeps `FIND_REACTORS` once and files two views of the one
+    /// object. `Owners` carries the narrow ours-or-not fact the ClaimReactor act
+    /// needs. `Reactors` carries the richer owner attribution, store and
+    /// `continuousWork` used by the global observation channel. A relay that
+    /// gaps drops both entries; the act treats missing ownership as *not ours*,
+    /// while the observation fold retains its dated prior sample as stale.
     ///
     /// **Less**, because nothing else in that room is work, however much vision
     /// we pay for: no source of it is pooled, no controller of it is Reserved,
@@ -430,6 +424,8 @@ module ColonyView =
             Thorium = named facts.Thorium
             Cooldowns = named facts.Cooldowns
             Owners = named facts.Owners
+            Reactors =
+                facts.Reactors |> List.filter (fun reactor -> Set.contains reactor.Id targets)
         }
 
     /// One colony's view of this tick (ADR 0052 decision 1): the rooms it works

@@ -196,6 +196,51 @@ let loop () =
         |> List.map (fun (colony, _, decision) -> colony.Home, decision.Memo)
         |> Map.ofList
 
+    // The one sector Reactor programme's global observation (#320). The
+    // declaration identifies both the target and the home Storage feeding it;
+    // the room facts answer only while vision does. A blind tick therefore
+    // hands `None` to the pure fold and retains the last sample unchanged.
+    let reactorReading =
+        decisions
+        |> List.tryPick (fun (colony, _, decision) ->
+            colony.Errands
+            |> List.tryPick (fun errand ->
+                let reactorId = fst errand.Target
+
+                (World.roomOf world errand.RoomName).Reactors
+                |> List.tryFind (fun reactor -> reactor.Id = reactorId)
+                |> Option.map (fun reactor ->
+                    let home = World.roomOf world colony.Home
+
+                    let banked =
+                        home.TargetKinds
+                        |> Map.toSeq
+                        |> Seq.tryPick (fun (id, kind) ->
+                            if kind = Structure BuiltKind.Storage then
+                                Some(Map.tryFind id home.Thorium |> Option.defaultValue 0)
+                            else
+                                None)
+                        |> Option.defaultValue 0
+
+                    let issued =
+                        decision.Intents
+                        |> List.exists (function
+                            | TransferEnergyToStructure(_, target, Thorium) -> target = reactorId
+                            | _ -> false)
+
+                    ({
+                        Owner = reactor.Owner
+                        StoreT = reactor.Thorium
+                        ContinuousWork = reactor.ContinuousWork
+                        BankedT = banked
+                        DeliveryIssued = issued
+                    }
+                    : Observe.ReactorReading))))
+
+    ObserveMemory.loadReactor ()
+    |> Observe.foldReactor Game.time reactorReading
+    |> ObserveMemory.saveReactor
+
     // Memory writes land before the engine calls: a throw inside Executor.run
     // must not discard the tick's anti-thrash state. The assignments stay one
     // flat leaf keyed by creep name (ADR 0047): a creep is one colony's

@@ -634,6 +634,68 @@ let load () : ObserveState =
 let save (state: ObserveState) =
     state |> Map.toSeq |> hashOf encodeCreepLog |> writeObserveLeaf "creeps"
 
+let private reactorOwnerName =
+    function
+    | ReactorOwner.Ours -> "ours"
+    | ReactorOwner.Unowned -> "none"
+    | ReactorOwner.Rival username -> "rival:" + username
+
+let private reactorOwnerOf name =
+    match name with
+    | "ours" -> ReactorOwner.Ours
+    | "none" -> ReactorOwner.Unowned
+    | value when value.StartsWith("rival:") && value.Length > 6 ->
+        ReactorOwner.Rival(value.Substring 6)
+    | _ -> failwith "unknown reactor owner"
+
+let private optionalInt (raw: obj) : int option =
+    if jsTypeof raw = "undefined" then
+        failwith "missing number-or-null field"
+    elif isNull raw then
+        None
+    elif jsTypeof raw = "number" then
+        Some(unbox<int> raw)
+    else
+        failwith "expected a number or null"
+
+/// The prior global Reactor programme record. All seven fields form one
+/// sample, so an absent, legacy or malformed leaf degrades whole to the empty
+/// state rather than combining dates and values from different wire shapes.
+let loadReactor () : ReactorState =
+    leafOr ReactorState.empty (fun () -> observeLeaf "reactor") (fun raw ->
+        if
+            jsTypeof raw?owner <> "string"
+            || jsTypeof raw?storeT <> "number"
+            || jsTypeof raw?continuousWork <> "number"
+            || jsTypeof raw?bankedT <> "number"
+            || jsTypeof raw?dryTicks <> "number"
+        then
+            failwith "malformed reactor leaf"
+
+        {
+            Owner = reactorOwnerOf (unbox<string> raw?owner)
+            StoreT = unbox<int> raw?storeT
+            ContinuousWork = unbox<int> raw?continuousWork
+            Seen = optionalInt raw?seen
+            BankedT = unbox<int> raw?bankedT
+            LastDelivery = optionalInt raw?lastDelivery
+            DryTicks = unbox<int> raw?dryTicks
+        })
+
+/// Write the one sector Reactor programme as a flat observe leaf. Optional
+/// dates are explicit nulls, so every write carries the complete seven-field
+/// wire shape even before the first sight or delivery.
+let saveReactor (state: ReactorState) =
+    let raw = createEmpty<obj>
+    raw?owner <- reactorOwnerName state.Owner
+    raw?storeT <- state.StoreT
+    raw?continuousWork <- state.ContinuousWork
+    raw?seen <- state.Seen |> Option.map box |> Option.defaultValue null
+    raw?bankedT <- state.BankedT
+    raw?lastDelivery <- state.LastDelivery |> Option.map box |> Option.defaultValue null
+    raw?dryTicks <- state.DryTicks
+    writeObserveLeaf "reactor" raw
+
 /// The named colony's prior Raid log, or empty when its subtree is absent
 /// or unreadable. An episode that will not decode costs that episode
 /// alone: the ring degrades row by row rather than vanishing (ADR 0028),

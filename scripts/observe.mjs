@@ -23,6 +23,7 @@
 //                                  the Layout's losses, and the declared outposts
 //                                  that do not border this home
 //   observe.mjs quotas             the cascade's workforce arithmetic, row by row
+//   observe.mjs reactor            the season programme and official score
 //   observe.mjs cpu                the per-tick CPU line — the tick's total,
 //                                  where it went phase by phase, how many
 //                                  intents the engine took, and ADR 0041's
@@ -48,7 +49,8 @@ import { report as cpuReport } from "./cpu-trigger.mjs";
 const usage =
   "usage: observe.mjs tasks [--json] | timeline <creep> [--json] | " +
   "raids [--colony <home>] [--json] | outposts [--colony <home>] [--json] | " +
-  "layout [--colony <home>] [--json] | quotas [--colony <home>] [--json] | cpu [--json] | " +
+  "layout [--colony <home>] [--json] | quotas [--colony <home>] [--json] | " +
+  "reactor [--json] | cpu [--json] | " +
   "verbose [add <creep> | remove <creep> | clear] [--json] | " +
   "console --seconds N";
 
@@ -76,9 +78,18 @@ const creepArg = rest[0];
 const [action, actionName] = rest;
 
 if (
-  !["tasks", "timeline", "raids", "outposts", "layout", "quotas", "cpu", "verbose", "console"].includes(
-    command,
-  )
+  ![
+    "tasks",
+    "timeline",
+    "raids",
+    "outposts",
+    "layout",
+    "quotas",
+    "reactor",
+    "cpu",
+    "verbose",
+    "console",
+  ].includes(command)
 )
   fail(usage);
 if (command === "timeline" && !creepArg) fail(usage);
@@ -1047,6 +1058,119 @@ if (command === "console") {
         );
       }
     }
+  }
+} else if (command === "reactor") {
+  // ---- reactor: the season programme and official score ----------------
+  const stored = await memoryGet("fabot.observe.reactor");
+  const number = (key, nullable = false) =>
+    typeof stored?.[key] === "number" || (nullable && stored?.[key] === null);
+  const owner =
+    stored?.owner === "ours" || stored?.owner === "none"
+      ? stored.owner
+      : typeof stored?.owner === "string" &&
+          stored.owner.startsWith("rival:") &&
+          stored.owner.length > "rival:".length
+        ? stored.owner.slice("rival:".length)
+        : null;
+
+  if (
+    stored == null ||
+    typeof stored !== "object" ||
+    Array.isArray(stored) ||
+    owner === null ||
+    !number("storeT") ||
+    !number("continuousWork") ||
+    !number("seen", true) ||
+    !number("bankedT") ||
+    !number("lastDelivery", true) ||
+    !number("dryTicks")
+  ) {
+    fail(
+      "the Reactor record at Memory.fabot.observe.reactor is absent or off its seven-field " +
+        "wire shape — the deployed bundle predates it, or the leaf was hand-edited.",
+    );
+  }
+
+  const clock = await api.gameTime(shard).catch((err) => {
+    fail(`game time read failed: ${err.message ?? err}`);
+  });
+  if (clock.ok !== 1 || typeof clock.time !== "number") {
+    fail(`game time read failed: ${JSON.stringify(clock)}`);
+  }
+
+  const me = await api.authMe().catch((err) => {
+    fail(`authenticated-user read failed: ${err.message ?? err}`);
+  });
+  if (me.ok !== 1 || typeof me.username !== "string") {
+    fail(`authenticated-user read failed: ${JSON.stringify(me)}`);
+  }
+
+  // The seasonal endpoint caps a page at twenty. `search` narrows the normal
+  // case to one row; paging remains explicit so a looser server-side match can
+  // never hide the exact authenticated username beyond the first page.
+  const limit = 20;
+  let offset = 0;
+  let scoreRow;
+  while (scoreRow === undefined) {
+    const page = await api
+      .req("GET", "/api/scoreboard/list", {
+        limit,
+        offset,
+        search: me.username,
+      })
+      .catch((err) => fail(`scoreboard read failed: ${err.message ?? err}`));
+
+    if (
+      page.ok !== 1 ||
+      !Array.isArray(page.users) ||
+      page.meta == null ||
+      typeof page.meta.length !== "number" ||
+      page.users.some(
+        (row) =>
+          row == null ||
+          typeof row !== "object" ||
+          typeof row.username !== "string" ||
+          typeof row.rank !== "number" ||
+          (row.score !== undefined && typeof row.score !== "number"),
+      )
+    ) {
+      fail(`scoreboard read returned an unexpected shape: ${JSON.stringify(page)}`);
+    }
+
+    scoreRow = page.users.find((row) => row.username === me.username);
+    offset += page.users.length;
+    if (scoreRow === undefined && (page.users.length === 0 || offset >= page.meta.length)) {
+      fail(`scoreboard carries no exact row for authenticated user ${JSON.stringify(me.username)}.`);
+    }
+  }
+
+  const score = scoreRow.score ?? 0;
+  const age = stored.seen === null ? null : Math.max(0, clock.time - stored.seen);
+  const result = {
+    ...stored,
+    owner,
+    freshness: age === null ? "never-seen" : age <= 1 ? "fresh" : "stale",
+    age,
+    scoreboard: { username: scoreRow.username, rank: scoreRow.rank, score },
+  };
+
+  if (json) {
+    console.log(JSON.stringify(result, null, 2));
+  } else {
+    const freshness =
+      age === null
+        ? "never seen"
+        : age <= 1
+          ? `fresh — seen at t${stored.seen}`
+          : `STALE by ${age} ticks — last seen at t${stored.seen}`;
+    const delivered = stored.lastDelivery === null ? "never" : `t${stored.lastDelivery}`;
+
+    console.log(`Reactor programme — ${freshness}`);
+    console.log(`  owner ${owner}`);
+    console.log(`  store ${stored.storeT} T  continuous work ${stored.continuousWork} ticks`);
+    console.log(`  banked ${stored.bankedT} T  last delivery ${delivered}`);
+    console.log(`  dry ticks ${stored.dryTicks}`);
+    console.log(`season scoreboard — ${scoreRow.username}: rank ${scoreRow.rank}, score ${score}`);
   }
 } else if (command === "cpu") {
   // ---- cpu: the per-tick CPU line ---------------------------------------

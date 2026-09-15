@@ -54,6 +54,25 @@ type InvaderCoreInfo =
         CollapseTick: int option
     }
 
+/// Whose flag a visible sector Reactor carries. Unlike `Ownership`, the rival
+/// case keeps the engine's username: this is operator attribution, not a
+/// decision's ours-or-not question (#320).
+[<RequireQualifiedAccess>]
+type ReactorOwner =
+    | Ours
+    | Rival of username: string
+    | Unowned
+
+/// The changing facts read from one visible sector Reactor. A room without
+/// vision carries no row, so no zero here can be mistaken for a stale sample.
+type ReactorInfo =
+    {
+        Id: string
+        Owner: ReactorOwner
+        Thorium: int
+        ContinuousWork: int
+    }
+
 /// Which deadline an [[outpost]]'s [[stand-down]] runs to — the provenance of
 /// the tick, carried beside it because it cannot be recovered from the tick
 /// afterwards, and an operator asking why an outpost is shut is asking exactly
@@ -197,6 +216,10 @@ type RoomFacts =
         /// today, for the reason `SpatialInfo.Owners` gives, and merged into a
         /// view's projection id-keyed and unlayered like the stores beside it.
         Owners: Map<string, Ownership>
+        /// The sector Reactors visible in this room, with the richer facts used
+        /// only by the global Reactor observation channel (#320). Decisions
+        /// continue to read the narrower `Owners` map above.
+        Reactors: ReactorInfo list
         /// Who holds the room, and whether its safe mode is running (ADR
         /// 0042) — `None` for a room nothing looked into this tick, which
         /// is not the same fact as a room nobody holds (ADR 0004).
@@ -255,6 +278,7 @@ module RoomFacts =
             Thorium = Map.empty
             Cooldowns = Map.empty
             Owners = Map.empty
+            Reactors = []
             Control = None
             Controller = None
             Energy = { Available = 0; Capacity = 0 }

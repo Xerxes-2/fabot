@@ -438,19 +438,13 @@ module Outpost =
 /// to prevent one room further out.
 ///
 /// What does **not** wait on the declaration is everything that changes — the
-/// target's store, its owner — which is the projection's to answer where there
+/// target's store, its owner and its `continuousWork` — which room facts answer where there
 /// is vision and is absent entry by entry where there is none (ADR 0004). The
 /// narrowing below carries every such entry the shell filed under the declared
-/// id and drops the rest, which is the rule; what the *shell* files for the one
-/// target the live errand names is, today, **nothing at all**, and that is a
-/// hole rather than a tick of darkness: `World.seenFacts` builds `Stores` and
-/// `Thorium` off `isStored`, which is `false` for `BuiltKind.Other` and so for
-/// every `STRUCTURE_*` the kind table lacks; there is no per-object owner
-/// anywhere in this repo (`Owner` is `ControlInfo`'s, the *room*'s); and
-/// `continuousWork` is not a word the tree knows. **#318 is where those facts
-/// arrive** — its "the tick the `reactor` leaf stops reading stale" is blocked
-/// on exactly them — and until they do, the body standing there is the colony's
-/// only eye on the room in intent rather than in fact.
+/// id and drops the rest, which is the rule. For the custom Reactor, the shell's
+/// `FIND_REACTORS` sweep files a dedicated rich row beside the narrow ownership
+/// map: decisions read the latter, while the global Reactor observation reads
+/// the former and retains its dated sample through a blind tick.
 ///
 /// Declared **inside the colony that runs it**, beside `Colony.Outposts`, for
 /// ADR 0047's reason: a room's name in that list is what makes it that colony's
@@ -597,22 +591,12 @@ module Errand =
     /// declaration being a claim about a live server at one moment of it.
     ///
     /// The reactor's store, its owner and its `continuousWork` are **not** here
-    /// and must not be: they change, so they belong to the projection where
-    /// there is vision and are absent entry by entry where there is none (ADR
-    /// 0004). What has to be said plainly is that today the projection does not
-    /// carry them **either**, and not because the room is dark: `World.seenFacts`
-    /// fills `Stores` and `Thorium` from `isStored`, which is `false` for
-    /// `BuiltKind.Other` and so for every `STRUCTURE_*` outside the kind table;
-    /// no per-object owner exists anywhere in this repo; and `continuousWork`
-    /// appears nowhere in it. They are permanently absent, not absent-when-dark,
-    /// and **#318 is the ticket that lands them** — whoever picks it up is
-    /// looking for a missing `isStored`/owner fact and not for a missing `find`
-    /// sweep, since `builtKindOf` already classifies an unknown structure as
-    /// `Other` and places it harmlessly. Nothing in this repo captures a
-    /// reactor either — `scripts/capture-room.mjs` takes a room's *fixed*
-    /// furniture, which is its sources, its controller and its mineral (ADR
-    /// 0036) — so W15S25's committed capture pins the ground this tile stands
-    /// on and never the object standing on it.
+    /// and must not be: they change, so the visible room's dedicated Reactor row
+    /// carries them and omits them when there is no vision (ADR 0004). Nothing
+    /// captures that row either — `scripts/capture-room.mjs` takes a room's
+    /// *fixed* furniture, its sources, controller and mineral (ADR 0036) — so
+    /// W15S25's committed capture pins the ground this tile stands on and never
+    /// the object standing on it.
     let w15s25: Errand =
         {
             RoomName = "W15S25"

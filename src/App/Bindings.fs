@@ -232,16 +232,15 @@ type IController =
 
 /// The sector **Reactor** (ADR 0057, `mod-season5/src/reactor.roomObject.js`):
 /// the season's scoring sink, one per sector centre, indestructible — it
-/// carries no `hits` at all — and walkable. Only the two facts a decision reads
-/// are bound: its id, and whether it is ours.
+/// carries no `hits` at all — and walkable. The decision reads its id and
+/// ownership; the observation channel also reads its store, owner name and
+/// continuity clock (#320).
 ///
 /// `my` is the mod's own accessor, `o.user ? o.user == runtimeData.user._id :
 /// undefined` — so it is **undefined** on a reactor nobody owns, exactly as a
 /// controller's is, and the three answers are read off `my` and `owner`
-/// together the way a room's ownership already is. `store`, `owner.username`,
-/// `continuousWork` and even `pos` are not bound: nothing decides on them yet,
-/// and the field list grows the tick a decision reads one (ADR 0007). The tile
-/// in particular never will be read here — it is the **declaration**'s
+/// together the way a room's ownership already is. The tile is still not read
+/// here — it is the **declaration**'s
 /// (`Errand.place`, ADR 0060 decision 1), which is what lets a Task name the
 /// target before any body of ours has stood in the room.
 type IReactor =
@@ -250,6 +249,9 @@ type IReactor =
     abstract my: bool
     /// Whose it is; undefined on an unowned one.
     abstract owner: IOwner
+    abstract store: IStore
+    /// Ticks consumed without the store running dry; zero while idle.
+    abstract continuousWork: int
 
 type ITower =
     abstract attack: target: obj -> int

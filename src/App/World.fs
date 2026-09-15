@@ -35,6 +35,16 @@ let private bodyPartOf =
 let private builtKindOf =
     reverseOf builtKindName allBuiltKinds >> Option.defaultValue BuiltKind.Other
 
+/// Attribute one visible Reactor's flag once, before deriving the narrow
+/// decision ownership and the richer operator-facing row from it (#320).
+let private reactorOwnerOf (reactor: IReactor) =
+    if not (isNull (box reactor.my)) && reactor.my then
+        ReactorOwner.Ours
+    elif isNull (box reactor.owner) then
+        ReactorOwner.Unowned
+    else
+        ReactorOwner.Rival reactor.owner.username
+
 /// One room's terrain as the engine spells it — the whole fifty-by-fifty grid,
 /// in the two windows the projection assembles from it, off one engine read so
 /// there is one terrain truth per room (ADR 0041).
@@ -234,6 +244,9 @@ let private seenFacts
     // standing in it.
     let reactors = room.find findReactors |> Array.map (fun o -> o :?> IReactor)
 
+    let reactorFacts =
+        reactors |> Array.map (fun reactor -> reactor, reactorOwnerOf reactor)
+
     // The controller travels through FIND_STRUCTURES on live servers, but
     // is projected explicitly so nothing depends on that detail.
     let controllers =
@@ -420,13 +433,24 @@ let private seenFacts
         // that from the far side of the narrowing, where the view's `erranding`
         // cut could not put it back.
         Owners =
-            reactors
-            |> Array.map (fun r ->
-                r.id,
-                if not (isNull (box r.my)) && r.my then Ownership.Ours
-                elif isNull (box r.owner) then Ownership.Unowned
-                else Ownership.Rival)
+            reactorFacts
+            |> Array.map (fun (reactor, owner) ->
+                reactor.id,
+                match owner with
+                | ReactorOwner.Ours -> Ownership.Ours
+                | ReactorOwner.Unowned -> Ownership.Unowned
+                | ReactorOwner.Rival _ -> Ownership.Rival)
             |> Map.ofArray
+        Reactors =
+            reactorFacts
+            |> Array.map (fun (reactor, owner) ->
+                {
+                    Id = reactor.id
+                    Owner = owner
+                    Thorium = reactor.store.getUsedCapacity (resourceName Thorium)
+                    ContinuousWork = reactor.continuousWork
+                })
+            |> Array.toList
         // Who holds the room, home included (ADR 0042). A seen room with
         // no controller at all gets a truthful entry: nobody owns or
         // reserves it, which is the neutral rate and not an unknown.
