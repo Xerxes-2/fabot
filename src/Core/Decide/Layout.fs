@@ -484,22 +484,33 @@ let internal planLayout
 
         let sourceContainerTiles = sourceContainerPicks |> List.map snd
 
-        // The controller container: an Upgrade-Work-Area tile beside a trunk
-        // and off the road itself — the buffer upgraders work from standing
-        // still, one tile from where the haulers drive. No reservation to dodge
-        // either: the Work Area is working ground (ADR 0022).
+        // The controller container: preferably an Upgrade-Work-Area tile beside
+        // a trunk and off the road itself — the buffer upgraders work from
+        // standing still, one tile from where the haulers drive. In a paved
+        // swamp pocket that strict set can be empty (#331); only then may the
+        // buffer share the paving. The container is the room's growth while a
+        // Link footing is a later luxury, so the footing fold below records the
+        // resulting shortfall rather than deleting the buffer with it.
         let controllerContainerTile =
             Atlas.positionOf atlas controller.Id
             |> Option.filter inHome
             |> Option.map RoomPos.pos
             |> Option.bind (fun controllerPos ->
-                upgradeArea
-                |> Set.filter (fun tile ->
-                    not (Set.contains tile trunkTiles)
-                    && not (Set.contains tile workAreaSwamps)
-                    && trunkTiles |> Set.exists (fun t -> range tile t = 1))
-                |> Set.toList
-                |> cheapest (fun tile -> range tile controllerPos) id)
+                let besideTrunk tile =
+                    trunkTiles |> Set.exists (fun t -> range tile t = 1)
+
+                let candidates =
+                    upgradeArea
+                    |> Set.filter (fun tile ->
+                        not (Set.contains tile trunkTiles) && besideTrunk tile)
+
+                let pick tiles =
+                    tiles |> Set.toList |> cheapest (fun tile -> range tile controllerPos) id
+
+                candidates
+                |> Set.filter (fun tile -> not (Set.contains tile workAreaSwamps))
+                |> pick
+                |> Option.orElseWith (fun () -> pick candidates))
 
         // The room's Thorium deposits and the level that unlocks them (ADR
         // 0057 decision 1). `CONTROLLER_STRUCTURES.extractor` is 1 at RCL6, 7

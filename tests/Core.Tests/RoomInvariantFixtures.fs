@@ -16,30 +16,20 @@ open Fabot.Core.Decide
 open Fabot.Core.Tests.RoomFixtures
 open Fabot.Core.Tests.Decide
 
-/// Which spawns a captured room plans its controller container from — the
-/// #104 loss, which #331 found is not always a whole room's (`Nowhere`) and
-/// not always none of it (`Everywhere`). The middle case is what W15S28
-/// showed: the Upgrade Work Area's paving and the trunk's entry into it are
-/// both functions of where the cluster grew, so the same terrain keeps the
-/// buffer from most spawns and loses it from one — and the one it loses it
-/// from is the tile the live colony stands on.
-type internal Buffer =
-    /// The rule holds: every swept spawn plans a buffer.
-    | Everywhere
-    /// No spawn does, because the room's Upgrade Work Area holds no tile
-    /// the rule could ever pick (W12S27, #104).
-    | Nowhere
-    /// These spawns do not, and the rest of the room's do (W15S28, #331).
-    /// Per tile for #105's reason: whichever of them a fix reaches first
-    /// should be the one that says so.
-    | NotFrom of Pos list
+/// Which spawns need ADR 0068's paved-swamp fallback rather than the strict
+/// controller-buffer pick. This is a fact the real-terrain sweep discovered,
+/// kept beside the other per-room losses instead of repeated as room names in
+/// each invariant that accepts the resulting Link-footing shortfall.
+type internal PavedBuffer =
+    | Never
+    | EverySpawn
+    | From of Pos list
 
-/// Whether the room is expected to plan a buffer from this spawn.
-let internal plansBuffer (buffer: Buffer) (spawn: Pos) =
-    match buffer with
-    | Everywhere -> true
-    | Nowhere -> false
-    | NotFrom tiles -> not (List.contains spawn tiles)
+let internal usesPavedBuffer fallback spawn =
+    match fallback with
+    | Never -> false
+    | EverySpawn -> true
+    | From spawns -> List.contains spawn spawns
 
 /// One captured room and everything the sweep knows about it beyond the
 /// file: the controller a room without one borrows, the spawn tiles worth
@@ -59,12 +49,9 @@ type internal Room =
         FallbackController: Pos option
         /// Spawn tiles swept on top of the stride's.
         AlsoSweep: Pos list
-        /// #104: this room's controller sits in a swamp pocket, so every
-        /// candidate for the controller container is paved and the room
-        /// plans no buffer — holding one fewer footing target than
-        /// sources + 2, and recording neither, because a target that is
-        /// never constructed is never unserved.
-        Buffer: Buffer
+        /// Spawns where only ADR 0068's paved controller-buffer fallback
+        /// preserves the room's growth buffer.
+        PavedBuffer: PavedBuffer
         /// #105: spawn tiles whose doorstep the clustered reservation
         /// seals, so a source's trunk cannot be routed and is dropped
         /// whole. Excluded from the trunk invariant and asserted to be
@@ -77,7 +64,7 @@ let internal noLosses =
         Name = ""
         FallbackController = None
         AlsoSweep = []
-        Buffer = Everywhere
+        PavedBuffer = Never
         SealedDoorsteps = []
     }
 
@@ -105,23 +92,19 @@ let internal rooms =
         // tile.
         { noLosses with
             Name = "W12S27"
-            Buffer = Nowhere
             AlsoSweep = [ { X = 32; Y = 2 } ]
+            PavedBuffer = EverySpawn
             SealedDoorsteps = [ { X = 6; Y = 18 }; { X = 32; Y = 2 } ]
         }
         { noLosses with Name = "W13S28" }
-        // #331: the third home, and the second room to lose its buffer to
-        // #104's mechanism — but from one spawn tile in thirty-four, and
-        // that tile is the one the live colony stands on. It is swept for
-        // W12S28's reason, so that the plan can be compared against a
-        // colony that exists; what the other thirty-three say is that the
-        // room's terrain is not the whole cause and the cluster's own
-        // growth is the rest of it. Every other invariant in the suite
-        // holds over this room from every spawn, this one included.
+        // #331: the third home. From the live spawn tile alone its strict
+        // buffer set is empty, so the paved-swamp fallback applies and its
+        // controller Link footing is the one accepted unserved target in the
+        // sweep. The buffer itself now exists from every spawn.
         { noLosses with
             Name = "W15S28"
-            Buffer = NotFrom [ { X = 18; Y = 30 } ]
             AlsoSweep = [ { X = 18; Y = 30 } ]
+            PavedBuffer = From [ { X = 18; Y = 30 } ]
         }
         // The plain tile nearest the centroid of its three sources.
         { noLosses with
