@@ -1329,10 +1329,12 @@ let planPool (view: ColonyView) atlas (tasks: Task list) : PooledTask list =
             // for the same ore, and the trips cost nothing extra either way: a
             // load is a load.
             //
-            // `Withdraw(_, Thorium)` is the mineral container's alone, as the
-            // `tierOf` arm above already assumes — `Planner.mineWithdraws` pools
-            // it off `mineralContainers` and nothing else, the delivery's draw
-            // on the Storage being an Emitter Intent and never a pooled Task.
+            // Since #319 the same resource Task is also the delivery draw from
+            // Storage. It inherits this stock-shaped lift deliberately: a
+            // warehouse holding at least the contact cliff has more than one
+            // 999-unit delivery available, while one below it stays on the
+            // Storage tier. The target kind changes the Emitter's bounded
+            // amount, not the urgency of stock waiting to move.
             | Withdraw(storeId, Thorium) when
                 SpatialInfo.heldIn view.Spatial Thorium storeId >= view.Tuning.MineContactCliff
                 ->

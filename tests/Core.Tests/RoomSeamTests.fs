@@ -1061,7 +1061,19 @@ let reclaimerRelayTests =
                 let chain = [ "W15S28"; "W15S27"; "W15S26"; "W15S25" ]
                 let captures = chain |> List.map load
 
-                let atlas =
+                let asPlain terrain =
+                    terrain |> Map.map (fun _ tile -> if tile = Wall then Wall else Plain)
+
+                let courier =
+                    { AtlasFixtures.creepWith
+                          "courier-route"
+                          0
+                          (List.replicate 20 Carry @ List.replicate 10 Move) with
+                        Thorium = Tuning.defaults.ReactorLoad
+                        FreeCapacity = 1
+                    }
+
+                let atlasWith terrainOf borderOf =
                     { SpatialInfo.empty with
                         RoomName = Some "W15S28"
                         Rooms =
@@ -1069,16 +1081,34 @@ let reclaimerRelayTests =
                             |> List.map (fun capture ->
                                 capture.RoomName,
                                 { RoomLayer.empty with
-                                    Terrain = capture.Terrain
+                                    Terrain = terrainOf capture
+                                    CreepPositions =
+                                        if capture.RoomName = "W15S28" then
+                                            Map.ofList [ courier.Name, { X = 28; Y = 11 } ]
+                                        else
+                                            Map.empty
+                                    TargetPositions =
+                                        if capture.RoomName = "W15S25" then
+                                            Map.ofList [ "reactor", { X = 44; Y = 6 } ]
+                                        else
+                                            Map.empty
                                 })
                             |> Map.ofList
                         Borders =
                             captures
-                            |> List.map (fun capture -> capture.RoomName, capture.Border)
+                            |> List.map (fun capture -> capture.RoomName, borderOf capture)
                             |> Map.ofList
+                        TargetKinds = Map.ofList [ "reactor", Structure BuiltKind.Other ]
                     }
-                    |> AtlasFixtures.snapshotWith []
+                    |> AtlasFixtures.snapshotWith [ courier ]
                     |> ofView
+
+                let atlas =
+                    atlasWith (fun capture -> capture.Terrain) (fun capture -> capture.Border)
+
+                let stepAtlas =
+                    atlasWith (fun capture -> asPlain capture.Terrain) (fun capture ->
+                        asPlain capture.Border)
 
                 let body = [ BodyPart.Claim; Move ]
 
@@ -1092,6 +1122,15 @@ let reclaimerRelayTests =
                 match walk with
                 | None -> failtest "the chain the Atlas answers with has to price this walk"
                 | Some ticks ->
+                    Expect.equal
+                        (walkTicks stepAtlas courier.Name (Refill("reactor", Thorium)))
+                        (Some 302)
+                        "151 loaded movement steps cost two ticks each on normalized terrain"
+
+                    let loadedWalk = walkTicks atlas courier.Name (Refill("reactor", Thorium))
+
+                    Expect.equal loadedWalk (Some 318) "the loaded body clock over the real terrain"
+
                     // A `[Claim; Move]` body is one fatigue part against one
                     // Move, so it walks a plain tile in one tick and pays
                     // extra for a swamp. **160 ticks** against the ADR's 154
@@ -1117,5 +1156,23 @@ let reclaimerRelayTests =
                         (Engine.claimLifetime - lead)
                         434
                         "so the cadence is 434 — ADR 0060 decision 3's ~420, derived off this Atlas's walk rather than asserted"
+
+                    // The courier's separate clock (#319): the accepted route
+                    // measurement is 151 movement steps plus three room
+                    // transitions. Its loaded body takes 318 ticks on the real
+                    // terrain, so a 636-tick cadence leaves the Reactor 363
+                    // ticks of stock and one whole leg plus 45 ticks in hand.
+                    // TTL cost is a third unit: below the 1,000 cliff each one
+                    // of those 318 elapsed ticks spends three ticks of life.
+                    let deliverySlack =
+                        Tuning.defaults.ReactorLoad - Tuning.defaults.DeliveryInterval
+
+                    Expect.equal deliverySlack 363 "the Reactor buffer between nominal deliveries"
+                    Expect.equal (deliverySlack - 318) 45 "one priced loaded leg still fits"
+
+                    Expect.equal
+                        (318 * Tuning.defaults.MineContactAgeing)
+                        954
+                        "the loaded leg's TTL cost"
             }
         ]

@@ -11,7 +11,9 @@ open Expecto
 open Fabot.Core
 open Fabot.Core.Types
 open Fabot.Core.Decide
+open Fabot.Core.Tests
 open Fabot.Core.Tests.Decide.Fixtures
+open Fabot.Core.Tests.Decide.MatcherFixtures
 
 /// The errand these cases run and the tiles they name are `Fixtures`' own
 /// (#318) — one spelling for this suite and the reserver row's, which reads the
@@ -28,6 +30,63 @@ let private ringTile = reactorRing
 /// name).
 let private claimer name =
     creepWith name 0 0 [ BodyPart.Claim; Move ]
+
+let private courier name =
+    creepWith name 0 1000 (List.replicate 20 Carry @ List.replicate 10 Move)
+
+/// The complete delivery programme on the one-hop decision fixture. The live
+/// three-hop price is pinned by `RoomSeamTests`; here each test moves one fact
+/// that opens the row or one end of its Withdraw→Refill cycle.
+let private deliveryColony owner =
+    let resident = claimer "relay"
+
+    let colony =
+        { mineHaulColony with
+            Bank = bank 2300 2300
+            Spatial =
+                { mineHaulColony.Spatial with
+                    Thorium =
+                        mineHaulColony.Spatial.Thorium
+                        |> Map.add "sto-1" 2997
+                        |> Map.add reactorId 0
+                }
+        }
+
+    colony
+    |> withReactorErrand
+    |> withReactorOwner owner
+    |> standingInErrand [ resident, reactorRing ]
+
+let private courierRow colony =
+    (decideOn colony).Quotas.Rows |> List.find (fun row -> row.Row = "courier")
+
+let private withHomeCreep pos creep colony =
+    { colony with
+        Creeps = creep :: colony.Creeps
+        Spatial = colony.Spatial |> withCreepsAt [ creep.Name, pos ]
+    }
+
+let private withHomeCreeps creeps colony =
+    { colony with
+        Creeps = (creeps |> List.map fst) @ colony.Creeps
+        Spatial =
+            colony.Spatial
+            |> withCreepsAt (creeps |> List.map (fun (creep: CreepInfo, pos) -> creep.Name, pos))
+    }
+
+let private withErrandCreep pos creep colony =
+    let layer = SpatialInfo.layerOf colony.Spatial errandRoom
+
+    { colony with
+        Creeps = creep :: colony.Creeps
+        Spatial =
+            colony.Spatial
+            |> withNeighbour
+                errandRoom
+                { layer with
+                    CreepPositions = Map.add creep.Name pos layer.CreepPositions
+                }
+    }
 
 /// The shared declaration with the given bodies standing on the given tiles of
 /// the errand room, and the owner entry the act is gated on: `None` leaves it
@@ -552,5 +611,302 @@ let errandActTests =
                     |> errandColony (Some Ownership.Rival) [ claimer "rc", { X = 25; Y = 42 } ]
 
                 Expect.isEmpty (reclaimIntents colony) "the act waits for the ring"
+            }
+        ]
+
+[<Tests>]
+let courierTests =
+    testList
+        "the courier: one 999-unit trip over the priced errand"
+        [
+            test
+                "the row opens only behind a diggable mine, a full load and the resident re-claimer" {
+                let ready = deliveryColony (Some Ownership.Ours)
+
+                Expect.equal
+                    (courierRow ready).Quota
+                    1
+                    "all four current facts open one cadence seat"
+
+                let incomeRocks =
+                    [
+                        for i in 1..5 ->
+                            $"income-{i}",
+                            {
+                                X = 21 + (i - 1) % 5 * 3
+                                Y = 20 + (i - 1) / 5 * 3
+                            }
+                    ]
+
+                let incomeTargets =
+                    incomeRocks
+                    |> List.collect (fun (id, rock) ->
+                        [
+                            id, rock, Source
+                            $"can-{id}",
+                            { rock with X = rock.X + 1 },
+                            Structure BuiltKind.Container
+                        ])
+
+                let earning =
+                    { ready with
+                        Sources = incomeRocks |> List.map (fst >> source)
+                        Tuning = { ready.Tuning with MinWorkforce = 0 }
+                        Spatial =
+                            ready.Spatial
+                            |> withTargets incomeTargets
+                            |> withHome (fun layer ->
+                                { layer with
+                                    Terrain =
+                                        incomeRocks
+                                        |> List.fold
+                                            (fun terrain (_, rock) ->
+                                                terrain
+                                                |> Map.add rock Wall
+                                                |> Map.add { rock with X = rock.X + 1 } Plain)
+                                            layer.Terrain
+                                })
+                    }
+
+                let workerQuota colony =
+                    (decideOn colony).Quotas.Rows
+                    |> List.find (fun row -> row.Row = "worker")
+                    |> fun row -> row.Quota
+
+                let everyTick =
+                    { earning with
+                        Tuning =
+                            { earning.Tuning with
+                                DeliveryInterval = 1
+                            }
+                    }
+
+                // At the shipped 636-tick cadence this income still hires four
+                // generalists. Buying the same 1,500-energy courier every tick
+                // costs 2,250,000 over a worker life and leaves only the Task
+                // floor: a fixed one-cast charge, or no charge, would leave the
+                // row at four.
+                Expect.equal
+                    (workerQuota earning, workerQuota everyTick)
+                    (4, 1)
+                    "courier replacement is amortized at its own cadence before the surplus is divided"
+
+                let poor = { ready with Bank = bank 1499 1499 }
+
+                let short =
+                    { ready with
+                        Spatial =
+                            { ready.Spatial with
+                                Thorium = Map.add "sto-1" 998 ready.Spatial.Thorium
+                            }
+                    }
+
+                let exhausted =
+                    { ready with
+                        Spatial =
+                            { ready.Spatial with
+                                Thorium = Map.add "min-a" 0 ready.Spatial.Thorium
+                            }
+                    }
+
+                let noResident =
+                    { ready with
+                        Creeps = ready.Creeps |> List.filter (fun creep -> creep.Name <> "relay")
+                        Spatial =
+                            ready.Spatial
+                            |> withNeighbour
+                                errandRoom
+                                { SpatialInfo.layerOf ready.Spatial errandRoom with
+                                    CreepPositions = Map.empty
+                                }
+                    }
+
+                for colony, reason in
+                    [
+                        poor, "a bank below the fixed 1,500 body yields"
+                        ready |> withExtractorSite, "an extractor site is not a diggable deposit"
+                        exhausted, "an exhausted deposit closes the row"
+                        short, "998 Thorium is not one delivery load"
+                        noResident, "the delivery waits behind the re-claimer"
+                    ] do
+                    Expect.equal (courierRow colony).Quota 0 reason
+            }
+
+            test "636 ticks is the cadence, and the fixed body is cast at its boundary" {
+                let fixedBody = List.replicate 20 Carry @ List.replicate 10 Move
+
+                let staffed =
+                    deliveryColony (Some Ownership.Ours)
+                    |> withHomeCreeps
+                        [
+                            miner "m", { X = 12; Y = 10 }
+                            creepWith "hauler-h" 0 1000 fixedBody, { X = 8; Y = 10 }
+                            worker "w" 0 50, { X = 9; Y = 10 }
+                        ]
+
+                let young = courier "courier-young" |> withLife 865
+                let old = courier "courier-old" |> withLife 864
+
+                let courierCasts colony =
+                    (decideOn colony).Intents
+                    |> spawnIntents
+                    |> List.filter (fun (_, _, name) -> name.StartsWith "courier-")
+
+                Expect.hasLength
+                    (courierCasts staffed)
+                    1
+                    "an identical 1,500-capacity hauler does not fill the courier row's gap"
+
+                Expect.isEmpty
+                    (staffed |> withHomeCreep { X = 13; Y = 10 } young |> courierCasts)
+                    "a courier younger than 636 ticks still owns this delivery slot"
+
+                Expect.equal
+                    (staffed
+                     |> withHomeCreep { X = 13; Y = 10 } old
+                     |> courierCasts
+                     |> List.map (fun (_, body, _) -> body))
+                    [ fixedBody ]
+                    "at 864 TTL the next fixed body is owed"
+            }
+
+            test "the priced pair draws exactly 999 from Storage and pours it into our Reactor" {
+                let empty = courier "courier-empty"
+
+                let atStorage =
+                    deliveryColony (Some Ownership.Ours) |> withHomeCreep { X = 13; Y = 10 } empty
+
+                Expect.contains
+                    (emitOn atStorage [ empty.Name, Withdraw("sto-1", Thorium) ])
+                    (WithdrawFromStore(empty.Name, "sto-1", Thorium, Some 999))
+                    "the delivery is the Withdraw amount option's first bounded caller"
+
+                let loaded = courier "courier-loaded" |> carrying 999
+
+                let atReactor =
+                    deliveryColony (Some Ownership.Ours) |> withErrandCreep ringTile loaded
+
+                Expect.contains
+                    (emitOn atReactor [ loaded.Name, Refill(reactor, Thorium) ])
+                    (TransferEnergyToStructure(loaded.Name, reactor, Thorium))
+                    "the multi-room leg ends as the ordinary resource-aware Refill"
+
+                let afterMine =
+                    { atReactor with
+                        Spatial =
+                            { atReactor.Spatial with
+                                Thorium =
+                                    atReactor.Spatial.Thorium
+                                    |> Map.add "min-a" 0
+                                    |> Map.add "sto-1" 0
+                            }
+                    }
+
+                Expect.contains
+                    (planTasksOn afterMine noThreats)
+                    (Refill(reactor, Thorium))
+                    "a drawn load keeps its sink after the start facts close"
+
+                let partial =
+                    { loaded with
+                        Thorium = 998
+                        FreeCapacity = 2
+                    }
+
+                let afterPartial =
+                    { afterMine with
+                        Creeps =
+                            partial
+                            :: (afterMine.Creeps
+                                |> List.filter (fun creep -> creep.Name <> loaded.Name))
+                    }
+
+                Expect.contains
+                    (planTasksHoldingThorium [ Refill(reactor, Thorium) ] afterPartial)
+                    (Refill(reactor, Thorium))
+                    "a partially poured load keeps the delivery it already holds after the start facts close"
+
+                Expect.isFalse
+                    (planTasksOn afterPartial noThreats |> List.contains (Refill(reactor, Thorium)))
+                    "an arbitrary partial mine load does not open a Reactor delivery"
+
+                let emptied =
+                    { partial with
+                        Thorium = 0
+                        FreeCapacity = 1000
+                    }
+
+                let otherLoad = courier "mine-load" |> carrying 998
+
+                let staleHolder =
+                    { afterPartial with
+                        Creeps =
+                            emptied
+                            :: (afterPartial.Creeps
+                                |> List.filter (fun creep -> creep.Name <> loaded.Name))
+                    }
+                    |> withErrandCreep { ringTile with X = ringTile.X + 1 } otherLoad
+
+                let reassigned =
+                    (decideFrom
+                        (Map.ofList [ emptied.Name, taskId (Refill(reactor, Thorium)) ])
+                        staleHolder)
+                        .Assignments
+                    |> Map.tryFind otherLoad.Name
+
+                Expect.notEqual
+                    reassigned
+                    (Some(taskId (Refill(reactor, Thorium))))
+                    "an empty stale holder cannot hand its delivery to another partial mine load"
+            }
+
+            test "a rival-held Reactor is no sink, while an unowned one may stage the load" {
+                let tasks owner =
+                    deliveryColony (Some owner) |> fun colony -> planTasksOn colony noThreats
+
+                Expect.isFalse
+                    (tasks Ownership.Rival |> List.contains (Refill(reactor, Thorium)))
+                    "transferring would score for the rival"
+
+                Expect.contains
+                    (tasks Ownership.Unowned)
+                    (Refill(reactor, Thorium))
+                    "an unowned Reactor keeps the staged load"
+
+                let loaded = courier "courier-waiting" |> carrying 999
+
+                let waiting =
+                    deliveryColony (Some Ownership.Rival) |> withErrandCreep ringTile loaded
+
+                Expect.isNone
+                    ((decideOn waiting).Assignments |> Map.tryFind loaded.Name)
+                    "the exact delivery load waits instead of returning to Storage while the rival owns the sink"
+            }
+
+            test "visible Keeper Reach pre-empts a loaded courier, which re-prices after it clears" {
+                let loaded = courier "courier-fleeing" |> carrying 999
+
+                let quiet = deliveryColony (Some Ownership.Ours) |> withErrandCreep ringTile loaded
+
+                let keeper =
+                    { hostileAt
+                          "keeper"
+                          { X = ringTile.X; Y = ringTile.Y + 4 }
+                          [ RangedAttack; Move ] with
+                        Owner = "Source Keeper"
+                        Pos = RoomPos.at errandRoom { X = ringTile.X; Y = ringTile.Y + 4 }
+                    }
+
+                let threatened = { quiet with Hostiles = [ keeper ] }
+
+                Expect.equal
+                    ((decideOn threatened).Assignments |> Map.tryFind loaded.Name)
+                    (Some(taskId Flee))
+                    "Safety-tier Flee interrupts the delivery inside visible Reach"
+
+                Expect.equal
+                    ((decideOn quiet).Assignments |> Map.tryFind loaded.Name)
+                    (Some(taskId (Refill(reactor, Thorium))))
+                    "when Reach clears the same loaded body re-prices the Reactor leg"
             }
         ]

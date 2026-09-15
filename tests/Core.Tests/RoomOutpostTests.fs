@@ -389,7 +389,9 @@ let outpostContainerTests =
                 // which controller and never the order a Map's keys came
                 // out in.
                 let pooled homes =
-                    planTasks { colony with Declared = homes } noThreats Set.empty
+                    let view = { colony with Declared = homes }
+
+                    planTasks view (Fabot.Core.Atlas.ofView view) noThreats HeldTaskFacts.empty
                     |> List.filter (function
                         | Reserve _
                         | Claim _ -> true

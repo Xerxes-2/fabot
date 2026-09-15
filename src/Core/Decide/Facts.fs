@@ -126,9 +126,25 @@ let internal isIndependent (view: ColonyView) = homeStage view = Some Independen
 /// and a Storage behind it.
 let internal keepsRamparts (view: ColonyView) = isIndependent view
 
-/// The task ids this colony's **living** creeps hold this tick: the one fact
-/// the Planner reads about the assignment table (ADR 0061), derived once in
-/// `Entry` and handed down to the pool. Read as `Set.contains (taskId t) held`
+/// The facts the Planner reads about the assignment table (ADR 0061, ADR
+/// 0067), derived once in `Entry` and handed down to the pool. `All` is read as
+/// `Set.contains (taskId t) held.All`; `WithThorium` binds delivery persistence
+/// to the living holder that still carries the paid-for load.
+type HeldTaskFacts =
+    {
+        All: Set<string>
+        WithThorium: Set<string>
+    }
+
+[<RequireQualifiedAccess>]
+module HeldTaskFacts =
+    let empty =
+        {
+            All = Set.empty
+            WithThorium = Set.empty
+        }
+
+/// The Planner's narrow view of the assignment table. Task ids are kept
 /// — **spelled forward, never parsed**, so nothing here has to pull a target
 /// out of a string and a `Withdraw` and a `Repair` on one container are
 /// different keys by construction.
@@ -138,19 +154,29 @@ let internal keepsRamparts (view: ColonyView) = isIndependent view
 /// drops those silently, but `planTasks` runs first, and a colony must not hold
 /// a Task open on the strength of a body that is not there.
 ///
-/// **Not filtered to the Repairs**, though today the Repair line is its only
-/// reader: the table holds task *ids*, and picking the Repairs out of it means
-/// reading a kind out of a string, which is the parsing this seam exists to
+/// **Not filtered to task kinds**: the table holds task *ids*, and picking a
+/// kind out of it means reading a kind out of a string, which is the parsing this seam exists to
 /// avoid. The whole table is the honest set — "these are the Tasks this colony
 /// holds" — and a reader that wants one kind writes the key it wants and asks,
 /// as `isHungry` does. One boolean per candidate is still what any reader gets.
-let internal heldTaskIds (view: ColonyView) (assignments: Assignments) : Set<string> =
-    let living = view.Creeps |> List.map (fun c -> c.Name) |> Set.ofList
+let internal heldTaskFacts (view: ColonyView) (assignments: Assignments) : HeldTaskFacts =
+    let living = view.Creeps |> List.map (fun creep -> creep.Name, creep) |> Map.ofList
 
     assignments
-    |> Map.toList
-    |> List.choose (fun (name, tid) -> if Set.contains name living then Some tid else None)
-    |> Set.ofList
+    |> Map.fold
+        (fun facts name tid ->
+            match Map.tryFind name living with
+            | None -> facts
+            | Some creep ->
+                {
+                    All = Set.add tid facts.All
+                    WithThorium =
+                        if creep.Thorium > 0 then
+                            Set.add tid facts.WithThorium
+                        else
+                            facts.WithThorium
+                })
+        HeldTaskFacts.empty
 
 /// Whether a structure of this kind, carrying these hits, is hungry: its own
 /// line, read off the kind (ADR 0034) and — for the decaying kinds — off
@@ -353,3 +379,31 @@ let internal ourMineralContainers (view: ColonyView) : string list =
 let internal depositIsDiggable (view: ColonyView) atlas (depositId: string) =
     Map.tryFind depositId view.Spatial.Thorium |> Option.defaultValue 0 > 0
     && (Atlas.extractorOn atlas depositId).IsSome
+
+/// Whether the season's delivery programme has all of its current ground
+/// facts (#319): a diggable deposit feeding a Storage that holds one exact
+/// load, and a resident CLAIM body keeping vision and ownership at a declared
+/// Reactor. No remembered switch — each fact closes the row when it disappears.
+let internal courierProgrammeOpen (view: ColonyView) atlas =
+    let canDig = ourDeposits view |> List.exists (depositIsDiggable view atlas)
+
+    let hasLoad =
+        view.Spatial.TargetKinds
+        |> Map.exists (fun id kind ->
+            kind = Structure BuiltKind.Storage
+            && SpatialInfo.heldIn view.Spatial Thorium id >= view.Tuning.ReactorLoad)
+
+    let errandRooms =
+        view.Errands |> List.map (fun errand -> errand.RoomName) |> Set.ofList
+
+    let hasResidentReclaimer =
+        view.Creeps
+        |> List.exists (fun creep ->
+            partCount creep.Body BodyPart.Claim > 0
+            && (Atlas.creepTile atlas creep.Name
+                |> Option.exists (fun tile -> Set.contains tile.Room errandRooms)))
+
+    view.Bank.Capacity >= bodyCost courierPattern.Block
+    && canDig
+    && hasLoad
+    && hasResidentReclaimer

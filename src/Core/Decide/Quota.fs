@@ -699,6 +699,8 @@ type RowSizing =
         /// also a walk of the projection's targets that every colony without a
         /// deposit was paying for twice.
         MinerQuota: int
+        /// One while the Reactor delivery's current ground facts stand (#319).
+        CourierQuota: int
     }
 
 let internal rowSizingOf (view: ColonyView) atlas : RowSizing =
@@ -707,6 +709,7 @@ let internal rowSizingOf (view: ColonyView) atlas : RowSizing =
         ReserverClaims = reserverClaimsOf view
         MinerWorkPerMove = view.Tuning.MinerWorkPerMove
         MinerQuota = minerQuota view atlas
+        CourierQuota = if courierProgrammeOpen view atlas then 1 else 0
     }
 
 /// The colony's surplus over one creep's lifetime: the income the two upgrade
@@ -766,6 +769,12 @@ let internal surplusOverLifetime (view: ColonyView) atlas (sizing: RowSizing) ha
     let minerCost =
         sizing.MinerQuota * bodyCost (minerBodyFor sizing.MinerWorkPerMove capacity)
 
+    let courierCost =
+        sizing.CourierQuota
+        * ceilDiv
+            (bodyCost courierPattern.Block * Engine.creepLifetime)
+            view.Tuning.DeliveryInterval
+
     // The anchor row charged **Post by Post**, each at the body the casting
     // step would actually buy for that Post (ADR 0053): a row whose bodies
     // shrank with a lapsed reservation while its amortization went on deducting
@@ -778,6 +787,7 @@ let internal surplusOverLifetime (view: ColonyView) atlas (sizing: RowSizing) ha
         + haulerQuota * bodyCost (bodyFor haulerPattern capacity)
         + reserverCost * Engine.creepLifetime / Engine.claimLifetime
         + minerCost * view.Tuning.MineContactAgeing
+        + courierCost
 
     // Summed over the posted sources at each one's own output, never a count
     // times a constant (ADR 0042): a source the colony cannot price contributes
@@ -888,6 +898,7 @@ type QuotaRows =
         /// every colony that has not reached RCL6 and stood an extractor, which
         /// is every colony this bot has ever run until this season.
         Miner: int
+        Courier: int
         Upgrader: int
         Surplus: int
     }
@@ -910,6 +921,7 @@ let internal quotaRowsOf (view: ColonyView) atlas (sizing: RowSizing) haulerQuot
         Anchor = Atlas.postCount atlas
         Hauler = haulerQuota
         Miner = sizing.MinerQuota
+        Courier = sizing.CourierQuota
         Upgrader = upgraderQuota view atlas surplus
         Surplus = surplus
     }
@@ -1012,6 +1024,7 @@ let internal workforceTarget (view: ColonyView) atlas (tasks: Task list) (rows: 
     + rows.Anchor
     + rows.Hauler
     + rows.Miner
+    + rows.Courier
     + rows.Upgrader
     + workerRow
     |> max view.Tuning.MinWorkforce

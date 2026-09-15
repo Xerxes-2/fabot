@@ -512,7 +512,7 @@ let quotasRecordTests =
         [
             test "the cascade writes down its rows, and they sum to the target" {
                 // Observability only (ADR 0009): the record the `observe.mjs
-                // quotas` view prints. Seven rows in cascade order — the guard
+                // quotas` view prints. Eight rows in cascade order — the guard
                 // at the head of them since ADR 0056, behind only the supply
                 // floor, which is a floor and not a row and so has no line
                 // here; the [[miner]] between the rows that make the colony's
@@ -524,7 +524,16 @@ let quotasRecordTests =
 
                 Expect.equal
                     (quotas.Rows |> List.map (fun r -> r.Row))
-                    [ "guard"; "reserver"; "anchor"; "hauler"; "miner"; "upgrader"; "worker" ]
+                    [
+                        "guard"
+                        "reserver"
+                        "anchor"
+                        "hauler"
+                        "miner"
+                        "courier"
+                        "upgrader"
+                        "worker"
+                    ]
                     "one row per casting row, in the cascade's order"
 
                 Expect.equal

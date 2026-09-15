@@ -237,15 +237,14 @@ let decideUnarbitrated
     // Intent.
     let sizing = rowSizingOf view atlas
 
-    // The one fact the Planner reads about the colony's own decisions (ADR
-    // 0061): the task ids its living creeps hold, off the table the Matcher
-    // wrote last tick. Derived here, before the pool, because the pool is what
-    // reads it — a decaying structure somebody is already repairing is judged
-    // at the whole line instead of the hungry one — and because this is the one
-    // place that has both the assignments and the fleet to filter them by.
-    let held = heldTaskIds view assignments
+    // The narrow facts the Planner reads about the colony's own decisions (ADR
+    // 0061, ADR 0067): the task ids its living creeps hold, and which holders
+    // still carry Thorium, off the table the Matcher wrote last tick. Derived
+    // here, before the pool, because this is the one place that has both the
+    // assignments and the fleet to filter them by.
+    let held = heldTaskFacts view assignments
 
-    let tasks = planTasks view threats held
+    let tasks = planTasks view atlas threats held
 
     // The pool's other half (ADR 0052 decision 6): every entry's priority
     // and capacity, set once here and read by the Matcher and the mover.

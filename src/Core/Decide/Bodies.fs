@@ -39,6 +39,16 @@ let haulerPattern =
         Block = [ Carry; Carry; Move ]
     }
 
+/// The season courier (ADR 0057 decision 4, re-derived by #319): twenty Carry
+/// hold a 999-unit Thorium load below the 1,000-unit contact cliff, and ten
+/// Move carry it at road parity. Unlike the hauler beside it this row is one
+/// fixed body: a richer bank buys no useful capacity, and a poorer one yields.
+let courierPattern =
+    {
+        Name = "courier"
+        Block = List.replicate 20 Carry @ List.replicate 10 Move
+    }
+
 /// The reserver row (ADR 0042): the CLAIM body that walks to an outpost's
 /// controller and holds its reservation, which is what makes that room's
 /// sources worth ten a tick rather than five. `[2Claim;2Move]` pays for itself
@@ -115,6 +125,7 @@ let patternTable =
         workerPattern
         anchorPattern
         haulerPattern
+        courierPattern
         reserverPattern
         upgraderPattern
         guardPattern
@@ -359,6 +370,11 @@ let private wholeBlockBodyFor (block: BodyPart list) capacity =
 let private haulerBodyFor capacity =
     wholeBlockBodyFor haulerPattern.Block capacity
 
+/// The courier's fixed body. Affordability belongs to the spawn cascade; body
+/// sizing states the row's one useful shape even when a caller is only asking
+/// what that shape costs.
+let private courierBodyFor () = courierPattern.Block
+
 /// The reserver row's sizing rule: as many whole [Claim; Move] blocks as
 /// capacity buys, never below one. The bank's truncation alone, which is half
 /// the row's rule — ADR 0042 sizes the body off the reservation deficit *capped
@@ -453,6 +469,8 @@ let sizedBodyFor (sizing: BodySizing) pattern capacity =
         anchorBodyFor sizing.AnchorCap capacity
     elif pattern.Name = haulerPattern.Name then
         haulerBodyFor capacity
+    elif pattern.Name = courierPattern.Name then
+        courierBodyFor ()
     elif pattern.Name = reserverPattern.Name then
         match sizing.ReserverClaims with
         | [] -> reserverBodyFor capacity

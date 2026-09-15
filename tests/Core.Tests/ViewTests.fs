@@ -1053,7 +1053,7 @@ let colonyViewTests =
                     "unowned, the lost child is a room the mother projects again"
 
                 Expect.contains
-                    (planTasks taken noThreats Set.empty)
+                    (planTasks taken (Fabot.Core.Atlas.ofView taken) noThreats HeldTaskFacts.empty)
                     (Claim $"ctrl-{child}")
                     "and its controller is a Claim in her pool"
 
@@ -1064,7 +1064,7 @@ let colonyViewTests =
                     "a room somebody else holds is the stand-down's business, not a projection's"
 
                 Expect.isEmpty
-                    (planTasks rival noThreats Set.empty
+                    (planTasks rival (Fabot.Core.Atlas.ofView rival) noThreats HeldTaskFacts.empty
                      |> List.filter (function
                          | Claim _ -> true
                          | _ -> false))
@@ -1104,7 +1104,11 @@ let colonyViewTests =
                 Expect.isFalse
                     (List.contains
                         (Withdraw("buf-child", Energy))
-                        (planTasks taken noThreats Set.empty))
+                        (planTasks
+                            taken
+                            (Fabot.Core.Atlas.ofView taken)
+                            noThreats
+                            HeldTaskFacts.empty))
                     "nothing of that room is an intake of hers"
             }
 
@@ -1128,7 +1132,11 @@ let colonyViewTests =
                 Expect.isFalse
                     (List.contains
                         (Withdraw("buf-child", Energy))
-                        (planTasks raising noThreats Set.empty))
+                        (planTasks
+                            raising
+                            (Fabot.Core.Atlas.ofView raising)
+                            noThreats
+                            HeldTaskFacts.empty))
                     "so nothing pools a draw on it"
 
                 Expect.equal

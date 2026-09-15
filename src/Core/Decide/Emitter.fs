@@ -341,7 +341,23 @@ let internal applicable
     // sink takes one holding Thorium, which is the intake's own gate seen from
     // the far end — what a body took is what it has to put down.
     | Refill(_, Energy) -> has Carry && creep.Energy > 0 && not standing
-    | Refill(_, Thorium) -> has Carry && carryingThorium && not standing
+    | Refill(targetId, Thorium) ->
+        let reactor =
+            view.Errands |> List.exists (fun errand -> fst errand.Target = targetId)
+
+        let storage =
+            Map.tryFind targetId view.Spatial.TargetKinds = Some(Structure BuiltKind.Storage)
+
+        has Carry
+        && carryingThorium
+        && not standing
+        // A mine carrier above the decade-safe load must bank first; only the
+        // Storage draw is capped to 999 (#319).
+        && (not reactor || creep.Thorium <= view.Tuning.ReactorLoad)
+        // The exact delivery load is its body/task marker, not the courier's
+        // name: any light carrier may draw it, and once drawn it waits for the
+        // Reactor rather than pouring it straight back into Storage.
+        && (not storage || creep.Thorium <> view.Tuning.ReactorLoad)
     // The body gate on Build (#157, widened to every Build by #234), here for
     // the same reason ADR 0016's Withdraw gate is: the ladder lifts a site over
     // the Task that was pinning the body, and a rank the whole colony shares is
@@ -448,7 +464,18 @@ let private intentFor (view: ColonyView) atlas (creep: CreepInfo) task =
     // always meant: take as much as the body has room for (ADR 0057 decision 3).
     // The one place a number is ever named is the delivery's 999-unit load, and
     // that is decision 4's.
-    | Withdraw(storeId, resource) -> Some(WithdrawFromStore(creep.Name, storeId, resource, None))
+    | Withdraw(storeId, resource) ->
+        let amount =
+            if
+                resource = Thorium
+                && Map.tryFind storeId view.Spatial.TargetKinds = Some(Structure BuiltKind.Storage)
+                && view.Errands |> List.isEmpty |> not
+            then
+                Some view.Tuning.ReactorLoad
+            else
+                None
+
+        Some(WithdrawFromStore(creep.Name, storeId, resource, amount))
     // The reflex's own Intent, issued for a creep that walked: one act, one
     // vocabulary, whether the energy was underfoot already or was the reason the
     // creep came. Which is why an arriving picker spells it twice and `decide`

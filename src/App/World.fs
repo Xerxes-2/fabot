@@ -507,7 +507,10 @@ let private seenFacts
         Casting =
             casting
             |> List.map (fun c ->
-                c.body |> Array.map (fun p -> bodyPartOf p.``type``) |> Array.toList)
+                {
+                    Name = c.name
+                    Body = c.body |> Array.map (fun p -> bodyPartOf p.``type``) |> Array.toList
+                })
         Refillables =
             mine
             |> Array.filter (fun (_, kind) -> isRefillable kind)

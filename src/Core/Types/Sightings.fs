@@ -147,6 +147,10 @@ type CreepInfo =
         Moved: bool
     }
 
+/// A creep already paid for and still in a spawn's oven. Its generated name is
+/// retained because two rows may buy the same part counts (#319).
+type CastingInfo = { Name: string; Body: BodyPart list }
+
 /// What one room holds this tick, to everybody: the half a declaration carries
 /// and the half vision pays for, filed under the room's own name and saying
 /// nothing about who is looking at it (ADR 0052 decision 1). The unit the
@@ -212,14 +216,14 @@ type RoomFacts =
         /// in a [[nursery]] a mother is raising is a fact about that room and
         /// not about her — which is exactly what ends the nursery.
         Spawns: SpawnInfo list
-        /// The bodies still gestating in this room's spawns: energy the colony
-        /// has **already spent** on a creep that is not alive yet. Bodies and
-        /// not creeps, and filed under the room rather than under the spawn
-        /// building them, because a colony banks in one room (ADR 0052 decision
-        /// 1) and every row's gap is a colony number. Empty wherever no spawn
-        /// of ours is mid-cast, and empty is the whole of "nothing is being
-        /// cast here".
-        Casting: BodyPart list list
+        /// The names and bodies still gestating in this room's spawns: energy
+        /// the colony has **already spent** on a creep that is not alive yet.
+        /// Filed under the room rather than under the spawn building them,
+        /// because a colony banks in one room (ADR 0052 decision 1) and every
+        /// row's gap is a colony number. The name preserves the row that bought
+        /// an otherwise identical body (#319). Empty wherever no spawn of ours
+        /// is mid-cast, and empty is the whole of "nothing is being cast here".
+        Casting: CastingInfo list
         /// Our energy-hungry structures standing here (spawn, extension,
         /// tower), whether or not they currently have room.
         Refillables: RefillableInfo list

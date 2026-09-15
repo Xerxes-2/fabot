@@ -17,10 +17,14 @@ open Fabot.Core.Types
 /// as a hauler.
 let private isReserverBody (creep: CreepInfo) = partCount creep.Body BodyPart.Claim > 0
 
+let private hasCourierName (name: string) = name.StartsWith "courier-"
+
 /// Whether a living body carries Carry parts and no Work — the hauler row's
 /// own cut (ADR 0012), and `patternOfParts`' hauler arm read as a census.
 let private isHaulerBody (creep: CreepInfo) =
-    partCount creep.Body Work = 0 && partCount creep.Body Carry > 0
+    not (hasCourierName creep.Name)
+    && partCount creep.Body Work = 0
+    && partCount creep.Body Carry > 0
 
 /// Whether a body still in the oven is Work-heavy — the anchor row's `Work >
 /// Move`, the ratio fatigue parity forbids a worker body (ADR 0006). The
@@ -31,18 +35,25 @@ let private isHaulerBody (creep: CreepInfo) =
 let private castIsHeavy parts =
     partCount parts Work > partCount parts Move
 
-/// The pattern row a living body was cast from (`patternOfParts` over its part
-/// map), with the Atlas's `workHeavy` set answering the heavy question.
+/// The pattern row a living body was cast from. The fixed courier is read from
+/// the row prefix written by this cascade because its 20C/10M counts are also
+/// a 1,500-capacity hauler; every other row remains readable from its parts.
 let private patternOf (tuning: Tuning) atlas (creep: CreepInfo) =
-    patternOfParts tuning (Atlas.workHeavy atlas creep.Name) creep.Body
+    if hasCourierName creep.Name then
+        courierPattern
+    else
+        patternOfParts tuning (Atlas.workHeavy atlas creep.Name) creep.Body
 
 /// The row a body **still in the oven** was bought for: the same rule over the
-/// same counts, which is the whole point of there being one — the six arms
-/// used to be written out twice, in two representations, and only prose kept
-/// them in the same order.
-let private patternOfCast (tuning: Tuning) (body: BodyPart list) =
-    let parts = partsOf body
-    patternOfParts tuning (castIsHeavy parts) parts
+/// same name and counts. The name matters only for the courier collision above;
+/// preserving it also prevents a 1,500-capacity hauler in one oven from filling
+/// the courier row's gap in another.
+let private patternOfCast (tuning: Tuning) (cast: CastingInfo) =
+    if hasCourierName cast.Name then
+        courierPattern
+    else
+        let parts = partsOf cast.Body
+        patternOfParts tuning (castIsHeavy parts) parts
 
 /// Whether a living body can put energy into an extension (ADR 0050).
 let private canRefill (tuning: Tuning) atlas (creep: CreepInfo) =
@@ -157,7 +168,14 @@ let private leadOf (view: ColonyView) atlas (sizing: RowSizing) (creep: CreepInf
 /// why #318 withdrew the knob that tried it rather than shipping a number with
 /// no effect.
 let internal expiring (view: ColonyView) atlas (sizing: RowSizing) (creep: CreepInfo) =
-    creep.TicksToLive <= leadOf view atlas sizing creep
+    if patternOf view.Tuning atlas creep = courierPattern then
+        // A courier is economically spent after one 636-tick delivery slot,
+        // even though the shorter W15S28 route leaves physical life behind
+        // (#319). Counting that remainder would make the next load depend on a
+        // second Source Keeper crossing by the same body.
+        creep.TicksToLive <= Engine.creepLifetime - view.Tuning.DeliveryInterval
+    else
+        creep.TicksToLive <= leadOf view atlas sizing creep
 
 /// One specialist row of the spawn cascade, stated once: the name the `quotas`
 /// view files it under (ADR 0009), the pattern it casts, how many bodies it
@@ -249,7 +267,7 @@ let internal planSpawns
 
         let castOf pattern =
             casting
-            |> List.filter (fun body -> patternOfCast view.Tuning body = pattern)
+            |> List.filter (fun cast -> patternOfCast view.Tuning cast = pattern)
             |> List.length
 
         let deficit = target - (List.length living + List.length casting)
@@ -440,6 +458,16 @@ let internal planSpawns
                     Quota = rows.Miner
                     Census = isMinerBody
                 }
+                // The fixed season courier follows the re-claimer and the rows
+                // that make/carry income, but precedes the two surplus mouths
+                // (#319). `expiring` turns its 636-tick cadence into the same
+                // living-count seam every other row uses.
+                {
+                    Name = "courier"
+                    Pattern = courierPattern
+                    Quota = rows.Courier
+                    Census = fun creep -> patternOf view.Tuning atlas creep = courierPattern
+                }
                 // Behind the three rows hired off the ground and ahead of the
                 // generalist (ADR 0046): the upgrader spends the surplus those
                 // three produce, so it is cast once they stand, and it spends it
@@ -524,7 +552,7 @@ let internal planSpawns
                 // standing answers yes — buying a second one out of the same
                 // stranded bank is the oversell this row exists to make exactly
                 // once.
-                || casting |> List.exists (castCanRefill view.Tuning)
+                || casting |> List.exists (fun cast -> castCanRefill view.Tuning cast.Body)
             then
                 0
             else

@@ -391,7 +391,16 @@ let minerCastTests =
                 // surplus.
                 Expect.equal
                     ((decideOn (richMine 1800)).Quotas.Rows |> List.map (fun row -> row.Row))
-                    [ "guard"; "reserver"; "anchor"; "hauler"; "miner"; "upgrader"; "worker" ]
+                    [
+                        "guard"
+                        "reserver"
+                        "anchor"
+                        "hauler"
+                        "miner"
+                        "courier"
+                        "upgrader"
+                        "worker"
+                    ]
                     "the reported order is the casting order"
             }
 

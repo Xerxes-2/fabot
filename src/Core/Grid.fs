@@ -99,11 +99,11 @@ let internal terrainWeight terrain =
     | Wall -> -1
 
 /// A creep's fatigue factor from its body and current load: every part
-/// except Move and except empty Carry generates fatigue — the engine
-/// loads Carry parts 50 energy apiece, and the empty ones ride free.
+/// except Move and except empty Carry generates fatigue — the engine loads
+/// Carry parts per 50 units of either resource, and the empty ones ride free.
 let internal fatigueFactorOf (creep: CreepInfo) : FatigueFactor =
     let carry = partCount creep.Body Carry
-    let loadedCarry = min carry ((creep.Energy + 49) / 50)
+    let loadedCarry = min carry ((creep.Energy + creep.Thorium + 49) / 50)
     let parts = creep.Body |> Map.toList |> List.sumBy snd
 
     {

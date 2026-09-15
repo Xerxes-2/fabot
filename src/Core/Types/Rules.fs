@@ -58,6 +58,10 @@ module Engine =
     /// ever holds.
     let storageCapacity = 1_000_000
 
+    /// The season Reactor's Thorium store capacity. It consumes one a tick;
+    /// an empty 999-unit delivery therefore buys 999 ticks of continuity.
+    let reactorCapacity = 1_000
+
     /// ATTACK's range: a melee hostile strikes at one tile.
     let meleeRange = 1
 
@@ -321,6 +325,15 @@ type Tuning =
         /// decade would be the second of those, and moving it down spends trips
         /// on a container that is not yet bleeding.
         MineContactCliff: int
+        /// Thorium carried on one Reactor delivery (#319). 999 sits one below
+        /// the 1,000-unit contact cliff: the loaded courier burns three ticks
+        /// of life per movement tick rather than four.
+        ReactorLoad: int
+        /// Ticks between courier casts while the delivery programme is open
+        /// (#319). The loaded body's Atlas walk is 318 ticks over W15S28's
+        /// 154-unit route, so 636 leaves 363 ticks in the Reactor's 999-tick
+        /// buffer and absorbs that leg with 45 to spare.
+        DeliveryInterval: int
         /// **How far ahead** the Layout *places*, in controller levels (ADR
         /// 0011, ADR 0063, ADR 0064): the horizon is `controller.Level + this`,
         /// so the clustered kinds are sized one level above the room's own and
@@ -446,6 +459,8 @@ module Tuning =
             MinerWorkPerMove = 5
             MineContactAgeing = 3
             MineContactCliff = 1000
+            ReactorLoad = 999
+            DeliveryInterval = 636
             HorizonLookahead = 1
             OutpostBuilders = 2
             BootstrapLevel = 3

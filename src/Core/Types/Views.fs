@@ -33,12 +33,12 @@ type ColonyView =
         /// colony's, and whether one stands in a declared home reaches this
         /// colony as that room's [[stage]].
         Spawns: SpawnInfo list
-        /// The bodies this colony has in its ovens this tick: its **home
+        /// The named bodies this colony has in its ovens this tick: its **home
         /// room's** `RoomFacts.Casting` alone, for the reason `Bank` is one
         /// account — a colony casts from the spawns of the room it banks in.
         /// Read by the casting cascade and by nothing else: a body in an oven
         /// stands on no tile, holds no Task and answers no Verdict (ADR 0026).
-        Casting: BodyPart list list
+        Casting: CastingInfo list
         /// The **tunables** this colony decides under (ADR 0052 decision 5),
         /// arriving on the view like every other fact so that a rule reads its
         /// colony's own and a test moves one field instead of editing the rule.

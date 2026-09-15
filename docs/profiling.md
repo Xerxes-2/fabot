@@ -149,14 +149,14 @@ the mine's own target and, where the engine takes one, its own resource — a
 bare `harvest` count is the two Anchors' energy digs with the mine's folded
 invisibly into it.
 
-**The delivery is not here, and that is the tree's state and not a gap in the
-scenario.** `Deliver` is #319 and has not shipped, so no courier exists to
-carry the banked ore to the reactor and no scenario can execute one. What
-this scenario executes today is the ore into the Storage and the flag taken
-back. The report says so on every run and says it off the assignment table —
-it names any `deliver:` Task a body ended the run holding, and reports the
-absence only while there is one to report — so the line retires itself on the
-commit that lands the courier rather than having to be remembered.
+**The delivery is here as two ordinary resource Tasks, not a `Deliver`.** The
+scenario first lets the resident re-claimer take the Reactor, then loads the
+fixed courier standing in W15S27. On the next tick the assignment table must
+name `refill:<reactor-id>:Thorium`: a real multi-room price for the remainder
+of the outward leg through W15S26's masked Source Keeper terrain. The harness
+cannot walk the preceding Storage Withdraw, so loading on the ownership
+transition is its one fiction; the row, sink gate, priced match and emitted
+Refill are the production path (#319, ADR 0067).
 
 A `reactor` run compares only with another `reactor` run. It is a different
 colony at a different level over a different room set, and reading it against
@@ -232,12 +232,10 @@ stands a room at a level the live server has not reached:
   this is the frozen world's version of "now"; the withheld arm of ADR 0057
   decision 2's cooldown gate is not executed.
 - **The act counts are "reachable on every tick" and never a cadence.** The
-  world is frozen: nothing the stub verbs return moves a store, and
-  `claimReactor` never transfers ownership, so the reactor stays a rival's for
-  the whole run and `ClaimReactor` fires on every one of the profiled ticks.
-  Live it fires once and the flag is ours — which means the **`Ours`** arm of
-  ADR 0057 decision 5's gate, the one that withholds the act, is executed by
-  nothing here. Read the counts as "the act was reachable on each tick", which
+  world is otherwise frozen, but `claimReactor` deliberately transfers
+  ownership on its first call so the scenario executes both sides of that
+  gate and opens the courier's sink. Read the remaining counts as "the act was
+  reachable on each tick", which
   is what makes a zero meaningful, and never as a rate.
 - **The mineral container and the pile share a tile**, which is the live shape
   `Pool.fs` reads the pile as (that container's next dig, landed on the floor

@@ -324,10 +324,12 @@ let internal guardedOutposts (view: ColonyView) : string list =
 /// Planner: rebuild this tick's full Task pool from the colony view. Pure and
 /// from scratch every tick — Tasks are never persisted.
 ///
-/// `held` is the one fact this half reads about the colony's own assignment
-/// table (ADR 0061): the task ids its living creeps hold, derived once in
-/// `Entry` (`heldTaskIds`) and read by the Repair line alone, to pick which of
-/// the decaying kinds' two lines a structure is judged by.
+/// `held` is the narrow pair of facts this half reads about the colony's own
+/// assignment table (ADR 0061, ADR 0067): all task ids living creeps hold, and
+/// the subset whose holder still carries Thorium, derived once in `Entry`
+/// (`heldTaskFacts`). Repairs read the first to pick a decaying kind's line;
+/// a partially poured delivery reads the second so it cannot move to a
+/// different carrier when its empty holder releases it.
 ///
 /// **What it changes is not the Repair line alone**, because the pool this
 /// half returns is read further down: `Quota.workerFloor` stands the worker row
@@ -337,9 +339,10 @@ let internal guardedOutposts (view: ColonyView) : string list =
 /// binds first, and true whatever the tuning — a fact the pool carries is a
 /// fact every reader of the pool carries. It narrows ADR
 /// 0025's creep-blindness clause to what that clause's own reason was about —
-/// the Planner still sees no body, no position, no load and no name, and a set
-/// of ids is what keeps it that way where the `Assignments` map would not.
-let planTasks (view: ColonyView) (threats: Threats) (held: Set<string>) : Task list =
+/// the Planner still sees no body, position or name, only task ids and whether
+/// their holders have any delivery resource left; the facts keep that boundary
+/// where the `Assignments` map would not.
+let planTasks (view: ColonyView) atlas (threats: Threats) (held: HeldTaskFacts) : Task list =
     // Flee exists while a Reach does (ADR 0033): one Task for the whole
     // colony, at the head of the pool as its Safety tier is at the head of
     // the ranking. No Reach, no Flee — a quiet tick's pool is the pool it
@@ -411,7 +414,7 @@ let planTasks (view: ColonyView) (threats: Threats) (held: Set<string>) : Task l
     // 0010, ADR 0034) — and for the decaying kinds that is two lines since ADR
     // 0061, the hungry one for a structure nobody holds and the whole one for a
     // structure somebody is already repairing.
-    let repairs = hungryStructures view held |> List.map (fst >> Repair)
+    let repairs = hungryStructures view held.All |> List.map (fst >> Repair)
 
     // The ids of one projected kind, in id order. The containers, the
     // Storage and the controllers are all pooled by the projection's kind
@@ -640,6 +643,46 @@ let planTasks (view: ColonyView) (threats: Threats) (held: Set<string>) : Task l
         |> List.filter (fun id -> storageRoom id > 0)
         |> List.map (fun id -> Refill(id, Thorium))
 
+    // The delivery pair (#319), expressed as the same resource-aware cycle as
+    // the mine haul now that the Atlas prices the three-crossing errand. The
+    // start sentence gates a new draw; a load already drawn keeps its sink if
+    // the mine is exhausted, the Storage falls below one load, or the resident
+    // dies, so facts that close the row do not strand work already paid for.
+    // The exact load marks a new in-flight delivery before it has an assignment;
+    // once a partial transfer changes that amount, the held Reactor Task carries
+    // the same fact until applicability releases it empty.
+    let deliveryOpen = courierProgrammeOpen view atlas
+
+    let deliveryInFlight =
+        view.Creeps
+        |> List.exists (fun creep -> creep.Thorium = view.Tuning.ReactorLoad)
+
+    let deliveryWithdraws =
+        if deliveryOpen then
+            storages
+            |> List.filter (fun id ->
+                SpatialInfo.heldIn view.Spatial Thorium id >= view.Tuning.ReactorLoad)
+            |> List.map (fun id -> Withdraw(id, Thorium))
+        else
+            []
+
+    let reactorRefills =
+        view.Errands
+        |> List.choose (fun errand ->
+            let reactorId = fst errand.Target
+            let task = Refill(reactorId, Thorium)
+            let owner = Map.tryFind reactorId view.Spatial.Owners
+            let stored = SpatialInfo.heldIn view.Spatial Thorium reactorId
+
+            if
+                (deliveryOpen || deliveryInFlight || Set.contains (taskId task) held.WithThorium)
+                && (owner = Some Ownership.Ours || owner = Some Ownership.Unowned)
+                && stored < Engine.reactorCapacity
+            then
+                Some task
+            else
+                None)
+
     // The [[ferry]]'s other half (ADR 0052 decision 7): a bootstrapping child's
     // upgrade buffer is a Refill target of the mother's, on the same tier her
     // own buffer sits on (ADR 0012) — the deepest but the stock's, so nothing
@@ -725,3 +768,5 @@ let planTasks (view: ColonyView) (threats: Threats) (held: Set<string>) : Task l
     @ minePickups
     @ mineWithdraws
     @ mineRefills
+    @ deliveryWithdraws
+    @ reactorRefills

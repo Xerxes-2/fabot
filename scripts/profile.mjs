@@ -2439,6 +2439,10 @@ function homeStations(furnished) {
     // for exactly this row, the way an outpost's does.
     anchor: stationsOn(room, capture, furnished.posts),
     hauler: at([furnished.spawnPos]),
+    // The fixed courier is cast only by the reactor scenario today. Keeping a
+    // home fallback in every table preserves the station-coverage invariant;
+    // that scenario replaces it with a transit-room station below (#319).
+    courier: at([furnished.spawnPos]),
     // The buffer where the room has one, and the controller where it does
     // not: a colony this young has built no upgrade buffer yet, and at its
     // bank the row is not hired at all (ADR 0046, #187) — so the seat is
@@ -3162,6 +3166,28 @@ function buildReactorWorld() {
       [FIND_REACTORS]: [reactor],
     },
   });
+
+  // One body part-way down the declared chain (#319), so this scenario prices
+  // a real multi-room Reactor Refill rather than only its endpoints. W15S27 is
+  // the quiet transit room immediately before the Keeper crossing; W15S26's
+  // masked terrain is still part of the price through `declaredTerrains`.
+  const transitCapture = loadCapture("W15S27");
+  const transitSources = registerSources(transitCapture, register);
+  const transitRoom = stubRoom({
+    name: transitCapture.name,
+    controller: undefined,
+    findTables: {
+      105: transitSources,
+      108: [],
+      107: [],
+      114: [],
+      115: [],
+      103: [],
+      106: [],
+      116: [],
+      [FIND_REACTORS]: [],
+    },
+  });
   // What a body may not be stood on out there: the reactor's own tile — so
   // the re-claimer is resolved outward onto the ring it acts from rather than
   // under the thing it is acting on — and the room's rocks, which are
@@ -3211,6 +3237,7 @@ function buildReactorWorld() {
   // no extractor stands and the row's quota is zero, and `hireFleet` says so
   // if it is ever cast against such a world.
   stations.miner = mine ? stationsOn(home.room, capture, [mine.seat]) : [];
+  stations.courier = stationsIn(transitRoom, transitCapture, [{ x: 25, y: 25 }]);
 
   // The spare lane the census perturbation walks: the unpaved ground between
   // each pair of the room's containers in turn, the `outpost` scenario's own
@@ -3257,6 +3284,13 @@ function buildReactorWorld() {
   // says nothing.
   const storage =
     home.cluster.built.find((s) => s.structureType === "storage") ?? null;
+  if (storage) {
+    storage.store = store({
+      used: storage.store.getUsedCapacity("energy"),
+      capacity: STORAGE_CAPACITY,
+      thorium: tuningNumber("ReactorLoad") * 3,
+    });
+  }
   const acts = {
     claimReactor: 0,
     harvest: 0,
@@ -3290,10 +3324,11 @@ function buildReactorWorld() {
     creeps,
   });
 
-  const rooms = [home.room, errandRoom];
+  const rooms = [home.room, transitRoom, errandRoom];
   return {
     terrains: new Map([
       [capture.name, capture.terrain],
+      [transitCapture.name, transitCapture.terrain],
       [errandCapture.name, errandCapture.terrain],
       ...declaredTerrains(rooms.map((room) => room.name)),
     ]),
@@ -3310,6 +3345,7 @@ function buildReactorWorld() {
     stations,
     claimed: new Map([
       [capture.name, homeClaimed],
+      [transitCapture.name, new Set(transitSources.map((source) => keyOf(source.pos)))],
       [errandCapture.name, errandOccupied],
     ]),
     colonies: [capture.name],
@@ -3317,6 +3353,7 @@ function buildReactorWorld() {
     furnished: [geometryOf(home)],
     crew: (bodyOf, game) => {
       standOreCrew(bodyOf, game);
+      const courier = creeps.find((creep) => creep.name.startsWith("courier-"));
       // Counted on every body of the world rather than on the ones we expect to
       // act: which creep holds which Task is the Matcher's answer and not this
       // file's, and a counter on the body we guessed would read zero for the
@@ -3337,6 +3374,19 @@ function buildReactorWorld() {
               (resource === null || args[1] === resource)
             ) {
               acts[verb]++;
+              if (verb === "claimReactor") {
+                reactor.my = true;
+                reactor.owner = { username: COLONY_OWNER };
+                // The frozen harness cannot walk the courier from Storage.
+                // Load it on the same transition that opens the sink, so the
+                // next tick prices and holds the Reactor Refill from W15S27.
+                if (courier) {
+                  courier.store = store({
+                    capacity: tuningNumber("ReactorLoad") + 1,
+                    thorium: tuningNumber("ReactorLoad"),
+                  });
+                }
+              }
             }
             return inner(...args);
           };
@@ -3937,18 +3987,10 @@ function printReactor(world, seeded) {
     for (const [name, taskId] of ore)
       console.log(`    ${name.padEnd(oreWidth)}  ${taskId}`);
   }
-  // Said on every run rather than left to a reader's memory of the queue: the
-  // courier is #319 and has not shipped, so `Deliver` is not a Task kind in
-  // this tree and no scenario can execute one. What this scenario stands is
-  // the half of the programme that exists — the ore into the Storage, and the
-  // flag taken back — and the day the courier lands it is this scenario that
-  // owes it a body in a transit room.
-  // Said on every run rather than left to a reader's memory of the queue —
-  // and read off the table like every other claim in this block, so the day
-  // the courier lands and a body holds one, this line reports the Task
-  // instead of going on denying it exists.
+  // Read off the table rather than inferred from the stationed body (#319):
+  // the delivery is the ordinary priced Reactor Refill, not a `Deliver` kind.
   const delivering = Object.entries(assignments).filter(([, taskId]) =>
-    taskId.startsWith("deliver:"),
+    taskId === `refill:${errand.id}:Thorium`,
   );
   console.log(
     "  the delivery: " +
@@ -3957,12 +3999,10 @@ function printReactor(world, seeded) {
             .map(([name, taskId]) => `${name} ${taskId}`)
             .join(
               ", ",
-            )} — the courier has landed and this scenario is standing its far end; ` +
-          "the ms below include the leg from the Storage to the reactor"
-        : "no body ended the run holding a `deliver:` Task (the courier is #319 and is not in " +
-          "this tree), so the leg from the Storage to the reactor is executed by nothing here. " +
-          "The re-claimer above is the whole of what stands at the far end today; the courier " +
-          "joins this scenario on the commit that lands it."),
+            )} — the fixed courier stands in W15S27 and these ms include the priced remainder ` +
+          "of the three-hop leg through the masked Keeper room"
+        : "no body ended the run holding the Reactor's Thorium Refill — this run measured the " +
+          "row and pool entry but not the delivery match"),
   );
 }
 

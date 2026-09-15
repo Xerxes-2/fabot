@@ -1164,7 +1164,13 @@ let quotaInputTests =
                         "anchor"
                         (castRows
                             (decide
-                                (colony [ [ Work; Work; Carry; Move ] ])
+                                (colony
+                                    [
+                                        {
+                                            Name = "anchor-14-Spawn1"
+                                            Body = [ Work; Work; Carry; Move ]
+                                        }
+                                    ])
                                 Map.empty
                                 Set.empty
                                 None)
@@ -1186,7 +1192,18 @@ let quotaInputTests =
                     }
 
                 Expect.equal
-                    (castRows (decideOn (colony [ [ Carry; Carry; Move ] ])).Intents |> List.head)
+                    (castRows
+                        (decideOn (
+                            colony
+                                [
+                                    {
+                                        Name = "hauler-14-Spawn1"
+                                        Body = [ Carry; Carry; Move ]
+                                    }
+                                ]
+                        ))
+                            .Intents
+                     |> List.head)
                     "anchor"
                     "a hauler in the oven pays off no Anchor gap"
             }

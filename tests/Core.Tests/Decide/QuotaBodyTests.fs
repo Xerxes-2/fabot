@@ -158,6 +158,10 @@ let patternTableTests =
                             Block = [ Carry; Carry; Move ]
                         }
                         {
+                            Name = "courier"
+                            Block = List.replicate 20 Carry @ List.replicate 10 Move
+                        }
+                        {
                             Name = "reserver"
                             Block = [ BodyPart.Claim; Move ]
                         }
@@ -192,6 +196,23 @@ let patternTableTests =
                     (bodyCost guardPattern.Block)
                     750
                     "and the guard block is the 750 energy ADR 0056's whole arithmetic is written at"
+            }
+
+            test
+                "the courier is one fixed 999-unit road body, whatever the bank can afford above it" {
+                let expected = List.replicate 20 Carry @ List.replicate 10 Move
+
+                Expect.equal
+                    (bodyFor courierPattern 1500)
+                    expected
+                    "twenty Carry hold the 999-unit load below its decade cliff"
+
+                Expect.equal
+                    (bodyFor courierPattern 2300)
+                    expected
+                    "the row does not spend a richer RCL6 bank on unused capacity"
+
+                Expect.equal (bodyCost expected) 1500 "the fixed body costs 1,500 energy"
             }
 
             test "every row of the table has a sizing rule that can size it" {
