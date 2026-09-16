@@ -547,6 +547,39 @@ module World =
             fromRoom
             toRoom
 
+    /// `linked` over a table, for a caller that asks it many times: the route
+    /// search asks per border and re-asks per hop, so one tick's scan set and
+    /// refusals came to 93 calls over 26 distinct ordered pairs — 7.6% of a
+    /// tick, all of it outside `decide` and so invisible to the phase split
+    /// that has been driving the CPU work (`docs/research/cpu-headroom.md`,
+    /// its candidate 2).
+    ///
+    /// The table is the **caller's**, built per call of this function and
+    /// therefore per tick, and that is the whole design: `linked` reads two
+    /// rooms' border rings and one room's terrain off the world handed in, and
+    /// while ADR 0031's memo makes those stable within a tick, nothing
+    /// promises it across one — a room that gains vision gets its facts from
+    /// the projection, not from the memo. A table that outlived a tick would
+    /// be answering about a world that no longer exists, which is exactly the
+    /// mistake ADR 0032 avoids by keying on the census signature; here there
+    /// is no signature to key on, so the tick is the lifetime.
+    ///
+    /// Asymmetric by construction, like `linked` itself: `A B` and `B A` are
+    /// two questions (`Declaration.routable` asks both, ADR 0062), so the key
+    /// is the ordered pair and an answer is never reused backwards.
+    let linkedBy (keeperMargin: int) (world: World) : string -> string -> bool =
+        let answered = System.Collections.Generic.Dictionary<string * string, bool>()
+
+        fun fromRoom toRoom ->
+            let pair = (fromRoom, toRoom)
+
+            match answered.TryGetValue pair with
+            | true, answer -> answer
+            | _ ->
+                let answer = linked keeperMargin world fromRoom toRoom
+                answered.[pair] <- answer
+                answer
+
     /// What one colony's declaration narrows to this tick, and the union of it:
     /// `scanOf`'s whole answer, in four named halves rather than a positional
     /// four. Declared inside `World` and never auto-opened, so the names below
@@ -608,24 +641,21 @@ module World =
         (world: World)
         (colony: Colony)
         : ScanSet =
+        // One table for both narrowings and for every hop inside each
+        // (`linkedBy`): the two filters ask about overlapping chains out of the
+        // same home, so the pairs they share are asked once. The outposts and
+        // the errands are still two filters, because they are two declaration
+        // kinds and the failure sizes differ (ADR 0060).
+        let reaches = linkedBy (Tuning.keeperMargin tuning) world
+
         let outposts =
             Outpost.worked shut colony.Outposts
-            |> List.filter (
-                Outpost.routable
-                    (linked (Tuning.keeperMargin tuning) world)
-                    tuning.MaxHops
-                    colony.Home
-            )
+            |> List.filter (Outpost.routable reaches tuning.MaxHops colony.Home)
 
         let errands =
             colony.Errands
             |> List.filter (fun errand -> not (Set.contains errand.RoomName shut))
-            |> List.filter (
-                Errand.routable
-                    (linked (Tuning.keeperMargin tuning) world)
-                    tuning.MaxHops
-                    colony.Home
-            )
+            |> List.filter (Errand.routable reaches tuning.MaxHops colony.Home)
 
         // The two halves of what a mother projects for a child of hers, and
         // they are disjoint by construction: a room she is raising is one we

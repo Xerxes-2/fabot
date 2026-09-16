@@ -983,6 +983,30 @@ let keeperMaskTests =
 
                 Expect.isFalse (linked "W14S26" "W15S26") "and the world says the same"
 
+                // The table in front of it answers identically, and this pair
+                // is the case worth checking it on: `linkedBy` keys the
+                // **ordered** pair (`docs/research/cpu-headroom.md`'s candidate
+                // 2), and a table keyed on an unordered one would answer `true`
+                // backwards over the one border in this repo where the two
+                // directions genuinely differ — the mask's orphaned east band
+                // (#326, ADR 0062).
+                let reaches = World.linkedBy margin world
+
+                Expect.isTrue (reaches "W15S26" "W14S26") "the table agrees out of the keeper room"
+
+                Expect.isFalse
+                    (reaches "W14S26" "W15S26")
+                    "and does not reuse that answer backwards"
+
+                // Asked twice, because a table that answered once and drifted
+                // would be worse than no table: the second reading is the
+                // stored row and it has to be the same row.
+                Expect.isTrue
+                    (reaches "W15S26" "W14S26")
+                    "and a second reading of a stored pair is the same"
+
+                Expect.isFalse (reaches "W14S26" "W15S26") "in both directions"
+
                 // And the chain the search builds off that relation, which is
                 // the reader ADR 0062's predicate reaches through and the one
                 // nothing else in this repo covers.

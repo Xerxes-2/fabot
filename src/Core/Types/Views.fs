@@ -775,7 +775,11 @@ module ColonyView =
             // decision 2): a refusal read off raw terrain would name a room the
             // chain admits, or keep quiet about one it does not.
             Refused =
-                let reaches = World.linked (Tuning.keeperMargin tuning) world
+                // Over a table (`World.linkedBy`), because both refusals walk
+                // the same chains out of the same home and the route search
+                // re-asks per hop — 93 calls over 26 pairs in one tick before
+                // this (`docs/research/cpu-headroom.md`).
+                let reaches = World.linkedBy (Tuning.keeperMargin tuning) world
 
                 Outpost.refused reaches tuning.MaxHops home colony.Outposts
                 @ Errand.refused reaches tuning.MaxHops home colony.Errands
