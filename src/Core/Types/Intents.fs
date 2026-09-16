@@ -121,6 +121,63 @@ type FatigueFactor = { FatigueParts: int; MoveParts: int }
 /// carrying it.
 type WalkTable = System.Collections.Generic.Dictionary<Pos * FatigueFactor * string, int[]>
 
+/// What a step costs a body, as the flood prices it. It lives here beside the
+/// tables keyed on it rather than in `Grid`, where it was declared until the
+/// far-field memo below joined the plan memo: a record the host holds across
+/// ticks cannot name a type declared in a module compiled after it.
+///
+/// The split that matters to every reader of it is **traffic**: `TravelCost`
+/// prices this tick's standing creeps and the other two are blind to them
+/// (`Grid.pricingOf` substitutes `noTraffic`), which is what decides whether
+/// an answer may outlive the tick that computed it.
+type Pricing =
+    /// Travel cost's units — half-ticks, floored at one unit a step, with
+    /// the occupancy surcharge on occupied tiles (ADR 0010, ADR 0008).
+    /// The ranking price: it breaks rank ties in the Matcher.
+    | TravelCost
+    /// The walk's whole ticks — floored at one tick a step, traffic-blind
+    /// (ADR 0029). The clock: the horizon every time-aware judgement is
+    /// made at.
+    | Walk
+    /// Travel cost's own units over empty ground (ADR 0030): the route the
+    /// body would take were no tile occupied. It differs from TravelCost in
+    /// traffic alone, which is what lets the reroute attribution blame the
+    /// difference on traffic and nothing else (ADR 0008, ADR 0009).
+    | Baseline
+
+/// The **traffic-blind** far fields flooded under one census signature
+/// (`docs/research/cpu-headroom.md` §5.1): the cost from every tile of the
+/// first room of a chain to the origins the walk ends at, carried across the
+/// chain's Seams (ADR 0058), per tile index of that first room. The far leg of
+/// every cross-room price, and the eighteen whole-room floods the survey found
+/// a `pair --level 7` tick spending three quarters of its flood work
+/// recomputing from scratch every tick.
+///
+/// Held across ticks on the plan memo like `WalkTable` above and for the same
+/// reason (ADR 0032): every input it reads is signed by the census signature —
+/// the walking grid of each room in the chain, and the Seam bands, which are
+/// terrain. A grid is terrain plus roads, obstacle-kind structures and sites,
+/// minerals and the controller's own tile; the signature names the first four
+/// per projected room, and a controller is either the declaration's furniture,
+/// which no tick moves, or a fact of vision — and vision moving in a projected
+/// room adds or drops that room's entry in the signature's per-room rate
+/// (`Decide.censusSignature`, `ColonyView.ofWorld` filing `Control` for every
+/// room it works, transit rooms included). So a signature that has not moved
+/// is a field that cannot have.
+///
+/// `TravelCost` is **not** in here: occupancy is this tick's fact and no census
+/// signs it.
+///
+/// The key is the field's whole derivation: the chain of rooms, the Task and
+/// whether the body is Work-heavy, the fatigue factor, the pricing, and the
+/// **origins** the flood is seeded from — the last because two callers hand
+/// different ones under the same Task (#358).
+type FarFieldTable =
+    System.Collections.Generic.Dictionary<
+        string list * Task * bool * FatigueFactor * Pricing * Pos list,
+        int[]
+     >
+
 /// What a Link footing is held beside (ADR 0022, ADR 0027): each planned
 /// source container, the controller container, the Storage. The Layout knows a
 /// target's kind by construction and carries it, so a footing the fold cannot
@@ -255,4 +312,8 @@ type PlanMemo =
         /// The walks flooded under this signature, filled through the tick by
         /// the Atlas the table was handed to.
         Walks: WalkTable
+        /// The traffic-blind far fields flooded under this signature, filled
+        /// through the tick by that same Atlas — `Walks`' rule one query over
+        /// (`docs/research/cpu-headroom.md` §5.1).
+        FarFields: FarFieldTable
     }

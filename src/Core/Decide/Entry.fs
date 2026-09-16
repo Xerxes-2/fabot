@@ -196,7 +196,19 @@ let decideUnarbitrated
         | Some m -> m.Walks
         | None -> WalkTable()
 
-    let atlas = Atlas.ofViewRecalling walks view
+    // The far legs of every cross-room price under the traffic-blind
+    // pricings, on the same terms as the walks above and for the same reason
+    // (ADR 0032, `docs/research/cpu-headroom.md` §5.1): they are a pure
+    // function of the chain's walking grids and Seam bands, which the census
+    // signature signs, so a signature that still stands is a field that still
+    // stands. Recalled as one table with the walks and dropped with them,
+    // because the two are stale under exactly the same condition.
+    let farFields =
+        match recalled with
+        | Some m -> m.FarFields
+        | None -> FarFieldTable()
+
+    let atlas = Atlas.ofViewRecalling walks farFields view
 
     let plan =
         match recalled with
@@ -218,6 +230,7 @@ let decideUnarbitrated
                 HaulerDemand = demandRows
                 HaulerLoad = load
                 Walks = walks
+                FarFields = farFields
             }
 
     // The tick's Threats, derived once off the view's hostiles and the

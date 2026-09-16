@@ -49,15 +49,21 @@ let invaderCoreTests =
                 // on this fixture because both calls are handed no memo
                 // and recompute from scratch anyway.
                 //
-                // One field of the memo cannot ride the record comparison:
-                // `Walks` is the mutable `Dictionary` the Atlas fills
-                // through the tick, and a Dictionary compares by
+                // Two fields of the memo cannot ride the record comparison:
+                // `Walks` and `FarFields` are the mutable `Dictionary`s the
+                // Atlas fills through the tick, and a Dictionary compares by
                 // reference, so two floods of identical walks are unequal
-                // on it for a reason that has nothing to do with a core.
-                // Its reference is swapped in and its *contents* are
-                // compared beside it, which loses nothing.
+                // on them for a reason that has nothing to do with a core.
+                // Their references are swapped in and their *contents* are
+                // compared beside them, which loses nothing.
                 let walkRows (memo: PlanMemo) =
                     memo.Walks
+                    |> Seq.map (fun entry -> entry.Key, List.ofArray entry.Value)
+                    |> List.ofSeq
+                    |> List.sortBy fst
+
+                let farRows (memo: PlanMemo) =
+                    memo.FarFields
                     |> Seq.map (fun entry -> entry.Key, List.ofArray entry.Value)
                     |> List.ofSeq
                     |> List.sortBy fst
@@ -70,6 +76,7 @@ let invaderCoreTests =
                             Memo =
                                 { threatened.Memo with
                                     Walks = untroubled.Memo.Walks
+                                    FarFields = untroubled.Memo.FarFields
                                 }
                         }
                         untroubled
@@ -79,6 +86,11 @@ let invaderCoreTests =
                         (walkRows threatened.Memo)
                         (walkRows untroubled.Memo)
                         $"{label}: the same spawn walks flooded under it"
+
+                    Expect.equal
+                        (farRows threatened.Memo)
+                        (farRows untroubled.Memo)
+                        $"{label}: and the same far fields"
 
                 unchangedWith
                     "a core whose collapse timer is readable"
@@ -161,6 +173,7 @@ let invaderCoreTests =
                         Memo =
                             { frontier.Memo with
                                 Walks = rivalHeld.Memo.Walks
+                                FarFields = rivalHeld.Memo.FarFields
                             }
                     }
                     rivalHeld

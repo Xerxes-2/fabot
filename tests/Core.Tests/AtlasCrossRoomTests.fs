@@ -401,6 +401,115 @@ let crossRoomTests =
                     (Some 18)
                     "and the light body ignores the Post, over the same border on the same tick"
             }
+
+            test "two origin sets under one Task are two far fields, not one" {
+                // The far field is memoised per (chain, Task, body, pricing),
+                // and the origins it was flooded out of used to ride in as an
+                // argument rather than in the key. Two callers hand different
+                // ones for the same Task: `travelCost` prices toward the
+                // Task's own narrowed area, and `travelCostToward` toward the
+                // tiles the decision layer hands it — a Work Area with a Reach
+                // taken out, or a Flee set (ADR 0033). Whichever asked first
+                // answered for both (#358).
+                let atlas =
+                    northOf
+                        (corridorHome [ "w", { X = 25; Y = 10 } ])
+                        [ { X = 25; Y = 0 }, Plain ]
+                        corridorOutpost
+                        [ { X = 25; Y = 49 }, Plain ]
+                        [ "src-out", Source ]
+                        [ worker "w" ]
+
+                // The worked example above, in the ranking price's units:
+                // nine near steps, the exit, and eight in the outpost down to
+                // the source's one Seat at (25,41), two units a plain step.
+                Expect.equal
+                    (travelCost atlas "w" (Harvest "src-out"))
+                    (Some 36)
+                    "the premise: the Task's own area is flooded first"
+
+                // Four tiles nearer the landing than that Seat, so four steps
+                // and eight units cheaper: 9 + 1 + 4 steps.
+                Expect.equal
+                    (travelCostToward
+                        atlas
+                        "w"
+                        (Harvest "src-out")
+                        "W1N2"
+                        (Set.singleton (at "W1N2" { X = 25; Y = 45 })))
+                    (Some 28)
+                    "and the caller's own tile is priced to itself, not to the Seat behind it"
+            }
+
+            test
+                "the traffic-blind far field is recalled by the next Atlas; the traffic-aware one is not" {
+                // `docs/research/cpu-headroom.md` §5.1: every input of a far
+                // field under `Walk` or `Baseline` is in the census — the
+                // chain's walking grids and its Seam bands — so it rides the
+                // plan memo across the tick boundary exactly as the spawn
+                // walk table does (ADR 0032). `TravelCost` prices this tick's
+                // standing creeps, which no census signs, so it stays in the
+                // Atlas's own table and dies with it.
+                let snapshot () =
+                    northOfSnapshot
+                        (corridorHome [ "w", { X = 25; Y = 10 } ])
+                        [ { X = 25; Y = 0 }, Plain ]
+                        corridorOutpost
+                        [ { X = 25; Y = 49 }, Plain ]
+                        [ "src-out", Source ]
+                        [ worker "w" ]
+
+                let held = FarFieldTable()
+
+                let flood () =
+                    held |> Seq.map (fun entry -> entry.Value) |> Seq.exactlyOne
+
+                let first = snapshot () |> ofViewRecalling (WalkTable()) held
+
+                Expect.equal
+                    (walkTicks first "w" (Harvest "src-out"))
+                    (Some 18)
+                    "the first Atlas floods the chain to price the walk"
+
+                Expect.equal held.Count 1 "and leaves the far field in the table it was handed"
+                let flooded = flood ()
+
+                Expect.equal
+                    (travelCost first "w" (Harvest "src-out"))
+                    (Some 36)
+                    "the ranking price crosses the same border"
+
+                Expect.equal
+                    held.Count
+                    1
+                    "and adds nothing here: a field that prices traffic may not outlive the tick"
+
+                let second = snapshot () |> ofViewRecalling (WalkTable()) held
+
+                Expect.equal
+                    (walkTicks second "w" (Harvest "src-out"))
+                    (Some 18)
+                    "the recalled field prices the same walk"
+
+                Expect.equal held.Count 1 "no second entry under the same key"
+
+                Expect.isTrue
+                    (obj.ReferenceEquals(flood (), flooded))
+                    "the second Atlas read the first's field rather than running its own"
+
+                // The other half of the seam, the tick the census moves: a
+                // table with nothing in it is flooded into, and prices the
+                // same walk off its own Dijkstra.
+                let fresh = FarFieldTable()
+                let dropped = snapshot () |> ofViewRecalling (WalkTable()) fresh
+
+                Expect.equal
+                    (walkTicks dropped "w" (Harvest "src-out"))
+                    (Some 18)
+                    "an empty table is flooded into, and prices the walk identically"
+
+                Expect.equal fresh.Count 1 "the field it ran is left in it"
+            }
         ]
 
 [<Tests>]
@@ -669,7 +778,9 @@ let crossRoomLeadTests =
                         room, entry.Value)
                     |> Map.ofSeq
 
-                let atlas = leadAcrossSnapshot homeRing outpostRing [] [] |> ofViewRecalling walks
+                let atlas =
+                    leadAcrossSnapshot homeRing outpostRing [] []
+                    |> ofViewRecalling walks (FarFieldTable())
 
                 Expect.equal
                     (castWalkTicks atlas hauler leadSpawn (at "W1N2" outpostSeat))
@@ -702,7 +813,9 @@ let crossRoomLeadTests =
                 // filled table reads the very arrays the first one flooded,
                 // so a census that has not moved pays for no second
                 // Dijkstra on either side of the border (ADR 0032).
-                let second = leadAcrossSnapshot homeRing outpostRing [] [] |> ofViewRecalling walks
+                let second =
+                    leadAcrossSnapshot homeRing outpostRing [] []
+                    |> ofViewRecalling walks (FarFieldTable())
 
                 Expect.equal
                     (castWalkTicks second hauler leadSpawn (at "W1N2" outpostSeat))

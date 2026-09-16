@@ -942,4 +942,31 @@ let planMemoTests =
 
                 Expect.equal emptied.Memo.Walks.Count 0 "the memo's table went with its signature"
             }
+
+            test "the far fields ride the memo on the walk table's own terms" {
+                // `docs/research/cpu-headroom.md` §5.1: the traffic-blind far
+                // leg of a cross-room price reads the chain's walking grids
+                // and its Seam bands and nothing else, so it is recalled and
+                // dropped under exactly the condition the spawn walks are
+                // (ADR 0032). One seam and one signature for both tables,
+                // which is why this pins the lifetime here and leaves the
+                // field's contents to the Atlas suite, where a border is
+                // cheap to draw.
+                let staffed = staffedColony [ worker "w1" 0 50 ] [ "w1", { X = 22; Y = 25 } ]
+
+                let first = decideOn (staffed (trunkColony 2))
+
+                let held = decide (staffed (trunkColony 2)) Map.empty Set.empty (Some first.Memo)
+
+                Expect.isTrue
+                    (obj.ReferenceEquals(held.Memo.FarFields, first.Memo.FarFields))
+                    "an unchanged census hands the same table on"
+
+                let levelled =
+                    decide (staffed (trunkColony 3)) Map.empty Set.empty (Some first.Memo)
+
+                Expect.isFalse
+                    (obj.ReferenceEquals(levelled.Memo.FarFields, first.Memo.FarFields))
+                    "and a moved one gets a table of its own, as the walks do"
+            }
         ]

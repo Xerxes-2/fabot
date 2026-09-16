@@ -7,21 +7,6 @@ module Fabot.Core.Grid
 open Fabot.Core.Types
 open Fable.Core
 
-type internal Pricing =
-    /// Travel cost's units — half-ticks, floored at one unit a step, with
-    /// the occupancy surcharge on occupied tiles (ADR 0010, ADR 0008).
-    /// The ranking price: it breaks rank ties in the Matcher.
-    | TravelCost
-    /// The walk's whole ticks — floored at one tick a step, traffic-blind
-    /// (ADR 0029). The clock: the horizon every time-aware judgement is
-    /// made at.
-    | Walk
-    /// Travel cost's own units over empty ground (ADR 0030): the route the
-    /// body would take were no tile occupied. It differs from TravelCost in
-    /// traffic alone, which is what lets the reroute attribution blame the
-    /// difference on traffic and nothing else (ADR 0008, ADR 0009).
-    | Baseline
-
 /// A Dijkstra flood the readers advance rather than a finished pair of arrays:
 /// the distance and predecessor grids, plus the heap and the live length the
 /// loop left off at. Dijkstra settles a tile for good the moment it leaves the

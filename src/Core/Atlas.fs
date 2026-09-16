@@ -97,14 +97,22 @@ type Atlas =
             /// chain of one room is the one-hop far leg the join has always
             /// read, keyed the same way beside the same Task, body and
             /// pricing; a longer chain is that flood with a hop's seeds
-            /// folded on per further room. One table and not two, because a
-            /// reader that had to know which it wanted would be a reader that
-            /// could ask for the wrong one.
-            FarFields:
-                System.Collections.Generic.Dictionary<
-                    string list * Task * bool * FatigueFactor * Pricing,
-                    int[]
-                 >
+            /// folded on per further room.
+            ///
+            /// This one holds the **traffic-aware** pricing alone and dies
+            /// with the Atlas, because occupancy is this tick's fact; its
+            /// traffic-blind half lives in `FarFields` beside it and outlives
+            /// the tick. Two tables and not one, and the split is by the one
+            /// thing that decides a field's lifetime rather than by the
+            /// caller's taste: `farFieldAlong` picks by the pricing, so no
+            /// reader can ask for the wrong one.
+            TickFarFields: FarFieldTable
+            /// The same far legs under the traffic-blind pricings, held
+            /// across ticks on the plan memo's census signature (ADR 0032,
+            /// `docs/research/cpu-headroom.md` §5.1). Filled here, handed
+            /// back by `Decide.decideUnarbitrated` to the next tick, and
+            /// replaced by an empty table the tick the signature moves.
+            FarFields: FarFieldTable
             /// Memoised room chains per ordered room pair — every chain of the
             /// fewest crossings a walk between them could take, ends included
             /// (ADR 0058, #288). Answered off the border rings and the raw
@@ -167,12 +175,14 @@ type Atlas =
             RefillableIds: Set<string>
         }
 
-/// The Atlas over a view, recalling a spawn walk table rather than laying an
-/// empty one (ADR 0032). The caller hands in the plan memo's table while the
-/// census signature is unchanged, and a fresh one when it moved: every entry
-/// is a pure function of the census. Every other table is laid empty — they
-/// key on this tick's creeps, or on this tick's traffic.
-let ofViewRecalling (walks: WalkTable) (view: ColonyView) : Atlas =
+/// The Atlas over a view, recalling the tables the census keys rather than
+/// laying empty ones (ADR 0032): the spawn walk table, and the traffic-blind
+/// far fields beside it (`docs/research/cpu-headroom.md` §5.1). The caller
+/// hands in the plan memo's tables while the census signature is unchanged,
+/// and fresh ones when it moved: every entry in either is a pure function of
+/// the census. Every other table is laid empty — they key on this tick's
+/// creeps, or on this tick's traffic.
+let ofViewRecalling (walks: WalkTable) (farFields: FarFieldTable) (view: ColonyView) : Atlas =
     let spatial = view.Spatial
 
     // The home room, spelled the one way the convention is spelled
@@ -374,7 +384,8 @@ let ofViewRecalling (walks: WalkTable) (view: ColonyView) : Atlas =
                 Map.empty
         SeamWalks = System.Collections.Generic.Dictionary()
         Routes = System.Collections.Generic.Dictionary()
-        FarFields = System.Collections.Generic.Dictionary()
+        TickFarFields = FarFieldTable()
+        FarFields = farFields
         Walks = walks
         WorkAreas = System.Collections.Generic.Dictionary()
         HeavyAreas = System.Collections.Generic.Dictionary()
@@ -388,11 +399,12 @@ let ofViewRecalling (walks: WalkTable) (view: ColonyView) : Atlas =
         RefillableIds = view.Refillables |> List.map (fun r -> r.Id) |> Set.ofList
     }
 
-/// The Atlas over a view with nothing recalled: a fresh spawn walk
-/// table, filled from scratch as this tick prices its leads. The tick loop
+/// The Atlas over a view with nothing recalled: fresh tables, filled from
+/// scratch as this tick prices its leads and its crossings. The tick loop
 /// always has a memo to hand over, so this is the shape a reader building
 /// an Atlas over a view alone — a test, or a one-off — asks for.
-let ofView (view: ColonyView) : Atlas = ofViewRecalling (WalkTable()) view
+let ofView (view: ColonyView) : Atlas =
+    ofViewRecalling (WalkTable()) (FarFieldTable()) view
 
 /// One room's geometry, read the way ADR 0041 says a layer is read: a room the
 /// projection carries no geometry for has no entry, which is the same answer as
@@ -1870,6 +1882,28 @@ let private chainedInto
 /// The same chain memoised colony-wide for one Task and one body — the shape
 /// every per-creep price reads it in, and the reason a second creep pricing the
 /// same Task across the same rooms pays for no second chain.
+///
+/// Under the two traffic-blind pricings the memo is the **plan memo's**, so
+/// the answer outlives the tick that flooded it and the same chain is flooded
+/// once per census rather than once per tick (ADR 0032,
+/// `docs/research/cpu-headroom.md` §5.1: eighteen whole-room floods a tick on
+/// `pair --level 7`, all of them the same four `Reserve` chains). `TravelCost`
+/// keeps the per-tick table: it prices this tick's standing creeps, which no
+/// census signs.
+///
+/// The **origins** are in the key and not merely in the argument list, and
+/// they must be: `pricedAcross` hands the Task's own narrowed area while
+/// `crossingToward` hands the caller's tiles — a Work Area less a Reach, or a
+/// Flee set (ADR 0033) — so under the old key whichever flooded first answered
+/// for the other (#358). That is a same-tick wrong number on `main` today and
+/// would be a persistent one the moment a field outlives its call.
+///
+/// Which is also what bounds the held table: `crossingToward` prices at
+/// `TravelCost` alone today, so every key that reaches the held half carries
+/// origins derived from the Task and the grids — both signed by the signature
+/// the table rides. A caller-narrowed set under `Walk` would key the held
+/// table on the decision layer's per-tick judgement instead, and that grows
+/// with the ticks rather than with the census.
 let private farFieldAlong
     (atlas: Atlas)
     (pricing: Pricing)
@@ -1880,7 +1914,13 @@ let private farFieldAlong
     : int[] =
     let factor = factorOf atlas creep
 
-    memoised atlas.FarFields (chain, task, workHeavy atlas creep, factor, pricing) (fun () ->
+    let table =
+        match pricing with
+        | Walk
+        | Baseline -> atlas.FarFields
+        | TravelCost -> atlas.TickFarFields
+
+    memoised table (chain, task, workHeavy atlas creep, factor, pricing, origins) (fun () ->
         chainedInto atlas factor pricing chain origins)
 
 /// The near leg of a cross-room join, in the two shapes its callers hand it:
