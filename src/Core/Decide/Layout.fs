@@ -140,12 +140,15 @@ let private allowanceOf kind level =
     | BuiltKind.Tower, _ -> 6
     | BuiltKind.Storage, (0 | 1 | 2 | 3) -> 0
     | BuiltKind.Storage, _ -> 1
+    | BuiltKind.Terminal, (0 | 1 | 2 | 3 | 4 | 5) -> 0
+    | BuiltKind.Terminal, _ -> 1
     | _ -> 0
 
 /// The kinds the clustered horizon sizes, and the ones the ceiling below is
 /// read over. The Storage is not one of them: it reads no horizon at all and
 /// holds its whole allowance from level 0 (ADR 0022).
-let private clusteredKinds = [ BuiltKind.Extension; BuiltKind.Tower ]
+let private clusteredKinds =
+    [ BuiltKind.Extension; BuiltKind.Tower; BuiltKind.Terminal ]
 
 /// The level past which `allowanceOf` stops growing — the smallest level at
 /// which every clustered kind already answers what its catch-all row answers,
@@ -295,6 +298,28 @@ let internal planLayout
         let horizon = Tuning.horizonOf view.Tuning controller.Level
 
         let storageSlots = gapAt BuiltKind.Storage view.Tuning.StorageLevel
+
+        // The terminal's slot, sized at the **horizon** and not from level 0
+        // (#349). The Storage's argument — its tile never comes back once an
+        // extension takes it — is true of the terminal too, and it is still not
+        // enough: holding a tile from level 0 for a kind the engine unlocks at
+        // RCL6 is the four-level lookahead ADR 0011 bargained away and ADR 0063
+        // derived out, and it is paid by exactly the rooms that can least
+        // afford it. A cramped room offering seven same-colour tiles lost its
+        // fifth extension to this reservation at RCL2 — four levels before the
+        // terminal could be built at all.
+        //
+        // Sized at the horizon it is held one level early, the same bargain
+        // every clustered kind gets, and what it risks is one tile of distance:
+        // if an extension took the pick beside the Storage before RCL5, the
+        // terminal takes the next tile of the same ordering and the ore's walk
+        // is a tile longer. That is the cheap side of the trade.
+        let terminalSlots = gapAt BuiltKind.Terminal horizon
+
+        // ... and at the ceiling for the reservation the trunks dodge (ADR
+        // 0064), which reads no level: a road planned across the terminal's
+        // tile at RCL2 is a road orphaned at RCL6.
+        let reservedTerminalSlots = gapAt BuiltKind.Terminal allowanceCeiling
         let towerSlots = gapAt BuiltKind.Tower horizon
         let extensionSlots = gapAt BuiltKind.Extension horizon
 
@@ -328,10 +353,25 @@ let internal planLayout
         let clustered =
             ordering
             |> List.truncate (
-                storageSlots + reservedTowerSlots + reservedExtensionSlots + footingSlots
+                storageSlots
+                + reservedTerminalSlots
+                + reservedTowerSlots
+                + reservedExtensionSlots
+                + footingSlots
             )
 
         let storagePick = ordering |> List.truncate storageSlots
+
+        // The terminal behind the Storage in the same ordering, which is what
+        // buys the thing the send is for: the ordering is the cluster sorted by
+        // range from the spawn, so the tile after the Storage's is the nearest
+        // tile to it the cluster has — and the ore's walk from the one store to
+        // the other is a hauler's shortest leg rather than a second errand
+        // (#349).
+        let terminalPick =
+            ordering
+            |> List.skip (min storageSlots (List.length ordering))
+            |> List.truncate terminalSlots
 
         // Reserved before trunks: a trunk never crosses a tile a reserved
         // structure will claim, and the widened window holds the footings as
@@ -615,8 +655,15 @@ let internal planLayout
         // directions: the footing fold would record the tile as *served* while
         // the container site took it, and the Storage would go without the link
         // ADR 0022 reserved one for.
+        // ... and the **terminal's** pick with them (#349), which reaches this
+        // list through no other route either: it is the target of no footing —
+        // a link carries energy to a store the haulers feed, and a terminal is
+        // fed by no Refill at all — so nothing above names it, and a link
+        // reserved on its tile would be the same silent double loss.
         let footingBlockedTiles =
-            (footingTargets |> List.map fst) @ (mineralContainerPicks |> List.map snd)
+            (footingTargets |> List.map fst)
+            @ (mineralContainerPicks |> List.map snd)
+            @ terminalPick
 
         // A standing link is a target, so its own footing has stopped being
         // buildable: added back, or the footing would jump the tick the link
@@ -671,10 +718,16 @@ let internal planLayout
         // them: this is the **placement**, sized at the horizon and so at this
         // room's own level, inside the reservation the trunks already dodged
         // (ADR 0064).
+        // The terminal's pick is held out with the Storage's (#349): both are
+        // tiles of this same ordering, reserved from level 0 against the level
+        // the engine unlocks them at, and a tower or an extension offered one
+        // of them is the double-booking ADR 0022's invariant exists to catch.
         let clusterPicks =
             ordering
             |> List.filter (fun tile ->
-                not (List.contains tile storagePick) && not (Set.contains tile footingTiles))
+                not (List.contains tile storagePick)
+                && not (List.contains tile terminalPick)
+                && not (Set.contains tile footingTiles))
             |> List.truncate (towerSlots + extensionSlots)
 
         let towerTiles, extensionTiles =
@@ -808,6 +861,7 @@ let internal planLayout
             |> List.map (fun tile -> PlaceConstructionSite(RoomPos.at room tile, kind))
 
         place Storage (storagePick |> List.truncate (gapAt BuiltKind.Storage controller.Level))
+        @ place Terminal (terminalPick |> List.truncate (gapAt BuiltKind.Terminal controller.Level))
         @ place Tower (towerTiles |> List.truncate (gapAt BuiltKind.Tower controller.Level))
         @ place
             Extension

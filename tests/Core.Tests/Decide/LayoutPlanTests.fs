@@ -1010,7 +1010,9 @@ let storageTests =
             test "RCL4 places one Storage on the ordering's first pick, the tower next" {
                 // The cluster's nearest same-colour tile is the Storage's at
                 // every level (ADR 0022) — the tower and the extensions take
-                // the picks after it.
+                // the picks after it. The terminal's own pick is the second
+                // nearest from RCL5 (#349), one level before the engine
+                // unlocks it and not four; at RCL4 the tower still has it.
                 let { Intents = intents } = decideOn (atLevel 4 (openRoom 3))
 
                 Expect.equal
@@ -1028,6 +1030,69 @@ let storageTests =
                         (orderKey { X = 24; Y = 24 })
                         (orderKey tile)
                         "the Storage's pick comes before every extension in the one ordering"
+            }
+
+            // The terminal (#349). Sized at the horizon rather than from level
+            // 0: the Storage's "its tile never comes back" is true here too and
+            // still not enough, because holding a tile four levels early is the
+            // lookahead ADR 0011 bargained away — and the room that pays is the
+            // cramped one, which loses an extension it could build now for a
+            // terminal it cannot build until RCL6.
+            test "the terminal's tile is held a level early and placed at RCL6" {
+                let at level = decideOn (atLevel level (openRoom 3))
+
+                Expect.isEmpty
+                    (sitesOfKind Terminal (at 4).Intents)
+                    "RCL4 is two levels out: the tile is not held and no terminal is asked for"
+
+                Expect.equal
+                    (sitesOfKind Tower (at 4).Intents)
+                    [ { X = 24; Y = 26 } ]
+                    "so the tower still takes the pick after the Storage's"
+
+                Expect.isEmpty
+                    (sitesOfKind Terminal (at 5).Intents)
+                    "RCL5 holds the tile but places nothing: the engine allows no terminal yet"
+
+                Expect.isFalse
+                    (List.contains { X = 24; Y = 26 } (placedTiles (at 5).Intents))
+                    "and nothing else is placed on it, which is what holding it means"
+
+                Expect.equal
+                    (sitesOfKind Terminal (at 6).Intents)
+                    [ { X = 24; Y = 26 } ]
+                    "RCL6 places one, on the tile held for it"
+
+                // The point of the pick, in one number (#349): the terminal
+                // lands two tiles from the Storage's own — the nearest this
+                // checkerboard allows — so moving the ore from the one store to
+                // the other is the shortest walk in the cluster and not a
+                // second errand.
+                Expect.equal
+                    (sitesOfKind Storage (at 6).Intents
+                     |> List.map (fun tile -> range tile { X = 24; Y = 26 }))
+                    [ 2 ]
+                    "two tiles from the Storage the same plan places"
+            }
+
+            test "a standing terminal places none, and its tile is offered to no other kind" {
+                let standing =
+                    openRoom 3
+                    |> withTargets
+                        [
+                            "sto-1", { X = 24; Y = 24 }, Structure BuiltKind.Storage
+                            "term-1", { X = 24; Y = 26 }, Structure BuiltKind.Terminal
+                        ]
+
+                let { Intents = intents } = decideOn (atLevel 6 standing)
+
+                Expect.isEmpty
+                    (sitesOfKind Terminal intents)
+                    "the standing census fills the allowance"
+
+                Expect.isFalse
+                    (List.contains { X = 24; Y = 26 } (placedTiles intents))
+                    "and the tower behind it takes the next tile, not this one"
             }
 
             test "RCL3 places no Storage yet still holds its tile against the cluster" {

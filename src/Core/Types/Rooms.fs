@@ -55,6 +55,20 @@ type BuiltKind =
     /// nothing, stores nothing, decays into nothing and is never repaired, so
     /// every predicate over the vocabulary answers no for it.
     | Extractor
+    /// The terminal (#349). One per room from RCL6, and the only structure in
+    /// the vocabulary whose reason for existing is a room it is **not** in: a
+    /// `send` between two terminals of the same owner is unrestricted by
+    /// `mod-season5/src/terminal-restriction.js`, which nulls a send only when
+    /// the target terminal belongs to somebody else. That is the one path from
+    /// the Thorium banked in rooms five and six crossings from the Reactor to
+    /// the colony that can walk it in.
+    ///
+    /// Modelled rather than Other for the Extractor's reason: the Layout has to
+    /// see the one already standing — or the site going up — before it asks for
+    /// another. It holds a store, and no rule reads that store yet; a kind the
+    /// Refill rules do not name is a kind no hauler fills, which is what keeps
+    /// this slice inert until #349's send rule lands.
+    | Terminal
     /// Any structure kind the decision layer has no rules for yet.
     | Other
 

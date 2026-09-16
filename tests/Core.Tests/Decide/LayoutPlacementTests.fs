@@ -32,6 +32,7 @@ let builtKindTests =
                         "link"
                         "rampart"
                         "extractor"
+                        "terminal"
                     ]
                     "each BuiltKind maps to its Screeps string"
             }
@@ -73,6 +74,9 @@ let builtKindTests =
                         // does not decay, and its hits never reach the
                         // projection (ADR 0057 decision 1).
                         BuiltKind.Extractor, None
+                        // Nor a terminal: it does not decay either, and
+                        // nothing reads its hits (#349).
+                        BuiltKind.Terminal, None
                     ]
                     "one line per kind, and none for the kinds Repair never touches"
 

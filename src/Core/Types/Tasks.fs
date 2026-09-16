@@ -206,6 +206,10 @@ type StructureKind =
     /// clustered ordering by construction — and the only one the Layout places
     /// exactly once in a room's life.
     | Extractor
+    /// The terminal (#349). One per room from RCL6, placed off the clustered
+    /// ordering behind the Storage's own pick, so the ore's walk from the one
+    /// store to the other is the shortest walk the cluster has.
+    | Terminal
 
 /// One step of creep movement, engine vocabulary: Top decreases Y.
 type Direction =
@@ -269,6 +273,7 @@ let allBuiltKinds =
         BuiltKind.Link
         BuiltKind.Rampart
         BuiltKind.Extractor
+        BuiltKind.Terminal
     ]
 
 /// Screeps STRUCTURE_* strings as the engine spells them, in `structureType`
@@ -287,6 +292,7 @@ let builtKindName =
     | BuiltKind.Link -> "link"
     | BuiltKind.Rampart -> "rampart"
     | BuiltKind.Extractor -> "extractor"
+    | BuiltKind.Terminal -> "terminal"
     | BuiltKind.Other -> ""
 
 /// The built kind a placement Intent's kind names: the one crossing between
@@ -303,6 +309,7 @@ let builtKindOfPlaceable =
     | Storage -> BuiltKind.Storage
     | Rampart -> BuiltKind.Rampart
     | Extractor -> BuiltKind.Extractor
+    | Terminal -> BuiltKind.Terminal
 
 /// The kinds Refill keeps fed (ADR 0010): the spawn-energy feeders and the
 /// towers, the structures a view projects as Refillables. The controller
@@ -319,6 +326,11 @@ let isRefillable =
     | BuiltKind.Link
     | BuiltKind.Rampart
     | BuiltKind.Extractor
+    // The terminal is fed by no Refill (#349). Its energy and its ore are the
+    // send rule's business and will be pooled off its store the way the
+    // Storage's are (ADR 0023), not off this list, which is the spawn-energy
+    // feeders and the towers.
+    | BuiltKind.Terminal
     | BuiltKind.Other -> false
 
 /// The Keep (ADR 0034): the structures worth defending — the spawn, the tower
@@ -336,6 +348,12 @@ let isKeep =
     | BuiltKind.Link
     | BuiltKind.Rampart
     | BuiltKind.Extractor
+    // Not in the Keep yet, and it is a real question rather than an obvious no
+    // (#349): a terminal holding the season's banked ore is worth more than the
+    // Storage beside it. Answering yes moves three rules at once — a rampart
+    // over it, Repair to full, and the safe-mode reflex — so it is left for the
+    // slice that has a terminal standing to measure them against.
+    | BuiltKind.Terminal
     | BuiltKind.Other -> false
 
 /// The kinds a raid's damage is charged on (ADR 0034): the Keep and the
@@ -353,6 +371,7 @@ let isDefence =
     | BuiltKind.Container
     | BuiltKind.Link
     | BuiltKind.Extractor
+    | BuiltKind.Terminal
     | BuiltKind.Other -> false
 
 /// The kinds whose projection has to ask the engine who owns them: every
@@ -370,6 +389,7 @@ let needsOwner =
     | BuiltKind.Container
     | BuiltKind.Link
     | BuiltKind.Extractor
+    | BuiltKind.Terminal
     | BuiltKind.Other -> false
 
 /// Where a kind is whole — which of the three rules judges its hits (ADR
@@ -408,6 +428,10 @@ let wholeLine =
     | BuiltKind.Extension
     | BuiltKind.Link
     | BuiltKind.Extractor
+    // A terminal does not decay, and nothing reads its hits, so Repair never
+    // asks after it — the same answer the extensions get and for the same
+    // reason (#349).
+    | BuiltKind.Terminal
     | BuiltKind.Other -> None
 
 /// The kinds whose stored energy enters the projection: the containers,
@@ -425,6 +449,12 @@ let isStored =
     | BuiltKind.Link
     | BuiltKind.Rampart
     | BuiltKind.Extractor
+    // Not yet (#349), and deliberately: this field is what puts a store into
+    // the projection, and "fields nobody decides on stay out" is this list's
+    // own rule. It flips in the slice that adds the send — together with the
+    // rules that read it, so a terminal's store never sits in the projection
+    // as an energy source no rule meant to offer.
+    | BuiltKind.Terminal
     | BuiltKind.Other -> false
 
 /// The kinds a creep can stand on; every other kind blocks its tile
@@ -445,6 +475,9 @@ let isWalkable =
     | BuiltKind.Tower
     | BuiltKind.Storage
     | BuiltKind.Link
+    // In OBSTACLE_OBJECT_TYPES, like the Storage it stands beside
+    // (`docs/research/creep-positioning-traffic.md`).
+    | BuiltKind.Terminal
     | BuiltKind.Other -> false
 
 /// Screeps direction constants as `Creep.move` expects them: TOP = 1, then clockwise.

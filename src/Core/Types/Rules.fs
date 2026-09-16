@@ -266,6 +266,14 @@ type Tuning =
         /// unbuildable for every other kind, so there is no window for an
         /// extension to take and nothing to hold open.
         ExtractorLevel: int
+        /// The level the engine unlocks the terminal at (`CONTROLLER_STRUCTURES`
+        /// for "terminal": 1 from RCL6). Beside `StorageLevel` and read the
+        /// same way (#349): the Layout **reserves** the terminal's tile at this
+        /// level from level 0, because its pick sits inside the clustered
+        /// ordering and an extension that takes that tile never gives it back —
+        /// and it *places* at the room's own level, so nothing goes up before
+        /// the engine allows it.
+        TerminalLevel: int
         /// The Work parts one Move carries on the **miner** row (ADR 0057
         /// decision 2). Five, derived at the **2,300 bank**: the body walks to
         /// one tile once and then never leaves it, so its Move is bought for a
@@ -485,6 +493,7 @@ module Tuning =
             SafeModeDeadline = 3
             StorageLevel = 4
             ExtractorLevel = 6
+            TerminalLevel = 6
             MinerWorkPerMove = 5
             MineContactAgeing = 3
             MineContactCliff = 1000
