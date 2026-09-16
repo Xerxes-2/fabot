@@ -974,6 +974,62 @@ let courierTests =
                     "and the draw behind it stays shut"
             }
 
+            // #362, and the sentence the gate's docstring had to give up: "a
+            // load admitted here has strictly more room when it lands" is true
+            // of one carrier and false of two. Live at t501,501 a hauler drew
+            // 204 T against a low store; the gate stayed open behind it, a
+            // courier drew a whole 500 and landed first, and the hauler reached
+            // a store of 999 with 196 T it could not put down — 152 ticks
+            // standing on the Reactor's tile, beside 419 T already on the floor
+            // from the same shape.
+            test "the draw counts the ore already walking, not only the ore already burnt" {
+                let room = Engine.reactorCapacity - Tuning.defaults.ReactorLoad
+
+                let withStore held =
+                    deliveryColony (Some Ownership.Ours) |> withReactorStore held
+
+                // One unit afloat is one unit of the room already spoken for,
+                // which is the whole of the fix: the store is not the only
+                // claim on the Reactor's space.
+                let afloat aboard held =
+                    withStore held
+                    |> withErrandCreep ringTile (courier "courier-walking" |> carrying aboard)
+
+                Expect.isFalse
+                    (planTasksOn (afloat 1 room) noThreats
+                     |> List.contains (Withdraw("sto-1", Thorium)))
+                    "exactly one load of room and one unit walking: the second draw is the one that strands"
+
+                Expect.contains
+                    (planTasksOn (afloat 1 (room - 1)) noThreats)
+                    (Withdraw("sto-1", Thorium))
+                    "and a unit of room to spare over what is afloat opens it again"
+
+                // The live shape, to the numbers it happened at: 204 aboard
+                // against a store that leaves room for a load and no more.
+                Expect.isFalse
+                    (planTasksOn (afloat 204 room) noThreats
+                     |> List.contains (Withdraw("sto-1", Thorium)))
+                    "the incident's own arithmetic: 204 walking is 204 of the store's room already claimed"
+
+                // Counting every unit afloat counts a mine hauler's load too,
+                // which is not inbound to the Reactor at all. That is the
+                // conservative side of the trade and it is asserted rather than
+                // regretted: naming which body is inbound means reading the
+                // assignments the Planner is blind to (ADR 0025), and the cost
+                // of the reading is one haul cycle of cadence.
+                let mineHaul =
+                    { withStore room with
+                        Creeps =
+                            (hauler "hauler-homebound" 0 100 |> carrying 400)
+                            :: (withStore room).Creeps
+                    }
+
+                Expect.isFalse
+                    (planTasksOn mineHaul noThreats |> List.contains (Withdraw("sto-1", Thorium)))
+                    "ore walking home to the Storage defers the draw as well, deliberately"
+            }
+
             // The regression the first version of this gate shipped (#354).
             // `SpatialInfo.Thorium` carries every store a Task can name and
             // deliberately not the Reactor's — `RoomFacts.Thorium`'s own

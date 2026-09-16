@@ -370,11 +370,26 @@ let internal ourThoriumTombstones (view: ColonyView) : string list =
 /// strands the surplus, or falls behind it and breaks the streak, and 636
 /// ticks per 999-T load outran it by 57%.
 ///
-/// Read at the **draw**, on the store as it stands, which is deliberately
-/// conservative: the store goes on draining for the whole loaded walk, so a
-/// load admitted here has strictly more room when it lands than when it was
-/// drawn. That is what makes a partial transfer — and so a courier holding
-/// ore it cannot put down — unreachable rather than merely unlikely.
+/// Read at the **draw**, on the store as it stands **plus every unit of ore
+/// already aboard a body of ours** (#362). The store alone was the first
+/// version's reading, and its claim — that a load admitted here has strictly
+/// more room when it lands, the store draining for the whole loaded walk — is
+/// true of *one* carrier and false of two. Live at t501,501 a hauler drew 204 T
+/// against a low store and set off on the three-crossing walk; the gate stayed
+/// open behind it, a courier drew a whole 500 and landed first, and the hauler
+/// arrived at a store of 999 with 196 T it could not put down. It stood on the
+/// Reactor's tile for 152 ticks and 419 T were already on the floor beside it
+/// from the same shape.
+///
+/// Counting **all** ore afloat is deliberately conservative, and it is the
+/// reading that cannot be gamed by who is carrying: a mine [[hauler]] walking
+/// its own deposit's ore home to the Storage is counted too, though it is not
+/// inbound to the Reactor, so a colony that still mines *and* delivers will
+/// sometimes defer a draw by one haul cycle. That costs ticks of cadence; the
+/// alternative costs ore on a hot tile, and this programme has now paid that
+/// price three times (#354, #356, this). Naming which body is inbound would
+/// mean reading the `Assignments` map the Planner is deliberately blind to
+/// (ADR 0025), and the number it would buy is a delivery's worth of latency.
 ///
 /// A Reactor we cannot see answers `false`: no row, no room (ADR 0004). That
 /// closes the draw and leaves the load banked at home, which is where a load
@@ -388,6 +403,8 @@ let internal ourThoriumTombstones (view: ColonyView) : string list =
 /// up on its floor. The unit test agreed with it because the fixture wrote the
 /// store where the gate looked — a projection shape `World` has never built.
 let internal reactorTakesALoad (view: ColonyView) : bool =
+    let afloat = view.Creeps |> List.sumBy (fun creep -> creep.Thorium)
+
     view.Errands
     |> List.exists (fun errand ->
         let reactorId = fst errand.Target
@@ -395,7 +412,7 @@ let internal reactorTakesALoad (view: ColonyView) : bool =
         view.Reactors
         |> List.exists (fun reactor ->
             reactor.Id = reactorId
-            && reactor.Thorium + view.Tuning.ReactorLoad <= Engine.reactorCapacity))
+            && reactor.Thorium + afloat + view.Tuning.ReactorLoad <= Engine.reactorCapacity))
 
 /// The **mineral [[container]]s** of this colony's own deposits, in deposit
 /// order (ADR 0057 decision 3): the built container standing on a deposit's

@@ -1838,6 +1838,16 @@ let errandTests =
                     (view.Errands |> List.map (fun errand -> errand.RoomName))
                     [ errandRoom ]
                     "against the errand's own room, which is the other end of that hop count"
+
+                // The projection-side half of #362's draw gate, which reads the
+                // ore afloat off exactly this field. A body three rooms out
+                // carrying a load is the case that stranded one: if the
+                // narrowing dropped its `Thorium` the gate would read 0 afloat
+                // and open behind every carrier already walking.
+                Expect.equal
+                    (courier |> Option.map (fun creep -> creep.Thorium))
+                    (Some 500)
+                    "and the load aboard it reaches the view, which is what the draw gate subtracts"
             }
 
             test "the declared target is placed before any body of ours has stood there" {
