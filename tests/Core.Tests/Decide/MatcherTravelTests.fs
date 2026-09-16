@@ -85,7 +85,7 @@ let travelCostTests =
                 let snapshot =
                     { bareRespawn with
                         Refillables = [ refillable "spawn-1" 50 BuiltKind.Spawn ]
-                        ConstructionSites = [ { Id = "site-1" } ]
+                        ConstructionSites = [ { Id = "site-1"; Left = siteOwes } ]
                         Creeps = [ worker "w1" 50 0 ]
                         Spatial =
 
@@ -416,7 +416,7 @@ let movementTests =
             test "a builder works from range 3 without closing in" {
                 let snapshot =
                     { bareRespawn with
-                        ConstructionSites = [ { Id = "site-1" } ]
+                        ConstructionSites = [ { Id = "site-1"; Left = siteOwes } ]
                         Creeps = [ worker "w1" 50 0 ]
                         Spatial =
 

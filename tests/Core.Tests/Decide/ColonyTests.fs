@@ -57,7 +57,7 @@ let private withWestOutpost (crowdX: int) (colony: ColonyView) =
         }
 
     { colony with
-        ConstructionSites = colony.ConstructionSites @ [ { Id = "site-west" } ]
+        ConstructionSites = colony.ConstructionSites @ [ { Id = "site-west"; Left = siteOwes } ]
         Creeps = [ for i in 1..4 -> worker $"w{i}" 50 0 ]
         Spatial =
             { colony.Spatial with
@@ -324,7 +324,7 @@ let private withNorthSpawnSite (site: Pos) (colony: ColonyView) =
     let outpost = SpatialInfo.layerOf colony.Spatial "W1N2"
 
     { colony with
-        ConstructionSites = colony.ConstructionSites @ [ { Id = "site-spawn" } ]
+        ConstructionSites = colony.ConstructionSites @ [ { Id = "site-spawn"; Left = siteOwes } ]
         Spatial =
             { colony.Spatial with
                 TargetKinds = Map.add "site-spawn" (Site BuiltKind.Spawn) colony.Spatial.TargetKinds
@@ -685,7 +685,11 @@ let nurseryTests =
                         Declared = colony.Declared @ [ "W2N1" ]
                         Stages = Map.add "W2N1" stage colony.Stages
                         ConstructionSites =
-                            colony.ConstructionSites @ [ { Id = "can-w-a" }; { Id = "can-w-b" } ]
+                            colony.ConstructionSites
+                            @ [
+                                { Id = "can-w-a"; Left = siteOwes }
+                                { Id = "can-w-b"; Left = siteOwes }
+                            ]
                         Spatial =
                             { colony.Spatial with
                                 Borders = Map.add "W2N1" plainRing colony.Spatial.Borders
@@ -835,7 +839,8 @@ let nurseryTests =
                         |> withHungryExtension { X = 10; Y = 40 }
 
                     { colony with
-                        ConstructionSites = colony.ConstructionSites @ [ { Id = "site-home" } ]
+                        ConstructionSites =
+                            colony.ConstructionSites @ [ { Id = "site-home"; Left = siteOwes } ]
                         Declared = [ SpatialInfo.homeName colony.Spatial ]
                         Stages = Map.ofList [ SpatialInfo.homeName colony.Spatial, Nursery ]
                         Spatial =
@@ -1331,7 +1336,8 @@ let bootstrapTests =
                     let north = SpatialInfo.layerOf colony.Spatial "W1N2"
 
                     { colony with
-                        ConstructionSites = colony.ConstructionSites @ [ { Id = id } ]
+                        ConstructionSites =
+                            colony.ConstructionSites @ [ { Id = id; Left = siteOwes } ]
                         Spatial =
                             { colony.Spatial with
                                 TargetKinds = Map.add id (Site kind) colony.Spatial.TargetKinds
@@ -2078,7 +2084,7 @@ let colonyStageTests =
                 let lane stage =
                     bufferLaneFlow
                         [ "site-1", { X = 15; Y = 10 }, Site BuiltKind.Extension ]
-                        [ { Id = "site-1" } ]
+                        [ { Id = "site-1"; Left = siteOwes } ]
                         (creepWith "w" 100 0 (bodyFor workerPattern 300))
                     |> atStage stage
 

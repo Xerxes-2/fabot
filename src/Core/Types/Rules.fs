@@ -150,6 +150,12 @@ module Engine =
     /// the rate.
     let neutralOutputPerTick = 5
 
+    /// BUILD_POWER: the energy one Work part puts into a site per build tick,
+    /// five times what the same part drains upgrading. It is what turns a
+    /// site's outstanding cost into ticks of labour, which is the worker row's
+    /// backlog term (#364).
+    let buildPerWork = 5
+
     /// UPGRADE_CONTROLLER_POWER's energy cost: what one Work part drains
     /// per upgrade tick — the rate an upgrade mouth eats income at.
     let upgradeDrainPerWork = 1

@@ -1016,8 +1016,68 @@ let internal workforceTarget (view: ColonyView) atlas (tasks: Task list) (rows: 
     // crews has three bodies that can build, and a floor read off the income
     // term alone would hire a fourth against a job that does not exist. What
     // the floor is for is the colony where this sum is *zero*.
+    // The **backlog** term (#364): generalists hired against what the standing
+    // sites still owe, paid for out of the stock rather than divided out of the
+    // income the two terms above share.
+    //
+    // Why it exists, and the numbers are W13S28's on 2026-09-17: a terminal
+    // site sat at 3,836/100,000 for thousands of ticks with **535,748 energy
+    // banked**, two workers in the room, and 16,464 T of score stranded behind
+    // it — ore that cannot move until the terminal stands (#349). Nothing in
+    // this sum could see it. `unpostedSeats` counts Posts, `incomeWorkers`
+    // divides a surplus, and `workerFloor` answers *two* whether the pool holds
+    // a road's 300 or a terminal's 100,000. A colony with a bank and a job was
+    // hiring as though it had neither.
+    //
+    // Sized in **labour and not in energy**, which is the whole of the
+    // arithmetic: a Work part puts `Engine.buildPerWork` into a site every
+    // tick, so one body of the row clears `work × 5 × 1,500` over a life, and
+    // the term is what it takes to clear the backlog inside one lifetime. At
+    // W13S28's four-Work body that is 30,000 a body, so 96,164 owing hires
+    // four. Bodies are charged against the stock at their cast price and the
+    // whole term is refused if the stock cannot pay for them *and* the
+    // building, because a row hired against a bank that empties mid-build is
+    // the ADR 0039 mistake in a different currency.
+    //
+    // It decays without any rule of its own: the sites become structures, the
+    // backlog goes to zero, and the bodies are not replaced as they die.
+    let backlogWorkers =
+        let owed = view.ConstructionSites |> List.sumBy (fun site -> site.Left)
+
+        let body = bodyFor workerPattern capacity
+
+        let clearedPerLife =
+            partCountIn body Work * Engine.buildPerWork * Engine.creepLifetime
+
+        if owed = 0 || clearedPerLife = 0 then
+            0
+        else
+            // **Floored, where every other division in this file is a
+            // ceiling** (ADR 0037), and the asymmetry is the point: what a
+            // ceiling would round up here is a whole extra body for a road's
+            // 300, and `workerFloor` already stands two generalists whenever
+            // anything is in the Build pool. So this term adds a body only for
+            // a whole lifetime of building the row it sits beside provably
+            // cannot absorb — the remainder is the floor's job, and it is
+            // already doing it.
+            let wanted = owed / clearedPerLife
+
+            // The stock this is paid out of, and the **building is charged
+            // first**: bodies are hired out of what is left once the sites
+            // themselves are covered. A row hired against a bank that empties
+            // mid-build is ADR 0039's mistake in another currency — bodies
+            // standing beside a site nobody can pay for.
+            //
+            // `Bank` is not this number. That is the spawn account the
+            // extensions hold, which the hauler row keeps full out of this very
+            // stock (ADR 0023), so reading it here would count the same energy
+            // twice.
+            (stockedEnergy view - owed) / bodyCost body |> max 0 |> min wanted
+
     let workerRow =
-        (unpostedSeats + incomeWorkers |> max (workerFloor tasks)) + pioneers
+        (unpostedSeats + incomeWorkers |> max (workerFloor tasks))
+        + pioneers
+        + backlogWorkers
 
     List.length rows.Reserver
     + rows.Guard

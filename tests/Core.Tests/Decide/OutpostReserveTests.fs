@@ -115,7 +115,7 @@ let reserveTests =
                 let colony =
                     { bareRespawn with
                         Sources = [ source "src-a" ]
-                        ConstructionSites = [ { Id = "site-1" } ]
+                        ConstructionSites = [ { Id = "site-1"; Left = siteOwes } ]
                         Refillables = [ refillable "spawn-1" 300 BuiltKind.Spawn ]
                         Creeps = [ reserver "r1" ]
                         Spatial =

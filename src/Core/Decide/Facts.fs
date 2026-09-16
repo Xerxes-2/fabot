@@ -497,6 +497,25 @@ let internal depositIsDiggable (view: ColonyView) atlas (depositId: string) =
 /// `hasLoad` is what makes that safe, and it is unchanged: the programme wants
 /// a whole `ReactorLoad` in a Storage before it hires anybody, so a closing
 /// programme now means an empty bank rather than an empty mine.
+/// The energy standing in this colony's Storages — its **stock**, as against
+/// `ColonyView.Bank`'s spawn account (ADR 0023). Read by the worker row's
+/// backlog term (#364), which is paid out of the stock and not out of income:
+/// a 100,000-energy terminal is bought with what is banked, and the row that
+/// builds it has to be hired against the same number.
+///
+/// Folded over every Storage the projection holds rather than the home room's
+/// alone, for `mineRefills`' reason: one is all there has ever been, and a rule
+/// that assumed it would be silently wrong in the colony that first has two.
+let internal stockedEnergy (view: ColonyView) : int =
+    view.Spatial.TargetKinds
+    |> Map.fold
+        (fun total id kind ->
+            if kind = Structure BuiltKind.Storage then
+                total + SpatialInfo.storedIn view.Spatial id
+            else
+                total)
+        0
+
 let internal courierProgrammeOpen (view: ColonyView) atlas =
     let hasLoad =
         view.Spatial.TargetKinds

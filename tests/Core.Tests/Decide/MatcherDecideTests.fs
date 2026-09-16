@@ -490,7 +490,7 @@ let tests =
             test "a full creep with a construction site and a full spawn goes building" {
                 let snapshot =
                     { bareRespawn with
-                        ConstructionSites = [ { Id = "site-1" } ]
+                        ConstructionSites = [ { Id = "site-1"; Left = siteOwes } ]
                         Creeps = [ worker "w1" 50 0 ]
                     }
 
@@ -511,7 +511,7 @@ let tests =
             test "an empty creep is never matched to a Build task" {
                 let snapshot =
                     { bareRespawn with
-                        ConstructionSites = [ { Id = "site-1" } ]
+                        ConstructionSites = [ { Id = "site-1"; Left = siteOwes } ]
                         Creeps = [ worker "w1" 0 50 ]
                     }
 
@@ -531,7 +531,7 @@ let tests =
                 let snapshot =
                     { bareRespawn with
                         Refillables = [ refillable "spawn-1" 50 BuiltKind.Spawn ]
-                        ConstructionSites = [ { Id = "site-1" } ]
+                        ConstructionSites = [ { Id = "site-1"; Left = siteOwes } ]
                         Creeps = [ worker "w1" 50 0 ]
                     }
 

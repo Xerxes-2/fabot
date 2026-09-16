@@ -197,6 +197,12 @@ type IConstructionSite =
     /// Screeps STRUCTURE_* string of what is being built.
     abstract structureType: string
     abstract pos: IRoomPosition
+    /// The energy already built into it, and what it needs in all. Bound for
+    /// the worker row's backlog term (#364): a road's 300 and a terminal's
+    /// 100,000 are both "a site" to a count, and a row hired off a count sends
+    /// two bodies at either.
+    abstract progress: int
+    abstract progressTotal: int
 
 /// The `owner` sub-object every owned game object carries.
 type IOwner =

@@ -192,7 +192,9 @@ let private withStores stores (name, facts: RoomFacts) =
 let private withSites sites (name, facts: RoomFacts) =
     name,
     { facts with
-        ConstructionSites = sites |> List.map (fun id -> ({ Id = id }: ConstructionSiteInfo))
+        ConstructionSites =
+            sites
+            |> List.map (fun id -> ({ Id = id; Left = siteOwes }: ConstructionSiteInfo))
     }
 
 let private withSources sources (name, facts: RoomFacts) =
@@ -363,6 +365,16 @@ let private terminalWorld =
                         Stores = Map.add "term-home" 4_000 facts.Stores
                         Thorium = Map.add "term-home" 19_848 facts.Thorium
                         Owners = Map.add "term-home" Ownership.Ours facts.Owners
+                        // And a site of the same kind still going up beside it,
+                        // carrying the live arithmetic of W13S28's: 3,836 paid
+                        // of 100,000 (#364).
+                        ConstructionSites =
+                            [
+                                {
+                                    Id = "site-terminal"
+                                    Left = 100_000 - 3_836
+                                }
+                            ]
                         Hits = Map.add "term-home" { Hits = 3000; HitsMax = 3000 } facts.Hits
                     }))
     }
@@ -1848,6 +1860,21 @@ let errandTests =
     testList
         "an errand carries the ground, the walk, and the one thing declared in it"
         [
+            test
+                "what a site still owes reaches the view, which is what tells a road from a terminal" {
+                // The projection-side counterpart of #364's backlog term. The
+                // rule is a division by this number, so a projection that
+                // dropped it — as it did until this slice, `ConstructionSiteInfo`
+                // being `{ Id }` alone — leaves the row unable to tell a road's
+                // 300 from the terminal that held 16,464 T of score behind it.
+                let view = viewUnder consigning terminalWorld mother
+
+                Expect.equal
+                    (view.ConstructionSites |> List.map (fun site -> site.Id, site.Left))
+                    [ "site-terminal", 96_164; "site-child", siteOwes ]
+                    "every site arrives with what it owes, which is `progressTotal - progress` and not either half: the mother's own and the one in the room she raises, summed by the backlog term as one bill"
+            }
+
             test "a terminal's two stores and the consignment it is for both reach the view" {
                 // The projection-side counterpart of #349's consignment rules,
                 // written with them for #355's and #356's reason. Three facts

@@ -602,7 +602,12 @@ let private seenFacts
         // container the switch that admits an outpost into the economy.
         ConstructionSites =
             sites
-            |> Array.map (fun (site, _) -> ({ Id = site.id }: ConstructionSiteInfo))
+            |> Array.map (fun (site, _) ->
+                ({
+                    Id = site.id
+                    Left = site.progressTotal - site.progress
+                }
+                : ConstructionSiteInfo))
             |> Array.toList
         // The hostiles standing here (ADR 0033, #201). Read for every room the
         // world can see and not the spawn rooms' alone: a Threat's Reach gates

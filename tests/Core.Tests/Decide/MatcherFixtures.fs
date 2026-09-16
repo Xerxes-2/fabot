@@ -382,7 +382,7 @@ let surplusColony =
 let blockedLane (rows: int list) har =
     { bareRespawn with
         Sources = [ source "src-a" ]
-        ConstructionSites = [ { Id = "site-1" } ]
+        ConstructionSites = [ { Id = "site-1"; Left = siteOwes } ]
         Creeps = [ har; worker "bob" 50 0 ]
         Spatial =
             spatial

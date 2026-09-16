@@ -5,7 +5,21 @@
 module Fabot.Core.Types.Sightings
 
 /// What the decision layer knows about one construction site this tick.
-type ConstructionSiteInfo = { Id: string }
+type ConstructionSiteInfo =
+    {
+        Id: string
+        /// The energy still owed before this site becomes a structure —
+        /// `progressTotal - progress`, one number rather than two, because
+        /// nothing decides on how far along a site is, only on what is left to
+        /// pay (#364).
+        ///
+        /// It is what tells a road's 300 from a terminal's 100,000, and a row
+        /// that could not tell them apart hired two bodies at either: W13S28's
+        /// terminal sat at 3,836/100,000 for thousands of ticks with 535,748
+        /// energy banked, two workers in the room and 16,464 T of score
+        /// stranded behind it.
+        Left: int
+    }
 
 /// What the decision layer knows about one hostile creep in a room the colony
 /// is looking into this tick: its id and tile (what the fire reflex aims at,

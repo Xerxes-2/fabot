@@ -810,3 +810,90 @@ let outpostWorkforceTests =
                     "the same room plans the same tiles: a source a room away is no source of its"
             }
         ]
+
+/// The worker row's backlog term (#364): generalists hired against what the
+/// standing sites still owe, paid out of the stock. Written because live at
+/// W13S28 a terminal site sat at 3,836/100,000 for thousands of ticks with
+/// 535,748 energy banked, two workers in the room, and 16,464 T of score
+/// stranded behind it — and no term of this sum could see any of that.
+[<Tests>]
+let backlogWorkforceTests =
+    testList
+        "the worker row's backlog"
+        [
+            test "the row grows with what the sites owe, and not with how many there are" {
+                // The distinction the old row could not draw. `workerFloor`
+                // answers two whether the pool holds a road's 300 or a
+                // terminal's 100,000, so a count-shaped term would hire the
+                // same crowd at either.
+                let banked = stocking 600_000 (trunkColony 6)
+
+                Expect.equal
+                    (targetOf (banked |> owing [ 300 ]))
+                    (targetOf banked)
+                    "a road's 300 is inside one body's life and hires nobody extra"
+
+                Expect.isGreaterThan
+                    (targetOf (banked |> owing [ 100_000 ]))
+                    (targetOf (banked |> owing [ 300 ]))
+                    "a terminal's 100,000 is not, and the row grows for it"
+
+                // The arithmetic is labour and not energy: a Work part puts
+                // `Engine.buildPerWork` in a tick, so one body clears
+                // `work × 5 × 1,500` over a life, and the term is what clears
+                // the backlog inside one lifetime.
+                let body = Bodies.bodyFor Bodies.workerPattern banked.Bank.Capacity
+                let perLife = partCountIn body Work * Engine.buildPerWork * Engine.creepLifetime
+
+                Expect.equal
+                    (targetOf (banked |> owing [ perLife ]) - targetOf banked)
+                    1
+                    "exactly one lifetime of building hires exactly one body"
+
+                // Floored, where every other division in `Quota` is a ceiling
+                // (ADR 0037): what a ceiling rounds up here is a whole body for
+                // a road, and `workerFloor` already stands two the moment
+                // anything is in the Build pool. The remainder is the floor's
+                // job.
+                Expect.equal
+                    (targetOf (banked |> owing [ perLife + 1 ]) - targetOf banked)
+                    1
+                    "one energy past a lifetime is still one body: the remainder belongs to the floor, not to this term"
+
+                Expect.equal
+                    (targetOf (banked |> owing [ perLife; perLife ]) - targetOf banked)
+                    2
+                    "two sites owing a lifetime each are one backlog of two, summed and not maxed"
+            }
+
+            test "the building is charged before the bodies, so a colony with no stock hires nobody" {
+                let poor = trunkColony 6 |> owing [ 100_000 ]
+
+                Expect.equal
+                    (targetOf poor)
+                    (targetOf (trunkColony 6))
+                    "no Storage and no stock: the same row as with no site at all"
+
+                // ADR 0039's mistake in another currency — bodies standing
+                // beside a site nobody can pay for. The stock has to cover the
+                // building first and the bodies out of what is left.
+                Expect.equal
+                    (targetOf (stocking 90_000 (trunkColony 6) |> owing [ 100_000 ]))
+                    (targetOf (stocking 90_000 (trunkColony 6)))
+                    "a stock short of the site itself hires nobody: the build is charged first"
+
+                Expect.isGreaterThan
+                    (targetOf (stocking 600_000 (trunkColony 6) |> owing [ 100_000 ]))
+                    (targetOf (stocking 600_000 (trunkColony 6)))
+                    "and a stock that covers the site and the crowd hires the crowd"
+            }
+
+            test "the term retires itself: no sites, no addend" {
+                let banked = stocking 600_000 (trunkColony 6)
+
+                Expect.equal
+                    (targetOf (banked |> owing []))
+                    (targetOf banked)
+                    "a colony with nothing standing hires nothing for it, and the bodies it hired are simply not replaced as they die"
+            }
+        ]

@@ -476,7 +476,7 @@ let anchorTests =
                 // distance taken away.
                 let snapshot =
                     { dualSeatColony with
-                        ConstructionSites = [ { Id = "site-1" } ]
+                        ConstructionSites = [ { Id = "site-1"; Left = siteOwes } ]
                         Creeps = [ anchor "a1" 50 0; worker "g1" 50 0 ]
                         Spatial =
                             corridorEast [ "site-1", { X = 31; Y = 10 } ]
@@ -515,7 +515,7 @@ let anchorTests =
                 // and its own cases are below.
                 let snapshot =
                     { dualSeatColony with
-                        ConstructionSites = [ { Id = "site-1" } ]
+                        ConstructionSites = [ { Id = "site-1"; Left = siteOwes } ]
                         Creeps = [ anchor "a1" 50 0 ]
                         Spatial =
                             corridorEast [ "site-1", { X = 12; Y = 10 } ]

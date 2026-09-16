@@ -256,7 +256,11 @@ let plannerTests =
             test "each construction site yields a Build task" {
                 let snapshot =
                     { bareRespawn with
-                        ConstructionSites = [ { Id = "site-1" }; { Id = "site-2" } ]
+                        ConstructionSites =
+                            [
+                                { Id = "site-1"; Left = siteOwes }
+                                { Id = "site-2"; Left = siteOwes }
+                            ]
                     }
 
                 let builds =

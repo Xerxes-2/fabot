@@ -989,6 +989,43 @@ let pileTaskColony amount (creeps: (string * Pos) list) =
             |> withCreepsAt creeps
     }
 
+/// The workforce target this ColonyView decides — the sum every row is an
+/// addend of (`Quota.workforceTarget`).
+let targetOf (colony: ColonyView) = (decideOn colony).Quotas.Target
+
+/// The same colony with `units` of energy standing in a Storage of its own
+/// (#364): the **stock**, as against `Bank`'s spawn account, which is what the
+/// worker row's backlog term is paid out of.
+let stocking units (colony: ColonyView) =
+    { colony with
+        Spatial =
+            { colony.Spatial with
+                TargetKinds =
+                    Map.add "sto-stock" (Structure BuiltKind.Storage) colony.Spatial.TargetKinds
+                Stores = Map.add "sto-stock" units colony.Spatial.Stores
+            }
+            |> withHome (fun layer ->
+                { layer with
+                    TargetPositions = Map.add "sto-stock" { X = 26; Y = 26 } layer.TargetPositions
+                })
+    }
+
+/// The same colony with a construction site standing for each of these
+/// outstanding costs (#364). The cost is the fact the backlog term reads: a
+/// road owes 300 and a terminal 100,000, and a row that cannot tell them apart
+/// hires the same crowd at either.
+let owing (costs: int list) (colony: ColonyView) =
+    { colony with
+        ConstructionSites =
+            costs
+            |> List.mapi (fun index cost ->
+                ({
+                    Id = $"site-owing-{index}"
+                    Left = cost
+                }
+                : ConstructionSiteInfo))
+    }
+
 /// The hauler quota this ColonyView decides, read off the plan memo `decide`
 /// returns — the quota's only seam, since the rule itself is private to
 /// that pipeline.
@@ -1332,7 +1369,9 @@ let withOutpostTrunk (sites: (string * BuiltKind * Pos) list) (colony: ColonyVie
     let outpost = SpatialInfo.layerOf colony.Spatial "W1N2"
 
     { colony with
-        ConstructionSites = colony.ConstructionSites @ [ for id, _, _ in sites -> { Id = id } ]
+        ConstructionSites =
+            colony.ConstructionSites
+            @ [ for id, _, _ in sites -> { Id = id; Left = siteOwes } ]
         Spatial =
             { colony.Spatial with
                 TargetKinds =

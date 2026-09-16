@@ -819,6 +819,12 @@ function placeCluster({
         id: `${prefix}site-${i}`,
         structureType: "extension",
         pos: take(),
+        // What the site still owes, which the worker row divides by (#364).
+        // Half-built rather than untouched, because the two figures the
+        // engine never shows are a site at `progressTotal` — that tick it is a
+        // structure — and the 3,000 is CONSTRUCTION_COST for an extension.
+        progress: 1500,
+        progressTotal: 3000,
       }),
     );
   }

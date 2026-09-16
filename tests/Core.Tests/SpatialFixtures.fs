@@ -9,6 +9,17 @@ module Fabot.Core.Tests.SpatialFixtures
 
 open Fabot.Core.Types
 
+/// What a fixture's construction site still owes (#364). One number shared by
+/// every fixture that stands a site, because almost none of them care: the
+/// Build pool is one Task per site whatever the site costs, and the cases that
+/// *do* care — the worker row's backlog term — name their own figure.
+///
+/// Deliberately not 0. A site owing nothing is a site the engine would have
+/// turned into a structure on the tick it was paid, so it is a shape `World`
+/// cannot produce, and a fixture built on it would let a rule read "no backlog"
+/// off a room full of sites.
+let siteOwes = 1_000
+
 /// The home room's geometry, read back off a projection: the room `RoomName`
 /// names, and the one the empty name files when it names none
 /// (`SpatialInfo.homeName`). Absent geometry reads as an empty layer, never as
