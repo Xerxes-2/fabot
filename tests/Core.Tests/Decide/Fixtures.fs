@@ -201,6 +201,7 @@ let bareRespawn =
         // no seat of the reserver row is the re-claimer's (#318).
         Errands = []
         Consignee = None
+        Crossed = Set.empty
         Reactors = []
         // And nothing remembered of a room it cannot see (#151): a fixture
         // is a tick with vision wherever it lays a fact, so an empty
@@ -869,6 +870,7 @@ let receivingColony arrived =
 
     { home with
         Consignee = None
+        Crossed = Set.empty
         Spatial =
             { home.Spatial with
                 Thorium = Map.add "term-1" arrived home.Spatial.Thorium
@@ -1870,6 +1872,7 @@ let withReactorErrand (colony: ColonyView) =
     { colony with
         Errands = [ reactorErrand ]
         Consignee = None
+        Crossed = Set.empty
         Spatial =
             colony.Spatial
             |> withNeighbour
@@ -2110,4 +2113,43 @@ let crowdAtOutpostSite (colony: ColonyView) =
             colony.Spatial
             |> withCreepsAt
                 [ "w1", { X = 10; Y = 2 }; "w2", { X = 10; Y = 3 }; "w3", { X = 10; Y = 4 } ]
+    }
+
+/// A pile of ore on the floor of `room`, wherever that room is in this
+/// colony's projection (#360). Named `-In` because the room is the whole point:
+/// the same pile is a leak this colony answers for or a stranger's floor
+/// depending only on which room it lies in and what the projection says about
+/// that room.
+let withPileIn room id amount (colony: ColonyView) =
+    let layer = SpatialInfo.layerOf colony.Spatial room
+
+    { colony with
+        Spatial =
+            { colony.Spatial with
+                TargetKinds = Map.add id (Dropped Thorium) colony.Spatial.TargetKinds
+                Thorium = Map.add id amount colony.Spatial.Thorium
+            }
+            |> withNeighbour
+                room
+                { layer with
+                    TargetPositions = Map.add id { X = 25; Y = 25 } layer.TargetPositions
+                }
+    }
+
+/// The same ore one object over: a tombstone holding it, which is what a
+/// courier that dies on the loaded leg leaves behind (#359, #360).
+let withTombstoneIn room id amount (colony: ColonyView) =
+    let layer = SpatialInfo.layerOf colony.Spatial room
+
+    { colony with
+        Spatial =
+            { colony.Spatial with
+                TargetKinds = Map.add id Tombstone colony.Spatial.TargetKinds
+                Thorium = Map.add id amount colony.Spatial.Thorium
+            }
+            |> withNeighbour
+                room
+                { layer with
+                    TargetPositions = Map.add id { X = 26; Y = 25 } layer.TargetPositions
+                }
     }

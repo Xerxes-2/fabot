@@ -1433,6 +1433,48 @@ let courierTests =
             }
         ]
 
+/// The sweep's third reach (#360): ore in a room a chain merely **crosses**.
+/// The pool-side counterpart of `ViewTests`' "only the ore comes through", for
+/// the reason #355 and #356 were both filed — a rule green against a shape the
+/// projection cannot build, or a projection carrying a fact no rule reads, and
+/// this feature is one function in each file.
+[<Tests>]
+let crossedSweepTests =
+    testList
+        "ore in a room the chain crosses"
+        [
+            test "a pile and a tombstone on a crossed floor are pooled, and a stranger's are not" {
+                let far = "W1N9"
+
+                let bleeding colony =
+                    colony
+                    |> withPileIn far "pile-crossing" 419
+                    |> withTombstoneIn far "tomb-crossing" 175
+
+                let stranger = bleeding (deliveryColony (Some Ownership.Ours))
+
+                let onTheWay =
+                    { stranger with
+                        Crossed = Set.singleton far
+                    }
+
+                Expect.isFalse
+                    (planTasksOn stranger noThreats
+                     |> List.contains (Pickup("pile-crossing", Thorium)))
+                    "a floor we neither own, declared nor cross is not ours to walk onto"
+
+                Expect.contains
+                    (planTasksOn onTheWay noThreats)
+                    (Pickup("pile-crossing", Thorium))
+                    "and the same floor, once the projection says the chain crosses it, is ours to sweep"
+
+                Expect.contains
+                    (planTasksOn onTheWay noThreats)
+                    (Withdraw("tomb-crossing", Thorium))
+                    "the tombstone beside it too, which is what a courier that dies on the loaded leg leaves (#359)"
+            }
+        ]
+
 /// The consignment (#349): W12S28 and W13S28 bank 36,484 T between them and sit
 /// five and six crossings from the Reactor, outside `Tuning.MaxHops` — so no
 /// courier row of theirs can ever open, and the ore moves by terminal or not at

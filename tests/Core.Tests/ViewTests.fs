@@ -1387,6 +1387,44 @@ let private twoHopWorld =
                 ))
     }
 
+/// The same chain with **ore bleeding** in the room it crosses (#360): a pile
+/// on the floor and a loaded tombstone, which is what a courier that dies on
+/// the loaded leg leaves behind. Beside the furniture the room already has, so
+/// the cut can be asked the question that matters — not "does anything survive"
+/// but "does *only* the ore survive".
+let private twoHopBleeding =
+    { twoHopWorld with
+        Rooms =
+            twoHopWorld.Rooms
+            |> Map.change
+                crossed
+                (Option.map (fun (facts: RoomFacts) ->
+                    { facts with
+                        Layer =
+                            { facts.Layer with
+                                TargetPositions =
+                                    facts.Layer.TargetPositions
+                                    |> Map.add "pile-crossed" { X = 25; Y = 25 }
+                                    |> Map.add "tomb-crossed" { X = 26; Y = 25 }
+                            }
+                        TargetKinds =
+                            facts.TargetKinds
+                            |> Map.add "pile-crossed" (Dropped Thorium)
+                            |> Map.add "tomb-crossed" Tombstone
+                        Thorium =
+                            facts.Thorium
+                            |> Map.add "pile-crossed" 419
+                            |> Map.add "tomb-crossed" 175
+                        // A tombstone is a store, so the shell files its energy
+                        // column too (#360's own smaller finding). It must not
+                        // ride along: a store in a transit room is the 2,020
+                        // demand that started all of this.
+                        Stores = Map.add "tomb-crossed" 0 facts.Stores
+                        Hits = Map.add "pile-crossed" { Hits = 1; HitsMax = 1 } facts.Hits
+                        Owners = Map.add "tomb-crossed" Ownership.Ours facts.Owners
+                    }))
+    }
+
 [<Tests>]
 let transitTests =
     testList
@@ -1442,6 +1480,67 @@ let transitTests =
                 Expect.isTrue
                     (Map.containsKey "src-two" view.Spatial.TargetKinds)
                     "the two-hop outpost's own rock is placed off the declaration"
+            }
+
+            test "but ore bleeding on that floor comes through, and only the ore" {
+                // #360, and the argument is `borrowable`'s: **decaying ore is
+                // not furniture**. Everything else this cut drops is a standing
+                // thing, exactly as workable on the day the room is declared.
+                // Ore on the floor bleeds `ceil(amount/1000)` a tick, the
+                // season never makes another gram, and a transit room is where
+                // it most often lands — the delivery route is three crossings
+                // and the courier is oldest on the loaded leg.
+                let view = viewUnder twoHopDeclaration twoHopBleeding mother
+
+                Expect.equal
+                    (Map.tryFind "pile-crossed" view.Spatial.TargetKinds)
+                    (Some(Dropped Thorium))
+                    "the pile is named, which is what lets a rung pool it and the breach channel alarm on it"
+
+                Expect.equal
+                    (Map.tryFind "tomb-crossed" view.Spatial.TargetKinds)
+                    (Some Tombstone)
+                    "and the tombstone beside it, where a courier that dies loaded leaves its ore (#359)"
+
+                Expect.equal
+                    (SpatialInfo.heldIn view.Spatial Thorium "pile-crossed",
+                     SpatialInfo.heldIn view.Spatial Thorium "tomb-crossed")
+                    (419, 175)
+                    "with the ore in them, which is the size of the leak and what the alarm's amount reads"
+
+                Expect.equal
+                    (SpatialInfo.placementOf view.Spatial "pile-crossed")
+                    (Some(RoomPos.at crossed { X = 25; Y = 25 }))
+                    "and where they are, without which nothing can be walked to"
+
+                // And nothing else. This half is the test: the room's furniture
+                // is still furniture, and one admitted kind must not carry a
+                // store column, a hit count or an owner in with it.
+                for id in [ "src-crossed"; "ctrl-crossed"; "cont-crossed" ] do
+                    Expect.isFalse
+                        (Map.containsKey id view.Spatial.TargetKinds)
+                        $"{id}: the furniture stays out — admitting ore is not admitting the room"
+
+                Expect.isEmpty
+                    (view.Spatial.Stores
+                     |> Map.filter (fun id _ -> id = "tomb-crossed" || id = "cont-crossed"))
+                    "no store column for anything in that room, the tombstone's own 0 included: a store here is the 2,020-demand row #286 was filed for"
+
+                Expect.isEmpty
+                    (view.Spatial.Hits |> Map.filter (fun id _ -> id = "pile-crossed"))
+                    "no hit count, so nothing here is pooled as a Repair"
+
+                Expect.isEmpty
+                    (view.Spatial.Owners |> Map.filter (fun id _ -> id = "tomb-crossed"))
+                    "and no per-object owner: ore on a floor is nobody's, and an Emitter gates acts on that map (#318)"
+
+                Expect.isTrue
+                    (Set.contains crossed view.Crossed)
+                    "the room is named as crossed, which is the reach `Facts.oursToSweep` widens by (#360)"
+
+                Expect.isFalse
+                    (Set.contains twoHop view.Crossed)
+                    "and the declared outpost at the far end of the chain is not crossed but worked"
             }
 
             test

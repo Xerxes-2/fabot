@@ -317,7 +317,25 @@ let private oursToSweep (view: ColonyView) (id: string) : bool =
 
     inARoomWeOwn view id
     || SpatialInfo.roomOf view.Spatial id
-       |> Option.exists (fun room -> Set.contains room errandRooms)
+       |> Option.exists (fun room ->
+           Set.contains room errandRooms
+           // The third clause and the third widening of this reach (#360): a
+           // room we own (#311), a room we declared an errand in (#354), and a
+           // room a chain of ours merely **crosses**. The delivery route is
+           // three crossings, the courier is oldest on the loaded leg — that is
+           // the leg `Emitter.outlivesTheLoadedLeg` guards — and ore that falls
+           // in the middle of it used to land where nothing could name it, pool
+           // it or alarm on it, while it bled `ceil(amount/1000)` a tick and the
+           // season never made another gram.
+           //
+           // `view.Crossed` and not "any room in the projection", which is what
+           // this clause was first written as and what the suite caught: a
+           // stranger's room can be in a scan set without being on a chain, and
+           // its floor is not ours to walk onto. What makes a crossed room's ore
+           // ours is the pairing with `ColonyView.transiting`, which admits
+           // exactly two kinds out of such a room — a pile and a tombstone — so
+           // there is no third thing here for the widening to reach.
+           || Set.contains room view.Crossed)
 
 /// The [[thorium]] **on the ground** in a room this colony owns, in id order
 /// (#311): the dig that landed on the floor rather than in the mineral

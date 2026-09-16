@@ -54,6 +54,7 @@ let snapshotWith creeps spatial =
         // no seat of the reserver row is the re-claimer's (#318).
         Errands = []
         Consignee = None
+        Crossed = Set.empty
         Reactors = []
         // And nothing remembered of a room it cannot see: the sighting map
         // is the Matcher's alone and the Atlas prices nothing off it (#151).

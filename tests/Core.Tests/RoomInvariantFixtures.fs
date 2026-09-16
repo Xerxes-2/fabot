@@ -226,6 +226,7 @@ let internal colonyOf (room: LoadedRoom) level =
         // no seat of the reserver row is the re-claimer's (#318).
         Errands = []
         Consignee = None
+        Crossed = Set.empty
         Reactors = []
         // And nothing remembered of a room it cannot see: every fixture
         // here is a tick with vision, so the sighting map answers nothing

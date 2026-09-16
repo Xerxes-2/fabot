@@ -392,6 +392,7 @@ let quiet: ColonyView =
         // no seat of the reserver row is the re-claimer's (#318).
         Errands = []
         Consignee = None
+        Crossed = Set.empty
         Reactors = []
         // And nothing remembered of a room it cannot see: the log records
         // what happened, and a vision grace changes which assignment a tick
@@ -2980,7 +2981,26 @@ let breachKindTests =
                 Expect.equal
                     (breachesOn 100 (quiet |> withPile "W9S9" "pile-1" 915))
                     []
-                    "a room we neither own nor declared is somebody else's floor"
+                    "a room we neither own nor declared nor cross is somebody else's floor"
+
+                // The third clause of that reach (#360). A room a chain of ours
+                // merely crosses is not somebody else's floor — it is where the
+                // ore most often lands, the delivery route being three
+                // crossings and the courier oldest on the loaded leg — and
+                // until this it was the one place a leak could bleed out
+                // unnamed. `Crossed` is what says so, and it is the projection's
+                // own subtraction rather than a second guess at it.
+                let onTheWay =
+                    let seen = quiet |> withPile "W9S9" "pile-1" 419
+
+                    { seen with
+                        Crossed = Set.singleton "W9S9"
+                    }
+
+                Expect.equal
+                    (breachesOn 100 onTheWay)
+                    [ BreachKind.OreOnTheFloor, "W9S9", "pile-1", 419 ]
+                    "the same floor, once the projection says we cross it, is a leak this colony is answerable for"
             }
 
             test "a pile on the declared Reactor's floor is a breach: that room has no owner at all" {

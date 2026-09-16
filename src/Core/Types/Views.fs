@@ -162,6 +162,23 @@ type ColonyView =
         /// ore or refuses the intent, and a refusal costs the tick's call and
         /// nothing else.
         Consignee: string option
+        /// The rooms in this colony's scan set that it merely **crosses** — the
+        /// ground a chain of [[seam]]s runs over, neither home nor outpost nor
+        /// errand nor a room it raises (`transiting`, ADR 0058 decision 2).
+        ///
+        /// Carried because one reach needs it and nothing else does: decaying
+        /// ore in such a room is this colony's to sweep (#360), and ore is the
+        /// only thing `transiting` lets through. Derived where the subtraction
+        /// is already spelled instead of re-derived in `Facts`, which would be
+        /// a second answer free to disagree with the first — the mistake #271
+        /// records for the sighting grace, in the same function.
+        ///
+        /// What this is **not** is "rooms we may act in". A rival's room can sit
+        /// on a chain, and what makes its floor's ore ours is not this set but
+        /// what `transiting` admitted out of that room: two decaying kinds, no
+        /// structure, no controller, no owner. A rule that read this set for
+        /// anything else would be reading a permission nobody granted.
+        Crossed: Set<string>
         /// The declared sector Reactors this colony can see, with the store and
         /// streak `RoomFacts.Reactors` carries (#354). Narrowed exactly as the
         /// errand's other facts are — `erranding` keeps the rows whose id the
@@ -366,10 +383,52 @@ module ColonyView =
     /// `ofWorld`, because a sighting is the world's and not a field of the
     /// facts: this function is handed no memory to drop.
     let private transiting (facts: RoomFacts) : RoomFacts =
+        // The one exception, and it is `borrowable`'s exception for the same
+        // reason (#360): **decaying ore is not furniture**. Everything else this
+        // function cuts is a standing thing — a source, a controller, a
+        // container — which will be exactly as workable on the tick this colony
+        // declares the room and no worse for being invisible until then. Ore on
+        // the floor is the opposite: it bleeds `ceil(amount/1000)` a tick, the
+        // season never makes another gram of it, and the room it lands in is
+        // most often a transit room precisely *because* it fell out of a body
+        // that was crossing.
+        //
+        // The live route is three crossings, so two of the four rooms between
+        // W15S28's Storage and the Reactor are transit rooms. A courier is most
+        // likely to die en route — that is the leg where it is oldest and the
+        // one `Emitter.outlivesTheLoadedLeg` guards — and until this clause its
+        // tombstone, and the pile the tombstone decays into, landed where
+        // nothing could name them, nothing could pool them and nothing could
+        // alarm on them.
+        //
+        // Admitted in **every** transit room and not only those on an errand
+        // chain, which is the decision #360 asked for. The reach is not a
+        // guess about where ore might be: ore reaches a room we have no other
+        // business in only by falling out of a body of ours that was walking
+        // through, and every transit room is a room our bodies walk through.
+        // Narrowing it to the delivery chain would have covered this incident
+        // and missed the mine haul's, on a route nobody has priced yet.
+        //
+        // What rides along is the minimum three facts a sweep needs: that the
+        // thing is there, where it is, and how much ore is in it. No hits, no
+        // owner (a pile carries none and a tombstone's is not read — ore on the
+        // floor is nobody's), no store column, so nothing here can be repaired,
+        // refilled or withdrawn from as furniture.
+        let decaying =
+            facts.TargetKinds
+            |> Map.filter (fun _ kind ->
+                match kind with
+                | Dropped Thorium
+                | Tombstone -> true
+                | _ -> false)
+
+        let oreOf table =
+            table |> Map.filter (fun id _ -> Map.containsKey id decaying)
+
         { facts with
             Layer =
                 { facts.Layer with
-                    TargetPositions = Map.empty
+                    TargetPositions = oreOf facts.Layer.TargetPositions
                     // A rival's site is a placement fact and nothing else
                     // (#248), and nothing is ever placed in a transit room:
                     // carried here it would be work of a sort after all — the
@@ -378,14 +437,16 @@ module ColonyView =
                     // memo away.
                     RivalSites = Set.empty
                 }
-            TargetKinds = Map.empty
+            TargetKinds = decaying
             Hits = Map.empty
             Stores = Map.empty
             // A deposit's remaining Thorium, a store's Thorium and an
             // extractor's cooldown are work facts by the test above — what a
             // quota reads and what an Emitter gates on (ADR 0057) — so they go
-            // out with the stores they stand beside.
-            Thorium = Map.empty
+            // out with the stores they stand beside. What stays is the ore in
+            // the two decaying kinds above, which is not a fact about a
+            // structure but the size of a leak (#360).
+            Thorium = oreOf facts.Thorium
             Cooldowns = Map.empty
             // And whose an object standing here is (#318), by the same test:
             // it is what an Emitter gates an act on, so it is work. A room we
@@ -756,6 +817,8 @@ module ColonyView =
             // against, because the room it names is not one this colony
             // projects (#349).
             Consignee = colony.Consignee
+            // The subtraction above, carried rather than re-derived (#360).
+            Crossed = transit
             // The declared Reactors' own rows, over the same scan set the
             // errands were narrowed to (#354). The store here is what meters a
             // delivery: the Reactor burns 1 T a tick against a 1,000-unit cap,

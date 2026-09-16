@@ -881,6 +881,7 @@ let colonyAt (capture: RoomCapture) (level: int) (bank: int) : ColonyView =
         // no seat of the reserver row is the re-claimer's (#318).
         Errands = []
         Consignee = None
+        Crossed = Set.empty
         Reactors = []
         // And nothing remembered of a room it cannot see: these captures
         // are ticks with vision in every room they carry (#151).
