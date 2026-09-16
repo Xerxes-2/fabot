@@ -191,6 +191,18 @@ let loop () =
     // from.
     let atDecide = Game.cpu.getUsed ()
 
+    // How many colonies threw their plan memo away this tick, counted against
+    // the memo each one was handed, before the table is overwritten (#357). A
+    // `decide` six times its own mean is either a replan or a pricing storm,
+    // and the CPU line could not tell those apart.
+    let replans =
+        decisions
+        |> List.filter (fun (colony, _, decision) ->
+            match Map.tryFind colony.Home planMemos with
+            | Some prior -> prior.Signature <> decision.Memo.Signature
+            | None -> true)
+        |> List.length
+
     planMemos <-
         decisions
         |> List.map (fun (colony, _, decision) -> colony.Home, decision.Memo)
@@ -381,6 +393,8 @@ let loop () =
             AtSave = atSave
             AtExecute = Game.cpu.getUsed ()
             Intents = accepted
+            Bucket = Game.cpu.bucket
+            Replans = replans
         }
 
     // The CPU line stays one flat leaf keyed by tick: it records the whole

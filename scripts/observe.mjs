@@ -1360,7 +1360,14 @@ if (command === "console") {
   // bot's at all: it is what the engine had already spent by the time
   // `loop` was entered.
   const PHASES = ["entry", "snapshot", "decide", "save", "execute"];
-  const COLUMNS = [...PHASES, "intents"];
+  // Two counts ride beside them (#357) and neither is a duration: the bucket
+  // the engine had banked for us as the tick ended, and how many colonies threw
+  // their plan memo away in it. They are what turn a spike from a number into a
+  // diagnosis — a tick may spend `limit + bucket` capped at 500 ms, so the
+  // margin says whether a 339 ms tick was survivable, and the replan count says
+  // whether `decide` was replanning or pricing.
+  const COUNTS = ["intents", "bucket", "replans"];
+  const COLUMNS = [...PHASES, ...COUNTS];
 
   // `--json` is the stored rows, not the judged ones: the raw structure is
   // what a jq reader came for, and a row hidden from it could not be seen
@@ -1418,7 +1425,7 @@ if (command === "console") {
     const absent = "—".padStart(8);
     const cells = (row) =>
       isSplit(row)
-        ? [...PHASES.map((key) => ms(row[key])), String(row.intents).padStart(8)]
+        ? [...PHASES.map((key) => ms(row[key])), ...COUNTS.map((key) => String(row[key]).padStart(8))]
         : COLUMNS.map(() => absent);
 
     console.log(
@@ -1463,6 +1470,28 @@ if (command === "console") {
         `mean intents the engine accepted, per split row: ${mean("intents").toFixed(1)} — ` +
           `a count, not milliseconds; ≈ ${(mean("intents") * 0.2).toFixed(2)} CPU at the ` +
           "engine's 0.2 an intent, which the local ruler does not charge",
+      );
+
+      // The margin, and the two ways it is read: where it stands now, and
+      // whether the window as a whole is banking or spending. A mean tick under
+      // the limit refills what the spikes withdraw, and that arithmetic — not
+      // the spike's own size — is what says whether this is survivable.
+      const last = split[split.length - 1];
+      const drawn = split
+        .filter((row) => row.ms > 100)
+        .reduce((total, row) => total + row.ms - 100, 0);
+      const banked = split
+        .filter((row) => row.ms <= 100)
+        .reduce((total, row) => total + 100 - row.ms, 0);
+      console.log(
+        `bucket ${last.bucket} as of t${last.t}; over this window the ticks over the ` +
+          `100 ms limit drew ${drawn.toFixed(0)} and the ticks under it banked ` +
+          `${banked.toFixed(0)} — ${banked >= drawn ? "net refill" : "NET DRAIN"}`,
+      );
+      console.log(
+        `replans: ${split.reduce((total, row) => total + row.replans, 0)} over the window, ` +
+          `${split.filter((row) => row.replans > 0).length} tick(s) with at least one — ` +
+          "a colony that threw its plan memo away re-planned its whole layout in that tick (ADR 0033)",
       );
     }
 

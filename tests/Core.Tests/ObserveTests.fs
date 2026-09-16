@@ -2644,6 +2644,8 @@ let private costing (ms: float) =
         AtSave = ms
         AtExecute = ms
         Intents = 0
+        Bucket = 10_000
+        Replans = 0
     }
 
 [<Tests>]
@@ -2726,6 +2728,12 @@ let cpuTests =
                             AtSave = 46.0
                             AtExecute = 49.4
                             Intents = 44
+                            // The margin and the replan count ride the same
+                            // row (#357): a full bucket and a tick that kept
+                            // every colony's plan, which is the shape a phase
+                            // split is read against.
+                            Bucket = 9_872
+                            Replans = 0
                         }
 
                 Expect.equal
@@ -2739,6 +2747,8 @@ let cpuTests =
                                 Save = 1.8
                                 Execute = 3.4
                                 Intents = 44
+                                Bucket = 9_872
+                                Replans = 0
                             }
                     ]
                     "each phase is the ground it covers, not the counter it ended at"
@@ -2766,6 +2776,11 @@ let cpuTests =
                             AtSave = 2.0015
                             AtExecute = 3.9999996
                             Intents = 1
+                            // Neither of these is a duration, so neither is
+                            // rounded: an integer count of banked milliseconds
+                            // and an integer count of colonies.
+                            Bucket = 4_213
+                            Replans = 2
                         }
 
                 Expect.equal
@@ -2779,6 +2794,8 @@ let cpuTests =
                                 Save = 0.001
                                 Execute = 1.998
                                 Intents = 1
+                                Bucket = 4_213
+                                Replans = 2
                             }
                     ]
                     "every phase rounds to three decimal places"

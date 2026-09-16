@@ -5,6 +5,12 @@ open Fable.Core
 
 type ICpu =
     abstract getUsed: unit -> float
+    /// The CPU the engine has banked for us. Read because the margin is what
+    /// decides whether a spike matters (#357): a tick may spend up to
+    /// `limit + bucket`, capped at 500 ms, and it banks what it does not
+    /// spend — so a 339 ms tick against a 100 ms limit is a 239 ms withdrawal,
+    /// and whether that is survivable is a fact about this number alone.
+    abstract bucket: int
 
 /// Screeps `FIND_SOURCES` constant.
 let findSources = 105

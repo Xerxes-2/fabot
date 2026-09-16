@@ -1026,6 +1026,8 @@ let private cpuPhaseFields: (string * (CpuPhases -> obj)) list =
         "save", (fun p -> box p.Save)
         "execute", (fun p -> box p.Execute)
         "intents", (fun p -> box p.Intents)
+        "bucket", (fun p -> box p.Bucket)
+        "replans", (fun p -> box p.Replans)
     ]
 
 /// The phase split off one CPU row, or `None` when the row carries none.
@@ -1044,6 +1046,8 @@ let private decodeCpuPhases (raw: obj) : CpuPhases option =
                 Save = unbox<float> raw?save
                 Execute = unbox<float> raw?execute
                 Intents = unbox<int> raw?intents
+                Bucket = unbox<int> raw?bucket
+                Replans = unbox<int> raw?replans
             }
     else
         None

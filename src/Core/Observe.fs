@@ -1147,6 +1147,17 @@ type CpuReadings =
         AtSave: float
         AtExecute: float
         Intents: int
+        /// `Game.cpu.bucket` as the tick ended: the margin, which is the one
+        /// number that says whether a spike matters (#357). Read live rather
+        /// than derived, because the engine's own arithmetic — a tick may spend
+        /// up to `limit + bucket` capped at 500 ms, and what it does not spend
+        /// it banks — is the thing being checked, not restated.
+        Bucket: int
+        /// How many of this bot's colonies threw their plan memo away this tick
+        /// (ADR 0033). Carried on the CPU line rather than inferred from it
+        /// because a `decide` six times its own mean is either a replan or a
+        /// pricing storm, and a reader cannot tell those apart from a total.
+        Replans: int
     }
 
 /// One tick's cost, split at the loop's phase boundaries: the engine's prelude
@@ -1166,6 +1177,8 @@ type CpuPhases =
         Save: float
         Execute: float
         Intents: int
+        Bucket: int
+        Replans: int
     }
 
 /// One tick's cost, as the engine measured it: the tick it was measured on, the
@@ -1234,6 +1247,8 @@ let foldCpu (cap: int) (tick: int) (readings: CpuReadings) (prior: CpuState) : C
             Save = toMicrosecond (readings.AtSave - readings.AtDecide)
             Execute = toMicrosecond (readings.AtExecute - readings.AtSave)
             Intents = readings.Intents
+            Bucket = readings.Bucket
+            Replans = readings.Replans
         }
 
     {
