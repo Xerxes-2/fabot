@@ -1682,4 +1682,42 @@ let deliveryRankTests =
                     (Some(priorityOfTier StockDraw - tierRungs / 2))
                     "and the mine's own haul stays on the Storage's tier: ore *into* the Storage is exactly the stock work decision 3 ranked"
             }
+
+            test "and it admits one body, not one per banked load" {
+                // The hazard the tier change introduces, capped in the same
+                // breath: the ordinary Withdraw capacity divides the store by
+                // the load, which for a bank of 34,876 T is 69 holders — and at
+                // the top of the Feeding tier that is every idle Carrier in the
+                // colony walking 500 T three rooms out while the spawn cluster
+                // it was refilling goes empty (live W15S28: 215 of 8,300).
+                //
+                // One, because the programme is one body by construction: #319
+                // sized a fixed 20-Carry courier against a 636-tick cadence and
+                // the row's quota is 1.
+                let capOf colony task =
+                    poolOn colony
+                    |> List.tryPick (fun pooled ->
+                        if pooled.Task = task then Some pooled.Capacity else None)
+
+                let delivering = deliveryColony (Some Ownership.Ours)
+
+                Expect.equal
+                    (capOf delivering (Withdraw("sto-1", Thorium))
+                     |> Option.bind (Capacity.capOf CapScope.Everyone))
+                    (Some 1)
+                    "one courier's worth of the bank, whatever the bank holds"
+
+                // Pairwise against the mine's own draw on the same fixture
+                // family, which keeps the load-divided cap it was given (#161).
+                // And the mine's own draw keeps #161's arithmetic — 1,200 of
+                // ore over this fixture's 200-energy hauler load is six bodies
+                // — which is the number this cap is *right* to answer: that
+                // haul is a few tiles of one room, and a body that fills up
+                // half way puts the rest down beside it.
+                Expect.equal
+                    (capOf (mineHaulColony |> withMineStock 1200) (Withdraw("can-min", Thorium))
+                     |> Option.bind (Capacity.capOf CapScope.Everyone))
+                    (Some 6)
+                    "while the mine's draw still answers the number its own stock divides into loads"
+            }
         ]

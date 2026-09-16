@@ -1552,6 +1552,25 @@ let planPool (view: ColonyView) atlas (tasks: Task list) : PooledTask list =
         // energy it holds none of. The divisor is the [[hauler unit]]'s load
         // either way — one row draws both legs, which is the whole of decision
         // 3's "a row's quota grows, not a row".
+        // **The delivery's draw admits one body, not one per load** (#367, and
+        // the hazard the tier change in `priorityOf` introduced). The clause
+        // below divides the store by the load, which for the Reactor's own draw
+        // is 34,876 T banked / 500 = 69 holders — and since that draw now ranks
+        // at the top of the Feeding tier, every idle Carrier in the colony could
+        // take 500 T three rooms out while the spawn cluster it was refilling
+        // went empty. Live W15S28 stood at 215 of 8,300 in its cluster with two
+        // rows unhired while this was deployed.
+        //
+        // One is the right number because the programme is one body by
+        // construction: #319 sized a fixed 20-Carry courier against a 636-tick
+        // cadence and the row's quota is 1. Read through the same two facts the
+        // tier is — the store is a Storage, the programme is open — so the cap
+        // and the rank cannot come to disagree about which draw this is.
+        | Withdraw(storeId, Thorium) when
+            Map.tryFind storeId view.Spatial.TargetKinds = Some(Structure BuiltKind.Storage)
+            && Facts.courierProgrammeOpen view atlas
+            ->
+            Capacity.total 1
         | Withdraw(storeId, resource) ->
             let stock = SpatialInfo.heldIn view.Spatial resource storeId
 
