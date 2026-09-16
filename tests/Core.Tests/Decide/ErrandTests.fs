@@ -1494,10 +1494,27 @@ let consignmentTests =
                     (arriving |> List.contains (Refill("term-1", Energy)))
                     "and no fee is stocked for a send this colony never makes"
 
+                // The ore sink is gated too, and this pair is the live bug
+                // (#363). The argument for leaving it open was `mineRefills`' —
+                // a laden body must have somewhere to put its load down — and
+                // it is a good argument about the wrong pair: the *Storage's*
+                // Thorium sink is pooled unconditionally and is that somewhere.
+                // An ungated terminal sink is a **second** sink in a room that
+                // also draws ore out of that same terminal, and the two fed
+                // each other: at W15S28 a courier and a hauler both matched the
+                // terminal's Refill while 19,848 T sat in it waiting to be
+                // walked to the Storage, and the courier's delivery load —
+                // drawn for a Reactor three crossings out, then at 619 and 380
+                // ticks without a delivery — was about to go back into the
+                // terminal beside it.
+                Expect.isFalse
+                    (arriving |> List.contains (Refill("term-1", Thorium)))
+                    "and the receiving end never offers its terminal as a sink: that is the loop, and the Storage is the sink a laden body needs"
+
                 Expect.contains
-                    arriving
-                    (Refill("term-1", Thorium))
-                    "while the ore sink stands whatever the declaration says: a laden body must have somewhere to put it down"
+                    (planTasksOn (receivingColony 5_000) noThreats)
+                    (Refill("sto-1", Thorium))
+                    "which the Storage's own unconditional Thorium sink already answers, as it does for the mine's ore"
 
                 // The two directions must never both be pooled in one colony:
                 // a room that ships out and draws in would cycle its ore

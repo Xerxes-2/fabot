@@ -777,28 +777,46 @@ let planTasks (view: ColonyView) atlas (threats: Threats) (held: HeldTaskFacts) 
     // the live state of W12S28, whose storage was emptied to 0 by the 100,000
     // the terminal itself cost.
     //
-    // The **ore** sink is pooled whatever the declaration says, for
-    // `mineRefills`' reason: a body already holding ore must have somewhere to
-    // put it down, and the colony that stops declaring a consignment is the one
-    // whose terminal is fullest.
+    // **Both** sinks are gated on the declaration, and the ore sink was not for
+    // the first forty minutes this shipped — which is the bug it is worth
+    // spelling out, because the argument that left it open was a good argument
+    // about the wrong pair.
     //
-    // The **energy** sink is not, and the difference is 4,000 energy a colony.
-    // Only a sender pays a fee; a terminal that never sends and is stocked
-    // anyway has taken `Tuning.TerminalEnergy` out of the spawn economy to
-    // hold it forever. Live that would have been W15S28 — the *receiving* end,
-    // whose terminal exists precisely so that it never has to ship anything —
-    // and W11S29, four levels from an extractor. Energy sitting in a terminal
-    // buys no body and upgrades no controller.
+    // The argument was `mineRefills`': a body already holding ore must have
+    // somewhere to put it down. True, and already answered — the *Storage's*
+    // Thorium sink is pooled unconditionally and is that somewhere. What an
+    // ungated terminal sink adds is a **second** sink in the same room, and at
+    // the receiving end the same room also draws ore *out* of that terminal, so
+    // the two rules fed each other: live at W15S28 a courier and a hauler both
+    // matched `refill:<terminal>:Thorium` while 19,848 T sat in the terminal
+    // waiting to be walked to the Storage, and the courier's 500-unit delivery
+    // load — drawn for the Reactor three crossings away — was about to be put
+    // back into the terminal beside it. The Reactor was at 619 and falling with
+    // no delivery for 380 ticks.
+    //
+    // So the self-feeding loop ADR 0023 refuses for the stock's Withdraw is
+    // refused here the same way: only a colony that **ships** offers its
+    // terminal as a sink, and a colony that receives only ever draws out.
+    //
+    // The energy clause is gated for its own reason, and the difference is
+    // 4,000 energy a colony: only a sender pays a fee, so a terminal stocked
+    // for a send it will never make has taken `Tuning.TerminalEnergy` out of
+    // the spawn economy to hold forever. Live that is W15S28, the receiving end
+    // whose terminal exists precisely so it never ships, and W11S29, four
+    // levels from an extractor.
     let consignRefills =
-        terminals
-        |> List.collect (fun id ->
-            [
-                if SpatialInfo.heldIn view.Spatial Thorium id < Engine.terminalCapacity then
-                    Refill(id, Thorium)
+        match view.Consignee with
+        | None -> []
+        | Some _ ->
+            terminals
+            |> List.collect (fun id ->
+                [
+                    if SpatialInfo.heldIn view.Spatial Thorium id < Engine.terminalCapacity then
+                        Refill(id, Thorium)
 
-                if view.Consignee.IsSome && stored id < view.Tuning.TerminalEnergy then
-                    Refill(id, Energy)
-            ])
+                    if stored id < view.Tuning.TerminalEnergy then
+                        Refill(id, Energy)
+                ])
 
     // **Inbound**, at the far end: ore that arrived by `send` sits in the
     // terminal, and the courier's draw reads the *Storage*, so it has to be
