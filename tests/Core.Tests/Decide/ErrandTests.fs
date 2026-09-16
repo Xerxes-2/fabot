@@ -759,6 +759,110 @@ let courierTests =
                     "at 864 TTL the next fixed body is owed"
             }
 
+            // #354's third clause, over a floor wide enough to price the leg it
+            // turns on. The shared errand fixture cannot: its errand floor
+            // stops at y 47 and its home floor is a corridor at y 10..11, so
+            // neither side of the one crossing has ground behind its landing
+            // tile (ADR 0062), `Atlas.routes` answers `[]`, and every
+            // cross-room price out there is `None`. Widened here, in the one
+            // case that needs a priced walk, rather than in the fixture three
+            // suites read.
+            //
+            // The clause: the Storage's Thorium draw is refused a body whose
+            // life is under `walk × Tuning.MineContactAgeing` for the Reactor's
+            // own Refill. Under the 1,000-unit contact cliff the mod spends
+            // `floor(log10 store.T)` extra life a tick on every creep whose
+            // tile carries ore, and the ore on that tile is the body's own
+            // load — so there is no cool tile anywhere for a loaded courier,
+            // and a body that dies on the leg does not lose a body, it loses
+            // the ore: the tombstone cooks its own tile, decays at the same
+            // three-fold rate, and drops a pile that bleeds at 1 T a tick.
+            test "the delivery draw refuses a body that could not outlive the loaded leg" {
+                let plainFloor =
+                    [
+                        for x in 1..48 do
+                            for y in 1..48 -> { X = x; Y = y }, Plain
+                    ]
+
+                let paved (colony: ColonyView) =
+                    let errand = SpatialInfo.layerOf colony.Spatial errandRoom
+
+                    { colony with
+                        Spatial =
+                            // Named, and the home layer re-filed under the name.
+                            // The `spatial` funnel files home under the **empty**
+                            // name, and an empty name has no sector coordinates
+                            // to be adjacent by, so no chain out of it can exist
+                            // at all — which is the deeper reason the shared
+                            // fixture cannot price this leg. `homeControl`
+                            // carrying both keys is this case anticipated.
+                            { colony.Spatial with
+                                RoomName = Some "W1N1"
+                                Rooms =
+                                    colony.Spatial.Rooms
+                                    |> Map.remove (SpatialInfo.homeName colony.Spatial)
+                                    |> Map.add
+                                        "W1N1"
+                                        (SpatialInfo.layerOf
+                                            colony.Spatial
+                                            (SpatialInfo.homeName colony.Spatial))
+                                Borders =
+                                    colony.Spatial.Borders
+                                    |> Map.add "W1N1" plainRing
+                                    |> Map.add errandRoom plainRing
+                            }
+                            |> withHome (fun layer ->
+                                { layer with
+                                    Terrain = TerrainGrid.ofList plainFloor
+                                })
+                            |> withNeighbour
+                                errandRoom
+                                { errand with
+                                    Terrain = TerrainGrid.ofList plainFloor
+                                }
+                    }
+
+                let atStorage life =
+                    let aged =
+                        { courier "courier-aged" with
+                            TicksToLive = life
+                        }
+
+                    aged,
+                    deliveryColony (Some Ownership.Ours)
+                    |> paved
+                    |> withHomeCreep { X = 13; Y = 10 } aged
+
+                let draws (creep: CreepInfo, colony) =
+                    Map.tryFind creep.Name (decideOn colony).Assignments = Some(
+                        taskId (Withdraw("sto-1", Thorium))
+                    )
+
+                // Read off the Atlas, not asserted: the clause is pinned to the
+                // walk the colony prices, not to a number that moves with the
+                // floor under it.
+                let leg =
+                    let creep, colony = atStorage Engine.creepLifetime
+
+                    match
+                        Atlas.walkTicks (Atlas.ofView colony) creep.Name (Refill(reactor, Thorium))
+                    with
+                    | Some ticks -> ticks
+                    | None ->
+                        failtest
+                            "the widened floor must price the delivery leg, or this case shows nothing"
+
+                let needed = leg * Tuning.defaults.MineContactAgeing
+
+                Expect.isTrue
+                    (draws (atStorage needed))
+                    "exactly the loaded leg's life, at three ticks a tick, is enough"
+
+                Expect.isFalse
+                    (draws (atStorage (needed - 1)))
+                    "one tick short of it is refused: that load would be dropped short of the Reactor"
+            }
+
             // #354's third clause, at the one end this fixture can show. The
             // clause: a delivery draw is refused a body that cannot outlive the
             // loaded leg, priced at three ticks of life per tick walked
