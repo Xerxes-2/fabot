@@ -478,6 +478,36 @@ module Outpost =
             Controller = "6a8caac6dd4872bccd3195f4", { Room = "W11S29"; X = 30; Y = 29 }
         }
 
+    /// W15S28's north outpost, declared 2026-09-16 off
+    /// `docs/research/w15s27-outpost.md`, which executes the ticket ADR 0059
+    /// left open: the room was declined for W13S28 in
+    /// `multihop-outposts.md` §4 at a price taken under the old chain rule, and
+    /// the recommendation was that it wait for W15S28. It now has one hop and
+    /// one chain each way over a 20-tile band, one source at a 132-tick round
+    /// trip, and ≈6.3 energy a tick net against a container, a reserver and one
+    /// more hauler.
+    ///
+    /// What decided it is none of those. The room is **already** in this
+    /// colony's scan set as the W15S25 errand's transit room, and `transiting`
+    /// hands a transit room's facts back with `ConstructionSites = []` — so a
+    /// human's hand-laid trunk out there is not merely unbuilt, it is
+    /// *invisible*, and this line is what makes those sites pool as Build at
+    /// all (#266 rations them, container first then nearest the crossing, at
+    /// `Tuning.OutpostBuilders`).
+    ///
+    /// Its rock has a **single** Seat, `13,29`: a hand-laid site of any other
+    /// kind on that tile plans this room no container at all, which is the one
+    /// way this declaration can be live and worth nothing. Paving it saves the
+    /// Reactor courier nothing either — at `Tuning.ReactorLoad` 500 the
+    /// 20-Carry body is half empty, ten fatigue parts against ten Move, and one
+    /// tick a tile on plain as on road (198 ticks loaded, paved or not).
+    let w15s27: Outpost =
+        {
+            RoomName = "W15S27"
+            Sources = [ "6a8caa95dd4872bccd319011", { Room = "W15S27"; X = 14; Y = 28 } ]
+            Controller = "6a8caa95dd4872bccd319010", { Room = "W15S27"; X = 6; Y = 9 }
+        }
+
 /// One errand: a room a colony declares because it must walk a body there and
 /// act on **one** named object in it, and for no other reason (ADR 0060
 /// decision 1). A room name and that object's engine id and tile, and nothing
@@ -883,13 +913,16 @@ module Colony =
             // The entry with no spawn behind it *is* the decision to take the
             // room (ADR 0047's user story 1): W13S28 projects it as an outpost
             // by the line above, and this line is what turns that room's
-            // controller from a Reserve into a Claim. No outposts of its own
-            // yet — W15S27, W15S29 and W14S29 are the rooms it will want, and
-            // a room worked from a colony that does not exist is a body bought
-            // for nobody.
+            // controller from a Reserve into a Claim. The colony it was a
+            // decision about now exists — RCL6, its own spawn, its own
+            // extensions — so the rooms it *would* want stop being bodies
+            // bought for nobody, and W15S27 is the first of them (2026-09-16,
+            // `docs/research/w15s27-outpost.md`). W15S29 and W14S29 are not
+            // measured yet; W14S28 is W13S28's by the entry above and one hop
+            // from here, which is a reassignment and not a new declaration.
             {
                 Home = "W15S28"
-                Outposts = []
+                Outposts = [ Outpost.w15s27 ]
                 // And the one errand there is (ADR 0060 decision 1): the
                 // sector Reactor in W15S25, three crossings out by W15S27 and
                 // the Source Keeper room W15S26. This colony declares it
