@@ -135,16 +135,42 @@ let maskIn (margin: int) (room: string) : Pos -> bool =
     | centres -> fun tile -> centres |> List.exists (fun centre -> range centre tile <= margin)
 
 /// The same rule in bulk: every masked tile of this room that is a coordinate
-/// of the fifty-by-fifty grid, border ring included. What the [[atlas]] lays
-/// its grids from, because a grid pass that asked `masked` per tile would ask
-/// it 2,500 times for an answer that covers a few hundred. The two agree by
-/// construction: `tilesWithin` is the Chebyshev ball `range` is the measure of.
+/// of the fifty-by-fifty grid, border ring included, de-duplicated and in
+/// `tilesWithin` order. What the [[atlas]] lays its grids from, because a grid
+/// pass that asked `masked` per tile would ask it 2,500 times for an answer
+/// that covers a few hundred.
+///
+/// The ball is `tilesWithin`'s own — the Chebyshev ball `range` is the measure
+/// of, x-major then y — walked here rather than built as a list per centre,
+/// and de-duplicated through the grid's own index rather than through
+/// `List.distinct`. The answer is identical, tile for tile and in the same
+/// order: the walk is that function's, the bounds test is the one the filter
+/// applied, and a first-seen index keeps the first occurrence `distinct`
+/// keeps. What it drops is the garbage — `8 × 169` intermediate `Pos` values
+/// and a `HashSet<Pos>` over them, every tick.
+///
+/// It is written this way because the [[atlas]] calls it once per projected
+/// room per tick and it is the single largest attributable runtime cost in a
+/// `reactor` run: 44.5 ms of a 316 ms `decide`, 14.1%, of which the
+/// de-duplication alone was 10.0 ms (`npm run profile -- 100 30 --scenario
+/// reactor --level 7`, sampled 2026-09-17; W15S26 is the one room in the table
+/// today and its answer is 937 tiles).
 let maskedTilesIn (margin: int) (room: string) : Pos list =
-    centresIn room
-    |> List.collect (tilesWithin margin)
-    |> List.filter (fun tile ->
-        tile.X >= 0
-        && tile.X < Engine.roomSide
-        && tile.Y >= 0
-        && tile.Y < Engine.roomSide)
-    |> List.distinct
+    match centresIn room with
+    | [] -> []
+    | centres ->
+        let seen = Array.zeroCreate<bool> tileCount
+        let tiles = ResizeArray<Pos>()
+
+        for centre in centres do
+            for x in centre.X - margin .. centre.X + margin do
+                if x >= 0 && x < Engine.roomSide then
+                    for y in centre.Y - margin .. centre.Y + margin do
+                        if y >= 0 && y < Engine.roomSide then
+                            let index = x * Engine.roomSide + y
+
+                            if not seen.[index] then
+                                seen.[index] <- true
+                                tiles.Add { X = x; Y = y }
+
+        List.ofSeq tiles

@@ -82,11 +82,34 @@ let internal fatigueFactorOf (creep: CreepInfo) : FatigueFactor =
 /// creep; this one reads a body the projection carries no creep for: the
 /// hauler quota's candidate (ADR 0012) and a lead's replacement (ADR 0026).
 let internal emptyFactorOf (body: BodyPart list) : FatigueFactor =
-    let parts = partsOf body
-    let moves = partCount parts Move
+    // Counted in one pass over the list rather than through
+    // `Vocabulary.partsOf`, which counts a whole `Map<BodyPart, int>` into
+    // existence to read two keys out of it — `partCountIn`'s own argument, on
+    // the rule that asks about a single part, applied to the rule that asks
+    // about two. The answer is identical by construction: `List.length` is the
+    // total and the map's two entries are these two counts.
+    //
+    // It is here rather than anywhere else because this is the hot one: every
+    // [[lead]] prices its successor's walk through `Atlas.castWalkTicks`, which
+    // takes this factor before it reaches its own memo, and a `pair --level 7`
+    // profile attributed 17.0 ms of a 265 ms `decide` — 6.4% — to the map this
+    // line used to build (`npm run profile -- 100 30 --scenario pair --level
+    // 7`, 2026-09-17). `partsOf` stays what it is for the rules that read
+    // several parts.
+    let mutable total = 0
+    let mutable moves = 0
+    let mutable carry = 0
+
+    for part in body do
+        total <- total + 1
+
+        match part with
+        | Move -> moves <- moves + 1
+        | Carry -> carry <- carry + 1
+        | _ -> ()
 
     {
-        FatigueParts = List.length body - moves - partCount parts Carry
+        FatigueParts = total - moves - carry
         MoveParts = moves
     }
 

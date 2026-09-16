@@ -28,8 +28,22 @@ The harness implements only the API surface declared in
 costs (the prelude, 0.2 CPU per accepted intent, Memory serialization) are
 not simulated. **Relative percentages are the signal; absolute ms/tick is
 a floor.** Only runs at the same `--scenario`, `--level` and machine
-compare with each other; run-to-run spread is about a tenth of a
-millisecond.
+compare with each other.
+
+**Run-to-run spread is wider than this page used to claim.** It said "about a
+tenth of a millisecond", which is the spread *within* one session; across
+sessions on the same machine the median of an unchanged arm drifts by about
+**±6%** (measured 2026-09-17 while landing #365: base-arm medians of the same
+build wandered between 2.55 and 2.70 ms of per-colony `decide` on `pair
+--level 7`). So:
+
+- A claim under about **5%** needs 300-tick rounds, at least three pairs, **both
+  arm orders**, and a reported spread. A single number in that range is not
+  evidence here.
+- Interleave the arms with a **full rebuild between each**, and never compare a
+  figure from one session against one written down in another — including the
+  figures in this repo's own research documents, which name the run they came
+  from for exactly this reason.
 
 Every run prints ADR 0041's trigger to revisit the layered projection —
 **a mean tick above 50 ms, or any single tick above 80** — judged against
