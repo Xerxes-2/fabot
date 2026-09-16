@@ -448,9 +448,12 @@ let internal ourMineralContainers (view: ColonyView) : string list =
 
 /// Whether a deposit of ours is one the colony can **actually dig this tick**
 /// (ADR 0057 decision 2): it still holds Thorium, and its extractor **stands**.
-/// The two conditions the [[miner]] row's own quota puts a body at 0 for, written
-/// once so the row that hires the digger and the term that hires the carrier
-/// cannot disagree about whether there is a mine (#262). The row adds the third,
+/// The two conditions the [[miner]] row's own quota puts a body at 0 for. It was
+/// written once so the row that hires the digger and the term that hires the
+/// carrier could not disagree about whether there is a mine (#262) — they are
+/// now **meant** to disagree, and only the digger reads this (#361): the
+/// carrier's load comes out of a Storage, which outlives the deposit that
+/// filled it. The row adds the third,
 /// the mine [[post]], which the container census the haul term reads has already
 /// answered. A site is not an extractor: `harvest.js` refuses a mineral with
 /// none on it, so a deposit under one produces nothing and the haul priced
@@ -460,12 +463,24 @@ let internal depositIsDiggable (view: ColonyView) atlas (depositId: string) =
     && (Atlas.extractorOn atlas depositId).IsSome
 
 /// Whether the season's delivery programme has all of its current ground
-/// facts (#319): a diggable deposit feeding a Storage that holds one exact
-/// load, and a resident CLAIM body keeping vision and ownership at a declared
-/// Reactor. No remembered switch — each fact closes the row when it disappears.
+/// facts (#319, narrowed by #361): a Storage holding one whole load, and a
+/// resident CLAIM body keeping vision and ownership at a declared Reactor. No
+/// remembered switch — each fact closes the row when it disappears.
+///
+/// What is **not** a condition, and cost a live streak to learn: a diggable
+/// mine. The row used to require one, on the reading that a delivery programme
+/// is the far end of a mining programme. It is not. Thorium never regenerates
+/// (`docs/research/thorium-reactor.md`), so every deposit ends mined out with
+/// its ore sitting in a Storage — and the tick the mine ran dry this row
+/// closed, the courier was not replaced, and the Reactor burned down its
+/// 1,000-unit store with **7,226 T banked at home and a 7,989-tick streak
+/// standing** (#361). Ore in the bank scores exactly what ore in the ground
+/// scores; the mine decides only whether the bank is *refilled*.
+///
+/// `hasLoad` is what makes that safe, and it is unchanged: the programme wants
+/// a whole `ReactorLoad` in a Storage before it hires anybody, so a closing
+/// programme now means an empty bank rather than an empty mine.
 let internal courierProgrammeOpen (view: ColonyView) atlas =
-    let canDig = ourDeposits view |> List.exists (depositIsDiggable view atlas)
-
     let hasLoad =
         view.Spatial.TargetKinds
         |> Map.exists (fun id kind ->
@@ -483,6 +498,5 @@ let internal courierProgrammeOpen (view: ColonyView) atlas =
                 |> Option.exists (fun tile -> Set.contains tile.Room errandRooms)))
 
     view.Bank.Capacity >= bodyCost courierPattern.Block
-    && canDig
     && hasLoad
     && hasResidentReclaimer

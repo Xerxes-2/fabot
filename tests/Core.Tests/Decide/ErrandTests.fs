@@ -660,13 +660,13 @@ let courierTests =
         "the courier: one 500-unit trip over the priced errand"
         [
             test
-                "the row opens only behind a diggable mine, a full load and the resident re-claimer" {
+                "the row opens behind a full load and the resident re-claimer, and not behind a mine" {
                 let ready = deliveryColony (Some Ownership.Ours)
 
                 Expect.equal
                     (courierRow ready).Quota
                     1
-                    "all four current facts open one cadence seat"
+                    "all three current facts open one cadence seat"
 
                 let incomeRocks =
                     [
@@ -766,12 +766,27 @@ let courierTests =
                 for colony, reason in
                     [
                         poor, "a bank below the fixed 1,500 body yields"
-                        ready |> withExtractorSite, "an extractor site is not a diggable deposit"
-                        exhausted, "an exhausted deposit closes the row"
                         short, "499 Thorium is not one delivery load"
                         noResident, "the delivery waits behind the re-claimer"
                     ] do
                     Expect.equal (courierRow colony).Quota 0 reason
+
+                // The mine is **not** one of the facts, and this is the pair
+                // that used to say the opposite (#361). Thorium never
+                // regenerates, so every deposit ends mined out with its ore in
+                // a Storage; the tick W15S28's mine ran dry this row closed,
+                // the courier was not replaced, and the Reactor started
+                // burning down its store with 7,226 T banked and a 7,989-tick
+                // streak standing. Ore in the bank scores what ore in the
+                // ground scores.
+                for colony, reason in
+                    [
+                        exhausted,
+                        "an exhausted deposit does not close the row: the bank still holds a load"
+                        ready |> withExtractorSite,
+                        "nor does a mine with no extractor standing — the carrier does not dig"
+                    ] do
+                    Expect.equal (courierRow colony).Quota 1 reason
             }
 
             test "636 ticks is the cadence, and the fixed body is cast at its boundary" {
