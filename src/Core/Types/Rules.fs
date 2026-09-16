@@ -58,6 +58,35 @@ module Engine =
     /// ever holds.
     let storageCapacity = 1_000_000
 
+    /// TERMINAL_CAPACITY: what a terminal's store holds, over all resources at
+    /// once. The cap on one consignment leg (#349): 19,848 T fits in one
+    /// terminal with room to spare, so the ore moves in as few sends as the
+    /// hauling allows and never in 500-unit courier loads.
+    let terminalCapacity = 300_000
+
+    /// TERMINAL_COOLDOWN: the ticks a terminal is refused after a `send`.
+    /// Ten, so a colony shipping a bank moves it in bursts and the decision to
+    /// send has to survive being refused — the store it reads is the store the
+    /// engine will still hold next tick.
+    let terminalCooldown = 10
+
+    /// TERMINAL_MIN_SEND: the smallest amount `send` accepts. Below it the
+    /// intent is refused outright, which is why the last few hundred units of a
+    /// bank are shipped in one lot or not at all.
+    let terminalMinSend = 100
+
+    /// The energy a `send` costs the sending terminal:
+    /// `ceil(amount · (1 − e^(−range/30)))` over the **linear** room distance
+    /// (`calcTerminalEnergyCost`, and Screeps' `Game.map.getRoomLinearDistance`
+    /// is Chebyshev and not the hop count this tree walks by). Three rooms is
+    /// about 95 energy a thousand; the whole 36,484 T banked in the two homes
+    /// moves for under 4,000 (#349).
+    ///
+    /// Read off the engine source and **not yet confirmed against a live
+    /// send** — the one number in this module that has never been paid.
+    let sendFee (range: int) (amount: int) =
+        float amount * (1.0 - exp (-float range / 30.0)) |> ceil |> int
+
     /// The season Reactor's Thorium store capacity. It consumes one a tick;
     /// an empty 999-unit delivery therefore buys 999 ticks of continuity.
     let reactorCapacity = 1_000
@@ -354,6 +383,19 @@ type Tuning =
         /// ageing waiting for room, and died holding ore. 915 T reached the
         /// Reactor room's floor that way (#354).
         ReactorLoad: int
+        /// The energy a terminal is kept stocked with, to pay `send`'s fee out
+        /// of (#349). Energy sitting in a terminal is energy out of the
+        /// economy — it buys no body and upgrades no controller — so this is
+        /// sized off the job and not off the store: the fee is
+        /// `Engine.sendFee`, about 95 energy a thousand units over the three
+        /// rooms between W12S28 and W15S28, so 4,000 ships the whole 36,484 T
+        /// banked in the two shipping colonies with room to spare.
+        ///
+        /// Not sized off the terminal's 300,000 capacity, which is the mistake
+        /// the mirror of this field would make: a terminal stocked to capacity
+        /// would hold four colonies' worth of spawning energy to move ore that
+        /// costs a twentieth of it.
+        TerminalEnergy: int
         /// Ticks between courier casts while the delivery programme is open
         /// (#319). The loaded body's Atlas walk is 318 ticks over W15S28's
         /// 154-unit route, so a courier cast this often is always fresh
@@ -498,6 +540,7 @@ module Tuning =
             MineContactAgeing = 3
             MineContactCliff = 1000
             ReactorLoad = 500
+            TerminalEnergy = 4_000
             DeliveryInterval = 636
             ReclaimerOverlap = 25
             HorizonLookahead = 1

@@ -737,6 +737,89 @@ let planTasks (view: ColonyView) atlas (threats: Threats) (held: HeldTaskFacts) 
             else
                 None)
 
+    // The consignment (#349): the two Tasks that put a declaring colony's
+    // banked ore into its own terminal, and the one that takes an arriving
+    // consignment out of it. What actually crosses the map is `planConsignment`
+    // in `Layout` — a structure intent, not a body — and these three are the
+    // hauling either side of it.
+    //
+    // Three rooms of `send` replace five and six crossings of walk, which is
+    // the whole reason the terminal was worth 100,000 energy: W12S28 and
+    // W13S28 bank 36,484 T between them and sit outside `Tuning.MaxHops` of the
+    // Reactor, so no courier row of theirs can ever be opened (`Errand`'s own
+    // docstring, and `docs/research/fourth-colony.md` deferred deliverability
+    // to exactly this ticket).
+    let terminals = idsOfKind (Structure BuiltKind.Terminal)
+
+    let terminalRoom id =
+        Engine.terminalCapacity - stored id - SpatialInfo.heldIn view.Spatial Thorium id
+
+    // **Outbound**, and only for a colony that declares a consignee: the ore
+    // goes from the Storage into the terminal. Gated on room in the terminal
+    // and on nothing else — not on the Storage's level, because unlike the
+    // delivery draw there is no 500-unit load here and no walk to strand a
+    // carrier on: the terminal stands in the home room, feet from the Storage,
+    // and a body that fills up half way puts down what it has.
+    let consignWithdraws =
+        match view.Consignee with
+        | None -> []
+        | Some _ ->
+            if terminals |> List.exists (fun id -> terminalRoom id > 0) then
+                storages
+                |> List.filter (fun id -> SpatialInfo.heldIn view.Spatial Thorium id > 0)
+                |> List.map (fun id -> Withdraw(id, Thorium))
+            else
+                []
+
+    // Its sink, and the fee's intake beside it. The energy matters as much as
+    // the ore: `send` is paid out of the **sending** terminal's own energy, so
+    // a terminal holding 19,848 T and no energy ships nothing at all — which is
+    // the live state of W12S28, whose storage was emptied to 0 by the 100,000
+    // the terminal itself cost.
+    //
+    // The **ore** sink is pooled whatever the declaration says, for
+    // `mineRefills`' reason: a body already holding ore must have somewhere to
+    // put it down, and the colony that stops declaring a consignment is the one
+    // whose terminal is fullest.
+    //
+    // The **energy** sink is not, and the difference is 4,000 energy a colony.
+    // Only a sender pays a fee; a terminal that never sends and is stocked
+    // anyway has taken `Tuning.TerminalEnergy` out of the spawn economy to
+    // hold it forever. Live that would have been W15S28 — the *receiving* end,
+    // whose terminal exists precisely so that it never has to ship anything —
+    // and W11S29, four levels from an extractor. Energy sitting in a terminal
+    // buys no body and upgrades no controller.
+    let consignRefills =
+        terminals
+        |> List.collect (fun id ->
+            [
+                if SpatialInfo.heldIn view.Spatial Thorium id < Engine.terminalCapacity then
+                    Refill(id, Thorium)
+
+                if view.Consignee.IsSome && stored id < view.Tuning.TerminalEnergy then
+                    Refill(id, Energy)
+            ])
+
+    // **Inbound**, at the far end: ore that arrived by `send` sits in the
+    // terminal, and the courier's draw reads the *Storage*, so it has to be
+    // walked across the room. The sink is `mineRefills` above, which is pooled
+    // off the Storage's free capacity alone — written for the mine's ore and
+    // taking this the same way, because neither rule knows nor needs to know
+    // where a load came from.
+    //
+    // Gated on the colony declaring **no** consignee of its own, which is what
+    // keeps the two directions from fighting: a room that both ships out and
+    // draws in would cycle its ore between two stores forever, one Task
+    // undoing the other tick after tick — the same self-feeding loop ADR 0023
+    // refuses for the stock's Withdraw.
+    let arrivalWithdraws =
+        match view.Consignee with
+        | Some _ -> []
+        | None ->
+            terminals
+            |> List.filter (fun id -> SpatialInfo.heldIn view.Spatial Thorium id > 0)
+            |> List.map (fun id -> Withdraw(id, Thorium))
+
     // The [[ferry]]'s other half (ADR 0052 decision 7): a bootstrapping child's
     // upgrade buffer is a Refill target of the mother's, on the same tier her
     // own buffer sits on (ADR 0012) — the deepest but the stock's, so nothing
@@ -770,6 +853,13 @@ let planTasks (view: ColonyView) atlas (threats: Threats) (held: HeldTaskFacts) 
     flees
     @ guards
     @ harvests
+    // The consignment's rungs sit here, above the energy cycle and below the
+    // season's own: ore is the season's score and the hauling it asks for is a
+    // few tiles of the home room, so nothing in the energy economy is worth
+    // making it wait (#349).
+    @ consignWithdraws
+    @ arrivalWithdraws
+    @ consignRefills
     // Behind the sources' own, which is pool order and so the last rung of the
     // Matcher's ladder: the two never tie for a body anyway, the deposit's
     // Harvest reaching only a body with no Carry at all.

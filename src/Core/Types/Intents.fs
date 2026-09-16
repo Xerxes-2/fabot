@@ -103,6 +103,20 @@ type Intent =
     | SayCreep of creepName: string * message: string
     | ActivateSafeMode of controllerId: string
     | FireTower of towerId: string * hostileId: string
+    /// A terminal shipping a resource to another room's terminal (#349). The
+    /// **amount and the destination room** are both named here rather than left
+    /// for the Executor to work out, for `HealCreep`'s reason: an Intent whose
+    /// numbers ride implicitly on the actor says nothing in the Executor's
+    /// failure line, and this is the one intent in this list whose refusal is
+    /// expected in normal running — a terminal is on cooldown for ten ticks
+    /// after every send, and a colony that decides to ship reads no cooldown
+    /// (`RoomFacts` carries none) and so is refused about a tenth of the time
+    /// it asks.
+    | SendFromTerminal of
+        terminalId: string *
+        resource: Resource *
+        amount: int *
+        destination: string
 
 /// Creep name -> task id. The only state remembered between ticks (anti-thrash).
 type Assignments = Map<string, string>

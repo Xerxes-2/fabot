@@ -441,7 +441,15 @@ let wholeLine =
 let isStored =
     function
     | BuiltKind.Container
-    | BuiltKind.Storage -> true
+    | BuiltKind.Storage
+    // And the terminal, as of the slice that ships ore through it (#349). Its
+    // store is read for two things and offered as neither an energy intake nor
+    // a hauling sink: the Thorium waiting to be sent, and the energy the fee is
+    // paid out of. Both halves of that are rules in `Planner`, filed under the
+    // consignment the colony declares — the flip was held back until they
+    // existed, because a store in the projection that no rule names is a store
+    // every generic rule may pick up.
+    | BuiltKind.Terminal -> true
     | BuiltKind.Spawn
     | BuiltKind.Extension
     | BuiltKind.Tower
@@ -449,12 +457,6 @@ let isStored =
     | BuiltKind.Link
     | BuiltKind.Rampart
     | BuiltKind.Extractor
-    // Not yet (#349), and deliberately: this field is what puts a store into
-    // the projection, and "fields nobody decides on stay out" is this list's
-    // own rule. It flips in the slice that adds the send — together with the
-    // rules that read it, so a terminal's store never sits in the projection
-    // as an energy source no rule meant to offer.
-    | BuiltKind.Terminal
     | BuiltKind.Other -> false
 
 /// The kinds a creep can stand on; every other kind blocks its tile

@@ -237,12 +237,14 @@ let private declared: Colony list =
                 ]
             Errands = []
             Mother = None
+            Consignee = None
         }
         {
             Home = child
             Outposts = []
             Errands = []
             Mother = Some mother
+            Consignee = None
         }
     ]
 
@@ -323,6 +325,48 @@ let private noneShut = Map.empty<string, Set<string>>
 
 let private holdersOf world =
     World.creepColonies Tuning.defaults declared (World.living declared world) noneShut world
+
+/// The same pair with the mother **shipping** to the child, and a terminal
+/// standing in her room holding both of the stores a send reads (#349).
+let private consigning: Colony list =
+    declared
+    |> List.map (fun colony ->
+        if colony.Home = mother then
+            { colony with Consignee = Some child }
+        else
+            colony)
+
+let private terminalWorld =
+    { pairWorld with
+        Rooms =
+            pairWorld.Rooms
+            |> Map.change
+                mother
+                (Option.map (fun (facts: RoomFacts) ->
+                    { facts with
+                        Layer =
+                            { facts.Layer with
+                                TargetPositions =
+                                    Map.add
+                                        "term-home"
+                                        { X = 6; Y = 6 }
+                                        facts.Layer.TargetPositions
+                            }
+                        TargetKinds =
+                            Map.add "term-home" (Structure BuiltKind.Terminal) facts.TargetKinds
+                        // The two stores a send is priced against, and they
+                        // travel in **different** tables: energy under
+                        // `Stores`, ore under `Thorium` (ADR 0057 decision 3).
+                        // A fixture that wrote both into one would agree with a
+                        // rule reading either, which is the shape #354's first
+                        // gate was green against.
+                        Stores = Map.add "term-home" 4_000 facts.Stores
+                        Thorium = Map.add "term-home" 19_848 facts.Thorium
+                        Owners = Map.add "term-home" Ownership.Ours facts.Owners
+                        Hits = Map.add "term-home" { Hits = 3000; HitsMax = 3000 } facts.Hits
+                    }))
+    }
+
 
 /// One colony's view, built under whatever declaration is handed in — the
 /// one spelling of the construction this file has, so a parameter added to
@@ -1804,6 +1848,47 @@ let errandTests =
     testList
         "an errand carries the ground, the walk, and the one thing declared in it"
         [
+            test "a terminal's two stores and the consignment it is for both reach the view" {
+                // The projection-side counterpart of #349's consignment rules,
+                // written with them for #355's and #356's reason. Three facts
+                // have to survive `ofWorld` for `planConsignment` to be worth
+                // anything: the terminal's kind, its **two** stores in their
+                // two separate tables, and the declaration naming the far end.
+                let view = viewUnder consigning terminalWorld mother
+
+                Expect.equal
+                    (Map.tryFind "term-home" view.Spatial.TargetKinds)
+                    (Some(Structure BuiltKind.Terminal))
+                    "the terminal is a target of a kind, which is how the rule finds it at all"
+
+                Expect.equal
+                    (SpatialInfo.heldIn view.Spatial Thorium "term-home")
+                    19_848
+                    "the ore waiting to be shipped, off the Thorium table"
+
+                Expect.equal
+                    (SpatialInfo.storedIn view.Spatial "term-home")
+                    4_000
+                    "and the energy the fee is paid out of, off the store table beside it — the two are never one number (ADR 0057 decision 3)"
+
+                Expect.equal
+                    view.Consignee
+                    (Some child)
+                    "the declaration rides onto the view unnarrowed: there is no scan set for a room three crossings out"
+
+                // And the far end reads none of it. This is what makes the
+                // send's blindness deliberate rather than an oversight: the
+                // receiving colony cannot see the terminal that is about to
+                // ship to it, so no rule of its own can wait for a consignment.
+                let far = viewUnder consigning terminalWorld child
+
+                Expect.equal far.Consignee None "the receiving colony declares nothing"
+
+                Expect.isFalse
+                    (Map.containsKey "term-home" far.Spatial.TargetKinds)
+                    "and cannot see the sender's terminal at all"
+            }
+
             test
                 "the courier under the flag reaches the view as a body with parts, and the home it walked from is named" {
                 // The projection-side half of #361's running-dry alarm, written
@@ -2542,6 +2627,7 @@ let private declaringOutpost outpost : Colony =
         Outposts = [ outpost ]
         Errands = []
         Mother = None
+        Consignee = None
     }
 
 let private declaringErrand errand : Colony =
@@ -2550,6 +2636,7 @@ let private declaringErrand errand : Colony =
         Outposts = []
         Errands = [ errand ]
         Mother = None
+        Consignee = None
     }
 
 [<Tests>]

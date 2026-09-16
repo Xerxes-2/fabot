@@ -342,6 +342,7 @@ let errandStandDownTests =
                         Outposts = []
                         Errands = [ reactorErrand ]
                         Mother = None
+                        Consignee = None
                     }
 
                 let world =
@@ -1429,5 +1430,141 @@ let courierTests =
                     ((decideOn quiet).Assignments |> Map.tryFind loaded.Name)
                     (Some(taskId (Refill(reactor, Thorium))))
                     "when Reach clears the same loaded body re-prices the Reactor leg"
+            }
+        ]
+
+/// The consignment (#349): W12S28 and W13S28 bank 36,484 T between them and sit
+/// five and six crossings from the Reactor, outside `Tuning.MaxHops` — so no
+/// courier row of theirs can ever open, and the ore moves by terminal or not at
+/// all. Three rules haul it (`Planner`) and one ships it (`Layout`), and these
+/// are the tests of the pairing between them.
+[<Tests>]
+let consignmentTests =
+    testList
+        "the consignment"
+        [
+            test
+                "a declared consignee draws its bank towards the terminal, and the terminal takes it" {
+                let tasks = planTasksOn (consigningColony 0 10_000) noThreats
+
+                Expect.contains
+                    tasks
+                    (Withdraw("sto-1", Thorium))
+                    "the banked ore is drawn out of the Storage"
+
+                Expect.contains
+                    tasks
+                    (Refill("term-1", Thorium))
+                    "and the terminal is where it goes"
+
+                // The fee's intake, which matters as much as the ore: `send` is
+                // paid out of the sending terminal's own energy, and W12S28's
+                // storage was emptied to 0 by the 100,000 the terminal cost.
+                Expect.contains
+                    (planTasksOn (consigningColony 0 0) noThreats)
+                    (Refill("term-1", Energy))
+                    "and energy follows it, because a terminal with no energy ships nothing"
+
+                Expect.isFalse
+                    (planTasksOn (consigningColony 0 Tuning.defaults.TerminalEnergy) noThreats
+                     |> List.contains (Refill("term-1", Energy)))
+                    "stocked to the tuned figure it takes no more: energy in a terminal buys no body"
+            }
+
+            test
+                "a colony that declares no consignee walks arriving ore out of its terminal instead" {
+                let arriving = planTasksOn (receivingColony 5_000) noThreats
+
+                Expect.contains
+                    arriving
+                    (Withdraw("term-1", Thorium))
+                    "the far end draws what landed in the terminal"
+
+                Expect.contains
+                    arriving
+                    (Refill("sto-1", Thorium))
+                    "and the Storage takes it, the same sink the mine's own ore uses"
+
+                // 4,000 energy a colony turns on this clause. Only a sender
+                // pays a fee, and a terminal stocked for a send it will never
+                // make has taken that much out of the spawn economy to hold
+                // forever — which live would have been W15S28, the receiving
+                // end, and W11S29, four levels from an extractor.
+                Expect.isFalse
+                    (arriving |> List.contains (Refill("term-1", Energy)))
+                    "and no fee is stocked for a send this colony never makes"
+
+                Expect.contains
+                    arriving
+                    (Refill("term-1", Thorium))
+                    "while the ore sink stands whatever the declaration says: a laden body must have somewhere to put it down"
+
+                // The two directions must never both be pooled in one colony:
+                // a room that ships out and draws in would cycle its ore
+                // between two stores forever, one Task undoing the other — the
+                // self-feeding loop ADR 0023 refuses for the stock's Withdraw.
+                Expect.isFalse
+                    (planTasksOn (consigningColony 5_000 10_000) noThreats
+                     |> List.contains (Withdraw("term-1", Thorium)))
+                    "a shipping colony never draws out of its own terminal"
+            }
+
+            test "the send ships what the terminal holds, priced by the engine's own fee" {
+                // W1N1 to W1N4 is three rooms, which is `getRoomLinearDistance`
+                // and not the hop count: the fee is `ceil(amount · (1 −
+                // e^(−3/30)))`, about 95 energy a thousand.
+                let fee = Engine.sendFee 3 10_000
+
+                Expect.equal fee 952 "the engine's arithmetic, read off `calcTerminalEnergyCost`"
+
+
+
+                Expect.equal
+                    (sendsOn (consigningColony 10_000 fee))
+                    [ "term-1", Thorium, 10_000, "W1N4" ]
+                    "energy exactly covering the fee ships the whole store"
+
+                Expect.equal
+                    (sendsOn (consigningColony 10_000 0))
+                    []
+                    "and no energy ships nothing at all, which is W12S28's live state"
+            }
+
+            test "a terminal that cannot pay for all of it ships what it can" {
+                // The amount is scaled by the ratio the fee overshoots by. The
+                // fee is linear in the amount — the exponential is in the range
+                // alone — so one correction lands, and the assertion is that
+                // what is shipped is affordable rather than that it is maximal.
+                let shipped = sendsOn (consigningColony 10_000 500)
+
+                match shipped with
+                | [ _, _, amount, _ ] ->
+                    Expect.isLessThan
+                        amount
+                        10_000
+                        "less than the store, because the energy does not cover it"
+
+                    Expect.isLessThanOrEqual
+                        (Engine.sendFee 3 amount)
+                        500
+                        "and the fee on what is shipped is paid by the energy that is there"
+                | other -> failtestf "expected one send, got %A" other
+            }
+
+            test "the floors: below the engine's minimum, or with nothing declared, nothing ships" {
+                Expect.equal
+                    (sendsOn (consigningColony (Engine.terminalMinSend - 1) 10_000))
+                    []
+                    "under 100 units the engine refuses a send outright, so the tail waits to go in one lot"
+
+                Expect.equal
+                    (sendsOn (consigningColony Engine.terminalMinSend 10_000))
+                    [ "term-1", Thorium, Engine.terminalMinSend, "W1N4" ]
+                    "at the minimum it goes"
+
+                Expect.equal
+                    (sendsOn (receivingColony 10_000))
+                    []
+                    "and a colony with no consignee declared ships nothing, whatever its terminal holds"
             }
         ]

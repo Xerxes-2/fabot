@@ -56,7 +56,10 @@ let private channel =
     | SpawnCreep _
     | PlaceConstructionSite _
     | ActivateSafeMode _
-    | FireTower _ -> None
+    | FireTower _
+    // A structure's verb and no creep's: nothing to de-duplicate per body, and
+    // two sends in one tick are the engine's business to refuse (#349).
+    | SendFromTerminal _ -> None
 
 /// Reject same-channel duplicates (even identical ones) and engine suppression
 /// pairs, per creep. Nothing is dropped or reordered, and different creeps do

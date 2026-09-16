@@ -844,6 +844,27 @@ type Colony =
         /// `Tuning.BootstrapLevel`. `None` for a colony that was never
         /// anybody's child and for one that has outgrown its mother.
         Mother: string option
+        /// The home room of the colony this one **ships its banked Thorium to**
+        /// (#349), or `None` for a colony that ships none — either because it
+        /// can walk its own ore to the Reactor or because it has none left.
+        ///
+        /// Declared by hand for the reason `Errands` is: it is a claim about
+        /// two rooms at once, and the claim is not the distance but that the
+        /// **far end can finish the job**. A send puts ore in a terminal three
+        /// rooms away; what makes that worth 100,000 energy of terminal is that
+        /// the room it lands in holds a declared `Errand` and a courier row
+        /// that walks it the last three crossings. A colony cannot read that
+        /// off its own view — `decide` runs per colony (ADR 0032) and no view
+        /// carries another colony's declarations — so the pairing is stated
+        /// where both ends are visible to a reader, here, rather than derived
+        /// from a fact neither end holds.
+        ///
+        /// The energy is not the reason to hesitate: `mod-season5`'s
+        /// `terminal-restriction.js` nulls only a `send` whose target terminal
+        /// belongs to **another user**, and the engine's own fee is
+        /// `ceil(amount · (1 − e^(−range/30)))` — about 95 energy a thousand
+        /// over the three rooms between W12S28 and W15S28.
+        Consignee: string option
     }
 
 [<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
@@ -881,6 +902,13 @@ module Colony =
                 // way there is projected from here (ADR 0060 decision 1).
                 Errands = []
                 Mother = None
+                // 19,848 T banked here with no walk to spend it on, and the
+                // terminal to move it stood on 2026-09-17 at (11,43) — the
+                // 100,000 energy that emptied this storage. W15S28 is the far
+                // end because it is the one colony that declares the Reactor
+                // errand: three rooms of `send` and then three crossings of
+                // courier (#349).
+                Consignee = Some "W15S28"
             }
             // The second colony (ADR 0047). W13S28 was the first colony's
             // outpost until its own spawn stood; that tick it became a living
@@ -946,6 +974,11 @@ module Colony =
                 // its own open question and does not answer.
                 Errands = []
                 Mother = Some "W12S28"
+                // 16,464 T banked and a terminal going up at (14,10),
+                // 3,836/100,000 on 2026-09-17. Same far end and same reason as
+                // W12S28's above: five crossings of walk this colony will
+                // never make, three rooms of `send` it can (#349).
+                Consignee = Some "W15S28"
             }
             // The third colony (2026-09-10, `docs/research/third-colony.md`).
             // The entry with no spawn behind it *is* the decision to take the
@@ -968,6 +1001,11 @@ module Colony =
                 // is the room's whole reason for being where it is.
                 Errands = [ Errand.w15s25 ]
                 Mother = Some "W13S28"
+                // The far end of the other two colonies' consignments, and
+                // so ships nothing itself: what lands in this terminal is
+                // walked the last three crossings by the courier row this
+                // colony already runs (#349).
+                Consignee = None
             }
             // The fourth colony (2026-09-16, `docs/research/fourth-colony.md`).
             // The entry with no spawn behind it *is* the decision to take the
@@ -991,6 +1029,11 @@ module Colony =
                 Outposts = []
                 Errands = []
                 Mother = Some "W13S28"
+                // Its own 45,000 T is in the ground, not the bank, and the
+                // extractor to reach it is four levels away — nothing to ship
+                // yet. The pairing is owed to this room too (ADR 0060 decision
+                // 3), and is declared the tick there is a terminal at each end.
+                Consignee = None
             }
         ]
 
@@ -1063,6 +1106,10 @@ module Colony =
                     // describe is one no human wrote a mother for, and an
                     // invented one would hire pioneers for a constant's slip.
                     Mother = None
+                    // And nothing to ship: a consignment is a pairing a
+                    // human wrote down for both its ends (#349), and the
+                    // fallback colony knows of no second room at all.
+                    Consignee = None
                 })
             |> Option.toList
         | living -> living

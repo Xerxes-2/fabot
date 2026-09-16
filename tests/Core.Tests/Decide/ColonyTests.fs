@@ -937,12 +937,14 @@ let private splitPair =
             Outposts = []
             Errands = []
             Mother = None
+            Consignee = None
         }
         {
             Home = "W1N2"
             Outposts = []
             Errands = []
             Mother = None
+            Consignee = None
         }
     ]
 
@@ -966,12 +968,14 @@ let private nurseryPair =
                 ]
             Errands = []
             Mother = None
+            Consignee = None
         }
         {
             Home = "W1N2"
             Outposts = []
             Errands = []
             Mother = Some "W1N1"
+            Consignee = None
         }
     ]
 
@@ -986,12 +990,14 @@ let private raisedPair =
             Outposts = []
             Errands = []
             Mother = None
+            Consignee = None
         }
         {
             Home = "W1N2"
             Outposts = []
             Errands = []
             Mother = Some "W1N1"
+            Consignee = None
         }
     ]
 
@@ -1548,12 +1554,14 @@ let twoColonyTests =
                             Outposts = []
                             Errands = []
                             Mother = None
+                            Consignee = None
                         }
                         {
                             Home = child
                             Outposts = []
                             Errands = []
                             Mother = Some home
+                            Consignee = None
                         }
                     ]
 

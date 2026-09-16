@@ -150,6 +150,18 @@ type ColonyView =
         /// outside `Tuning.MaxHops`, and a room they cannot price is a room they
         /// do not project.
         Errands: Errand list
+        /// The home room of the colony this one **ships its banked Thorium to**
+        /// (`Colony.Consignee`, #349), carried onto the view unchanged because
+        /// it is a declaration and not a sighting: the far end is three rooms
+        /// away and outside every scan set this colony holds, so there is
+        /// nothing here to narrow and nothing to see. What a rule may read off
+        /// it is a **room name to send to**, never a fact about that room —
+        /// whether its terminal stands, what it holds, whether its courier is
+        /// alive are all invisible from here (ADR 0004), and the `send` is
+        /// issued into that blindness on purpose: the engine either moves the
+        /// ore or refuses the intent, and a refusal costs the tick's call and
+        /// nothing else.
+        Consignee: string option
         /// The declared sector Reactors this colony can see, with the store and
         /// streak `RoomFacts.Reactors` carries (#354). Narrowed exactly as the
         /// errand's other facts are — `erranding` keeps the rows whose id the
@@ -740,6 +752,10 @@ module ColonyView =
             // the projection does not hold, which is #243's silence with a
             // bigger body standing beside the spawn.
             Errands = errands
+            // The declaration, straight through: no scan set to narrow it
+            // against, because the room it names is not one this colony
+            // projects (#349).
+            Consignee = colony.Consignee
             // The declared Reactors' own rows, over the same scan set the
             // errands were narrowed to (#354). The store here is what meters a
             // delivery: the Reactor burns 1 T a tick against a 1,000-unit cap,

@@ -135,6 +135,9 @@ let private execute (intent: Intent) : Outcome =
     | FireTower(towerId, hostileId) ->
         withTarget hostileId (fun target ->
             withActor (Game.getObjectById towerId :?> ITower) (fun tower -> tower.attack target))
+    | SendFromTerminal(terminalId, resource, amount, destination) ->
+        withActor (Game.getObjectById terminalId :?> ITerminal) (fun terminal ->
+            terminal.send (resourceName resource, amount, destination))
 
 /// Replay every Intent and answer back what the engine said. Failures are
 /// logged here, once and uniformly; the outcome list is the seam `Main.loop`

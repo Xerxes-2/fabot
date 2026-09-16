@@ -200,6 +200,7 @@ let bareRespawn =
         // 1), and this fixture declares none — so no Reclaim is pooled and
         // no seat of the reserver row is the re-claimer's (#318).
         Errands = []
+        Consignee = None
         Reactors = []
         // And nothing remembered of a room it cannot see (#151): a fixture
         // is a tick with vision wherever it lays a fact, so an empty
@@ -814,6 +815,81 @@ let mineHaulColony =
             |> withObstacles [ { X = 14; Y = 10 } ]
             |> withTargets [ "sto-1", { X = 14; Y = 10 }, Structure BuiltKind.Storage ]
     }
+
+/// The same colony under a **named** home room, geometry and all. Every fixture
+/// built on `SpatialFixtures.spatial` carries its layer under the empty name
+/// (that funnel's own docstring says so, and warns to name the room first and
+/// build second), which is invisible until a rule reads the name — and
+/// `planConsignment` reads it, because the fee is priced over the distance from
+/// this room to the consignee's.
+///
+/// So this moves the layer rather than setting the field: naming the room and
+/// leaving the geometry where it was is exactly the quiet mistake the funnel
+/// warns about, with the target-keyed queries still answering and every
+/// room-keyed one falling back to `RoomLayer.empty`.
+let named room (colony: ColonyView) =
+    let layer = SpatialInfo.layerOf colony.Spatial (SpatialInfo.homeName colony.Spatial)
+
+    { colony with
+        Spatial =
+            { colony.Spatial with
+                RoomName = Some room
+                Rooms = Map.add room layer colony.Spatial.Rooms
+            }
+    }
+
+/// The shipping colony (#349): `mineHaulColony`'s mine and Storage with a
+/// **terminal** standing beside them at (15,10) and a consignee declared. This
+/// is W12S28's live shape — a bank of ore, a terminal, and no errand anywhere
+/// within `Tuning.MaxHops` — and the fixture keeps the mine so that the
+/// outbound haul and the mine haul are pooled against each other rather than in
+/// isolation.
+///
+/// `thorium` and `energy` are the terminal's own two stores, which are the only
+/// facts `planConsignment` reads besides the declaration: what there is to ship
+/// and what there is to pay the fee with.
+let consigningColony thorium energy =
+    let home = named "W1N1" mineHaulColony
+
+    { home with
+        Consignee = Some "W1N4"
+        Spatial =
+            { home.Spatial with
+                Thorium = home.Spatial.Thorium |> Map.add "sto-1" 20_000 |> Map.add "term-1" thorium
+                Stores = Map.add "term-1" energy home.Spatial.Stores
+            }
+            |> withTargets [ "term-1", { X = 15; Y = 10 }, Structure BuiltKind.Terminal ]
+    }
+
+/// The receiving end of the same consignment: the terminal holds ore that
+/// arrived by `send`, and this colony declares no consignee of its own — which
+/// is what makes the ore walk **out** of the terminal here and into it there.
+let receivingColony arrived =
+    let home = named "W1N1" mineHaulColony
+
+    { home with
+        Consignee = None
+        Spatial =
+            { home.Spatial with
+                Thorium = Map.add "term-1" arrived home.Spatial.Thorium
+            }
+            |> withTargets [ "term-1", { X = 15; Y = 10 }, Structure BuiltKind.Terminal ]
+    }
+
+let sends intents =
+    intents
+    |> List.choose (function
+        | SendFromTerminal(terminal, resource, amount, destination) ->
+            Some(terminal, resource, amount, destination)
+        | _ -> None)
+
+/// The sends a whole tick emits (#349). Taken off `decide` and not off
+/// `Layout.planConsignment`, which is `internal`: the intent has to survive
+/// `IntentPlan.create`'s channel check to be worth asserting, or a structure
+/// verb that collided with a creep's would be dropped with the rule that wrote
+/// it still green.
+
+let sendsOn view = (decideOn view).Intents |> sends
 
 /// The same colony with the mineral container holding `units` rather than 600 —
 /// the one fact a pairwise case about the Thorium leg moves.
@@ -1754,6 +1830,7 @@ let withReactorErrand (colony: ColonyView) =
 
     { colony with
         Errands = [ reactorErrand ]
+        Consignee = None
         Spatial =
             colony.Spatial
             |> withNeighbour

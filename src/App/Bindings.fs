@@ -262,6 +262,18 @@ type IReactor =
 type ITower =
     abstract attack: target: obj -> int
 
+/// The one verb a terminal has that a store does not (#349). `send` moves a
+/// resource to another room's terminal directly, paying a fee out of **this**
+/// terminal's energy, and the season's `mod-season5/src/terminal-restriction.js`
+/// nulls it only when the destination terminal belongs to another user — an
+/// own-terminal send of Thorium is legal, which is the whole basis of the
+/// consignment.
+///
+/// `description` is the optional last argument the engine logs; nothing here
+/// passes one, so it is omitted from the binding rather than passed as null.
+type ITerminal =
+    abstract send: resourceType: string * amount: int * destination: string -> int
+
 type IRoom =
     abstract name: string
     /// Energy available for spawning in this room (spawn + extensions).

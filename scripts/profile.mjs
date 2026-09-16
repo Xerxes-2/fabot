@@ -344,6 +344,14 @@ function worldRegistry() {
       hits: 4000,
       hitsMax: 5000,
       store: store(),
+      // The terminal's one verb (#349), on every structure for the same
+      // reason the creep stub implements every verb `Bindings.fs` declares:
+      // a structure missing a method the Executor reaches for takes the whole
+      // run down on the tick that intent is first emitted (#163). No scenario
+      // declares a consignee yet, so nothing has reached this — which is the
+      // state `ClaimReactor` was in before the reactor scenario existed, and
+      // the reason it is stubbed before it is needed.
+      send: ok,
       ...extra,
     });
 

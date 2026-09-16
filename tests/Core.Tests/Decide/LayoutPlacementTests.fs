@@ -97,8 +97,8 @@ let builtKindTests =
 
                 Expect.equal
                     (allBuiltKinds |> List.filter isStored)
-                    [ BuiltKind.Container; BuiltKind.Storage ]
-                    "the containers and the Storage alone put a store in the projection"
+                    [ BuiltKind.Container; BuiltKind.Storage; BuiltKind.Terminal ]
+                    "the containers, the Storage and — since ore ships (#349) — the terminal put a store in the projection"
 
                 // `allBuiltKinds` leaves Other out, so no filter above can
                 // say anything about it — and Other is the arm with the worst

@@ -101,6 +101,80 @@ let internal planSafeMode (view: ColonyView) atlas : Intent list =
 /// hostiles are narrowed to match. That narrowing is the reflex's own rule and
 /// not a repair for a missing join: a tower shoots inside its own room (ADR
 /// 0014), and `RoomPos.range` answers None across a border.
+/// The consignment's one intent (#349): a terminal shipping this colony's
+/// banked Thorium to the terminal of the colony that can walk it to the
+/// Reactor. Everything either side of it is hauling (`Planner`'s
+/// `consignWithdraws`, `consignRefills`, `arrivalWithdraws`); this is the only
+/// place the ore crosses the map without a body.
+///
+/// Four facts and no memory. A declared consignee, the terminal's own Thorium,
+/// the terminal's own energy, and the engine's fee — so a tick where any of
+/// them is missing ships nothing and no state has to be unwound. What is
+/// deliberately **not** read:
+///
+/// - **The cooldown.** A terminal is refused for ten ticks after a send and
+///   `RoomFacts` carries no cooldown, so about a tenth of the asks are refused
+///   with `ERR_TIRED`. That is a logged failure and a tick's call, against a
+///   field in the projection that only this rule would ever read.
+/// - **Anything about the far end.** Whether its terminal stands, what it
+///   holds, whether its courier lives are all invisible from here (ADR 0004,
+///   and `ColonyView.Consignee`'s own docstring): the room is outside every
+///   scan set this colony holds. The send is issued into that blindness on
+///   purpose — the engine moves the ore or refuses the intent.
+///
+/// The amount is the smaller of what the terminal holds and what its energy can
+/// pay the fee on, floored at `Engine.terminalMinSend`: below 100 the engine
+/// refuses outright, so the tail of a bank ships in one lot or waits for the
+/// energy to pay for it.
+let internal planConsignment (view: ColonyView) : Intent list =
+    match view.Consignee, view.Spatial.RoomName with
+    | Some destination, Some home ->
+        let range =
+            // Screeps prices a send over `Game.map.getRoomLinearDistance`,
+            // which is Chebyshev — the diagonal of a room-name grid costs one
+            // room, not two — and every other distance in this tree is the hop
+            // count (`RoomName.hopsBetween`). Read the engine's metric here and
+            // not the walk's: the fee is the engine's to charge.
+            RoomName.offsetOf home destination
+            |> Option.map (fun (dx, dy) -> max (abs dx) (abs dy))
+
+        let ship terminalId =
+            let banked = SpatialInfo.heldIn view.Spatial Thorium terminalId
+            let energy = SpatialInfo.storedIn view.Spatial terminalId
+
+            match range with
+            | Some range when banked >= Engine.terminalMinSend ->
+                // The largest amount this terminal's own energy pays for,
+                // found by the fee rather than by an inverse of it: the
+                // engine's formula is an exponential and the amount is an
+                // integer, so the affordable amount is read off the fee of
+                // what is there.
+                let affordable =
+                    if Engine.sendFee range banked <= energy then
+                        banked
+                    else
+                        // Scale down by the ratio the fee overshoots by, then
+                        // step back to a figure the energy covers. One
+                        // correction is enough because the fee is linear in the
+                        // amount — the exponential is in the range alone.
+                        let ratio = float energy / float (Engine.sendFee range banked)
+                        float banked * ratio |> floor |> int
+
+                if
+                    affordable >= Engine.terminalMinSend
+                    && Engine.sendFee range affordable <= energy
+                then
+                    Some(SendFromTerminal(terminalId, Thorium, affordable, destination))
+                else
+                    None
+            | _ -> None
+
+        view.Spatial.TargetKinds
+        |> Map.toList
+        |> List.filter (fun (_, kind) -> kind = Structure BuiltKind.Terminal)
+        |> List.choose (fst >> ship)
+    | _ -> []
+
 let internal planFire (view: ColonyView) atlas : Intent list =
     match hostilesAtHome view with
     | [] -> []

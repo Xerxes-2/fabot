@@ -287,6 +287,11 @@ let decideUnarbitrated
 
     let defenseIntents = planSafeMode view atlas @ planFire view atlas
 
+    // The consignment's send (#349), beside the defence reflexes because it is
+    // the same kind of thing: a structure's own verb, read off facts on the
+    // view, owing nothing to the Matcher or to a body.
+    let consignmentIntents = planConsignment view
+
     // The pool is derived before the spawns, and the dependency runs one way
     // only: the worker row's floor asks the pool whether anything is standing
     // in Build or Repair (ADR 0046), and nothing in the pool reads a spawn
@@ -347,6 +352,7 @@ let decideUnarbitrated
 
     let intents =
         defenseIntents
+        @ consignmentIntents
         @ spawnIntents
         @ plan.SiteIntents
         @ outpostSiteIntents
