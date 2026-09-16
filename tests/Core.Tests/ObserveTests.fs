@@ -2884,6 +2884,30 @@ let private withPile room id amount (colony: ColonyView) =
                 }
     }
 
+/// A tombstone standing in a room, holding the given ore — the courier that
+/// died loaded (#359). The same three facts as the pile above and one
+/// difference: the kind names no resource, so `amount` in the Thorium map is
+/// the only thing that makes this object ore at all, which is why the control
+/// below is a tombstone with no entry in it.
+let private withTombstone room id amount (colony: ColonyView) =
+    let layer = SpatialInfo.layerOf colony.Spatial room
+
+    { colony with
+        Spatial =
+            { colony.Spatial with
+                TargetKinds = Map.add id Tombstone colony.Spatial.TargetKinds
+                Thorium =
+                    match amount with
+                    | Some units -> Map.add id units colony.Spatial.Thorium
+                    | None -> colony.Spatial.Thorium
+            }
+            |> withNeighbour
+                room
+                { layer with
+                    TargetPositions = Map.add id { X = 27; Y = 43 } layer.TargetPositions
+                }
+    }
+
 /// The colony with the errand declared and the Reactor visible and ours,
 /// holding `held` of its 1,000 (#354's fixtures, which put the store on the
 /// Reactor's **row** and never in `SpatialInfo.Thorium`).
@@ -2948,6 +2972,46 @@ let breachKindTests =
                     (breachesOn 100 (quiet |> erranding 500 |> withPile errandRoom "pile-r" 915))
                     [ BreachKind.OreOnTheFloor, errandRoom, "pile-r", 915 ]
                     "the errand room's floor is the one floor of ours that is in nobody's room"
+            }
+
+            test "ore in a tombstone is the same breach, and a tombstone holding none is no breach" {
+                // #359. The channel swept `Dropped Thorium` alone, so the ore a
+                // courier dies with — 175 T at W15S25's (43,6) — was invisible
+                // to it until the tombstone decayed and dropped the store as
+                // piles. Covering the tombstone directly is those ticks, and the
+                // decay is why it is `OreOnTheFloor` and not a kind of its own:
+                // it is the same incident a few hundred ticks earlier, reported
+                // to an operator who would take the same action.
+                //
+                // Pinned in both rooms the reach names, because they are two
+                // clauses: a room we own, and a room we declared an errand in —
+                // the second being the one with no controller, where 915 T of
+                // the pile's own incident bled unnamed. The projection half of
+                // both is `ViewTests`' pair of tombstone cases, written with
+                // this one for #355's and #356's reason.
+                Expect.equal
+                    (breachesOn
+                        100
+                        (quiet |> owning raidRoom |> withTombstone raidRoom "tomb-1" (Some 175)))
+                    [ BreachKind.OreOnTheFloor, raidRoom, "tomb-1", 175 ]
+                    "the amount is the T in the store, which is what makes the row actionable"
+
+                Expect.equal
+                    (breachesOn
+                        100
+                        (quiet |> erranding 500 |> withTombstone errandRoom "tomb-r" (Some 175)))
+                    [ BreachKind.OreOnTheFloor, errandRoom, "tomb-r", 175 ]
+                    "and the declared Reactor's room, which is where a courier dies"
+
+                // The pairwise control: the same object in the same room with no
+                // entry in the Thorium map — a tombstone of a body that was
+                // carrying energy, or none. A tombstone is not a breach; ore in
+                // one is.
+                Expect.isEmpty
+                    (breachesOn
+                        100
+                        (quiet |> owning raidRoom |> withTombstone raidRoom "tomb-1" None))
+                    "a tombstone holding no ore is a decaying object and not a loss"
             }
 
             test "ore a courier cannot place is a breach, and a load that fits is not" {

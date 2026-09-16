@@ -1,7 +1,7 @@
 /// The observe channel's pure folds: the Transition log's, keyed by creep (ADR
 /// 0009); the Raid log's, colony-level and episodic (ADR 0028); the CPU line's,
 /// one row per tick (ADR 0041); and the [[breach log]]'s, one row per live
-/// invariant violation folded with its age (#278).
+/// invariant violation folded with its age (#355).
 module Fabot.Core.Observe
 
 open Fabot.Core.Types
@@ -1264,7 +1264,7 @@ let foldCpu (cap: int) (tick: int) (readings: CpuReadings) (prior: CpuState) : C
             |> trim cap
     }
 
-/// What one live invariant check found broken this tick (#278). The fourth
+/// What one live invariant check found broken this tick (#355). The fourth
 /// observe channel's vocabulary, and the reason it exists at all: the test
 /// suite runs on fixtures this repo authors, so it confirms the code's belief
 /// about the projection rather than the engine's behaviour — 63 of the 65 test
@@ -1283,11 +1283,20 @@ let foldCpu (cap: int) (tick: int) (readings: CpuReadings) (prior: CpuState) : C
 /// match is an error here (`Directory.Build.props`).
 [<RequireQualifiedAccess>]
 type BreachKind =
-    /// A Dropped Thorium pile standing in a room this colony projects and may
-    /// sweep. 915 T of it — about 4,500 season points — sat on the Reactor
-    /// room's floor for hours because no rule could name it (#354's second
-    /// half): `Facts.ourThoriumPiles` filtered "a room we own", and a Reactor
-    /// room has no controller, so its floor belonged to nobody.
+    /// Ore decaying in a room this colony projects and may sweep, with the
+    /// object it is decaying in as the `Subject`. 915 T of it — about 4,500
+    /// season points — sat on the Reactor room's floor for hours because no
+    /// rule could name it (#354's second half): `Facts.ourThoriumPiles`
+    /// filtered "a room we own", and a Reactor room has no controller, so its
+    /// floor belonged to nobody.
+    ///
+    /// **Two objects and one kind** (#359): a Dropped Thorium pile, and a
+    /// tombstone or a ruin holding Thorium — a courier that died loaded, 175 T
+    /// at W15S25's (43,6). The name is the floor's because that is where the
+    /// second ends up: a tombstone drops its whole store as piles when it
+    /// decays, so the two are one incident a few hundred ticks apart, and they
+    /// ask the operator for one response — send a body to draw it. The
+    /// `Subject` says which object it stood in.
     | OreOnTheFloor
     /// One of our creeps is standing at the declared Reactor holding ore the
     /// Reactor has no room for. The tick before the ore hits the floor: a
@@ -1370,7 +1379,7 @@ module BreachState =
 let capBreaches = 20
 
 /// The declared Reactors this colony can actually see, each with the room its
-/// declaration names (#278). The join is the errand's: `ColonyView.Reactors`
+/// declaration names (#355). The join is the errand's: `ColonyView.Reactors`
 /// carries the rows and no room, and `ColonyView.Errands` carries the room and
 /// the engine id, so a row is answered for only where a declaration names it.
 ///
@@ -1405,23 +1414,34 @@ let private breachesIn (view: ColonyView) : Breach list =
     // is has one home, and the alarm can never come to disagree with the
     // Pickup that is supposed to answer it.
     //
-    // **Live, the errand half of that reach fires on nothing today, and the
-    // Pickup behind it pools nothing either.** `ColonyView.ofWorld`'s
-    // `erranding` cut empties an errand room's kind census on purpose (ADR 0060
-    // decision 1, #286) and filters its `Thorium` map to the declared id, so a
-    // pile standing on the Reactor's floor reaches the view with no kind and no
-    // amount — reproduced against `ViewTests`' own errand world while wiring
-    // this channel (#278), where a 915 T pile read back as `TargetKinds: None,
-    // Thorium: None`. `Facts.ourThoriumPiles` sweeps the census, so its
-    // errand-room clause cannot match, and this check inherits that silence:
-    // what it catches today is a pile in a room we **own**. That is the same
-    // family of fault as the incident this channel was built for — a rule that
-    // is green against a hand-written fixture and inert against the projection
-    // the shell builds — and it is reported rather than fixed here, because
-    // widening what an errand room carries is ADR 0060's decision and not this
-    // channel's.
-    let piles =
-        Decide.Facts.ourThoriumPiles view
+    // **That errand half fired on nothing when this channel was wired**, and
+    // the note is kept because it is the whole lesson: `ColonyView.ofWorld`'s
+    // `erranding` cut emptied an errand room's kind census, so a pile on the
+    // Reactor's floor reached the view with no kind and no amount — reproduced
+    // against `ViewTests`' own errand world while wiring this channel (#356),
+    // where a 915 T pile read back as `TargetKinds: None, Thorium: None`. The
+    // narrowing was widened to admit it in #356 and the silence is over; what
+    // that leaves is the rule the pair was filed under — a check and the
+    // projection it reads are pinned together or not at all, which is why each
+    // ore case here has a `ViewTests` counterpart written with it.
+    //
+    // **And the ore that is not on a floor at all** (#359), swept in the same
+    // breath and under the same kind. A courier that dies loaded leaves its ore
+    // in its tombstone — 175 T at W15S25's (43,6) — and a tombstone drops its
+    // whole store as piles when it decays
+    // (`processor/intents/tombstones/tick.js`), so the pile check above catches
+    // this ore one step late and minus whatever the decay took. The ticks in
+    // between are the point of covering it directly.
+    //
+    // `OreOnTheFloor` and not a kind of its own, deliberately: a breach kind is
+    // what the reader groups and sorts by, and these two rows say one thing —
+    // ore this colony may sweep is decaying somewhere it is not being swept —
+    // and ask for one response, a body sent to draw it. What differs is the
+    // clock, which is faster here, and the `Subject` already says which object
+    // it is. A second kind would make an operator learn a vocabulary to take
+    // the same action twice.
+    let decayingOre =
+        (Decide.Facts.ourThoriumPiles view @ Decide.Facts.ourThoriumTombstones view)
         |> List.choose (fun id ->
             SpatialInfo.roomOf view.Spatial id
             |> Option.map (fun room ->
@@ -1524,7 +1544,7 @@ let private breachesIn (view: ColonyView) : Breach list =
                 Amount = 0
             })
 
-    piles @ unplaceable @ starved @ lost
+    decayingOre @ unplaceable @ starved @ lost
 
 /// Trim the log to the cap. Oldest **last-seen** first, the way `capEpisodes`
 /// trims its ring — and with the tie-break stated, because here the tie is the
@@ -1548,7 +1568,7 @@ let private capStanding (cap: int) (rows: Map<BreachKind * string, StandingBreac
         |> List.skip overflow
         |> Map.ofList
 
-/// The breach log's fold (#278): this tick's view plus the previous log produce
+/// The breach log's fold (#355): this tick's view plus the previous log produce
 /// the new one. A violation this tick keeps the tick it was **first** seen on,
 /// so the row ages; a violation this tick did not read is gone, whatever it
 /// said last tick.

@@ -223,6 +223,19 @@ let withdrawCapacityTests =
             }
         ]
 
+/// The tombstone field with `units` of the season's ore in the store beside
+/// whatever energy it holds (#359) — a courier that died loaded. The kind is
+/// already `Tombstone` and stays so: `Tombstone` names no resource, so what
+/// makes this a case about ore is the Thorium map alone, which is the shape
+/// `ViewTests` pins the projection building.
+let private withTombOre units (colony: ColonyView) =
+    { colony with
+        Spatial =
+            { colony.Spatial with
+                Thorium = Map.add "tomb-1" units colony.Spatial.Thorium
+            }
+    }
+
 [<Tests>]
 let pickupTaskTests =
     testList
@@ -663,6 +676,102 @@ let pickupTaskTests =
                 let { Assignments = spent } = decideOn (tombColony 0 [ "h1", { X = 11; Y = 10 } ])
 
                 Expect.equal (Map.tryFind "h1" spent) None "an empty store is no Task"
+            }
+
+            test "and the season's ore in one is drawn the same way; an energy-only one offers none" {
+                // #359. The line above pooled a tombstone's **energy** and
+                // nothing else, so a courier that died with ore aboard left
+                // 175 T in a store no rule of this colony could name — W15S25's
+                // tombstone at (43,6), in the declared Reactor room, decaying.
+                // The engine's `withdraw` takes a tombstone or a ruin for any
+                // resource (`@screeps/engine` `src/game/creeps.js`: its target
+                // test names `globals.Tombstone` and `globals.Ruin`), so this is
+                // the same sentence one column over.
+                //
+                // The projection half of this case — that a tombstone really
+                // reaches a view with a kind, a tile and a Thorium amount and no
+                // energy entry — is `ViewTests`' "a tombstone's ore in a room she
+                // owns rides whole", written with it: #355 and #356 were both a
+                // rule green against a shape `ofWorld` never builds.
+                let ore = tombColony 0 [ "h1", { X = 11; Y = 10 } ] |> withTombOre 175
+
+                let {
+                        Intents = intents
+                        Assignments = assignments
+                    } =
+                    decideOn ore
+
+                Expect.equal
+                    (Map.tryFind "h1" assignments)
+                    (Some(taskId (Withdraw("tomb-1", Thorium))))
+                    "ore in a store with a clock on it is drawn like ore in a container"
+
+                Expect.contains
+                    intents
+                    (WithdrawFromStore("h1", "tomb-1", Thorium, None))
+                    "and the act names the ore and no amount: the 999-unit load is the Storage draw's alone"
+
+                // The cap is the store's own holding divided by the row's cast
+                // at this bank — 150 energy buys `[2 Carry; 1 Move]`, a hundred
+                // — so 175 T is two trips, exactly as 175 in a container would
+                // be. Read off the pool rather than asserted as a number, so the
+                // case moves with the row it is priced on.
+                Expect.equal
+                    (partCountIn (bodyFor haulerPattern ore.Bank.Capacity) Carry
+                     * Engine.carryPartCapacity)
+                    100
+                    "the premise: the divisor is the hauler row's own cast at this bank"
+
+                Expect.equal
+                    (poolOn ore
+                     |> List.tryPick (fun pooled ->
+                         if pooled.Task = Withdraw("tomb-1", Thorium) then
+                             Capacity.capOf CapScope.Everyone pooled.Capacity
+                         else
+                             None))
+                    (Some 2)
+                    "capped by what it holds of the resource named, like every other Withdraw: 175 is two trips"
+
+                // The pairwise control: the same tombstone holding the 408
+                // energy of the case above and no ore at all. `Tombstone`
+                // carries no resource, so it is the holding that admits the
+                // Task, and a store with none of the ore offers none of it.
+                Expect.isFalse
+                    (planTasksOn (tombColony 408 [ "h1", { X = 11; Y = 10 } ]) noThreats
+                     |> List.contains (Withdraw("tomb-1", Thorium)))
+                    "an energy-only tombstone pools no ore draw"
+            }
+
+            test
+                "a tombstone's ore takes the pile's rung, where a container's under the cliff takes none" {
+                // #359 reading #306 and #311. The draw sits on the
+                // [[storage]]'s own tier (ADR 0057 decision 3) and so does the
+                // bank's energy Withdraw, so a rungless ore draw loses every
+                // travel-cost tie to a Storage in the middle of the home room —
+                // which is #306's live W13S28, 486k banked and the mine not
+                // drawn once in 700 ticks. A tombstone is further away than any
+                // mine (the live one is three crossings out) and on a shorter
+                // clock than any pile: it drops its **whole** store as piles
+                // when it decays, and those piles then bleed.
+                //
+                // Pairwise on the kind of store alone: the same resource, the
+                // same 175 units, under the contact cliff both times.
+                let rankOf colony task =
+                    poolOn colony
+                    |> List.tryPick (fun pooled ->
+                        if pooled.Task = task then Some pooled.Priority else None)
+
+                Expect.equal
+                    (rankOf (mineHaulColony |> withMineStock 175) (Withdraw("can-min", Thorium)))
+                    (Some(priorityOfTier StockDraw))
+                    "the premise: a container under the cliff is decision 3's rungless intake"
+
+                Expect.equal
+                    (rankOf
+                        (tombColony 0 [ "h1", { X = 11; Y = 10 } ] |> withTombOre 175)
+                        (Withdraw("tomb-1", Thorium)))
+                    (Some(priorityOfTier StockDraw + rankOfRung OneRungUp))
+                    "the same ore in a store that ends takes the Thorium pile's rung, and for the pile's reason"
             }
 
             test "a tombstone keeps no construction site off its tile" {

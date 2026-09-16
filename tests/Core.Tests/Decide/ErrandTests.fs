@@ -115,6 +115,59 @@ let private reclaimsOf (colony: ColonyView) =
         | Reclaim _ -> true
         | _ -> false)
 
+/// A whole room of plain ground, for the two cases that need the delivery leg
+/// **priced**.
+let private plainFloor =
+    [
+        for x in 1..48 do
+            for y in 1..48 -> { X = x; Y = y }, Plain
+    ]
+
+/// The shared fixture with that floor under both ends of its one crossing, and
+/// a real room name on the home layer. The shared fixture cannot price a
+/// cross-room walk at all: its errand floor stops at y 47 and its home floor is
+/// a corridor at y 10..11, so neither side of the crossing has ground behind
+/// its landing tile (ADR 0062), `Atlas.routes` answers `[]`, and every
+/// cross-room price out there is `None`.
+///
+/// Named, and the home layer re-filed under the name: the `spatial` funnel
+/// files home under the **empty** name, and an empty name has no sector
+/// coordinates to be adjacent by, so no chain out of it can exist at all —
+/// which is the deeper reason the shared fixture cannot price this leg.
+/// `homeControl` carrying both keys is this case anticipated.
+///
+/// A `let private` **function** and not a value, `AGENTS.md` § Code hygiene:
+/// what it is handed carries an Atlas-bearing view, and a module-level value
+/// shared by two lists is two threads onto one memo table (#310).
+let private paved (colony: ColonyView) =
+    let errand = SpatialInfo.layerOf colony.Spatial errandRoom
+
+    { colony with
+        Spatial =
+            { colony.Spatial with
+                RoomName = Some "W1N1"
+                Rooms =
+                    colony.Spatial.Rooms
+                    |> Map.remove (SpatialInfo.homeName colony.Spatial)
+                    |> Map.add
+                        "W1N1"
+                        (SpatialInfo.layerOf colony.Spatial (SpatialInfo.homeName colony.Spatial))
+                Borders =
+                    colony.Spatial.Borders
+                    |> Map.add "W1N1" plainRing
+                    |> Map.add errandRoom plainRing
+            }
+            |> withHome (fun layer ->
+                { layer with
+                    Terrain = TerrainGrid.ofList plainFloor
+                })
+            |> withNeighbour
+                errandRoom
+                { errand with
+                    Terrain = TerrainGrid.ofList plainFloor
+                }
+    }
+
 /// The Task **id** one named body holds this tick, which is what the assignment
 /// table is keyed in. `holds` below is what a case should reach for: it takes
 /// the Task itself, so a case names the Task and never spells the string.
@@ -778,50 +831,6 @@ let courierTests =
             // the ore: the tombstone cooks its own tile, decays at the same
             // three-fold rate, and drops a pile that bleeds at 1 T a tick.
             test "the delivery draw refuses a body that could not outlive the loaded leg" {
-                let plainFloor =
-                    [
-                        for x in 1..48 do
-                            for y in 1..48 -> { X = x; Y = y }, Plain
-                    ]
-
-                let paved (colony: ColonyView) =
-                    let errand = SpatialInfo.layerOf colony.Spatial errandRoom
-
-                    { colony with
-                        Spatial =
-                            // Named, and the home layer re-filed under the name.
-                            // The `spatial` funnel files home under the **empty**
-                            // name, and an empty name has no sector coordinates
-                            // to be adjacent by, so no chain out of it can exist
-                            // at all — which is the deeper reason the shared
-                            // fixture cannot price this leg. `homeControl`
-                            // carrying both keys is this case anticipated.
-                            { colony.Spatial with
-                                RoomName = Some "W1N1"
-                                Rooms =
-                                    colony.Spatial.Rooms
-                                    |> Map.remove (SpatialInfo.homeName colony.Spatial)
-                                    |> Map.add
-                                        "W1N1"
-                                        (SpatialInfo.layerOf
-                                            colony.Spatial
-                                            (SpatialInfo.homeName colony.Spatial))
-                                Borders =
-                                    colony.Spatial.Borders
-                                    |> Map.add "W1N1" plainRing
-                                    |> Map.add errandRoom plainRing
-                            }
-                            |> withHome (fun layer ->
-                                { layer with
-                                    Terrain = TerrainGrid.ofList plainFloor
-                                })
-                            |> withNeighbour
-                                errandRoom
-                                { errand with
-                                    Terrain = TerrainGrid.ofList plainFloor
-                                }
-                    }
-
                 let atStorage life =
                     let aged =
                         { courier "courier-aged" with
@@ -1037,6 +1046,178 @@ let courierTests =
                     (planTasksOn (withPile "W9S9" 915) noThreats
                      |> List.contains (Pickup("pile-reactor", Thorium)))
                     "a room we neither own nor declared is still none of ours"
+            }
+
+            // #359, the same room one object over. A courier that dies on the
+            // ring leaves its ore in a **tombstone**, not on the floor: live at
+            // W15S25 that was 175 T at (43,6). The floor check above catches it
+            // only after the tombstone decays, which drops the whole store as
+            // piles that then bleed — so what is drawn here is what those ticks
+            // would have cost.
+            //
+            // The shape these cases hand-write — a `Tombstone` kind, a tile and
+            // a Thorium amount, all three inside a declared room — is one the
+            // projection has to be able to build, and until this ticket it could
+            // not: `erranding` emptied that room's census. `ViewTests`' "and the
+            // ore in a tombstone on that floor rides on the same argument" is
+            // this case's other half and was written with it (#355, #356).
+            test "a tombstone of ours on that floor is ours to draw, ore and all" {
+                let tombTile = { X = 26; Y = 45 }
+
+                let withTomb room amount =
+                    let ready = deliveryColony (Some Ownership.Ours)
+                    let layer = SpatialInfo.layerOf ready.Spatial room
+
+                    { ready with
+                        Spatial =
+                            { ready.Spatial with
+                                TargetKinds =
+                                    Map.add "tomb-reactor" Tombstone ready.Spatial.TargetKinds
+                                Thorium = Map.add "tomb-reactor" amount ready.Spatial.Thorium
+                            }
+                            |> withNeighbour
+                                room
+                                { layer with
+                                    TargetPositions =
+                                        Map.add "tomb-reactor" tombTile layer.TargetPositions
+                                }
+                    }
+
+                Expect.contains
+                    (planTasksOn (withTomb errandRoom 175) noThreats)
+                    (Withdraw("tomb-reactor", Thorium))
+                    "the errand room's tombstone is drawn on the errand room's own argument"
+
+                // **No threshold**, where the pile above carries one: the
+                // [[pickup reflex]] is the pile's alternative to a Task and
+                // there is no reflex that empties a store, so the alternative
+                // here is the decay. One unit is a Task.
+                Expect.contains
+                    (planTasksOn (withTomb errandRoom 1) noThreats)
+                    (Withdraw("tomb-reactor", Thorium))
+                    "a store that ends is worth the trip at any holding (`worthTheTrip`, #232)"
+
+                Expect.isFalse
+                    (planTasksOn (withTomb "W9S9" 175) noThreats
+                     |> List.contains (Withdraw("tomb-reactor", Thorium)))
+                    "a room we neither own nor declared is still none of ours"
+            }
+
+            // #354's TTL clause, asked of the object #359 added, on the one
+            // fixture in this suite whose leg has a price. The clause refuses a
+            // **Storage** draw to a body that cannot outlive the loaded leg at
+            // `Tuning.MineContactAgeing`, because that load has nowhere to go
+            // but the Reactor three rooms away and no cool tile to wait on. A
+            // tombstone draw is the opposite errand in every term: the ore is
+            // already in the room, the walk is over, and the ore is decaying
+            // under a body that is standing next to it. Refusing it would leave
+            // the colony watching the ore go rather than saving a body that is
+            // going anyway.
+            test "the TTL clause refuses the Storage's load and not a tombstone's in that room" {
+                let tombTile = { X = 26; Y = 45 }
+
+                let atStorage life =
+                    let aged =
+                        { courier "courier-aged" with
+                            TicksToLive = life
+                        }
+
+                    let ready = deliveryColony (Some Ownership.Ours) |> paved
+                    let layer = SpatialInfo.layerOf ready.Spatial errandRoom
+
+                    aged,
+                    { ready with
+                        Spatial =
+                            { ready.Spatial with
+                                TargetKinds =
+                                    Map.add "tomb-reactor" Tombstone ready.Spatial.TargetKinds
+                                Thorium =
+                                    ready.Spatial.Thorium
+                                    |> Map.add "tomb-reactor" 175
+                                    // The mine emptied, so the ore intakes this
+                                    // body chooses between are the two under
+                                    // test and not three: the matcher scores a
+                                    // candidate against its cheapest rival
+                                    // alone, and the container is nearer than
+                                    // either.
+                                    |> Map.add "can-min" 0
+                            }
+                            |> withNeighbour
+                                errandRoom
+                                { layer with
+                                    TargetPositions =
+                                        Map.add "tomb-reactor" tombTile layer.TargetPositions
+                                }
+                    }
+                    |> withHomeCreep { X = 13; Y = 10 } aged
+
+                // Read off the Atlas, as the Storage case above reads it: the
+                // clause is pinned to the walk the colony prices and not to a
+                // number that moves with the floor under it.
+                let leg =
+                    let creep, colony = atStorage Engine.creepLifetime
+
+                    match
+                        Atlas.walkTicks (Atlas.ofView colony) creep.Name (Refill(reactor, Thorium))
+                    with
+                    | Some ticks -> ticks
+                    | None ->
+                        failtest
+                            "the widened floor must price the delivery leg, or this case shows nothing"
+
+                let creep, colony = atStorage (leg * Tuning.defaults.MineContactAgeing - 1)
+
+                Expect.isFalse
+                    (colony |> holds creep.Name (Withdraw("sto-1", Thorium)))
+                    "the premise: one tick short of the loaded leg, the Storage's 500 is refused"
+
+                Expect.isTrue
+                    (colony |> holds creep.Name (Withdraw("tomb-reactor", Thorium)))
+                    "and the very same body draws the tombstone: a short local errand over ore that is bleeding"
+            }
+
+            // #359's other end: a draw is only worth pooling if the load has
+            // somewhere to go (#262's stranded carrier, which is why the
+            // Storage's Thorium sink is pooled off free capacity alone). A
+            // tombstone's 175 is under `Tuning.ReactorLoad`, so what this pins
+            // is that **no rung of the delivery's arithmetic shuts on a
+            // sub-load**: the 500-unit gate #354 added is on the *draw* from
+            // Storage, and the Reactor's own Refill admits any load at or under
+            // one (#319's cap clause).
+            test "a sub-load of ore has a sink: the Reactor beside it, or the Storage at home" {
+                let carried = 175
+                let loaded = courier "courier-part" |> carrying carried
+
+                // Paved, because the Storage half of the pair is a **walk home**
+                // and the shared fixture prices no crossing at all (ADR 0062,
+                // `paved` above): an unpriceable sink would read as "no sink"
+                // here for a reason that is the fixture's and not the rule's.
+                let open' =
+                    deliveryColony (Some Ownership.Ours) |> paved |> withErrandCreep ringTile loaded
+
+                Expect.isTrue
+                    (open' |> holds loaded.Name (Refill(reactor, Thorium)))
+                    "with the programme open the Reactor is the nearer sink and takes a part load"
+
+                // The pairwise control: the same body in the same room with the
+                // bank drained under one delivery, which is the one fact
+                // `courierProgrammeOpen` reads here. The Reactor's Refill leaves
+                // the pool with it, and the sink is the Storage's own.
+                let shut =
+                    { open' with
+                        Spatial =
+                            { open'.Spatial with
+                                Thorium = Map.add "sto-1" 0 open'.Spatial.Thorium
+                            }
+                    }
+
+                Expect.isFalse
+                    (planTasksOn shut noThreats |> List.contains (Refill(reactor, Thorium)))
+                    "the premise: a shut programme pools no Reactor Refill"
+
+                Expect.isTrue
+                    (shut |> holds loaded.Name (Refill("sto-1", Thorium)))
+                    "so the load goes to the warehouse, which takes any amount that is not the delivery's own"
             }
 
             test "the priced pair draws exactly 500 from Storage and pours it into our Reactor" {

@@ -210,13 +210,33 @@ let private seenFacts
 
     // The stores with a clock on them (#167): a dead creep's tombstone and a
     // destroyed structure's ruin, projected as one kind because a Withdraw
-    // reads the same three facts off either. Energy only, and only while there
-    // is some: an empty tombstone is a target no rule can answer for, and
-    // projecting one is a hundred ticks of churn in every id-keyed table.
+    // reads the same three facts off either. Only while there is something in
+    // it, which is the filter's original reason and stands unchanged: an empty
+    // tombstone is a target no rule can answer for, and projecting one is a
+    // hundred ticks of churn in every id-keyed table.
+    //
+    // **Something is either resource and not energy alone** (#359). A courier
+    // that dies with ore aboard leaves it in its tombstone, and the filter read
+    // down the energy column alone dropped such a tombstone here — no kind, no
+    // tile, no amount, so no rule downstream could name it however much it
+    // wanted to. Live at W15S25 that was 175 T in a tombstone at (43,6), in the
+    // declared Reactor room, decaying. The engine's `withdraw` takes it: its
+    // target test admits `globals.Tombstone` and `globals.Ruin` beside a
+    // structure and its resource argument is any of `RESOURCES_ALL`
+    // (`@screeps/engine` `src/game/creeps.js`, and the processor's
+    // `intents/creeps/withdraw.js` moves `target.store[resourceType]`), so ore
+    // in one is drawable exactly as its energy is. And it is worth drawing
+    // rather than waiting out: a decaying tombstone drops its **whole** store
+    // as piles (`intents/tombstones/tick.js` calls `_create-energy` once per
+    // resourceType), so ore left in one becomes ore on the floor bleeding at
+    // `ceil(amount / 1000)` a tick, and Thorium never regenerates — the mod
+    // deletes an exhausted deposit outright, so ore lost is lost for the season.
     let tombstones =
         Array.append (room.find findTombstones) (room.find findRuins)
         |> Array.map (fun o -> o :?> ITombstone)
-        |> Array.filter (fun r -> r.store.getUsedCapacity (resourceName Energy) > 0)
+        |> Array.filter (fun r ->
+            r.store.getUsedCapacity (resourceName Energy) > 0
+            || r.store.getUsedCapacity (resourceName Thorium) > 0)
 
     // The season's Thorium deposits, and only those (ADR 0057 decision 1).
     // The mod stands an ordinary-ore mineral in the same room and the colony
@@ -401,6 +421,16 @@ let private seenFacts
                     dropped
                     |> Array.choose (fun (r, resource) ->
                         if resource = Thorium then Some(r.id, r.amount) else None)
+                    // And the store with a clock on it (#359), read off
+                    // `store` exactly as the stored structures above are: a
+                    // tombstone or a ruin holds its ore in a real store, which
+                    // is why the mod's contact penalty counts it and why a
+                    // `withdraw` empties it. Without this column a tombstone
+                    // that survived the filter above still reached the pool
+                    // with no amount, and a Withdraw's capacity and its
+                    // worth-the-trip clause are both read off this map.
+                    tombstones
+                    |> Array.map (fun r -> r.id, r.store.getUsedCapacity (resourceName Thorium))
                 ]
             |> Array.filter (fun (_, held) -> held > 0)
             |> Map.ofArray

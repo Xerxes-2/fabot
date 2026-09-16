@@ -722,6 +722,69 @@ let colonyViewTests =
                     "and its own extractor's clock with it"
             }
 
+            test "a tombstone's ore in a room she owns rides whole: kind, tile and amount" {
+                // #359's projection half for a room this colony **owns**, which
+                // is the shape every rule-side fixture of that ticket
+                // hand-writes: `PoolWithdrawTests` pools a `Withdraw` off it and
+                // `ObserveTests` alarms on it, and both would be green against a
+                // shape `ofWorld` never builds if this case did not stand beside
+                // them (#355, #356 — twice in one day). The errand room's own,
+                // narrowed, half is pinned in `errandTests` below.
+                //
+                // A tombstone holding **only** ore, because that is what an
+                // energy-shaped projection dropped: the shell's transient filter
+                // read the energy column alone, so this object reached the view
+                // with no kind, no tile and no amount and did not exist. That
+                // filter is `World.ofGame`'s and untestable from here — the shell
+                // has no test project — so what this case can pin is the half
+                // `Core` owns: the facts travel through the cut unchanged, so a
+                // rule that reads kind and `Thorium` together reads what the
+                // shell files.
+                let facts = pairWorld.Rooms.[mother]
+
+                let world =
+                    { pairWorld with
+                        Rooms =
+                            pairWorld.Rooms
+                            |> Map.add
+                                mother
+                                { facts with
+                                    Layer =
+                                        { facts.Layer with
+                                            TargetPositions =
+                                                Map.add
+                                                    "tomb-home"
+                                                    { X = 4; Y = 4 }
+                                                    facts.Layer.TargetPositions
+                                        }
+                                    TargetKinds = Map.add "tomb-home" Tombstone facts.TargetKinds
+                                    Thorium = Map.add "tomb-home" 175 facts.Thorium
+                                }
+                    }
+
+                let spatial = (viewUnder declared world mother).Spatial
+
+                Expect.equal
+                    (Map.tryFind "tomb-home" spatial.TargetKinds)
+                    (Some Tombstone)
+                    "the kind the Withdraw pool sweeps"
+
+                Expect.equal
+                    (Map.tryFind "tomb-home" spatial.Thorium)
+                    (Some 175)
+                    "the amount its capacity is counted off"
+
+                Expect.equal
+                    (SpatialInfo.placementOf spatial "tomb-home")
+                    (Some(RoomPos.at mother { X = 4; Y = 4 }))
+                    "and the tile a body is priced to"
+
+                Expect.equal
+                    (Map.tryFind "tomb-home" spatial.Stores)
+                    None
+                    "and no energy entry, a courier's tombstone holding none: the two columns are read apart (ADR 0057 decision 3)"
+            }
+
             test "the mother keeps the child's ground whole" {
                 // The borrowed room is narrowed in what it holds and never
                 // in what it is: her pioneers walk over that terrain.
@@ -1653,14 +1716,23 @@ let private errandSeen =
                 // one that stays out.
                 "pile-errand", { X = 5; Y = 3 }, Dropped Thorium
                 "pile-energy", { X = 5; Y = 4 }, Dropped Energy
+                // And the same pair one object over (#359): a courier of ours
+                // that died in that room with ore aboard, and a tombstone
+                // holding energy alone beside it. `Tombstone` names no
+                // resource, so which of the two is admitted can only be read
+                // off the store — which is what makes the second one the
+                // adjacent case worth pinning.
+                "tomb-errand", { X = 5; Y = 5 }, Tombstone
+                "tomb-spent", { X = 5; Y = 6 }, Tombstone
             ]
         |> withSources [ "src-errand" ]
-        |> withStores [ "can-errand", 1_200; reactor, 40 ]
+        |> withStores [ "can-errand", 1_200; reactor, 40; "tomb-errand", 120; "tomb-spent", 300 ]
         |> withSites [ "site-errand" ]
 
     name,
     { facts with
-        Thorium = Map.ofList [ reactor, 400; "can-errand", 90; "pile-errand", 915 ]
+        Thorium =
+            Map.ofList [ reactor, 400; "can-errand", 90; "pile-errand", 915; "tomb-errand", 175 ]
         Cooldowns = Map.ofList [ reactor, 7; "can-errand", 3 ]
         // Whose the declared target is, which is the fact #318 added and the
         // one the [[reclaim]]'s act is gated on. A rival's, because that is the
@@ -1769,8 +1841,9 @@ let errandTests =
                     (Map.tryFind errandRoom view.Spatial.Rooms
                      |> Option.map (fun layer -> layer.TargetPositions)
                      |> Option.defaultValue Map.empty
-                     |> Map.filter (fun id _ -> id <> reactor && id <> "pile-errand"))
-                    "two tiles are placed in that room: the declared one's and the ore on its floor (#356)"
+                     |> Map.filter (fun id _ ->
+                         id <> reactor && id <> "pile-errand" && id <> "tomb-errand"))
+                    "three tiles are placed in that room: the declared one's, the ore on its floor (#356) and the ore in the tombstone on it (#359)"
             }
 
             test "ore on the errand room's floor is the one thing beside the declaration that rides" {
@@ -1809,6 +1882,70 @@ let errandTests =
                 Expect.isFalse
                     (Map.containsKey "pile-energy" view.Spatial.TargetKinds)
                     "a pile of energy out there is nobody's errand: the filter is one resource, not a kind of object"
+            }
+
+            test "and the ore in a tombstone on that floor rides on the same argument" {
+                // #359, which is #356 one object over: a courier that dies
+                // loaded leaves its ore in its tombstone rather than on the
+                // floor, and W15S25 had 175 T standing in one at (43,6) in the
+                // declared Reactor room. Every word of #356's argument carries
+                // — nobody owns the room, no other colony walks a body to it,
+                // the ore is bleeding — and the clock is shorter: a tombstone
+                // drops its whole store as piles when it decays
+                // (`processor/intents/tombstones/tick.js`), so what the pile
+                // case catches is this ore later and smaller.
+                //
+                // **This case is the projection half of a pair.** The rules
+                // that answer this ore are pinned in `PoolWithdrawTests` (the
+                // Withdraw and its rung), `ErrandTests` (the draw the TTL
+                // clause must not refuse, and where the load goes) and
+                // `ObserveTests` (the breach), each against a hand-written
+                // `ColonyView`; this is what says the projection can build the
+                // shape those assume — kind, tile and amount together. #355 and
+                // #356 were both the pair written apart, a rule green against a
+                // shape `ofWorld` never builds, so the two were written
+                // together here.
+                let view = viewUnder errandDeclared errandWorld mother
+
+                Expect.equal
+                    (Map.tryFind "tomb-errand" view.Spatial.TargetKinds)
+                    (Some Tombstone)
+                    "the tombstone is classified, which is what makes a kind-swept Withdraw able to find it"
+
+                Expect.equal
+                    (Map.tryFind "tomb-errand" view.Spatial.Thorium)
+                    (Some 175)
+                    "and its ore rides beside the kind: the Withdraw's capacity is counted off this map"
+
+                Expect.equal
+                    (SpatialInfo.placementOf view.Spatial "tomb-errand")
+                    (Some(RoomPos.at errandRoom { X = 5; Y = 5 }))
+                    "and its tile, without which no body can be priced to it"
+
+                Expect.contains
+                    (SpatialInfo.idsOfKind view.Spatial Tombstone)
+                    "tomb-errand"
+                    "the kind census answers it, which is the sweep `Facts.ourThoriumTombstones` runs before it filters by room"
+
+                Expect.isFalse
+                    (Map.containsKey "tomb-spent" view.Spatial.TargetKinds)
+                    "a tombstone holding energy alone is nobody's errand: the admission is read off the ore and not off the object"
+
+                // The energy column stays the declaration's. What the tombstone
+                // is admitted **for** is its ore, and an errand room is not a
+                // place this colony hauls a dead creep's energy home from:
+                // `Stores` is what an energy Withdraw's own filter reads, so
+                // leaving it out is what keeps that Task unpooled three
+                // crossings from home.
+                Expect.equal
+                    (Map.tryFind "tomb-errand" view.Spatial.Stores)
+                    None
+                    "the 120 energy in it does not ride: one resource is the errand's, and it is not that one"
+
+                Expect.equal
+                    (Map.tryFind reactor view.Spatial.Stores)
+                    (Some 40)
+                    "while the declared target's own store is untouched by that cut"
             }
 
             test "and the one target it names is: its store rides, its kind does not" {

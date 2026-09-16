@@ -416,13 +416,19 @@ module ColonyView =
     /// — a row hiring against furniture no declaration names, because our own
     /// bodies walking through were the vision that filed it.
     ///
-    /// The kind census stays **empty**, which is the narrowing stated in the
-    /// data rather than as a rule each pool has to remember: every pool is
+    /// The kind census is **the decaying ore and nothing else** (#356, #359).
+    /// It is empty of the room's furniture, which is the narrowing stated in
+    /// the data rather than as a rule each pool has to remember: every pool is
     /// built by sweeping `TargetKinds`, so an id that is placed and classified
     /// by nothing is priceable by a Task that names it — which the errand's own
-    /// Tasks do — and enumerable by no pool at all. The room's hits go with the
-    /// kinds and for the same reason: a Repair is pooled off a hit count, and
-    /// an errand's target is not a thing this colony repairs.
+    /// Tasks do — and enumerable by no pool at all. The declared target is such
+    /// an id and stays such an id. What is classified here is what decays: a
+    /// Thorium pile on that floor and a tombstone or a ruin holding Thorium on
+    /// it, each of which is answered by a kind-swept rung that already sweeps
+    /// our own rooms, and each of which is gone inside a few hundred ticks if
+    /// nothing names it. The room's hits stay out with the furniture and for
+    /// the original reason: a Repair is pooled off a hit count, and an errand's
+    /// target is not a thing this colony repairs.
     let private erranding (targets: Set<string>) (facts: RoomFacts) : RoomFacts =
         let crossed = transiting facts
 
@@ -443,10 +449,24 @@ module ColonyView =
         // same kind-swept `Pickup` rung that sweeps our own rooms, which is
         // exactly why it needs a kind. Nothing else grows a census entry: the
         // filter is one resource on the floor, not "dropped things".
-        let floorOre =
-            facts.TargetKinds |> Map.filter (fun _ kind -> kind = Dropped Thorium)
+        //
+        // **And the same ore one object over** (#359): a tombstone or a ruin
+        // out here that holds Thorium. This is #356 again with the ore inside a
+        // store rather than on the floor — a courier that dies loaded leaves
+        // 175 T in its tombstone, W15S25 live — and every word of the argument
+        // above carries: nobody owns the room, no other colony walks a body to
+        // it, and the ore is bleeding, faster if anything, because the
+        // tombstone drops its whole store as piles when it decays and those
+        // piles then bleed. Recognised by the kind **and** an entry in the
+        // room's Thorium map, because `Tombstone` does not name a resource: a
+        // tombstone holding only energy is this case's neighbour and stays out,
+        // exactly as the pile of energy beside the ore does.
+        let decayingOre =
+            facts.TargetKinds
+            |> Map.filter (fun id kind ->
+                kind = Dropped Thorium || (kind = Tombstone && Map.containsKey id facts.Thorium))
 
-        let admitted = Set.union targets (floorOre |> Map.keys |> Set.ofSeq)
+        let admitted = Set.union targets (decayingOre |> Map.keys |> Set.ofSeq)
 
         let named map =
             map |> Map.filter (fun id _ -> Set.contains id admitted)
@@ -456,8 +476,18 @@ module ColonyView =
                 { crossed.Layer with
                     TargetPositions = named facts.Layer.TargetPositions
                 }
-            TargetKinds = floorOre
-            Stores = named facts.Stores
+            TargetKinds = decayingOre
+            // **The energy column is the declaration's alone**, which is why
+            // this one map is cut by `targets` and not by `admitted` (#359).
+            // What an admitted object is admitted *for* is its ore; a tombstone
+            // that also holds energy would otherwise pool an energy Withdraw
+            // three crossings from home off a census entry granted for the ore,
+            // and a haul of a dead creep's 200 energy across a sector is not
+            // work this colony declared a room for. It subtracts nothing from
+            // the pile case #356 shipped: `World` files an energy pile's amount
+            // in `Stores` and a Thorium pile's in `Thorium`, so an ore pile has
+            // no entry here to lose.
+            Stores = facts.Stores |> Map.filter (fun id _ -> Set.contains id targets)
             Thorium = named facts.Thorium
             Cooldowns = named facts.Cooldowns
             Owners = named facts.Owners

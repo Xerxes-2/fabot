@@ -494,6 +494,10 @@ let planTasks (view: ColonyView) atlas (threats: Threats) (held: HeldTaskFacts) 
     // become of the thing holding it is not this pool's question. The engine's
     // `withdraw` takes either object, and the cap and the tier are read off the
     // stock and the kind exactly as a container's are.
+    //
+    // This list is the **energy** column of that sentence, and it was the whole
+    // of it until #359: one holding the season's ore is drawn by `tombstoneOre`
+    // below, off the same objects and the same argument, one resource over.
     let tombstones = idsOfKind Tombstone
 
     // The [[ferry]]'s sink is the one store in this pool a body of this
@@ -622,6 +626,49 @@ let planTasks (view: ColonyView) atlas (threats: Threats) (held: HeldTaskFacts) 
         |> List.filter (fun id ->
             SpatialInfo.heldIn view.Spatial Thorium id >= view.Tuning.PickupThreshold)
         |> List.map (fun id -> Pickup(id, Thorium))
+
+    // **And the same ore in a store with a clock on it** (#359): a tombstone or
+    // a ruin holding Thorium. A courier that dies loaded leaves its ore in its
+    // tombstone, which is where W15S25's 175 T stood — in the declared Reactor
+    // room, decaying, named by nothing. The energy line above pools a tombstone
+    // as a store already and says why: "a tombstone and a ruin are stores the
+    // same way", and the engine's `withdraw` takes either object. It only ever
+    // said it about energy; this is the same sentence read down the ore's
+    // column, and the Intent, the cap and the tier are the mineral container's
+    // own (`Withdraw(_, Thorium)`).
+    //
+    // **No threshold beside it**, where the pile above carries
+    // `Tuning.PickupThreshold`: the pile's threshold buys the [[pickup
+    // reflex]]'s bargain — a scrap too small for a trip is left to a body that
+    // is passing anyway — and there is no reflex that empties a store, so the
+    // alternative to a Task here is watching it decay. What bounds the trip
+    // instead is the Withdraw's own `worthTheTrip` clause, which exempts a
+    // store that ends for exactly this reason (`Emitter`, #232).
+    //
+    // Whose the ore is, is `Facts.ourThoriumTombstones`' to say, beside the
+    // pile's: a room we own or a room we declared an errand in. The borrowed
+    // filter is read over it as the energy line beside it reads one — no store
+    // of a child's is the mother's to draw at any stage (ADR 0047 decision 1) —
+    // and it subtracts nothing today, `ColonyView.borrowable` refusing
+    // `Tombstone` outright, so a child's tombstone never reaches her census to
+    // be filtered.
+    //
+    // **Where the load goes**, because a draw with no sink is #262's stranded
+    // carrier: `mineRefills` below, the Storage's own `Refill(_, Thorium)`,
+    // which is pooled off the Storage's free capacity alone and off no fact
+    // about the mine — written that way so that a body holding ore always has
+    // somewhere to put it down. A tombstone's load is under
+    // `Tuning.ReactorLoad`, and nothing on that side needs to know: the
+    // Storage's Thorium sink has no lower bound, and the delivery's 500-unit
+    // gate is on the *draw* from Storage and not on the sink into it. Where the
+    // courier programme is open the Reactor itself is the nearer sink and takes
+    // it — `reactorRefills` below, whose cap clause admits any load at or under
+    // `Tuning.ReactorLoad` (`Emitter`, #319) — which is the whole trip for ore
+    // already standing in that room. So this rung needs no sink of its own.
+    let tombstoneOre =
+        ourThoriumTombstones view
+        |> List.filter (inABorrowedRoom >> not)
+        |> List.map (fun id -> Withdraw(id, Thorium))
 
     // The sink, pooled off the **Storage alone** and off no fact about the mine
     // (#262): the Planner is creep-blind (ADR 0013), so what gates this is the
@@ -773,6 +820,12 @@ let planTasks (view: ColonyView) atlas (threats: Threats) (held: HeldTaskFacts) 
     // nothing for this pair and is written the way the energy lists above are
     // written, which is the only claim made for it.
     @ minePickups
+    // Beside the piles and for their reason (#359): of the ore this colony can
+    // name, the copy in a tombstone is the one on the shortest clock — the
+    // store decays into piles that then decay themselves — and pool order is
+    // the Matcher's last tie-break, reaching an exact tie in priority, travel
+    // cost and crowd alike and nothing else.
+    @ tombstoneOre
     @ mineWithdraws
     @ mineRefills
     @ deliveryWithdraws

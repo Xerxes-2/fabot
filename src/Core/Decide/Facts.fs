@@ -300,6 +300,25 @@ let internal inARoomWeOwn (view: ColonyView) (id: string) : bool =
 let internal ourDeposits (view: ColonyView) : string list =
     SpatialInfo.idsOfKind view.Spatial Mineral |> List.filter (inARoomWeOwn view)
 
+/// Whether decaying ore standing at this target is **this colony's to sweep**
+/// (#354, #311): a room we own, or a room we declared an [[errand]] in. The
+/// errand clause is the whole of #354's second half — the Reactor's room has no
+/// controller, so "a room we own" made its floor belong to nobody while 915 T
+/// bled on it at 1 T a tick with a body of ours standing two tiles away.
+///
+/// Written once because three readers ask it — the piles below, the tombstones
+/// beside them (#359), and the breach channel that alarms on both — and two
+/// copies of one sentence are free to disagree about whose a room is, which is
+/// the failure mode that made the alarm silent through the incident it was
+/// built for.
+let private oursToSweep (view: ColonyView) (id: string) : bool =
+    let errandRooms =
+        view.Errands |> List.map (fun errand -> errand.RoomName) |> Set.ofList
+
+    inARoomWeOwn view id
+    || SpatialInfo.roomOf view.Spatial id
+       |> Option.exists (fun room -> Set.contains room errandRooms)
+
 /// The [[thorium]] **on the ground** in a room this colony owns, in id order
 /// (#311): the dig that landed on the floor rather than in the mineral
 /// [[container]], because the container was at its 2,000 cap on the tick the
@@ -314,15 +333,34 @@ let internal ourDeposits (view: ColonyView) : string list =
 /// list is the Withdraw's arithmetic — an amount over a threshold, capped by a
 /// load — because a pile with no store in it is the mineral container with the
 /// store taken away.
+///
+/// Whose the room has to be is `oursToSweep` above, shared with the tombstones
+/// below.
 let internal ourThoriumPiles (view: ColonyView) : string list =
-    let errandRooms =
-        view.Errands |> List.map (fun errand -> errand.RoomName) |> Set.ofList
-
     SpatialInfo.idsOfKind view.Spatial (Dropped Thorium)
-    |> List.filter (fun id ->
-        inARoomWeOwn view id
-        || SpatialInfo.roomOf view.Spatial id
-           |> Option.exists (fun room -> Set.contains room errandRooms))
+    |> List.filter (oursToSweep view)
+
+/// The [[thorium]] in a **store with a clock on it** — a tombstone or a ruin —
+/// standing in a room this colony sweeps, in id order (#359). The pile above
+/// one object over: a courier that dies with ore aboard leaves it in its
+/// tombstone rather than on the floor, and W15S25's tombstone at (43,6) held
+/// 175 T of it in the declared Reactor room.
+///
+/// It is the same errand as the pile's and the same clock, run faster. The
+/// engine's `withdraw` takes a tombstone or a ruin for any resource
+/// (`@screeps/engine` `src/game/creeps.js`, whose target test names
+/// `globals.Tombstone` and `globals.Ruin` beside a structure), and a tombstone
+/// that decays drops its **whole** store as piles
+/// (`processor/intents/tombstones/tick.js`) — so ore left in one is ore that
+/// becomes ore on the floor, which is where `ourThoriumPiles` above picks the
+/// story up, minus whatever the decay cost in between.
+///
+/// The kind carries no resource, so the holding is what selects: a tombstone
+/// with an entry in the Thorium map and none for the energy-only one beside it,
+/// absence being no holding (ADR 0004).
+let internal ourThoriumTombstones (view: ColonyView) : string list =
+    SpatialInfo.idsOfKind view.Spatial Tombstone
+    |> List.filter (fun id -> SpatialInfo.heldIn view.Spatial Thorium id > 0 && oursToSweep view id)
 
 /// Whether a Reactor this colony has declared has room for a **whole load**
 /// (#354). What gates a new draw at the Storage, and the only regulator of

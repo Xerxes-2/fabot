@@ -1339,6 +1339,30 @@ let planPool (view: ColonyView) atlas (tasks: Task list) : PooledTask list =
                 SpatialInfo.heldIn view.Spatial Thorium storeId >= view.Tuning.MineContactCliff
                 ->
                 TwoRungsUp
+            // **The ore in a store that ends, one rung up** (#359) — the
+            // Thorium pile's rung below, granted to the same ore held in a
+            // tombstone or a ruin, and granted for the identical sentence: ore
+            // that is going away, on a tier where nothing else is. It is going
+            // away faster, if anything. A tombstone drops its whole store as
+            // piles when it decays (`processor/intents/tombstones/tick.js`) and
+            // those piles then bleed `ceil(amount / 1000)` a tick, so the
+            // colony's second chance at this ore is strictly smaller than its
+            // first.
+            //
+            // Without a rung this Task is exactly #306 again, and not a
+            // theoretical tie: it shares the `StockDraw` tier with the
+            // [[storage]]'s own energy Withdraw, the bank stands at home and a
+            // tombstone in the declared Reactor room is three crossings away,
+            // so a rankless draw loses every travel-cost tie to the bank on
+            // every tick and the ore decays untouched — which is what #306
+            // found the mineral container doing with 486k banked beside it. One
+            // rung and not two, for the reason the pile takes one: two would
+            // put it over the mine's own full container, and draining the
+            // container is what stops the floor filling in the first place.
+            | Withdraw(storeId, Thorium) when
+                Map.tryFind storeId view.Spatial.TargetKinds = Some Tombstone
+                ->
+                OneRungUp
             // **And the floor under it, one rung lower** (#306). The pile is the
             // container's next dig that has already landed, so it earns the lift
             // for the bleeding half of the same argument — rungless it tied the
