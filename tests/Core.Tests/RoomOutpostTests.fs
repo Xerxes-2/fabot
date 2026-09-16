@@ -194,7 +194,7 @@ let outpostDeclarationTests =
                     let atlas = declaredAtlas outpost
 
                     let walkable tile =
-                        match Map.tryFind tile capture.Terrain with
+                        match TerrainGrid.tryFind tile capture.Terrain with
                         | Some terrain -> terrain <> Wall
                         | None -> false
 
@@ -477,7 +477,10 @@ let errandDeclarationTests =
                     // gives.
                     let groundIn room tile =
                         match Map.tryFind room rings with
-                        | Some(_, terrain) -> nonWall terrain tile
+                        | Some(_, terrain) ->
+                            match TerrainGrid.tryFind tile terrain with
+                            | Some ground -> ground <> Wall
+                            | None -> false
                         | None -> false
 
                     Seam.joinedBy
@@ -549,14 +552,14 @@ let errandDeclarationTests =
                             "the capture read is the room the declaration names"
 
                         Expect.equal
-                            (Map.tryFind pos capture.Terrain)
+                            (TerrainGrid.tryFind pos capture.Terrain)
                             (Some Plain)
                             $"{errand.RoomName}: the declared target stands on plain ground the server answered with"
 
                         Expect.isNonEmpty
                             (neighbourhood pos
                              |> List.filter (fun tile ->
-                                 match Map.tryFind tile capture.Terrain with
+                                 match TerrainGrid.tryFind tile capture.Terrain with
                                  | Some terrain -> terrain <> Wall
                                  | None -> false))
                             $"{errand.RoomName}: with ground beside it for the body that acts on it to stand on"

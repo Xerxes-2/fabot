@@ -32,7 +32,7 @@ let private child = "W13S28"
 /// row behind each exit row and nothing more, so what the patch is for is
 /// untouched.
 let private ground =
-    Map.ofList
+    TerrainGrid.ofList
         [
             for x in 1..10 do
                 for y in 1..10 -> { X = x; Y = y }, Plain
@@ -728,8 +728,8 @@ let colonyViewTests =
                 let layer = SpatialInfo.layerOf (viewOf pairWorld mother).Spatial child
 
                 Expect.equal
-                    (Map.count layer.Terrain)
-                    (Map.count ground)
+                    (TerrainGrid.count layer.Terrain)
+                    (TerrainGrid.count ground)
                     "every tile is still there"
             }
 
@@ -1292,7 +1292,7 @@ let transitTests =
                     "the transit room is in the projection, which is what a chain is priced over"
 
                 Expect.isNonEmpty
-                    (SpatialInfo.layerOf view.Spatial crossed).Terrain
+                    (TerrainGrid.toList (SpatialInfo.layerOf view.Spatial crossed).Terrain)
                     "carrying the ground a walk crosses"
 
                 Expect.isNonEmpty
@@ -1716,7 +1716,7 @@ let errandTests =
                     "the errand room is projected"
 
                 Expect.isNonEmpty
-                    (SpatialInfo.layerOf view.Spatial errandRoom).Terrain
+                    (TerrainGrid.toList (SpatialInfo.layerOf view.Spatial errandRoom).Terrain)
                     "carrying the terrain a walk is floodable over"
 
                 Expect.isNonEmpty
@@ -2022,7 +2022,7 @@ let errandTests =
                     "the crossing is projected, which is what the chain is priced over"
 
                 Expect.isNonEmpty
-                    (SpatialInfo.layerOf view.Spatial errandCrossed).Terrain
+                    (TerrainGrid.toList (SpatialInfo.layerOf view.Spatial errandCrossed).Terrain)
                     "carrying its ground"
 
                 Expect.isFalse
@@ -2208,7 +2208,7 @@ let private keeperWorld () : World =
                  Layer =
                      { RoomLayer.empty with
                          Terrain =
-                             Map.ofList
+                             TerrainGrid.ofList
                                  [
                                      for x in 1..48 do
                                          for y in 1..48 -> { X = x; Y = y }, Plain
@@ -2498,7 +2498,7 @@ let scanSetMaskTests =
                         Layer =
                             { RoomLayer.empty with
                                 Terrain =
-                                    Map.ofList
+                                    TerrainGrid.ofList
                                         [
                                             for x in 1 .. Seam.exitEdge - 1 do
                                                 for y in 1 .. Seam.exitEdge - 1 ->
@@ -2549,5 +2549,106 @@ let scanSetMaskTests =
                 Expect.isTrue
                     (World.linked margin world keeperRoom "W14S26")
                     "the crossing out of the keeper room is still a crossing: the far side there has ground"
+            }
+        ]
+
+/// The projection's terrain container in its own right (#278). `TerrainGrid`
+/// replaced a `Map<Pos, Terrain>` at forty-odd call sites on the promise that
+/// it answers exactly what the map answered, so the three answers that promise
+/// turns on are pinned here: absence, the off-grid guard, and the order the
+/// tiles come back in. The off-grid cases are the ones that were never true of
+/// the code this replaced — `Atlas.gridOf`'s `Map.iter` wrote whatever tile the
+/// projection held straight into a 2,500-slot array, so a tile off the grid
+/// wrote past the end of it, which Fable does silently and .NET throws on.
+[<Tests>]
+let terrainGridTests =
+    testList
+        "projection terrain grid"
+        [
+            test "a tile the grid does not carry reads as absent, like a map's missing key" {
+                let grid = TerrainGrid.ofList [ { X = 10; Y = 10 }, Plain ]
+
+                Expect.equal
+                    (TerrainGrid.tryFind { X = 10; Y = 10 } grid)
+                    (Some Plain)
+                    "the tile it carries"
+
+                Expect.equal
+                    (TerrainGrid.tryFind { X = 11; Y = 10 } grid)
+                    None
+                    "a tile inside the room it does not"
+
+                Expect.equal (TerrainGrid.count grid) 1 "and it carries exactly the one"
+            }
+
+            test "an off-grid tile reads as absent rather than off the end of the array" {
+                let grid = TerrainGrid.ofList [ { X = 10; Y = 10 }, Plain ]
+
+                for tile in
+                    [
+                        { X = -1; Y = 10 }
+                        { X = 10; Y = -1 }
+                        { X = Engine.roomSide; Y = 10 }
+                        { X = 10; Y = Engine.roomSide }
+                    ] do
+                    Expect.equal
+                        (TerrainGrid.tryFind tile grid)
+                        None
+                        $"{tile.X},{tile.Y} is not a tile of this room, and asking is not an error"
+            }
+
+            test "an off-grid tile cannot be written, by `ofList` or by `add`" {
+                let offGrid =
+                    {
+                        X = Engine.roomSide
+                        Y = Engine.roomSide
+                    }
+
+                let built = TerrainGrid.ofList [ offGrid, Plain; { X = 1; Y = 1 }, Swamp ]
+
+                Expect.equal
+                    (TerrainGrid.count built)
+                    1
+                    "the off-grid pair is dropped and the on-grid one kept"
+
+                Expect.equal
+                    (TerrainGrid.toList (TerrainGrid.add offGrid Wall built))
+                    (TerrainGrid.toList built)
+                    "and adding one changes nothing"
+            }
+
+            test "the tiles come back in (X, Y) order, which every tie-break rests on" {
+                let scattered =
+                    [
+                        { X = 3; Y = 2 }, Plain
+                        { X = 1; Y = 9 }, Swamp
+                        { X = 3; Y = 1 }, Wall
+                        { X = 1; Y = 4 }, Plain
+                    ]
+
+                Expect.equal
+                    (TerrainGrid.toList (TerrainGrid.ofList scattered))
+                    [
+                        { X = 1; Y = 4 }, Plain
+                        { X = 1; Y = 9 }, Swamp
+                        { X = 3; Y = 1 }, Wall
+                        { X = 3; Y = 2 }, Plain
+                    ]
+                    "sorted by X then Y, the order `Map.toList` answered in"
+            }
+
+            test "`remove` takes a tile out, and a removed tile is impassable geometry" {
+                let grid = TerrainGrid.ofList [ { X = 5; Y = 5 }, Plain; { X = 6; Y = 5 }, Plain ]
+
+                let holed = TerrainGrid.remove { X = 5; Y = 5 } grid
+
+                Expect.equal (TerrainGrid.tryFind { X = 5; Y = 5 } holed) None "the tile is gone"
+
+                Expect.equal
+                    (TerrainGrid.tryFind { X = 6; Y = 5 } holed)
+                    (Some Plain)
+                    "its neighbour is not"
+
+                Expect.equal (TerrainGrid.count grid) 2 "and the grid it came from is untouched"
             }
         ]

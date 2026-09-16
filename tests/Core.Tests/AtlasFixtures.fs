@@ -417,7 +417,7 @@ let internal storeRingView =
 /// about.
 let bordered rings =
     let plain =
-        Map.ofList
+        TerrainGrid.ofList
             [
                 for x in 1..48 do
                     for y in 1..48 -> { X = x; Y = y }, Plain
@@ -491,13 +491,13 @@ let internal seamGround ground rings =
                         tiles
                         |> List.choose (fun (tile, _) -> diagonallyBehind tile)
                         |> List.map (fun tile -> tile, Plain)
-                        |> Map.ofList
+                        |> TerrainGrid.ofList
                 })
             |> Map.ofList
             |> Map.add
                 "W12S28"
                 { RoomLayer.empty with
-                    Terrain = Map.ofList ground
+                    Terrain = TerrainGrid.ofList ground
                 }
         Borders = rings |> List.map (fun (room, tiles) -> room, Map.ofList tiles) |> Map.ofList
     }
@@ -529,7 +529,7 @@ let internal plainLine tiles =
 let internal pinnedLayer =
     { RoomLayer.empty with
         Terrain =
-            Map.ofList
+            TerrainGrid.ofList
                 [
                     for x in 8..12 do
                         for y in 8..15 do
@@ -597,7 +597,7 @@ let internal northOf (home: RoomLayer) homeRing (outpost: RoomLayer) outpostRing
 /// in it.
 let internal corridorHome creeps =
     { RoomLayer.empty with
-        Terrain = Map.ofList (plainLine [ for y in 1..48 -> { X = 25; Y = y } ])
+        Terrain = TerrainGrid.ofList (plainLine [ for y in 1..48 -> { X = 25; Y = y } ])
         CreepPositions = Map.ofList creeps
     }
 
@@ -607,7 +607,7 @@ let internal corridorHome creeps =
 let internal corridorOutpost =
     { RoomLayer.empty with
         Terrain =
-            Map.ofList (
+            TerrainGrid.ofList (
                 plainLine
                     [
                         for y in 1..48 do
@@ -705,13 +705,13 @@ let internal haulerBody = [ Carry; Carry; Move ]
 let internal haulAcross homeRing outpostRing =
     northOf
         { RoomLayer.empty with
-            Terrain = Map.ofList (plainLine [ for y in 1..48 -> { X = 25; Y = y } ])
+            Terrain = TerrainGrid.ofList (plainLine [ for y in 1..48 -> { X = 25; Y = y } ])
             TargetPositions = Map.ofList [ "spawn-1", { X = 25; Y = 10 } ]
             Obstacles = Set.singleton { X = 25; Y = 10 }
         }
         homeRing
         { RoomLayer.empty with
-            Terrain = Map.ofList (plainLine [ for y in 41..48 -> { X = 25; Y = y } ])
+            Terrain = TerrainGrid.ofList (plainLine [ for y in 41..48 -> { X = 25; Y = y } ])
             TargetPositions = Map.ofList [ "can-out", { X = 25; Y = 41 } ]
             CreepPositions =
                 Map.ofList [ "loaded", { X = 25; Y = 41 }; "empty", { X = 25; Y = 41 } ]
@@ -804,7 +804,7 @@ let internal chainOfFour
 /// creep and no target in it: the shape a room a walk only passes through has.
 let internal corridorTransit =
     { RoomLayer.empty with
-        Terrain = Map.ofList (plainLine [ for y in 1..48 -> { X = 25; Y = y } ])
+        Terrain = TerrainGrid.ofList (plainLine [ for y in 1..48 -> { X = 25; Y = y } ])
     }
 
 /// The Source Keeper room the chain to the sector Reactor crosses, under its
@@ -822,7 +822,7 @@ let internal corridorTransit =
 /// keeping the two apart is what stops a green band from meaning either one.
 let internal keeperRoom =
     let plain window =
-        Map.ofList
+        TerrainGrid.ofList
             [
                 for x in window do
                     for y in window -> { X = x; Y = y }, Plain

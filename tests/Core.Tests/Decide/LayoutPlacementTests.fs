@@ -560,7 +560,7 @@ let placementTests =
                     room
                     |> withHome (fun layer ->
                         { layer with
-                            Terrain = Map.add { X = 24; Y = 24 } Wall layer.Terrain
+                            Terrain = TerrainGrid.add { X = 24; Y = 24 } Wall layer.Terrain
                         })
 
                 let { Intents = intents } = decideOn (atLevel 2 holed)

@@ -728,7 +728,7 @@ let outpostWorkforceTests =
                                         Terrain =
                                             (layer.Terrain, threeSeatField rock)
                                             ||> List.fold (fun acc (tile, terrain) ->
-                                                Map.add tile terrain acc)
+                                                TerrainGrid.add tile terrain acc)
                                     })
                         })
 

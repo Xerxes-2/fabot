@@ -909,7 +909,7 @@ let consistencyTests =
 
                 let standing =
                     (homeLayer projection).Terrain
-                    |> Map.toList
+                    |> TerrainGrid.toList
                     |> List.choose (fun (tile, kind) ->
                         if
                             kind <> Wall

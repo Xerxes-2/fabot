@@ -50,8 +50,11 @@ let private reactorOwnerOf (reactor: IReactor) =
 /// there is one terrain truth per room (ADR 0041).
 type private RoomTerrain =
     {
-        /// x,y in 1..48: the ground the projection stands on.
-        Ground: Map<Pos, Terrain>
+        /// x,y in 1..48: the ground the projection stands on, as the flat
+        /// grid the Atlas rebuilds its weight arrays from (#278). Memoised
+        /// per room below, so this list-and-fill happens once per room per
+        /// global reset rather than once per room per tick.
+        Ground: TerrainGrid
         /// The border ring, x or y of 0 or 49: the Seam's terrain, never
         /// ground.
         Border: Map<Pos, Terrain>
@@ -78,7 +81,7 @@ let private terrainOf (roomName: string) : RoomTerrain =
                 // impassable, so no path, Seat or standing candidate ever
                 // uses an exit (ADR 0041). Do not "fix" this trim.
                 Ground =
-                    Map.ofList
+                    TerrainGrid.ofList
                         [
                             for x in 1..48 do
                                 for y in 1..48 do

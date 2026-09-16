@@ -35,11 +35,14 @@ let loaderTests =
                 // line here that has to agree with the shell.
                 let room = load "W12S28"
 
-                Expect.hasLength room.Terrain (48 * 48) "the 48x48 interior, exits excluded"
+                Expect.hasLength
+                    (TerrainGrid.toList room.Terrain)
+                    (48 * 48)
+                    "the 48x48 interior, exits excluded"
 
                 Expect.isTrue
                     (room.Terrain
-                     |> Map.forall (fun tile _ ->
+                     |> TerrainGrid.forall (fun tile _ ->
                          tile.X >= 1 && tile.X <= 48 && tile.Y >= 1 && tile.Y <= 48))
                     "no tile outside the projected window"
             }
@@ -89,12 +92,12 @@ let loaderTests =
                 let room = load "W12S28"
 
                 Expect.equal
-                    (Map.tryFind { X = 15; Y = 40 } room.Terrain)
+                    (TerrainGrid.tryFind { X = 15; Y = 40 } room.Terrain)
                     (Some Swamp)
                     "15,40 is the swamp tile #77 names"
 
                 Expect.equal
-                    (Map.tryFind { X = 15; Y = 39 } room.Terrain)
+                    (TerrainGrid.tryFind { X = 15; Y = 39 } room.Terrain)
                     (Some Plain)
                     "15,39 is the tile the RCL4 burst's extension took"
             }

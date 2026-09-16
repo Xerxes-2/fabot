@@ -20,7 +20,7 @@ let private twoExitAcross farRing =
     let home =
         { RoomLayer.empty with
             Terrain =
-                Map.ofList (
+                TerrainGrid.ofList (
                     plainLine
                         [
                             for y in 1..10 -> { X = 25; Y = y }
@@ -34,7 +34,7 @@ let private twoExitAcross farRing =
     let outpost =
         { RoomLayer.empty with
             Terrain =
-                Map.ofList
+                TerrainGrid.ofList
                     [
                         for x in 25..27 -> { X = x; Y = 41 }, Plain
                         for y in 42..48 -> { X = 25; Y = y }, Swamp
@@ -345,7 +345,7 @@ let crossRoomTests =
                 let outpost =
                     { RoomLayer.empty with
                         Terrain =
-                            Map.ofList (
+                            TerrainGrid.ofList (
                                 plainLine
                                     [
                                         for y in 41..48 -> { X = 25; Y = y }
@@ -953,14 +953,15 @@ let crossRoomStepTests =
                 // lowest exit, and (20,0) is lower than (30,0).
                 let home stand =
                     { RoomLayer.empty with
-                        Terrain = Map.ofList (plainLine [ for x in 20..30 -> { X = x; Y = 1 } ])
+                        Terrain =
+                            TerrainGrid.ofList (plainLine [ for x in 20..30 -> { X = x; Y = 1 } ])
                         CreepPositions = Map.ofList [ "w", stand ]
                     }
 
                 let outpost =
                     { RoomLayer.empty with
                         Terrain =
-                            Map.ofList (
+                            TerrainGrid.ofList (
                                 plainLine
                                     [
                                         for y in 41..48 -> { X = 20; Y = y }
@@ -1171,7 +1172,7 @@ let crossRoomStepTests =
                 let home pos =
                     { RoomLayer.empty with
                         Terrain =
-                            Map.ofList (
+                            TerrainGrid.ofList (
                                 plainLine
                                     [
                                         for y in 1..10 -> { X = 25; Y = y }
@@ -1184,7 +1185,7 @@ let crossRoomStepTests =
                 let outpost =
                     { RoomLayer.empty with
                         Terrain =
-                            Map.ofList (
+                            TerrainGrid.ofList (
                                 plainLine
                                     [
                                         for y in 41..48 -> { X = 25; Y = y }
@@ -1226,7 +1227,8 @@ let crossRoomStepTests =
                         failtest "the creep never reached a crossing"
                     else
                         match firstStepFor (across [ 23; 27 ] pos) "w" (Harvest "src-out") with
-                        | Some step when Map.containsKey step ground -> drive step (step :: taken)
+                        | Some step when TerrainGrid.containsKey step ground ->
+                            drive step (step :: taken)
                         | Some step -> List.rev (step :: taken)
                         | None -> List.rev taken
 
@@ -1560,7 +1562,7 @@ let private cornerOfFour homeRing =
     let home =
         { RoomLayer.empty with
             Terrain =
-                Map.ofList (
+                TerrainGrid.ofList (
                     plainLine
                         [
                             // The column up to the north exit and the row west
@@ -1579,20 +1581,20 @@ let private cornerOfFour homeRing =
     // swamp to the exit at (0,48), which lands it on (49,48) of the target.
     let northCorner =
         { RoomLayer.empty with
-            Terrain = Map.ofList [ for x in 1..25 -> { X = x; Y = 48 }, Swamp ]
+            Terrain = TerrainGrid.ofList [ for x in 1..25 -> { X = x; Y = 48 }, Swamp ]
         }
 
     // The cheap one: landed on (49,25), the walk turns north up a plain
     // column to the exit at (48,0), which lands it on (48,49) of the target.
     let westCorner =
         { RoomLayer.empty with
-            Terrain = Map.ofList (plainLine [ for y in 1..25 -> { X = 48; Y = y } ])
+            Terrain = TerrainGrid.ofList (plainLine [ for y in 1..25 -> { X = 48; Y = y } ])
         }
 
     let target =
         { RoomLayer.empty with
             Terrain =
-                Map.ofList (
+                TerrainGrid.ofList (
                     plainLine
                         [
                             for y in 1..48 do

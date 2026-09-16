@@ -42,7 +42,7 @@ let onDemandFloodTests =
 
                     let stands =
                         capture.Terrain
-                        |> Map.toList
+                        |> TerrainGrid.toList
                         |> List.choose (fun (tile, terrain) ->
                             if terrain <> Wall && (tile.X + tile.Y) % 7 = 0 then
                                 Some tile
@@ -337,7 +337,7 @@ let onDemandFloodTests =
 
                 let walls =
                     capture.Terrain
-                    |> Map.toList
+                    |> TerrainGrid.toList
                     |> List.choose (fun (tile, terrain) ->
                         if terrain = Wall then Some tile else None)
 
@@ -662,7 +662,8 @@ let roadGateTests =
 
                 Expect.isTrue
                     (roads
-                     |> List.exists (fun tile -> Map.tryFind tile capture.Terrain = Some Swamp))
+                     |> List.exists (fun tile ->
+                         TerrainGrid.tryFind tile capture.Terrain = Some Swamp))
                     "at least one trunk tile is paved over swamp"
 
                 Expect.isLessThan

@@ -290,7 +290,7 @@ let crossRoomWalkTests =
                                         $"{from} -> {into}: the step from {stand.X},{stand.Y} to {tile.X},{tile.Y} is one tile"
 
                                     let onGround =
-                                        match Map.tryFind tile near.Terrain with
+                                        match TerrainGrid.tryFind tile near.Terrain with
                                         | Some terrain -> terrain <> Wall
                                         | None -> false
 
@@ -633,7 +633,7 @@ let keeperMaskTests =
                 // is no slack for a detour round a room the mask closed.
                 let raw =
                     keeperRoom.Terrain
-                    |> Map.toList
+                    |> TerrainGrid.toList
                     |> List.filter (fun (_, terrain) -> terrain <> Wall)
                     |> List.length
 
@@ -867,7 +867,7 @@ let keeperMaskTests =
                     | None -> false
 
                 let groundOf tile =
-                    match Map.tryFind tile capture.Terrain with
+                    match TerrainGrid.tryFind tile capture.Terrain with
                     | Some terrain -> terrain <> Wall && not (Keepers.masked margin "W15S26" tile)
                     | None -> false
 
@@ -919,7 +919,7 @@ let keeperMaskTests =
                         ]
 
                 let openGround =
-                    Map.ofList
+                    TerrainGrid.ofList
                         [
                             for x in 1 .. Seam.exitEdge - 1 do
                                 for y in 1 .. Seam.exitEdge - 1 -> { X = x; Y = y }, Plain
@@ -1058,8 +1058,13 @@ let reclaimerRelayTests =
                 let chain = [ "W15S28"; "W15S27"; "W15S26"; "W15S25" ]
                 let captures = chain |> List.map load
 
-                let asPlain terrain =
-                    terrain |> Map.map (fun _ tile -> if tile = Wall then Wall else Plain)
+                let flatten tile = if tile = Wall then Wall else Plain
+
+                let asPlainGrid grid =
+                    grid |> TerrainGrid.map (fun _ tile -> flatten tile)
+
+                let asPlainRing ring =
+                    ring |> Map.map (fun _ tile -> flatten tile)
 
                 let courier =
                     { AtlasFixtures.creepWith
@@ -1104,8 +1109,8 @@ let reclaimerRelayTests =
                     atlasWith (fun capture -> capture.Terrain) (fun capture -> capture.Border)
 
                 let stepAtlas =
-                    atlasWith (fun capture -> asPlain capture.Terrain) (fun capture ->
-                        asPlain capture.Border)
+                    atlasWith (fun capture -> asPlainGrid capture.Terrain) (fun capture ->
+                        asPlainRing capture.Border)
 
                 let body = [ BodyPart.Claim; Move ]
 

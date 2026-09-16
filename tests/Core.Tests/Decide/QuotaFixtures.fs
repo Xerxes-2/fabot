@@ -152,7 +152,7 @@ let internal haulRoundingColony arms =
             |> withHome (fun layer ->
                 { layer with
                     Terrain =
-                        Map.ofList (
+                        TerrainGrid.ofList (
                             [ for tile in lane -> tile, Plain ]
                             @ [ for (_, _, rock) in arms -> rock, Wall ]
                         )
@@ -424,7 +424,7 @@ let internal upgraderRoom =
     |> withHome (fun layer ->
         { layer with
             Terrain =
-                Map.ofList
+                TerrainGrid.ofList
                     [
                         for x in 8..32 do
                             for y in 9..11 ->
@@ -508,7 +508,7 @@ let internal withDeclaredOutpost (colony: ColonyView) =
             |> withNeighbour
                 "W1N2"
                 { RoomLayer.empty with
-                    Terrain = Map.ofList (corridor 25 41 48)
+                    Terrain = TerrainGrid.ofList (corridor 25 41 48)
                     TargetPositions = Map.ofList [ "ctrl-out", { X = 25; Y = 45 } ]
                 }
     }
@@ -530,7 +530,7 @@ let internal thirdSource (colony: ColonyView) =
                 ]
             |> withHome (fun layer ->
                 { layer with
-                    Terrain = layer.Terrain |> Map.add { X = 14; Y = 10 } Wall
+                    Terrain = layer.Terrain |> TerrainGrid.add { X = 14; Y = 10 } Wall
                 })
     }
 
@@ -612,7 +612,7 @@ let internal sinkLaneColony available controllerX =
             |> withHome (fun layer ->
                 { layer with
                     Terrain =
-                        Map.ofList
+                        TerrainGrid.ofList
                             [
                                 for x in 18..47 do
                                     for y in 24..26 ->
@@ -665,7 +665,7 @@ let internal outpostPostColony held life =
             |> withHome (fun layer ->
                 { layer with
                     Terrain =
-                        Map.ofList
+                        TerrainGrid.ofList
                             [
                                 for x in 9..11 do
                                     for y in 1..10 -> { X = x; Y = y }, Plain
@@ -679,7 +679,7 @@ let internal outpostPostColony held life =
                 "W1N2"
                 { RoomLayer.empty with
                     Terrain =
-                        Map.ofList
+                        TerrainGrid.ofList
                             [
                                 for x in 9..11 do
                                     for y in 44..48 ->
@@ -743,7 +743,7 @@ let internal pairedPostColony held homeLife outLife =
             |> withHome (fun layer ->
                 { layer with
                     Terrain =
-                        Map.ofList
+                        TerrainGrid.ofList
                             [
                                 for x in 9..11 do
                                     for y in 1..10 ->
@@ -764,7 +764,7 @@ let internal pairedPostColony held homeLife outLife =
                 "W1N2"
                 { RoomLayer.empty with
                     Terrain =
-                        Map.ofList
+                        TerrainGrid.ofList
                             [
                                 for x in 9..11 do
                                     for y in 44..48 ->
@@ -858,7 +858,7 @@ let internal upgraderBandColony upgraders =
             |> withHome (fun layer ->
                 { layer with
                     Terrain =
-                        Map.ofList (
+                        TerrainGrid.ofList (
                             [
                                 for x in 5..15 do
                                     for y in 5..15 ->

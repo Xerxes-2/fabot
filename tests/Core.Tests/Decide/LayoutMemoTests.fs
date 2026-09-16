@@ -61,7 +61,7 @@ let censusSignatureTests =
                             bare.Spatial
                             |> withHome (fun layer ->
                                 { layer with
-                                    Terrain = Map.add mineralPos Wall layer.Terrain
+                                    Terrain = TerrainGrid.add mineralPos Wall layer.Terrain
                                 })
                             |> withStanding "min-a" mineralPos Mineral
                     }

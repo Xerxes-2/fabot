@@ -14,6 +14,149 @@ type Terrain =
     | Swamp
     | Wall
 
+/// One room's terrain as a **flat grid** rather than a map: two thousand five
+/// hundred slots indexed by `Geometry.indexOf`, an absent tile holding `None`
+/// (#278). It answers exactly what `Map<Pos, Terrain>` answered — absence
+/// included, which is what the projection's totality rests on: a tile this
+/// does not carry is impassable, and so is a tile off the grid entirely.
+///
+/// A map was the wrong shape for the one thing this is: a whole-room table,
+/// fixed for the life of the server, rebuilt into the Atlas's weight grids
+/// **every tick of every room**. That rebuild walked a 2,500-node balanced
+/// tree per room per tick and was the largest single cost in our own code
+/// (#278: 4.13% of a tick on the `pair` scenario). The grid is read with a
+/// bounded `for` instead, and `World.terrainMemo` now memoises the finished
+/// array, so the walk happens once per room per global reset rather than once
+/// per room per tick.
+///
+/// The type is a record around the array and not the bare array, so that the
+/// projection cannot be handed a differently-strided array by accident and so
+/// that equality is the record's: two grids are equal when their slots are,
+/// which is what the fixtures compare.
+type TerrainGrid = internal { Tiles: Terrain option[] }
+
+/// Reading and writing a `TerrainGrid`. The names and the argument order are
+/// `Map`'s on purpose: this module replaced a `Map<Pos, Terrain>` at forty-odd
+/// call sites, and a caller that says `add`, `remove` or `tryFind` should not
+/// have to think about which of the two it is holding. Every entry guards the
+/// index with `inGrid` (`Geometry`), so an off-grid `Pos` reads as absent and
+/// a write to one is dropped — the answers a map gave.
+[<RequireQualifiedAccess>]
+module TerrainGrid =
+
+    /// The grid no room carries: every tile absent. Never written to, being
+    /// shared by every caller that asks for one.
+    let empty: TerrainGrid = { Tiles = Array.create tileCount None }
+
+    let tryFind (pos: Pos) (grid: TerrainGrid) : Terrain option =
+        if inGrid pos then grid.Tiles.[indexOf pos] else None
+
+    let containsKey (pos: Pos) (grid: TerrainGrid) : bool = (tryFind pos grid).IsSome
+
+    /// A copy with one tile written. A copy and not a mutation, because the
+    /// projection is a value the whole tick reads and the fixtures build
+    /// variants off one another; the cost is a 2,500-slot array copy, paid
+    /// only where a `Map.add` was paid before — never in the tick's own path.
+    let add (pos: Pos) (terrain: Terrain) (grid: TerrainGrid) : TerrainGrid =
+        if not (inGrid pos) then
+            grid
+        else
+            let tiles = Array.copy grid.Tiles
+            tiles.[indexOf pos] <- Some terrain
+            { Tiles = tiles }
+
+    let remove (pos: Pos) (grid: TerrainGrid) : TerrainGrid =
+        if not (inGrid pos) then
+            grid
+        else
+            let tiles = Array.copy grid.Tiles
+            tiles.[indexOf pos] <- None
+            { Tiles = tiles }
+
+    let ofList (tiles: (Pos * Terrain) list) : TerrainGrid =
+        let grid = Array.create tileCount None
+
+        for pos, terrain in tiles do
+            if inGrid pos then
+                grid.[indexOf pos] <- Some terrain
+
+        { Tiles = grid }
+
+    /// Every tile the grid carries, in `indexOf` order — which is (X, Y)
+    /// order, the order `Map.toList` answered in and every "ties by (X, Y)"
+    /// rule in the colony rests on (ADR 0011).
+    let toList (grid: TerrainGrid) : (Pos * Terrain) list =
+        [
+            for index in 0 .. tileCount - 1 do
+                match grid.Tiles.[index] with
+                | Some terrain -> yield posAt index, terrain
+                | None -> ()
+        ]
+
+    let count (grid: TerrainGrid) : int =
+        let mutable total = 0
+
+        for index in 0 .. tileCount - 1 do
+            if grid.Tiles.[index].IsSome then
+                total <- total + 1
+
+        total
+
+    let forall (predicate: Pos -> Terrain -> bool) (grid: TerrainGrid) : bool =
+        let mutable holds = true
+        let mutable index = 0
+
+        while holds && index < tileCount do
+            match grid.Tiles.[index] with
+            | Some terrain when not (predicate (posAt index) terrain) -> holds <- false
+            | _ -> index <- index + 1
+
+        holds
+
+    /// A grid with every present tile's terrain rewritten, the absent ones
+    /// left absent — `Map.map` for the same shape, which is what a fixture
+    /// that flattens a real capture's swamps needs (`RoomSeamTests`).
+    let map (change: Pos -> Terrain -> Terrain) (grid: TerrainGrid) : TerrainGrid =
+        let tiles = Array.create tileCount None
+
+        for index in 0 .. tileCount - 1 do
+            match grid.Tiles.[index] with
+            | Some terrain -> tiles.[index] <- Some(change (posAt index) terrain)
+            | None -> ()
+
+        { Tiles = tiles }
+
+    let exists (predicate: Pos -> Terrain -> bool) (grid: TerrainGrid) : bool =
+        let mutable found = false
+        let mutable index = 0
+
+        while not found && index < tileCount do
+            match grid.Tiles.[index] with
+            | Some terrain when predicate (posAt index) terrain -> found <- true
+            | _ -> index <- index + 1
+
+        found
+
+    /// The tick's own reader: the present tiles, index and terrain, without
+    /// building a `Pos` or a list. This is what `Atlas.gridOf` fills its
+    /// weight arrays through, and the whole point of the type — the index is
+    /// handed over raw because the caller's array is strided the same way.
+    let inline internal iterIndexed
+        ([<InlineIfLambda>] handle: int -> Terrain -> unit)
+        (grid: TerrainGrid)
+        : unit =
+        for index in 0 .. tileCount - 1 do
+            match grid.Tiles.[index] with
+            | Some terrain -> handle index terrain
+            | None -> ()
+
+    /// The same walk keyed by tile, for the readers that want a `Pos`.
+    let inline internal iter
+        ([<InlineIfLambda>] handle: Pos -> Terrain -> unit)
+        (grid: TerrainGrid)
+        : unit =
+        iterIndexed (fun index terrain -> handle (posAt index) terrain) grid
+
 /// What kind of thing a projected target is.
 type TargetKind =
     | Source
@@ -84,7 +227,7 @@ type RoomLayer =
         /// absent from the map is impassable. The border ring is not here and
         /// is not ground: it rides in `SpatialInfo.Borders`, which the Seam
         /// query alone is priced off (ADR 0036, ADR 0041).
-        Terrain: Map<Pos, Terrain>
+        Terrain: TerrainGrid
         /// Target id -> that target's tile in this room: the Task targets, and
         /// the piles and tombstones a hauler is sent to. The two
         /// transient kinds are filtered out by kind where standing on a tile
@@ -123,7 +266,7 @@ module RoomLayer =
     /// 0004).
     let empty: RoomLayer =
         {
-            Terrain = Map.empty
+            Terrain = TerrainGrid.empty
             TargetPositions = Map.empty
             CreepPositions = Map.empty
             Obstacles = Set.empty

@@ -83,7 +83,7 @@ let spatial targets tiles =
     SpatialInfo.empty
     |> withHome (fun layer ->
         { layer with
-            Terrain = Map.ofList tiles
+            Terrain = TerrainGrid.ofList tiles
             TargetPositions = Map.ofList targets
         })
 

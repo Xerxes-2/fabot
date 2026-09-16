@@ -499,15 +499,11 @@ module World =
     /// reads terrain for every declared and transit room whether or not there
     /// is vision (ADR 0031, ADR 0041), so the ground behind a landing tile has
     /// been in hand on every tick the ring was.
-    let groundWalkable
-        (keeperMargin: int)
-        (room: string)
-        (terrain: Map<Pos, Terrain>)
-        : Pos -> bool =
+    let groundWalkable (keeperMargin: int) (room: string) (terrain: TerrainGrid) : Pos -> bool =
         let masked = Keepers.maskIn keeperMargin room
 
         fun tile ->
-            match Map.tryFind tile terrain with
+            match TerrainGrid.tryFind tile terrain with
             | Some ground -> ground <> Wall && not (masked tile)
             | None -> false
 

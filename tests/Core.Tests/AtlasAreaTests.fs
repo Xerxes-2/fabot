@@ -10,7 +10,7 @@ open Fabot.Core.Tests.AtlasFixtures
 /// can have. What an edge case answers here is the checked index and never a
 /// hole in the terrain, which is the whole point of standing the cases on it.
 let private wholeRoomPlain =
-    Map.ofList
+    TerrainGrid.ofList
         [
             for x in 1..48 do
                 for y in 1..48 -> { X = x; Y = y }, Plain

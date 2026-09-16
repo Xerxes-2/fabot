@@ -125,7 +125,7 @@ let internal spawnTiles (room: Room) (capture: RoomCapture) =
         @ (capture.Controller |> Option.toList |> List.map snd)
 
     [
-        for KeyValue(tile, terrain) in capture.Terrain do
+        for tile, terrain in TerrainGrid.toList capture.Terrain do
             if
                 terrain = Plain
                 && tile.X % stride = 0
@@ -761,7 +761,7 @@ let internal crossRoomStride = 397
 /// and its floods per tile).
 let internal standingSample (capture: RoomCapture) =
     capture.Terrain
-    |> Map.toList
+    |> TerrainGrid.toList
     |> List.filter (fun (_, terrain) -> terrain <> Wall)
     |> List.mapi (fun index (tile, _) -> index, tile)
     |> List.filter (fun (index, _) -> index % crossRoomStride = 0)
@@ -771,7 +771,7 @@ let internal standingSample (capture: RoomCapture) =
 /// unreachable goals nobody chose for what they prove.
 let internal wallSample (capture: RoomCapture) =
     capture.Terrain
-    |> Map.toList
+    |> TerrainGrid.toList
     |> List.filter (fun (_, terrain) -> terrain = Wall)
     |> List.mapi (fun index (tile, _) -> index, tile)
     |> List.filter (fun (index, _) -> index % crossRoomStride = 0)
@@ -1011,7 +1011,7 @@ let internal standingIn (capture: RoomCapture) (spawn: Pos) (creep: CreepInfo) (
 /// the other end of the same promise.
 let internal nearestFirst (stand: Pos) (capture: RoomCapture) =
     capture.Terrain
-    |> Map.toList
+    |> TerrainGrid.toList
     |> List.map fst
     |> List.sortBy (fun tile -> range stand tile, tile.X, tile.Y)
 
@@ -1073,7 +1073,7 @@ let internal standsAcross (near: RoomCapture) (far: RoomCapture) (from: string) 
 /// them did.
 let internal drainTile (capture: RoomCapture) =
     capture.Terrain
-    |> Map.toList
+    |> TerrainGrid.toList
     |> List.find (fun (_, terrain) -> terrain = Wall)
     |> fst
 

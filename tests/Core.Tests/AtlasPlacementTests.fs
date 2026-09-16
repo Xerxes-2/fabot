@@ -101,7 +101,8 @@ let placementQueryTests =
                     |> withHome (fun layer ->
                         { layer with
                             Terrain =
-                                Map.ofList [ { X = 10; Y = 10 }, Plain; { X = 10; Y = 11 }, Swamp ]
+                                TerrainGrid.ofList
+                                    [ { X = 10; Y = 10 }, Plain; { X = 10; Y = 11 }, Swamp ]
                         })
                     |> fun projection ->
                         { projection with
@@ -109,7 +110,7 @@ let placementQueryTests =
                                 Map.add
                                     "W1N1"
                                     { RoomLayer.empty with
-                                        Terrain = Map.ofList [ { X = 20; Y = 20 }, Plain ]
+                                        Terrain = TerrainGrid.ofList [ { X = 20; Y = 20 }, Plain ]
                                     }
                                     projection.Rooms
                         }
@@ -137,7 +138,7 @@ let placementQueryTests =
                     |> withHome (fun layer ->
                         { layer with
                             Terrain =
-                                Map.ofList
+                                TerrainGrid.ofList
                                     [
                                         { X = 10; Y = 10 }, Swamp
                                         { X = 10; Y = 11 }, Plain
@@ -151,7 +152,7 @@ let placementQueryTests =
                                     "W1N1"
                                     { RoomLayer.empty with
                                         Terrain =
-                                            Map.ofList
+                                            TerrainGrid.ofList
                                                 [
                                                     { X = 10; Y = 10 }, Plain
                                                     { X = 10; Y = 11 }, Swamp

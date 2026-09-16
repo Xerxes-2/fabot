@@ -95,7 +95,7 @@ let trunkPathTests =
                     corridor
                     |> withHome (fun layer ->
                         { layer with
-                            Terrain = Map.add { X = 12; Y = 10 } Swamp layer.Terrain
+                            Terrain = TerrainGrid.add { X = 12; Y = 10 } Swamp layer.Terrain
                             Roads = Set.singleton { X = 12; Y = 10 }
                         })
                     |> snapshotWith []
@@ -166,7 +166,7 @@ let trunkPathTests =
                     |> withHome (fun layer ->
                         { layer with
                             Terrain =
-                                Map.ofList
+                                TerrainGrid.ofList
                                     [
                                         yield { X = 10; Y = 10 }, Wall
                                         for x in 11..14 do

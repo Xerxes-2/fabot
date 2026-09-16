@@ -49,15 +49,6 @@ type internal Flood =
         mutable Size: int
     }
 
-let internal tileCount = Engine.roomSide * Engine.roomSide
-let internal indexOf pos = pos.X * Engine.roomSide + pos.Y
-
-let internal posAt index =
-    {
-        X = index / Engine.roomSide
-        Y = index % Engine.roomSide
-    }
-
 /// Unreached marker in a flood's distance array.
 let internal unreached = System.Int32.MaxValue
 
@@ -78,16 +69,6 @@ let internal noTraffic: bool[] = Array.create tileCount false
 /// absence of every tile in it are one answer — unpriceable geometry, never
 /// blocked geometry. Shared by all three grids and never written.
 let internal noGround: int[] = Array.create tileCount -1
-
-/// Whether a tile is one of the room's own fifty-by-fifty — the guard every
-/// grid read passes through, because a `Pos` off the grid indexes off the
-/// array: under Fable that reads `undefined`, which the weight comparisons
-/// would call walkable, while .NET throws.
-let internal inGrid (tile: Pos) =
-    tile.X >= 0
-    && tile.X < Engine.roomSide
-    && tile.Y >= 0
-    && tile.Y < Engine.roomSide
 
 /// The weight of raw ground (ADR 0010): plain 2, swamp 10, wall impassable —
 /// written as the -1 the weight table marks impassable with. The one place

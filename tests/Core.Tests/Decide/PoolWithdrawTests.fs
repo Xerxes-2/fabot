@@ -1312,7 +1312,8 @@ let thoriumPileTests =
                                 room
                                 { RoomLayer.empty with
                                     Terrain =
-                                        Map.ofList [ for x in 8..12 -> { X = x; Y = 10 }, Plain ]
+                                        TerrainGrid.ofList
+                                            [ for x in 8..12 -> { X = x; Y = 10 }, Plain ]
                                     TargetPositions = Map.ofList [ "pile-r", minePost ]
                                 }
                     }

@@ -349,7 +349,8 @@ let outpostContainerTests =
                         { layer with
                             Terrain =
                                 (layer.Terrain, [ for y in 1..14 -> { X = 10; Y = y } ])
-                                ||> List.fold (fun terrain tile -> Map.add tile Plain terrain)
+                                ||> List.fold (fun terrain tile ->
+                                    TerrainGrid.add tile Plain terrain)
                         })
 
                 let alone = reachingItsBorder (trunkColony 4)

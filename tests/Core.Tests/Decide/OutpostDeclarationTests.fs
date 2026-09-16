@@ -254,7 +254,7 @@ let outpostTests =
                             |> withNeighbour
                                 "W1N2"
                                 { RoomLayer.empty with
-                                    Terrain = Map.ofList (corridor 10 40 48)
+                                    Terrain = TerrainGrid.ofList (corridor 10 40 48)
                                     TargetPositions = Map.ofList [ "src-out", { X = 10; Y = 46 } ]
                                     CreepPositions = Map.ofList [ "w", pos ]
                                 }
@@ -1218,7 +1218,7 @@ let outpostTests =
                             |> withNeighbour
                                 "W1N2"
                                 { RoomLayer.empty with
-                                    Terrain = Map.ofList (corridor 10 1 48)
+                                    Terrain = TerrainGrid.ofList (corridor 10 1 48)
                                     TargetPositions = Map.ofList [ "src-out", { X = 10; Y = 46 } ]
                                     CreepPositions = Map.ofList outpostCreeps
                                 }
@@ -1281,7 +1281,7 @@ let outpostTests =
                             |> withNeighbour
                                 "W1N2"
                                 { RoomLayer.empty with
-                                    Terrain = Map.ofList (corridor 10 1 48)
+                                    Terrain = TerrainGrid.ofList (corridor 10 1 48)
                                     TargetPositions = Map.ofList [ "src-out", { X = 10; Y = 46 } ]
                                     CreepPositions = Map.ofList [ "o", { X = 10; Y = 5 } ]
                                 }
@@ -1346,7 +1346,7 @@ let outpostTests =
                                 "W1N2"
                                 { RoomLayer.empty with
                                     Terrain =
-                                        Map.ofList (
+                                        TerrainGrid.ofList (
                                             corridor 10 40 48 @ [ { X = 9; Y = 48 }, Plain ]
                                         )
                                     TargetPositions = Map.ofList [ "src-out", { X = 10; Y = 46 } ]
@@ -1407,13 +1407,15 @@ let outpostTests =
                             |> withHome (fun layer ->
                                 { layer with
                                     Terrain =
-                                        Map.ofList (corridor 10 1 40 @ [ { X = 9; Y = 5 }, Plain ])
+                                        TerrainGrid.ofList (
+                                            corridor 10 1 40 @ [ { X = 9; Y = 5 }, Plain ]
+                                        )
                                     CreepPositions = Map.empty
                                 })
                             |> withNeighbour
                                 "W1N2"
                                 { RoomLayer.empty with
-                                    Terrain = Map.ofList (corridor 10 1 48)
+                                    Terrain = TerrainGrid.ofList (corridor 10 1 48)
                                     TargetPositions = Map.ofList [ "src-out", { X = 10; Y = 46 } ]
                                     CreepPositions =
                                         Map.ofList
@@ -1726,7 +1728,7 @@ let outpostTests =
                             |> withNeighbour
                                 "W1N2"
                                 { RoomLayer.empty with
-                                    Terrain = Map.ofList (corridor 10 40 48)
+                                    Terrain = TerrainGrid.ofList (corridor 10 40 48)
                                     TargetPositions =
                                         Map.ofList
                                             [

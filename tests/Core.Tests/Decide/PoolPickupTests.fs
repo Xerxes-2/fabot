@@ -119,7 +119,7 @@ let pickupReflexTests =
                             }
                             |> withHome (fun layer ->
                                 { layer with
-                                    Terrain = Map.add { X = 11; Y = 11 } Wall layer.Terrain
+                                    Terrain = TerrainGrid.add { X = 11; Y = 11 } Wall layer.Terrain
                                     TargetPositions =
                                         Map.add "src-a" { X = 11; Y = 11 } layer.TargetPositions
                                 })

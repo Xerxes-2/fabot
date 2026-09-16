@@ -331,7 +331,7 @@ let anchorTests =
                 |> withHome (fun layer ->
                     { layer with
                         Terrain =
-                            Map.ofList
+                            TerrainGrid.ofList
                                 [
                                     { X = 9; Y = 10 }, Plain
                                     { X = 11; Y = 10 }, Plain
@@ -463,9 +463,9 @@ let anchorTests =
                         TargetPositions =
                             (Map.toList layer.TargetPositions @ extraTargets) |> Map.ofList
                         Terrain =
-                            (Map.toList layer.Terrain
+                            (TerrainGrid.toList layer.Terrain
                              @ [ for x in 12..30 -> { X = x; Y = 10 }, Plain ])
-                            |> Map.ofList
+                            |> TerrainGrid.ofList
                     })
 
             test "a distant Build flows to the generalist; the Anchor upgrades in place" {

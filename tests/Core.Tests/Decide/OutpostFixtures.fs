@@ -66,14 +66,14 @@ let internal twoRockColony (westContainer: (string * Pos) list) =
                 { layer with
                     Terrain =
                         (layer.Terrain, [ for x in 1..10 -> { X = x; Y = 26 } ])
-                        ||> List.fold (fun terrain pos -> Map.add pos Plain terrain)
+                        ||> List.fold (fun terrain pos -> TerrainGrid.add pos Plain terrain)
                     TargetPositions = Map.empty
                     CreepPositions = Map.ofList [ "anchor", { X = 2; Y = 26 } ]
                 })
             |> withNeighbour
                 "W1N2"
                 { RoomLayer.empty with
-                    Terrain = Map.ofList (corridor 10 40 48)
+                    Terrain = TerrainGrid.ofList (corridor 10 40 48)
                     TargetPositions =
                         Map.ofList
                             [ "src-north", { X = 10; Y = 46 }; "cont-north", { X = 10; Y = 45 } ]
@@ -81,7 +81,7 @@ let internal twoRockColony (westContainer: (string * Pos) list) =
             |> withNeighbour
                 "W2N1"
                 { RoomLayer.empty with
-                    Terrain = Map.ofList [ for x in 41..48 -> { X = x; Y = 26 }, Plain ]
+                    Terrain = TerrainGrid.ofList [ for x in 41..48 -> { X = x; Y = 26 }, Plain ]
                     TargetPositions = Map.ofList (("src-west", { X = 45; Y = 26 }) :: westContainer)
                 }
     }
@@ -176,7 +176,7 @@ let internal withOutpostGround room terrain placed (colony: ColonyView) =
             |> withNeighbour
                 room
                 { RoomLayer.empty with
-                    Terrain = Map.ofList terrain
+                    Terrain = TerrainGrid.ofList terrain
                     TargetPositions = placed |> List.map (fun (id, pos, _) -> id, pos) |> Map.ofList
                 }
     }
@@ -280,7 +280,7 @@ let internal haulHome =
             }
             |> withHome (fun layer ->
                 { layer with
-                    Terrain = Map.ofList (corridor 25 1 48)
+                    Terrain = TerrainGrid.ofList (corridor 25 1 48)
                     TargetPositions = Map.ofList [ "spawn-1", { X = 25; Y = 10 } ]
                     Obstacles = Set.singleton { X = 25; Y = 10 }
                 })
@@ -308,7 +308,7 @@ let internal withHaulOutpost (control: RoomControlInfo option) (colony: ColonyVi
             |> withNeighbour
                 "W1N2"
                 { RoomLayer.empty with
-                    Terrain = Map.ofList (corridor 25 41 48)
+                    Terrain = TerrainGrid.ofList (corridor 25 41 48)
                     TargetPositions =
                         Map.ofList [ "src-out", { X = 25; Y = 40 }; "can-out", { X = 25; Y = 41 } ]
                 }
@@ -358,7 +358,7 @@ let internal withSecondHaulContainer (tile: Pos) (colony: ColonyView) =
                 { outpost with
                     Terrain =
                         (outpost.Terrain, [ for x in 26..40 -> { X = x; Y = 44 } ])
-                        ||> List.fold (fun acc branch -> Map.add branch Plain acc)
+                        ||> List.fold (fun acc branch -> TerrainGrid.add branch Plain acc)
                     TargetPositions =
                         outpost.TargetPositions
                         |> Map.add "src-out2" { tile with Y = 43 }
@@ -448,7 +448,7 @@ let internal raidedOutpost (hostiles: HostileInfo list) =
                 "W1N2"
                 { outpost with
                     Terrain =
-                        Map.ofList
+                        TerrainGrid.ofList
                             [
                                 for x in 20..30 do
                                     for y in 41..48 -> { X = x; Y = y }, Plain
@@ -635,14 +635,14 @@ let internal twoOutpostColony (creeps: (CreepInfo * Pos) list) =
             { layer with
                 Terrain =
                     (layer.Terrain, [ for x in 1..10 -> { X = x; Y = 26 } ])
-                    ||> List.fold (fun terrain pos -> Map.add pos Plain terrain)
+                    ||> List.fold (fun terrain pos -> TerrainGrid.add pos Plain terrain)
                 CreepPositions =
                     creeps |> List.map (fun (creep, pos) -> creep.Name, pos) |> Map.ofList
             })
         |> withNeighbour
             "W2N1"
             { RoomLayer.empty with
-                Terrain = Map.ofList [ for x in 41..48 -> { X = x; Y = 26 }, Plain ]
+                Terrain = TerrainGrid.ofList [ for x in 41..48 -> { X = x; Y = 26 }, Plain ]
             }
         |> Outpost.place [ westReserveDeclaration ]
 

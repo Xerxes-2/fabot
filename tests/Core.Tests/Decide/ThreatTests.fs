@@ -997,7 +997,8 @@ let threatGateTests =
                                 colony.Spatial
                                 |> withHome (fun layer ->
                                     { layer with
-                                        Terrain = Map.add { X = 24; Y = 20 } Plain layer.Terrain
+                                        Terrain =
+                                            TerrainGrid.add { X = 24; Y = 20 } Plain layer.Terrain
                                     })
                                 |> withTargets
                                     [ "can-b", { X = 24; Y = 20 }, Structure BuiltKind.Container ]
@@ -1037,7 +1038,8 @@ let threatGateTests =
                             colony.Spatial
                             |> withHome (fun layer ->
                                 { layer with
-                                    Terrain = Map.add { X = 24; Y = 18 } Plain layer.Terrain
+                                    Terrain =
+                                        TerrainGrid.add { X = 24; Y = 18 } Plain layer.Terrain
                                 })
                     }
 
@@ -1510,7 +1512,7 @@ let private twoRoomColony (hostiles: HostileInfo list) =
             |> withNeighbour
                 "W1N2"
                 { RoomLayer.empty with
-                    Terrain = Map.ofList (corridor 10 40 48)
+                    Terrain = TerrainGrid.ofList (corridor 10 40 48)
                     TargetPositions = Map.ofList [ "src-out", { X = 10; Y = 47 } ]
                     CreepPositions = Map.ofList [ "wo", { X = 10; Y = 45 } ]
                 }
@@ -1861,7 +1863,7 @@ let keeperTests =
                                     "W15S26"
                                     { RoomLayer.empty with
                                         Terrain =
-                                            Map.ofList
+                                            TerrainGrid.ofList
                                                 [
                                                     for x in 1..48 do
                                                         for y in 1..48 -> { X = x; Y = y }, Plain

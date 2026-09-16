@@ -84,6 +84,39 @@ type Pos =
                 else 0
             | _ -> 1
 
+/// The grid index of a tile, and its inverse — one room's fifty-by-fifty laid
+/// out as `x * roomSide + y`. This is the stride every flat per-room array in
+/// the colony is indexed by: the flood's distance, weight and price arrays
+/// (`Grid`), the Atlas's Seat, Reach and Work-Area grids, and the terrain grid
+/// the projection carries (`TerrainGrid`). It lives here, beside `Pos` and
+/// ahead of all of them, because the day two of those arrays disagreed about
+/// the stride they would index each other's tiles — and `Pos.GetHashCode` is
+/// this same expression, which is what makes it injective over a room.
+///
+/// `inline`, all four: these are the innermost expressions of the tick, and a
+/// call per grid read is what the flat arrays were bought to avoid.
+let internal tileCount = Engine.roomSide * Engine.roomSide
+
+let inline internal indexOf (pos: Pos) = pos.X * Engine.roomSide + pos.Y
+
+let inline internal posAt (index: int) =
+    {
+        X = index / Engine.roomSide
+        Y = index % Engine.roomSide
+    }
+
+/// Whether a tile is one of the room's own fifty-by-fifty — the guard every
+/// flat-array read passes through, because a `Pos` off the grid indexes off
+/// the array: under Fable that reads `undefined`, which a weight comparison
+/// would call walkable and a terrain match would call absent in one case and
+/// crash on in another, while .NET throws outright. A guarded read answers
+/// what `Map.tryFind` answered for the same tile: nothing.
+let inline internal inGrid (tile: Pos) =
+    tile.X >= 0
+    && tile.X < Engine.roomSide
+    && tile.Y >= 0
+    && tile.Y < Engine.roomSide
+
 /// Screeps range: Chebyshev distance between two tiles of **one** room. The
 /// one definition — the Atlas's geometry, the two hostile reflexes and the
 /// Raid log's closest approach all measure with it. Takes grid coordinates;

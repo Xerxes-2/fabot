@@ -119,7 +119,7 @@ let dualSeatLaneColony ticks (placed: (CreepInfo * Pos) list) =
                 { layer with
                     Terrain =
                         (layer.Terrain, [ for x in 12..31 -> { X = x; Y = 9 } ])
-                        ||> List.fold (fun acc tile -> Map.add tile Plain acc)
+                        ||> List.fold (fun acc tile -> TerrainGrid.add tile Plain acc)
                     CreepPositions =
                         placed |> List.map (fun (creep, pos) -> creep.Name, pos) |> Map.ofList
                 })

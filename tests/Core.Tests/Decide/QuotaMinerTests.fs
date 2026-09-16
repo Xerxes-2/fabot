@@ -50,11 +50,11 @@ let private earningMine =
                 { layer with
                     Terrain =
                         layer.Terrain
-                        |> Map.add { X = 4; Y = 10 } Wall
-                        |> Map.add { X = 5; Y = 10 } Plain
-                        |> Map.add { X = 6; Y = 10 } Plain
-                        |> Map.add { X = 7; Y = 10 } Plain
-                        |> Map.add { X = 20; Y = 10 } Wall
+                        |> TerrainGrid.add { X = 4; Y = 10 } Wall
+                        |> TerrainGrid.add { X = 5; Y = 10 } Plain
+                        |> TerrainGrid.add { X = 6; Y = 10 } Plain
+                        |> TerrainGrid.add { X = 7; Y = 10 } Plain
+                        |> TerrainGrid.add { X = 20; Y = 10 } Wall
                 })
             |> withTargets
                 [
@@ -87,7 +87,7 @@ let private rivalMine =
                 "W1N2"
                 { RoomLayer.empty with
                     Terrain =
-                        Map.ofList
+                        TerrainGrid.ofList
                             [
                                 for x in 8..12 ->
                                     { X = x; Y = 10 }, (if x = 10 then Wall else Plain)

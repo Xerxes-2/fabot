@@ -243,7 +243,7 @@ let errandStandDownTests =
 
             test "the target-room withdrawal removes the errand from the scan until its clock ends" {
                 let ground =
-                    Map.ofList
+                    TerrainGrid.ofList
                         [
                             for x in 1 .. Seam.exitEdge - 1 do
                                 for y in 1 .. Seam.exitEdge - 1 -> { X = x; Y = y }, Plain
@@ -649,8 +649,10 @@ let courierTests =
                                         |> List.fold
                                             (fun terrain (_, rock) ->
                                                 terrain
-                                                |> Map.add rock Wall
-                                                |> Map.add { rock with X = rock.X + 1 } Plain)
+                                                |> TerrainGrid.add rock Wall
+                                                |> TerrainGrid.add
+                                                    { rock with X = rock.X + 1 }
+                                                    Plain)
                                             layer.Terrain
                                 })
                     }

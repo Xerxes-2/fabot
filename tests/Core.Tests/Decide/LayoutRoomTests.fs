@@ -142,7 +142,7 @@ let squareRingTests =
                             // Walls everywhere but the ring and the two approach rows, so
                             // the two lanes round the block are the only ways past it.
                             Terrain =
-                                Map.ofList (
+                                TerrainGrid.ofList (
                                     [
                                         for x in 6..18 do
                                             for y in 9..15 -> { X = x; Y = y }, Wall

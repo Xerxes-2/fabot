@@ -11,7 +11,7 @@ open Fabot.Core.Tests.AtlasFixtures
 /// the two rooms and what is filed in them — never the ground, because a Seam
 /// is a fact about the ring and the two columns it joins.
 let private seamColumn =
-    Map.ofList (plainLine [ for y in 10..17 -> { X = 10; Y = y } ])
+    TerrainGrid.ofList (plainLine [ for y in 10..17 -> { X = 10; Y = y } ])
 
 [<Tests>]
 let seamTests =
@@ -283,7 +283,8 @@ let seamTests =
                                     "W12S27"
                                     { RoomLayer.empty with
                                         Terrain =
-                                            Map.ofList [ for x in 1..3 -> { X = x; Y = 48 }, Plain ]
+                                            TerrainGrid.ofList
+                                                [ for x in 1..3 -> { X = x; Y = 48 }, Plain ]
                                     }
                         }
                     |> snapshotWith []
@@ -412,7 +413,7 @@ let seamWalkTests =
                                 [
                                     "W12S28",
                                     { RoomLayer.empty with
-                                        Terrain = Map.ofList toNorthExit
+                                        Terrain = TerrainGrid.ofList toNorthExit
                                     }
                                     "W12S27", RoomLayer.empty
                                 ]
@@ -480,7 +481,8 @@ let roomTests =
 
                 let outpost =
                     { RoomLayer.empty with
-                        Terrain = Map.ofList (plainLine [ for x in 5..10 -> { X = x; Y = 10 } ])
+                        Terrain =
+                            TerrainGrid.ofList (plainLine [ for x in 5..10 -> { X = x; Y = 10 } ])
                         TargetPositions = Map.ofList [ "src-out", { X = 4; Y = 10 } ]
                         CreepPositions = Map.ofList [ "w-out", { X = 10; Y = 10 } ]
                     }
@@ -711,7 +713,7 @@ let roomTests =
                     |> withHome (fun layer ->
                         { layer with
                             Terrain =
-                                Map.ofList
+                                TerrainGrid.ofList
                                     [
                                         for x in 9..11 do
                                             for y in 9..11 do
@@ -724,7 +726,7 @@ let roomTests =
                 let outpost =
                     { RoomLayer.empty with
                         Terrain =
-                            Map.ofList
+                            TerrainGrid.ofList
                                 [
                                     for x in 9..11 do
                                         for y in 9..12 do
@@ -791,7 +793,7 @@ let roomTests =
                     }
                     |> withHome (fun layer ->
                         { layer with
-                            Terrain = Map.ofList (plainLine [ { X = 10; Y = 10 } ])
+                            Terrain = TerrainGrid.ofList (plainLine [ { X = 10; Y = 10 } ])
                             TargetPositions =
                                 Map.ofList
                                     [
@@ -802,7 +804,7 @@ let roomTests =
 
                 let outpost =
                     { RoomLayer.empty with
-                        Terrain = Map.ofList (plainLine [ { X = 10; Y = 10 } ])
+                        Terrain = TerrainGrid.ofList (plainLine [ { X = 10; Y = 10 } ])
                         TargetPositions =
                             Map.ofList
                                 [ "src-out", { X = 10; Y = 11 }; "can-out", { X = 10; Y = 10 } ]
@@ -839,12 +841,15 @@ let roomTests =
                     }
                     |> withHome (fun layer ->
                         { layer with
-                            Terrain = Map.ofList (plainLine [ { X = 20; Y = 20 } ])
+                            Terrain = TerrainGrid.ofList (plainLine [ { X = 20; Y = 20 } ])
                         })
 
                 let outpost =
                     { RoomLayer.empty with
-                        Terrain = Map.ofList (plainLine [ { X = 10; Y = 10 }; { X = 10; Y = 11 } ])
+                        Terrain =
+                            TerrainGrid.ofList (
+                                plainLine [ { X = 10; Y = 10 }; { X = 10; Y = 11 } ]
+                            )
                         TargetPositions =
                             Map.ofList
                                 [ "src-out", { X = 10; Y = 10 }; "ctrl-out", { X = 10; Y = 12 } ]
@@ -1335,7 +1340,7 @@ let keeperSeamTests =
                 // wall" are the same question, exactly as the ring predicate
                 // above takes the same latitude.
                 let grounded room tile =
-                    Map.containsKey tile (SpatialInfo.layerOf keeperRoom room).Terrain
+                    TerrainGrid.containsKey tile (SpatialInfo.layerOf keeperRoom room).Terrain
                     && not (Keepers.masked margin room tile)
 
                 for into in [ "W15S25"; "W15S27"; "W16S26" ] do

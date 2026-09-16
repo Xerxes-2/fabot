@@ -37,7 +37,7 @@ let travelCostTests =
                     projection
                     |> withHome (fun layer ->
                         { layer with
-                            Terrain = Map.add { X = 20; Y = 20 } Plain layer.Terrain
+                            Terrain = TerrainGrid.add { X = 20; Y = 20 } Plain layer.Terrain
                         })
                     |> snapshotWith [ worker "w" ]
                     |> ofView

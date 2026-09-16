@@ -23,8 +23,9 @@ type RoomCapture =
         Tick: int
         /// Terrain per tile over x,y in 1..48 — the same window
         /// `World.terrainOf` projects as ground, with the exit rows
-        /// dropped.
-        Terrain: Map<Pos, Terrain>
+        /// dropped, in the same flat grid the shell hands the projection
+        /// (#278).
+        Terrain: TerrainGrid
         /// Terrain on the border ring, x or y of 0 or 49 — the rows the
         /// window above drops, delivered beside it and never inside it,
         /// exactly as the shell delivers them (ADR 0041): the Seam's own
@@ -148,7 +149,7 @@ let load (roomName: string) : RoomCapture =
         terrainOfMask (int rows.[y].[x] - int '0')
 
     let terrain =
-        Map.ofList
+        TerrainGrid.ofList
             [
                 for y in 1 .. roomSide - 2 do
                     for x in 1 .. roomSide - 2 -> { X = x; Y = y }, terrainAt x y
@@ -320,7 +321,7 @@ let private extensionCapacity = 50
 /// not wall. Swamp is ground — a container sits on one and W12S28's own
 /// controller is served off one.
 let private isGround (capture: RoomCapture) (pos: Pos) =
-    match Map.tryFind pos capture.Terrain with
+    match TerrainGrid.tryFind pos capture.Terrain with
     | Some Wall
     | None -> false
     | Some _ -> true

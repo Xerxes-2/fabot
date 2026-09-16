@@ -264,7 +264,7 @@ let openRoom radius =
     |> withHome (fun layer ->
         { layer with
             Terrain =
-                Map.ofList
+                TerrainGrid.ofList
                     [
                         for x in 25 - radius .. 25 + radius do
                             for y in 25 - radius .. 25 + radius do
@@ -348,7 +348,7 @@ let trunkRoom =
     |> withHome (fun layer ->
         { layer with
             Terrain =
-                Map.ofList
+                TerrainGrid.ofList
                     [
                         for x in 10..40 do
                             for y in 15..35 do
@@ -415,7 +415,7 @@ let withOutpost room targets tiles (colony: ColonyView) =
                     Map.add
                         room
                         { RoomLayer.empty with
-                            Terrain = Map.ofList tiles
+                            Terrain = TerrainGrid.ofList tiles
                             TargetPositions =
                                 targets |> List.map (fun (id, pos, _) -> id, pos) |> Map.ofList
                         }
@@ -544,7 +544,7 @@ let lane pocket =
     |> withHome (fun layer ->
         { layer with
             Terrain =
-                Map.ofList (
+                TerrainGrid.ofList (
                     [ for x in 8..15 -> { X = x; Y = 12 }, Plain ]
                     @ [ { X = 7; Y = 12 }, Wall; { X = 16; Y = 12 }, Wall ]
                     @ (if pocket then [ { X = 11; Y = 11 }, Plain ] else [])
@@ -1195,7 +1195,7 @@ let northBorderColony (homeSource: Pos) =
             }
             |> withHome (fun layer ->
                 { layer with
-                    Terrain = Map.ofList (corridor 10 1 40)
+                    Terrain = TerrainGrid.ofList (corridor 10 1 40)
                     TargetPositions = Map.ofList [ "src-home", homeSource ]
                     CreepPositions = Map.ofList [ "w", { X = 10; Y = 2 } ]
                 })
@@ -1234,7 +1234,7 @@ let withNorthOutpost (outpostSource: Pos option) (colony: ColonyView) =
             |> withNeighbour
                 "W1N2"
                 { RoomLayer.empty with
-                    Terrain = Map.ofList (corridor 10 40 48)
+                    Terrain = TerrainGrid.ofList (corridor 10 40 48)
                     TargetPositions =
                         outpostSource
                         |> Option.map (fun pos -> Map.ofList [ "src-out", pos ])
@@ -1416,7 +1416,7 @@ let switchHome =
             }
             |> withHome (fun layer ->
                 { layer with
-                    Terrain = Map.ofList (({ X = 24; Y = 20 }, Wall) :: corridor 25 1 48)
+                    Terrain = TerrainGrid.ofList (({ X = 24; Y = 20 }, Wall) :: corridor 25 1 48)
                     TargetPositions =
                         Map.ofList
                             [
@@ -1443,7 +1443,7 @@ let switchUnposted =
             |> withNeighbour
                 "W1N2"
                 { RoomLayer.empty with
-                    Terrain = Map.ofList (corridor 25 41 48)
+                    Terrain = TerrainGrid.ofList (corridor 25 41 48)
                     TargetPositions = Map.ofList [ "src-out", { X = 25; Y = 40 } ]
                 }
     }
@@ -1758,7 +1758,7 @@ let withReactorErrand (colony: ColonyView) =
             |> withNeighbour
                 reactorErrand.RoomName
                 { existing with
-                    Terrain = Map.ofList errandFloor
+                    Terrain = TerrainGrid.ofList errandFloor
                     TargetPositions = Map.add reactorId reactorTile existing.TargetPositions
                 }
     }
@@ -1904,7 +1904,7 @@ let ferryMother stage =
             |> withHome (fun layer ->
                 { layer with
                     Terrain =
-                        Map.ofList
+                        TerrainGrid.ofList
                             [
                                 for x in 9..11 do
                                     for y in 1..10 -> { X = x; Y = y }, Plain
@@ -1915,7 +1915,7 @@ let ferryMother stage =
                 "W1N2"
                 { RoomLayer.empty with
                     Terrain =
-                        Map.ofList
+                        TerrainGrid.ofList
                             [
                                 for x in 9..11 do
                                     for y in 44..48 -> { X = x; Y = y }, Plain

@@ -52,7 +52,7 @@ let private candidateColony (creeps: (CreepInfo * Pos) list) =
 let private withWestOutpost (crowdX: int) (colony: ColonyView) =
     let west =
         { RoomLayer.empty with
-            Terrain = Map.ofList [ for x in 45..49 -> { X = x; Y = 2 }, Plain ]
+            Terrain = TerrainGrid.ofList [ for x in 45..49 -> { X = x; Y = 2 }, Plain ]
             TargetPositions = Map.ofList [ "site-west", { X = 48; Y = 2 } ]
         }
 
@@ -70,7 +70,7 @@ let private withWestOutpost (crowdX: int) (colony: ColonyView) =
                 { layer with
                     Terrain =
                         (layer.Terrain, [ for x in 0..10 -> { X = x; Y = 2 } ])
-                        ||> List.fold (fun acc pos -> Map.add pos Plain acc)
+                        ||> List.fold (fun acc pos -> TerrainGrid.add pos Plain acc)
                     CreepPositions =
                         Map.ofList [ for i in 1..4 -> $"w{i}", { X = crowdX + i; Y = 2 } ]
                 })
@@ -698,7 +698,8 @@ let nurseryTests =
                                 "W2N1"
                                 { RoomLayer.empty with
                                     Terrain =
-                                        Map.ofList [ for x in 45..49 -> { X = x; Y = 25 }, Plain ]
+                                        TerrainGrid.ofList
+                                            [ for x in 45..49 -> { X = x; Y = 25 }, Plain ]
                                     TargetPositions =
                                         Map.ofList
                                             [
@@ -1048,7 +1049,7 @@ let private childColony (creeps: (string * Pos) list) =
             }
             |> withHome (fun layer ->
                 { layer with
-                    Terrain = Map.ofList (corridor 10 40 48)
+                    Terrain = TerrainGrid.ofList (corridor 10 40 48)
                     TargetPositions = Map.ofList [ "src-child", { X = 10; Y = 46 } ]
                     CreepPositions = Map.ofList creeps
                 })

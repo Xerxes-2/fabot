@@ -864,7 +864,7 @@ let arbitrationTests =
                             |> withHome (fun layer ->
                                 { layer with
                                     Terrain =
-                                        Map.ofList
+                                        TerrainGrid.ofList
                                             [
                                                 { X = 9; Y = 1 }, Plain
                                                 { X = 10; Y = 1 }, Plain
@@ -1011,7 +1011,7 @@ let arbitrationTests =
                     pocketRoom
                     |> withHome (fun layer ->
                         { layer with
-                            Terrain = Map.remove { X = 20; Y = 14 } layer.Terrain
+                            Terrain = TerrainGrid.remove { X = 20; Y = 14 } layer.Terrain
                         })
 
                 Expect.isEmpty
@@ -1433,7 +1433,7 @@ let arbitrationTests =
                     |> withHome (fun layer ->
                         { layer with
                             Terrain =
-                                Map.ofList (
+                                TerrainGrid.ofList (
                                     [ for x in 8..15 -> { X = x; Y = 12 }, Plain ]
                                     @ [ { X = 12; Y = 11 }, Swamp; { X = 16; Y = 12 }, Wall ]
                                 )

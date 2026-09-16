@@ -97,7 +97,7 @@ let internal withPileRoom room piles positions (colony: ColonyView) =
                         room
                         { RoomLayer.empty with
                             Terrain =
-                                Map.ofList
+                                TerrainGrid.ofList
                                     [
                                         for x in 8..12 do
                                             for y in 8..12 -> { X = x; Y = y }, Plain

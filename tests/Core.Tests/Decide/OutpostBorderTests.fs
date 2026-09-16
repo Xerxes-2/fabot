@@ -192,13 +192,13 @@ let neighbouringRoomTests =
                     }
                     |> withHome (fun layer ->
                         { layer with
-                            Terrain = Map.ofList (corridor 10 10 17)
+                            Terrain = TerrainGrid.ofList (corridor 10 10 17)
                             CreepPositions = Map.ofList [ "w-home", { X = 10; Y = 10 } ]
                         })
 
                 let outpost =
                     { RoomLayer.empty with
-                        Terrain = Map.ofList (corridor 10 10 17)
+                        Terrain = TerrainGrid.ofList (corridor 10 10 17)
                         TargetPositions = Map.ofList [ "src-out", { X = 10; Y = 18 } ]
                     }
 
@@ -244,7 +244,7 @@ let neighbouringRoomTests =
                     }
                     |> withHome (fun layer ->
                         { layer with
-                            Terrain = Map.ofList (corridor 10 10 18)
+                            Terrain = TerrainGrid.ofList (corridor 10 10 18)
                             TargetPositions = Map.ofList [ "src-home", { X = 10; Y = 18 } ]
                             CreepPositions = Map.ofList [ "w-home", { X = 10; Y = 10 } ]
                         })
@@ -266,7 +266,7 @@ let neighbouringRoomTests =
 
                 let neighbour =
                     { RoomLayer.empty with
-                        Terrain = Map.ofList (corridor 10 10 18)
+                        Terrain = TerrainGrid.ofList (corridor 10 10 18)
                         CreepPositions = Map.ofList [ "w-out", { X = 10; Y = 11 } ]
                     }
 

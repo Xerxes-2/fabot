@@ -255,8 +255,13 @@ let ofViewRecalling (walks: WalkTable) (view: ColonyView) : Atlas =
     let gridOf (room: string) (foreign: Set<Pos>) (layer: RoomLayer) =
         let ground = Array.create tileCount -1
 
+        // The grid is strided exactly as this array is (`Geometry.indexOf`),
+        // so the terrain walks straight in by index: no `Pos` is built and no
+        // tree is walked, which is the whole of #278. The bounds guard lives
+        // in `TerrainGrid`'s own entries, and a slot it holds is in range by
+        // construction.
         layer.Terrain
-        |> Map.iter (fun tile terrain -> ground.[indexOf tile] <- terrainWeight terrain)
+        |> TerrainGrid.iterIndexed (fun index terrain -> ground.[index] <- terrainWeight terrain)
 
         maskKeepers room ground
 

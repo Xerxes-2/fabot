@@ -46,7 +46,8 @@ let pocketColony level =
         trunkRoom
         |> withHome (fun layer ->
             { layer with
-                Terrain = (layer.Terrain, walled) ||> List.fold (fun acc t -> Map.add t Wall acc)
+                Terrain =
+                    (layer.Terrain, walled) ||> List.fold (fun acc t -> TerrainGrid.add t Wall acc)
             })
         |> withTargets [ "src-b", srcB, Source ]
 
@@ -133,7 +134,7 @@ let mineralColonyAt pos level =
             colony.Spatial
             |> withHome (fun layer ->
                 { layer with
-                    Terrain = Map.add pos Wall layer.Terrain
+                    Terrain = TerrainGrid.add pos Wall layer.Terrain
                 })
             |> withStanding "min-a" pos Mineral
     }
@@ -240,7 +241,7 @@ let sealedPocketColony level =
             { layer with
                 Terrain =
                     (layer.Terrain, sealedTiles)
-                    ||> List.fold (fun acc tile -> Map.add tile Wall acc)
+                    ||> List.fold (fun acc tile -> TerrainGrid.add tile Wall acc)
             })
 
     { colony with
@@ -268,7 +269,7 @@ let severedControllerColony level =
                 { layer with
                     Terrain =
                         (layer.Terrain, ridge)
-                        ||> List.fold (fun acc tile -> Map.add tile Wall acc)
+                        ||> List.fold (fun acc tile -> TerrainGrid.add tile Wall acc)
                 })
     }
 
@@ -284,7 +285,7 @@ let enclosedSourceColony level =
             colony.Spatial
             |> withHome (fun layer ->
                 { layer with
-                    Terrain = Map.add { X = 21; Y = 30 } Wall layer.Terrain
+                    Terrain = TerrainGrid.add { X = 21; Y = 30 } Wall layer.Terrain
                 })
     }
 
