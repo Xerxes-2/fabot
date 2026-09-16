@@ -1604,6 +1604,15 @@ let outpostTests =
                     [ "W15S27"; "W15S29" ]
                     "the third colony works the room its errand crosses and the one the survey called its best"
 
+                // And the fourth colony's, declared the day after its spawn
+                // stood (`w12s29-outpost.md`): 81 ticks of haul, the cheapest
+                // in the programme, against 380 of demand over one hauler.
+                Expect.equal
+                    (Colony.outpostsOf Colony.declared "W11S29"
+                     |> List.map (fun outpost -> outpost.RoomName))
+                    [ "W12S29" ]
+                    "the fourth colony works the room on its doorstep"
+
                 Expect.isEmpty
                     (Colony.outpostsOf Colony.declared "W1N1")
                     "and a room nobody declared a colony for works no outposts at all"

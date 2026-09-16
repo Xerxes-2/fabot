@@ -508,6 +508,38 @@ module Outpost =
             Controller = "6a8caa95dd4872bccd319010", { Room = "W15S27"; X = 6; Y = 9 }
         }
 
+    /// W11S29's first outpost, declared 2026-09-17 off
+    /// `docs/research/w12s29-outpost.md`: one hop east, one source, and an
+    /// **81-tick haul round trip** — less than half the cheapest number in
+    /// either earlier outpost survey, because this room's one source sits at
+    /// (40,43), hard against the border it shares with W11S29, whose spawn
+    /// stands at (11,30). A 500-capacity hauler over 81 ticks moves 6.2 energy
+    /// a tick against this colony's whole current demand of 380 over one
+    /// hauler, so the declaration roughly doubles the fourth colony's income
+    /// for one more hauler and change.
+    ///
+    /// Two liabilities, both measured and neither a refusal:
+    ///
+    /// - **The source has a single Seat** (one walkable neighbour), so one
+    ///   anchor at a time and a dead one waits for its corpse —
+    ///   `multihop-outposts.md` §4.3, and the same shape as W11S28's (32,14).
+    ///   A reason to keep hands off that tile.
+    /// - **The reserver this colony can afford banks nothing.** At RCL3 with
+    ///   ten extensions the bank is 800 and `Bodies.bodyFor` answers
+    ///   `[Claim; Move]` — one CLAIM, which holds a reservation flat (one tick
+    ///   added an action against one decayed a tick) and accumulates no
+    ///   buffer, so any gap in its presence drops the source to
+    ///   `Engine.neutralOutputPerTick`. The room's full 10 a tick arrives with
+    ///   RCL4's 1,300 bank and ADR 0042's two-CLAIM body; until then this is a
+    ///   declared shortfall rather than a surprise, and positive even at the
+    ///   neutral rate.
+    let w12s29: Outpost =
+        {
+            RoomName = "W12S29"
+            Sources = [ "6a8caabadd4872bccd3194ad", { Room = "W12S29"; X = 40; Y = 43 } ]
+            Controller = "6a8caabadd4872bccd3194ac", { Room = "W12S29"; X = 15; Y = 36 }
+        }
+
     /// W15S28's south outpost, declared 2026-09-17 off
     /// `docs/research/outpost-wave-2.md`, which called it *the best room of the
     /// three* and told it to wait: cheapest haul of the candidates (1,170), the
@@ -1075,7 +1107,12 @@ module Colony =
             // one room wider).
             {
                 Home = "W11S29"
-                Outposts = []
+                // Its first outpost, one hop east, declared the day after its
+                // own spawn stood (2026-09-17,
+                // `docs/research/w12s29-outpost.md`): the cheapest haul in the
+                // programme at 81 ticks, on the colony with the most to gain
+                // from one — 380 of demand over a single hauler today.
+                Outposts = [ Outpost.w12s29 ]
                 Errands = []
                 Mother = Some "W13S28"
                 // Its own 45,000 T is in the ground, not the bank, and the

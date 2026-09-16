@@ -31,7 +31,11 @@ jobs:
         run: nix develop -c dotnet tool restore
 
       - name: Cache npm downloads
-        uses: actions/cache@v4
+        # v6, not v4: v5 moved the action onto the Node 24 runtime (runner
+        # 2.327.1 or newer, which GitHub-hosted runners are) and v6 is the same
+        # action rebuilt as ESM. The inputs are unchanged, so this is a runtime
+        # bump and not a migration.
+        uses: actions/cache@v6
         with:
           path: ~/.npm
           key: npm-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
