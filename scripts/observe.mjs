@@ -575,6 +575,15 @@ if (command === "console") {
     "rival-reservation":
       "the end of the reservation another player holds — a room somebody else is " +
       "working, not a threat (#165)",
+    // The fifth basis, and this table had four for the whole of its life
+    // (#368): a raid with no core in it, withdrawn from only once the colony
+    // has stopped fighting for the room — a guard of ours still standing there,
+    // or casts left in the episode's ADR 0056 budget, means the room is a fight
+    // and not a withdrawal. Its deadline is the raid's own longest remaining
+    // life, that being all a coreless raid offers.
+    "invader-raid":
+      "an invader raid the colony has stopped fighting for — the deadline is the " +
+      "raid's own remaining life (ADR 0056, ADR 0043)",
   };
 
   // What a row's `last` tick is the last sighting *of*, keyed off the same
@@ -587,6 +596,9 @@ if (command === "console") {
     reservation: "a core last seen there",
     fallback: "a core last seen there",
     "rival-reservation": "the reservation last read there",
+    // A raid is seen as creeps and not as a structure, so what `last` dates
+    // here is the last tick one of them was standing in the room (#368).
+    "invader-raid": "a raider last seen there",
   };
 
   // The stride between looks into a latched room, mirroring
