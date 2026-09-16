@@ -508,6 +508,34 @@ module Outpost =
             Controller = "6a8caa95dd4872bccd319010", { Room = "W15S27"; X = 6; Y = 9 }
         }
 
+    /// W12S28's west outpost, declared 2026-09-16 off
+    /// `docs/research/outpost-wave-2.md`, which is the wave-2 survey's only
+    /// "declare now": one hop and one chain each way, one source at a 210-tick
+    /// round trip, about 6.25 energy a tick net — and the cheapest tick of the
+    /// three candidates, because this room's terrain layer is already in the
+    /// world as a transit room of W13S28's W11S29 chain, so what the
+    /// declaration adds is this colony's own projection and not a grid
+    /// (+0.7 ms of `decide`, against +1.5..2.0 for either W15S28 candidate,
+    /// while ADR 0041's revisit trigger is firing — #332, #353).
+    ///
+    /// Two liabilities, both geometry. Its band is **two tiles**, `49,31` and
+    /// `49,32`, and it is the room's only door: W11S27, W10S28 and W11S29 all
+    /// answer `false` both ways. And its rock has a **single** Seat, `32,14` —
+    /// a site of any other kind on that tile plans this room no container at
+    /// all (ADR 0042 as #244 amends it), and a dead anchor waits for its own
+    /// corpse before the next one can stand (`multihop-outposts.md` §4.3).
+    ///
+    /// It does **not** starve #349's terminal site: that site is a *home* site,
+    /// so it is not in `Pool.siteOrder`'s outpost queue at all, and what this
+    /// declaration puts ahead of it is 5,000 progress against the terminal's
+    /// 100,000 — one twentieth — while paying +6.25 a tick towards it.
+    let w11s28: Outpost =
+        {
+            RoomName = "W11S28"
+            Sources = [ "6a8caac6dd4872bccd3195f1", { Room = "W11S28"; X = 33; Y = 15 } ]
+            Controller = "6a8caac6dd4872bccd3195f2", { Room = "W11S28"; X = 8; Y = 16 }
+        }
+
 /// One errand: a room a colony declares because it must walk a body there and
 /// act on **one** named object in it, and for no other reason (ADR 0060
 /// decision 1). A room name and that object's engine id and tile, and nothing
@@ -836,9 +864,19 @@ module Colony =
         [
             {
                 Home = "W12S28"
-                // W12S27 alone since W13S28 stood its own spawn (below); the
-                // room is ADR 0042's north outpost, read off the pair above.
-                Outposts = Outpost.adr0042 |> List.filter (fun o -> o.RoomName = "W12S27")
+                // Two rooms: ADR 0042's north outpost W12S27, read off the pair
+                // above, and W11S28 to the west (2026-09-16,
+                // `docs/research/outpost-wave-2.md`). That survey priced three
+                // candidates at about 6.3 energy a tick each and found the
+                // question is never which room is best but **which colony can
+                // pay**: two of the three land on W15S28, which took W15S27
+                // today and would go to 1,035 spawn ticks of 1,500 holding
+                // both, and either costs it +1.5..2.0 ms of `decide` while ADR
+                // 0041's revisit trigger is already firing. This room costs its
+                // holder +0.7 ms, because its terrain is in the world already.
+                Outposts =
+                    (Outpost.adr0042 |> List.filter (fun o -> o.RoomName = "W12S27"))
+                    @ [ Outpost.w11s28 ]
                 // The sector Reactor is six crossings away and no room of the
                 // way there is projected from here (ADR 0060 decision 1).
                 Errands = []

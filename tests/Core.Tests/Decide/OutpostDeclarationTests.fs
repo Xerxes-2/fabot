@@ -1498,8 +1498,8 @@ let outpostTests =
 
                 Expect.equal
                     (outposts |> List.map (fun outpost -> outpost.RoomName))
-                    [ "W12S27" ]
-                    "the north outpost alone: the west one is a colony of its own now (ADR 0047)"
+                    [ "W12S27"; "W11S28" ]
+                    "the north outpost and, since 2026-09-16, the west one: the room ADR 0042's pair called west is a colony of its own now (ADR 0047), and W11S28 is a room further west again (`docs/research/outpost-wave-2.md`)"
 
                 Expect.equal
                     (Outpost.adr0042 |> List.map (fun outpost -> outpost.RoomName))
@@ -1558,8 +1558,8 @@ let outpostTests =
 
                 Expect.equal
                     (Outpost.roomsProjected outposts "W12S28")
-                    [ "W12S28"; "W12S27" ]
-                    "so the mother's projection covers the home room and its one outpost"
+                    [ "W12S28"; "W12S27"; "W11S28" ]
+                    "so the mother's projection covers the home room and both its outposts — and W11S28 was in its scan set already, as a transit room of the chain to the nursery, which is exactly why that declaration is the cheapest tick of the three the wave-2 survey priced"
             }
 
             test "a declared outpost joins the spawn room in the set the shell scans" {
