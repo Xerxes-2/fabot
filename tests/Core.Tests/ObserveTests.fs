@@ -356,6 +356,7 @@ let quiet: ColonyView =
         // it reads (ADR 0042).
         RoomControl = Map.empty
         HeldOutposts = Set.empty
+        ThreatenedOutposts = Set.empty
         ConstructionSites = []
         Creeps = []
         Hostiles = []
@@ -1374,6 +1375,30 @@ let recheckedAt tick state =
 let heldAt tick state =
     (standDown Tuning.defaults tick state).HeldOutposts
 
+/// The gate's fourth set (#366), which withholds no room either: the declared
+/// outposts an armed [[threat]] was standing in at the last look and whose
+/// memory this tick is still short of. What the view hands to
+/// `Planner.guardedOutposts` and `Quota.guardsWanted` on the ticks the raid has
+/// killed everything of ours that could see the room.
+let threatenedAt tick state =
+    (standDown Tuning.defaults tick state).ThreatenedOutposts
+
+/// An armed raider in a room: ADR 0033's Threat, the only hostile #366's
+/// memory is written for.
+let armedIn room = raiderIn room 1 [ Move; Attack ]
+
+/// The same raid with no weapon on it: a healer is a hostile the [[fire
+/// reflex]] shoots and the [[raid log]] records, and no reason to buy a guard.
+let healerIn room = raiderIn room 2 [ Move; Heal ]
+
+/// A declared outpost the colony is **looking into** this tick, holding
+/// whatever hostiles the case names — the two facts #366's memory is written
+/// from, said together because either alone writes nothing.
+let lookingAt room hostiles (colony: ColonyView) =
+    { (colony |> withDeclaredOutpost room |> visible room None) with
+        Hostiles = hostiles
+    }
+
 [<Tests>]
 let outpostTests =
     testList
@@ -2337,6 +2362,131 @@ let holdTests =
                 Expect.isEmpty
                     (heldAt 101 RaidState.empty)
                     "a colony with no log at all holds nothing out of its own pool"
+            }
+        ]
+
+[<Tests>]
+let threatMemoryTests =
+    testList
+        "raid fold: the guard's memory of a raided outpost"
+        [
+            test "an armed threat seen in a declared outpost is remembered through the blind ticks" {
+                // #366. The guard row hires on a threat seen in an outpost,
+                // and the bodies that vision comes from — the anchor, the
+                // hauler, the reserver — are exactly what the raid kills, so
+                // the room goes dark and the row that bought a 15-ATTACK-part
+                // body stops asking for it. This is #333's answer in the guard
+                // row: the conclusion is written down on the tick with vision
+                // and read on the ticks without one.
+                let looked =
+                    RaidState.empty
+                    |> raidTick 100 (quiet |> lookingAt outpostRoom [ armedIn outpostRoom ])
+
+                Expect.equal
+                    (looked.Threatened |> Map.tryFind outpostRoom)
+                    (Some
+                        {
+                            Until = 100 + Tuning.defaults.ThreatMemory
+                        })
+                    "the look writes the room down against its own clock: this tick plus ThreatMemory"
+
+                // The blind tick is the whole point: nothing of ours stands in
+                // the room any more, so there is no control entry and no
+                // hostile on the view, and the record has to survive that.
+                let blind = looked |> raidTick 140 quiet
+
+                Expect.equal
+                    (blind.Threatened |> Map.tryFind outpostRoom)
+                    (Some { Until = 400 })
+                    "a tick with no vision in the room leaves the conclusion exactly as it found it"
+
+                Expect.equal
+                    (threatenedAt 399 blind)
+                    (Set.singleton outpostRoom)
+                    "one tick short of the memory's end the guard row still answers for the room"
+
+                Expect.isEmpty
+                    (threatenedAt 400 blind)
+                    "and on the tick it runs out the room is forgotten, with no look taken at all"
+
+                Expect.isEmpty
+                    (threatenedAt 101 RaidState.empty)
+                    "a colony with no log remembers no raid: absence classifies nothing (ADR 0004)"
+            }
+
+            test "a look that finds the outpost clear forgets the raid on the tick it takes" {
+                // The other direction of the same rule, and the one that keeps
+                // this a memory rather than a second [[stand-down]]: a tick
+                // with vision decides the room either way. The guard's own
+                // arrival is what usually takes this look, which is why the
+                // memory may be generous — the cost of it being too long is one
+                // body's walk into a room that turns out to be clear.
+                let remembered =
+                    RaidState.empty
+                    |> raidTick 100 (quiet |> lookingAt outpostRoom [ armedIn outpostRoom ])
+
+                let cleared = remembered |> raidTick 160 (quiet |> lookingAt outpostRoom [])
+
+                Expect.isEmpty
+                    cleared.Threatened
+                    "the room is seen clear 240 ticks before the memory would have run out, and the entry goes with the look"
+
+                Expect.isEmpty (threatenedAt 161 cleared) "so the gate answers for nothing"
+
+                // Vision and no Threat is a clearing; vision and a Threat is a
+                // fresh write, which is what keeps a raid that outlives the
+                // memory from being forgotten while it is being watched.
+                let stillThere =
+                    remembered
+                    |> raidTick 160 (quiet |> lookingAt outpostRoom [ armedIn outpostRoom ])
+
+                Expect.equal
+                    (stillThere.Threatened |> Map.tryFind outpostRoom)
+                    (Some { Until = 460 })
+                    "and a look that finds it still standing there moves the clock to this tick's"
+            }
+
+            test
+                "a healer alone is remembered nowhere, and neither is a room the colony merely crosses" {
+                // Two narrowings in one case, both of them the rule's own
+                // spelling rather than this fixture's. ADR 0033's Threat test:
+                // a hostile with no ATTACK or RANGED_ATTACK part reaches
+                // nothing and is no reason to buy a body, so it writes no
+                // memory a guard row could act on. And the room: the guard row
+                // is per **declared outpost**, so a raid at home is the
+                // [[keep]]'s (ADR 0034) and one in a room the colony does not
+                // declare hires nobody (#324).
+                let healerSeen =
+                    RaidState.empty
+                    |> raidTick 100 (quiet |> lookingAt outpostRoom [ healerIn outpostRoom ])
+
+                Expect.isEmpty
+                    healerSeen.Threatened
+                    "a healer standing in the outpost is a hostile with no reach and buys no guard"
+
+                let atHome =
+                    RaidState.empty
+                    |> raidTick
+                        100
+                        { (quiet |> visible raidRoom None) with
+                            Hostiles = [ armedIn raidRoom ]
+                        }
+
+                Expect.isEmpty
+                    atHome.Threatened
+                    "and an armed raid in the colony's own room is no outpost's memory"
+
+                let undeclared =
+                    RaidState.empty
+                    |> raidTick
+                        100
+                        { (quiet |> visible outpostRoom None) with
+                            Hostiles = [ armedIn outpostRoom ]
+                        }
+
+                Expect.isEmpty
+                    undeclared.Threatened
+                    "nor is a room with no controller of ours projected in it: no declaration, no guard row"
             }
         ]
 

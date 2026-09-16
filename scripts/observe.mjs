@@ -507,6 +507,49 @@ if (command === "console") {
     return { room, holder: entry.holder, until: entry.until };
   });
 
+  // The guard row's memory of a raid in a room it has gone blind in (#366),
+  // read **leniently on absence and strictly on shape** — which is the one
+  // place this command parts from the three maps above, and for a reason of
+  // its own. Absence here is a bundle that predates #366, and what such a
+  // bundle does is hire its guards off vision alone: that is the behaviour
+  // this command described correctly before the record existed, so failing the
+  // whole readout over it would take an operator's only view of three other
+  // families away to report a missing feature. A malformed *entry* still stops
+  // the command, for `holds`' reason: the bot drops what it cannot decode, so
+  // an unreadable entry is a room whose guard is not being hired right now and
+  // this is the command that would have said so.
+  if (
+    stored.threatened !== undefined &&
+    stored.threatened !== null &&
+    (typeof stored.threatened !== "object" || Array.isArray(stored.threatened))
+  ) {
+    fail(
+      `the Raid log at Memory.fabot.observe.colonies.${home}.raids carries a \`threatened\` ` +
+        `entry that is not a map: ${JSON.stringify(stored.threatened)} — the leaf was ` +
+        'hand-edited, or its wire shape has moved. Not read as "no outpost is remembered".',
+    );
+  }
+  const threatened =
+    stored.threatened === undefined || stored.threatened === null
+      ? null
+      : Object.entries(stored.threatened).map(([room, entry]) => {
+          if (
+            entry === null ||
+            typeof entry !== "object" ||
+            Array.isArray(entry) ||
+            typeof entry.until !== "number"
+          ) {
+            fail(
+              `the entry at Memory.fabot.observe.colonies.${home}.raids.threatened.${room} is ` +
+                `off the wire shape: ${JSON.stringify(entry)} — the leaf was hand-edited, or ` +
+                "its wire shape has moved. " +
+                'Not read as "nothing is raiding that room": the bot drops an entry it cannot ' +
+                "decode, so the guard bought for this room may be standing at home.",
+            );
+          }
+          return { room, until: entry.until };
+        });
+
   // The clock the rows are read against. Off the server rather than off the
   // CPU line's last row: that row is as old as the last tick the bundle
   // finished, and a bundle that stopped writing leaves it behind while the
@@ -634,6 +677,11 @@ if (command === "console") {
           outposts: stored.outposts,
           rivalHeld: stored.rivalHeld,
           holds: stored.holds,
+          // `null` and not `{}` for a bundle that predates #366: "this bot
+          // does not keep the record" and "it keeps it and remembers no raid"
+          // are different answers, and one of them means the guard row is
+          // still reading vision alone.
+          threatened: stored.threatened ?? null,
         },
         null,
         2,
@@ -815,6 +863,44 @@ if (command === "console") {
               `(${BASIS[row.basis]})`,
           );
         }
+        console.log("");
+      }
+    }
+
+    // The guard row's memory, printed under the gate's own families because it
+    // is not one of them: it withholds nothing, and what it says about a room
+    // is that the colony is still hiring for a fight it can no longer see
+    // (#366). Standing entries alone, on `now < until`, which is the test the
+    // bot's own gate filters by — an entry whose tick has passed is one the
+    // fold has not caught up with and no guard is being hired off it.
+    if (threatened === null) {
+      console.log(
+        "the deployed bundle predates #366: it keeps no memory of a raid in a room it has " +
+          "gone blind in, so its guard row reads vision alone.",
+      );
+      console.log("");
+    } else {
+      const remembered = threatened
+        .filter((latch) => now < latch.until)
+        .sort((a, b) => a.room.localeCompare(b.room));
+
+      for (const latch of remembered) {
+        console.log(
+          `${latch.room}  guarded from memory — an armed threat was standing here at the last ` +
+            `look, and nothing of ours can see the room now`,
+        );
+        console.log(
+          `  the guard row hires one body for it until ${tickOf(latch.until)}, ` +
+            `${ticks(latch.until - now)} to go (#366)`,
+        );
+        console.log(
+          "  the room is not withheld: its rock is pooled and its Tasks are offered. The " +
+            "first tick anything of ours",
+        );
+        console.log(
+          "  sees the room again decides it either way — a threat still standing writes the " +
+            "memory forward, a clear room ends it.",
+        );
         console.log("");
       }
     }

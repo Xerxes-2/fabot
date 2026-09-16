@@ -21,6 +21,7 @@ let snapshotWith creeps spatial =
         // prices nothing: geometry is all it reads.
         RoomControl = Map.empty
         HeldOutposts = Set.empty
+        ThreatenedOutposts = Set.empty
         ConstructionSites = []
         Creeps = creeps
         Hostiles = []

@@ -97,6 +97,33 @@ type ColonyView =
         /// decided by that entry either way, and this set is read only where
         /// there is none.
         HeldOutposts: Set<string>
+        /// The declared [[outpost]]s this colony last saw an **armed**
+        /// [[threat]] standing in, whose memory has not run out
+        /// (`StandDown.ThreatenedOutposts`, `RaidState.Threatened`, #366).
+        /// `Hostiles`' memory as `HeldOutposts` is `RoomControl`'s, carried for
+        /// the same reason and read under the same rule.
+        ///
+        /// **What a reader may conclude from a room being in here:** that on
+        /// the last tick anything of ours could see that room, something armed
+        /// (ADR 0033's Threat test — an ATTACK or a RANGED_ATTACK part, never
+        /// merely "a hostile") was standing in it, and that fewer than
+        /// `Tuning.ThreatMemory` ticks have passed since. That is enough to
+        /// hire **one** guard and to pool its Guard, which is the whole of
+        /// what #366 asks of it.
+        ///
+        /// **What a reader may not:** that the threat is still there, what it
+        /// is made of, how many of them there are, or anything a fight has to
+        /// be priced from. `Quota.guardBlocksBeat` reads bodies, and there are
+        /// no bodies here — a room in this set and not in `RoomControl`
+        /// contributes no hostile to any list on the view. Nor is it a
+        /// withdrawal: the room is worked, its rock is pooled and its Tasks are
+        /// offered, which is what tells this apart from `StandDown.Shut`.
+        ///
+        /// **Vision overrules it**: a room with a `RoomControl` entry answers
+        /// for itself off this tick's `Hostiles`, and the one rule that reads
+        /// this set (`Planner.guardedOutposts`) consults it only where there is
+        /// none.
+        ThreatenedOutposts: Set<string>
         /// Our construction sites in every room this colony works and has
         /// vision in: the Build pool is this list one to one, so an outpost's
         /// site is a Task like the home room's, and a bootstrapped child's site
@@ -769,6 +796,11 @@ module ColonyView =
             // out of a pool it was in, and the reader intersects it with the
             // projected outposts anyway.
             HeldOutposts = gate.HeldOutposts
+            // The gate's fourth set, verbatim and for `HeldOutposts`' reason
+            // (#366): it takes no room out of the work and only ever puts a
+            // Guard into the pool for a room the declaration already names,
+            // and its reader intersects it with the projected outposts.
+            ThreatenedOutposts = gate.ThreatenedOutposts
             ConstructionSites = collected (fun facts -> facts.ConstructionSites)
             Creeps = mine |> List.map (fun creep -> creep.Info)
             Hostiles = collected (fun facts -> facts.Hostiles)

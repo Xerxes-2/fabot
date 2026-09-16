@@ -308,18 +308,46 @@ let internal reservableOutposts (view: ColonyView) : string list =
 /// is pooled, the cast body would stand idle in the oven's shadow.
 ///
 /// ADR 0033's own Threat test and never "a hostile": a scout or a healer alone
-/// reaches nothing, takes no ground and is no reason to buy a body. Vision is
-/// the whole of what it reads (ADR 0004) — an outpost the colony cannot see
-/// carries no hostiles and asks for no guard, the same zero a quiet room
-/// contributes.
+/// reaches nothing, takes no ground and is no reason to buy a body.
+///
+/// **Vision is no longer the whole of what it reads** (#366), and that is the
+/// same correction #333 made to the reserver row one function up. ADR 0056 says
+/// "vision in a guarded outpost is the guard", which is circular while the
+/// guard is still in the oven: the vision in an *unguarded* outpost is the
+/// anchor, the hauler and the reserver, and those are precisely what a raid
+/// kills. Live W11S28 — the guard row fires on t506514, the anchor dies on
+/// t506583 and the reserver on t506605, the room goes dark, this list empties,
+/// the Guard leaves the pool, and a 15-ATTACK-part body stands idle at home
+/// while a 2-ATTACK-part invader holds the room for a thousand ticks more.
+///
+/// So the order is #333's, word for word: **a tick with vision decides the room
+/// either way**, and a tick with no vision in that room reads what the last
+/// look concluded (`view.ThreatenedOutposts`, `RaidState.Threatened` through
+/// `StandDown`). A room whose look shows it clear leaves this list on the tick
+/// of that look — which is what the arriving guard's own vision does, on the
+/// same tick it lands — and the memory ends by its own clock otherwise
+/// (`Tuning.ThreatMemory`), because nothing in the engine counts a raid down.
+///
+/// A declared outpost that has never been looked into is in **neither** half
+/// and asks for no guard, which is ADR 0004 unchanged: absence classifies
+/// nothing, and this rule buys a body rather than a look.
 let internal guardedOutposts (view: ColonyView) : string list =
-    if List.isEmpty view.Hostiles then
+    if List.isEmpty view.Hostiles && Set.isEmpty view.ThreatenedOutposts then
         []
     else
         declaredOutposts view
         |> List.filter (fun room ->
-            view.Hostiles
-            |> List.exists (fun h -> h.Pos.Room = room && (weaponRange h |> Option.isSome)))
+            let seenArmed =
+                view.Hostiles
+                |> List.exists (fun h -> h.Pos.Room = room && (weaponRange h |> Option.isSome))
+
+            // The union of the two halves and not a two-armed test on vision,
+            // so the blind half can never take a room the tick's own hostiles
+            // put in: the record is the previous tick's, and this tick's raid
+            // outranks it wherever both answer.
+            seenArmed
+            || (Set.contains room view.ThreatenedOutposts
+                && not (Map.containsKey room view.RoomControl)))
 
 /// Planner: rebuild this tick's full Task pool from the colony view. Pure and
 /// from scratch every tick — Tasks are never persisted.

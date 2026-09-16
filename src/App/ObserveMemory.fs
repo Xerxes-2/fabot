@@ -451,6 +451,45 @@ let private holdMapOf (raw: obj) : Map<string, OutpostHold> =
                 None)
         |> Map.ofArray
 
+// One remembered raid on the wire (#366): `{ until }`, the tick the guard row
+// stops answering for a room it has gone blind in. One field and an object all
+// the same, matching `encodeHold` beside it rather than a bare number: the leaf
+// beside this one was written as a bare number once and #275 had to grow it a
+// second field on a live bundle, which cost a migration clause that is still
+// there.
+let private encodeThreat (latch: ThreatLatch) =
+    let o = createEmpty<obj>
+    o?until <- latch.Until
+    o
+
+// `encodeThreat`'s partner, a checker and not a cast for `decodeHold`'s reason:
+// an `until` that is not a number would compare false against `view.Time <
+// until` for ever, which here means a guard hired for a room nothing has looked
+// into since the log was hand-edited. An entry that will not read is dropped
+// (`threatMapOf`) and costs the room its memory — the guard row falls back to
+// what vision says, which is the pre-#366 behaviour and not a wrong answer
+// about a different room.
+let private decodeThreat (raw: obj) : ThreatLatch =
+    if isNull raw || jsTypeof raw <> "object" then
+        failwith "not a threat latch"
+    elif jsTypeof raw?until <> "number" then
+        failwith "not a tick"
+    else
+        { Until = unbox<int> raw?until }
+
+// The threat map read back, entry by entry as the two maps above are.
+let private threatMapOf (raw: obj) : Map<string, ThreatLatch> =
+    if isNull raw then
+        Map.empty
+    else
+        objectEntries raw
+        |> Array.choose (fun (key, value) ->
+            try
+                Some(key, decodeThreat value)
+            with _ ->
+                None)
+        |> Map.ofArray
+
 // One latched room on the wire (#275): `{ since, lastLooked }` — the tick the
 // gate shut on, and the tick the last look into the room was taken on, which is
 // what the stride to the next look is measured from.
@@ -726,6 +765,12 @@ let loadRaids (home: string) : RaidState =
             // is read off the view every tick, so an empty record costs
             // the colony nothing and the operator one tick of silence.
             Holds = holdMapOf raids?holds
+            // The guard row's memory of a raid in a room it has gone blind in
+            // (#366), absent from a bundle that predates it and an empty map
+            // being what that says: the ticks with vision write it back, and
+            // until they do the row answers off vision alone, which is what it
+            // did before the record existed.
+            Threatened = threatMapOf raids?threatened
             Living = raids?living |> unbox<string[]> |> Set.ofArray
             // The damage baseline, absent from a bundle written
             // before it existed: an empty baseline charges the next
@@ -750,6 +795,11 @@ let saveRaids (home: string) (state: RaidState) =
     // nothing, so there is no episode to date — and under the room's own key,
     // one hold per controller being all the engine allows.
     raids?holds <- state.Holds |> Map.toSeq |> hashOf encodeHold
+    // Room name to the tick the guard row stops answering for a raid it can no
+    // longer see (#366). A clock and no window, basis or roster: what a raid
+    // was is the episode ring's business, and this is one bit — armed, and
+    // still worth a body — under the room's own key.
+    raids?threatened <- state.Threatened |> Map.toSeq |> hashOf encodeThreat
     raids?living <- state.Living |> Set.toArray
     raids?hits <- state.Hits |> Map.toSeq |> hashOf box
     writeColonyLeaf home "raids" raids

@@ -1018,6 +1018,31 @@ let private seatUnionIn (atlas: Atlas) (room: string) : Set<Pos> =
     |> List.map (seatTiles ground)
     |> List.fold Set.union Set.empty
 
+/// The **standable** ring of one room's projected sources, joined to that room:
+/// the [[guard]]'s Work Area on the ticks it has no [[threat]] to ring (#366).
+///
+/// A [[reach]]'s ring needs a Threat to be derived from and there is none while
+/// the room is dark, which used to leave that room's Guard applicable to nobody
+/// and the body already paid for standing at home. The declaration itself
+/// carries the geometry — `Outpost.Sources` places a source's tile whether or
+/// not there is vision (ADR 0031, ADR 0041) — so the fallback is the ground our
+/// anchors stand on, which is where the raid is and where the hunting is done.
+/// On arrival vision returns and `Threats.ringIn` takes over on the same tick.
+///
+/// Off the **weights** and not the raw ground, unlike `seatUnionIn` beside it:
+/// a Seat is counted by terrain alone because a structure on it does not stop
+/// the rock being workable (ADR 0001), while this is a set of tiles a body is
+/// asked to stand on, and a tile under an obstacle is one it cannot. One room's
+/// and never the whole projection's, as every geometry here is (ADR 0041).
+let sourceRingIn (atlas: Atlas) (room: string) : Set<RoomPos> =
+    let weights = weightsOf atlas room
+
+    targetsOfKind atlas Source
+    |> List.choose (tileIn atlas room)
+    |> List.collect (fun pos -> neighbours pos |> List.filter (walkableAt weights))
+    |> List.map (RoomPos.at room)
+    |> Set.ofList
+
 /// Every controller of one room's Upgrade Work Area, unioned — the tiles a
 /// creep can upgrade from, behind `dualSeatsIn` and controllerContainers. One
 /// room for the same reason the Seat union is one room's.

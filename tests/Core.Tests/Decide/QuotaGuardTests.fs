@@ -66,6 +66,82 @@ let guardRowTests =
                     "and the Invader's leftover hold costs that guard nothing"
             }
 
+            test "the outpost the raid blinded the colony in goes on hiring the one guard" {
+                // **#366, on the live case.** W11S28's guard row fired on the
+                // raid its anchor and its reserver could see; the invader
+                // killed both, the room went dark, `view.Hostiles` emptied,
+                // this row fell back to 0 and the 15-ATTACK-part body it had
+                // already paid for stood idle at home while a 2-ATTACK-part
+                // invader kept the room. The memory (`RaidState.Threatened`
+                // through `ColonyView.ThreatenedOutposts`) is what the row
+                // reads on those ticks, and #333 is the precedent: remember the
+                // conclusion, consult it only while blind, let it expire.
+                //
+                // Pairwise on the memory alone, over one blind colony: no
+                // vision in the room in either reading, and the only thing that
+                // moves between them is whether the last look concluded
+                // anything.
+                let blind =
+                    { guardColony [] [] with
+                        RoomControl = (guardColony [] []).RoomControl |> Map.remove "W1N2"
+                    }
+
+                Expect.equal
+                    (guardQuotaOf blind)
+                    (Some 0)
+                    "the premise, and the bug: blind and with nothing remembered, the row asks for nobody"
+
+                Expect.equal
+                    (guardQuotaOf
+                        { blind with
+                            ThreatenedOutposts = Set.singleton "W1N2"
+                        })
+                    (Some 1)
+                    "and with the last look's armed Threat remembered it goes on hiring the one body"
+            }
+
+            test "a remembered raid is one guard, and a seen one is priced as it always was" {
+                // `guardsWanted`'s blind clause (#366): **one**, because the
+                // two-guard clause prices the raid's healing against our
+                // blocks' damage and neither number exists while blind — a room
+                // with no `RoomControl` entry contributes no hostile to the
+                // view at all. Hiring two bodies for a room nobody can see is
+                // the worse error of the two.
+                //
+                // And vision overrules the memory in both directions, which is
+                // the half that keeps this from being a stand-down: the same
+                // room latched **and** seen answers off this tick's raid, so a
+                // two-healer raid still buys its second guard.
+                let latched = Set.singleton "W1N2"
+
+                let blindAndLatched =
+                    { guardColony [] [] with
+                        RoomControl = (guardColony [] []).RoomControl |> Map.remove "W1N2"
+                        ThreatenedOutposts = latched
+                    }
+
+                Expect.equal
+                    (guardQuotaOf blindAndLatched)
+                    (Some 1)
+                    "a raid nobody can see is priced at one body and never at the cap"
+
+                Expect.equal
+                    (guardQuotaOf
+                        { guardColony (raidOf 2) [] with
+                            ThreatenedOutposts = latched
+                        })
+                    (Some 2)
+                    "and the tick vision answers, the room is priced off the raid: two healers, two guards"
+
+                Expect.equal
+                    (guardQuotaOf
+                        { guardColony [] [] with
+                            ThreatenedOutposts = latched
+                        })
+                    (Some 0)
+                    "a look that finds the room clear hires nobody, memory or no memory"
+            }
+
             test "a hostile that reaches nothing is no reason to hire" {
                 // The gate is ADR 0033's [[threat]] and never "a hostile": a
                 // `smallHealer` carries neither ATTACK nor RANGED_ATTACK, so

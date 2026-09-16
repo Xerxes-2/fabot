@@ -505,6 +505,30 @@ type Tuning =
         /// The [[stand-down]] a threat gave no readable deadline for: 2,500
         /// ticks, the stronghold expansion period (ADR 0043).
         StandDownFallback: int
+        /// How long an armed [[threat]] seen in a declared [[outpost]] is
+        /// remembered once the room goes dark (#366): the ticks the guard row
+        /// and the Guard Task keep answering for a room nothing of ours can
+        /// see any more, counted from the last tick vision showed the threat.
+        ///
+        /// **300, and it is arithmetic rather than a preference**: the memory
+        /// has to cover the cast plus the walk, because the raid kills the
+        /// bodies whose vision hired the guard (the anchor, the hauler and the
+        /// reserver) and the room is dark for the whole of both. The cast is
+        /// 3 ticks a part and the live RCL7 guard is five `guardPattern`
+        /// blocks — 50 parts, 150 ticks of oven — and the walk is about 50
+        /// ticks a room crossing at `Tuning.MaxHops` of 3, so 150 + 150.
+        ///
+        /// Being **too long** costs one guard walking into a room that is
+        /// already clear: 750 energy a block, and vision clears the latch on
+        /// the tick that body arrives, so the error is one trip and never a
+        /// standing row. Being too **short** costs the thing the ticket is
+        /// about — a paid-for guard idle at home while a 2-ATTACK invader
+        /// keeps the room. It is deliberately far under `RivalRecheck` (5,000)
+        /// and `StandDownFallback` (2,500): this is a memory that sends a body
+        /// in, not a second [[stand-down]], and a raid that outlives it is
+        /// re-read the moment anything of ours sees the room again. Ticks and
+        /// not a price, so the same at any bank and any [[stage]].
+        ThreatMemory: int
         /// How often a [[stand-down]] latched on another player's **ownership**
         /// is looked at again (#165): once this many ticks have passed since the
         /// last look, the room is re-admitted to the colony's scan set for one
@@ -581,6 +605,7 @@ module Tuning =
             MaxHops = 3
             TrunkSwampWeight = 3
             StandDownFallback = 2500
+            ThreatMemory = 300
             RivalRecheck = 5000
             QuietGap = 50
             VisionGrace = 150

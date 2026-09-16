@@ -372,7 +372,20 @@ let internal areaFor (threats: Threats) atlas creep task : Set<RoomPos> =
         // so the room is the Task's own and never the creep's — a body a border
         // away is offered the same ring, and it is the price of walking there
         // that decides whether it can have it.
-        | Guard room -> Threats.ringIn threats room
+        // — with one fallback, and it is the one the room's blindness forces
+        // (#366): a Guard is pooled for an outpost the colony *remembers* a
+        // raid in as well as for one it can see, and a room nothing of ours
+        // stands in has no Threat, so no Reach, so no ring. Empty here the
+        // Task is applicable to nobody and the body the guard row already paid
+        // for stays at home, which is the whole of the ticket. The declared
+        // source tiles are geometry vision never had to supply, so the walk has
+        // a destination: the ground the garrison stands on, which is the ground
+        // the raid came for. The instant the guard arrives the room is lit, the
+        // ring above exists and this branch is not taken again.
+        | Guard room ->
+            match Threats.ringIn threats room with
+            | ring when Set.isEmpty ring -> Atlas.sourceRingIn atlas room
+            | ring -> ring
         | _ -> Atlas.workAreaFor atlas creep task
 
     match reachOnWork threats atlas task with

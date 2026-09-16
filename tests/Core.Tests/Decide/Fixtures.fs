@@ -164,6 +164,7 @@ let bareRespawn =
         Controller = Some(controllerAt 1)
         RoomControl = homeControl
         HeldOutposts = Set.empty
+        ThreatenedOutposts = Set.empty
         ConstructionSites = []
         Creeps = []
         Hostiles = []

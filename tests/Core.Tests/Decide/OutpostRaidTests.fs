@@ -593,6 +593,196 @@ let guardTaskTests =
             }
         ]
 
+/// The raided outpost as the raid leaves it: **dark**, with nothing of ours
+/// standing in it and no control entry for it, and the last look's armed
+/// [[threat]] remembered (#366). That pairing is the live shape and not a
+/// convenience — the anchor, the hauler and the reserver are the vision, so the
+/// tick they die the room has no `RoomControl` entry, no creep of ours in its
+/// layer and no hostile on the view, all four at once. The room's declaration,
+/// its rock and its ground stay exactly where they were: a declared outpost's
+/// geometry needs no vision (ADR 0031, ADR 0041).
+let private blinded (colony: ColonyView) =
+    let outpost = SpatialInfo.layerOf colony.Spatial "W1N2"
+
+    { colony with
+        RoomControl = Map.remove "W1N2" colony.RoomControl
+        Creeps =
+            colony.Creeps
+            |> List.filter (fun creep -> not (Map.containsKey creep.Name outpost.CreepPositions))
+        Spatial =
+            colony.Spatial
+            |> withNeighbour
+                "W1N2"
+                { outpost with
+                    CreepPositions = Map.empty
+                }
+    }
+
+/// The same room with the last look's conclusion on the view, which is what
+/// `Observe.standDown` hands `ColonyView.ofWorld` on those ticks.
+let private remembering (colony: ColonyView) =
+    { colony with
+        ThreatenedOutposts = Set.singleton "W1N2"
+    }
+
+[<Tests>]
+let blindGuardTests =
+    testList
+        "the Guard of an outpost the raid has gone dark in"
+        [
+            test "the remembered raid pools its Guard, capped at one" {
+                // **#366 at the Planner's seam.** ADR 0056 reads the Guard off
+                // vision, and ADR 0056's own sentence — "vision in a guarded
+                // outpost is the guard" — is circular while that guard is still
+                // in the oven: the vision in an *unguarded* outpost is the
+                // anchor, the hauler and the reserver, which is exactly what
+                // the raid kills. Live W11S28 went dark 70 ticks after the
+                // guard was cast and the Task vanished under the body walking
+                // to it.
+                //
+                // Pairwise on the memory and nothing else: the same blind room
+                // twice, once with the last look's conclusion and once without.
+                let dark = blinded (declaredRaid [])
+                let remembered = remembering dark
+
+                Expect.isNone
+                    (pooledOf dark |> entryFor (Guard "W1N2"))
+                    "the premise, and the bug: blind and remembering nothing, no Guard is pooled at all"
+
+                Expect.isSome
+                    (pooledOf remembered |> entryFor (Guard "W1N2"))
+                    "and with the armed Threat of the last look remembered, the fight is pooled again"
+
+                Expect.equal
+                    (pooledOf remembered
+                     |> entryFor (Guard "W1N2")
+                     |> Option.map (fun entry -> entry.Capacity |> Capacity.capOf CapScope.Fighters))
+                    (Some(Some 1))
+                    "at one body: the two-guard clause prices a raid, and there is no raid on the view to price"
+            }
+
+            test "the guard already paid for is walked into the room it cannot see" {
+                // The whole of what the ticket costs: a 15-ATTACK-part body
+                // standing `idle (none-applicable)` at home while a
+                // 2-ATTACK-part invader keeps the outpost. `Threats.ringIn` is
+                // empty for a room no Threat stands in, so the Guard's Work
+                // Area was empty and the Task was applicable to nobody; the
+                // fallback is the walkable ring of the **declared** source
+                // tiles (`Atlas.sourceRingIn`), which is where our anchors
+                // stand and therefore where the hunting is.
+                //
+                // Pairwise against the same blind room with nothing remembered,
+                // which is the tick this colony really had.
+                let decideWith colony =
+                    decide
+                        (colony |> withBodyAtHome (guard "g-home") atSpawn)
+                        Map.empty
+                        (Set.singleton "g-home")
+                        None
+
+                let forgotten = decideWith (blinded (declaredRaid []))
+                let remembered = decideWith (remembering (blinded (declaredRaid [])))
+
+                Expect.equal
+                    (Map.tryFind "g-home" forgotten.Assignments)
+                    None
+                    "the premise: with the raid forgotten the body is matched to nothing at all"
+
+                Expect.equal
+                    (Map.tryFind "g-home" remembered.Assignments)
+                    (Some(taskId (Guard "W1N2")))
+                    "and with it remembered the body holds the fight it was bought for"
+
+                Expect.equal
+                    (moveIntentsFor "g-home" remembered.Intents)
+                    [ MoveCreep("g-home", Direction.Top) ]
+                    "the mover walks it up the corridor toward the crossing, as it does for a seen raid"
+
+                Expect.isEmpty
+                    (attacksOf remembered.Intents)
+                    "and it swings at nothing: a guard with no visible target issues no attack (ADR 0056)"
+
+                Expect.isEmpty
+                    (rejectionsFor "g-home" remembered.Verdicts
+                     |> Option.defaultValue []
+                     |> List.filter (fun (task, _) -> task = taskId (Guard "W1N2")))
+                    "on no rejected row: neither unreachable nor inapplicable, which an empty ring made it"
+            }
+
+            test
+                "the fallback ground is the declared source ring, and arrival hands it back to the Reach" {
+                // The geometry, said once so the case above cannot be green on
+                // a walk to nowhere: `Outpost.Sources` places `src-out` at
+                // (25,40) whether or not there is vision, and the ring is the
+                // walkable neighbours of that tile — the y = 41 row of this
+                // fixture's field, the container's own tile included, a
+                // container being no obstacle.
+                //
+                // And the fallback is exactly a fallback: the tick the guard
+                // arrives the room is lit, a Threat is standing in it and
+                // `Threats.ringIn` answers, so the ordinary ring takes over on
+                // the same tick. Read off the live raid beside it.
+                let dark = remembering (blinded (declaredRaid []))
+                let atlas = Atlas.ofView dark
+
+                Expect.equal
+                    (Atlas.sourceRingIn atlas "W1N2")
+                    ([ { X = 24; Y = 41 }; { X = 25; Y = 41 }; { X = 26; Y = 41 } ]
+                     |> List.map (RoomPos.at "W1N2")
+                     |> Set.ofList)
+                    "the rock's three walkable neighbours, standing in the declaration and not in vision"
+
+                let seen = declaredRaid raiders
+                let ring = Threats.ringIn (threatsOf seen (Atlas.ofView seen)) "W1N2"
+
+                Expect.isNonEmpty
+                    ring
+                    "the tick vision answers, the Threat's own ring exists and is what the Task is worked from"
+
+                Expect.isFalse
+                    (Set.isSubset ring (Atlas.sourceRingIn atlas "W1N2"))
+                    "and it is a different set: the fallback is the geometry, the ring is the fight"
+            }
+
+            test "a guard standing in the dark room keeps the Task, and vision clears it" {
+                // The arrival tick from the body's side, and the other half of
+                // `guardedOutposts`' order (#366): a tick **with** vision
+                // decides the room either way. A guard standing on the
+                // fallback ground of a room that is still dark holds the Task;
+                // the tick its own vision shows the room clear, the memory is
+                // dropped by the fold and the Task goes with it — which is
+                // what keeps this a memory and not a second [[stand-down]].
+                let standing =
+                    remembering (blinded (declaredRaid []))
+                    |> withGuards [ guard "g-1", { X = 24; Y = 41 } ]
+
+                Expect.equal
+                    (Map.tryFind "g-1" (decide standing Map.empty Set.empty None).Assignments)
+                    (Some(taskId (Guard "W1N2")))
+                    "on a declared source's ring in a room it cannot see past, the body holds the fight"
+
+                // The same tick with the room lit and empty: the latch is still
+                // on the view, because the fold that clears it runs on the
+                // observation and not here.
+                let lit =
+                    { standing with
+                        RoomControl =
+                            standing.RoomControl
+                            |> Map.add
+                                "W1N2"
+                                {
+                                    Owner = Ownership.Unowned
+                                    Reservation = None
+                                    SafeMode = false
+                                }
+                    }
+
+                Expect.isNone
+                    (pooledOf lit |> entryFor (Guard "W1N2"))
+                    "and the tick vision answers for the room, the clear look wins over the memory"
+            }
+        ]
+
 /// The two-room shape #147 was filed on: a body of ours **at home** and a Task
 /// whose ground is a raided room across the [[seam]]. ADR 0056 decides it
 /// rather than merely touching it — the reading below is the one that must sit

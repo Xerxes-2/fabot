@@ -513,8 +513,30 @@ let guardBlocksBeat (view: ColonyView) (room: string) (blocks: int) : bool =
 /// Planner set, which is ADR 0052 decision 6. Asked only of a room
 /// `guardedOutposts` has already answered for — a room with no Threat in it is
 /// not one guard but none.
+///
+/// **A room remembered and not seen is one guard** (#366). Since that ticket
+/// `guardedOutposts` also answers for a declared outpost the colony has gone
+/// blind in, and the two-guard clause prices the raid's healing against our
+/// blocks' damage — neither number exists while blind, because a room with no
+/// `RoomControl` entry contributes no hostile to the view at all. One is the
+/// answer that sends the body already bought without buying a second for a
+/// fight nobody can see; pricing an unseen raid at its cheapest is the wrong
+/// direction (ADR 0056's own argument for ignoring `rangedHealPower`), and
+/// hiring two bodies for a room nobody can see is worse. Written as its own
+/// clause rather than left to the empty raid falling through
+/// `guardBlocksBeat`'s zero-damage arm below: the arms agree today, but that
+/// one is a statement about a raid we **can** see dealing nothing, and this is
+/// a statement about not being able to see.
 let internal guardsWanted (view: ColonyView) (room: string) : int =
-    if guardBlocksBeat view room 1 then 1 else Engine.guardCap
+    if
+        Set.contains room view.ThreatenedOutposts
+        && not (Map.containsKey room view.RoomControl)
+    then
+        1
+    elif guardBlocksBeat view room 1 then
+        1
+    else
+        Engine.guardCap
 
 /// The guard row's quota: `guardsWanted` over every raided outpost, summed.
 let internal guardQuota (view: ColonyView) : int =

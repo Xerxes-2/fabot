@@ -13,6 +13,7 @@
 module Fabot.Core.Tests.ViewTests
 
 open Expecto
+open Fabot.Core
 open Fabot.Core.Types
 open Fabot.Core.Decide
 
@@ -1048,6 +1049,77 @@ let colonyViewTests =
                 Expect.isFalse
                     (Map.containsKey outpost looked.RoomControl)
                     "no vision, no entry — and an entry invented here would read as a room nobody holds"
+            }
+
+            test "the remembered raid rides the view, and the guard row reads it off one" {
+                // **The projection-side half of #366**, and the lesson of
+                // #355/#356: a rule green against a hand-built `ColonyView` is
+                // green against a shape `ColonyView.ofWorld` may never build.
+                // So the chain is walked end to end here — a `RaidState`
+                // carrying the memory, through `Observe.standDown`, through
+                // `ofWorld`, into `Planner.guardedOutposts` and
+                // `Quota.guardsWanted` — over a world whose outpost is **dark**,
+                // which is the world the raid leaves behind when it kills the
+                // anchor and the reserver.
+                let blind =
+                    { pairWorld with
+                        Rooms = unseen outpost pairWorld.Rooms
+                    }
+
+                let colony = declared |> List.find (fun colony -> colony.Home = mother)
+
+                let viewUnderLog (log: Observe.RaidState) =
+                    ColonyView.ofWorld
+                        Tuning.defaults
+                        declared
+                        (Observe.standDown Tuning.defaults blind.Time log)
+                        (holdersOf blind)
+                        blind
+                        colony
+
+                let remembered =
+                    viewUnderLog
+                        { Observe.RaidState.empty with
+                            Threatened = Map.ofList [ outpost, { Until = blind.Time + 300 } ]
+                        }
+
+                let forgotten = viewUnderLog Observe.RaidState.empty
+
+                Expect.isEmpty
+                    remembered.Hostiles
+                    "the premise: nothing of ours can see the room, so the view carries no raid to read"
+
+                Expect.isFalse
+                    (Map.containsKey outpost remembered.RoomControl)
+                    "and no control entry either, which is what 'blind in this room' is"
+
+                Expect.equal
+                    remembered.ThreatenedOutposts
+                    (Set.singleton outpost)
+                    "the last look's conclusion survives the cut from the world onto the view"
+
+                // Read through the public pool rather than off the internal
+                // derivation: the Guard's presence is `Planner.guardedOutposts`
+                // and its Fighter cap is `Quota.guardsWanted`, so one pool
+                // entry pins both halves as the colony really reaches them.
+                let guardIn view =
+                    let atlas = Atlas.ofView view
+
+                    Pool.planPool
+                        view
+                        atlas
+                        (Planner.planTasks view atlas (threatsOf view atlas) HeldTaskFacts.empty)
+                    |> List.tryFind (fun entry -> entry.Task = Guard outpost)
+
+                Expect.equal
+                    (guardIn remembered
+                     |> Option.map (fun entry -> entry.Capacity |> Capacity.capOf CapScope.Fighters))
+                    (Some(Some 1))
+                    "so the room is guarded off a view the shell really builds, and asks for one body"
+
+                Expect.isNone
+                    (guardIn forgotten)
+                    "pairwise on the log alone: with nothing remembered the same world guards nothing"
             }
 
             test "a room the colony works carries its sighting, dark or not" {

@@ -794,8 +794,13 @@ module Errand =
 /// tick, and split apart they would be free to disagree about which rooms the
 /// colony has withdrawn from.
 ///
+/// Since #366 there is a fourth set and it is #333's shape said about the
+/// guard row: the outposts an armed [[threat]] was standing in at the last
+/// look. It withdraws nothing either, and it is read on the blind ticks alone.
+///
 /// The name is ADR 0043's and is now narrower than the record — two of the
-/// three sets are a stand-down's, and `HeldOutposts` is deliberately not one.
+/// four sets are a stand-down's, and `HeldOutposts` and `ThreatenedOutposts`
+/// are deliberately not.
 /// It is left as written rather than renamed under an accepted ADR: what the
 /// field docs owe a reader is which of them withdraws a room, and they say so.
 type StandDown =
@@ -832,6 +837,29 @@ type StandDown =
         /// more reserver every time the last one died (#333's live cadence, one
         /// body per 600 ticks).
         HeldOutposts: Set<string>
+        /// The declared [[outpost]]s an armed [[threat]] was **standing in** at
+        /// the last look, and whose memory has not run out on this tick
+        /// (`RaidState.Threatened`, #366). #333's shape in the guard row: the
+        /// second set here that withdraws nothing, and the second one read
+        /// only where this tick's vision answers for nothing.
+        ///
+        /// What it buys is the body already paid for. The guard row hires on a
+        /// threat seen in an outpost, and the bodies providing that vision —
+        /// the anchor, the hauler, the reserver — are exactly what the raid
+        /// kills, so the room goes dark, `view.Hostiles` empties, no Guard is
+        /// pooled and a 15-ATTACK-part guard stands idle at home while a
+        /// 2-ATTACK-part invader keeps the room (#366's live W11S28). ADR
+        /// 0056's "vision in a guarded outpost is the guard" is circular, and
+        /// this is where the circle is cut.
+        ///
+        /// **Vision overrules it**, exactly as it overrules `HeldOutposts`: a
+        /// room with a `RoomControl` entry is decided by that tick's hostiles
+        /// either way, and this set is consulted only where there is none
+        /// (`Planner.guardedOutposts`). It ends by its own clock
+        /// (`Tuning.ThreatMemory`) because a raid nobody can see is a raid
+        /// nothing ends, and a memory with no end would hire a guard for a room
+        /// an invader left hours ago.
+        ThreatenedOutposts: Set<string>
     }
 
 [<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
@@ -844,6 +872,7 @@ module StandDown =
             Shut = Set.empty
             Rechecked = Set.empty
             HeldOutposts = Set.empty
+            ThreatenedOutposts = Set.empty
         }
 
 /// Where one colony stands in its life (ADR 0052 decision 3). Three answers to

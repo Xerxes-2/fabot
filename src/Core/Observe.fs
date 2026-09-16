@@ -401,6 +401,19 @@ type OutpostHold =
         Until: int
     }
 
+/// One declared [[outpost]] an armed [[threat]] was seen standing in, against
+/// the tick that memory runs out on (#366). The guard row's half of #333's
+/// shape: a conclusion held across the blind ticks, because the bodies whose
+/// vision hired the guard are what the raid kills.
+type ThreatLatch =
+    {
+        /// The **absolute** tick the memory runs out on: the tick the threat
+        /// was last seen plus `Tuning.ThreatMemory`. Absolute like an
+        /// `OutpostHold.Until` beside it and for its reason — stored as a
+        /// duration it would date the memory to whenever it was last read.
+        Until: int
+    }
+
 /// The whole persisted Raid log.
 type RaidState =
     {
@@ -470,6 +483,30 @@ type RaidState =
         /// map is bounded by the rooms the colony scans, as the latch map
         /// beside it is.
         Holds: Map<string, OutpostHold>
+        /// The declared [[outpost]]s an **armed** [[threat]] was standing in on
+        /// the last tick the colony could see them, each against the tick that
+        /// memory runs out on (#366). The fourth shape in this leaf, and
+        /// `Holds`' shape applied to the guard row rather than the reserver
+        /// one: written on the ticks with vision, **removed** on a tick with
+        /// vision that shows the room clear, and expiring by its own clock in
+        /// between.
+        ///
+        /// It withdraws nothing. What it buys is that the body the guard row
+        /// already paid for is still hired, still pooled a Guard and still
+        /// walked at the room on the ticks the raid has killed everything of
+        /// ours that could see it (`ColonyView.ThreatenedOutposts` through
+        /// `standDown`, read by `Planner.guardedOutposts`). ADR 0056 made
+        /// vision in a guarded outpost the guard's own, which is circular the
+        /// moment the guard has not arrived yet: W11S28 lost its anchor and its
+        /// reserver to a 2-ATTACK-part invader, the room went dark, and the
+        /// 15-ATTACK-part guard bought for that raid stood idle at home.
+        ///
+        /// Ends by a clock of its own and not by a look, for `Holds`' reason
+        /// turned around: nothing in the engine counts a raid down, so the
+        /// number is ours (`Tuning.ThreatMemory`) and is sized at the cast plus
+        /// the walk. No ring and no cap — bounded by the declared outposts, as
+        /// the two maps beside it are.
+        Threatened: Map<string, ThreatLatch>
         /// The owned creep names the previous tick projected, less the ones
         /// whose life ran out on it: the baseline this tick's losses are read
         /// against. Carried only while an episode is open, so a creep that
@@ -498,6 +535,7 @@ module RaidState =
             Outposts = []
             RivalHeld = Map.empty
             Holds = Map.empty
+            Threatened = Map.empty
             Living = Set.empty
             Hits = Map.empty
         }
@@ -842,6 +880,14 @@ let private lookDue (tuning: Tuning) (tick: int) (latch: RivalLatch) =
 /// 0004) — and what it does with `Rechecked` is read those rooms' controllers
 /// and nothing else of them (`ColonyView.ofWorld`).
 ///
+/// Since #366 a fourth rides beside that third and is not a withdrawal either:
+/// `ThreatenedOutposts`, the declared outposts an armed [[threat]] was standing
+/// in at the last look and whose memory this tick is still short of. What the
+/// shell does with it is the same thing: hand it to the view, where the guard
+/// row and the Guard Task read it on the ticks the raid has blinded the colony
+/// in the room (`Planner.guardedOutposts`) — the room goes on being worked
+/// either way.
+///
 /// Since #333 a third set rides beside them and it is **not** a withdrawal:
 /// `HeldOutposts`, the rooms whose controller somebody else's CLAIM parts were
 /// standing on at the last look and whose hold this tick is still short of.
@@ -886,6 +932,18 @@ let standDown (tuning: Tuning) (tick: int) (state: RaidState) : StandDown =
             state.Holds
             |> Map.toList
             |> List.filter (fun (_, hold) -> tick < hold.Until)
+            |> List.map fst
+            |> Set.ofList
+        // The standing threat memories, on the same `tick < Until` test the
+        // holds above are filtered by and the fold retires an entry on (#366).
+        // Filtered here as well for that clause's reason: a leaf the fold has
+        // not caught up with — no tick with vision since the memory ran out —
+        // cannot go on hiring a guard for a room nothing has seen in longer
+        // than `Tuning.ThreatMemory`.
+        ThreatenedOutposts =
+            state.Threatened
+            |> Map.toList
+            |> List.filter (fun (_, latch) -> tick < latch.Until)
             |> List.map fst
             |> Set.ofList
     }
@@ -1119,6 +1177,52 @@ let foldRaids (cap: int) (alive: Set<string>) (view: ColonyView) (prior: RaidSta
                         }
                         rooms
                 | None -> Map.remove room rooms)
+        // The guard row's memory of a raid (#366), on the two rules `Holds`
+        // above is kept by: a tick with vision decides a declared outpost
+        // either way — an armed Threat standing in it writes the memory
+        // forward, a room seen clear removes it — and a tick with no vision in
+        // that room leaves the last conclusion standing. `RoomControl` is the
+        // vision test for the same reason it is `Holds`': a seen room gets a
+        // truthful control entry whoever holds it (`World.ofGame`), so an entry
+        // is exactly "the colony looked into this room this tick".
+        //
+        // Where it parts from `Holds` is the clock. The engine counts a
+        // reservation down and ends that record for us; nothing counts a raid
+        // down, so the end is ours to choose and it is `Tuning.ThreatMemory`,
+        // sized at the guard's cast plus its walk. An expired entry is dropped
+        // here rather than filtered by every reader, so the leaf cannot
+        // accumulate raids that ended hours ago.
+        //
+        // Declared outposts alone, off the guard row's own derivation
+        // (`Planner.declaredOutposts`, the list `raidDeadlines` above reads):
+        // the [[home room]]'s raid is the [[keep]]'s business (ADR 0034), an
+        // [[errand]]'s is a withdrawal (#348), and a [[transit room]] hires
+        // nobody (#324) — a memory written for any of those would be one no
+        // reader could ever act on.
+        Threatened =
+            let standing =
+                prior.Threatened |> Map.filter (fun _ latch -> view.Time < latch.Until)
+
+            let declared = Fabot.Core.Decide.Planner.declaredOutposts view |> Set.ofList
+
+            let armedIn room =
+                view.Hostiles
+                |> List.exists (fun hostile ->
+                    hostile.Pos.Room = room && Decide.Facts.isArmed hostile)
+
+            (standing, view.RoomControl)
+            ||> Map.fold (fun rooms room _ ->
+                if not (Set.contains room declared) then
+                    rooms
+                elif armedIn room then
+                    Map.add
+                        room
+                        {
+                            Until = view.Time + view.Tuning.ThreatMemory
+                        }
+                        rooms
+                else
+                    Map.remove room rooms)
         Living = if Option.isSome episode then surviving else Set.empty
         // The damage baseline, carried on the same condition the damage is
         // charged on (#201): an open episode *and* a hostile in the room the

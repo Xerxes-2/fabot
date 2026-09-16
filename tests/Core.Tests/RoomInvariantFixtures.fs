@@ -176,6 +176,7 @@ let internal colonyOf (room: LoadedRoom) level =
         // sources are priced at the full rate (ADR 0042) — the sweep is
         // over one room and every one of them is a room with a spawn in it.
         HeldOutposts = Set.empty
+        ThreatenedOutposts = Set.empty
         RoomControl =
             Map.ofList
                 [
