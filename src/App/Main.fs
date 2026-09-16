@@ -190,17 +190,22 @@ let loop () =
         else
             Game.time % List.length views
 
+    // The decision is **bound** and then tupled, and the turn is a DU
+    // (`ReplanTurn`), because the first shape of this call shipped broken: as
+    // an expression inside the tuple with a `bool` last argument, the turn
+    // arrived as JavaScript `undefined` and `not undefined` is `true`, so
+    // every colony deferred every tick and no layout was planned at all
+    // (#357). `npm run profile` caught it and no test did, which is why the
+    // harness is now a pre-deploy gate and not a convenience.
     let decisions =
         views
         |> List.mapi (fun index (colony, view) ->
-            colony,
-            view,
-            decideUnarbitrated
-                view
-                assignments
-                verbose
-                (Map.tryFind colony.Home planMemos)
-                (index = turn))
+            let memo = Map.tryFind colony.Home planMemos
+
+            let whose = if index = turn then ReplanTurn.Now else ReplanTurn.Waiting
+
+            let decision = decideUnarbitrated view assignments verbose memo whose
+            colony, view, decision)
 
     // The one movement pass of the tick: every colony's Move Intents folded
     // together and arbitrated once per room, over every creep of ours standing

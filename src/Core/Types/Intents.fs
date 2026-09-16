@@ -318,6 +318,19 @@ type PlanMemo =
         FarFields: FarFieldTable
     }
 
+/// Whether this tick is a colony's turn to re-plan its layout (#357), and a DU
+/// rather than a `bool` because a missing DU argument cannot read as one of
+/// its cases: `not undefined` is `true` in JavaScript, so a `bool` that failed
+/// to arrive would read as "not my turn" and defer a colony forever, silently.
+/// A tag read off `undefined` throws instead, which is what an argument that
+/// did not arrive should do.
+[<RequireQualifiedAccess>]
+type ReplanTurn =
+    /// This colony re-plans if its memo is stale.
+    | Now
+    /// It serves what it has and owes a plan (`PlanMemo.deferred`).
+    | Waiting
+
 [<RequireQualifiedAccess>]
 module PlanMemo =
 

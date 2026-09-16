@@ -992,7 +992,7 @@ let planMemoTests =
                         Map.empty
                         Set.empty
                         (Some planned.Memo)
-                        false
+                        ReplanTurn.Waiting
 
                 Expect.equal
                     waiting.Memo.SiteIntents
@@ -1010,7 +1010,7 @@ let planMemoTests =
                         Map.empty
                         Set.empty
                         (Some planned.Memo)
-                        true)
+                        ReplanTurn.Now)
                         .Memo.Signature
                     planned.Memo.Signature
                     "which the next turn pays: the same view, planning allowed, signs the census it planned against"
@@ -1020,7 +1020,12 @@ let planMemoTests =
                 let staffed = staffedColony [ worker "w1" 0 50 ] [ "w1", { X = 22; Y = 25 } ]
 
                 let blind =
-                    decideUnarbitrated (staffed (trunkColony 2)) Map.empty Set.empty None false
+                    decideUnarbitrated
+                        (staffed (trunkColony 2))
+                        Map.empty
+                        Set.empty
+                        None
+                        ReplanTurn.Waiting
 
                 Expect.isEmpty
                     blind.Memo.SiteIntents
