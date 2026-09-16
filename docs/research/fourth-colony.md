@@ -301,7 +301,7 @@ GCL 每 tick 约 43.2（t302,458 的 5,939,008 → t491,564 的 14,104,557），
 
 1. **Layout 里没有 terminal**，而它是本季单票价值最高的一张（182,420 分的已有库存）。
 2. **`Keepers.centres` 里只有 W15S26**；第五、第六个房的交付路都要 W14S25 / W14S26 / W16S26。
-3. **CPU 已到 ADR 0041 的门上**（max 79.79 / 80），#332 与 #278 应当从 needs-triage 抬上去。
+3. **CPU 已到 ADR 0041 的门上**（max 79.79 / 80）。部署后实测 **mean 57.98 / max 103.95，门已经烧了**，`decide` 23.39 → 36.61。随后用 `profile --scenario pair --level 7` + `build/fabot.cpuprofile` 定位到了钱花在哪，**而且推翻了本文原先的猜测**：keeper mask（#332）在这个场景里是 **0%**，真正的大头是 `matchCreeps` **35.9%**，其中 `pricedAcrossInto`（跨房定价的 flood）**27.2%**；`ofViewRecalling`（铺 Atlas 的格子）10.9%；self time 里 `settleTo` 13.8% + `pop` 9.4% ≈ 四分之一个 tick 在 Dijkstra 里，另有 `value`（Fable 的 `Option.get`）12.8% 摊在 F# list/Map 内部。乘数是 (creep 数) × (跨房候选 Task 数)，而第四个 colony 把两者都乘大了 —— 归档为 **#353**，#278 打的是那 26%，#332 打的是小头。
 4. **W17S28 / W17S29 的五个丢 trunk 的 spawn 位**（`W17S28 6,30 / 12,12 / 18,12`、`W17S29 48,18 / 48,42`）是两个房未来入选时要先归档的反例。
 5. **`profile.mjs` 的第一个 self-check 把墙格数当成了地形的指纹**，于是一条真的 declaration 把闸门打红了：**W13S29 与 W12S29 恰好都是 710 个墙格**，三个站着多于一个房的场景全部失败并指控 stub “忽略了房名参数”（`stub` 只有一个房，闸门本身跳过）。本次一并修了（改成逐格比整张 grid，并把碰撞的那一对房名打出来）。**要读出来的一般结论**：这是 `third-colony.md` §8 那个 `DECLARED_UNFURNISHED` 缺口的同一个形状 —— #287 把“哪些房”从 harness 里抽走了，却留下了一个对“这些房长什么样”做哈希的校验。
 6. **§3 的六个“名字层接受、地形层拒绝”的房**说明 #259 的口子在真实地图上是常态而不是特例；`ColonyView.Refused` 这个渠道值得一个能从终端读的命令。
