@@ -402,6 +402,31 @@ type Tuning =
         /// would hold four colonies' worth of spawning energy to move ore that
         /// costs a twentieth of it.
         TerminalEnergy: int
+        /// How many of a generalist's 1,500 ticks the worker row's backlog term
+        /// assumes it spends **building** (#364). Not the lifetime, which is
+        /// what the term shipped with and what made it dead code on the colony
+        /// it was written for.
+        ///
+        /// Measured live at W13S28 on 2026-09-17, two windows over the terminal
+        /// site: **+3,985 over 120 ticks (33/tick)** with three workers on the
+        /// row, and **+1,666 over 108 ticks (15.4/tick)** with one to two. One
+        /// 16-Work body ought to put 80 a tick into a site, so the row was
+        /// running at a tenth to a fifth of its nominal rate, and a term that
+        /// divided by the whole lifetime answered "one body is enough" for a
+        /// backlog of 96,465 that had not moved in thousands of ticks.
+        ///
+        /// Where the rest of the time goes is the body's own carry cycle, and
+        /// the arithmetic agrees with the measurement: 16 Work drains the 16
+        /// Carry beside it in ten ticks, and then the body walks to the Storage
+        /// and back. Ten ticks of building against a twenty-tick round trip is
+        /// a third at best, less as the site gets further from the stock — so
+        /// 300 is the measured fifth and not a guess at the geometry.
+        ///
+        /// Sized at the **optimistic** end of the measured band on purpose: too
+        /// small a figure hires a crowd, and a crowd costs crowding (ADR 0020),
+        /// CPU (`docs/research/cpu-headroom.md`) and the energy of the bodies
+        /// themselves. The term is allowed to under-hire.
+        BuildTicksPerLife: int
         /// Ticks between courier casts while the delivery programme is open
         /// (#319). The loaded body's Atlas walk is 318 ticks over W15S28's
         /// 154-unit route, so a courier cast this often is always fresh
@@ -547,6 +572,7 @@ module Tuning =
             MineContactCliff = 1000
             ReactorLoad = 500
             TerminalEnergy = 4_000
+            BuildTicksPerLife = 300
             DeliveryInterval = 636
             ReclaimerOverlap = 25
             HorizonLookahead = 1

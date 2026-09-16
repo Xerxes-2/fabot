@@ -1046,8 +1046,16 @@ let internal workforceTarget (view: ColonyView) atlas (tasks: Task list) (rows: 
 
         let body = bodyFor workerPattern capacity
 
+        // `Tuning.BuildTicksPerLife` and **not** `Engine.creepLifetime`, which
+        // is what this term shipped with an hour earlier and what made it dead
+        // code on the colony it was written for: a 16-Work body nominally
+        // clears 120,000 over a whole life, so W13S28's 96,465 answered "one
+        // body is enough" for a site that had not moved in thousands of ticks.
+        // Live it was building at a tenth to a fifth of nominal, because a
+        // generalist spends most of its life carrying its own energy — the two
+        // measured windows are in that field's own docstring.
         let clearedPerLife =
-            partCountIn body Work * Engine.buildPerWork * Engine.creepLifetime
+            partCountIn body Work * Engine.buildPerWork * view.Tuning.BuildTicksPerLife
 
         if owed = 0 || clearedPerLife = 0 then
             0

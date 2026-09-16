@@ -839,16 +839,21 @@ let backlogWorkforceTests =
                     "a terminal's 100,000 is not, and the row grows for it"
 
                 // The arithmetic is labour and not energy: a Work part puts
-                // `Engine.buildPerWork` in a tick, so one body clears
-                // `work × 5 × 1,500` over a life, and the term is what clears
-                // the backlog inside one lifetime.
+                // `Engine.buildPerWork` in a tick, and the ticks it spends
+                // doing so are `Tuning.BuildTicksPerLife` — a **fifth** of a
+                // life, measured live, because the body spends the rest
+                // carrying its own energy. Dividing by the whole lifetime is
+                // what made this term answer zero for W13S28's 96,465 that had
+                // not moved in thousands of ticks.
                 let body = Bodies.bodyFor Bodies.workerPattern banked.Bank.Capacity
-                let perLife = partCountIn body Work * Engine.buildPerWork * Engine.creepLifetime
+
+                let perLife =
+                    partCountIn body Work * Engine.buildPerWork * banked.Tuning.BuildTicksPerLife
 
                 Expect.equal
                     (targetOf (banked |> owing [ perLife ]) - targetOf banked)
                     1
-                    "exactly one lifetime of building hires exactly one body"
+                    "exactly one body's worth of building hires exactly one body"
 
                 // Floored, where every other division in `Quota` is a ceiling
                 // (ADR 0037): what a ceiling rounds up here is a whole body for
