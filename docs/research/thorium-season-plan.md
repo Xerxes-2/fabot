@@ -5,6 +5,16 @@ Date: 2026-09-13, live tick 396,515–396,757 on `shardSeason`. Supersedes the s
 re-verified today against `mod-season5` (`da59118`); its **numbers about us, the board and the
 sector** are all stale, and §6 below lists every one.
 
+> **Every live number below is superseded by `docs/research/fourth-colony.md` (2026-09-16, tick 491,332).**
+> The rules and the score arithmetic of this note still stand and were re-read there; the situation has
+> moved on every axis: the reactor W15S25 is **ours** (not Odiodin's) and still dry, score 0, *last
+> delivery never*; W12S28 and W13S28 are **RCL7 with extractors**, their deposits **mined out and
+> deleted**, 36,484 T banked between them with no way to deliver it; W15S28 is RCL6 with 19,760 T left
+> in the ground; GCL is 14,104,557 (four rooms); the board's leader is `giaco` at 511,561; and the
+> measured tick rate is 2,738 ms, leaving ~1,475,000 ticks. The one *rule* the newer note adds:
+> `terminal-restriction.js` blocks only sends to **another user's** terminal, so our own terminals can
+> move Thorium — which is what that 36,484 T is waiting on.
+
 ## Summary
 
 - **Time is not the binding constraint, and it is not close.** The season ends 2026-11-01; the

@@ -411,6 +411,73 @@ module Outpost =
             Controller = "6a8caa95dd4872bccd319015", { Room = "W15S28"; X = 25; Y = 31 }
         }
 
+    /// The fourth colony's room, declared 2026-09-16 off
+    /// `docs/research/fourth-colony.md`: **one** source, and a d4 Thorium
+    /// deposit of **45,000** — the richest deposit a chain of ours reaches and
+    /// twice any *reachable* rival candidate's, which is the whole of why a
+    /// one-source room is here at all. A source buys RCL and the season is scored in Thorium; 45,000 T
+    /// is about 225,000 score at the 5-a-tick band — more once the cumulative
+    /// burn passes 99,999 ticks and the marginal T is worth 6 — and the one
+    /// source only moves the
+    /// tick RCL6 arrives on, which the research puts around t750,000 against a
+    /// season ending near t1,966,000.
+    ///
+    /// **What the research found that no earlier survey had: terrain, not
+    /// economics, decided this.** Counted the way ADR 0062 counts — both rings,
+    /// the ground behind the landing, and the keeper margin — W9S28 carries the
+    /// same d4 45,000 with *two* sources and is walled off entirely
+    /// (`W11S28 ↔ W10S28` and `W10S28 ↔ W9S28` are both empty bands, so the
+    /// highway column is sealed on both sides along this row); W13S25,
+    /// `third-colony.md`'s runner-up and
+    /// the one room that can price the Reactor at two crossings, opens onto
+    /// nothing but the Source Keeper room W14S25; W11S26 opens only north; and
+    /// W13S26 is W12S28's three-hop room rather than W13S28's two-hop one,
+    /// because `W13S26 ↔ W13S27` is empty too. **Six** outpost declarations
+    /// the names would accept and the ground refuses — W9S28 and W11S26 from
+    /// W12S28, W13S25 and W13S26 from W13S28, W16S28 at *one* hop and W17S28 at
+    /// two from W15S28 — and a seventh refusal of the errand kind, W12S25's
+    /// reactor chain. #259's shape is the common case on this map and not the
+    /// exception.
+    ///
+    /// **One source, one door.** `W11S28 ↔ W11S29` is empty as well, so this
+    /// room is entered from W12S29 and from nowhere else a body can walk; its
+    /// other two borders are the highways W10S29 and W11S30, which carry no
+    /// controller and can never be outposts of it. That is the cheapest
+    /// defensive frontage of any candidate and the thinnest outpost future.
+    ///
+    /// **Its Thorium is not deliverable by any walk, and that is deliberate.**
+    /// W15S25 is eight crossings away, so this room will never declare
+    /// `Errand.w15s25`. What moves the ore is a terminal — `mod-season5`'s
+    /// `terminal-restriction.js` nulls only a `send` whose target terminal is
+    /// somebody else's, so our own terminals should be able to send Thorium to
+    /// each other for about 125 energy per 1,000 T over this range, which the
+    /// research read off that file and off `calcTerminalEnergyCost` and
+    /// **marks unverified**: nothing has sent a unit of Thorium on this server
+    /// and `engine`'s own `terminal/tick.js` was not re-read. That capability
+    /// is owed to the **36,484 T already banked in W12S28 and W13S28** (35,564
+    /// in the two storages, 920 in their mineral containers), worth 182,420
+    /// score, whichever room is claimed next. The
+    /// research therefore chose on ore in the ground rather than on walking
+    /// distance, and says plainly that if the terminal is refused the right
+    /// fourth room is W13S26 instead.
+    ///
+    /// Declared as W13S28's outpost and as a colony of its own on the same day
+    /// (ADR 0047's candidate-colony arrangement), with W13S28 as the mother
+    /// rather than the two-hop W12S28 because a mother lends stock and not
+    /// distance: W12S28's storage was measured at 0 rising to 3,746 over three
+    /// hundred ticks with every spare unit going into its own controller, while
+    /// W13S28's holds 625,402. W13S29, W12S28, W12S29 and W11S28 — the whole
+    /// interior of `transitBetween`'s rectangle, W12S28's own home among them —
+    /// enter the projection as transit rooms carrying terrain and a border ring
+    /// (`OutpostDeclarationTests` pins the list). The ids and tiles are the
+    /// engine's, read the day it was declared.
+    let w11s29: Outpost =
+        {
+            RoomName = "W11S29"
+            Sources = [ "6a8caac6dd4872bccd3195f5", { Room = "W11S29"; X = 7; Y = 33 } ]
+            Controller = "6a8caac6dd4872bccd3195f4", { Room = "W11S29"; X = 30; Y = 29 }
+        }
+
 /// One errand: a room a colony declares because it must walk a body there and
 /// act on **one** named object in it, and for no other reason (ADR 0060
 /// decision 1). A room name and that object's engine id and tile, and nothing
@@ -795,7 +862,16 @@ module Colony =
                 // raises, whose every site is feeding-tier (ADR 0047 decision
                 // 4). Live proof: claimed at t~305,2xx, spawn site placed by
                 // hand, and not one body crossed until this line changed.
-                Outposts = [ Outpost.w13s29 ]
+                // W11S29 joins it on 2026-09-16 as the fourth colony's room
+                // (`docs/research/fourth-colony.md`): three crossings out by
+                // W13S29 and W12S29, declared here so its controller enters
+                // this colony's pool as a Claim, and **to be taken out of this
+                // list the day that Claim lands** — which is the paragraph
+                // about W15S28 further down this entry, and the same rule about the haul: this
+                // colony runs a 2,780 demand on two haulers today, and one
+                // more source three crossings out is the shape that took
+                // W14S28 from 2,790 to 4,810 and two haulers to four.
+                Outposts = [ Outpost.w13s29; Outpost.w11s29 ]
                 // Five crossings to the Reactor, so this colony declares no
                 // errand either — and the 22,000 Thorium it banks is ore
                 // nothing here can deliver, which ADR 0060 decision 3 files as
@@ -820,6 +896,29 @@ module Colony =
                 // because this colony is the only one that can reach it, which
                 // is the room's whole reason for being where it is.
                 Errands = [ Errand.w15s25 ]
+                Mother = Some "W13S28"
+            }
+            // The fourth colony (2026-09-16, `docs/research/fourth-colony.md`).
+            // The entry with no spawn behind it *is* the decision to take the
+            // room, exactly as the third colony's was: W13S28 projects it as an
+            // outpost by the line above, and this line turns that room's
+            // controller from a Reserve into a Claim.
+            //
+            // No outposts: the only room this could ever declare is W12S29 —
+            // one source, and W12S28's own candidate — because the two borders
+            // open beside it land on the highways W10S29 and W11S30, which
+            // carry no controller, and the fourth border is wall. And a room
+            // worked from a colony that does not exist is a body bought for
+            // nobody.
+            // And no errand, by eight crossings — the 45,000 Thorium under this
+            // room is ore no walk of ours can deliver, and the terminal that
+            // can is owed to the 36,484 T already banked in the two homes
+            // rather than to this room (ADR 0060 decision 3's open question,
+            // one room wider).
+            {
+                Home = "W11S29"
+                Outposts = []
+                Errands = []
                 Mother = Some "W13S28"
             }
         ]

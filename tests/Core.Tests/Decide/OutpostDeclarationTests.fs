@@ -1491,8 +1491,8 @@ let outpostTests =
 
                 Expect.equal
                     (Colony.homes Colony.declared)
-                    [ "W12S28"; "W13S28"; "W15S28" ]
-                    "three colonies are declared: the room this bot has always run, the one it raised, and today's candidate (ADR 0047)"
+                    [ "W12S28"; "W13S28"; "W15S28"; "W11S29" ]
+                    "four colonies are declared: the room this bot has always run, the one it raised, the one that raised itself into a spawn, and today's candidate (ADR 0047)"
 
                 Expect.equal
                     (outposts |> List.map (fun outpost -> outpost.RoomName))
@@ -1507,8 +1507,8 @@ let outpostTests =
                 Expect.equal
                     (Colony.outpostsOf Colony.declared "W13S28"
                      |> List.map (fun outpost -> outpost.RoomName))
-                    [ "W13S29" ]
-                    "and the second colony works its south outpost alone while it raises a child (W14S28 withdrawn by hand)"
+                    [ "W13S29"; "W11S29" ]
+                    "and the second colony works its south outpost beside the fourth colony's room, which is hers to project until that Claim lands (W14S28 withdrawn by hand)"
 
                 // W15S28 is declared and is **not** an outpost of anybody's:
                 // it is owned, so it is a room its mother raises and not one
@@ -1538,8 +1538,17 @@ let outpostTests =
                         (Colony.errandsOf Colony.declared "W13S28")
                         [ "W15S28" ]
                         "W13S28")
-                    [ "W13S28"; "W13S29"; "W15S28"; "W14S28" ]
-                    "the home, its outpost, the nursery two hops out, and the transit room on the way to it"
+                    [
+                        "W13S28"
+                        "W13S29"
+                        "W11S29"
+                        "W12S28"
+                        "W12S29"
+                        "W11S28"
+                        "W15S28"
+                        "W14S28"
+                    ]
+                    "the home, its two outposts, the transit rooms on the way to the three-hop one — the whole rectangle `transitBetween` names, W12S28's own home among them — the nursery two hops out, and the transit room on the way to it"
 
                 Expect.isEmpty
                     (Colony.outpostsOf Colony.declared "W1N1")

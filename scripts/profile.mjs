@@ -4477,31 +4477,42 @@ if (scenario === "reactor") {
 }
 
 // Harness self-check, before a tick is ever run: the terrain query answers
-// by room name. Each room is counted by its own wall tiles read back
-// through `Game.map.getRoomTerrain`, and two rooms answering the same count
-// would mean the argument is being ignored — the defect this scenario
-// exists to rule out. Validate the harness before trusting it: a
-// single-terrain stub would have measured the outpost scenario as the home
-// room three times over and said nothing.
-const wallsOf = (roomName) => {
+// by room name. Each room's grid is read back through
+// `Game.map.getRoomTerrain` and compared **tile by tile** against the ones
+// before it, because two rooms answering the identical grid would mean the
+// argument is being ignored — the defect this scenario exists to rule out.
+// Validate the harness before trusting it: a single-terrain stub would have
+// measured the outpost scenario as the home room three times over and said
+// nothing.
+//
+// The comparison is the whole grid and **not** the wall count, which is what
+// it was until 2026-09-16: a count is a hash with collisions, and the fourth
+// colony's declaration produced one on the first try — W13S29 and W12S29 both
+// hold exactly 710 wall tiles over entirely different terrain, so the three
+// scenarios that stand more than one room failed this gate with a message
+// accusing the stub of a defect it did not have
+// (`docs/research/fourth-colony.md` §10). A gate that goes red on a true
+// declaration is a gate nobody can keep.
+const gridOf = (roomName) => {
   const terrain = game.map.getRoomTerrain(roomName);
-  let walls = 0;
+  const tiles = [];
   for (let x = 0; x < 50; x++) {
-    for (let y = 0; y < 50; y++) if ((terrain.get(x, y) & WALL) !== 0) walls++;
+    for (let y = 0; y < 50; y++) tiles.push((terrain.get(x, y) & WALL) !== 0 ? "1" : "0");
   }
-  return walls;
+  return tiles.join("");
 };
 const worldRooms = [...terrainReads.keys()];
-const wallCounts = worldRooms.map((name) => [name, wallsOf(name)]);
-if (
-  worldRooms.length > 1 &&
-  new Set(wallCounts.map(([, n]) => n)).size !== worldRooms.length
-) {
+const grids = worldRooms.map((name) => [name, gridOf(name)]);
+if (worldRooms.length > 1 && new Set(grids.map(([, g]) => g)).size !== worldRooms.length) {
+  const seen = new Map();
+  const clashes = [];
+  for (const [name, grid] of grids) {
+    if (seen.has(grid)) clashes.push(`  ${seen.get(grid)} and ${name} answer the identical grid`);
+    else seen.set(grid, name);
+  }
   console.error(
     "the stub's terrain query answers the same grid for two rooms — it is ignoring its argument:\n" +
-      wallCounts
-        .map(([name, walls]) => `  ${name}  ${walls} wall tiles`)
-        .join("\n"),
+      clashes.join("\n"),
   );
   process.exit(1);
 }
@@ -4817,15 +4828,16 @@ console.log(
       .join(", "),
 );
 
-// The self-check's evidence, printed rather than only asserted: a wall
-// count is a cheap fingerprint of a fifty-by-fifty grid, so distinct counts
-// are the harness saying out loud that the query read its argument.
+// The self-check's evidence, printed rather than only asserted. The wall
+// count is what gets printed and never what gets compared: it reads at a
+// glance, and two rooms may honestly share one (W12S29 and W13S29 both
+// hold 710), which is why the gate above compares the grids themselves.
 console.log(
   "terrain query answers by room name: " +
-    wallCounts
-      .map(([name, walls]) => `${name} ${walls} wall tiles`)
+    grids
+      .map(([name, grid]) => `${name} ${[...grid].filter((t) => t === "1").length} wall tiles`)
       .join(", ") +
-    (worldRooms.length > 1 ? " (all distinct)" : ""),
+    (worldRooms.length > 1 ? " (all grids distinct)" : ""),
 );
 
 // The observe channel's CPU line as the bundle itself wrote it (ADR 0041),
@@ -4880,7 +4892,7 @@ if (!Array.isArray(cpuLine) || cpuLine.length === 0) {
 // — a declaration removed, or a stand-down shutting one — because those
 // ms are then fewer rooms' projection than the world in front of it, and
 // nothing else in the report would say so.
-const projected = wallCounts
+const projected = grids
   .filter(([name]) => terrainReads.get(name) > 0)
   .map(([name]) => name);
 const unprojected = worldRooms.filter((name) => !projected.includes(name));
