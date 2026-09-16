@@ -880,6 +880,7 @@ let colonyAt (capture: RoomCapture) (level: int) (bank: int) : ColonyView =
         // 1), and this fixture declares none — so no Reclaim is pooled and
         // no seat of the reserver row is the re-claimer's (#318).
         Errands = []
+        Reactors = []
         // And nothing remembered of a room it cannot see: these captures
         // are ticks with vision in every room they carry (#151).
         Sightings = Map.empty

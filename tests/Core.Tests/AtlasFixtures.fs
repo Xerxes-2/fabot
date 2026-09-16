@@ -53,6 +53,7 @@ let snapshotWith creeps spatial =
         // 1), and this fixture declares none — so no Reclaim is pooled and
         // no seat of the reserver row is the re-claimer's (#318).
         Errands = []
+        Reactors = []
         // And nothing remembered of a room it cannot see: the sighting map
         // is the Matcher's alone and the Atlas prices nothing off it (#151).
         Sightings = Map.empty

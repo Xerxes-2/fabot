@@ -150,6 +150,20 @@ type ColonyView =
         /// outside `Tuning.MaxHops`, and a room they cannot price is a room they
         /// do not project.
         Errands: Errand list
+        /// The declared sector Reactors this colony can see, with the store and
+        /// streak `RoomFacts.Reactors` carries (#354). Narrowed exactly as the
+        /// errand's other facts are — `erranding` keeps the rows whose id the
+        /// declaration names — so a Reactor in a transit room we merely walk
+        /// through contributes nothing.
+        ///
+        /// This is the one fact about a Reactor a *decision* reads. Its store
+        /// is deliberately absent from `SpatialInfo.Thorium`, and the first
+        /// version of #354's draw gate read it there anyway: the projection
+        /// answered 0 for a store holding 999, the gate never closed, and ore
+        /// went on arriving at a full Reactor and reaching its floor. The
+        /// fixture agreed with the gate because it wrote the store where the
+        /// gate looked, which is a shape `World` has never produced.
+        Reactors: ReactorInfo list
         /// The [[stage]] of every room that is a colony of ours this tick
         /// (`World.stages`, ADR 0052 decision 3) — this colony's own and its
         /// children's alike, the same map handed to every colony because a
@@ -673,6 +687,15 @@ module ColonyView =
             // the projection does not hold, which is #243's silence with a
             // bigger body standing beside the spawn.
             Errands = errands
+            // The declared Reactors' own rows, over the same scan set the
+            // errands were narrowed to (#354). The store here is what meters a
+            // delivery: the Reactor burns 1 T a tick against a 1,000-unit cap,
+            // so a draw at the Storage has to be answered against *its* level
+            // and nothing else. A room without vision contributes no row, and
+            // no row reads as "no room for a load" (ADR 0004) — which keeps a
+            // load banked at home rather than drawn towards a store nobody can
+            // see.
+            Reactors = worked |> List.collect (fun (_, facts) -> facts.Reactors)
             Stages = stages
             // The bodies in these rooms that are not this colony's, each
             // tile joined to the room it stands in (ADR 0052 decision 2): a

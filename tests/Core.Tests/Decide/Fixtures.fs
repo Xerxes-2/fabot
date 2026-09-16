@@ -200,6 +200,7 @@ let bareRespawn =
         // 1), and this fixture declares none — so no Reclaim is pooled and
         // no seat of the reserver row is the re-claimer's (#318).
         Errands = []
+        Reactors = []
         // And nothing remembered of a room it cannot see (#151): a fixture
         // is a tick with vision wherever it lays a fact, so an empty
         // sighting map is what every case here decides under, and the
@@ -1794,6 +1795,48 @@ let withReactorOwner owner (colony: ColonyView) =
                     | Some who -> Map.add reactorId who colony.Spatial.Owners
                     | None -> colony.Spatial.Owners
             }
+        // The Reactor's own row travels with its ownership, because in the
+        // shell both come off one `FIND_REACTORS` sweep of one object
+        // (`World.reactorFacts`): vision gives ownership *and* store together,
+        // or gives neither. A fixture that could carry one without the other
+        // would let a rule read a store in a room this colony cannot see.
+        Reactors =
+            match owner with
+            | Some who ->
+                [
+                    {
+                        Id = reactorId
+                        Owner =
+                            if who = Ownership.Ours then
+                                ReactorOwner.Ours
+                            else
+                                ReactorOwner.Rival "somebody"
+                        Thorium = 0
+                        ContinuousWork = 0
+                    }
+                ]
+            | None -> []
+    }
+
+/// What the declared Reactor's store holds (#354). Beside `withReactorOwner`
+/// and never instead of it: no vision, no row, and a colony that cannot see the
+/// Reactor draws nothing towards it.
+///
+/// The store is set **here**, on the Reactor's row, and not in
+/// `SpatialInfo.Thorium` — which carries every store a Task can name and
+/// deliberately not this one. #354's draw gate was written against the wrong
+/// map and its first test agreed with it, because the test wrote the store
+/// where the gate looked: 999 T in the projection read as 0, the gate never
+/// closed in flight, and the ore reached the Reactor room's floor anyway.
+let withReactorStore (held: int) (colony: ColonyView) =
+    { colony with
+        Reactors =
+            colony.Reactors
+            |> List.map (fun reactor ->
+                if reactor.Id = reactorId then
+                    { reactor with Thorium = held }
+                else
+                    reactor)
     }
 
 /// The buffer lane (ADR 0046): a plain corridor three rows deep, the

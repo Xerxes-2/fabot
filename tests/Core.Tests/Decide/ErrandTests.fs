@@ -906,14 +906,7 @@ let courierTests =
             // load admitted here has more room when it lands than when it left.
             test "the draw waits for the Reactor to have room for a whole load" {
                 let withStore held =
-                    let ready = deliveryColony (Some Ownership.Ours)
-
-                    { ready with
-                        Spatial =
-                            { ready.Spatial with
-                                Thorium = Map.add reactor held ready.Spatial.Thorium
-                            }
-                    }
+                    deliveryColony (Some Ownership.Ours) |> withReactorStore held
 
                 let room = Engine.reactorCapacity - Tuning.defaults.ReactorLoad
 
@@ -955,6 +948,49 @@ let courierTests =
                 Expect.isFalse
                     (tasks |> List.contains (Withdraw("sto-1", Thorium)))
                     "and the draw behind it stays shut"
+            }
+
+            // The regression the first version of this gate shipped (#354).
+            // `SpatialInfo.Thorium` carries every store a Task can name and
+            // deliberately not the Reactor's — `RoomFacts.Thorium`'s own
+            // comment says so — and the gate read it there anyway: a Reactor
+            // holding 999 answered 0, the gate never closed once in flight, and
+            // ore went on arriving at a full store and reaching its floor.
+            //
+            // What made it invisible is the part worth pinning: the test agreed
+            // with the gate, because the fixture wrote the store where the gate
+            // looked. This case writes the Reactor's store into that map on
+            // purpose and asserts the gate does **not** see it.
+            test "the draw reads the Reactor's own row, and no Thorium map beside it" {
+                let ready = deliveryColony (Some Ownership.Ours)
+
+                let inTheWrongMap =
+                    { ready with
+                        Spatial =
+                            { ready.Spatial with
+                                Thorium =
+                                    Map.add reactor Engine.reactorCapacity ready.Spatial.Thorium
+                            }
+                    }
+
+                Expect.contains
+                    (planTasksOn inTheWrongMap noThreats)
+                    (Withdraw("sto-1", Thorium))
+                    "a full store written where the projection never writes one changes nothing"
+
+                Expect.isFalse
+                    (planTasksOn (ready |> withReactorStore Engine.reactorCapacity) noThreats
+                     |> List.contains (Withdraw("sto-1", Thorium)))
+                    "the same number on the Reactor's own row closes the draw"
+
+                // And the row's absence is a closed draw, not an open one: a
+                // Reactor we cannot see has no store to answer with, and a load
+                // is better banked at home than walked towards a level nobody
+                // read (ADR 0004).
+                Expect.isFalse
+                    (planTasksOn { ready with Reactors = [] } noThreats
+                     |> List.contains (Withdraw("sto-1", Thorium)))
+                    "no vision, no row, no draw"
             }
 
             // The other half of #354: the ore that reached the floor could be

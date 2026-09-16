@@ -338,16 +338,26 @@ let internal ourThoriumPiles (view: ColonyView) : string list =
 /// drawn. That is what makes a partial transfer — and so a courier holding
 /// ore it cannot put down — unreachable rather than merely unlikely.
 ///
-/// A Reactor we cannot see answers `false`: no store, no room (ADR 0004).
-/// That closes the draw and leaves the load banked at home, which is where a
-/// load with nowhere to go belongs.
+/// A Reactor we cannot see answers `false`: no row, no room (ADR 0004). That
+/// closes the draw and leaves the load banked at home, which is where a load
+/// with nowhere to go belongs.
+///
+/// Read off `view.Reactors` and **not** off `SpatialInfo.Thorium`, which
+/// carries every store a Task can name and deliberately not this one
+/// (`RoomFacts.Thorium`'s own comment). The first version of this gate asked
+/// the wrong map: it answered 0 for a Reactor holding 999, so the gate never
+/// closed once in flight, and ore went on arriving at a full store and ending
+/// up on its floor. The unit test agreed with it because the fixture wrote the
+/// store where the gate looked — a projection shape `World` has never built.
 let internal reactorTakesALoad (view: ColonyView) : bool =
     view.Errands
     |> List.exists (fun errand ->
         let reactorId = fst errand.Target
 
-        SpatialInfo.heldIn view.Spatial Thorium reactorId + view.Tuning.ReactorLoad
-        <= Engine.reactorCapacity)
+        view.Reactors
+        |> List.exists (fun reactor ->
+            reactor.Id = reactorId
+            && reactor.Thorium + view.Tuning.ReactorLoad <= Engine.reactorCapacity))
 
 /// The **mineral [[container]]s** of this colony's own deposits, in deposit
 /// order (ADR 0057 decision 3): the built container standing on a deposit's
