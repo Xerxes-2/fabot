@@ -1063,6 +1063,33 @@ let planPool (view: ColonyView) atlas (tasks: Task list) : PooledTask list =
         // has no better; the container's own overflow penalty is 0.3 energy a
         // tick of repair. **Asked before the kind**, because the store it names
         // is a container and would otherwise answer Feeding.
+        // **Except the delivery's own draw, which is Feeding** (#367). The
+        // paragraph above is right about the *mine* haul — ore into the Storage
+        // is stock work, and a miner's 3.33 T/tick against a cadence consuming
+        // 1.25 has 2.6× of slack — and it was wrong about the one draw whose
+        // sink is the Reactor. That load is not stock being topped up: it is
+        // the season's score, and the store it feeds burns 1 T a tick against a
+        // streak worth 4 points a unit.
+        //
+        // Live at t506,631-507,096 this cost the streak. The courier scored the
+        // delivery draw at rank 8 every tick while ordinary energy hauling
+        // scored -2 and 0, so it hauled energy for 465 ticks and the Reactor
+        // fell 500 -> 47. The pool had not changed; the colony had — W15S29's
+        // two source containers, the terminal's arrival haul and the mine haul
+        // between them mean there is now *always* energy work, and "the work a
+        // body does when it has no better" became work nobody ever did.
+        //
+        // Told apart by the store, which is the same test the Emitter's own
+        // delivery clause uses (`deliveryDraw`): a Storage's Thorium goes to
+        // the Reactor, a container's or a pile's goes to the Storage. And only
+        // while the programme that walks it is actually open — with no resident
+        // re-claimer and no errand there is no delivery for this rung to be
+        // about, and the ore is plain stock again.
+        | Withdraw(storeId, Thorium) when
+            Map.tryFind storeId view.Spatial.TargetKinds = Some(Structure BuiltKind.Storage)
+            && Facts.courierProgrammeOpen view atlas
+            ->
+            Feeding
         | Withdraw(_, Thorium) -> StockDraw
         | Withdraw(storeId, Energy) ->
             if Map.tryFind storeId view.Spatial.TargetKinds = Some(Structure BuiltKind.Storage) then

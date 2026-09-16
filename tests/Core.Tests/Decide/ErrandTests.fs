@@ -1627,3 +1627,59 @@ let consignmentTests =
                     "and a colony with no consignee declared ships nothing, whatever its terminal holds"
             }
         ]
+
+/// #367: the one Thorium draw whose sink is the Reactor, and the tier it ranks
+/// on. Filed under the errand because that is what makes this draw unlike every
+/// other one — there is a programme at the far end that turns the load into
+/// score, and a store at the far end that burns 1 T a tick whether or not the
+/// load arrives.
+[<Tests>]
+let deliveryRankTests =
+    testList
+        "the delivery's rank"
+        [
+            test "the delivery's own draw outranks the energy hauling beside it" {
+                // Live at t506,631-507,096 it did not. The courier scored
+                // `withdraw:<storage>:Thorium` at rank 8 every tick while
+                // ordinary energy hauling scored -2 and 0, so it hauled energy
+                // for 465 ticks and the Reactor fell from 500 T to 47 with
+                // 35,376 T banked ten tiles away. Nothing in the pool had
+                // changed; the colony had — W15S29's two source containers, the
+                // terminal's arrival haul and the mine haul between them mean
+                // there is now *always* energy work, and ADR 0057 decision 3's
+                // "the work a body does when it has no better" became work
+                // nobody ever did.
+                let delivering = deliveryColony (Some Ownership.Ours)
+
+                let rankOf colony task =
+                    poolOn colony
+                    |> List.tryPick (fun pooled ->
+                        if pooled.Task = task then Some pooled.Priority else None)
+
+                // Stated as a tier and not against a neighbour task, because
+                // what it competes with is every Feeding-tier intake in the
+                // colony and this fixture carries only some of them: the claim
+                // is that the draw now sits *in* that tier instead of one below
+                // it, which is exactly the -2 against 8 the live scoring showed.
+                Expect.isLessThan
+                    (rankOf delivering (Withdraw("sto-1", Thorium)))
+                    (Some(priorityOfTier StockDraw))
+                    "the score's own load is no longer stock work: it beats every StockDraw rung outright"
+
+                Expect.isLessThanOrEqual
+                    (rankOf delivering (Withdraw("sto-1", Thorium)))
+                    (Some(priorityOfTier Feeding))
+                    "and it sits inside the Feeding tier, which is the tier the energy hauling it lost 465 ticks to is on"
+
+                Expect.equal
+                    (rankOf delivering (Withdraw("sto-1", Thorium))
+                     |> Option.map (fun rank -> rank - priorityOfTier Feeding))
+                    (Some -2)
+                    "two rungs up inside it — the rungs are the Storage's own and this change does not touch them"
+
+                Expect.isGreaterThanOrEqual
+                    (rankOf (mineHaulColony |> withMineStock 600) (Withdraw("can-min", Thorium)))
+                    (Some(priorityOfTier StockDraw - tierRungs / 2))
+                    "and the mine's own haul stays on the Storage's tier: ore *into* the Storage is exactly the stock work decision 3 ranked"
+            }
+        ]
