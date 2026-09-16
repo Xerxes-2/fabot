@@ -545,7 +545,7 @@ let walkRecallTests =
                 // an Atlas handed a filled table reads the entry instead of
                 // running the Dijkstra a second time.
                 let walks = WalkTable()
-                let first = corridorSnapshot () |> ofViewRecalling walks (FarFieldTable())
+                let first = corridorSnapshot () |> ofViewRecalling walks (FarFieldMemo.empty ())
 
                 Expect.equal
                     (castWalkTicks first hauler spawnTile (at home goal))
@@ -555,7 +555,7 @@ let walkRecallTests =
                 Expect.equal walks.Count 1 "and leaves the flood in the table it was handed"
                 let flooded = flood walks
 
-                let second = corridorSnapshot () |> ofViewRecalling walks (FarFieldTable())
+                let second = corridorSnapshot () |> ofViewRecalling walks (FarFieldMemo.empty ())
 
                 Expect.equal
                     (castWalkTicks second hauler spawnTile (at home goal))
@@ -574,7 +574,7 @@ let walkRecallTests =
                 // flooded into, so a caller that dropped its memo prices the
                 // same lead off its own Dijkstra.
                 let fresh = WalkTable()
-                let atlas = corridorSnapshot () |> ofViewRecalling fresh (FarFieldTable())
+                let atlas = corridorSnapshot () |> ofViewRecalling fresh (FarFieldMemo.empty ())
 
                 Expect.equal
                     (castWalkTicks atlas hauler spawnTile (at home goal))

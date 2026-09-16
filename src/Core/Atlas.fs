@@ -78,6 +78,15 @@ type Atlas =
             /// room name; the flood prices these tiles dearer so paths
             /// detour around standing traffic.
             Occupied: Map<string, bool[]>
+            /// The occupied tiles of a room, in one string, memoised per room
+            /// name: the sign a traffic-aware far field is keyed under
+            /// (`FarFieldTable`, `docs/research/cpu-headroom.md` §5.1). Laid
+            /// lazily and read off the array above rather than off the creeps
+            /// that filled it, so what signs a flood is what the flood prices
+            /// and the two cannot drift apart — at the cost of one pass over
+            /// a room's tiles, paid only for the rooms a chain is priced over
+            /// (four a tick on `pair --level 7`) and only when one is.
+            OccupancySigns: System.Collections.Generic.Dictionary<string, string>
             /// Memoised Dijkstra flood per placed creep's tile, fatigue factor
             /// and pricing, forced at most once per tick and shared by every
             /// query pricing from it (ADR 0002). Bodies of the same factor at
@@ -92,6 +101,11 @@ type Atlas =
             /// however many tiles are read off it, so the Seats of every source
             /// share one answer.
             SeamWalks: System.Collections.Generic.Dictionary<string * string, int[]>
+            /// Memoised Seam band per ordered room pair — the tile pairs
+            /// `seams` answers with, which every hop of every chain priced
+            /// reads and which nothing about a creep or a Task can move
+            /// (`docs/research/cpu-headroom.md` §5.4).
+            Seams: System.Collections.Generic.Dictionary<string * string, (Pos * Pos) list>
             /// Memoised far leg per **chain** of rooms — `FarFloods` with the
             /// room replaced by the route the walk crosses (ADR 0058). A
             /// chain of one room is the one-hop far leg the join has always
@@ -99,20 +113,16 @@ type Atlas =
             /// pricing; a longer chain is that flood with a hop's seeds
             /// folded on per further room.
             ///
-            /// This one holds the **traffic-aware** pricing alone and dies
-            /// with the Atlas, because occupancy is this tick's fact; its
-            /// traffic-blind half lives in `FarFields` beside it and outlives
-            /// the tick. Two tables and not one, and the split is by the one
-            /// thing that decides a field's lifetime rather than by the
-            /// caller's taste: `farFieldAlong` picks by the pricing, so no
-            /// reader can ask for the wrong one.
-            TickFarFields: FarFieldTable
-            /// The same far legs under the traffic-blind pricings, held
-            /// across ticks on the plan memo's census signature (ADR 0032,
-            /// `docs/research/cpu-headroom.md` §5.1). Filled here, handed
-            /// back by `Decide.decideUnarbitrated` to the next tick, and
-            /// replaced by an empty table the tick the signature moves.
-            FarFields: FarFieldTable
+            /// The three tables that holds them, split by lifetime and never
+            /// by the caller's taste: `farFieldAlong` picks by the pricing and
+            /// by the crowd standing in the chain, so no reader can ask for
+            /// the wrong one (`FarFieldMemo`,
+            /// `docs/research/cpu-headroom.md` §5.1). All three are filled
+            /// here and two of them are handed back by
+            /// `Decide.decideUnarbitrated` to the next tick — the census one
+            /// while the signature stands, the tick one always, as the next
+            /// tick's `LastTick`.
+            FarFields: FarFieldMemo
             /// Memoised room chains per ordered room pair — every chain of the
             /// fewest crossings a walk between them could take, ends included
             /// (ADR 0058, #288). Answered off the border rings and the raw
@@ -176,13 +186,14 @@ type Atlas =
         }
 
 /// The Atlas over a view, recalling the tables the census keys rather than
-/// laying empty ones (ADR 0032): the spawn walk table, and the traffic-blind
-/// far fields beside it (`docs/research/cpu-headroom.md` §5.1). The caller
-/// hands in the plan memo's tables while the census signature is unchanged,
-/// and fresh ones when it moved: every entry in either is a pure function of
-/// the census. Every other table is laid empty — they key on this tick's
-/// creeps, or on this tick's traffic.
-let ofViewRecalling (walks: WalkTable) (farFields: FarFieldTable) (view: ColonyView) : Atlas =
+/// laying empty ones (ADR 0032): the spawn walk table, and the far fields
+/// beside it (`docs/research/cpu-headroom.md` §5.1). The caller hands in the
+/// plan memo's tables while the census signature is unchanged, and fresh ones
+/// when it moved: every entry in any of them is a pure function of the census
+/// and — for the traffic-aware ones, whose key says so — of a crowd standing
+/// where this tick's crowd stands. Every other table is laid empty: they key
+/// on this tick's creeps.
+let ofViewRecalling (walks: WalkTable) (farFields: FarFieldMemo) (view: ColonyView) : Atlas =
     let spatial = view.Spatial
 
     // The home room, spelled the one way the convention is spelled
@@ -383,9 +394,10 @@ let ofViewRecalling (walks: WalkTable) (farFields: FarFieldTable) (view: ColonyV
                     Map.add room laid table)
                 Map.empty
         SeamWalks = System.Collections.Generic.Dictionary()
+        Seams = System.Collections.Generic.Dictionary()
         Routes = System.Collections.Generic.Dictionary()
-        TickFarFields = FarFieldTable()
         FarFields = farFields
+        OccupancySigns = System.Collections.Generic.Dictionary()
         Walks = walks
         WorkAreas = System.Collections.Generic.Dictionary()
         HeavyAreas = System.Collections.Generic.Dictionary()
@@ -404,7 +416,7 @@ let ofViewRecalling (walks: WalkTable) (farFields: FarFieldTable) (view: ColonyV
 /// always has a memo to hand over, so this is the shape a reader building
 /// an Atlas over a view alone — a test, or a one-off — asks for.
 let ofView (view: ColonyView) : Atlas =
-    ofViewRecalling (WalkTable()) (FarFieldTable()) view
+    ofViewRecalling (WalkTable()) (FarFieldMemo.empty ()) view
 
 /// One room's geometry, read the way ADR 0041 says a layer is read: a room the
 /// projection carries no geometry for has no entry, which is the same answer as
@@ -1551,13 +1563,26 @@ let private groundWalkable (atlas: Atlas) (room: string) : Pos -> bool =
 /// which enters no walking grid, walkable or buildable set and no Work Area, so
 /// the Matcher cannot pick one and have the engine empty it the tick a creep
 /// arrives. Deterministic (X, Y) order, total (ADR 0004).
+///
+/// Memoised per ordered pair, the empty band included (ADR 0004: the absence
+/// is the answer, and it is answered once). It is asked several times over for
+/// one pair — twenty-two calls over seven pairs in a `pair --level 7` tick
+/// (`docs/research/cpu-headroom.md` §5.4) — because every hop of every chain
+/// priced is a band read, and the answer is a function of the two rooms' rings
+/// and the far room's ground alone: no creep, no Task and no pricing enters
+/// it. Per tick like every other table here, which is enough to collapse those
+/// twenty-two to seven; the band is in fact terrain-constant for the life of
+/// the server, but a table outliving the tick has to be handed in and handed
+/// back, and the survey put the whole of what that would buy at about 1% of a
+/// tick.
 let seams (atlas: Atlas) (fromRoom: string) (toRoom: string) : (Pos * Pos) list =
-    Seam.bandBy
-        (ringWalkable atlas fromRoom)
-        (ringWalkable atlas toRoom)
-        (groundWalkable atlas toRoom)
-        fromRoom
-        toRoom
+    memoised atlas.Seams (fromRoom, toRoom) (fun () ->
+        Seam.bandBy
+            (ringWalkable atlas fromRoom)
+            (ringWalkable atlas toRoom)
+            (groundWalkable atlas toRoom)
+            fromRoom
+            toRoom)
 
 /// Every chain of rooms a walk from one room to another could cross at the
 /// fewest crossings, ends included, and empty where the projection joins them
@@ -1574,9 +1599,10 @@ let seams (atlas: Atlas) (fromRoom: string) (toRoom: string) : (Pos * Pos) list 
 /// does not carry has no ring, `seams` gives it an empty band, and it is
 /// joined to nothing: the search therefore stays inside the rooms
 /// `RoomName.transitBetween` put in the world and cannot wander the sector on
-/// a tick that memoised a long chain. Memoised per ordered pair, the empty
-/// answer included (ADR 0004: the absence is the answer, and it is answered
-/// once).
+/// a tick that memoised a long chain. The chains are memoised per ordered
+/// pair, the empty answer included (ADR 0004: the absence is the answer, and
+/// it is answered once) — this table, and not the bands `seams` above keeps,
+/// which are memoised on their own ordered pair beside it.
 ///
 /// **Which chain is walked is not decided here** (#288). A chain's price is
 /// three single-room floods laid end to end, so two chains of the same hop
@@ -1879,6 +1905,40 @@ let private chainedInto
 
         foldChain atlas factor pricing (last, target) (hopsAlong chain |> List.rev)
 
+/// The occupancy of a chain's rooms, in one string: the sign a traffic-aware
+/// far field is keyed under, and the whole of what a field flooded under
+/// `TravelCost` reads that the census signature does not sign
+/// (`docs/research/cpu-headroom.md` §5.1).
+///
+/// Every room of the chain and not merely the one the flood starts in, because
+/// every one of them is priced: `chainedInto` floods the last room's own
+/// occupancy and `foldChain` prices each hop's seed room out of that room's
+/// (`carriedAcross`'s `pricingOf`), so a creep standing anywhere along the
+/// chain moves the number that comes back.
+///
+/// The empty string for the traffic-blind pricings, and it is not a stand-in:
+/// `Grid.pricingOf` hands `Walk` and `Baseline` `noTraffic`, so those two
+/// really do price no occupied tile, and the sign says as much. Which is also
+/// what keeps the census-held table growing with the census rather than with
+/// the ticks — every key in it signs a crowd of none.
+let private occupancySign (atlas: Atlas) (pricing: Pricing) (chain: string list) : string =
+    match pricing with
+    | Walk
+    | Baseline -> ""
+    | TravelCost ->
+        chain
+        |> List.map (fun room ->
+            memoised atlas.OccupancySigns room (fun () ->
+                let occupied = occupiedOf atlas room
+                let marks = System.Text.StringBuilder()
+
+                for index in 0 .. tileCount - 1 do
+                    if occupied.[index] then
+                        marks.Append(index).Append(';') |> ignore
+
+                marks.ToString()))
+        |> String.concat "|"
+
 /// The same chain memoised colony-wide for one Task and one body — the shape
 /// every per-creep price reads it in, and the reason a second creep pricing the
 /// same Task across the same rooms pays for no second chain.
@@ -1887,9 +1947,17 @@ let private chainedInto
 /// the answer outlives the tick that flooded it and the same chain is flooded
 /// once per census rather than once per tick (ADR 0032,
 /// `docs/research/cpu-headroom.md` §5.1: eighteen whole-room floods a tick on
-/// `pair --level 7`, all of them the same four `Reserve` chains). `TravelCost`
-/// keeps the per-tick table: it prices this tick's standing creeps, which no
-/// census signs.
+/// `pair --level 7`, all of them the same four `Reserve` chains).
+///
+/// `TravelCost` outlives the tick too, but by one tick and on a key that names
+/// the crowd it priced (`occupancySign` above, `FarFieldMemo`): this tick reads
+/// what last tick flooded when the standing traffic along the chain has not
+/// moved, and floods again when it has. One tick of carry is what bounds the
+/// table — a key that moves with the crowd would otherwise fill a table that
+/// grows with the clock instead of with the census — and it is enough, because
+/// the ask repeats every tick: a reserve chain nothing walks is priced off one
+/// flood for as long as it stays quiet, where before this it was re-flooded
+/// every tick forever.
 ///
 /// The **origins** are in the key and not merely in the argument list, and
 /// they must be: `pricedAcross` hands the Task's own narrowed area while
@@ -1904,7 +1972,26 @@ let private chainedInto
 /// the table rides. A caller-narrowed set under `Walk` would key the held
 /// table on the decision layer's per-tick judgement instead, and that grows
 /// with the ticks rather than with the census.
-let private farFieldAlong
+///
+/// **A chain is priced off its own suffix's field** and not from the target
+/// room every time (`docs/research/cpu-headroom.md` §5.3). Two chains toward
+/// one target from different rooms share a tail — `W12S28>W12S29>W11S29` and
+/// `W13S29>W12S29>W11S29` share `W12S29>W11S29` — and folding each from
+/// scratch floods the shared rooms twice. So the recursion memoises the
+/// suffix under the suffix's own key, and a chain costs the one hop it adds.
+/// The floods are the same floods in the same order: `chainedInto` folds the
+/// hops *reversed*, which is the target room first and one room nearer per
+/// step, so taking the suffix first and carrying one more hop is that fold cut
+/// in two at a room boundary — not an approximation of it. Measured
+/// bit-identical, and −18.8% of a `pair --level 7` tick's heap pops before the
+/// memo above held any of them.
+///
+/// The two compose the other way round as well: a chain's first room is the
+/// crowded one — a colony's own home — and its suffix runs through the empty
+/// rooms a declaration reaches over, so the tick a creep moves at home and
+/// re-keys the whole chain, the suffix's field is still the one last tick
+/// flooded and only the hop into home is paid again.
+let rec private farFieldAlong
     (atlas: Atlas)
     (pricing: Pricing)
     (creep: string)
@@ -1914,14 +2001,57 @@ let private farFieldAlong
     : int[] =
     let factor = factorOf atlas creep
 
-    let table =
-        match pricing with
-        | Walk
-        | Baseline -> atlas.FarFields
-        | TravelCost -> atlas.TickFarFields
+    let key =
+        chain,
+        task,
+        workHeavy atlas creep,
+        factor,
+        pricing,
+        origins,
+        occupancySign atlas pricing chain
 
-    memoised table (chain, task, workHeavy atlas creep, factor, pricing, origins) (fun () ->
-        chainedInto atlas factor pricing chain origins)
+    let flood () =
+        match chain with
+        | first :: (next :: _ as suffix) ->
+            let onward = farFieldAlong atlas pricing creep task suffix origins
+
+            // The last step of `chainedInto`'s own fold, hop for hop: the
+            // field over the suffix's first room, carried back over the one
+            // crossing this chain adds, and settled across the room it lands
+            // in.
+            let seedRoom, seeds =
+                carriedAcross
+                    atlas
+                    factor
+                    pricing
+                    { From = first; To = next }
+                    next
+                    (reachedIn onward)
+
+            let stepPrices, traffic = pricingOf (occupiedOf atlas seedRoom) factor pricing
+
+            floodFromAllSeeded (weightsOf atlas seedRoom) traffic stepPrices seeds
+            |> drained
+            |> fst
+        // A chain of one room has no suffix to share and no hop to carry:
+        // the flood into the Task's own ground, which is what the fold
+        // bottoms out at anyway.
+        | _ -> chainedInto atlas factor pricing chain origins
+
+    match pricing with
+    | Walk
+    | Baseline -> memoised atlas.FarFields.PerCensus key flood
+    | TravelCost ->
+        // The carry, written out rather than folded into `memoised`, because
+        // a hit on the previous tick's table has to land in this tick's: an
+        // answer recalled and not re-filed would be dropped at the tick
+        // boundary and re-flooded on the next one, which is the whole saving
+        // paid back every other tick.
+        memoised atlas.FarFields.ThisTick key (fun () ->
+            if atlas.FarFields.LastTick.ContainsKey key then
+                atlas.FarFields.LastTick.[key]
+            else
+                flood ())
 
 /// The near leg of a cross-room join, in the two shapes its callers hand it:
 /// the tick's own per-creep flood, which the join may push further, and one

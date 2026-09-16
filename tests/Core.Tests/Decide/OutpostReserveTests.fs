@@ -791,6 +791,7 @@ let standDownGateTests =
                             { withLook.Memo with
                                 Walks = withoutLook.Memo.Walks
                                 FarFields = withoutLook.Memo.FarFields
+                                TrafficFarFields = withoutLook.Memo.TrafficFarFields
                             }
                     }
                     withoutLook

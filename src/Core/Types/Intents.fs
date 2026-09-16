@@ -145,7 +145,7 @@ type Pricing =
     /// difference on traffic and nothing else (ADR 0008, ADR 0009).
     | Baseline
 
-/// The **traffic-blind** far fields flooded under one census signature
+/// Far fields flooded under one census signature
 /// (`docs/research/cpu-headroom.md` §5.1): the cost from every tile of the
 /// first room of a chain to the origins the walk ends at, carried across the
 /// chain's Seams (ADR 0058), per tile index of that first room. The far leg of
@@ -165,18 +165,69 @@ type Pricing =
 /// room it works, transit rooms included). So a signature that has not moved
 /// is a field that cannot have.
 ///
-/// `TravelCost` is **not** in here: occupancy is this tick's fact and no census
-/// signs it.
-///
 /// The key is the field's whole derivation: the chain of rooms, the Task and
-/// whether the body is Work-heavy, the fatigue factor, the pricing, and the
-/// **origins** the flood is seeded from — the last because two callers hand
-/// different ones under the same Task (#358).
+/// whether the body is Work-heavy, the fatigue factor, the pricing, the
+/// **origins** the flood is seeded from — that one because two callers hand
+/// different ones under the same Task (#358) — and the **standing traffic**
+/// the flood priced, as `Atlas`' occupancy sign spells it: the occupied tiles
+/// of every room of the chain, in one string, and the empty string for the
+/// two traffic-blind pricings, which read no occupancy at all
+/// (`Grid.pricingOf` substitutes `noTraffic`).
+///
+/// A traffic-blind field therefore keys on the census alone and a
+/// traffic-aware one keys on this tick's crowd as well, which is what decides
+/// the lifetime of each — `FarFieldMemo` below is where that split is spelled.
 type FarFieldTable =
     System.Collections.Generic.Dictionary<
-        string list * Task * bool * FatigueFactor * Pricing * Pos list,
+        string list * Task * bool * FatigueFactor * Pricing * Pos list * string,
         int[]
      >
+
+/// The far-field tables an Atlas prices its cross-room legs out of, one per
+/// **lifetime** — which is the only thing that distinguishes them, so they are
+/// named for it and not for a caller (`docs/research/cpu-headroom.md` §5.1,
+/// §5.3).
+///
+/// A record and not three arguments of one type, because three
+/// `FarFieldTable`s in a row is a swap the compiler cannot see: laying the
+/// tick's table where the census's belongs would hold this tick's traffic
+/// forever and read as a stale travel cost, never as an error.
+type FarFieldMemo =
+    {
+        /// The traffic-blind fields (`Walk`, `Baseline`), held while the
+        /// census signature stands (ADR 0032). Grows with the census: the
+        /// chains a colony's declarations reach over, times the Tasks at the
+        /// end of them.
+        PerCensus: FarFieldTable
+        /// The traffic-aware fields (`TravelCost`) the **previous** tick
+        /// flooded, read here and never written. An entry is readable only
+        /// under a key naming the same standing traffic, so a crowd that
+        /// moved is a miss rather than a stale number.
+        LastTick: FarFieldTable
+        /// The traffic-aware fields **this** tick floods — every one it
+        /// recalls from `LastTick` included, so an answer stays alive as long
+        /// as it goes on being asked for. Handed to the next tick on the plan
+        /// memo, where it becomes that tick's `LastTick`.
+        ///
+        /// One tick of carry and not an unbounded table, because a key
+        /// carrying the crowd's position is a key that moves when the crowd
+        /// does: a table holding every one of them would grow with the ticks
+        /// where this one is bounded by what a single tick asks.
+        ThisTick: FarFieldTable
+    }
+
+[<RequireQualifiedAccess>]
+module FarFieldMemo =
+    /// Three empty tables: the Atlas of a caller holding no memo at all — a
+    /// test, or a one-off. A function and never a value, because a table
+    /// shared by two parallel test lists is two threads writing one
+    /// `Dictionary` (#310, `AGENTS.md` § Code hygiene).
+    let empty () : FarFieldMemo =
+        {
+            PerCensus = FarFieldTable()
+            LastTick = FarFieldTable()
+            ThisTick = FarFieldTable()
+        }
 
 /// What a Link footing is held beside (ADR 0022, ADR 0027): each planned
 /// source container, the controller container, the Storage. The Layout knows a
@@ -316,6 +367,14 @@ type PlanMemo =
         /// through the tick by that same Atlas — `Walks`' rule one query over
         /// (`docs/research/cpu-headroom.md` §5.1).
         FarFields: FarFieldTable
+        /// The traffic-aware far fields this tick flooded, for the next tick
+        /// to read under a key naming the same crowd (`FarFieldMemo.ThisTick`
+        /// above, `docs/research/cpu-headroom.md` §5.1). It rides the
+        /// signature with the two tables above it because a moved census is a
+        /// moved walking grid, which stales a priced field whatever the crowd
+        /// is doing; it is replaced every tick rather than added to, because
+        /// its keys move with the crowd.
+        TrafficFarFields: FarFieldTable
     }
 
 /// Whether this tick is a colony's turn to re-plan its layout (#357), and a DU
@@ -354,7 +413,17 @@ module PlanMemo =
     /// and a hauler row of zero casts no body rather than dismissing one. What
     /// is lost is one tick of *new* placement per colony per turn — measured
     /// against a tick that the engine kills outright.
-    let deferred (walks: WalkTable) (farFields: FarFieldTable) : PlanMemo =
+    /// The three tables are handed in and not defaulted, because every one of
+    /// them is a fact this tick paid for: a deferred colony declines to
+    /// **plan**, not to price. Handing in an empty table here would throw away
+    /// the tick's own walks and far fields, and handing in last tick's
+    /// traffic-aware table would stop that carry dead on every turn a colony
+    /// skips (ADR 0032, `docs/research/cpu-headroom.md`).
+    let deferred
+        (walks: WalkTable)
+        (farFields: FarFieldTable)
+        (trafficFarFields: FarFieldTable)
+        : PlanMemo =
         {
             Signature = ""
             SiteIntents = []
@@ -367,4 +436,5 @@ module PlanMemo =
             HaulerLoad = 0
             Walks = walks
             FarFields = farFields
+            TrafficFarFields = trafficFarFields
         }

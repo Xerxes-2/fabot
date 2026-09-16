@@ -442,14 +442,14 @@ let crossRoomTests =
             }
 
             test
-                "the traffic-blind far field is recalled by the next Atlas; the traffic-aware one is not" {
+                "the traffic-blind far field rides the census table; the traffic-aware one never does" {
                 // `docs/research/cpu-headroom.md` §5.1: every input of a far
                 // field under `Walk` or `Baseline` is in the census — the
                 // chain's walking grids and its Seam bands — so it rides the
                 // plan memo across the tick boundary exactly as the spawn
                 // walk table does (ADR 0032). `TravelCost` prices this tick's
-                // standing creeps, which no census signs, so it stays in the
-                // Atlas's own table and dies with it.
+                // standing creeps, which no census signs, so it is filed in a
+                // table of its own — the one the case below follows.
                 let snapshot () =
                     northOfSnapshot
                         (corridorHome [ "w", { X = 25; Y = 10 } ])
@@ -459,10 +459,10 @@ let crossRoomTests =
                         [ "src-out", Source ]
                         [ worker "w" ]
 
-                let held = FarFieldTable()
+                let held = FarFieldMemo.empty ()
 
                 let flood () =
-                    held |> Seq.map (fun entry -> entry.Value) |> Seq.exactlyOne
+                    held.PerCensus |> Seq.map (fun entry -> entry.Value) |> Seq.exactlyOne
 
                 let first = snapshot () |> ofViewRecalling (WalkTable()) held
 
@@ -471,7 +471,11 @@ let crossRoomTests =
                     (Some 18)
                     "the first Atlas floods the chain to price the walk"
 
-                Expect.equal held.Count 1 "and leaves the far field in the table it was handed"
+                Expect.equal
+                    held.PerCensus.Count
+                    1
+                    "and leaves the far field in the table it was handed"
+
                 let flooded = flood ()
 
                 Expect.equal
@@ -480,9 +484,11 @@ let crossRoomTests =
                     "the ranking price crosses the same border"
 
                 Expect.equal
-                    held.Count
+                    held.PerCensus.Count
                     1
-                    "and adds nothing here: a field that prices traffic may not outlive the tick"
+                    "and adds nothing here: a field that prices traffic is not signed by the census"
+
+                Expect.equal held.ThisTick.Count 1 "it goes to the tick's own table instead"
 
                 let second = snapshot () |> ofViewRecalling (WalkTable()) held
 
@@ -491,7 +497,7 @@ let crossRoomTests =
                     (Some 18)
                     "the recalled field prices the same walk"
 
-                Expect.equal held.Count 1 "no second entry under the same key"
+                Expect.equal held.PerCensus.Count 1 "no second entry under the same key"
 
                 Expect.isTrue
                     (obj.ReferenceEquals(flood (), flooded))
@@ -500,7 +506,7 @@ let crossRoomTests =
                 // The other half of the seam, the tick the census moves: a
                 // table with nothing in it is flooded into, and prices the
                 // same walk off its own Dijkstra.
-                let fresh = FarFieldTable()
+                let fresh = FarFieldMemo.empty ()
                 let dropped = snapshot () |> ofViewRecalling (WalkTable()) fresh
 
                 Expect.equal
@@ -508,7 +514,91 @@ let crossRoomTests =
                     (Some 18)
                     "an empty table is flooded into, and prices the walk identically"
 
-                Expect.equal fresh.Count 1 "the field it ran is left in it"
+                Expect.equal fresh.PerCensus.Count 1 "the field it ran is left in it"
+            }
+
+            test "the traffic-aware far field is recalled for as long as the crowd stands still" {
+                // The other half of `docs/research/cpu-headroom.md` §5.1: a
+                // `TravelCost` field reads the census *and* the tiles creeps
+                // stand on along the chain, so it is keyed on both and rides
+                // one tick forward on the plan memo. The corridor is one tile
+                // wide, so a body standing in it is a body every crossing
+                // walks through: the surcharge is in the number, and a field
+                // recalled when it should not be would be visible as the old
+                // number rather than as a slow tick.
+                let snapshot (blocker: Pos) =
+                    northOfSnapshot
+                        (corridorHome [ "w", { X = 25; Y = 10 } ])
+                        [ { X = 25; Y = 0 }, Plain ]
+                        { corridorOutpost with
+                            CreepPositions = Map.ofList [ "out", blocker ]
+                        }
+                        [ { X = 25; Y = 49 }, Plain ]
+                        [ "src-out", Source ]
+                        [ worker "w"; worker "out" ]
+
+                // On the walk down to the Seat, so the crossing pays the
+                // occupancy surcharge for the one tile it cannot go round:
+                // `Grid.occupancyPenalty`, which is `Engine.swampWeight` —
+                // ten (ADR 0008 as #225 amends it).
+                let onTheWay = { X = 25; Y = 45 }
+                // Past the source and off every path the price is taken
+                // over, so the same crowd of one costs nothing.
+                let aside = { X = 25; Y = 30 }
+
+                let carried (memo: FarFieldMemo) =
+                    {
+                        PerCensus = memo.PerCensus
+                        LastTick = memo.ThisTick
+                        ThisTick = FarFieldTable()
+                    }
+
+                let field (memo: FarFieldMemo) =
+                    memo.ThisTick |> Seq.map (fun entry -> entry.Value) |> Seq.exactlyOne
+
+                let first = FarFieldMemo.empty ()
+
+                Expect.equal
+                    (travelCost
+                        (snapshot onTheWay |> ofViewRecalling (WalkTable()) first)
+                        "w"
+                        (Harvest "src-out"))
+                    (Some 46)
+                    "the premise: the blocked corridor costs the empty one's 36 plus the surcharge"
+
+                let flooded = field first
+                let second = carried first
+
+                Expect.equal
+                    (travelCost
+                        (snapshot onTheWay |> ofViewRecalling (WalkTable()) second)
+                        "w"
+                        (Harvest "src-out"))
+                    (Some 46)
+                    "the next tick prices the same crossing"
+
+                Expect.isTrue
+                    (obj.ReferenceEquals(field second, flooded))
+                    "off the field the last tick flooded, because the key names the same standing crowd"
+
+                let third = carried second
+
+                Expect.equal
+                    (travelCost
+                        (snapshot aside |> ofViewRecalling (WalkTable()) third)
+                        "w"
+                        (Harvest "src-out"))
+                    (Some 36)
+                    "and the tick the body steps off the way, the surcharge goes with it"
+
+                Expect.isFalse
+                    (obj.ReferenceEquals(field third, flooded))
+                    "which is a field of its own: a crowd that moved is a miss, never a stale number"
+
+                Expect.equal
+                    third.ThisTick.Count
+                    1
+                    "and the tick's table holds what the tick asked for, never a tick's history of crowds"
             }
         ]
 
@@ -780,7 +870,7 @@ let crossRoomLeadTests =
 
                 let atlas =
                     leadAcrossSnapshot homeRing outpostRing [] []
-                    |> ofViewRecalling walks (FarFieldTable())
+                    |> ofViewRecalling walks (FarFieldMemo.empty ())
 
                 Expect.equal
                     (castWalkTicks atlas hauler leadSpawn (at "W1N2" outpostSeat))
@@ -815,7 +905,7 @@ let crossRoomLeadTests =
                 // Dijkstra on either side of the border (ADR 0032).
                 let second =
                     leadAcrossSnapshot homeRing outpostRing [] []
-                    |> ofViewRecalling walks (FarFieldTable())
+                    |> ofViewRecalling walks (FarFieldMemo.empty ())
 
                 Expect.equal
                     (castWalkTicks second hauler leadSpawn (at "W1N2" outpostSeat))
@@ -1556,6 +1646,59 @@ let multiHopTests =
                     (walkTicks atlas "w-back" (Harvest "src-out"))
                     (Some 71)
                     "four tiles further back is four ticks dearer, both hops unchanged"
+            }
+
+            test
+                "a chain is filed beside its own suffix, so the next chain over that tail floods nothing" {
+                // `docs/research/cpu-headroom.md` §5.3: two chains toward one
+                // target from different rooms share a tail, and folding each
+                // from the target every time floods the shared rooms once per
+                // chain. Here the body at home is priced over W1N2>W1N3 and
+                // the body in the transit room over W1N3 alone — the first
+                // chain's own suffix — so the second is a lookup.
+                let held = FarFieldMemo.empty ()
+
+                let chains () =
+                    held.PerCensus
+                    |> Seq.map (fun entry ->
+                        let chain, _, _, _, _, _, _ = entry.Key
+                        chain)
+                    |> List.ofSeq
+                    |> List.sortBy List.length
+
+                let atlas =
+                    chainOfThreeSnapshot
+                        (corridorHome [ "w", { X = 25; Y = 10 } ])
+                        [ { X = 25; Y = 0 }, Plain ]
+                        [ { X = 25; Y = 0 }, Plain; { X = 25; Y = 49 }, Plain ]
+                        { corridorTransit with
+                            CreepPositions = Map.ofList [ "mid", { X = 25; Y = 20 } ]
+                        }
+                        [ { X = 25; Y = 49 }, Plain ]
+                        corridorOutpost
+                        [ "src-out", Source ]
+                        [ worker "w"; worker "mid" ]
+                    |> ofViewRecalling (WalkTable()) held
+
+                Expect.equal
+                    (walkTicks atlas "w" (Harvest "src-out"))
+                    (Some 67)
+                    "the premise: the home body is priced over both borders"
+
+                Expect.equal
+                    (chains ())
+                    [ [ "W1N3" ]; [ "W1N2"; "W1N3" ] ]
+                    "and the fold's own halves are both filed: the far room's field, and it carried one hop"
+
+                Expect.equal
+                    (walkTicks atlas "mid" (Harvest "src-out"))
+                    (Some 28)
+                    "the transit room's body prices the hop it has left"
+
+                Expect.equal
+                    (chains ())
+                    [ [ "W1N3" ]; [ "W1N2"; "W1N3" ] ]
+                    "off the entry the first chain left, which is what sharing a suffix means"
             }
 
             test "a creep standing in the transit room prices the hop it has left" {

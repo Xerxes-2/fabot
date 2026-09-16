@@ -740,7 +740,12 @@ let internal roundTripOf atlas =
 /// y=0 here with y=49 there. The middle room is a **transit** room — it holds
 /// terrain and a border ring and nothing else, which is exactly what ADR 0058
 /// projects one for.
-let internal chainOfThree
+///
+/// The ColonyView is handed out beside the Atlas for the reason
+/// `northOfSnapshot` is: one case below hands its own far-field tables in and
+/// reads what the chain left in them (`ofViewRecalling`,
+/// `docs/research/cpu-headroom.md` §5.3).
+let internal chainOfThreeSnapshot
     (home: RoomLayer)
     homeRing
     middleRing
@@ -765,6 +770,9 @@ let internal chainOfThree
     |> withNeighbour "W1N2" middle
     |> withNeighbour "W1N3" far
     |> snapshotWith creeps
+
+let internal chainOfThree home homeRing middleRing middle farRing far kinds creeps =
+    chainOfThreeSnapshot home homeRing middleRing middle farRing far kinds creeps
     |> ofView
 
 /// A projection carrying four rooms in the same north-south line — W1N1 through

@@ -49,24 +49,27 @@ let invaderCoreTests =
                 // on this fixture because both calls are handed no memo
                 // and recompute from scratch anyway.
                 //
-                // Two fields of the memo cannot ride the record comparison:
-                // `Walks` and `FarFields` are the mutable `Dictionary`s the
-                // Atlas fills through the tick, and a Dictionary compares by
-                // reference, so two floods of identical walks are unequal
-                // on them for a reason that has nothing to do with a core.
-                // Their references are swapped in and their *contents* are
-                // compared beside them, which loses nothing.
+                // Three fields of the memo cannot ride the record comparison:
+                // `Walks`, `FarFields` and `TrafficFarFields` are the mutable
+                // `Dictionary`s the Atlas fills through the tick, and a
+                // Dictionary compares by reference, so two floods of identical
+                // walks are unequal on them for a reason that has nothing to
+                // do with a core. Their references are swapped in and their
+                // *contents* are compared beside them, which loses nothing.
                 let walkRows (memo: PlanMemo) =
                     memo.Walks
                     |> Seq.map (fun entry -> entry.Key, List.ofArray entry.Value)
                     |> List.ofSeq
                     |> List.sortBy fst
 
-                let farRows (memo: PlanMemo) =
-                    memo.FarFields
+                let rowsOf (table: FarFieldTable) =
+                    table
                     |> Seq.map (fun entry -> entry.Key, List.ofArray entry.Value)
                     |> List.ofSeq
                     |> List.sortBy fst
+
+                let farRows (memo: PlanMemo) =
+                    rowsOf memo.FarFields, rowsOf memo.TrafficFarFields
 
                 let unchangedWith label cores =
                     let threatened = decideOn { colony with InvaderCores = cores }
@@ -77,6 +80,7 @@ let invaderCoreTests =
                                 { threatened.Memo with
                                     Walks = untroubled.Memo.Walks
                                     FarFields = untroubled.Memo.FarFields
+                                    TrafficFarFields = untroubled.Memo.TrafficFarFields
                                 }
                         }
                         untroubled
@@ -174,6 +178,7 @@ let invaderCoreTests =
                             { frontier.Memo with
                                 Walks = rivalHeld.Memo.Walks
                                 FarFields = rivalHeld.Memo.FarFields
+                                TrafficFarFields = rivalHeld.Memo.TrafficFarFields
                             }
                     }
                     rivalHeld
