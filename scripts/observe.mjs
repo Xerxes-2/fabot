@@ -1,7 +1,8 @@
 // One-shot CLI over the observe channels — the Transition log (ADR 0009),
-// the Raid log (ADR 0028), the Layout record (ADR 0035) and the CPU line
-// (ADR 0041): pull the observe subtree from `Memory.fabot.observe`, flip
-// the verbose list remotely, or watch the console for a bounded window.
+// the Raid log (ADR 0028), the Layout record (ADR 0035), the CPU line
+// (ADR 0041) and the breach log (#278): pull the observe subtree from
+// `Memory.fabot.observe`, flip the verbose list remotely, or watch the
+// console for a bounded window.
 // `outposts` is the one read that needs a second endpoint — it also reads
 // the server's clock, because shut-or-open has no answer without it, and
 // it fails on that read alone where the others cannot.
@@ -22,6 +23,9 @@
 //   observe.mjs layout             what this colony could not deliver this tick:
 //                                  the Layout's losses, and the declared outposts
 //                                  that do not border this home
+//   observe.mjs breaches           what is broken right now: one row per live
+//                                  invariant violation, oldest first, each with
+//                                  how long it has stood
 //   observe.mjs quotas             the cascade's workforce arithmetic, row by row
 //   observe.mjs reactor            the season programme and official score
 //   observe.mjs cpu                the per-tick CPU line — the tick's total,
@@ -38,8 +42,9 @@
 //                                       bounded window is the only one-shot read
 // Every read takes --json to emit the raw stored structure for jq.
 //
-// `raids`, `outposts` and `layout` are one colony's record and take
-// `--colony <home>` to say whose (ADR 0047). Without it they read the first
+// `raids`, `outposts`, `layout`, `quotas` and `breaches` are one colony's
+// record and take `--colony <home>` to say whose (ADR 0047). Without it
+// they read the first
 // colony under `Memory.fabot.observe.colonies` — this script cannot see
 // `Colony.declared`, so "first" is the first home the bot wrote a leaf for,
 // which is declaration order because the loop writes in it.
@@ -50,6 +55,7 @@ const usage =
   "usage: observe.mjs tasks [--json] | timeline <creep> [--json] | " +
   "raids [--colony <home>] [--json] | outposts [--colony <home>] [--json] | " +
   "layout [--colony <home>] [--json] | quotas [--colony <home>] [--json] | " +
+  "breaches [--colony <home>] [--json] | " +
   "reactor [--json] | cpu [--json] | " +
   "verbose [add <creep> | remove <creep> | clear] [--json] | " +
   "console --seconds N";
@@ -85,6 +91,7 @@ if (
     "outposts",
     "layout",
     "quotas",
+    "breaches",
     "reactor",
     "cpu",
     "verbose",
@@ -101,10 +108,10 @@ if (command === "console" && !(Number.isFinite(seconds) && seconds > 0)) {
   fail("console needs --seconds N (a positive number): the subscription must be bounded");
 }
 if (command !== "console" && seconds !== undefined) fail(usage);
-// The colony-keyed commands are exactly the two channels that split by home
+// The colony-keyed commands are exactly the channels that split by home
 // (ADR 0047); anywhere else the flag would name a colony nothing reads.
 if (rawArgs.includes("--colony")) {
-  if (!["raids", "outposts", "layout", "quotas"].includes(command)) fail(usage);
+  if (!["raids", "outposts", "layout", "quotas", "breaches"].includes(command)) fail(usage);
   // The flag eats the next argument, so a bare `--colony` at the end, or one
   // in front of `--json`, would silently read the default colony instead of
   // the one the operator asked for.
@@ -124,10 +131,10 @@ const memoryGet = async (path) => {
 };
 
 // One colony's leaf, under `Memory.fabot.observe.colonies.<home>` (ADR
-// 0047): the two channels that are a colony's record rather than the
-// world's — the Raid log and the Layout record — are keyed by home room,
-// because `decide` runs once per colony and each answers for the rooms its
-// own colony works.
+// 0047): the channels that are a colony's record rather than the world's —
+// the Raid log, the Layout record and, since #278, the breach log — are
+// keyed by home room, because `decide` runs once per colony and each
+// answers for the rooms its own colony works.
 //
 // The whole subtree is read in one call rather than the one path, because
 // the key list is itself an answer: it is what `--colony` is checked
@@ -1056,6 +1063,131 @@ if (command === "console") {
           `  ${entry.room}  ${entry.kind} — no chain of Seams reaches it, ` +
             "so it is worked by nobody",
         );
+      }
+    }
+  }
+} else if (command === "breaches") {
+  // ---- breaches: the live invariant violations, oldest first ------------
+
+  // The wire shape written by ObserveMemory.fs:
+  //   { rows: [{ kind, room, subject, amount, first, last }] }
+  // One row per violation **standing right now**, oldest first, each
+  // carrying the tick it opened on and the tick the bot last confirmed it
+  // (#278). A breach that clears drops out of the leaf entirely: this
+  // channel answers "what is broken now", and the episodic reading of the
+  // same rooms is the Raid log's.
+  //
+  // So the ages are read off the row itself — `last - first` — and this
+  // command reads no game clock, unlike `outposts`. It does not need one:
+  // every standing row was confirmed on the tick the bot last wrote, and
+  // that tick is `last`. What a clock would add is whether the *bundle* is
+  // still running, which `cpu` answers and this does not pretend to.
+  //
+  // The channel exists because the only feedback loop the Thorium
+  // programme had was a human polling this API by hand. Four incidents
+  // shipped green through the test suite — the suite runs on fixtures this
+  // repo authors, so it confirms the code's belief about the projection —
+  // and each of them bled score for hours before anybody looked: a draw
+  // gate reading a store off a map `World` never writes (915 T on a floor),
+  // a delivery interval outrunning the burn, and ore in a room no rule
+  // could name.
+  const { home, stored } = await colonyLeaf("breaches");
+  if (!Array.isArray(stored.rows)) {
+    fail(
+      `the breach log at Memory.fabot.observe.colonies.${home}.breaches carries no \`rows\` ` +
+        "list — the leaf was hand-edited, or its wire shape has moved. " +
+        'Not read as "nothing is broken".',
+    );
+  }
+
+  // One clause per kind, exactly as `breachKindName` spells them on the
+  // wire (ObserveMemory.fs), and what the amount on that row counts. A
+  // closed table for the reason the `outposts` command's bases are one: the
+  // key comes off the wire, the bot drops a row whose kind it cannot read,
+  // and a row this reader guessed at would describe a violation nobody
+  // wrote.
+  const KIND = {
+    "ore-on-the-floor": "the T of ore lying on the floor of a room this colony sweeps",
+    "ore-unplaceable": "the T aboard a body at the Reactor that the Reactor has no room for",
+    "reactor-starved":
+      "0 — the declared Reactor of ours is standing empty, and its continuous-work streak with it",
+    "reactor-lost":
+      "0 — the declared Reactor's own row says it is not ours, so what is delivered there scores " +
+      "for whoever holds it",
+  };
+
+  // A row off the wire shape stops the command and is quoted, never
+  // dropped — the asymmetry the Layout record's `refused` rows are printed
+  // under, and for the same reason. Core drops a row it cannot decode, so
+  // an unreadable row is one this command would otherwise hide while the
+  // colony is standing in it.
+  const rows = stored.rows.map((row) => {
+    if (
+      row === null ||
+      typeof row !== "object" ||
+      Array.isArray(row) ||
+      // An own-key test and never `KIND[row.kind] !== undefined`: every
+      // object literal answers `toString` and `constructor` with a
+      // function, so a prototype name off the wire would read as a known
+      // kind here while Core's decoder answers `None` and drops the row.
+      !Object.hasOwn(KIND, row.kind) ||
+      typeof row.room !== "string" ||
+      typeof row.subject !== "string" ||
+      typeof row.amount !== "number" ||
+      typeof row.first !== "number" ||
+      typeof row.last !== "number"
+    ) {
+      fail(
+        `a row at Memory.fabot.observe.colonies.${home}.breaches.rows is off the wire shape: ` +
+          `${JSON.stringify(row)} — the leaf was hand-edited, or its wire shape has moved. ` +
+          'Not read as "that one is fine": the bot drops a row it cannot decode, so this may be ' +
+          "a violation nothing else will tell you about.",
+      );
+    }
+    return row;
+  });
+
+  const tickOf = (t) => `t${t.toLocaleString("en-US")}`;
+  const ticks = (n) => `${n.toLocaleString("en-US")} tick${n === 1 ? "" : "s"}`;
+
+  if (json) {
+    console.log(JSON.stringify(stored.rows, null, 2));
+  } else {
+    console.log(`colony ${home}`);
+    console.log("");
+    if (rows.length === 0) {
+      console.log(
+        "no breaches: every check this channel runs held on the tick the bot last wrote",
+      );
+      console.log(
+        "  — which is a statement about what the colony could see, never about what is true " +
+          "in a room it is blind in (ADR 0004)",
+      );
+    } else {
+      // Stored oldest first by Core (`breachRows`), and printed in that
+      // order rather than re-sorted here: one ordering, in one place, under
+      // test. The age is what turns a list into a priority — a pile a
+      // courier is three ticks from picking up and a pile that is bleeding
+      // read exactly alike without it.
+      console.log(`${rows.length} breach${rows.length === 1 ? "" : "es"} standing, oldest first:`);
+      const kindWidth = Math.max(...rows.map((row) => row.kind.length));
+      const roomWidth = Math.max(...rows.map((row) => row.room.length));
+      const subjectWidth = Math.max(...rows.map((row) => row.subject.length));
+      for (const row of rows) {
+        console.log(
+          `  ${row.kind.padEnd(kindWidth)}  ${row.room.padEnd(roomWidth)}  ` +
+            `${row.subject.padEnd(subjectWidth)}  amount ${String(row.amount).padStart(4)}  ` +
+            `standing ${ticks(row.last - row.first)} ` +
+            `(since ${tickOf(row.first)}, last read ${tickOf(row.last)})`,
+        );
+      }
+      console.log("");
+      // What each kind that actually appeared means, once rather than per
+      // row: the rows are the priority list and stay one line each, and the
+      // sentence explaining a kind does not get longer the more piles are
+      // on the floor.
+      for (const kind of [...new Set(rows.map((row) => row.kind))]) {
+        console.log(`  ${kind}: amount is ${KIND[kind]}`);
       }
     }
   }

@@ -2822,3 +2822,347 @@ let cpuTests =
                     "absence is preserved, and only the new row is split"
             }
         ]
+
+/// The room the errand fixtures declare, and the Reactor standing in it: the
+/// `Decide` suites' own spelling, read rather than re-spelled (#318's rule for
+/// the two domains that already share it). A second spelling here would be a
+/// fixture free to drift away from the rule it stands in for — and the
+/// regression this channel exists to catch is precisely a fixture that agreed
+/// with the code about a shape `World` never builds.
+let private errandRoom = Decide.Fixtures.reactorErrand.RoomName
+let private reactor = Decide.Fixtures.reactorId
+
+/// A room this colony **owns**: the other half of the pile check's reach, and
+/// the half `Facts.inARoomWeOwn` answers off `RoomControl`.
+let private owning room (colony: ColonyView) =
+    { colony with
+        RoomControl =
+            Map.add
+                room
+                {
+                    Owner = Ownership.Ours
+                    Reservation = None
+                    SafeMode = false
+                }
+                colony.RoomControl
+    }
+
+/// A dropped Thorium pile standing in a room, as the projection carries one:
+/// its kind on the census, its amount in `SpatialInfo.Thorium`, and its tile in
+/// that room's layer (ADR 0041). All three, because the pile check joins the
+/// census to the room and reads the amount off the map beside them.
+let private withPile room id amount (colony: ColonyView) =
+    let layer = SpatialInfo.layerOf colony.Spatial room
+
+    { colony with
+        Spatial =
+            { colony.Spatial with
+                TargetKinds = Map.add id (Dropped Thorium) colony.Spatial.TargetKinds
+                Thorium = Map.add id amount colony.Spatial.Thorium
+            }
+            |> withNeighbour
+                room
+                { layer with
+                    TargetPositions = Map.add id { X = 26; Y = 43 } layer.TargetPositions
+                }
+    }
+
+/// The colony with the errand declared and the Reactor visible and ours,
+/// holding `held` of its 1,000 (#354's fixtures, which put the store on the
+/// Reactor's **row** and never in `SpatialInfo.Thorium`).
+let private erranding held (colony: ColonyView) =
+    colony
+    |> Decide.Fixtures.withReactorErrand
+    |> Decide.Fixtures.withReactorOwner (Some Ownership.Ours)
+    |> Decide.Fixtures.withReactorStore held
+
+/// One of ours standing in the errand room with a load of ore aboard — the
+/// courier at the end of the paired delivery (ADR 0060 decision 3).
+let private courierAt name carried (colony: ColonyView) =
+    colony
+    |> Decide.Fixtures.standingInErrand [ { ours name with Thorium = carried }, { X = 25; Y = 43 } ]
+
+/// The breaches this view yields on one tick, as (kind, room, subject, amount)
+/// rows — the whole of what a row says, so a case that fires the right kind on
+/// the wrong object cannot pass.
+let private breachesOn t (colony: ColonyView) =
+    foldBreaches capBreaches t { colony with Time = t } BreachState.empty
+    |> breachRows
+    |> List.map (fun row -> row.Breach.Kind, row.Breach.Room, row.Breach.Subject, row.Breach.Amount)
+
+/// The kinds alone, for the cases that are about which check fired.
+let private kindsOn t (colony: ColonyView) =
+    breachesOn t colony |> List.map (fun (kind, _, _, _) -> kind)
+
+[<Tests>]
+let breachKindTests =
+    testList
+        "breach log: what fires"
+        [
+            test "a Thorium pile in a room we own is a breach, and one in a stranger's room is not" {
+                Expect.equal
+                    (breachesOn 100 (quiet |> owning raidRoom |> withPile raidRoom "pile-1" 915))
+                    [ BreachKind.OreOnTheFloor, raidRoom, "pile-1", 915 ]
+                    "the amount is the T on the floor, which is what makes the row actionable"
+
+                Expect.equal
+                    (breachesOn 100 (quiet |> withPile "W9S9" "pile-1" 915))
+                    []
+                    "a room we neither own nor declared is somebody else's floor"
+            }
+
+            test "a pile on the declared Reactor's floor is a breach: that room has no owner at all" {
+                // #354's second half, which is the reason this check reads
+                // `Facts.ourThoriumPiles` rather than "a room we own": the
+                // Reactor's room has no controller, so it is owned by nobody,
+                // and 915 T sat on it for hours while a body of ours stood two
+                // tiles away. A check written against ownership alone would
+                // have been silent through the very incident it is for.
+                //
+                // This case pins the rule; that the **projection** can build
+                // the shape is pinned next door in `ViewTests` ("ore on the
+                // errand room's floor is the one thing beside the declaration
+                // that rides"), and the two were written together because they
+                // were false apart: wiring this channel is what found that
+                // `erranding` had emptied the kind census the Pickup #354
+                // added sweeps, so the rule reached nothing live and its own
+                // fixture hid that (#356, #355).
+                Expect.equal
+                    (breachesOn 100 (quiet |> erranding 500 |> withPile errandRoom "pile-r" 915))
+                    [ BreachKind.OreOnTheFloor, errandRoom, "pile-r", 915 ]
+                    "the errand room's floor is the one floor of ours that is in nobody's room"
+            }
+
+            test "ore a courier cannot place is a breach, and a load that fits is not" {
+                let full = quiet |> erranding Engine.reactorCapacity |> courierAt "courier" 500
+
+                Expect.equal
+                    (breachesOn 100 full
+                     |> List.filter (fun (kind, _, _, _) -> kind = BreachKind.OreUnplaceable))
+                    [ BreachKind.OreUnplaceable, errandRoom, "courier", 500 ]
+                    "a full Reactor has no room for any of the 500 aboard"
+
+                Expect.equal
+                    (breachesOn 100 (quiet |> erranding 700 |> courierAt "courier" 500))
+                    [ BreachKind.OreUnplaceable, errandRoom, "courier", 200 ]
+                    "300 of the load fits; the breach is the 200 that has nowhere to go"
+
+                Expect.equal
+                    (breachesOn 100 (quiet |> erranding 500 |> courierAt "courier" 500))
+                    []
+                    "a load the store has exactly the room for is the delivery working"
+            }
+
+            test "a courier's load is read off the Reactor's row, and no Thorium map beside it" {
+                // The regression shape of #354's first incident, copied from
+                // `ErrandTests`' "the draw reads the Reactor's own row":
+                // `SpatialInfo.Thorium` carries every store a Task can name and
+                // deliberately not the Reactor's, and the draw gate read it
+                // there anyway — 999 read as 0, the gate never closed, and the
+                // ore reached the floor. What made it invisible is what this
+                // case pins: the unit test agreed with the gate, because the
+                // fixture wrote the store where the gate looked.
+                let ready = quiet |> erranding 0 |> courierAt "courier" 500
+
+                let inTheWrongMap =
+                    { ready with
+                        Spatial =
+                            { ready.Spatial with
+                                Thorium =
+                                    Map.add reactor Engine.reactorCapacity ready.Spatial.Thorium
+                            }
+                    }
+
+                Expect.isFalse
+                    (kindsOn 100 inTheWrongMap |> List.contains BreachKind.OreUnplaceable)
+                    "a full store written where the projection never writes one raises no alarm"
+
+                Expect.equal
+                    (breachesOn
+                        100
+                        (quiet |> erranding Engine.reactorCapacity |> courierAt "courier" 500)
+                     |> List.filter (fun (kind, _, _, _) -> kind = BreachKind.OreUnplaceable))
+                    [ BreachKind.OreUnplaceable, errandRoom, "courier", 500 ]
+                    "the same number on the Reactor's own row is the breach"
+            }
+
+            test "a body of ours elsewhere holding ore is nobody's breach" {
+                // The cheapest false positive there is, and the reason the
+                // check is narrowed to the bodies standing in the errand room:
+                // a [[miner]] at home holding ore bound for its container is
+                // not ore with nowhere to go, however full the Reactor is.
+                let atHome =
+                    { (quiet |> erranding Engine.reactorCapacity) with
+                        Creeps = [ { ours "miner" with Thorium = 500 } ]
+                    }
+
+                Expect.isFalse
+                    (kindsOn 100 atHome |> List.contains BreachKind.OreUnplaceable)
+                    "the load of a body that is not at the Reactor has somewhere else to be"
+            }
+
+            test "a Reactor of ours standing dry is a breach; one with ore in it is not" {
+                Expect.equal
+                    (breachesOn 100 (quiet |> erranding 0))
+                    [ BreachKind.ReactorStarved, errandRoom, reactor, 0 ]
+                    "an empty store is the streak reset, and the row's whole content is the fact"
+
+                Expect.equal
+                    (breachesOn 100 (quiet |> erranding 1))
+                    []
+                    "one tonne in the store is a programme that is running"
+            }
+
+            test "a declared Reactor whose row is not ours is a breach, and is not also starved" {
+                let rivals =
+                    quiet
+                    |> Decide.Fixtures.withReactorErrand
+                    |> Decide.Fixtures.withReactorOwner (Some Ownership.Rival)
+
+                Expect.equal
+                    (breachesOn 100 rivals)
+                    [ BreachKind.ReactorLost, errandRoom, reactor, 0 ]
+                    "everything delivered there scores for whoever holds the flag"
+
+                Expect.isFalse
+                    (kindsOn 100 rivals |> List.contains BreachKind.ReactorStarved)
+                    "a Reactor that is not ours is not a Reactor of ours standing dry"
+            }
+
+            test "a Reactor we cannot see yields no row of any kind" {
+                // ADR 0004 taken to its conclusion on an alarm channel: no
+                // vision, no row, no reading — and therefore no breach. A
+                // declared Reactor with nothing of ours standing out there is
+                // the ordinary state between two re-claimers, and a channel
+                // that read absence as a violation would cry wolf on every one
+                // of those ticks.
+                let blind =
+                    { (quiet |> erranding 0) with
+                        Reactors = []
+                    }
+
+                Expect.equal
+                    (breachesOn 100 blind)
+                    []
+                    "neither starved nor lost: the colony has read nothing to be either"
+            }
+
+            test "a colony with nothing wrong records nothing" {
+                Expect.equal
+                    (breachesOn 100 (quiet |> erranding 500))
+                    []
+                    "the healthy tick is empty"
+            }
+        ]
+
+[<Tests>]
+let breachAgeTests =
+    testList
+        "breach log: age and the cap"
+        [
+            test "a breach still standing fifty ticks later is fifty ticks old" {
+                // The whole reason this channel folds rather than snapshotting:
+                // live, a pile a courier is three ticks from picking up and a
+                // pile that is bleeding read exactly alike.
+                let colony = quiet |> owning raidRoom |> withPile raidRoom "pile-1" 915
+
+                let state =
+                    BreachState.empty
+                    |> foldBreaches capBreaches 100 { colony with Time = 100 }
+                    |> foldBreaches capBreaches 150 { colony with Time = 150 }
+
+                Expect.equal
+                    (standing 150 state |> List.map (fun (breach, age) -> breach.Subject, age))
+                    [ "pile-1", 50 ]
+                    "the row keeps the tick it opened on and ages against the clock"
+
+                Expect.equal
+                    (breachRows state |> List.map (fun row -> row.FirstSeen, row.LastSeen))
+                    [ 100, 150 ]
+                    "and it dates itself, so the leaf can be read without a clock"
+            }
+
+            test "a breach that clears drops out rather than lingering" {
+                // This channel answers "what is broken now" and nothing else;
+                // the episodic reading of the same ground is the Raid log's
+                // (ADR 0028). A row that lingered would need a reader who knew
+                // which rows were current, which is every stale dashboard.
+                let broken = quiet |> owning raidRoom |> withPile raidRoom "pile-1" 915
+
+                let state =
+                    BreachState.empty
+                    |> foldBreaches capBreaches 100 { broken with Time = 100 }
+                    |> foldBreaches
+                        capBreaches
+                        101
+                        { (quiet |> owning raidRoom) with
+                            Time = 101
+                        }
+
+                Expect.equal (breachRows state) [] "the pile was picked up, and the log says so"
+            }
+
+            test "a breach that comes back opens a fresh age" {
+                // The stated cost of dropping out: a violation that flickers
+                // off for one tick loses its age. That is the right trade for
+                // four checks that are conditions the projection re-reads every
+                // tick rather than events, and it is pinned so the next reader
+                // meets it here rather than in the field.
+                let broken = quiet |> owning raidRoom |> withPile raidRoom "pile-1" 915
+                let clear = quiet |> owning raidRoom
+
+                let state =
+                    BreachState.empty
+                    |> foldBreaches capBreaches 100 { broken with Time = 100 }
+                    |> foldBreaches capBreaches 101 { clear with Time = 101 }
+                    |> foldBreaches capBreaches 102 { broken with Time = 102 }
+
+                Expect.equal
+                    (standing 102 state |> List.map snd)
+                    [ 0 ]
+                    "the returning pile is a new row, not the old one resumed"
+            }
+
+            test "the latest reading wins: a growing pile reports what it holds now" {
+                let state =
+                    BreachState.empty
+                    |> foldBreaches
+                        capBreaches
+                        100
+                        { (quiet |> owning raidRoom |> withPile raidRoom "pile-1" 90) with
+                            Time = 100
+                        }
+                    |> foldBreaches
+                        capBreaches
+                        101
+                        { (quiet |> owning raidRoom |> withPile raidRoom "pile-1" 915) with
+                            Time = 101
+                        }
+
+                Expect.equal
+                    (breachRows state |> List.map (fun row -> row.Breach.Amount, row.FirstSeen))
+                    [ 915, 100 ]
+                    "the amount is this tick's and the age is the first tick's"
+            }
+
+            test "the cap keeps the rows that have stood longest" {
+                // Every surviving row was last seen on this very tick — a row
+                // that stops appearing drops out — so `LastSeen` is tied across
+                // the whole log and `FirstSeen` is what decides. Evicting the
+                // oldest would silence exactly the breach worth reading.
+                let piles ids amount time =
+                    (quiet |> owning raidRoom, ids)
+                    ||> List.fold (fun colony id -> withPile raidRoom id amount colony)
+                    |> fun colony -> { colony with Time = time }
+
+                let state =
+                    BreachState.empty
+                    |> foldBreaches 2 100 (piles [ "old-a"; "old-b" ] 915 100)
+                    |> foldBreaches 2 101 (piles [ "old-a"; "old-b"; "new-c" ] 915 101)
+
+                Expect.equal
+                    (breachRows state |> List.map (fun row -> row.Breach.Subject))
+                    [ "old-a"; "old-b" ]
+                    "the cap drops the breach that has only just appeared"
+            }
+        ]

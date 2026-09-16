@@ -426,14 +426,37 @@ module ColonyView =
     let private erranding (targets: Set<string>) (facts: RoomFacts) : RoomFacts =
         let crossed = transiting facts
 
+        // The declaration's own targets, and beside them any Thorium lying on
+        // this room's floor (#354, found inert by the breach channel's wiring
+        // and issue #356). A pile out here is ours by the same argument the
+        // errand itself is: nobody owns the room, we are the only colony that
+        // walks a body to it, and the ore is score bleeding at 1 T a tick
+        // (`docs/research/thorium-reactor.md`). `Facts.ourThoriumPiles` was
+        // widened to reach an errand room's floor and reached nothing, because
+        // this narrowing had already taken the pile's kind and amount out —
+        // which is why a rule and its projection are read together or not at
+        // all.
+        //
+        // A pile is not furniture and admitting it is not ADR 0060 decision 1
+        // reopened: the declaration still names the **one** thing out here a
+        // Task may be planned *against*, and a pile is planned against by the
+        // same kind-swept `Pickup` rung that sweeps our own rooms, which is
+        // exactly why it needs a kind. Nothing else grows a census entry: the
+        // filter is one resource on the floor, not "dropped things".
+        let floorOre =
+            facts.TargetKinds |> Map.filter (fun _ kind -> kind = Dropped Thorium)
+
+        let admitted = Set.union targets (floorOre |> Map.keys |> Set.ofSeq)
+
         let named map =
-            map |> Map.filter (fun id _ -> Set.contains id targets)
+            map |> Map.filter (fun id _ -> Set.contains id admitted)
 
         { crossed with
             Layer =
                 { crossed.Layer with
                     TargetPositions = named facts.Layer.TargetPositions
                 }
+            TargetKinds = floorOre
             Stores = named facts.Stores
             Thorium = named facts.Thorium
             Cooldowns = named facts.Cooldowns

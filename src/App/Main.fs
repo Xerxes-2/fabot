@@ -310,17 +310,36 @@ let loop () =
         // The cascade's own numbers, for `observe.mjs quotas` (ADR 0009).
         ObserveMemory.saveQuotas colony.Home decision.Quotas
 
+        // The breach log (#278): the live invariant checks, folded with memory
+        // so every row carries how long it has stood. Off the **same view this
+        // tick decided from**, which is the whole point of the channel — the
+        // test suite runs on fixtures this repo authors, so it confirms the
+        // code's belief about the projection, and three of the four incidents
+        // in the Thorium programme happened in `World.fs`, the half that has no
+        // tests by construction. An assertion read off the real projection
+        // every tick is the only feedback loop that could have caught them; the
+        // Layout record beside it is the one that already works that way, and
+        // it is reporting a real loss right now.
+        //
+        // Written every tick, empty or not, and under this colony's own key —
+        // its checks read this colony's rooms and its declarations (ADR 0047).
+        ObserveMemory.loadBreaches colony.Home
+        |> Observe.foldBreaches Observe.capBreaches Game.time view
+        |> ObserveMemory.saveBreaches colony.Home
+
     pruneDeadCreepMemory living
 
     // Where every creep of ours stood this tick, for next tick's
     // `CreepInfo.Moved` (#225).
     World.positions () |> ObserveMemory.savePositions
-    // The Memory boundary: the assignments, all three observe channels and the
-    // dead creeps' pruning, which is everything this tick persists except the
-    // CPU line's own leaf — written after the last reading, so it is the single
+    // The Memory boundary: the assignments, every observe channel but one and
+    // the dead creeps' pruning, which is everything this tick persists except
+    // the CPU line's own leaf — written after the last reading, so it is the single
     // write the line never prices. A boundary and not a noun's price: the phase
     // holds the observe folds and the `Game.creeps` sweep that feeds them as
-    // well as the writes.
+    // well as the writes — the breach log's four checks among them since #278,
+    // which is where their cost is read if ADR 0041's trigger ever fires on
+    // them.
     let atSave = Game.cpu.getUsed ()
     // Failures are already logged by the Executor; what is read off the
     // outcomes here is how many intents the engine took (#170). The engine

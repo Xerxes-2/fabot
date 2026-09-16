@@ -1648,6 +1648,11 @@ let private errandSeen =
                 "can-errand", { X = 4; Y = 3 }, Structure BuiltKind.Container
                 "site-errand", { X = 4; Y = 4 }, Site BuiltKind.Extension
                 reactor, reactorTile, Structure BuiltKind.Container
+                // Ore on that room's floor, and beside it a pile of energy, so
+                // the one admitted census entry (#356) is tested against the
+                // one that stays out.
+                "pile-errand", { X = 5; Y = 3 }, Dropped Thorium
+                "pile-energy", { X = 5; Y = 4 }, Dropped Energy
             ]
         |> withSources [ "src-errand" ]
         |> withStores [ "can-errand", 1_200; reactor, 40 ]
@@ -1655,7 +1660,7 @@ let private errandSeen =
 
     name,
     { facts with
-        Thorium = Map.ofList [ reactor, 400; "can-errand", 90 ]
+        Thorium = Map.ofList [ reactor, 400; "can-errand", 90; "pile-errand", 915 ]
         Cooldowns = Map.ofList [ reactor, 7; "can-errand", 3 ]
         // Whose the declared target is, which is the fact #318 added and the
         // one the [[reclaim]]'s act is gated on. A rival's, because that is the
@@ -1764,8 +1769,46 @@ let errandTests =
                     (Map.tryFind errandRoom view.Spatial.Rooms
                      |> Option.map (fun layer -> layer.TargetPositions)
                      |> Option.defaultValue Map.empty
-                     |> Map.filter (fun id _ -> id <> reactor))
-                    "one tile is placed in that room and it is the declared one's"
+                     |> Map.filter (fun id _ -> id <> reactor && id <> "pile-errand"))
+                    "two tiles are placed in that room: the declared one's and the ore on its floor (#356)"
+            }
+
+            test "ore on the errand room's floor is the one thing beside the declaration that rides" {
+                // #356. #354 widened `Facts.ourThoriumPiles` to reach an
+                // errand room's floor and it reached nothing: this narrowing
+                // had already taken the pile's kind and amount out, so the
+                // `Pickup` it added could never be pooled, and the 915 T that
+                // reached W15S25's floor stayed unnamed by anything. The unit
+                // test agreed with the rule because its fixture wrote the pile
+                // straight into the projection — a shape `ofWorld` never built.
+                // A rule and the projection it reads are checked together or
+                // not at all.
+                //
+                // The ore is ours by the errand's own argument: nobody owns the
+                // room, no other colony walks a body to it, and the pile decays
+                // at 1 T a tick. What stays out is everything else — the
+                // container's kind, the rock, the site — so this is one
+                // resource on the floor and not a door for `Dropped` things.
+                let view = viewUnder errandDeclared errandWorld mother
+
+                Expect.equal
+                    (Map.tryFind "pile-errand" view.Spatial.TargetKinds)
+                    (Some(Dropped Thorium))
+                    "the pile is classified, which is what makes a kind-swept Pickup able to find it"
+
+                Expect.equal
+                    (Map.tryFind "pile-errand" view.Spatial.Thorium)
+                    (Some 915)
+                    "and the amount rides with it, since the threshold is read off it"
+
+                Expect.contains
+                    (SpatialInfo.idsOfKind view.Spatial (Dropped Thorium))
+                    "pile-errand"
+                    "and the kind census answers it, which is the sweep `Facts.ourThoriumPiles` runs before it filters by room — the reach #354 claimed and did not have"
+
+                Expect.isFalse
+                    (Map.containsKey "pile-energy" view.Spatial.TargetKinds)
+                    "a pile of energy out there is nobody's errand: the filter is one resource, not a kind of object"
             }
 
             test "and the one target it names is: its store rides, its kind does not" {

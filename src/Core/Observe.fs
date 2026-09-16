@@ -1,6 +1,7 @@
 /// The observe channel's pure folds: the Transition log's, keyed by creep (ADR
-/// 0009); the Raid log's, colony-level and episodic (ADR 0028); and the CPU
-/// line's, one row per tick (ADR 0041).
+/// 0009); the Raid log's, colony-level and episodic (ADR 0028); the CPU line's,
+/// one row per tick (ADR 0041); and the [[breach log]]'s, one row per live
+/// invariant violation folded with its age (#278).
 module Fabot.Core.Observe
 
 open Fabot.Core.Types
@@ -1247,3 +1248,353 @@ let foldCpu (cap: int) (tick: int) (readings: CpuReadings) (prior: CpuState) : C
             ]
             |> trim cap
     }
+
+/// What one live invariant check found broken this tick (#278). The fourth
+/// observe channel's vocabulary, and the reason it exists at all: the test
+/// suite runs on fixtures this repo authors, so it confirms the code's belief
+/// about the projection rather than the engine's behaviour — 63 of the 65 test
+/// files are hand-written fixtures, and `src/App/World.fs`, where the
+/// projection is actually built, has no tests by construction. Four live
+/// incidents in the Thorium delivery programme shipped green through 1,389 of
+/// them, and three happened in exactly that untested half. What the layout
+/// channel already does for the plan — assert on the *real* projection every
+/// tick, and report a footing target with no footing — this does for the four
+/// facts those incidents broke.
+///
+/// A closed vocabulary rather than a message string, for `Ownership`'s reason:
+/// the kind crosses the wire, it is what the reader groups and sorts by, and a
+/// kind added without its wire name fails the build rather than printing as a
+/// blank — `breachKindName` matches the union exhaustively and an incomplete
+/// match is an error here (`Directory.Build.props`).
+[<RequireQualifiedAccess>]
+type BreachKind =
+    /// A Dropped Thorium pile standing in a room this colony projects and may
+    /// sweep. 915 T of it — about 4,500 season points — sat on the Reactor
+    /// room's floor for hours because no rule could name it (#354's second
+    /// half): `Facts.ourThoriumPiles` filtered "a room we own", and a Reactor
+    /// room has no controller, so its floor belonged to nobody.
+    | OreOnTheFloor
+    /// One of our creeps is standing at the declared Reactor holding ore the
+    /// Reactor has no room for. The tick before the ore hits the floor: a
+    /// transfer into a full store moves what fits and leaves the rest aboard,
+    /// and a courier that cannot put its load down drops it.
+    | OreUnplaceable
+    /// A declared Reactor of ours whose store is empty. Not a catastrophe and
+    /// not nothing: the continuous-work streak resets, and the programme falls
+    /// back to 1 point per T.
+    | ReactorStarved
+    /// A declared Reactor whose own row says it is not ours — somebody walked a
+    /// CLAIM body in, or the re-claimer died before its relief arrived. Every
+    /// tonne delivered while that stands scores for whoever holds the flag.
+    | ReactorLost
+
+/// One violation as this tick reads it: what broke, where, on which engine
+/// object, and the one number that makes it actionable — T on the floor, T
+/// that cannot be placed, and 0 for the two kinds whose whole content is the
+/// fact itself.
+///
+/// `Subject` is the **engine id** (a pile, a creep name, a Reactor) and never a
+/// description, because it is the fold's identity: the same pile seen on two
+/// ticks has to be one row growing older rather than two rows.
+type Breach =
+    {
+        Kind: BreachKind
+        Room: string
+        Subject: string
+        Amount: int
+    }
+
+/// One breach as the log carries it: the breach itself, the tick it was first
+/// seen, and the tick it was last confirmed.
+///
+/// **The age is the whole reason this channel folds at all.** A snapshot of
+/// this tick's violations is a list live already answers; what it cannot answer
+/// is whether a pile on the floor is bleeding or whether a courier is three
+/// ticks from picking it up, and `tick - FirstSeen` is exactly that
+/// distinction.
+///
+/// `LastSeen` is the tick the fold last confirmed this row, which is the tick
+/// the fold last ran: a breach that stops appearing **drops out** (`foldBreaches`),
+/// so every standing row carries the current tick here. It is kept all the same
+/// because the leaf is read hours later out of Memory by `observe.mjs breaches`
+/// with no game clock of its own, and `LastSeen - FirstSeen` is the age as of
+/// the last tick the bot wrote — a self-dating record, and the one thing that
+/// tells a reader whether the bundle that wrote it is still running.
+type StandingBreach =
+    {
+        FirstSeen: int
+        LastSeen: int
+        Breach: Breach
+    }
+
+/// The whole persisted breach log: one row per (kind, subject) standing right
+/// now. A map and not a ring, because this channel answers **"what is broken
+/// now"** and nothing else — a breach that clears leaves no trace here, and the
+/// Raid log beside it is where episodic history lives (ADR 0028). That is a
+/// decision and not an oversight: a channel an operator has to date-filter
+/// before it means anything is one more thing to read, and the two questions
+/// have two answers already.
+type BreachState =
+    {
+        Standing: Map<BreachKind * string, StandingBreach>
+    }
+
+[<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
+module BreachState =
+    /// The empty breach log — what an absent, malformed or foreign-shaped leaf
+    /// reads as, the way `RaidState.empty` and `CpuState.empty` do. Empty is
+    /// also the healthy steady state here, unlike either of those.
+    let empty = { Standing = Map.empty }
+
+/// The breach log's cap, and the sibling `capEpisodes` number for its reason: a
+/// few hundred bytes a row against a 2MB Memory, and twenty rows is already
+/// more than an operator acts on in one sitting. It bounds a shape that is
+/// otherwise unbounded from the engine's side — a mining accident can leave
+/// dozens of piles — and the cap is what keeps one bad tick from writing a leaf
+/// nobody can parse.
+let capBreaches = 20
+
+/// The declared Reactors this colony can actually see, each with the room its
+/// declaration names (#278). The join is the errand's: `ColonyView.Reactors`
+/// carries the rows and no room, and `ColonyView.Errands` carries the room and
+/// the engine id, so a row is answered for only where a declaration names it.
+///
+/// **A Reactor we cannot see yields nothing here, and therefore no breach of
+/// any kind** (ADR 0004): no row, no reading. That is the same rule
+/// `Facts.reactorTakesALoad` closes its draw on, and it has to be stated on
+/// this side too — an invariant channel that read absence as a violation would
+/// alarm on every tick the errand's resident body is between lives.
+let private declaredReactors (view: ColonyView) : (string * ReactorInfo) list =
+    view.Errands
+    |> List.choose (fun errand ->
+        let reactorId = fst errand.Target
+
+        view.Reactors
+        |> List.tryFind (fun reactor -> reactor.Id = reactorId)
+        |> Option.map (fun reactor -> errand.RoomName, reactor))
+
+/// This tick's violations, in kind order. Every check is O(creeps + declared
+/// targets + piles) with no flood, no `Atlas.routes` and no `walkTicks`: ADR
+/// 0041's revisit trigger is a mean tick above 50 ms and the live line already
+/// reads 49.4, so a channel that priced a walk would spend the budget the
+/// projection is being judged on.
+let private breachesIn (view: ColonyView) : Breach list =
+    // The ore on the floor, over exactly the reach `Facts.ourThoriumPiles` has
+    // since #354: a room we own, **or** a room we declared an errand in. That
+    // second clause is the whole of the incident — the Reactor's room has no
+    // controller, so "a room we own" made its floor invisible while a body of
+    // ours stood two tiles away and the pile decayed at 1 T a tick.
+    //
+    // Read through `Facts` rather than restated: `Observe` compiles after
+    // `Decide/Facts.fs` (`Core.fsproj`), so the one sentence about whose a pile
+    // is has one home, and the alarm can never come to disagree with the
+    // Pickup that is supposed to answer it.
+    //
+    // **Live, the errand half of that reach fires on nothing today, and the
+    // Pickup behind it pools nothing either.** `ColonyView.ofWorld`'s
+    // `erranding` cut empties an errand room's kind census on purpose (ADR 0060
+    // decision 1, #286) and filters its `Thorium` map to the declared id, so a
+    // pile standing on the Reactor's floor reaches the view with no kind and no
+    // amount — reproduced against `ViewTests`' own errand world while wiring
+    // this channel (#278), where a 915 T pile read back as `TargetKinds: None,
+    // Thorium: None`. `Facts.ourThoriumPiles` sweeps the census, so its
+    // errand-room clause cannot match, and this check inherits that silence:
+    // what it catches today is a pile in a room we **own**. That is the same
+    // family of fault as the incident this channel was built for — a rule that
+    // is green against a hand-written fixture and inert against the projection
+    // the shell builds — and it is reported rather than fixed here, because
+    // widening what an errand room carries is ADR 0060's decision and not this
+    // channel's.
+    let piles =
+        Decide.Facts.ourThoriumPiles view
+        |> List.choose (fun id ->
+            SpatialInfo.roomOf view.Spatial id
+            |> Option.map (fun room ->
+                {
+                    Kind = BreachKind.OreOnTheFloor
+                    Room = room
+                    Subject = id
+                    Amount = SpatialInfo.heldIn view.Spatial Thorium id
+                }))
+
+    let reactors = declaredReactors view
+
+    // The ore that has nowhere to go: a body of ours standing **in the declared
+    // Reactor's room** holding more than the Reactor's free space. `transfer`
+    // into a full store moves what fits and answers `ERR_FULL` for the rest, so
+    // the surplus stays aboard and is dropped when the body dies or is
+    // re-tasked — which is how 915 T reached that floor.
+    //
+    // The free space is read off `view.Reactors` — the Reactor's own row — and
+    // **never** off `SpatialInfo.Thorium`, which carries every store a Task can
+    // name and deliberately not this one (`RoomFacts.Thorium`'s own comment).
+    // #354's draw gate read the wrong map: it answered 0 for a store holding
+    // 999, the gate never closed once in flight, and the ore went on arriving
+    // at a full Reactor. Its unit test agreed with it, because the fixture
+    // wrote the store where the gate looked — a projection shape `World` has
+    // never built. An alarm written against that same map would have been
+    // silent through the whole incident it exists to catch, which is why this
+    // check is pinned from both sides in `ObserveTests`.
+    //
+    // **Narrowed to the bodies standing in that room**, and the narrowing is
+    // the difference between an alarm and a noise generator: "any creep of ours
+    // holding Thorium" fires on every [[miner]] at home whenever the Reactor is
+    // near full, and that ore is on its way to a container, not to the Reactor.
+    // A body standing in the errand room is there for one reason — the errand
+    // declares one object and pools nothing else (ADR 0060 decision 1) — so its
+    // load has exactly one destination. The cost of the narrowing is that a
+    // surplus is named when it arrives rather than when it is drawn; the draw
+    // gate is the rule that prevents it, and this is the channel that says the
+    // gate failed.
+    let unplaceable =
+        reactors
+        |> List.collect (fun (room, reactor) ->
+            let free = Engine.reactorCapacity - reactor.Thorium
+            let standingThere = (SpatialInfo.layerOf view.Spatial room).CreepPositions
+
+            view.Creeps
+            |> List.filter (fun creep -> Map.containsKey creep.Name standingThere)
+            |> List.choose (fun creep ->
+                // The ore that has nowhere to go, and not the load: a courier
+                // holding 500 against 300 of free space is 200 in trouble. At
+                // or below zero there is room for all of it and there is no
+                // breach, which is the clamp written as the gate it is.
+                let stranded = creep.Thorium - free
+
+                if stranded >= 1 then
+                    Some
+                        {
+                            Kind = BreachKind.OreUnplaceable
+                            Room = room
+                            Subject = creep.Name
+                            Amount = stranded
+                        }
+                else
+                    None))
+
+    // A Reactor of ours standing dry. The programme pays 1 point per T at a
+    // broken streak against the multiplier a continuous one earns
+    // (`docs/research/thorium-reactor.md`), so an empty store is income lost
+    // rather than damage taken — and it is the one of the four kinds that is
+    // routinely *transient*, which is exactly what the age column is for: a
+    // store empty for one tick is a delivery landing, and one empty for four
+    // hundred is the supply chain broken.
+    let starved =
+        reactors
+        |> List.filter (fun (_, reactor) ->
+            reactor.Owner = ReactorOwner.Ours && reactor.Thorium = 0)
+        |> List.map (fun (room, reactor) ->
+            {
+                Kind = BreachKind.ReactorStarved
+                Room = room
+                Subject = reactor.Id
+                Amount = 0
+            })
+
+    // A declared Reactor whose row says the flag on it is not ours. Any owner
+    // but ours, the rival's and the unowned alike: what is actionable is that
+    // nothing delivered there scores for us, and that is equally true of a
+    // Reactor somebody claimed and of one whose ownership lapsed when the
+    // re-claimer died. The two are one `ReactorOwner` case apart on the wire
+    // and one act apart on the ground — walk a CLAIM body back in (ADR 0060
+    // decision 3).
+    let lost =
+        reactors
+        |> List.filter (fun (_, reactor) -> reactor.Owner <> ReactorOwner.Ours)
+        |> List.map (fun (room, reactor) ->
+            {
+                Kind = BreachKind.ReactorLost
+                Room = room
+                Subject = reactor.Id
+                Amount = 0
+            })
+
+    piles @ unplaceable @ starved @ lost
+
+/// Trim the log to the cap. Oldest **last-seen** first, the way `capEpisodes`
+/// trims its ring — and with the tie-break stated, because here the tie is the
+/// normal case rather than the exotic one: a row that stops appearing drops out
+/// altogether, so every surviving row was last seen on this very tick and the
+/// primary key is tied across all of them. What decides it then is `FirstSeen`,
+/// **newest dropped first**: the row that has stood longest is the one bleeding
+/// longest, and a cap that evicted it would silence exactly the breach worth
+/// reading. The remaining tie — two rows opened on one tick — is broken on kind
+/// and subject so the eviction is a function of the state and not of map
+/// ordering.
+let private capStanding (cap: int) (rows: Map<BreachKind * string, StandingBreach>) =
+    let overflow = Map.count rows - cap
+
+    if overflow <= 0 then
+        rows
+    else
+        rows
+        |> Map.toList
+        |> List.sortBy (fun ((kind, subject), row) -> row.LastSeen, -row.FirstSeen, kind, subject)
+        |> List.skip overflow
+        |> Map.ofList
+
+/// The breach log's fold (#278): this tick's view plus the previous log produce
+/// the new one. A violation this tick keeps the tick it was **first** seen on,
+/// so the row ages; a violation this tick did not read is gone, whatever it
+/// said last tick.
+///
+/// **Dropping out is the decision this channel is built on.** A row that
+/// lingered would make the log a history, and a history needs a reader who
+/// knows which rows are current — the failure mode of every stale dashboard.
+/// The consequence is deliberate and worth naming: a breach that flickers off
+/// for one tick loses its age and reads as new. That is the right trade for
+/// the four kinds here, all of which are *conditions* the projection re-reads
+/// every tick rather than *events*; an episodic reading of the same ground is
+/// `foldRaids`' job.
+///
+/// A blind tick is not a quiet one, and nothing here pretends otherwise: a
+/// Reactor with no row and a room with no vision contribute no breach, so the
+/// log empties while the colony cannot look. That is ADR 0004 taken to its
+/// conclusion — absence is never evidence — and it is why this channel says
+/// "nothing is broken that I can see" and never "nothing is broken".
+let foldBreaches (cap: int) (tick: int) (view: ColonyView) (prior: BreachState) : BreachState =
+    {
+        Standing =
+            breachesIn view
+            |> List.map (fun breach ->
+                let key = breach.Kind, breach.Subject
+
+                let firstSeen =
+                    prior.Standing
+                    |> Map.tryFind key
+                    |> Option.map (fun row -> row.FirstSeen)
+                    |> Option.defaultValue tick
+
+                key,
+                {
+                    FirstSeen = firstSeen
+                    LastSeen = tick
+                    // The latest reading and not the first: the amount is what
+                    // makes the row actionable, and a pile that has grown from
+                    // 90 T to 915 must say 915. The opposite rule to the raid
+                    // roster's first-sighting-wins, and for the opposite reason
+                    // — that record answers what came, this one answers what is
+                    // standing there now.
+                    Breach = breach
+                })
+            |> Map.ofList
+            |> capStanding cap
+    }
+
+/// The standing rows, **oldest first**: the order every reader of this channel
+/// wants, computed once here so neither the Memory writer nor `observe.mjs`
+/// has an ordering of its own to drift away from. Ties on the opening tick are
+/// broken on kind and subject, so the same log always reads out in the same
+/// order.
+let breachRows (state: BreachState) : StandingBreach list =
+    state.Standing
+    |> Map.toList
+    |> List.sortBy (fun ((kind, subject), row) -> row.FirstSeen, kind, subject)
+    |> List.map snd
+
+/// The live rows against a clock: each breach with how many ticks it has been
+/// standing, oldest first. The whole of what a consumer needs — no filtering,
+/// because a row that is in the log is standing by construction, and no
+/// sorting, because `breachRows` has done it.
+let standing (tick: int) (state: BreachState) : (Breach * int) list =
+    breachRows state |> List.map (fun row -> row.Breach, tick - row.FirstSeen)

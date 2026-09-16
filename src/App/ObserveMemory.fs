@@ -1,8 +1,8 @@
 /// Serialization shell for the observe channels (ADR 0009, ADR 0028, ADR 0035,
-/// ADR 0041): read the prior Transition log, Raid log and CPU line from
-/// `Memory.fabot.observe`, hand each to its pure Core fold and write the
-/// results back; the Layout leaf is written outright, having no prior state
-/// because it records this tick's plan. Absent or unreadable state is
+/// ADR 0041, #278): read the prior Transition log, Raid log, CPU line and
+/// breach log from `Memory.fabot.observe`, hand each to its pure Core fold and
+/// write the results back; the Layout leaf is written outright, having no prior
+/// state because it records this tick's plan. Absent or unreadable state is
 /// discarded, never repaired, so telemetry cannot take the colony down.
 module Fabot.ObserveMemory
 
@@ -904,6 +904,116 @@ let saveLayout
         |> List.toArray
 
     writeColonyLeaf home "layout" layout
+
+// A breach kind on the wire (#278). Spelled once, in both directions, over a
+// closed set — `reactorOwnerName`'s idiom two leaves up, and for its reason: a
+// kind added without its wire name must fail to compile or fail to decode,
+// never print as a blank. Hyphenated lower case, the spelling
+// `standDownBasisName` and `declarationKindName` already use on this subtree.
+let private breachKindName =
+    function
+    | BreachKind.OreOnTheFloor -> "ore-on-the-floor"
+    | BreachKind.OreUnplaceable -> "ore-unplaceable"
+    | BreachKind.ReactorStarved -> "reactor-starved"
+    | BreachKind.ReactorLost -> "reactor-lost"
+
+let private breachKindOf name =
+    match name with
+    | "ore-on-the-floor" -> Some BreachKind.OreOnTheFloor
+    | "ore-unplaceable" -> Some BreachKind.OreUnplaceable
+    | "reactor-starved" -> Some BreachKind.ReactorStarved
+    | "reactor-lost" -> Some BreachKind.ReactorLost
+    | _ -> None
+
+// One standing breach on the wire: what broke, where, on which engine object,
+// the number that makes it actionable, and the two ticks that date it. Plain
+// fields and no union, the way every other leaf of this subtree is written.
+//
+// Both ticks ride, though one of them is always this tick: `last` is what lets
+// a reader of the leaf compute an age — `last - first` — with no game clock of
+// its own, and what tells that reader whether the bundle that wrote the row is
+// still running. `observe.mjs breaches` reads exactly those two.
+let private encodeBreach (row: StandingBreach) =
+    let o = createEmpty<obj>
+    o?kind <- breachKindName row.Breach.Kind
+    o?room <- row.Breach.Room
+    o?subject <- row.Breach.Subject
+    o?amount <- row.Breach.Amount
+    o?first <- row.FirstSeen
+    o?last <- row.LastSeen
+    o
+
+// `encodeBreach`'s partner, and a checker rather than a cast: `unbox` is erased
+// by Fable, so a `first` that is not a number would read back as a tick and
+// date a breach to the epoch — an age of a hundred thousand ticks printed
+// against a pile dropped this minute. A row that will not read costs its own
+// row and no more (`rowsOf`, ADR 0028), which is the safe direction here in a
+// way it is not for a stand-down: the next tick re-reads the projection and
+// writes every live breach back, so a dropped row is one tick of silence rather
+// than a room left open.
+let private decodeBreach (raw: obj) : StandingBreach option =
+    if isNull raw || jsTypeof raw <> "object" then
+        None
+    else
+        match breachKindOf (string raw?kind) with
+        | None -> None
+        | Some kind ->
+            if
+                jsTypeof raw?room <> "string"
+                || jsTypeof raw?subject <> "string"
+                || jsTypeof raw?amount <> "number"
+                || jsTypeof raw?first <> "number"
+                || jsTypeof raw?last <> "number"
+            then
+                None
+            else
+                Some
+                    {
+                        FirstSeen = unbox<int> raw?first
+                        LastSeen = unbox<int> raw?last
+                        Breach =
+                            {
+                                Kind = kind
+                                Room = unbox<string> raw?room
+                                Subject = unbox<string> raw?subject
+                                Amount = unbox<int> raw?amount
+                            }
+                    }
+
+/// The named colony's prior breach log, or empty when its subtree is absent or
+/// unreadable (#278). One log per colony, like the Raid log and the Layout
+/// record beside it (ADR 0047): the checks read one colony's view.
+///
+/// What a discarded log costs is the **ages** and nothing else — every live
+/// breach is re-read off this tick's view and written back, so the rows return
+/// on the next tick reading zero ticks old. That is the cheapest degradation of
+/// the four channels, and it is why nothing here is repaired.
+let loadBreaches (home: string) : BreachState =
+    leafOr BreachState.empty (fun () -> colonyLeaf home "breaches") (fun breaches ->
+        {
+            Standing =
+                breaches?rows
+                |> rowsOf decodeBreach
+                |> List.map (fun row -> (row.Breach.Kind, row.Breach.Subject), row)
+                |> Map.ofList
+        })
+
+/// Write one colony's breach log back under
+/// `Memory.fabot.observe.colonies.<home>.breaches`, leaving the rest of the
+/// observe subtree and every other colony's leaves alone (ADR 0047).
+///
+/// Written every tick, empty list included, so the leaf's presence is itself
+/// the signal that this bundle is live — which is what lets `observe.mjs
+/// breaches` tell "no channel" from "nothing is broken", the distinction ADR
+/// 0028 made for the Raid log and ADR 0035 for the Layout record.
+///
+/// Rows in `breachRows`' order — oldest breach first — so the ordering is
+/// Core's, computed once and under test, rather than a second opinion in the
+/// writer and a third in the reader.
+let saveBreaches (home: string) (state: BreachState) =
+    let breaches = createEmpty<obj>
+    breaches?rows <- state |> breachRows |> List.map encodeBreach |> List.toArray
+    writeColonyLeaf home "breaches" breaches
 
 /// The keys one CPU row's phase group is written under, each beside the
 /// reader that answers it. One list, so the guard that admits a group and the
