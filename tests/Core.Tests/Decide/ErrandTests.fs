@@ -759,6 +759,39 @@ let courierTests =
                     "at 864 TTL the next fixed body is owed"
             }
 
+            // #354's third clause, at the one end this fixture can show. The
+            // clause: a delivery draw is refused a body that cannot outlive the
+            // loaded leg, priced at three ticks of life per tick walked
+            // (`Tuning.MineContactAgeing`) — a body that dies loaded does not
+            // lose a body, it loses the ore, through a tombstone that cooks its
+            // own tile and drops a pile that bleeds at 1 T a tick.
+            //
+            // What is pinned here is its **permissive** end (ADR 0004): an
+            // unpriceable leg refuses nobody. This fixture is one crossing with
+            // no ground behind either landing (ADR 0062) and a nameless home
+            // layer, so every cross-room price out of it is `None` — which is
+            // why the refusal itself is pinned nowhere yet and #354 carries the
+            // ticket for it. `RoomSeamTests` holds the arithmetic over the real
+            // captures: 159 loaded ticks, 477 of life at the contact rate.
+            test "an unpriceable delivery leg refuses nobody, however old the body" {
+                let aged =
+                    { courier "courier-aged" with
+                        TicksToLive = 1
+                    }
+
+                let colony =
+                    deliveryColony (Some Ownership.Ours) |> withHomeCreep { X = 13; Y = 10 } aged
+
+                Expect.isNone
+                    (Atlas.walkTicks (Atlas.ofView colony) aged.Name (Refill(reactor, Thorium)))
+                    "the fixture's premise: this leg has no price"
+
+                Expect.equal
+                    (Map.tryFind aged.Name (decideOn colony).Assignments)
+                    (Some(taskId (Withdraw("sto-1", Thorium))))
+                    "a walk the Atlas cannot price is no reason to refuse a body its work"
+            }
+
             // #354. The Reactor burns exactly 1 T a tick against a
             // 1,000-unit store, so nothing about a *cadence* can meter this
             // delivery: 999 T every 636 ticks is 1.57 T a tick, and the

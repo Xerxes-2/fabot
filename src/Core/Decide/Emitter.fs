@@ -300,8 +300,47 @@ let internal applicable
         // shaped to never make) — and the two it drops are the two that are
         // about the *controller's* container: ADR 0019's Work part and the
         // buffer-side exemption, neither of which a mineral container can be.
+        // **A load must be deliverable by the body that draws it** (#354). The
+        // delivery draw is the one intake in this colony whose onward leg is
+        // priced at *three* ticks of life per tick walked: under the
+        // 1,000-unit contact cliff the mod spends `floor(log10 store.T)`
+        // extra life a tick on every creep whose tile carries ore, and the
+        // ore on that tile is the body's own load, so there is nowhere to
+        // stand that is not hot and no way to put it down but the Reactor.
+        // `Tuning.MineContactAgeing` is that three, already written for the
+        // miner's side of the same rule.
+        //
+        // A body that cannot outlive the loaded leg dies on it, and dying
+        // loaded is not a lost body but lost **score**: the tombstone makes
+        // its own tile hot, so it decays at the same three-fold rate and
+        // drops the ore as a pile that then bleeds at 1 T a tick.
+        //
+        // Asked of the Reactor's own Refill, which is the leg this load is
+        // for, so the Atlas answers off the cross-room price the delivery
+        // pays anyway. An unpriceable walk does not refuse (ADR 0004), and a
+        // colony with no errand declared has nothing to forall over — which
+        // is every colony before this season.
+        let outlivesTheLoadedLeg =
+            view.Errands
+            |> List.forall (fun errand ->
+                match Atlas.walkTicks atlas creep.Name (Refill(fst errand.Target, Thorium)) with
+                | None -> true
+                | Some walk -> creep.TicksToLive >= walk * view.Tuning.MineContactAgeing)
+
+        // The clause reaches the **Storage's** Thorium draw alone: that is the
+        // delivery's intake, and the mine haul's — a container under the
+        // miner's feet — is a walk of a few tiles onto the same room's floor.
+        let deliveryDraw =
+            Map.tryFind storeId view.Spatial.TargetKinds = Some(Structure BuiltKind.Storage)
+
         match resource with
-        | Thorium -> has Carry && emptyHanded && worthTheTrip && not heavy && not standing
+        | Thorium ->
+            has Carry
+            && emptyHanded
+            && worthTheTrip
+            && not heavy
+            && not standing
+            && (not deliveryDraw || outlivesTheLoadedLeg)
         | Energy ->
             has Carry
             && halfEmpty
