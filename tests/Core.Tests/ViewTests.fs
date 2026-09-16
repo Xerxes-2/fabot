@@ -1771,11 +1771,75 @@ let private blindErrandWorld =
         Rooms = pairWorld.Rooms |> unseen errandCrossed |> unseen errandRoom
     }
 
+/// The courier standing under the flag, carrying the body the season's row
+/// actually casts (`Bodies.courierPattern`: twenty Carry, ten Move) and filed
+/// into the errand room. Written for the running-dry alarm (#361), which reads
+/// a courier off its **shape** — so what has to reach the view is not that a
+/// creep of ours is out there but that its parts survive the projection's
+/// errand narrowing.
+let private courierWorld =
+    let courier = creep "courier-900-Spawn1" errandRoom
+
+    { errandWorld with
+        Creeps =
+            errandWorld.Creeps
+            @ [
+                { courier with
+                    Info =
+                        { courier.Info with
+                            Body = Map.ofList [ Carry, 20; Move, 10 ]
+                            Thorium = 500
+                        }
+                }
+            ]
+        Rooms =
+            errandWorld.Rooms
+            |> Map.add
+                errandRoom
+                (snd (withCreeps [ "courier-900-Spawn1", reactorTile ] errandSeen))
+    }
+
 [<Tests>]
 let errandTests =
     testList
         "an errand carries the ground, the walk, and the one thing declared in it"
         [
+            test
+                "the courier under the flag reaches the view as a body with parts, and the home it walked from is named" {
+                // The projection-side half of #361's running-dry alarm, written
+                // with it for the reason #355 and #356 were both filed: the
+                // rule was green in `ObserveTests` against a hand-written view,
+                // and what that cannot say is whether `ofWorld` builds the
+                // shape it assumes. Here that shape is three facts — a creep of
+                // ours standing in an **errand** room (the census cut that
+                // silenced #356 lived exactly here), its body's parts, and the
+                // home room name the lead time is measured from.
+                let view = viewUnder errandDeclared courierWorld mother
+
+                let courier =
+                    view.Creeps |> List.tryFind (fun creep -> creep.Name = "courier-900-Spawn1")
+
+                Expect.equal
+                    (courier |> Option.map (fun creep -> Map.tryFind Carry creep.Body))
+                    (Some(Some 20))
+                    "the Carry count survives the errand narrowing, which is what the alarm matches a courier by"
+
+                Expect.equal
+                    (courier |> Option.map (fun creep -> Map.tryFind Move creep.Body))
+                    (Some(Some 10))
+                    "and the Move count beside it: a shape match on one part alone would take a hauler for a courier"
+
+                Expect.equal
+                    view.Spatial.RoomName
+                    (Some mother)
+                    "and the home is named, without which `RoomName.hopsBetween` has no origin and the alarm stays silent by design"
+
+                Expect.equal
+                    (view.Errands |> List.map (fun errand -> errand.RoomName))
+                    [ errandRoom ]
+                    "against the errand's own room, which is the other end of that hop count"
+            }
+
             test "the declared target is placed before any body of ours has stood there" {
                 // ADR 0060 decision 1's first question, and ADR 0041's
                 // deadlock one declaration kind wider: a courier has to hold

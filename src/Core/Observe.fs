@@ -5,6 +5,7 @@
 module Fabot.Core.Observe
 
 open Fabot.Core.Types
+open Fabot.Core.Decide.Bodies
 
 /// One recorded change in a creep's timeline: what happened and when.
 type ObserveEntry = { Tick: int; Verdict: Verdict }
@@ -1307,6 +1308,27 @@ type BreachKind =
     /// not nothing: the continuous-work streak resets, and the programme falls
     /// back to 1 point per T.
     | ReactorStarved
+    /// A declared Reactor of ours that still burns, with **no courier alive to
+    /// reach it before it stops** (#361). `ReactorStarved` above fires on the
+    /// tick the streak is already gone; this is the same incident read while it
+    /// can still be answered, and it is the one kind here whose entire value is
+    /// arriving early.
+    ///
+    /// **The threshold is the lead time, and that is the whole design.** It
+    /// fires when the store holds fewer ticks of burn than it takes to put a
+    /// load under the flag from a standing start — casting the fixed body plus
+    /// walking it out — so it fires on the *last* tick an answer still works
+    /// and never a tick before. Both errors cost: a tick later saves nothing,
+    /// and an alarm that fired on a comfortable store would be answered by a
+    /// courier hired early, which then stands at the Reactor burning down its
+    /// 1,500-tick life for nothing.
+    ///
+    /// Why it was filed, live at W15S28 t499742: store 315 and falling 1 a
+    /// tick, last delivery 685 ticks earlier, courier quota 0 — with 7,226 T
+    /// banked at home and a 7,989-tick streak standing. Read 165 ticks too late
+    /// to save it. Nothing in this channel said a word, because the store was
+    /// not yet zero.
+    | ReactorRunningDry
     /// A declared Reactor whose own row says it is not ours — somebody walked a
     /// CLAIM body in, or the re-claimer died before its relief arrived. Every
     /// tonne delivered while that stands scores for whoever holds the flag.
@@ -1507,6 +1529,66 @@ let private breachesIn (view: ColonyView) : Breach list =
                 else
                     None))
 
+    // The Reactor that will stand dry before anybody can reach it (#361). Three
+    // terms, all off rows this view already carries — no flood and no priced
+    // walk, for the reason this function's own docstring gives.
+    //
+    // `leadTicks` is what the alarm is timed against: 90 ticks to cast the
+    // fixed courier body (30 parts at the engine's 3 ticks a part,
+    // `CREEP_SPAWN_TIME`) plus the walk out. The walk is **a floor and not a
+    // price** — 50 ticks a room crossing, which is a full room width at the
+    // one-tile-a-tick this body does on roads (20 loaded Carry against 10 Move
+    // is 10 fatigue a tile on road, under the 20 the Move parts clear). Live
+    // measured 159 ticks over W15S28's three crossings against the 150 this
+    // floor gives, so it under-reads by about 6% and therefore fires slightly
+    // *late* rather than early. A priced walk would be honest to the tile and
+    // would also cost the `Atlas.routes` this channel refuses to spend.
+    ///
+    /// `None` when the names do not join, which is a declaration this colony
+    /// should not be holding at all (`Errand.routable`): the alarm stays silent
+    /// rather than guessing a distance, because a lead time guessed too long is
+    /// a row that cries on every tick forever.
+    let leadTicks (room: string) =
+        let cast = List.length courierPattern.Block * 3
+
+        view.Spatial.RoomName
+        |> Option.bind (fun home -> RoomName.hopsBetween home room)
+        |> Option.map (fun hops -> cast + hops * 50)
+
+    // A body is a courier by its **shape**, matched against the row's own
+    // pattern rather than its name: the name is a spawn-time string this
+    // channel would have to parse, while `courierPattern.Block` is the fact the
+    // quota hires against, so the two cannot come to disagree about what a
+    // courier is.
+    let couriers =
+        view.Creeps
+        |> List.filter (fun creep ->
+            partCount creep.Body Carry = partCountIn courierPattern.Block Carry
+            && partCount creep.Body Move = partCountIn courierPattern.Block Move)
+
+    // One store tick is one T: the Reactor burns exactly 1 a tick
+    // (`docs/research/thorium-reactor.md`), so the store *is* the clock and no
+    // rate has to be estimated.
+    let runningDry =
+        if not (List.isEmpty couriers) then
+            []
+        else
+            reactors
+            |> List.filter (fun (room, reactor) ->
+                reactor.Owner = ReactorOwner.Ours
+                && reactor.Thorium > 0
+                && leadTicks room |> Option.exists (fun lead -> reactor.Thorium <= lead))
+            |> List.map (fun (room, reactor) ->
+                {
+                    Kind = BreachKind.ReactorRunningDry
+                    Room = room
+                    Subject = reactor.Id
+                    // The ticks of burn left, which is what the operator acts
+                    // on: it counts down every tick the row stands, and the
+                    // row's age says how long nobody has answered.
+                    Amount = reactor.Thorium
+                })
+
     // A Reactor of ours standing dry. The programme pays 1 point per T at a
     // broken streak against the multiplier a continuous one earns
     // (`docs/research/thorium-reactor.md`), so an empty store is income lost
@@ -1544,7 +1626,7 @@ let private breachesIn (view: ColonyView) : Breach list =
                 Amount = 0
             })
 
-    decayingOre @ unplaceable @ starved @ lost
+    decayingOre @ unplaceable @ runningDry @ starved @ lost
 
 /// Trim the log to the cap. Oldest **last-seen** first, the way `capEpisodes`
 /// trims its ring — and with the tie-break stated, because here the tie is the

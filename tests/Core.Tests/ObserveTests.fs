@@ -2912,7 +2912,20 @@ let private withTombstone room id amount (colony: ColonyView) =
 /// holding `held` of its 1,000 (#354's fixtures, which put the store on the
 /// Reactor's **row** and never in `SpatialInfo.Thorium`).
 let private erranding held (colony: ColonyView) =
-    colony
+    { colony with
+        // The home this delivery runs from, and it has to be a room the errand
+        // is actually reachable from (#361). `quiet` lives at `raidRoom`
+        // (W12S28) while `Decide.Fixtures`' Reactor stands in W1N2 — **42 room
+        // crossings apart**, a declaration `Errand.routable` would refuse and
+        // no courier could ever walk. It never mattered until a check read the
+        // distance: the running-dry alarm times itself against the walk, and
+        // against 42 hops every store in these fixtures reads as too late to
+        // save. Three hops is the live pairing, W15S28 to W15S25.
+        Spatial =
+            { colony.Spatial with
+                RoomName = Some "W1N5"
+            }
+    }
     |> Decide.Fixtures.withReactorErrand
     |> Decide.Fixtures.withReactorOwner (Some Ownership.Ours)
     |> Decide.Fixtures.withReactorStore held
@@ -2922,6 +2935,23 @@ let private erranding held (colony: ColonyView) =
 let private courierAt name carried (colony: ColonyView) =
     colony
     |> Decide.Fixtures.standingInErrand [ { ours name with Thorium = carried }, { X = 25; Y = 43 } ]
+
+/// The courier's real body on a named creep (#361): the alarm matches the
+/// **shape** `Bodies.courierPattern` casts — twenty Carry and ten Move — so a
+/// fixture that wants to be seen as a courier has to carry it, and the
+/// three-part `ours` body beside it is the control that must not be.
+let private withCourierBody name (colony: ColonyView) =
+    { colony with
+        Creeps =
+            colony.Creeps
+            |> List.map (fun creep ->
+                if creep.Name = name then
+                    { creep with
+                        Body = Map.ofList [ Carry, 20; Move, 10 ]
+                    }
+                else
+                    creep)
+    }
 
 /// The breaches this view yields on one tick, as (kind, room, subject, amount)
 /// rows — the whole of what a row says, so a case that fires the right kind on
@@ -3090,8 +3120,47 @@ let breachKindTests =
 
                 Expect.equal
                     (breachesOn 100 (quiet |> erranding 1))
+                    [ BreachKind.ReactorRunningDry, errandRoom, reactor, 1 ]
+                    "one tonne left and nobody walking is the row that arrives in time, not the starved one"
+            }
+
+            test
+                "a Reactor whose store is thinner than the courier's lead time is a breach before it starves" {
+                // #361, and the whole of the design is the threshold. 90 ticks
+                // to cast the fixed body plus 150 over three crossings is 240,
+                // so 240 fires and 241 does not, and the row appears on the
+                // last tick an answer still lands rather than on the tick the
+                // streak is already gone.
+                Expect.equal
+                    (breachesOn 100 (quiet |> erranding 240))
+                    [ BreachKind.ReactorRunningDry, errandRoom, reactor, 240 ]
+                    "the amount is the ticks of burn left, which counts down while nobody answers"
+
+                Expect.equal
+                    (breachesOn 100 (quiet |> erranding 241))
                     []
-                    "one tonne in the store is a programme that is running"
+                    "one tick of margin over the lead time is a Reactor still reachable, and an alarm here would be answered by a courier that stands at the flag burning its 1,500-tick life"
+            }
+
+            test "a courier alive silences the running-dry row, whatever the store reads" {
+                // The condition is not "the store is low", it is "the store is
+                // low **and nobody is walking**": a body already cast is the
+                // answer this alarm asks for, and a channel that kept crying
+                // through the walk would have the operator hire a second
+                // courier to stand beside the first.
+                //
+                // Matched on the body's shape and never its name, so the alarm
+                // and the quota that hires cannot come to disagree about what a
+                // courier is.
+                let walking =
+                    quiet |> erranding 10 |> courierAt "courier" 500 |> withCourierBody "courier"
+
+                Expect.equal (breachesOn 100 walking) [] "the delivery is already in the air"
+
+                Expect.equal
+                    (breachesOn 100 (quiet |> erranding 10 |> courierAt "hauler" 500))
+                    [ BreachKind.ReactorRunningDry, errandRoom, reactor, 10 ]
+                    "a three-part body standing out there is not a courier and carries no load worth a delivery"
             }
 
             test "a declared Reactor whose row is not ours is a breach, and is not also starved" {

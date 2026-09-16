@@ -914,6 +914,7 @@ let private breachKindName =
     function
     | BreachKind.OreOnTheFloor -> "ore-on-the-floor"
     | BreachKind.OreUnplaceable -> "ore-unplaceable"
+    | BreachKind.ReactorRunningDry -> "reactor-running-dry"
     | BreachKind.ReactorStarved -> "reactor-starved"
     | BreachKind.ReactorLost -> "reactor-lost"
 
@@ -921,6 +922,7 @@ let private breachKindOf name =
     match name with
     | "ore-on-the-floor" -> Some BreachKind.OreOnTheFloor
     | "ore-unplaceable" -> Some BreachKind.OreUnplaceable
+    | "reactor-running-dry" -> Some BreachKind.ReactorRunningDry
     | "reactor-starved" -> Some BreachKind.ReactorStarved
     | "reactor-lost" -> Some BreachKind.ReactorLost
     | _ -> None

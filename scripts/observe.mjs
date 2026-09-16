@@ -1109,6 +1109,10 @@ if (command === "console") {
   const KIND = {
     "ore-on-the-floor": "the T of ore lying on the floor of a room this colony sweeps",
     "ore-unplaceable": "the T aboard a body at the Reactor that the Reactor has no room for",
+    "reactor-running-dry":
+      "the ticks of burn left in the declared Reactor, with no courier alive to reach it in time " +
+      "(#361) — the one row here worth answering the tick it appears, because its whole value is " +
+      "arriving before the streak breaks",
     "reactor-starved":
       "0 — the declared Reactor of ours is standing empty, and its continuous-work streak with it",
     "reactor-lost":
