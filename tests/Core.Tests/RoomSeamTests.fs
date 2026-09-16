@@ -1126,12 +1126,18 @@ let reclaimerRelayTests =
                 | Some ticks ->
                     Expect.equal
                         (walkTicks stepAtlas courier.Name (Refill("reactor", Thorium)))
-                        (Some 302)
-                        "151 loaded movement steps cost two ticks each on normalized terrain"
+                        (Some 151)
+                        "151 loaded movement steps, one tick each: a 500-unit load (#354) is half of this body's carry, so the walk out is not fatigued"
 
                     let loadedWalk = walkTicks atlas courier.Name (Refill("reactor", Thorium))
 
-                    Expect.equal loadedWalk (Some 318) "the loaded body clock over the real terrain"
+                    // 159 and not 318: at `Tuning.ReactorLoad` 500 (#354) the
+                    // 20-Carry courier is half empty, and half a carry is no
+                    // fatigue over 10 Move parts — the loaded leg costs one
+                    // tick a step, as the empty one does. The load was chosen
+                    // for the Reactor's 1,000-unit store; this is the second
+                    // thing it bought.
+                    Expect.equal loadedWalk (Some 159) "the loaded body clock over the real terrain"
 
                     // A `[Claim; Move]` body is one fatigue part against one
                     // Move, so it walks a plain tile in one tick and pays
@@ -1166,22 +1172,35 @@ let reclaimerRelayTests =
                         409
                         "so the cast cadence is 409, derived rather than configured"
 
-                    // The courier's separate clock (#319): the accepted route
-                    // measurement is 151 movement steps plus three room
-                    // transitions. Its loaded body takes 318 ticks on the real
-                    // terrain, so a 636-tick cadence leaves the Reactor 363
-                    // ticks of stock and one whole leg plus 45 ticks in hand.
-                    // TTL cost is a third unit: below the 1,000 cliff each one
-                    // of those 318 elapsed ticks spends three ticks of life.
-                    let deliverySlack =
-                        Tuning.defaults.ReactorLoad - Tuning.defaults.DeliveryInterval
-
-                    Expect.equal deliverySlack 363 "the Reactor buffer between nominal deliveries"
-                    Expect.equal (deliverySlack - 318) 45 "one priced loaded leg still fits"
+                    // The courier's separate clock (#319, re-derived by
+                    // #354). What #354 took out of this block is the idea that
+                    // a cadence meters the delivery: the Reactor burns exactly
+                    // 1 T a tick against a 1,000-unit store, so supply is
+                    // metered by the draw gate on that store
+                    // (`Facts.reactorTakesALoad`) and `DeliveryInterval` only
+                    // keeps a body in the row. The old arithmetic here read
+                    // `ReactorLoad - DeliveryInterval` as "buffer", which is
+                    // two units subtracted from each other — Thorium less
+                    // ticks — and it is what let 999 T leave home every 636
+                    // ticks against a 1 T/tick burn.
+                    //
+                    // The three clocks that do hold, over this room's real
+                    // terrain:
+                    let cycle = Tuning.defaults.ReactorLoad
 
                     Expect.equal
-                        (318 * Tuning.defaults.MineContactAgeing)
-                        954
-                        "the loaded leg's TTL cost"
+                        cycle
+                        500
+                        "one load is 500 Reactor-ticks, so the gate reopens 500 ticks after it closes"
+
+                    Expect.equal
+                        (Engine.reactorCapacity - Tuning.defaults.ReactorLoad - 159)
+                        341
+                        "the store at the courier's arrival: what the gate admits, less the loaded leg it drains through"
+
+                    Expect.equal
+                        (159 * Tuning.defaults.MineContactAgeing)
+                        477
+                        "the loaded leg's TTL cost: below the 1,000 cliff each elapsed tick spends three of life"
             }
         ]

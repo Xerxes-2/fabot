@@ -315,8 +315,39 @@ let internal ourDeposits (view: ColonyView) : string list =
 /// load — because a pile with no store in it is the mineral container with the
 /// store taken away.
 let internal ourThoriumPiles (view: ColonyView) : string list =
+    let errandRooms =
+        view.Errands |> List.map (fun errand -> errand.RoomName) |> Set.ofList
+
     SpatialInfo.idsOfKind view.Spatial (Dropped Thorium)
-    |> List.filter (inARoomWeOwn view)
+    |> List.filter (fun id ->
+        inARoomWeOwn view id
+        || SpatialInfo.roomOf view.Spatial id
+           |> Option.exists (fun room -> Set.contains room errandRooms))
+
+/// Whether a Reactor this colony has declared has room for a **whole load**
+/// (#354). What gates a new draw at the Storage, and the only regulator of
+/// supply the programme has: the Reactor burns exactly 1 T a tick against a
+/// 1,000-unit store (`docs/research/thorium-reactor.md` §2), so a cadence
+/// cannot meter a delivery — a fixed interval either outruns the burn and
+/// strands the surplus, or falls behind it and breaks the streak, and 636
+/// ticks per 999-T load outran it by 57%.
+///
+/// Read at the **draw**, on the store as it stands, which is deliberately
+/// conservative: the store goes on draining for the whole loaded walk, so a
+/// load admitted here has strictly more room when it lands than when it was
+/// drawn. That is what makes a partial transfer — and so a courier holding
+/// ore it cannot put down — unreachable rather than merely unlikely.
+///
+/// A Reactor we cannot see answers `false`: no store, no room (ADR 0004).
+/// That closes the draw and leaves the load banked at home, which is where a
+/// load with nowhere to go belongs.
+let internal reactorTakesALoad (view: ColonyView) : bool =
+    view.Errands
+    |> List.exists (fun errand ->
+        let reactorId = fst errand.Target
+
+        SpatialInfo.heldIn view.Spatial Thorium reactorId + view.Tuning.ReactorLoad
+        <= Engine.reactorCapacity)
 
 /// The **mineral [[container]]s** of this colony's own deposits, in deposit
 /// order (ADR 0057 decision 3): the built container standing on a deposit's

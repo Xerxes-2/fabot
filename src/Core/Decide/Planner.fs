@@ -657,8 +657,15 @@ let planTasks (view: ColonyView) atlas (threats: Threats) (held: HeldTaskFacts) 
         view.Creeps
         |> List.exists (fun creep -> creep.Thorium = view.Tuning.ReactorLoad)
 
+    // The draw is gated on the Reactor having room for the whole load (#354),
+    // which is what meters supply against a store that burns 1 T a tick. A
+    // load drawn against a full Reactor cannot be put down on arrival, and a
+    // courier holding Thorium it cannot transfer stands on its own hot tile
+    // burning three ticks of life a tick until it dies of it — 915 T reached
+    // the Reactor room's floor that way. Held work is untouched: the sink
+    // below keeps a load already drawn, whatever the store has become.
     let deliveryWithdraws =
-        if deliveryOpen then
+        if deliveryOpen && reactorTakesALoad view then
             storages
             |> List.filter (fun id ->
                 SpatialInfo.heldIn view.Spatial Thorium id >= view.Tuning.ReactorLoad)

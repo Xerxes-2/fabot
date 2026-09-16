@@ -325,14 +325,37 @@ type Tuning =
         /// decade would be the second of those, and moving it down spends trips
         /// on a container that is not yet bleeding.
         MineContactCliff: int
-        /// Thorium carried on one Reactor delivery (#319). 999 sits one below
-        /// the 1,000-unit contact cliff: the loaded courier burns three ticks
-        /// of life per movement tick rather than four.
+        /// Thorium carried on one Reactor delivery (#319, resized by #354).
+        /// Under the 1,000-unit contact cliff, so the loaded courier burns
+        /// three ticks of life per movement tick rather than four — every
+        /// value from 100 to 999 buys that, and which one is chosen is a
+        /// question about the **Reactor's** store, not the courier's.
+        ///
+        /// The Reactor holds 1,000 and burns exactly 1 T a tick, so what a
+        /// load must satisfy is `load + walk < reactorCapacity`: the draw is
+        /// gated on the store having room for a whole load (`Planner`), and
+        /// the store goes on draining for the whole loaded walk. 500 against
+        /// W15S28's 318-tick leg leaves the store oscillating 182..682 — a
+        /// **182-tick margin** against the one thing that must never happen,
+        /// the store reaching zero and the streak resetting to 1 pt/T.
+        ///
+        /// 999 was the first value and it was too large by exactly this
+        /// argument: no gate can both admit a 999 load into a 1,000 store and
+        /// leave the store non-empty at the courier's arrival, so the load
+        /// arrived unplaceable, the courier stood on its own hot tile at 3×
+        /// ageing waiting for room, and died holding ore. 915 T reached the
+        /// Reactor room's floor that way (#354).
         ReactorLoad: int
         /// Ticks between courier casts while the delivery programme is open
         /// (#319). The loaded body's Atlas walk is 318 ticks over W15S28's
-        /// 154-unit route, so 636 leaves 363 ticks in the Reactor's 999-tick
-        /// buffer and absorbs that leg with 45 to spare.
+        /// 154-unit route, so a courier cast this often is always fresh
+        /// enough to carry one.
+        ///
+        /// It is **not** what regulates supply (#354): 999 T every 636 ticks
+        /// against a 1 T/tick burn is 1.57 T a tick, and the surplus has
+        /// nowhere to be but a courier's store or the floor. Supply is
+        /// regulated by the draw gate on the Reactor's own store instead, and
+        /// this interval now only keeps a *body* in the programme.
         DeliveryInterval: int
         /// Ticks the [[re-claimer]] relief is meant to stand beside its
         /// incumbent (#329). Added both to the incumbent's replacement lead
@@ -465,7 +488,7 @@ module Tuning =
             MinerWorkPerMove = 5
             MineContactAgeing = 3
             MineContactCliff = 1000
-            ReactorLoad = 999
+            ReactorLoad = 500
             DeliveryInterval = 636
             ReclaimerOverlap = 25
             HorizonLookahead = 1

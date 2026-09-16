@@ -604,7 +604,7 @@ let errandActTests =
 [<Tests>]
 let courierTests =
     testList
-        "the courier: one 999-unit trip over the priced errand"
+        "the courier: one 500-unit trip over the priced errand"
         [
             test
                 "the row opens only behind a diggable mine, a full load and the resident re-claimer" {
@@ -686,7 +686,7 @@ let courierTests =
                     { ready with
                         Spatial =
                             { ready.Spatial with
-                                Thorium = Map.add "sto-1" 998 ready.Spatial.Thorium
+                                Thorium = Map.add "sto-1" 499 ready.Spatial.Thorium
                             }
                     }
 
@@ -715,7 +715,7 @@ let courierTests =
                         poor, "a bank below the fixed 1,500 body yields"
                         ready |> withExtractorSite, "an extractor site is not a diggable deposit"
                         exhausted, "an exhausted deposit closes the row"
-                        short, "998 Thorium is not one delivery load"
+                        short, "499 Thorium is not one delivery load"
                         noResident, "the delivery waits behind the re-claimer"
                     ] do
                     Expect.equal (courierRow colony).Quota 0 reason
@@ -759,7 +759,114 @@ let courierTests =
                     "at 864 TTL the next fixed body is owed"
             }
 
-            test "the priced pair draws exactly 999 from Storage and pours it into our Reactor" {
+            // #354. The Reactor burns exactly 1 T a tick against a
+            // 1,000-unit store, so nothing about a *cadence* can meter this
+            // delivery: 999 T every 636 ticks is 1.57 T a tick, and the
+            // surplus has nowhere to be but a courier's store or the floor —
+            // which is where 915 T of it went. The draw is gated on the
+            // store's own room instead, read at the draw and so strictly
+            // conservative: the store drains for the whole loaded walk, so a
+            // load admitted here has more room when it lands than when it left.
+            test "the draw waits for the Reactor to have room for a whole load" {
+                let withStore held =
+                    let ready = deliveryColony (Some Ownership.Ours)
+
+                    { ready with
+                        Spatial =
+                            { ready.Spatial with
+                                Thorium = Map.add reactor held ready.Spatial.Thorium
+                            }
+                    }
+
+                let room = Engine.reactorCapacity - Tuning.defaults.ReactorLoad
+
+                Expect.contains
+                    (planTasksOn (withStore room) noThreats)
+                    (Withdraw("sto-1", Thorium))
+                    "exactly one load of room opens the draw"
+
+                Expect.isFalse
+                    (planTasksOn (withStore (room + 1)) noThreats
+                     |> List.contains (Withdraw("sto-1", Thorium)))
+                    "one unit short of a load's room closes it: a load drawn now could not be put down"
+
+                Expect.isFalse
+                    (planTasksOn (withStore Engine.reactorCapacity) noThreats
+                     |> List.contains (Withdraw("sto-1", Thorium)))
+                    "and a full Reactor is the case that stranded a loaded courier on its own hot tile"
+
+                // The sink is not gated with the draw: a load already drawn
+                // must have somewhere to go while any of it fits, which is the
+                // same reason the start facts closing does not strand one. A
+                // store with room for one unit and not for one load closes the
+                // draw and keeps the sink — and only a Reactor at its cap
+                // closes both, which is the `stored < reactorCapacity` rule
+                // this leaves alone: an engine `transfer` into a full store is
+                // an error, not a wait.
+                let loaded = courier "courier-loaded" |> carrying 500
+
+                let nearlyFull =
+                    withStore (Engine.reactorCapacity - 1) |> withErrandCreep ringTile loaded
+
+                let tasks = planTasksOn nearlyFull noThreats
+
+                Expect.contains
+                    tasks
+                    (Refill(reactor, Thorium))
+                    "the Reactor is still the sink for ore already aboard"
+
+                Expect.isFalse
+                    (tasks |> List.contains (Withdraw("sto-1", Thorium)))
+                    "and the draw behind it stays shut"
+            }
+
+            // The other half of #354: the ore that reached the floor could be
+            // named by nobody. `Facts.ourThoriumPiles` filtered "a room we
+            // own", and the Reactor's room has no controller at all, so it is
+            // owned by nobody and its floor was invisible — while a CLAIM body
+            // of ours stood two tiles away and the pile decayed at 1 T a tick.
+            test "a Thorium pile on the declared Reactor's floor is ours to pick up" {
+                let pileTile = { X = 26; Y = 43 }
+
+                let withPile room amount =
+                    let ready = deliveryColony (Some Ownership.Ours)
+                    let layer = SpatialInfo.layerOf ready.Spatial room
+
+                    { ready with
+                        Spatial =
+                            { ready.Spatial with
+                                TargetKinds =
+                                    Map.add
+                                        "pile-reactor"
+                                        (Dropped Thorium)
+                                        ready.Spatial.TargetKinds
+                                Thorium = Map.add "pile-reactor" amount ready.Spatial.Thorium
+                            }
+                            |> withNeighbour
+                                room
+                                { layer with
+                                    TargetPositions =
+                                        Map.add "pile-reactor" pileTile layer.TargetPositions
+                                }
+                    }
+
+                Expect.contains
+                    (planTasksOn (withPile errandRoom 915) noThreats)
+                    (Pickup("pile-reactor", Thorium))
+                    "the errand room's floor is the one floor of ours that is in nobody's room"
+
+                Expect.isFalse
+                    (planTasksOn (withPile errandRoom 99) noThreats
+                     |> List.contains (Pickup("pile-reactor", Thorium)))
+                    "the pickup threshold is unchanged by where the pile lies"
+
+                Expect.isFalse
+                    (planTasksOn (withPile "W9S9" 915) noThreats
+                     |> List.contains (Pickup("pile-reactor", Thorium)))
+                    "a room we neither own nor declared is still none of ours"
+            }
+
+            test "the priced pair draws exactly 500 from Storage and pours it into our Reactor" {
                 let empty = courier "courier-empty"
 
                 let atStorage =
@@ -767,10 +874,10 @@ let courierTests =
 
                 Expect.contains
                     (emitOn atStorage [ empty.Name, Withdraw("sto-1", Thorium) ])
-                    (WithdrawFromStore(empty.Name, "sto-1", Thorium, Some 999))
+                    (WithdrawFromStore(empty.Name, "sto-1", Thorium, Some 500))
                     "the delivery is the Withdraw amount option's first bounded caller"
 
-                let loaded = courier "courier-loaded" |> carrying 999
+                let loaded = courier "courier-loaded" |> carrying 500
 
                 let atReactor =
                     deliveryColony (Some Ownership.Ours) |> withErrandCreep ringTile loaded
@@ -825,7 +932,7 @@ let courierTests =
                         FreeCapacity = 1000
                     }
 
-                let otherLoad = courier "mine-load" |> carrying 998
+                let otherLoad = courier "mine-load" |> carrying 499
 
                 let staleHolder =
                     { afterPartial with
@@ -862,7 +969,7 @@ let courierTests =
                     (Refill(reactor, Thorium))
                     "an unowned Reactor keeps the staged load"
 
-                let loaded = courier "courier-waiting" |> carrying 999
+                let loaded = courier "courier-waiting" |> carrying 500
 
                 let waiting =
                     deliveryColony (Some Ownership.Rival) |> withErrandCreep ringTile loaded
@@ -873,7 +980,7 @@ let courierTests =
             }
 
             test "visible Keeper Reach pre-empts a loaded courier, which re-prices after it clears" {
-                let loaded = courier "courier-fleeing" |> carrying 999
+                let loaded = courier "courier-fleeing" |> carrying 500
 
                 let quiet = deliveryColony (Some Ownership.Ours) |> withErrandCreep ringTile loaded
 
