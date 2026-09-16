@@ -508,6 +508,26 @@ module Outpost =
             Controller = "6a8caa95dd4872bccd319010", { Room = "W15S27"; X = 6; Y = 9 }
         }
 
+    /// W15S28's south outpost, declared 2026-09-17 off
+    /// `docs/research/outpost-wave-2.md`, which called it *the best room of the
+    /// three* and told it to wait: cheapest haul of the candidates (1,170), the
+    /// most Seats (5), a 26-tile band, about 6.34 energy a tick net. What it
+    /// waited on was never the room — it was #353 (landed) and this colony's own
+    /// digestion of W15S27, whose container now stands at (13,29) holding 1,380
+    /// with the second hauler and third anchor cast.
+    ///
+    /// Its one liability, and the survey names it alone among the three: the
+    /// controller's Work Area is a **single tile** (12,34), so one reserver at a
+    /// time and a dead one waits for its corpse before the next can stand —
+    /// `multihop-outposts.md` §4.3's warning, the same shape as W11S28's single
+    /// Seat. A reason to keep hands off that tile, not a reason to refuse it.
+    let w15s29: Outpost =
+        {
+            RoomName = "W15S29"
+            Sources = [ "6a8caa95dd4872bccd319017", { Room = "W15S29"; X = 18; Y = 20 } ]
+            Controller = "6a8caa95dd4872bccd319018", { Room = "W15S29"; X = 12; Y = 34 }
+        }
+
     /// W12S28's west outpost, declared 2026-09-16 off
     /// `docs/research/outpost-wave-2.md`, which is the wave-2 survey's only
     /// "declare now": one hop and one chain each way, one source at a 210-tick
@@ -1004,7 +1024,25 @@ module Colony =
             // from here, which is a reassignment and not a new declaration.
             {
                 Home = "W15S28"
-                Outposts = [ Outpost.w15s27 ]
+                // W15S29 joins it on 2026-09-17. The wave-2 survey called it
+                // the best *room* of its three candidates and told it to wait
+                // on two things, neither about the room: #353, and this
+                // colony's own digestion of W15S27. Both are in: the perf work
+                // landed, and W15S27's container stands at (13,29) holding
+                // 1,380 with the second hauler and third anchor cast.
+                //
+                // And the survey's own refusal was a CPU refusal — "+1.5-2.0 ms
+                // of `decide`, +40-50%, on the colony whose tick is already the
+                // dearest we run" — which is no longer the price. Re-measured
+                // on today's code over the same scenario, three interleaved
+                // rounds with a rebuild between each and the declaration moved
+                // in this very list: **2.95, 2.95, 3.23 without against 3.51,
+                // 3.53, 3.68 with — +0.55 ms, +18%, intervals not
+                // overlapping.** What changed is #353 and #358: a room's
+                // marginal cost is a third of what it was, because the far
+                // field it adds is now held across ticks and shares its
+                // suffix with the chains already priced.
+                Outposts = [ Outpost.w15s27; Outpost.w15s29 ]
                 // And the one errand there is (ADR 0060 decision 1): the
                 // sector Reactor in W15S25, three crossings out by W15S27 and
                 // the Source Keeper room W15S26. This colony declares it

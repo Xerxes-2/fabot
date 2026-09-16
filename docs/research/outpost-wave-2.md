@@ -760,3 +760,50 @@ would move on the live server, and the direction is named.
 - **The live CPU after any of this.** §10's ratios are the harness's. What ADR 0041
   asks for is a live `observe cpu` after a deploy, and the honest sequence is
   #353/#332 first, then one declaration, then that reading.
+
+## 13. Addendum, 2026-09-17: W15S29 declared, and why the refusal expired
+
+§11 said *declare later* and named the two conditions. Both are now met, and the
+second one turned out to be **the wrong number rather than the wrong answer**.
+
+- **The digestion is done.** W15S27's container stands at `13,29` holding 1,380
+  energy; W15S28 runs its second hauler and third anchor (`observe quotas`:
+  reserver 2, anchor 3, hauler 2, courier 1). §11's "the colony that just
+  swallowed a declaration should not be handed the next one" has been served.
+- **The CPU refusal expired, and it expired by a factor of three.** §10 measured
+  **+1.5–2.0 ms of `decide` (+40–50%)** for either W15S28 room, and called that
+  "not a charge this bot has the room to pay". Re-measured on today's code, same
+  scenario (`--scenario reactor --level 7`, which *is* W15S28 at RCL6 with the
+  W15S25 errand), 100 ticks, **three interleaved rounds with a rebuild between
+  each** and the declaration moved in `Colony.declared` between arms:
+
+  | round | `decide`, W15S28, without | with |
+  |---|---|---|
+  | 1 | 3.23 | 3.51 |
+  | 2 | 2.95 | 3.68 |
+  | 3 | 2.95 | 3.53 |
+
+  **+0.55 ms, +18%, intervals not overlapping.** Whole tick 4.31–4.81 → 4.98–5.19.
+
+  What changed is #353 and #358, both landed since: the far field a new room adds
+  is now **held across ticks** (`PlanMemo`) and **shares its suffix** with chains
+  already priced, so the marginal cost of a room is about a third of what this
+  survey measured. The refusal was correct when it was written and was made
+  obsolete by work aimed at exactly that.
+
+- **What did *not* improve, and is recorded rather than explained away:** the live
+  100-tick tick mean is **65.43 ms with a max of 150.93** (bucket at its 10,000
+  cap and net-refilling), against §10's 58/104. It went **up**, because four
+  colonies now run where three did and W11S29 climbed to RCL3. ADR 0041's revisit
+  trigger (mean > 50, or any tick > 80) is still firing and this declaration does
+  not stop it firing; what the measurement supports is that the *marginal* room
+  is cheap now, not that the tick is.
+
+- **Live cost booked:** +0.55 ms on one of four colonies' `decide`, so about +0.6
+  ms of a 65 ms tick — under 1%. Against §7's ~6.34 energy a tick net, which is
+  what pays for W15S28's own climb out of RCL6 and the haul of the 20,726 T
+  sitting in its Storage.
+
+- **The liability to watch, unchanged from §11:** the controller's Work Area is a
+  **single tile** (`12,34`). One reserver at a time, and a dead one waits for its
+  corpse before the next can stand.

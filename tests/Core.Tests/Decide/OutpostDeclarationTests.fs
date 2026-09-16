@@ -1592,6 +1592,18 @@ let outpostTests =
                     ]
                     "the nursery rides the bootstrap half and brings the whole rectangle `transitBetween` names for a three-hop chain — W12S28's own home among them (ADR 0058), which is where it belonged all along"
 
+                // The third colony's two, and the pairing is the reason to pin
+                // them here: W15S27 is the room the delivery route crosses on
+                // the way to the Reactor, and W15S29 is the one declared for
+                // its own sake (2026-09-17, `outpost-wave-2.md`) once the
+                // survey's CPU refusal stopped being the price — +0.55 ms of
+                // `decide` on today's code against the +1.5-2.0 it measured.
+                Expect.equal
+                    (Colony.outpostsOf Colony.declared "W15S28"
+                     |> List.map (fun outpost -> outpost.RoomName))
+                    [ "W15S27"; "W15S29" ]
+                    "the third colony works the room its errand crosses and the one the survey called its best"
+
                 Expect.isEmpty
                     (Colony.outpostsOf Colony.declared "W1N1")
                     "and a room nobody declared a colony for works no outposts at all"
