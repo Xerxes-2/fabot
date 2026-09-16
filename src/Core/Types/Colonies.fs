@@ -958,16 +958,27 @@ module Colony =
                 // raises, whose every site is feeding-tier (ADR 0047 decision
                 // 4). Live proof: claimed at t~305,2xx, spawn site placed by
                 // hand, and not one body crossed until this line changed.
-                // W11S29 joins it on 2026-09-16 as the fourth colony's room
-                // (`docs/research/fourth-colony.md`): three crossings out by
-                // W13S29 and W12S29, declared here so its controller enters
-                // this colony's pool as a Claim, and **to be taken out of this
-                // list the day that Claim lands** — which is the paragraph
-                // about W15S28 further down this entry, and the same rule about the haul: this
-                // colony runs a 2,780 demand on two haulers today, and one
-                // more source three crossings out is the shape that took
-                // W14S28 from 2,790 to 4,810 and two haulers to four.
-                Outposts = [ Outpost.w13s29; Outpost.w11s29 ]
+                // W11S29 was in this list from 2026-09-16 until its Claim
+                // landed, for the one tick's worth of reason ADR 0047 allows:
+                // a room declared here puts its controller in this colony's
+                // pool as a Claim, which is how a fourth colony is taken at
+                // all. It came out on 2026-09-17 (#352), and both halves of
+                // why are worth keeping.
+                //
+                // The half the W15S28 paragraph below already argues:
+                // `childrenWhere` gives a room in both lists to the **outpost**
+                // list, so an owned spawn-less room reads as a room we mine —
+                // no Reserve, no Post, and its spawn site behind a container
+                // one hop nearer.
+                //
+                // And the half this one paid: the haul. Left in for a few
+                // thousand ticks past the Claim, W13S28 ran an anchor of its
+                // own on W11S29's rock **three crossings out** while W11S29's
+                // colony ran one on the same rock, and this colony's demand
+                // went 2,780 over two haulers to 5,760 over four. That is the
+                // shape that took W14S28 from 2,790 to 4,810 and had it
+                // withdrawn by hand the day it was declared.
+                Outposts = [ Outpost.w13s29 ]
                 // Five crossings to the Reactor, so this colony declares no
                 // errand either — and the 22,000 Thorium it banks is ore
                 // nothing here can deliver, which ADR 0060 decision 3 files as

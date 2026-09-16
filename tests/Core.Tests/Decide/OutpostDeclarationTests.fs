@@ -1509,8 +1509,25 @@ let outpostTests =
                 Expect.equal
                     (Colony.outpostsOf Colony.declared "W13S28"
                      |> List.map (fun outpost -> outpost.RoomName))
-                    [ "W13S29"; "W11S29" ]
-                    "and the second colony works its south outpost beside the fourth colony's room, which is hers to project until that Claim lands (W14S28 withdrawn by hand)"
+                    [ "W13S29" ]
+                    "and the second colony works its south outpost alone: W11S29's Claim landed on 2026-09-17 and the room left this list the same day (#352, W14S28 withdrawn by hand before it)"
+
+                // What the removal cost while it was overdue, kept as a number
+                // because the argument for the removal is a haul bill (#352):
+                // W13S28 ran an anchor on W11S29's rock **three crossings out**
+                // while W11S29's own colony ran one on the same rock, and this
+                // colony's demand went 2,780 over two haulers to 5,760 over
+                // four. A claimed room in both lists reads as a room we mine,
+                // and two colonies then mine it.
+                Expect.isFalse
+                    (Colony.outpostsOf Colony.declared "W13S28"
+                     |> List.exists (fun outpost -> outpost.RoomName = "W11S29"))
+                    "no colony mines a room that has a colony of its own"
+
+                Expect.equal
+                    (Outpost.w11s29.RoomName)
+                    "W11S29"
+                    "while the declaration itself is kept written for the record: it is how the fourth colony was taken, and ADR 0047's arrangement needs it readable"
 
                 // W15S28 is declared and is **not** an outpost of anybody's:
                 // it is owned, so it is a room its mother raises and not one
@@ -1540,17 +1557,39 @@ let outpostTests =
                         (Colony.errandsOf Colony.declared "W13S28")
                         [ "W15S28" ]
                         "W13S28")
+                    [ "W13S28"; "W13S29"; "W15S28"; "W14S28" ]
+                    "the home, its one outpost, the child two hops out and the transit room on the way to it"
+
+                // Three rooms left this scan set with W11S29's declaration
+                // (#352) — the nursery itself, W12S29 and W11S28, plus
+                // W12S28's own home, which was in here only as a corner of the
+                // rectangle `transitBetween` names for a three-hop chain. That
+                // is four rooms of terrain, borders and census this colony no
+                // longer reads every tick, and it lands in the middle of a CPU
+                // squeeze (`docs/research/cpu-headroom.md`).
+                //
+                // And what replaces it for the nursery is the **bootstrap**
+                // half, which is the point ADR 0047 decision 4 rests on: a
+                // room a mother raises is projected because she raises it, not
+                // because somebody once declared it a mine. Named as
+                // bootstrapped, it and its transit room come straight back.
+                Expect.equal
+                    (Colony.roomsProjected
+                        (Colony.outpostsOf Colony.declared "W13S28")
+                        (Colony.errandsOf Colony.declared "W13S28")
+                        [ "W15S28"; "W11S29" ]
+                        "W13S28")
                     [
                         "W13S28"
                         "W13S29"
+                        "W15S28"
+                        "W14S28"
                         "W11S29"
                         "W12S28"
                         "W12S29"
                         "W11S28"
-                        "W15S28"
-                        "W14S28"
                     ]
-                    "the home, its two outposts, the transit rooms on the way to the three-hop one — the whole rectangle `transitBetween` names, W12S28's own home among them — the nursery two hops out, and the transit room on the way to it"
+                    "the nursery rides the bootstrap half and brings the whole rectangle `transitBetween` names for a three-hop chain — W12S28's own home among them (ADR 0058), which is where it belonged all along"
 
                 Expect.isEmpty
                     (Colony.outpostsOf Colony.declared "W1N1")
