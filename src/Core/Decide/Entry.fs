@@ -183,6 +183,7 @@ let decideUnarbitrated
     (assignments: Assignments)
     (verbose: Set<string>)
     (memo: PlanMemo option)
+    (mayPlan: bool)
     : Decision =
     let signature = censusSignature view
     // The signature is read before the Atlas is built, because the Atlas
@@ -210,9 +211,25 @@ let decideUnarbitrated
 
     let atlas = Atlas.ofViewRecalling walks farFields view
 
+    // Whose turn it is to re-plan (#357, `mayPlan`). A stale memo is not a
+    // wrong plan, only an old one — the reservations are level-blind (ADR
+    // 0064) and a site already in the world outlives the Intent that placed
+    // it — while four colonies re-planning in the same tick measured 487 ms
+    // of the engine's 500 ms ceiling. So a colony whose turn has not come
+    // serves what it has: its stale memo, or `PlanMemo.deferred` if it has
+    // none at all. Both keep a signature this tick's census cannot match, so
+    // the plan is owed and the next turn pays it.
     let plan =
         match recalled with
         | Some m -> m
+        | None when not mayPlan ->
+            match memo with
+            | Some stale ->
+                { stale with
+                    Walks = walks
+                    FarFields = farFields
+                }
+            | None -> PlanMemo.deferred walks farFields
         | None ->
             let siteIntents, servedFootings, unservedFootings, unroutedTrunks, deferredContainers =
                 planLayout view atlas
@@ -338,7 +355,10 @@ let decide
     (verbose: Set<string>)
     (memo: PlanMemo option)
     : Decision =
-    let decision = decideUnarbitrated view assignments verbose memo
+    // One colony alone is always its own turn to re-plan: the budget #357
+    // added exists to stagger colonies against each other, and there is
+    // nothing here to stagger against.
+    let decision = decideUnarbitrated view assignments verbose memo true
     let moveIntents, moveVerdicts = resolveRooms [ decision.Movement ]
 
     { decision with

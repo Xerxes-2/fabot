@@ -317,3 +317,41 @@ type PlanMemo =
         /// (`docs/research/cpu-headroom.md` §5.1).
         FarFields: FarFieldTable
     }
+
+[<RequireQualifiedAccess>]
+module PlanMemo =
+
+    /// A colony's plan when its turn to re-plan has not come round (#357). The
+    /// tick that re-planned four colonies at once cost **487 ms of the
+    /// engine's 500 ms ceiling** — 164 in the projection and 248 deciding —
+    /// against a mean of 84, and a re-planning tick averages 209 against 84.
+    /// So a colony re-plans on its turn, and this is what it holds until then:
+    /// nothing placed, no footing reserved, no hauler asked for.
+    ///
+    /// The signature is **deliberately empty**, which is why this is a value
+    /// and not a record literal at the call site. `censusSignature` composes
+    /// eight fields with `|` separators, so it can never produce the empty
+    /// string — and a memo whose signature can never match is one the next
+    /// tick must replace. A memo stamped with the signature it *declined* to
+    /// plan against would be served forever.
+    ///
+    /// Empty is the right stand-in and not merely the cheap one: a site
+    /// already in the world does not need this tick's Intent to survive (the
+    /// engine holds construction sites), an unreserved footing blocks nothing,
+    /// and a hauler row of zero casts no body rather than dismissing one. What
+    /// is lost is one tick of *new* placement per colony per turn — measured
+    /// against a tick that the engine kills outright.
+    let deferred (walks: WalkTable) (farFields: FarFieldTable) : PlanMemo =
+        {
+            Signature = ""
+            SiteIntents = []
+            UnservedFootings = []
+            ServedFootings = []
+            UnroutedTrunks = []
+            DeferredContainers = []
+            HaulerQuota = 0
+            HaulerDemand = []
+            HaulerLoad = 0
+            Walks = walks
+            FarFields = farFields
+        }

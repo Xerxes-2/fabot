@@ -969,4 +969,82 @@ let planMemoTests =
                     (obj.ReferenceEquals(levelled.Memo.FarFields, first.Memo.FarFields))
                     "and a moved one gets a table of its own, as the walks do"
             }
+
+            // #357. Four colonies re-planning in one tick measured 487 ms of
+            // the engine's 500 ms ceiling — and they arrive together by
+            // construction, since a global reset (every code upload is one)
+            // empties every memo at once. So a colony re-plans on its turn.
+            // What it serves in between is what these cases are about: the
+            // plan must be *old*, never wrong, and it must stay owed.
+            test "a colony whose turn has not come serves the plan it has, and still owes a new one" {
+                let staffed = staffedColony [ worker "w1" 0 50 ] [ "w1", { X = 22; Y = 25 } ]
+
+                let planned = decideOn (staffed (trunkColony 2))
+
+                // The census moves (a level-up) and the turn is somebody
+                // else's: the stale plan stands, down to the Intents it
+                // placed, because a reservation is level-blind (ADR 0064) and
+                // a site already in the world outlives the Intent that placed
+                // it.
+                let waiting =
+                    decideUnarbitrated
+                        (staffed (trunkColony 3))
+                        Map.empty
+                        Set.empty
+                        (Some planned.Memo)
+                        false
+
+                Expect.equal
+                    waiting.Memo.SiteIntents
+                    planned.Memo.SiteIntents
+                    "the plan served is the one it already had"
+
+                Expect.equal
+                    waiting.Memo.Signature
+                    planned.Memo.Signature
+                    "and it keeps the old signature, so the plan is still owed"
+
+                Expect.notEqual
+                    (decideUnarbitrated
+                        (staffed (trunkColony 3))
+                        Map.empty
+                        Set.empty
+                        (Some planned.Memo)
+                        true)
+                        .Memo.Signature
+                    planned.Memo.Signature
+                    "which the next turn pays: the same view, planning allowed, signs the census it planned against"
+            }
+
+            test "a colony with no memo at all defers to an empty plan, never to a signed one" {
+                let staffed = staffedColony [ worker "w1" 0 50 ] [ "w1", { X = 22; Y = 25 } ]
+
+                let blind =
+                    decideUnarbitrated (staffed (trunkColony 2)) Map.empty Set.empty None false
+
+                Expect.isEmpty
+                    blind.Memo.SiteIntents
+                    "nothing is placed on a tick this colony did not plan"
+
+                Expect.equal
+                    blind.Memo.HaulerQuota
+                    0
+                    "and no hauler is asked for: a row of zero casts no body"
+
+                // The load-bearing half. `censusSignature` composes eight
+                // fields with `|` separators, so it cannot produce the empty
+                // string — a deferred memo is therefore one no census can
+                // match, and the tick after it must plan for real. A memo
+                // stamped with the signature it declined to plan against would
+                // be served forever.
+                Expect.equal
+                    blind.Memo.Signature
+                    ""
+                    "the signature is empty, which no census signature is"
+
+                let paid = decideOn (staffed (trunkColony 2))
+
+                Expect.notEqual paid.Memo.Signature "" "and the tick that plans signs it properly"
+                Expect.isNonEmpty paid.Memo.SiteIntents "placing what the deferred tick did not"
+            }
         ]

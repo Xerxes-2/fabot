@@ -170,12 +170,37 @@ let loop () =
     // (#216 R2b): a room two colonies both work is one room, and half its
     // traffic arbitrated against the other half read as empty is how a
     // mother's [[pioneer]] came to claim the child's [[anchor]]'s tile (#220).
+    // One colony re-plans per tick, round-robin by tick (#357). The tick that
+    // re-planned all four at once cost 487 ms of the engine's 500 ms ceiling,
+    // and a re-planning tick averages 209 ms against a mean of 84 — and they
+    // arrive together by construction, because a global reset (every code
+    // upload is one) empties every memo in the same tick.
+    //
+    // The turn is `Game.time % count` and not "whoever is stalest", because
+    // the alternative asks this shell to compute a census signature it has no
+    // business knowing (it is the decision layer's own, ADR 0032/0033). A
+    // colony waits at most `count - 1` ticks for its turn, spends them serving
+    // a plan whose reservations are level-blind anyway, and a colony that
+    // needs no re-plan simply passes its turn. One colony alone is always its
+    // own turn, so every one-colony world — the whole suite and the profile
+    // harness — is unchanged.
+    let turn =
+        if List.isEmpty views then
+            0
+        else
+            Game.time % List.length views
+
     let decisions =
         views
-        |> List.map (fun (colony, view) ->
+        |> List.mapi (fun index (colony, view) ->
             colony,
             view,
-            decideUnarbitrated view assignments verbose (Map.tryFind colony.Home planMemos))
+            decideUnarbitrated
+                view
+                assignments
+                verbose
+                (Map.tryFind colony.Home planMemos)
+                (index = turn))
 
     // The one movement pass of the tick: every colony's Move Intents folded
     // together and arbitrated once per room, over every creep of ours standing
