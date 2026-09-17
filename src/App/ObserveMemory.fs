@@ -1082,6 +1082,27 @@ let private cpuPhaseFields: (string * (CpuPhases -> obj)) list =
         "replans", (fun p -> box p.Replans)
     ]
 
+/// What each colony spent inside `decide`, read off one CPU row, or the empty
+/// list when the row carries none (#370).
+///
+/// Decoded on its own and never folded into `cpuPhaseFields`' all-six-or-none
+/// guard: the rows standing when this landed were written by a bundle that did
+/// not measure it, and they are exactly the window the change is compared
+/// against, so admitting them with their phases intact is the point. Every
+/// entry must be a number — a key whose value is not says the writer and the
+/// reader disagree about the shape, and half a split would price one colony
+/// against a boundary nobody read.
+let private decodeCpuColonies (raw: obj) : (string * float) list =
+    let colonies = raw?colonies
+
+    if jsTypeof colonies <> "object" || isNull colonies then
+        []
+    else
+        JS.Constructors.Object.keys colonies
+        |> Seq.filter (fun home -> jsTypeof colonies?(home) = "number")
+        |> Seq.map (fun home -> home, unbox<float> colonies?(home))
+        |> List.ofSeq
+
 /// The phase split off one CPU row, or `None` when the row carries none.
 /// Absent and malformed answer alike: a row that predates the split has no
 /// phase keys, and one whose keys will not decode was measured by nobody,
@@ -1167,6 +1188,7 @@ let loadCpu () : CpuState =
                                 Tick = unbox<int> raw?t
                                 Ms = unbox<float> raw?ms
                                 Phases = decodeCpuPhases raw
+                                Colonies = decodeCpuColonies raw
                             }
                     else
                         None)
@@ -1193,6 +1215,18 @@ let saveCpu (state: CpuState) =
                 for key, read in cpuPhaseFields do
                     o?(key) <- read phases
             | None -> ()
+
+            // One sub-object rather than a key per colony, so a home room's
+            // name can never collide with a phase's (#370) — and so the group
+            // is absent as a whole on a row that has none, which is what
+            // `decodeCpuColonies` reads as "nobody measured this".
+            if not (List.isEmpty sample.Colonies) then
+                let colonies = createEmpty<obj>
+
+                for home, ms in sample.Colonies do
+                    colonies?(home) <- ms
+
+                o?colonies <- colonies
 
             o)
         |> List.toArray

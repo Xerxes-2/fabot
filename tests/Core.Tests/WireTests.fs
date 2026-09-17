@@ -439,3 +439,47 @@ let observerTableTests =
                     "every BreachKind is a key of KIND in scripts/observe.mjs (#368)"
             }
         ]
+
+/// #370: the CPU line's per-colony split is written by `saveCpu` and read by
+/// `observe.mjs cpu`, and the key it rides under is a third vocabulary across
+/// the same seam #368 caught lagging.
+///
+/// Weaker than the two tests above, deliberately. `BASIS` and `KIND` are closed
+/// tables whose keys are a union's cases, so the union can be enumerated and
+/// the table checked against it. A colony's home room is not a closed set — it
+/// is whatever `Colony.declared` says today — so what can be checked is only
+/// that the reader looks for the group at all, under the spelling the writer
+/// uses. That is still the failure #368 was about: the writer grew a key and
+/// the reader never learnt it.
+[<Tests>]
+let observerCpuTests =
+    testList
+        "the observer reads the CPU line's per-colony split"
+        [
+            test "the reader knows the key `saveCpu` writes the split under" {
+                let script = Observer.script.Value
+
+                Expect.isTrue
+                    (script.Contains "row.colonies")
+                    "`observe.mjs cpu` reads `colonies` off a row: the sub-object `saveCpu` writes each colony's `decide` into, absent on a row from a bundle that did not measure it"
+            }
+
+            test "the split is not folded into the all-six-or-none phase group" {
+                // `cpuPhaseFields` decodes all of its keys or none of them, so
+                // a sixth phase key would make every row the previous bundle
+                // wrote read as unmeasured — and those rows are the window a
+                // change to this reading is compared against. The reader's own
+                // phase list is the thing that must not have grown.
+                let phases =
+                    Observer.script.Value
+                    |> fun text -> Regex.Match(text, @"const PHASES = \[([^\]]*)\]")
+
+                Expect.isTrue
+                    phases.Success
+                    "`observe.mjs` still declares its phase columns in one list"
+
+                Expect.isFalse
+                    (phases.Groups.[1].Value.Contains "colonies")
+                    "and the per-colony split is not one of them: it decodes on its own, so an older row keeps its phases"
+            }
+        ]

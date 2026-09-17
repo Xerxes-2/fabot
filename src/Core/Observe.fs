@@ -1268,6 +1268,22 @@ type CpuReadings =
         /// because a `decide` six times its own mean is either a replan or a
         /// pricing storm, and a reader cannot tell those apart from a total.
         Replans: int
+        /// What each colony spent inside `decide`, home room and milliseconds,
+        /// in the order they decided.
+        ///
+        /// The `Decide` phase is the tick's, deliberately (ADR 0047: the column
+        /// is what the tick spent deciding, not what one colony did), and that
+        /// is the column ADR 0041's trigger is read off. But it cannot say
+        /// *which* colony a spike came out of, and every CPU refusal this bot
+        /// has recorded was a measurement taken on the wrong shape — #332's
+        /// keeper mask read 0.00% because it was measured on `pair`, the one
+        /// harness world with no keeper room. Four colonies with four
+        /// projections is four shapes, and this is the reading that says which
+        /// of them to take a profile of.
+        ///
+        /// Cumulative like the rest and differenced by `foldCpu`: the shell
+        /// reads the counter at each colony's boundary and knows nothing else.
+        ColonyDecides: (string * float) list
     }
 
 /// One tick's cost, split at the loop's phase boundaries: the engine's prelude
@@ -1305,6 +1321,22 @@ type CpuSample =
         Tick: int
         Ms: float
         Phases: CpuPhases option
+        /// What each colony spent inside `decide`, home room and milliseconds.
+        ///
+        /// A list and not an `option`, unlike `Phases`: a row from a bundle
+        /// that did not measure this reads as the empty list, which is the
+        /// honest answer for a reading nobody took and also the correct answer
+        /// for a tick in which no colony decided at all. The distinction
+        /// `Phases` needs — a zero that was measured against a zero nobody
+        /// looked at — does not arise here, because the split is only ever read
+        /// against `Phases.Decide`, which says whether there was anything to
+        /// attribute.
+        ///
+        /// Kept off `CpuPhases` on purpose. That group decodes all-six-or-none,
+        /// so growing it would make every row the previous bundle wrote read as
+        /// unmeasured, and the window this is meant to compare against is the
+        /// hundred rows standing when the change lands.
+        Colonies: (string * float) list
     }
 
 /// The whole persisted CPU line: oldest first, capped, exactly as the
@@ -1361,6 +1393,22 @@ let foldCpu (cap: int) (tick: int) (readings: CpuReadings) (prior: CpuState) : C
             Replans = readings.Replans
         }
 
+    // Differenced against the boundary before each colony, the first against
+    // the phase's own start: the shell reads one counter per colony and the
+    // subtraction belongs wherever the other four already are. The sum is the
+    // `Decide` phase less what the tick spent between colonies — the movement
+    // arbitration and the two Memory reads `decide` is handed — so a reader
+    // comparing the two is reading that remainder, which is why neither number
+    // is derived from the other.
+    let colonies =
+        readings.ColonyDecides
+        |> List.fold
+            (fun (spent, at) (home, reading) ->
+                (home, toMicrosecond (reading - at)) :: spent, reading)
+            ([], readings.AtSnapshot)
+        |> fst
+        |> List.rev
+
     {
         Ticks =
             prior.Ticks
@@ -1369,6 +1417,7 @@ let foldCpu (cap: int) (tick: int) (readings: CpuReadings) (prior: CpuState) : C
                     Tick = tick
                     Ms = toMicrosecond readings.AtExecute
                     Phases = Some phases
+                    Colonies = colonies
                 }
             ]
             |> trim cap

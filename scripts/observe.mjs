@@ -1595,6 +1595,50 @@ if (command === "console") {
           `${split.filter((row) => row.replans > 0).length} tick(s) with at least one — ` +
           "a colony that threw its plan memo away re-planned its whole layout in that tick (ADR 0033)",
       );
+
+      // Which colony the `decide` phase went into (#370). Printed per colony
+      // and never summed into one line, because the whole reason the reading
+      // exists is that four colonies are four shapes and a profile has to be
+      // taken of one of them: every CPU refusal this bot has recorded was
+      // measured on the wrong shape, #332's keeper mask reading 0.00% on the
+      // one harness world with no keeper room.
+      //
+      // The rows that carry no split are counted rather than dropped, for
+      // `KIND`'s reason: a reader that silently ignored them would report a
+      // window of four rows as a window of a hundred, and the deployed bundle
+      // predating this reading is the ordinary case for the first hundred ticks
+      // after every upload.
+      const attributed = split.filter((row) => row.colonies && Object.keys(row.colonies).length);
+
+      if (attributed.length === 0) {
+        console.log(
+          "no row says which colony decided: the deployed bundle predates the per-colony " +
+            "reading, or no colony has decided since it landed",
+        );
+      } else {
+        const homes = [...new Set(attributed.flatMap((row) => Object.keys(row.colonies)))];
+        const spent = (home) =>
+          attributed
+            .filter((row) => typeof row.colonies[home] === "number")
+            .map((row) => row.colonies[home]);
+        console.log(
+          `decide by colony over ${attributed.length} attributed row${attributed.length === 1 ? "" : "s"}` +
+            `${attributed.length < split.length ? ` (of ${split.length} split)` : ""}:`,
+        );
+        for (const home of homes) {
+          const ms = spent(home);
+          const mean = ms.reduce((total, one) => total + one, 0) / ms.length;
+          const worst = Math.max(...ms);
+          console.log(
+            `  ${home}  mean ${mean.toFixed(2)} ms  max ${worst.toFixed(2)}  ` +
+              `over ${ms.length} tick${ms.length === 1 ? "" : "s"}`,
+          );
+        }
+        console.log(
+          "  the sum falls short of the `decide` column by the movement arbitration and the " +
+            "two Memory reads `decide` is handed, which is why neither is derived from the other",
+        );
+      }
     }
 
     console.log("");

@@ -2810,6 +2810,7 @@ let private costing (ms: float) =
         Intents = 0
         Bucket = 10_000
         Replans = 0
+        ColonyDecides = []
     }
 
 [<Tests>]
@@ -2873,6 +2874,66 @@ let cpuTests =
                     "each cost rounds to three decimal places"
             }
 
+            test "each colony's decide is differenced against the boundary before it (#370)" {
+                // The live shape the day this was built: four colonies, the
+                // `decide` phase running from 15.3 to 56.3 ms, and a reader
+                // who could not say which of the four a 140 ms spike had come
+                // out of. The readings arrive cumulative — one
+                // `Game.cpu.getUsed` after each colony — so the first is
+                // differenced against the phase's own start and each of the
+                // rest against the colony before it.
+                let state =
+                    CpuState.empty
+                    |> foldCpu
+                        capCpuTicks
+                        100
+                        {
+                            AtEntry = 0.4
+                            AtSnapshot = 15.3
+                            AtDecide = 56.3
+                            AtSave = 60.9
+                            AtExecute = 69.0
+                            Intents = 78
+                            Bucket = 10_000
+                            Replans = 0
+                            ColonyDecides =
+                                [ "W12S28", 27.3; "W13S28", 38.1; "W11S29", 45.0; "W15S28", 55.9 ]
+                        }
+
+                Expect.equal
+                    (state.Ticks |> List.map (fun sample -> sample.Colonies))
+                    [ [ "W12S28", 12.0; "W13S28", 10.8; "W11S29", 6.9; "W15S28", 10.9 ] ]
+                    "the first against `AtSnapshot`, each of the rest against the colony before it"
+
+                // And the remainder is readable rather than hidden: what the
+                // phase cost less what the colonies did is the movement
+                // arbitration and the two Memory reads `decide` is handed, so
+                // neither number is derived from the other and a reader can
+                // subtract them.
+                let phases = state.Ticks |> List.exactlyOne |> (fun sample -> sample.Phases)
+
+                Expect.equal
+                    (phases |> Option.map (fun p -> p.Decide))
+                    (Some 41.0)
+                    "the phase stays the tick's own, 41.0 ms against the colonies' 40.6"
+            }
+
+            test
+                "a bundle that measured no colony writes no split, which is what an older row reads as" {
+                // `Phases` needs its `option` because a measured zero and an
+                // unmeasured phase are different claims. This does not: the
+                // empty list is the right answer both for a row written before
+                // the split existed and for a tick in which no colony decided,
+                // and the split is only ever read against `Phases.Decide`,
+                // which says whether there was anything to attribute.
+                let state = CpuState.empty |> foldCpu capCpuTicks 100 (costing 21.0)
+
+                Expect.equal
+                    (state.Ticks |> List.map (fun sample -> sample.Colonies))
+                    [ [] ]
+                    "no reading, no attribution — and the row is still in the window the trigger is read off"
+            }
+
             test "the readings are differenced into phases, the entry alone" {
                 // The shape of a live tick the day the split was built: an
                 // engine prelude already spent before `loop` runs, then the
@@ -2898,6 +2959,7 @@ let cpuTests =
                             // split is read against.
                             Bucket = 9_872
                             Replans = 0
+                            ColonyDecides = []
                         }
 
                 Expect.equal
@@ -2945,6 +3007,7 @@ let cpuTests =
                             // and an integer count of colonies.
                             Bucket = 4_213
                             Replans = 2
+                            ColonyDecides = []
                         }
 
                 Expect.equal
@@ -2987,7 +3050,15 @@ let cpuTests =
                 // ColonyView cost nothing rather than that nobody measured it.
                 let unsplit =
                     {
-                        Ticks = [ { Tick = 99; Ms = 6.1; Phases = None } ]
+                        Ticks =
+                            [
+                                {
+                                    Tick = 99
+                                    Ms = 6.1
+                                    Phases = None
+                                    Colonies = []
+                                }
+                            ]
                     }
 
                 let state = unsplit |> foldCpu capCpuTicks 100 (costing 21.0)

@@ -197,6 +197,13 @@ let loop () =
     // every colony deferred every tick and no layout was planned at all
     // (#357). `npm run profile` caught it and no test did, which is why the
     // harness is now a pre-deploy gate and not a convenience.
+    // The counter is read *after* each colony's decision, so the CPU line can
+    // say which colony a spike came out of and not merely that the tick had
+    // one (#370). Cumulative, like every other boundary in this loop: the
+    // differencing is `foldCpu`'s. One `Game.cpu.getUsed` per colony, four
+    // calls on this bot, which is the cheapest reading in the loop and the one
+    // that decides where the next profile is taken — every CPU refusal
+    // recorded so far was measured on the wrong shape.
     let decisions =
         views
         |> List.mapi (fun index (colony, view) ->
@@ -205,14 +212,14 @@ let loop () =
             let whose = if index = turn then ReplanTurn.Now else ReplanTurn.Waiting
 
             let decision = decideUnarbitrated view assignments verbose memo whose
-            colony, view, decision)
+            colony, view, decision, Game.cpu.getUsed ())
 
     // The one movement pass of the tick: every colony's Move Intents folded
     // together and arbitrated once per room, over every creep of ours standing
     // in it, each moving on the intent its own colony registered (ADR 0001 —
     // this is that pure Resolver taking the whole room as its argument).
     let moveIntents, moveVerdicts =
-        resolveRooms (decisions |> List.map (fun (_, _, decision) -> decision.Movement))
+        resolveRooms (decisions |> List.map (fun (_, _, decision, _) -> decision.Movement))
 
     // The decision boundary, and every colony's `decide` is inside it: the
     // column is what the tick spent deciding and not what one colony did (ADR
@@ -227,7 +234,7 @@ let loop () =
     // and the CPU line could not tell those apart.
     let replans =
         decisions
-        |> List.filter (fun (colony, _, decision) ->
+        |> List.filter (fun (colony, _, decision, _) ->
             match Map.tryFind colony.Home planMemos with
             | Some prior -> prior.Signature <> decision.Memo.Signature
             | None -> true)
@@ -235,7 +242,7 @@ let loop () =
 
     planMemos <-
         decisions
-        |> List.map (fun (colony, _, decision) -> colony.Home, decision.Memo)
+        |> List.map (fun (colony, _, decision, _) -> colony.Home, decision.Memo)
         |> Map.ofList
 
     // The one sector Reactor programme's global observation (#320). The
@@ -244,7 +251,7 @@ let loop () =
     // hands `None` to the pure fold and retains the last sample unchanged.
     let reactorReading =
         decisions
-        |> List.tryPick (fun (colony, _, decision) ->
+        |> List.tryPick (fun (colony, _, decision, _) ->
             colony.Errands
             |> List.tryPick (fun errand ->
                 let reactorId = fst errand.Target
@@ -290,7 +297,7 @@ let loop () =
     // union is the whole map.
     saveAssignments (
         (Map.empty, decisions)
-        ||> List.fold (fun acc (_, _, decision) ->
+        ||> List.fold (fun acc (_, _, decision, _) ->
             (acc, decision.Assignments)
             ||> Map.fold (fun acc creep task -> Map.add creep task acc))
     )
@@ -311,11 +318,11 @@ let loop () =
         Observe.capPerCreep
         Game.time
         living
-        ((decisions |> List.collect (fun (_, _, decision) -> decision.Verdicts))
+        ((decisions |> List.collect (fun (_, _, decision, _) -> decision.Verdicts))
          @ moveVerdicts)
     |> ObserveMemory.save
 
-    for colony, view, decision in decisions do
+    for colony, view, decision, _ in decisions do
         // The Raid log's own channel (ADR 0028): colony-level and episodic,
         // because the fold above prunes a creep's whole timeline the tick it
         // dies — the one event a raid record has to keep. Written every tick
@@ -391,7 +398,7 @@ let loop () =
     // executed in one pass: the engine is one world and the phase is the tick's
     // whole execution cost (ADR 0047).
     let executionPlan =
-        (decisions |> List.collect (fun (_, _, decision) -> decision.Intents))
+        (decisions |> List.collect (fun (_, _, decision, _) -> decision.Intents))
         @ moveIntents
         |> Fabot.Core.IntentPlan.create
         |> function
@@ -425,6 +432,7 @@ let loop () =
             Intents = accepted
             Bucket = Game.cpu.bucket
             Replans = replans
+            ColonyDecides = decisions |> List.map (fun (colony, _, _, at) -> colony.Home, at)
         }
 
     // The CPU line stays one flat leaf keyed by tick: it records the whole
