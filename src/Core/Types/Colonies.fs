@@ -388,11 +388,11 @@ module Outpost =
     /// tick this adds is W12S29's +0.7 ms and not the +1.5..2.0 of a room
     /// nobody has walked (ADR 0041's trigger is still firing).
     ///
-    /// It also carries a **Thorium mineral at (2,29)**, which this declaration
-    /// does nothing about and which wants its own issue: a deposit three
-    /// crossings from a terminal that already ships is a different programme
-    /// from an outpost's source, and pretending one declaration buys both is
-    /// how W15S29 ate four bodies.
+    /// The Thorium mineral at (2,29) is not part of this and never can be: an
+    /// Extractor is an owned-room structure at RCL 6, and an outpost is by
+    /// definition a room we reserve and do not own. Recorded here so the tile
+    /// is not mistaken for an opportunity a later reading of this file might
+    /// think was overlooked.
     let w14s28: Outpost =
         {
             RoomName = "W14S28"
