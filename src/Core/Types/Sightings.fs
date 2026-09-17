@@ -352,7 +352,20 @@ type RoomSighting =
         /// the promise above into the *type*: there is no stale kind here for
         /// the next rule to read one out of. The view's cut is written off the
         /// **room**, never off what stands in it, so it needs none either.
-        Targets: Set<string>
+        /// Deferred, because the tick a room is **seen** nobody reads this:
+        /// both readers ask only about a sighting older than the tick they run
+        /// in (`Facts.errandRoomOf` tests `sighting.Tick < view.Time`, and the
+        /// errand narrowing in `ColonyView.ofWorld` intersects a remembered
+        /// one). The set is built the tick the room goes dark and the grace
+        /// starts asking, and `Lazy` keeps it built after that — so the world
+        /// stops paying a set of several hundred ids a room a tick for an
+        /// answer nobody wants yet (#371, the shape #371's safe set had).
+        ///
+        /// The narrowing above still holds where it matters: the type a rule
+        /// can read is still `Set<string>` and there is still no kind in it.
+        /// What the closure captures is the projection's own census, which the
+        /// shell built this tick anyway.
+        Targets: Lazy<Set<string>>
     }
 
 /// Everything this tick was seen to hold, once (ADR 0052 decision 1). The shell

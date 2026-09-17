@@ -445,7 +445,7 @@ let outpostTests =
                                     "W1N2",
                                     {
                                         Tick = tick
-                                        Targets = Set.singleton "site-out"
+                                        Targets = lazy (Set.singleton "site-out")
                                     }
                                 ]
                     }
@@ -545,7 +545,7 @@ let outpostTests =
                                     "W1N2",
                                     {
                                         Tick = 1000
-                                        Targets = Set.singleton "site-out"
+                                        Targets = lazy (Set.singleton "site-out")
                                     }
                                 ]
                     }
@@ -576,7 +576,15 @@ let outpostTests =
                             { backWithSite.Spatial with
                                 TargetKinds = Map.remove "site-out" backWithSite.Spatial.TargetKinds
                             }
-                        Sightings = Map.ofList [ "W1N2", { Tick = 1000; Targets = Set.empty } ]
+                        Sightings =
+                            Map.ofList
+                                [
+                                    "W1N2",
+                                    {
+                                        Tick = 1000
+                                        Targets = lazy (Set.empty)
+                                    }
+                                ]
                     }
 
                 Expect.contains

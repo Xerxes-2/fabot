@@ -320,7 +320,7 @@ let private pairWorld: World =
             |> Map.map (fun _ facts ->
                 {
                     Tick = 1000
-                    Targets = facts.TargetKinds |> Map.toList |> List.map fst |> Set.ofList
+                    Targets = lazy (facts.TargetKinds |> Map.keys |> Set.ofSeq)
                 })
     }
 
@@ -625,7 +625,7 @@ let worldTests =
                 let sighting tick targets =
                     {
                         Tick = tick
-                        Targets = Set.ofList targets
+                        Targets = lazy (Set.ofList targets)
                     }
 
                 let thisTick =
@@ -643,14 +643,27 @@ let worldTests =
                             ])
                         thisTick
 
+                // Compared field by field and not as a record: a sighting's
+                // ids are behind a `Lazy` now (#371), and F#'s structural
+                // equality compares two `Lazy` cells by reference — so
+                // `Expect.equal` on the record would pass or fail on which
+                // object the two came from rather than on what they say. This
+                // is the only place either side of the wire compared whole
+                // sightings; `recalling` merges them by room name and the two
+                // readers ask about one field each.
+                let read =
+                    Map.tryFind mother recalled.Sightings
+                    |> Option.map (fun seen -> seen.Tick, seen.Targets.Value)
+
                 Expect.equal
-                    (Map.tryFind mother recalled.Sightings)
-                    (Some(sighting 1000 [ "src-mother" ]))
+                    read
+                    (Some(1000, Set.ofList [ "src-mother" ]))
                     "a room seen this tick answers for itself, and the older sighting of it goes"
 
                 Expect.equal
-                    (Map.tryFind outpost recalled.Sightings)
-                    (Some(sighting 950 [ "src-out" ]))
+                    (Map.tryFind outpost recalled.Sightings
+                     |> Option.map (fun seen -> seen.Tick, seen.Targets.Value))
+                    (Some(950, Set.ofList [ "src-out" ]))
                     "a room this tick could not see keeps the last look taken into it"
 
                 Expect.isFalse
@@ -1139,7 +1152,7 @@ let colonyViewTests =
                     (view.Sightings
                      |> Map.tryFind outpost
                      |> Option.map (fun sighting ->
-                         sighting.Tick, Set.contains "src-out" sighting.Targets))
+                         sighting.Tick, Set.contains "src-out" sighting.Targets.Value))
                     (Some(1000, true))
                     "the tick it was last seen at, and what stood in it then"
 
@@ -1667,7 +1680,7 @@ let transitTests =
                                 crossed
                                 {
                                     Tick = twoHopWorld.Time - 1
-                                    Targets = Set.ofList [ "cont-crossed"; "src-crossed" ]
+                                    Targets = lazy (Set.ofList [ "cont-crossed"; "src-crossed" ])
                                 }
                     }
 

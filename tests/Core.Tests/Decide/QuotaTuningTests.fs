@@ -483,7 +483,7 @@ let tuningTests =
                                     "",
                                     {
                                         Tick = 900
-                                        Targets = Set.singleton "spawn-1"
+                                        Targets = lazy (Set.singleton "spawn-1")
                                     }
                                 ]
                     }

@@ -1207,7 +1207,7 @@ let fleeTests =
                                     "",
                                     {
                                         Tick = 999
-                                        Targets = Set.singleton "spawn-1"
+                                        Targets = lazy (Set.singleton "spawn-1")
                                     }
                                 ]
                     }

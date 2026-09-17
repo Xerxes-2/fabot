@@ -889,7 +889,10 @@ let ofGame (maxHops: int) (colonies: Colony list) (lastPositions: Map<string, Ro
                 roomName,
                 ({
                     Tick = Game.time
-                    Targets = facts.TargetKinds |> Map.toList |> List.map fst |> Set.ofList
+                    // Deferred, and the census captured rather than copied:
+                    // the ids are read the tick this room goes dark, not the
+                    // tick it is seen (#371).
+                    Targets = lazy (facts.TargetKinds |> Map.keys |> Set.ofSeq)
                 }
                 : RoomSighting))
             |> Map.ofList

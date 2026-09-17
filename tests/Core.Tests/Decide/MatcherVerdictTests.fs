@@ -562,7 +562,7 @@ let verdictTests =
                                     "",
                                     {
                                         Tick = tick
-                                        Targets = Set.singleton "spawn-1"
+                                        Targets = lazy (Set.singleton "spawn-1")
                                     }
                                 ]
                     }
@@ -1321,7 +1321,7 @@ let resourceIdVerdictTests =
                             home,
                             {
                                 Tick = 999
-                                Targets = Set.singleton "can-min"
+                                Targets = lazy (Set.singleton "can-min")
                             }
                         ]
 

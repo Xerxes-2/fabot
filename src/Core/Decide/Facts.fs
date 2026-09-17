@@ -92,7 +92,7 @@ let internal lastSeenIn (view: ColonyView) (tid: string) : string option =
             if
                 sighting.Tick < view.Time
                 && view.Time - sighting.Tick <= view.Tuning.VisionGrace
-                && Set.contains target sighting.Targets
+                && Set.contains target sighting.Targets.Value
             then
                 Some room
             else

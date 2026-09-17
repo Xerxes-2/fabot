@@ -718,7 +718,7 @@ module ColonyView =
                     remembered
                     |> Option.map (fun sighting ->
                         { sighting with
-                            Targets = Set.intersect sighting.Targets targets
+                            Targets = lazy (Set.intersect sighting.Targets.Value targets)
                         })
                 else
                     room, facts, remembered)
