@@ -99,8 +99,10 @@ type Atlas =
             /// of one room onto the crossings joining it to a named neighbour
             /// (ADR 0042's container pick). One flood per ordered room pair,
             /// however many tiles are read off it, so the Seats of every source
-            /// share one answer.
-            SeamWalks: System.Collections.Generic.Dictionary<string * string, int[]>
+            /// share one answer — and one per **census** rather than per tick,
+            /// since the table is the plan memo's (`SeamWalkTable`, ADR 0032):
+            /// it is handed in with the far fields and recalled with them.
+            SeamWalks: SeamWalkTable
             /// Memoised Seam band per ordered room pair — the tile pairs
             /// `seams` answers with, which every hop of every chain priced
             /// reads and which nothing about a creep or a Task can move
@@ -117,11 +119,12 @@ type Atlas =
             /// by the caller's taste: `farFieldAlong` picks by the pricing and
             /// by the crowd standing in the chain, so no reader can ask for
             /// the wrong one (`FarFieldMemo`,
-            /// `docs/research/cpu-headroom.md` §5.1). All three are filled
-            /// here and two of them are handed back by
-            /// `Decide.decideUnarbitrated` to the next tick — the census one
-            /// while the signature stands, the tick one always, as the next
-            /// tick's `LastTick`.
+            /// `docs/research/cpu-headroom.md` §5.1) — and the Seam walks'
+            /// table beside them, the record's fourth. All four are filled
+            /// here and three of them are handed back by
+            /// `Decide.decideUnarbitrated` to the next tick — the two census
+            /// ones, `PerCensus` and `SeamWalks`, while the signature stands,
+            /// the tick one always, as the next tick's `LastTick`.
             FarFields: FarFieldMemo
             /// Memoised room chains per ordered room pair — every chain of the
             /// fewest crossings a walk between them could take, ends included
@@ -186,8 +189,8 @@ type Atlas =
         }
 
 /// The Atlas over a view, recalling the tables the census keys rather than
-/// laying empty ones (ADR 0032): the spawn walk table, and the far fields
-/// beside it (`docs/research/cpu-headroom.md` §5.1). The caller hands in the
+/// laying empty ones (ADR 0032): the spawn walk table, the Seam walks, and
+/// the far fields beside them (`docs/research/cpu-headroom.md` §5.1). The caller hands in the
 /// plan memo's tables while the census signature is unchanged, and fresh ones
 /// when it moved: every entry in any of them is a pure function of the census
 /// and — for the traffic-aware ones, whose key says so — of a crowd standing
@@ -393,7 +396,7 @@ let ofViewRecalling (walks: WalkTable) (farFields: FarFieldMemo) (view: ColonyVi
 
                     Map.add room laid table)
                 Map.empty
-        SeamWalks = System.Collections.Generic.Dictionary()
+        SeamWalks = farFields.SeamWalks
         Seams = System.Collections.Generic.Dictionary()
         Routes = System.Collections.Generic.Dictionary()
         FarFields = farFields

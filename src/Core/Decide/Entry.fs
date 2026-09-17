@@ -210,6 +210,10 @@ let decideUnarbitrated
     // in would grow with the clock.
     let farFields =
         {
+            SeamWalks =
+                match recalled with
+                | Some m -> m.SeamWalks
+                | None -> SeamWalkTable()
             PerCensus =
                 match recalled with
                 | Some m -> m.FarFields
@@ -251,10 +255,12 @@ let decideUnarbitrated
             | Some stale ->
                 { stale with
                     Walks = walks
+                    SeamWalks = farFields.SeamWalks
                     FarFields = farFields.PerCensus
                     TrafficFarFields = farFields.ThisTick
                 }
-            | None -> PlanMemo.deferred walks farFields.PerCensus farFields.ThisTick
+            | None ->
+                PlanMemo.deferred walks farFields.SeamWalks farFields.PerCensus farFields.ThisTick
         | None ->
             let siteIntents, servedFootings, unservedFootings, unroutedTrunks, deferredContainers =
                 planLayout view atlas
@@ -272,6 +278,7 @@ let decideUnarbitrated
                 HaulerDemand = demandRows
                 HaulerLoad = load
                 Walks = walks
+                SeamWalks = farFields.SeamWalks
                 FarFields = farFields.PerCensus
                 TrafficFarFields = farFields.ThisTick
             }

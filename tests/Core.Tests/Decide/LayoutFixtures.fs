@@ -332,6 +332,7 @@ let sentinelMemo snapshot =
         HaulerDemand = []
         HaulerLoad = 0
         Walks = WalkTable()
+        SeamWalks = SeamWalkTable()
         FarFields = FarFieldTable()
         TrafficFarFields = FarFieldTable()
     }

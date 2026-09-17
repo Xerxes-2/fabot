@@ -79,6 +79,7 @@ let invaderCoreTests =
                             Memo =
                                 { threatened.Memo with
                                     Walks = untroubled.Memo.Walks
+                                    SeamWalks = untroubled.Memo.SeamWalks
                                     FarFields = untroubled.Memo.FarFields
                                     TrafficFarFields = untroubled.Memo.TrafficFarFields
                                 }
@@ -177,6 +178,7 @@ let invaderCoreTests =
                         Memo =
                             { frontier.Memo with
                                 Walks = rivalHeld.Memo.Walks
+                                SeamWalks = rivalHeld.Memo.SeamWalks
                                 FarFields = rivalHeld.Memo.FarFields
                                 TrafficFarFields = rivalHeld.Memo.TrafficFarFields
                             }

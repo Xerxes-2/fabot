@@ -569,6 +569,61 @@ let crossRoomTests =
                 Expect.equal fresh.PerCensus.Count 2 "the fields it ran are left in it"
             }
 
+            test "the Seam walk rides the census table, like the walks and the far fields" {
+                // `Atlas.seamWalkTicks` floods a whole room out of its Seam
+                // band under a constant planning body, and #266's outpost
+                // budget asks it every tick an outpost holds more sites than
+                // the budget covers. Everything it reads is the census's, so
+                // the table is the plan memo's (`SeamWalkTable`, ADR 0032): a
+                // second Atlas handed the same memo reads the first's flood,
+                // and a fresh memo floods again to the same number.
+                let snapshot () =
+                    northOfSnapshot
+                        (corridorHome [ "w", { X = 25; Y = 10 } ])
+                        [ { X = 25; Y = 0 }, Plain ]
+                        corridorOutpost
+                        [ { X = 25; Y = 49 }, Plain ]
+                        [ "src-out", Source ]
+                        [ worker "w" ]
+
+                let held = FarFieldMemo.empty ()
+                let first = snapshot () |> ofViewRecalling (WalkTable()) held
+
+                Expect.equal
+                    (seamWalkTicks first "W1N2" "W1N1" { X = 25; Y = 45 })
+                    (Some 4)
+                    "three plain tiles to the one beside the exit, and the step onto it"
+
+                Expect.equal held.SeamWalks.Count 1 "the flood is left in the table it was handed"
+
+                // The entry is poisoned before the second Atlas reads it, so
+                // an Atlas that laid a table of its own would answer four
+                // again and one that read the handed table answers the
+                // poison: a reference check on a table `memoised` never
+                // overwrites would pass either way.
+                let poisoned = Array.copy held.SeamWalks.[("W1N2", "W1N1")]
+                poisoned.[25 * Engine.roomSide + 45] <- 99
+                held.SeamWalks.[("W1N2", "W1N1")] <- poisoned
+                let second = snapshot () |> ofViewRecalling (WalkTable()) held
+
+                Expect.equal
+                    (seamWalkTicks second "W1N2" "W1N1" { X = 25; Y = 45 })
+                    (Some 98)
+                    "the second Atlas read the handed table, poison and all, rather than running its own"
+
+                Expect.equal held.SeamWalks.Count 1 "and filed nothing beside it"
+
+                let fresh = FarFieldMemo.empty ()
+                let dropped = snapshot () |> ofViewRecalling (WalkTable()) fresh
+
+                Expect.equal
+                    (seamWalkTicks dropped "W1N2" "W1N1" { X = 25; Y = 45 })
+                    (Some 4)
+                    "an empty table is flooded into, and prices the walk identically"
+
+                Expect.equal fresh.SeamWalks.Count 1 "the flood it ran is left in it"
+            }
+
             test "the traffic-aware far field is recalled for as long as the crowd stands still" {
                 // The other half of `docs/research/cpu-headroom.md` §5.1: a
                 // `TravelCost` field reads the census *and* the tiles creeps
@@ -600,6 +655,7 @@ let crossRoomTests =
 
                 let carried (memo: FarFieldMemo) =
                     {
+                        SeamWalks = memo.SeamWalks
                         PerCensus = memo.PerCensus
                         LastTick = memo.ThisTick
                         ThisTick = FarFieldTable()

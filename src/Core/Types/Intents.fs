@@ -197,17 +197,38 @@ type FarFieldTable =
         int[]
      >
 
-/// The far-field tables an Atlas prices its cross-room legs out of, one per
-/// **lifetime** — which is the only thing that distinguishes them, so they are
-/// named for it and not for a caller (`docs/research/cpu-headroom.md` §5.1,
-/// §5.3).
+/// The walk out to a Seam from every tile of one room's ground, per ordered
+/// room pair, as the flood's whole-tick distance per tile index — the tile's
+/// own entry cost included, which `Atlas.seamWalkTicks` takes back off (ADR
+/// 0042's outpost container pick, and the order #266's builder budget is
+/// spent in). Held on
+/// the same terms as `WalkTable`: it is flooded over the room's walking grid
+/// and its Seam band under one constant planning body, all of which the census
+/// signature signs and nothing else moves, so it is filled on demand by the
+/// Atlas and handed to the next tick's while the signature holds.
+type SeamWalkTable = System.Collections.Generic.Dictionary<string * string, int[]>
+
+/// The tables an Atlas prices its cross-room legs out of and the census memo
+/// recalls: the three far-field tables, one per **lifetime** — which is the
+/// only thing that distinguishes them, so they are named for it and not for a
+/// caller (`docs/research/cpu-headroom.md` §5.1, §5.3) — and beside them the
+/// Seam walks, the near half of a cross-room price with the far leg left off,
+/// which share the census's lifetime and are told apart by what they hold.
 ///
-/// A record and not three arguments of one type, because three
+/// A record and not four arguments of one type, because three
 /// `FarFieldTable`s in a row is a swap the compiler cannot see: laying the
 /// tick's table where the census's belongs would hold this tick's traffic
 /// forever and read as a stale travel cost, never as an error.
 type FarFieldMemo =
     {
+        /// The Seam walks flooded under this census signature (ADR 0032):
+        /// `Atlas.seamWalkTicks`' table, which was laid per Atlas — once a
+        /// tick — until the profile put the outpost budget's ordering at 5%
+        /// of a `reactor --level 7` tick, all of it the same whole-room flood
+        /// out of the same band over the same grid every tick. Everything it
+        /// reads is the census's: the room's walking grid, its Seam band, and
+        /// a planning body that is a constant.
+        SeamWalks: SeamWalkTable
         /// The traffic-blind fields (`Walk`, `Baseline`), held while the
         /// census signature stands (ADR 0032). Grows with the census: the
         /// chains a colony's declarations reach over, times the Tasks at the
@@ -238,6 +259,7 @@ module FarFieldMemo =
     /// `Dictionary` (#310, `AGENTS.md` § Code hygiene).
     let empty () : FarFieldMemo =
         {
+            SeamWalks = SeamWalkTable()
             PerCensus = FarFieldTable()
             LastTick = FarFieldTable()
             ThisTick = FarFieldTable()
@@ -377,6 +399,9 @@ type PlanMemo =
         /// The walks flooded under this signature, filled through the tick by
         /// the Atlas the table was handed to.
         Walks: WalkTable
+        /// The Seam walks flooded under this signature, on the same terms as
+        /// `Walks` and for the same reason (`SeamWalkTable`).
+        SeamWalks: SeamWalkTable
         /// The traffic-blind far fields flooded under this signature, filled
         /// through the tick by that same Atlas — `Walks`' rule one query over
         /// (`docs/research/cpu-headroom.md` §5.1).
@@ -427,14 +452,15 @@ module PlanMemo =
     /// and a hauler row of zero casts no body rather than dismissing one. What
     /// is lost is one tick of *new* placement per colony per turn — measured
     /// against a tick that the engine kills outright.
-    /// The three tables are handed in and not defaulted, because every one of
+    /// The four tables are handed in and not defaulted, because every one of
     /// them is a fact this tick paid for: a deferred colony declines to
     /// **plan**, not to price. Handing in an empty table here would throw away
-    /// the tick's own walks and far fields, and handing in last tick's
+    /// the tick's own walks, Seam walks and far fields, and handing in last tick's
     /// traffic-aware table would stop that carry dead on every turn a colony
     /// skips (ADR 0032, `docs/research/cpu-headroom.md`).
     let deferred
         (walks: WalkTable)
+        (seamWalks: SeamWalkTable)
         (farFields: FarFieldTable)
         (trafficFarFields: FarFieldTable)
         : PlanMemo =
@@ -449,6 +475,7 @@ module PlanMemo =
             HaulerDemand = []
             HaulerLoad = 0
             Walks = walks
+            SeamWalks = seamWalks
             FarFields = farFields
             TrafficFarFields = trafficFarFields
         }
