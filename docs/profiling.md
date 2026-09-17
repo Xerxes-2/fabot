@@ -385,6 +385,22 @@ tables and the `census-keyed frames` table all split into perturbed ticks
 - Samples the profiler parks at the root (GC, its own start and stop)
   belong to no tick and to neither class.
 
+## What keeps failing, and why
+
+Three of the refusals below share one mechanism, and it is worth naming because
+the instinct that produces them is a good instinct everywhere else: **in Fable,
+building an intermediate collection to avoid recomputing something small is a
+loss.** A closure per settled tile to shorten the flood's inner loop, a
+`Dictionary` to avoid `Map.add` per id, an array of tuples to resolve each
+structure's tile once instead of three times — each replaced cheap repeated work
+with a cheap allocation *per element*, and the allocation won every time.
+
+What has worked instead, three times out of three: **not doing the work at
+all** (the safe set, the sighting's ids, the keeper mask's rebuild), or
+**doing it once across ticks rather than once per tick** (the far-field memo).
+The question to ask of a candidate is not "can this be computed more cheaply"
+but "is anybody asking for it".
+
 ## Refusals with numbers behind them
 
 Things tried against this harness and **not** kept, so they are not re-proposed
@@ -401,6 +417,7 @@ reported — and each is a "no" from the clock rather than from an opinion.
 | `idsOfKindIn` folded over a Map | `reactor` | 0 or worse |
 | the flood's interior unrolled, eight neighbours without bounds tests | `reactor` | −3.1% of decide, spreads overlapping (4.19–4.81 against 4.25–4.57) |
 | the same unroll through a local `next -> relax ...` | `reactor` | **+6%**: a local function closing over the loop's eight values is a closure allocated per settled tile |
+| every structure's tile resolved once into a `places` array instead of three times by `posOf` | harness | −3% *against* it: 5.39 ms against 5.22, six runs interleaved, spreads overlapping |
 | `FIND_MY_STRUCTURES` screened out of the `FIND_STRUCTURES` sweep already taken | harness, then live | −3% in the harness *against* it and 0 live: `rooms` read 5.17, 5.14, 5.05 ms against 5.07–5.16 before |
 | the Atlas's kind census inverted through a `Dictionary` instead of `Map.add` per id | `reactor`, then live | 0 in the harness, and the live window came back *worse* (W15S28's decide 12.54 → 13.84 ms) |
 
