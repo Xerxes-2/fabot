@@ -401,6 +401,18 @@ reported — and each is a "no" from the clock rather than from an opinion.
 | `idsOfKindIn` folded over a Map | `reactor` | 0 or worse |
 | the flood's interior unrolled, eight neighbours without bounds tests | `reactor` | −3.1% of decide, spreads overlapping (4.19–4.81 against 4.25–4.57) |
 | the same unroll through a local `next -> relax ...` | `reactor` | **+6%**: a local function closing over the loop's eight values is a closure allocated per settled tile |
+| the Atlas's kind census inverted through a `Dictionary` instead of `Map.add` per id | `reactor`, then live | 0 in the harness, and the live window came back *worse* (W15S28's decide 12.54 → 13.84 ms) |
+
+The census one is worth a sentence of its own, because the structural argument
+for it was strong and wrong. Inverting a thousand-entry census with `Map.add`
+allocates a path through the tree per id to build an answer with about ten keys
+in it, so a mutable table frozen once at the end should have been strictly less
+work. It was not measurable in the harness — whose census is about ninety
+targets against the live colony's several hundred — and the live window moved
+the wrong way. The likely reason is the key: `Dictionary<TargetKind, _>` hashes
+a union structurally on every lookup, and `GetHashCode` is already 1.4% of a
+`reactor` profile. An F# `Map` compares where a `Dictionary` hashes, and for a
+DU key the comparison is the cheaper of the two.
 
 The last two are worth keeping in mind together. The bounds tests the unroll
 removes are four integer comparisons a neighbour, and taking all eight of them
