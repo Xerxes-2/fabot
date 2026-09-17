@@ -385,6 +385,30 @@ tables and the `census-keyed frames` table all split into perturbed ticks
 - Samples the profiler parks at the root (GC, its own start and stop)
   belong to no tick and to neither class.
 
+## Refusals with numbers behind them
+
+Things tried against this harness and **not** kept, so they are not re-proposed
+without new evidence. Each was measured the way this repo requires — arms
+interleaved, rebuilt between them, three rounds in both orders, spreads
+reported — and each is a "no" from the clock rather than from an opinion.
+
+| tried | world | reading |
+|---|---|---|
+| bounded far field | `pair` | −10.7% of pops only, no tick movement (#332) |
+| a different heap for the flood | `reactor` | 23% slower |
+| Matcher pruning by Priority group | `pair` | no movement |
+| `TerrainGrid`'s int sentinel | `outpost` | 0 |
+| `idsOfKindIn` folded over a Map | `reactor` | 0 or worse |
+| the flood's interior unrolled, eight neighbours without bounds tests | `reactor` | −3.1% of decide, spreads overlapping (4.19–4.81 against 4.25–4.57) |
+| the same unroll through a local `next -> relax ...` | `reactor` | **+6%**: a local function closing over the loop's eight values is a closure allocated per settled tile |
+
+The last two are worth keeping in mind together. The bounds tests the unroll
+removes are four integer comparisons a neighbour, and taking all eight of them
+out of 94% of a room's tiles bought about 3% of `decide` — under this clock's
+resolution. The flood's cost is the array traffic in the relaxation, not the
+control flow around it, and the one change that *did* move it (#278's flat
+`TerrainGrid`, −7.3% of samples) changed the memory and not the loop.
+
 ## History
 
 The baseline moved with the world it measures, and older numbers do not
