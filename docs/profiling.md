@@ -401,6 +401,7 @@ reported — and each is a "no" from the clock rather than from an opinion.
 | `idsOfKindIn` folded over a Map | `reactor` | 0 or worse |
 | the flood's interior unrolled, eight neighbours without bounds tests | `reactor` | −3.1% of decide, spreads overlapping (4.19–4.81 against 4.25–4.57) |
 | the same unroll through a local `next -> relax ...` | `reactor` | **+6%**: a local function closing over the loop's eight values is a closure allocated per settled tile |
+| `FIND_MY_STRUCTURES` screened out of the `FIND_STRUCTURES` sweep already taken | harness, then live | −3% in the harness *against* it and 0 live: `rooms` read 5.17, 5.14, 5.05 ms against 5.07–5.16 before |
 | the Atlas's kind census inverted through a `Dictionary` instead of `Map.add` per id | `reactor`, then live | 0 in the harness, and the live window came back *worse* (W15S28's decide 12.54 → 13.84 ms) |
 
 ## What is worth deferring, and what is left
