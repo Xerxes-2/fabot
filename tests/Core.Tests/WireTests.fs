@@ -7,6 +7,9 @@
 module Fabot.Core.Tests.WireTests
 
 open Expecto
+open System
+open System.IO
+open System.Text.RegularExpressions
 open FSharp.Reflection
 open Fabot.Core.Types
 open Fabot.Core
@@ -307,5 +310,132 @@ let wireVocabularyTests =
                      Decide.Facts.taskId (Refill("store", Energy)))
                     ("withdraw:store", "refill:store")
                     "and the energy spelling is the one it has always been"
+            }
+        ]
+
+/// The other end of the same wire: the tables in `scripts/observe.mjs` that turn
+/// these names into English. The round trips above keep F# honest with itself,
+/// and #368 is what they do not cover — **the JavaScript reader has no union to
+/// be exhaustive against.**
+///
+/// Live, `StandDownBasis` grew a fifth case (#165's `invader-raid`) and the
+/// observer's table kept four. The F# side was green: `standDownBasisName`
+/// matched exhaustively, the round trip passed, the leaf was written correctly.
+/// The reader dropped every row it could not name — and, because these tables
+/// are deliberately closed (a guessed row would describe a violation nobody
+/// wrote), it dropped them while **printing that a human must have hand-edited
+/// the leaf**. Two real stand-downs in W15S25 and W15S26 were unreadable for
+/// about 66,000 ticks, and the diagnosis was pointed at the operator.
+///
+/// So this reads the script as text and checks the keys. Crude, and the only
+/// check available: the alternative is emitting the tables from F# into the
+/// bundle, which would put English prose the bot never reads into the 570 KB it
+/// uploads every deploy.
+module private Observer =
+
+    open System.IO
+    open System.Text.RegularExpressions
+
+    /// The repository root, found by walking up from the test binary until a
+    /// `package.json` stands in the directory. Not a relative hop count from
+    /// `AppContext.BaseDirectory`: that is `bin/Debug/net10.0` today and the
+    /// count would rot the next time the build layout moves.
+    let root () =
+        let rec climb (dir: DirectoryInfo) =
+            if isNull dir then
+                failwith
+                    "no package.json above the test binary: this test needs the repository, not just the assembly"
+            elif File.Exists(Path.Combine(dir.FullName, "package.json")) then
+                dir.FullName
+            else
+                climb dir.Parent
+
+        climb (DirectoryInfo AppContext.BaseDirectory)
+
+    let script =
+        lazy (File.ReadAllText(Path.Combine(root (), "scripts", "observe.mjs")))
+
+    /// The quoted keys of one `const NAME = { ... }` table in the script, from
+    /// its opening brace to the first line that closes it at the same
+    /// indentation. Fails loudly when the table is not there at all, because a
+    /// renamed table that this test silently found nothing in is the same
+    /// failure it exists to catch.
+    let keysOf (table: string) =
+        let opening = Regex.Match(script.Value, $@"const {table} = \{{")
+
+        if not opening.Success then
+            failwithf
+                "no `const %s = {` in scripts/observe.mjs: the table was renamed or removed, and this test can no longer see whether it is complete"
+                table
+
+        let body = script.Value.Substring(opening.Index + opening.Length)
+        let closing = body.IndexOf("\n  };")
+
+        let body = if closing >= 0 then body.Substring(0, closing) else body
+
+        // Quoted **and** bare keys. Two of the five stand-down bases are
+        // spelt `reservation:` and `fallback:` — legal JavaScript identifiers,
+        // so the script quotes only the hyphenated ones — and a reader that saw
+        // the quoted form alone reported this complete table as missing them.
+        // It cost the first run of this very test, which is the argument for
+        // anchoring on the table's own indentation rather than on a quote.
+        Regex.Matches(
+            body,
+            "^\\s{4}(?:\"([a-z0-9-]+)\"|([A-Za-z][A-Za-z0-9]*))\\s*:",
+            RegexOptions.Multiline
+        )
+        |> Seq.map (fun m ->
+            if m.Groups[1].Success then
+                m.Groups[1].Value
+            else
+                m.Groups[2].Value)
+        |> Set.ofSeq
+
+/// The wire spelling these tables are keyed by, as a convention rather than a
+/// shared function: the breach vocabulary lives in `App` (`ObserveMemory`),
+/// which this project cannot reference, and its own docstring states the
+/// convention — "hyphenated lower case, the spelling `standDownBasisName` and
+/// `declarationKindName` already use". A vocabulary that departs from it reddens
+/// this test, which is the right outcome: the departure needs to be deliberate.
+let private kebabOf (name: string) =
+    name
+    |> Seq.mapi (fun i c ->
+        if System.Char.IsUpper c && i > 0 then
+            $"-{System.Char.ToLower c}"
+        else
+            string (System.Char.ToLower c))
+    |> String.concat ""
+
+[<Tests>]
+let observerTableTests =
+    testList
+        "the observer's closed tables carry every case"
+        [
+            test "the stand-down bases the script can name are all of them" {
+                let spelt = casesOf<StandDownBasis> () |> Seq.map standDownBasisName |> Set.ofSeq
+
+                // Both tables, because the row prints a basis twice over: once
+                // as the reason the outpost is shut and once as the sighting the
+                // deadline was read off, and #165's case reached only one of
+                // them for a while.
+                for table in [ "BASIS"; "SIGHTING" ] do
+                    Expect.isEmpty
+                        (Set.difference spelt (Observer.keysOf table))
+                        $"every StandDownBasis is a key of {table} in scripts/observe.mjs — a case the script cannot name is a row it drops while blaming the operator (#368)"
+            }
+
+            test "the breach kinds the script can name are all of them" {
+                // Five kinds today: two about ore that cannot be spent and
+                // three about the Reactor. `reactor-running-dry` is the one
+                // added most recently (#361), which is exactly the moment this
+                // check earns its keep.
+                let spelt =
+                    casesOf<Observe.BreachKind> ()
+                    |> Seq.map (fun kind -> kebabOf (string kind))
+                    |> Set.ofSeq
+
+                Expect.isEmpty
+                    (Set.difference spelt (Observer.keysOf "KIND"))
+                    "every BreachKind is a key of KIND in scripts/observe.mjs (#368)"
             }
         ]
