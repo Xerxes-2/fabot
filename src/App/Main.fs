@@ -68,6 +68,15 @@ let mutable private sightings: Map<string, RoomSighting> = Map.empty
 // (`ObserveMemory.appendCpu`).
 let mutable private cpuLine: Observe.CpuState option = None
 
+// Which ordered room pairs a Seam band joins (`JoinTable`), carried across
+// ticks on the heap beside the sightings and never emptied: every answer in it
+// is the terrain's, and the one fact about a pair that moves — whether the
+// world holds both rooms this tick — is read ahead of the table on every ask
+// (`World.linkedRecalling`). One table for every reader of every colony. A
+// global reset empties it, and the first tick after one answers every pair as
+// every tick used to.
+let private joins = JoinTable()
+
 // Exported as `loop` on the bundled `main` module; the engine calls it every tick.
 let loop () =
     // The engine's counter is already running when `loop` is entered, and this
@@ -138,7 +147,8 @@ let loop () =
     // adopted by the colony whose projection it stands in, and a latched room
     // the gate takes one look at this tick is projected by nobody (#165).
     let holders =
-        World.creepColonies
+        World.creepColoniesRecalling
+            joins
             Tuning.defaults
             Colony.declared
             colonies
@@ -161,7 +171,8 @@ let loop () =
         colonies
         |> List.map (fun colony ->
             let view =
-                ColonyView.ofWorld
+                ColonyView.ofWorldRecalling
+                    joins
                     Tuning.defaults
                     Colony.declared
                     (gateOf colony.Home)

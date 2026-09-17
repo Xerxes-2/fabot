@@ -998,6 +998,27 @@ let keeperMaskTests =
                     (reaches "W14S26" "W15S26")
                     "and does not reuse that answer backwards"
 
+                // The shell's own table (`JoinTable`, `World.linkedRecalling`):
+                // one entry per ordered pair under the margin, read on the
+                // second ask, and filed only for a pair the world holds both
+                // rooms of — an unheld room is joined to nothing and files
+                // nothing, because whether a room is held is this tick's fact
+                // and the table outlives the tick.
+                let table = JoinTable()
+                let tabled = World.linkedRecalling table margin world
+
+                Expect.isTrue (tabled "W15S26" "W14S26") "the table's first answer is the terrain's"
+                Expect.isFalse (tabled "W14S26" "W15S26") "and so is the backward one"
+                Expect.equal table.Count 2 "one entry per ordered pair asked"
+                Expect.isTrue (tabled "W15S26" "W14S26") "asked again, it reads the entry"
+                Expect.equal table.Count 2 "and files nothing new"
+
+                Expect.isFalse
+                    (tabled "W15S26" "W16S26")
+                    "a room the world does not hold is joined to nothing"
+
+                Expect.equal table.Count 2 "and is never filed"
+
                 // Asked twice, because a table that answered once and drifted
                 // would be worse than no table: the second reading is the
                 // stored row and it has to be the same row.

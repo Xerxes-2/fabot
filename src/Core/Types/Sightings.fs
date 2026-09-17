@@ -373,6 +373,17 @@ type RoomSighting =
 /// `ColonyView.ofWorld` cuts one colony's share of it; `decide` is written
 /// against a view and never against the world, so no rule can reach a room its
 /// colony does not work.
+/// `World.linkedRecalling`'s memo: `(keeper margin, from, to)` to whether a
+/// crossing joins the pair. Mutable and heap-only, like `WalkTable`, and the
+/// **shell's**: one table for the life of the process, handed to every reader
+/// of every colony on every tick, because every answer in it is the terrain's
+/// (`linkedRecalling` says why nothing in it goes stale). A test asks through
+/// `linkedBy`, `scanOf`, `creepColonies` and `ColonyView.ofWorld`, which lay a
+/// table of their own per call, or lays one inside the test body; what is
+/// forbidden is a **static** holding one, which would be shared across
+/// Expecto's parallel lists (#310, `ParallelSafetyTests`).
+type JoinTable = System.Collections.Generic.Dictionary<int * string * string, bool>
+
 type World =
     {
         Time: int
@@ -574,38 +585,59 @@ module World =
             fromRoom
             toRoom
 
-    /// `linked` over a table, for a caller that asks it many times: the route
-    /// search asks per border and re-asks per hop, so one tick's scan set and
-    /// refusals came to 93 calls over 26 distinct ordered pairs — 7.6% of a
-    /// tick, all of it outside `decide` and so invisible to the phase split
-    /// that has been driving the CPU work (`docs/research/cpu-headroom.md`,
-    /// its candidate 2).
+    /// `linked` over a table the caller holds, and holds **across ticks**: the
+    /// route search asks per border and re-asks per hop, and three readers ask
+    /// it per colony per tick — the scan set, the refusals and the creeps'
+    /// filing (`scanOf`, `ColonyView.ofWorld`, `creepColonies`) — which came
+    /// to 93 calls over 26 distinct pairs in one colony's tick before any
+    /// table stood (`docs/research/cpu-headroom.md`, its candidate 2), and to
+    /// three tables a colony a tick, each built and thrown away, once one did:
+    /// 5.7% of a `reactor --level 7` tick, all of it outside `decide`
+    /// (`docs/profiling.md` § History, 2026-09-18).
     ///
-    /// The table is the **caller's**, built per call of this function and
-    /// therefore per tick, and that is the whole design: `linked` reads two
-    /// rooms' border rings and one room's terrain off the world handed in, and
-    /// while ADR 0031's memo makes those stable within a tick, nothing
-    /// promises it across one — a room that gains vision gets its facts from
-    /// the projection, not from the memo. A table that outlived a tick would
-    /// be answering about a world that no longer exists, which is exactly the
-    /// mistake ADR 0032 avoids by keying on the census signature; here there
-    /// is no signature to key on, so the tick is the lifetime.
+    /// The table can outlive the tick because of what an answer reads and what
+    /// it does not. It reads two rooms' border rings and one room's ground,
+    /// which are terrain off ADR 0031's memo — the engine never changes a
+    /// room's terrain — under a keeper margin that is in the key. What *can*
+    /// move between ticks is which rooms the world holds at all: a room the
+    /// world carries nothing for has no ring and is joined to nothing
+    /// (`roomOf`, ADR 0004), and that is this tick's fact. So it is read off
+    /// `Rooms` ahead of the table on every ask, and the table is asked only
+    /// for a pair the world holds both rooms of — an answer filed there is
+    /// the terrain's and stands for the life of the process, and a room that
+    /// left the world is joined to nothing whatever the table remembers.
+    /// `JoinTable`'s doc says whose the table is.
     ///
     /// Asymmetric by construction, like `linked` itself: `A B` and `B A` are
     /// two questions (`Declaration.routable` asks both, ADR 0062), so the key
     /// is the ordered pair and an answer is never reused backwards.
-    let linkedBy (keeperMargin: int) (world: World) : string -> string -> bool =
-        let answered = System.Collections.Generic.Dictionary<string * string, bool>()
-
+    let linkedRecalling
+        (joins: JoinTable)
+        (keeperMargin: int)
+        (world: World)
+        : string -> string -> bool =
         fun fromRoom toRoom ->
-            let pair = (fromRoom, toRoom)
+            if not (Map.containsKey fromRoom world.Rooms && Map.containsKey toRoom world.Rooms) then
+                false
+            else
+                let key = (keeperMargin, fromRoom, toRoom)
 
-            match answered.TryGetValue pair with
-            | true, answer -> answer
-            | _ ->
-                let answer = linked keeperMargin world fromRoom toRoom
-                answered.[pair] <- answer
-                answer
+                // `ContainsKey` then the indexer, never `TryGetValue` in a
+                // match: Fable compiles the out-parameter pattern into four
+                // allocations per read (`Atlas.memoised`'s note).
+                if joins.ContainsKey key then
+                    joins.[key]
+                else
+                    let joined = linked keeperMargin world fromRoom toRoom
+                    joins.[key] <- joined
+                    joined
+
+    /// `linkedRecalling` over a table of this call's own — the shape a test
+    /// or a one-off asks in, the way `Atlas.ofView` is `ofViewRecalling` over
+    /// fresh tables. The shell never calls this: it holds one table for the
+    /// life of the process and hands it to every reader.
+    let linkedBy (keeperMargin: int) (world: World) : string -> string -> bool =
+        linkedRecalling (JoinTable()) keeperMargin world
 
     /// What one colony's declaration narrows to this tick, and the union of it:
     /// `scanOf`'s whole answer, in four named halves rather than a positional
@@ -659,7 +691,8 @@ module World =
     /// The whole `Tuning` and not the hop budget alone since ADR 0060: the
     /// chain is searched over the **masked** border rings, so the routable
     /// question reads `Tuning.keeperMargin` beside `Tuning.MaxHops`.
-    let scanOf
+    let scanRecalling
+        (joins: JoinTable)
         (tuning: Tuning)
         (stages: Map<string, ColonyStage>)
         (unowned: Set<string>)
@@ -669,11 +702,13 @@ module World =
         (colony: Colony)
         : ScanSet =
         // One table for both narrowings and for every hop inside each
-        // (`linkedBy`): the two filters ask about overlapping chains out of the
-        // same home, so the pairs they share are asked once. The outposts and
+        // (`linkedRecalling`): the two filters ask about overlapping chains
+        // out of the same home, so the pairs they share are asked once — and
+        // the table is the caller's, so they are asked once across every
+        // reader and every tick that hands the same one in. The outposts and
         // the errands are still two filters, because they are two declaration
         // kinds and the failure sizes differ (ADR 0060).
-        let reaches = linkedBy (Tuning.keeperMargin tuning) world
+        let reaches = linkedRecalling joins (Tuning.keeperMargin tuning) world
 
         let outposts =
             Outpost.worked shut colony.Outposts
@@ -698,6 +733,18 @@ module World =
             Scanned = Colony.roomsProjected outposts errands borrowed colony.Home
         }
 
+    /// `scanRecalling` over a table of this call's own (`linkedBy`).
+    let scanOf
+        (tuning: Tuning)
+        (stages: Map<string, ColonyStage>)
+        (unowned: Set<string>)
+        (colonies: Colony list)
+        (shut: Set<string>)
+        (world: World)
+        (colony: Colony)
+        : ScanSet =
+        scanRecalling (JoinTable()) tuning stages unowned colonies shut world colony
+
     /// The declared homes that stand empty this tick: ours to take back if
     /// they ever were ours, and the candidates a human means to take. Read off
     /// the same control entry ownership is read off everywhere (ADR 0042); a
@@ -710,9 +757,11 @@ module World =
             |> Option.exists (fun control -> control.Owner = Ownership.Unowned))
         |> Set.ofList
 
-    /// The rooms one colony projects this tick, off the world: `scanOf`'s
-    /// union with the stages and the ownership it needs read for it.
-    let roomsProjected
+    /// The rooms one colony projects this tick, off the world:
+    /// `scanRecalling`'s union with the stages and the ownership it needs
+    /// read for it, over the caller's join table (`JoinTable`).
+    let roomsProjectedRecalling
+        (joins: JoinTable)
         (tuning: Tuning)
         (colonies: Colony list)
         (shut: Set<string>)
@@ -720,7 +769,8 @@ module World =
         (colony: Colony)
         : string list =
         let scan =
-            scanOf
+            scanRecalling
+                joins
                 tuning
                 (stages tuning colonies world)
                 (unownedHomes colonies world)
@@ -734,8 +784,12 @@ module World =
     /// Which colony holds each creep this tick (`Colony.creepColonies`, ADR
     /// 0047 decision 2), decided over every living colony's scan set at once
     /// and handed to each view: a creep is one colony's business, or two
-    /// decisions would move one body twice.
-    let creepColonies
+    /// decisions would move one body twice. Over the caller's join table
+    /// (`JoinTable`): every colony's scan set is walked here a second time in
+    /// the tick, and the pairs the views' own walk answers are read, not
+    /// re-derived.
+    let creepColoniesRecalling
+        (joins: JoinTable)
         (tuning: Tuning)
         (colonies: Colony list)
         (running: Colony list)
@@ -746,7 +800,8 @@ module World =
             running
             |> List.map (fun colony ->
                 colony.Home,
-                roomsProjected
+                roomsProjectedRecalling
+                    joins
                     tuning
                     colonies
                     (Map.tryFind colony.Home shut |> Option.defaultValue Set.empty)
@@ -763,3 +818,13 @@ module World =
             projections
             spawnHomes
             (world.Creeps |> List.map (fun creep -> creep.Info.Name, Some creep.Room))
+
+    /// `creepColoniesRecalling` over a table of this call's own (`linkedBy`).
+    let creepColonies
+        (tuning: Tuning)
+        (colonies: Colony list)
+        (running: Colony list)
+        (shut: Map<string, Set<string>>)
+        (world: World)
+        : Map<string, string> =
+        creepColoniesRecalling (JoinTable()) tuning colonies running shut world

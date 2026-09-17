@@ -468,6 +468,21 @@ control flow around it, and the one change that *did* move it (#278's flat
 
 ## History
 
+- **2026-09-18, overnight round (#370).** Four cuts, each measured per this
+  page's rules and decision-identical by report diff. `923d68df`: the
+  cross-room walk reads the far field carried into the creep's own room
+  (`Atlas.pricedOffField`) — per-colony `decide` on `reactor --level 7`
+  3.19–3.34 → 2.73–2.89 ms, `pair --level 7` −7%, `outpost` −10%; live
+  `decide` 38.2 → 32.2 ms. `a01b33bf`: the Seam walk rides the census table
+  — reactor `decide` −7.5%. `22c26326`: the CPU line held on the heap, the
+  leaf appended one row a tick — 1.36 ms of a live tick outside every phase.
+  The room joins (`World.linkedRecalling`) answered off one process-lifetime
+  table: `WorldModule_linked` was 5.7% of a `reactor --level 7` tick by
+  inclusive samples, all in the snapshot phase; whole tick 3.76–3.89 →
+  3.43–3.60 ms, `decide` unmoved. A live probe (a throwaway build writing pop
+  counts by call site and `save`-phase sub-timings to `Memory.__probe`)
+  attributed what is left; its table is on #370.
+
 The baseline moved with the world it measures, and older numbers do not
 compare with today's: #144 furnished the room and derived the fleet; #163
 stood the outposts' containers and reservations (three worked rooms, not

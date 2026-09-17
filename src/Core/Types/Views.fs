@@ -610,7 +610,13 @@ module ColonyView =
     /// withholds rooms by), the **holders** `World.creepColonies`
     /// cut over every living colony's scan set at once, and the **world**
     /// itself.
-    let ofWorld
+    ///
+    /// The join table is the shell's, handed in for the life of the process
+    /// (`JoinTable`): every chain the scan set and the refusals below walk is
+    /// asked of it, so a pair the previous tick — or the previous colony —
+    /// already answered is read and not re-derived.
+    let ofWorldRecalling
+        (joins: JoinTable)
         (tuning: Tuning)
         (colonies: Colony list)
         (gate: StandDown)
@@ -622,10 +628,12 @@ module ColonyView =
         let stages = World.stages tuning colonies world
 
         // The declaration's narrowings and their union, off the one
-        // derivation the creep adoption reads too (`World.scanOf`). Written
-        // here a second time it would be a second answer free to disagree.
+        // derivation the creep adoption reads too (`World.scanRecalling`).
+        // Written here a second time it would be a second answer free to
+        // disagree.
         let scan =
-            World.scanOf
+            World.scanRecalling
+                joins
                 tuning
                 stages
                 (World.unownedHomes colonies world)
@@ -886,11 +894,12 @@ module ColonyView =
             // decision 2): a refusal read off raw terrain would name a room the
             // chain admits, or keep quiet about one it does not.
             Refused =
-                // Over a table (`World.linkedBy`), because both refusals walk
-                // the same chains out of the same home and the route search
-                // re-asks per hop — 93 calls over 26 pairs in one tick before
-                // this (`docs/research/cpu-headroom.md`).
-                let reaches = World.linkedBy (Tuning.keeperMargin tuning) world
+                // Over the shell's table (`World.linkedRecalling`), because
+                // both refusals walk the same chains out of the same home the
+                // scan set above just walked, and the route search re-asks
+                // per hop — 93 calls over 26 pairs in one tick before any
+                // table stood (`docs/research/cpu-headroom.md`).
+                let reaches = World.linkedRecalling joins (Tuning.keeperMargin tuning) world
 
                 Outpost.refused reaches tuning.MaxHops home colony.Outposts
                 @ Errand.refused reaches tuning.MaxHops home colony.Errands
@@ -908,3 +917,15 @@ module ColonyView =
                     remembered |> Option.map (fun sighting -> room, sighting))
                 |> Map.ofList
         }
+
+    /// `ofWorldRecalling` over a table of this call's own — the shape a test
+    /// asks in, the way `Atlas.ofView` is `ofViewRecalling` over fresh tables.
+    let ofWorld
+        (tuning: Tuning)
+        (colonies: Colony list)
+        (gate: StandDown)
+        (holders: Map<string, string>)
+        (world: World)
+        (colony: Colony)
+        : ColonyView =
+        ofWorldRecalling (JoinTable()) tuning colonies gate holders world colony

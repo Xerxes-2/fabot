@@ -438,6 +438,21 @@ in `Main.loop` and is therefore per-tick by construction — the Atlas's own
 convention. That caps the win at 93 → 26 calls (−72%) rather than the −100% the
 static measured; the difference is 26 band builds, ~2% of the tick.
 
+> **Superseded on 2026-09-18 (#370).** The table took the −100% this paragraph
+> gave up, by a route it did not consider: the static lives in the **shell**
+> (`Main.fs`, one `JoinTable` for the life of the process, handed in through
+> `World.linkedRecalling`, `scanRecalling`, `creepColoniesRecalling` and
+> `ColonyView.ofWorldRecalling`), while Core's old names stay as wrappers laying
+> a fresh table per call — the `Atlas.ofView` / `ofViewRecalling` shape. No
+> test list can share one, and no static in the test assembly reaches one, so
+> the collision hazard above never reaches Core. What made a lifetime longer
+> than the tick honest is that the one input which moves — whether the world
+> holds a room at all — is read off `Rooms` ahead of the table on every ask
+> (ADR 0031's amendment says so in the ADR's own terms). The per-tick `World`
+> field was tried first and refused by `ParallelSafetyTests`, which reads the
+> declared type: a `World` static with a `JoinTable option` in it is a fixture
+> holding a table, whatever the value.
+
 **Tests that would move.** None. `ViewTests` owns `Refused`, and the answers do
 not change.
 
