@@ -30,7 +30,11 @@ type Threats =
         /// where every other room's absence stands for "not derived" rather
         /// than "nowhere is safe": a creep with no Reach around it is matched
         /// to no Flee.
-        Safe: Map<string, Set<RoomPos>>
+        /// Held as a `Lazy` because the whole of it is 2,000 tiles a room and
+        /// its only reader is Flee's Work Area, which most ticks has no creep
+        /// to offer it to: the Reach exists whenever a hostile stands anywhere
+        /// we can see, while a body *in* that Reach is rare (#371).
+        Safe: Map<string, Lazy<Set<RoomPos>>>
         /// Per room, the walkable tiles within range 1 of a Threat standing in
         /// it, less the tiles the Threats themselves stand on — the [[guard]]'s
         /// Work Area (ADR 0056), and the safe set's exact opposite: Flee walks
@@ -61,7 +65,9 @@ module Threats =
     /// One room's safe set, already joined to that room; empty for a room
     /// no Reach was derived in.
     let safeIn (threats: Threats) (room: string) : Set<RoomPos> =
-        Map.tryFind room threats.Safe |> Option.defaultValue Set.empty
+        Map.tryFind room threats.Safe
+        |> Option.map (fun ground -> ground.Force())
+        |> Option.defaultValue Set.empty
 
     /// One room's range-1 ring, already joined to that room; empty for a room
     /// no Threat stands in — which leaves that room's Guard, if one was ever
@@ -122,19 +128,6 @@ let threatsOf (view: ColonyView) atlas : Threats =
                 if Set.isEmpty tiles then None else Some(room, tiles))
             |> Map.ofList
 
-        // The walkable ground of each room a Threat stands in, walked **once**
-        // for the two sets derived from it: the safe set is that ground less
-        // the Reach and the ring is the part of it beside a Threat, and
-        // `Atlas.walkableTilesIn` builds a 2,500-tile set per call and
-        // memoises nothing.
-        let walkable =
-            byRoom
-            |> List.map (fun (room, _) -> room, Atlas.walkableTilesIn atlas room)
-            |> Map.ofList
-
-        let walkableIn room =
-            Map.tryFind room walkable |> Option.defaultValue Set.empty
-
         // The range-1 ring of every Threat in a room, walkable and less the
         // tiles the Threats stand on — a body cannot stand where one of them
         // already does, and with two of them adjacent each is a tile of the
@@ -146,15 +139,19 @@ let threatsOf (view: ColonyView) atlas : Threats =
             byRoom
             |> List.map (fun (room, inRoom) ->
                 let standing = inRoom |> List.map (fun (_, pos, _) -> pos) |> Set.ofList
-                let walkable = walkableIn room
 
+                // Asked of the grid a tile at a time rather than against a
+                // materialised set of the room's walkable ground (#371): a
+                // ring is nine tiles a Threat and the ground is two thousand,
+                // and `Atlas.adjacentWalkableIn` answers the same question the
+                // same way — same grid, same terrain, road and obstacle
+                // precedence. The centre tile drops out either way: it is the
+                // tile a Threat stands on, so `standing` holds it.
                 let tiles =
                     inRoom
                     |> List.collect (fun (_, pos, _) ->
-                        pos
-                        |> tilesWithin 1
-                        |> List.filter (fun tile ->
-                            Set.contains tile walkable && not (Set.contains tile standing)))
+                        Atlas.adjacentWalkableIn atlas room pos
+                        |> List.filter (fun tile -> not (Set.contains tile standing)))
                     |> Set.ofList
 
                 room, RoomPos.setAt room tiles)
@@ -165,6 +162,8 @@ let threatsOf (view: ColonyView) atlas : Threats =
             Safe =
                 reach
                 |> Map.map (fun room tiles ->
-                    Set.difference (walkableIn room) tiles |> RoomPos.setAt room)
+                    lazy
+                        (Set.difference (Atlas.walkableTilesIn atlas room) tiles
+                         |> RoomPos.setAt room))
             Ring = ring
         }
