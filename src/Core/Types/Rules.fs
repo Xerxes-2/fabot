@@ -510,24 +510,43 @@ type Tuning =
         /// and the Guard Task keep answering for a room nothing of ours can
         /// see any more, counted from the last tick vision showed the threat.
         ///
-        /// **300, and it is arithmetic rather than a preference**: the memory
-        /// has to cover the cast plus the walk, because the raid kills the
-        /// bodies whose vision hired the guard (the anchor, the hauler and the
-        /// reserver) and the room is dark for the whole of both. The cast is
-        /// 3 ticks a part and the live RCL7 guard is five `guardPattern`
-        /// blocks — 50 parts, 150 ticks of oven — and the walk is about 50
-        /// ticks a room crossing at `Tuning.MaxHops` of 3, so 150 + 150.
+        /// **1,500: the longest a raider can still be standing there.** The
+        /// clock's job is not what #366 first sized it for.
         ///
-        /// Being **too long** costs one guard walking into a room that is
-        /// already clear: 750 energy a block, and vision clears the latch on
-        /// the tick that body arrives, so the error is one trip and never a
-        /// standing row. Being too **short** costs the thing the ticket is
-        /// about — a paid-for guard idle at home while a 2-ATTACK invader
-        /// keeps the room. It is deliberately far under `RivalRecheck` (5,000)
-        /// and `StandDownFallback` (2,500): this is a memory that sends a body
-        /// in, not a second [[stand-down]], and a raid that outlives it is
-        /// re-read the moment anything of ours sees the room again. Ticks and
-        /// not a price, so the same at any bank and any [[stage]].
+        /// It was 300 — 150 ticks of oven (3 a part, five `guardPattern`
+        /// blocks) plus 150 of walk (about 50 a room crossing at
+        /// `Tuning.MaxHops` of 3) — on the argument that the memory has to
+        /// cover the guard's cast and its journey. That is the right size for
+        /// **sending** the guard and the wrong size for **remembering**,
+        /// because of what expiry means while the room is dark: the entry
+        /// disappears, nothing looked, and the row reads the absence as a room
+        /// that is clear. An invader living out its full life outlasts 300 four
+        /// times over.
+        ///
+        /// Live, the same day #366 landed, W15S29 killed four of W15S28's
+        /// bodies that way — anchor-516370 and reserver-517630 (t517,880 and
+        /// t517,964), reserver-518659 (t518,726), reserver-519082 (t519,150),
+        /// all at range 1, all to one invader of 1 ATTACK and 1 RANGED_ATTACK.
+        /// The guard went in, the memory expired while the raider stayed, the
+        /// room read clear because nobody could see it, and the row sent the
+        /// next unarmed body. **A remembered threat with too short a clock is
+        /// worse than no memory at all**: it buys a body, walks it in, and then
+        /// forgets.
+        ///
+        /// So the clock is now a backstop and not a schedule:
+        /// `Engine.creepLifetime`, the most life any raider can have left when
+        /// it was last seen. What ends a memory in ordinary running is a
+        /// **look** — a tick of vision that finds the room clear removes it,
+        /// and the guard standing in the room is itself that look, so arrival
+        /// either clears the entry or renews it. This number only stops a latch
+        /// outliving every possible raider, which matters for a room nothing of
+        /// ours ever visits again.
+        ///
+        /// Being this long costs a guard hired for a room that went quiet
+        /// unseen: 750 energy a block, one trip, cleared on arrival. It is now
+        /// under `StandDownFallback` (2,500) rather than far under it, and the
+        /// difference from a [[stand-down]] is unchanged — this memory **sends
+        /// a body in**.
         ThreatMemory: int
         /// How often a [[stand-down]] latched on another player's **ownership**
         /// is looked at again (#165): once this many ticks have passed since the
@@ -605,7 +624,7 @@ module Tuning =
             MaxHops = 3
             TrunkSwampWeight = 3
             StandDownFallback = 2500
-            ThreatMemory = 300
+            ThreatMemory = Engine.creepLifetime
             RivalRecheck = 5000
             QuietGap = 50
             VisionGrace = 150

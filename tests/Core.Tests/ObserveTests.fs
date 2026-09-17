@@ -2397,17 +2397,29 @@ let threatMemoryTests =
 
                 Expect.equal
                     (blind.Threatened |> Map.tryFind outpostRoom)
-                    (Some { Until = 400 })
+                    (Some { Until = 100 + Engine.creepLifetime })
                     "a tick with no vision in the room leaves the conclusion exactly as it found it"
 
+                // The clock is a backstop and not a schedule (#369). It was 300
+                // — the guard's cast plus its walk — and that is the right size
+                // for *sending* a guard and the wrong size for *remembering*:
+                // while the room is dark an expiry cannot mean the raid ended,
+                // only that we stopped remembering, and the row then reads a
+                // room full of invader as clear. W15S29 killed four of W15S28's
+                // bodies that way in one day, one unarmed body at a time.
                 Expect.equal
-                    (threatenedAt 399 blind)
+                    (threatenedAt 999 blind)
                     (Set.singleton outpostRoom)
-                    "one tick short of the memory's end the guard row still answers for the room"
+                    "700 ticks past the old memory's end, with nobody looking, the room is still remembered"
+
+                Expect.equal
+                    (threatenedAt (99 + Engine.creepLifetime) blind)
+                    (Set.singleton outpostRoom)
+                    "one tick short of the backstop it still answers"
 
                 Expect.isEmpty
-                    (threatenedAt 400 blind)
-                    "and on the tick it runs out the room is forgotten, with no look taken at all"
+                    (threatenedAt (100 + Engine.creepLifetime) blind)
+                    "and on the tick no raider seen then could still be alive it is forgotten, with no look taken at all"
 
                 Expect.isEmpty
                     (threatenedAt 101 RaidState.empty)
@@ -2442,7 +2454,7 @@ let threatMemoryTests =
 
                 Expect.equal
                     (stillThere.Threatened |> Map.tryFind outpostRoom)
-                    (Some { Until = 460 })
+                    (Some { Until = 160 + Engine.creepLifetime })
                     "and a look that finds it still standing there moves the clock to this tick's"
             }
 

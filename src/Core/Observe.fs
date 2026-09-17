@@ -1188,10 +1188,15 @@ let foldRaids (cap: int) (alive: Set<string>) (view: ColonyView) (prior: RaidSta
         //
         // Where it parts from `Holds` is the clock. The engine counts a
         // reservation down and ends that record for us; nothing counts a raid
-        // down, so the end is ours to choose and it is `Tuning.ThreatMemory`,
-        // sized at the guard's cast plus its walk. An expired entry is dropped
-        // here rather than filtered by every reader, so the leaf cannot
-        // accumulate raids that ended hours ago.
+        // down, so the end is ours to choose — and it is a **backstop** rather
+        // than a schedule (`Tuning.ThreatMemory`, now the raider's own longest
+        // possible remaining life). What ends a memory in ordinary running is
+        // the look above, because while the room is dark an expiry cannot mean
+        // "the raid ended"; it can only mean "we stopped remembering", and the
+        // row then reads a room full of invader as a room that is clear. Four
+        // of W15S28's bodies were spent proving that (#369). An expired entry
+        // is still dropped here rather than filtered by every reader, so the
+        // leaf cannot accumulate raids no raider could have survived.
         //
         // Declared outposts alone, off the guard row's own derivation
         // (`Planner.declaredOutposts`, the list `raidDeadlines` above reads):
