@@ -59,6 +59,15 @@ let mutable private planMemos: Map<string, PlanMemo> = Map.empty
 // grace existed — the release it would have held is one it takes.
 let mutable private sightings: Map<string, RoomSighting> = Map.empty
 
+// The CPU line (ADR 0041), carried across ticks on the heap beside the plan
+// memos: read off Memory only when the heap holds none — a global reset, which
+// every code upload is — and dropped outright when the leaf is gone, a line
+// somebody discarded on purpose (#370). The leaf is still written every tick,
+// one row a tick, unconditionally; what the heap buys is that the hundred rows
+// standing are not decoded and re-encoded to add the one
+// (`ObserveMemory.appendCpu`).
+let mutable private cpuLine: Observe.CpuState option = None
+
 // Exported as `loop` on the bundled `main` module; the engine calls it every tick.
 let loop () =
     // The engine's counter is already running when `loop` is entered, and this
@@ -460,6 +469,24 @@ let loop () =
     // The CPU line stays one flat leaf keyed by tick: it records the whole
     // loop, every colony's phase inside every column, so there is nothing
     // here for two colonies to collide over (ADR 0047).
-    ObserveMemory.loadCpu ()
-    |> Observe.foldCpu Observe.capCpuTicks Game.time readings
-    |> ObserveMemory.saveCpu
+    let prior =
+        if not (ObserveMemory.cpuLineStands ()) then
+            Observe.CpuState.empty
+        else
+            match cpuLine with
+            | Some line -> line
+            | None -> ObserveMemory.loadCpu ()
+
+    let line = Observe.foldCpu Observe.capCpuTicks Game.time readings prior
+
+    // The tick after a global reset writes the line whole, and every tick
+    // after it appends: the rows standing after an upload are another
+    // bundle's, and only a re-encode normalises a phase group this one no
+    // longer reads whole (`decodeCpuPhases` answers `None` for a row short a
+    // key, and `observe.mjs cpu` refuses such a row) — which is what the
+    // whole write did on every tick, and now does once per upload.
+    match cpuLine with
+    | Some _ -> ObserveMemory.appendCpu line
+    | None -> ObserveMemory.saveCpu line
+
+    cpuLine <- Some line

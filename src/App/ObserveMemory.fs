@@ -1212,56 +1212,123 @@ let loadCpu () : CpuState =
                         None)
         })
 
+/// One CPU row as the wire carries it: `{ t, ms }`, the phase keys when the
+/// row was measured with them, and the three splits beside them. Rows ride as
+/// `{ t, ms }` because the tick number is the half a reader cannot reconstruct.
+let private encodeCpuSample (sample: CpuSample) : obj =
+    let o = createEmpty<obj>
+    o?t <- sample.Tick
+    o?ms <- sample.Ms
+
+    match sample.Phases with
+    | Some phases ->
+        for key, read in cpuPhaseFields do
+            o?(key) <- read phases
+    | None -> ()
+
+    // One sub-object rather than a key per colony, so a home room's
+    // name can never collide with a phase's (#370) — and so the group
+    // is absent as a whole on a row that has none, which is what
+    // `decodeCpuSplit` reads as "nobody measured this".
+    //
+    // Two of them now, and they are written the same way for the same
+    // reasons: the colonies' share of `decide` and the rooms' share of
+    // `snapshot`. Separate keys rather than one table of names, because
+    // a home room appears in **both** — W15S28 is a colony that decides
+    // and a room that is swept — and one table would have to choose
+    // which of its two prices to keep.
+    let writeSplit key rows =
+        if not (List.isEmpty rows) then
+            let split = createEmpty<obj>
+
+            for name, ms in rows do
+                split?(name) <- ms
+
+            o?(key) <- split
+
+    writeSplit "colonies" sample.Colonies
+    writeSplit "rooms" sample.Rooms
+    writeSplit "projects" sample.Projects
+
+    if sample.SweepHead > 0.0 then
+        o?head <- sample.SweepHead
+
+    o
+
 /// Write the CPU line back under `Memory.fabot.observe.cpu`, leaving the rest
-/// of the observe subtree alone the way `saveRaids` does. Every tick, so
-/// `observe.mjs cpu` can tell "this bundle keeps the line" from "the colony has
-/// been quiet", and a tick that throws first leaves a gap in the tick numbers.
-/// Rows ride as `{ t, ms }` because the tick number is the half a reader cannot
-/// reconstruct.
+/// of the observe subtree alone the way `saveRaids` does — the whole line,
+/// every row. What `appendCpu` below falls back to.
 let saveCpu (state: CpuState) =
     let cpu = createEmpty<obj>
-
-    cpu?ticks <-
-        state.Ticks
-        |> List.map (fun sample ->
-            let o = createEmpty<obj>
-            o?t <- sample.Tick
-            o?ms <- sample.Ms
-
-            match sample.Phases with
-            | Some phases ->
-                for key, read in cpuPhaseFields do
-                    o?(key) <- read phases
-            | None -> ()
-
-            // One sub-object rather than a key per colony, so a home room's
-            // name can never collide with a phase's (#370) — and so the group
-            // is absent as a whole on a row that has none, which is what
-            // `decodeCpuSplit` reads as "nobody measured this".
-            //
-            // Two of them now, and they are written the same way for the same
-            // reasons: the colonies' share of `decide` and the rooms' share of
-            // `snapshot`. Separate keys rather than one table of names, because
-            // a home room appears in **both** — W15S28 is a colony that decides
-            // and a room that is swept — and one table would have to choose
-            // which of its two prices to keep.
-            let writeSplit key rows =
-                if not (List.isEmpty rows) then
-                    let split = createEmpty<obj>
-
-                    for name, ms in rows do
-                        split?(name) <- ms
-
-                    o?(key) <- split
-
-            writeSplit "colonies" sample.Colonies
-            writeSplit "rooms" sample.Rooms
-            writeSplit "projects" sample.Projects
-
-            if sample.SweepHead > 0.0 then
-                o?head <- sample.SweepHead
-
-            o)
-        |> List.toArray
-
+    cpu?ticks <- state.Ticks |> List.map encodeCpuSample |> List.toArray
     writeObserveLeaf "cpu" cpu
+
+/// Whether the leaf holds a line at all — a `ticks` array with a row in it
+/// under `Memory.fabot.observe.cpu`. The shell asks this before it trusts the
+/// line it holds on the heap: a leaf somebody removed or emptied through the
+/// Memory HTTP API is a line discarded on purpose, and it restarts from this
+/// tick as it always did — from `CpuState.empty` — rather than being written
+/// back whole off the heap. Empty counts as discarded because the bot never
+/// leaves it so: `foldCpu` appends on every tick.
+let cpuLineStands () : bool =
+    let cpu = observeLeaf "cpu"
+
+    not (isNull cpu)
+    && JS.Constructors.Array.isArray cpu?ticks
+    && (unbox<obj[]> cpu?ticks).Length > 0
+
+/// Write this tick's row and no other (#370): the leaf's own `ticks` array is
+/// what `saveCpu` would have written a tick ago, so the newest row is pushed
+/// onto it and, once the ring is at its cap, the oldest shifted off the front.
+/// The stored shape is the one `saveCpu` writes, row for row, for every row
+/// this bundle wrote, so `observe.mjs cpu` and `loadCpu` read what they always
+/// read. A row an edit changed inside the window is not repaired — the
+/// agreement below is read at the ends — and stands until the ring shifts it
+/// off; the rows another bundle wrote are re-encoded once, by the whole write
+/// the shell makes on its first tick.
+///
+/// Why: the line is a hundred rows of some thirty-five values each, and it was
+/// decoded whole and encoded whole on every tick to add one row — 1.36 ms of
+/// a live tick, read by the probe that measured it (#370), and outside every
+/// phase column because it is the one write the line does not price. ADR
+/// 0041's rule stands untouched: one row a tick, every tick, unconditionally;
+/// what changes is that ninety-nine rows nobody asked about this tick are no
+/// longer rebuilt.
+///
+/// The append is taken only when the leaf agrees with the line: its rows are
+/// the line's but the newest — one longer when the fold dropped the oldest
+/// this tick — checked on the tick numbers at both ends rather than assumed.
+/// Anything else (no leaf, a hand-edited one, a line the heap and the leaf
+/// disagree about) is written whole, which is what every earlier tick did.
+let appendCpu (state: CpuState) =
+    let cpu = observeLeaf "cpu"
+    let ticks = if isNull cpu then null else cpu?ticks
+
+    match List.rev state.Ticks with
+    | newest :: older when JS.Constructors.Array.isArray ticks ->
+        let rows = unbox<obj[]> ticks
+        let held = rows.Length
+        let count = List.length older
+
+        let tickAt index =
+            let row = rows.[index]
+
+            if isNull row || jsTypeof row?t <> "number" then
+                -1
+            else
+                unbox<int> row?t
+
+        let agrees =
+            (held = count || held = count + 1)
+            && (count = 0
+                || (tickAt (held - 1) = (List.head older).Tick
+                    && tickAt (held - count) = (List.head state.Ticks).Tick))
+
+        if agrees then
+            if held = count + 1 then
+                emitJsStatement rows "$0.shift()"
+
+            emitJsStatement (rows, encodeCpuSample newest) "$0.push($1)"
+        else
+            saveCpu state
+    | _ -> saveCpu state
