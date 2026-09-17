@@ -3204,6 +3204,24 @@ function buildReactorWorld() {
       [FIND_REACTORS]: [],
     },
   });
+  // The colony's **second** outpost, furnished as one (#370).
+  //
+  // Until this the scenario stood three rooms — home, the transit room and the
+  // errand's — while the live W15S28 projects five, and the harness came out
+  // 3.5x cheaper than the colony it models: 5.7 ms for a whole tick against
+  // 19.8 ms for that colony's `decide` alone. A profile taken in a world that
+  // small is how #332 came to measure its keeper mask at 0.00%, so the world
+  // is grown until the ratio is explained rather than apologised for.
+  //
+  // W15S29 and not a second transit room, because the difference that matters
+  // is a **reservable** one: it carries a controller under our reservation, so
+  // the reserver row prices a claim in it, the Matcher pairs a body to it by
+  // travel cost against the errand's re-claimer, and the Layout plans a Seat
+  // and a band on its source. Through `furnishOutpost`, which is what the
+  // `outpost` and `pair` scenarios stand their neighbours with — a second
+  // hand-written room record here would be free to drift from those two.
+  const second = furnishOutpost(loadCapture("W15S29"), register, structure);
+
   // What a body may not be stood on out there: the reactor's own tile — so
   // the re-claimer is resolved outward onto the ring it acts from rather than
   // under the thing it is acting on — and the room's rocks, which are
@@ -3340,12 +3358,13 @@ function buildReactorWorld() {
     creeps,
   });
 
-  const rooms = [home.room, transitRoom, errandRoom];
+  const rooms = [home.room, transitRoom, errandRoom, second.room];
   return {
     terrains: new Map([
       [capture.name, capture.terrain],
       [transitCapture.name, transitCapture.terrain],
       [errandCapture.name, errandCapture.terrain],
+      [second.capture.name, second.capture.terrain],
       ...declaredTerrains(rooms.map((room) => room.name)),
     ]),
     rooms,
