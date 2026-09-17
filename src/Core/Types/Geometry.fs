@@ -499,14 +499,34 @@ module Seam =
     /// the names alone. The four corner tiles are left out of every row and
     /// column: a corner lies on two borders at once, and the engine makes at
     /// most one landing.
-    let pairsAcross offset : (Pos * Pos) list =
-        let alongEdge = [ 1 .. exitEdge - 1 ]
+    /// The four lists, built once. Each is 47 pairs of records, and the
+    /// callers ask for them per room pair per tick — the band's own derivation
+    /// walks every neighbour of every room in the scan set, and `joinedBy` asks
+    /// again for the price. Rebuilding a constant is what #365 found the keeper
+    /// mask doing, and this is the same shape: nothing about a border depends on
+    /// the tick, so the list is a value and not a computation. Private, so the
+    /// only way to reach one is through the `offset` match below, which is
+    /// where the rule about which offsets name a border lives.
+    let private alongEdge = [ 1 .. exitEdge - 1 ]
 
+    let private northPairs =
+        [ for x in alongEdge -> { X = x; Y = 0 }, { X = x; Y = exitEdge } ]
+
+    let private southPairs =
+        [ for x in alongEdge -> { X = x; Y = exitEdge }, { X = x; Y = 0 } ]
+
+    let private westPairs =
+        [ for y in alongEdge -> { X = 0; Y = y }, { X = exitEdge; Y = y } ]
+
+    let private eastPairs =
+        [ for y in alongEdge -> { X = exitEdge; Y = y }, { X = 0; Y = y } ]
+
+    let pairsAcross offset : (Pos * Pos) list =
         match offset with
-        | 0, -1 -> [ for x in alongEdge -> { X = x; Y = 0 }, { X = x; Y = exitEdge } ]
-        | 0, 1 -> [ for x in alongEdge -> { X = x; Y = exitEdge }, { X = x; Y = 0 } ]
-        | -1, 0 -> [ for y in alongEdge -> { X = 0; Y = y }, { X = exitEdge; Y = y } ]
-        | 1, 0 -> [ for y in alongEdge -> { X = exitEdge; Y = y }, { X = 0; Y = y } ]
+        | 0, -1 -> northPairs
+        | 0, 1 -> southPairs
+        | -1, 0 -> westPairs
+        | 1, 0 -> eastPairs
         | _ -> []
 
     /// Whether a body the engine puts down on a landing tile has anywhere to
