@@ -403,6 +403,33 @@ reported — and each is a "no" from the clock rather than from an opinion.
 | the same unroll through a local `next -> relax ...` | `reactor` | **+6%**: a local function closing over the loop's eight values is a closure allocated per settled tile |
 | the Atlas's kind census inverted through a `Dictionary` instead of `Map.add` per id | `reactor`, then live | 0 in the harness, and the live window came back *worse* (W15S28's decide 12.54 → 13.84 ms) |
 
+## What is worth deferring, and what is left
+
+Two of the wins in #371 were the same move — a derived collection built every
+tick for a reader that is usually not there — so it is worth writing down when
+that move pays and what is left after it, because the answer to "where else can
+we put a `Lazy`" turned out to be "almost nowhere, and here is why".
+
+It pays when **both** hold. The derivation is big: thousands of tiles, hundreds
+of ids. And the reader is usually absent — not merely cheap, *absent*, because
+a `Lazy` that is forced every tick costs an allocation and an indirection on top
+of the work it was supposed to defer.
+
+| candidate | verdict |
+| --- | --- |
+| `Threats.Safe`, the per-room tiles no Threat reaches | **deferred** (#371): two thousand tiles a room, and Flee's Work Area is read only when a body stands inside a Reach — which W15S28 carries every tick of the season because W15S26's keepers are visible, while almost nothing ever flees |
+| `RoomSighting.Targets`, the ids seen in a room | **deferred** (#371): hundreds of ids a room a tick, and both readers ask only about a sighting older than the tick they run in |
+| `Atlas.Buffers`, the controller's containers | **already deferred**, by hand, as a `mutable Set<string> option` memo filled on first ask — the same shape reached independently before `Lazy` was used anywhere |
+| `Atlas.MaskedTiles`, the keeper margin | **no**: it is read by every walk priced across those rooms, so there is no tick on which it is not wanted. #365 made it a constant instead, which is the right answer for a collection that is always read and never changes |
+| `RoomFacts.TargetKinds`, the room census | **no**: read on every tick by every target lookup. It is expensive (`Map.ofArray` is 2.1% of a harness tick) but the fix has to be a cheaper structure, not a later one — see #370 |
+| `Atlas.Ring`, the guard's ground | **no longer built at all** (#371): nine tiles a Threat asked of `adjacentWalkableIn`, rather than two thousand filtered |
+| `atlas.Heavy`, `RefillableIds`, the moving-creep set | **no**: a dozen creeps and forty refillables. Deferring a set this small buys less than the `Lazy` cell costs |
+| the far-field distances | **already memoised** across ticks (#358), which is the stronger version of the same idea: not "later" but "once" |
+
+The pattern to take from the table: the two that paid were both **sets derived
+for an exceptional case** — a body fleeing, a room going dark. Anything read on
+the ordinary path wants to be cheaper or constant, not deferred.
+
 The census one is worth a sentence of its own, because the structural argument
 for it was strong and wrong. Inverting a thousand-entry census with `Map.add`
 allocates a path through the tree per id to build an answer with about ten keys
