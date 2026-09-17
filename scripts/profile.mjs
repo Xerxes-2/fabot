@@ -221,6 +221,10 @@ const CONTROLLER_STRUCTURES = {
   extension: [0, 0, 5, 10, 20, 30, 40, 50, 60],
   tower: [0, 0, 0, 1, 1, 2, 2, 3, 6],
   storage: [0, 0, 0, 0, 1, 1, 1, 1, 1],
+  // The terminal, which is RCL 6 and which no scenario furnished until #370
+  // even though three of this bot's four colonies have built one and the
+  // season's ore moves by it (#349).
+  terminal: [0, 0, 0, 0, 0, 0, 1, 1, 1],
 };
 
 // Screeps EXTENSION_ENERGY_CAPACITY by RCL, and SPAWN_ENERGY_CAPACITY: the
@@ -234,6 +238,7 @@ const SPAWN_ENERGY_CAPACITY = 300;
 // CONTAINER_CAPACITY as the engine spells them.
 const TOWER_CAPACITY = 1000;
 const STORAGE_CAPACITY = 1000000;
+const TERMINAL_CAPACITY = 300000;
 const CONTAINER_CAPACITY = 2000;
 
 // Screeps CREEP_LIFE_TIME: a full body's life, and the ceiling the engine
@@ -263,6 +268,7 @@ function furnitureFor(rcl) {
     extensionSites: pending,
     towers: CONTROLLER_STRUCTURES.tower[rcl],
     storages: CONTROLLER_STRUCTURES.storage[rcl],
+    terminals: CONTROLLER_STRUCTURES.terminal[rcl],
     bank: SPAWN_ENERGY_CAPACITY + built * EXTENSION_ENERGY_CAPACITY[rcl],
   };
 }
@@ -278,7 +284,8 @@ const plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
 // 0052's `pair` scenario one run can furnish two rooms at two levels.
 const furnitureLine = (furniture = FURNITURE) =>
   `${plural(furniture.extensions, "extension")}, ${plural(furniture.towers, "tower")}, ` +
-  `${furniture.storages} storage, ${furniture.bank} energy bank`;
+  `${furniture.storages} storage, ${plural(furniture.terminals ?? 0, "terminal")}, ` +
+  `${furniture.bank} energy bank`;
 
 // ---------------------------------------------------------------------------
 // Stub engine surface shared by every scenario.
@@ -763,8 +770,8 @@ function placeCluster({
   prefix = "",
 }) {
   const furniture = furnitureFor(rcl);
-  const { extensions, extensionSites, towers, storages } = furniture;
-  const wanted = extensions + towers + storages + extensionSites;
+  const { extensions, extensionSites, towers, storages, terminals } = furniture;
+  const wanted = extensions + towers + storages + terminals + extensionSites;
   const reserved = workingGround(
     grid,
     sourcePositions,
@@ -808,6 +815,23 @@ function placeCluster({
         }),
         hits: 10000,
         hitsMax: 10000,
+      }),
+    );
+  }
+
+  // The terminal, empty (#370). Empty and not part-loaded because the two
+  // colonies that ship read `SpatialInfo.heldIn` on their *own* terminal to
+  // decide whether to send, and the one that receives reads it to decide
+  // whether to withdraw: a load chosen here would pick which of those two
+  // programmes the scenario is a model of. Empty models the receiver between
+  // shipments, which is W15S28 for all but a handful of ticks a cycle.
+  for (let i = 0; i < (terminals ?? 0); i++) {
+    built.push(
+      structure(`${prefix}terminal-${i}`, "terminal", take(), {
+        store: store({ used: 0, capacity: TERMINAL_CAPACITY }),
+        hits: 3000,
+        hitsMax: 3000,
+        cooldown: 0,
       }),
     );
   }
