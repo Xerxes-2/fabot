@@ -2411,6 +2411,9 @@ let private borderCrossing
 /// price (`pricedPath`) and the mover's step (`stepAcross`) have to be reading
 /// the same minimisation: a second one agrees on every number and splits on
 /// every tie, which walks a creep to one crossing while ranking it at another.
+/// That holds under each pricing a mover runs at, which is `TravelCost` and
+/// `Baseline`; `Walk` has no mover, which is what lets `pricedOffField` read
+/// its number off a field with no exit in it.
 let private crossingFor
     (atlas: Atlas)
     (pricing: Pricing)
@@ -2449,18 +2452,116 @@ let private crossingToward
         )
     | _ -> None
 
+/// The cross-room **walk** — the price `walkTicks` answers for a Task across a
+/// border — read off the far field carried one hop further, into the creep's
+/// own room, instead of joined to a flood out of the creep (ADR 0058, #171's
+/// second direction). The far field over the room beyond the Seam is what
+/// `pricedAcross` reads already, memoised per census under the traffic-blind
+/// pricings; `farFieldAlong` carries it back across one more crossing exactly
+/// as `chainedInto` carries every hop, and once that field is filed the
+/// creep's tile is one array read per chain rather than a Dijkstra pushed out
+/// to the border.
+///
+/// The number is the same number, and the argument is the one convention
+/// `joinedAcross` states: a step costs the tile it lands on. Flooded *into* a
+/// goal, a field charges every tile of a path including the tile it is read at
+/// (`floodPricedInto`), while a flood *out of* the creep charges every tile but
+/// the creep's own — so the field at the creep's tile is the join's minimum
+/// plus what it costs to stand where the creep stands, and that term comes off
+/// again here. Every other term is the join's own: the seeds are the same band
+/// (`seams creepRoom next`), the same exit price and the same far reading
+/// beside the landing, laid on the same tiles beside the exit that the join's
+/// `approach` names, and settled over the same grid under the same step table
+/// with no traffic. The minimum over the chains is `joinedAlong`'s too, taken
+/// here over the price alone: a field holds the sum and not the `(sum, exit)`
+/// pair, so this serves no pricing a mover runs at — `TravelCost` walks the
+/// exit the join's pair picked (`stepAcross`), and so does `Baseline`,
+/// traffic-blind though it is, for the reroute attribution's mover
+/// (`firstStepIgnoringTraffic`). No `Walk` reader ever wanted the exit. And
+/// the traffic is not what keeps `TravelCost` out, though the surcharge on the
+/// creep's own tile would cancel here exactly as its step does: it is the
+/// **lifetime**. A traffic-aware field is keyed on the crowd along its chain
+/// and lives a tick (`FarFieldMemo.ThisTick`), and a chain that now ends in
+/// the creep's own room — the crowded one, a colony's home — would be
+/// re-flooded whole nearly every tick, which is the near leg it replaced paid
+/// again with interest. Under `Walk` the field is the census's.
+///
+/// What it is worth, measured the way `docs/profiling.md` requires — 300-tick
+/// rounds, arms interleaved in both orders, three pairs: per-colony `decide`
+/// on `reactor --level 7` 3.19–3.34 ms against 2.73–2.89 (**−13%**), on `pair
+/// --level 7` 2.82–2.90 against 2.63–2.72 (−7%), on `outpost` 2.02–2.09
+/// against 1.78–1.92 (−10%), every spread disjoint. The mechanism behind the
+/// number: a placed creep's near leg was a flood out of its tile relaxed until
+/// the band's tiles settled, and a band is a whole room edge, so for a body
+/// standing anywhere inside the room that is most of the room's tiles — once
+/// per creep, per tick, for every creep whose Task lies across a border, and
+/// on `reactor --level 7` those `Walk` legs were 44% of every heap pop the
+/// tick made against a far field that missed its memo on none. What the field
+/// costs instead is one whole-room flood per (chain, Task, body, origins) on
+/// the tick that first asks for it — per chain, where the join bought its
+/// partial near flood once for every chain — and one more entry in the
+/// census-held table per such key, shared by every creep of that body pricing
+/// that Task for as long as the census stands. So a Task exactly one creep
+/// ever prices, over a census that moves every few ticks, can pay more here
+/// than it did; the three worlds above are the measurement that says the
+/// trade pays on the whole, and the profile and not this comment is what
+/// says so on the next world.
+///
+/// Total (ADR 0004), and honest about its one edge: a creep standing where the
+/// grid prices no step — the border ring, a site the engine dropped under it —
+/// has no standing cost to take off and no tile the field can reach, and it is
+/// priced by the join it always was, which seeds the flood's start whatever
+/// the ground says. No chain answers no walk, as it does in the join.
+let private pricedOffField
+    (atlas: Atlas)
+    (creep: string)
+    (task: Task)
+    (creepRoom: string)
+    (from: Pos)
+    (targetRoom: string)
+    : int option =
+    let factor = factorOf atlas creep
+    let stepPrices, traffic = pricingOf noTraffic factor Walk
+
+    match entryCost (weightsOf atlas creepRoom) traffic stepPrices from with
+    | None -> pricedAcross atlas Walk creep task creepRoom from targetRoom |> Option.map fst
+    | Some standing ->
+        let origins = narrowedArea atlas creep task |> RoomPos.tilesIn targetRoom
+
+        routes atlas creepRoom targetRoom
+        |> List.fold
+            (fun best chain ->
+                match reachedIn (farFieldAlong atlas Walk creep task chain origins) from with
+                | d when d = unreached -> best
+                | d ->
+                    let price = d - standing
+
+                    match best with
+                    | Some won when won <= price -> best
+                    | _ -> Some price)
+            None
+
 /// The same path priced for a Task: over the Task's own Work Area, and with the
 /// one escape a bare tile set cannot carry — a target the projection does not
 /// place prices at 0 rather than reading as unreachable geometry (ADR 0004). A
 /// Task in an unprojected room prices at 0 too: it never counts against the
-/// creep and, having no Work Area, never lets it act.
+/// creep and, having no Work Area, never lets it act. Across a border the
+/// crossing is read once and priced per pricing: the two a mover runs at take
+/// the join's `(sum, exit)` pair, the one `pricedAcross` derivation the step
+/// reads (`crossingFor`), and the walk takes the field (`pricedOffField`).
 let private pricedPath (atlas: Atlas) (pricing: Pricing) (creep: string) (task: Task) : int option =
     match actionOn task with
     | Some(targetId, _) when not (Map.containsKey targetId atlas.TargetAt) -> Some 0
     | _ ->
-        match crossingFor atlas pricing creep task with
-        | Some(_, _, won) -> won |> Option.map fst
+        match borderCrossing atlas creep task with
         | None -> pricedPathTo atlas pricing creep (workAreaFor atlas creep task)
+        | Some(creepRoom, from, targetRoom) ->
+            match pricing with
+            | Walk -> pricedOffField atlas creep task creepRoom from targetRoom
+            | TravelCost
+            | Baseline ->
+                pricedAcross atlas pricing creep task creepRoom from targetRoom
+                |> Option.map fst
 
 /// Travel cost of a Task for a creep (ADR 0002, revised by ADRs 0006 and 0010):
 /// the cost units — half-ticks — the creep's body needs along a cheapest path

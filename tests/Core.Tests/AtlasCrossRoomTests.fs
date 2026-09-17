@@ -162,6 +162,45 @@ let crossRoomTests =
                     "the ranking price charges the swamp exit its own ten units"
             }
 
+            test "the tile under the creep is charged nothing, however dear it is" {
+                // The worked example above with the creep's own tile turned
+                // to swamp: it is standing on it, not stepping onto it, so
+                // the walk is the same eighteen and the ranking price the
+                // same thirty-six. The walk is read off a field that charges
+                // that tile like any other and takes it off again
+                // (`pricedOffField`), and swamp is where taking off the wrong
+                // number — the ranking price's units, or a plain step — is
+                // four or nine ticks out rather than one.
+                let home =
+                    { corridorHome [ "w", { X = 25; Y = 10 } ] with
+                        Terrain =
+                            TerrainGrid.ofList
+                                [
+                                    for y in 1..48 ->
+                                        { X = 25; Y = y }, (if y = 10 then Swamp else Plain)
+                                ]
+                    }
+
+                let atlas =
+                    northOf
+                        home
+                        [ { X = 25; Y = 0 }, Plain ]
+                        corridorOutpost
+                        [ { X = 25; Y = 49 }, Plain ]
+                        [ "src-out", Source ]
+                        [ worker "w" ]
+
+                Expect.equal
+                    (walkTicks atlas "w" (Harvest "src-out"))
+                    (Some 18)
+                    "the swamp under the creep is not a step it takes"
+
+                Expect.equal
+                    (travelCost atlas "w" (Harvest "src-out"))
+                    (Some 36)
+                    "nor one the ranking price charges"
+            }
+
             test "the walk takes the cheapest crossing in the band, not the nearest" {
                 // Two exits, and the near one is the wrong one: the creep
                 // reaches (25,0) in nine steps and (27,0) in ten, but the
@@ -461,8 +500,19 @@ let crossRoomTests =
 
                 let held = FarFieldMemo.empty ()
 
-                let flood () =
-                    held.PerCensus |> Seq.map (fun entry -> entry.Value) |> Seq.exactlyOne
+                // The walk files two fields and not one: the far room's, the
+                // suffix its own recursion bottoms out at, and the same field
+                // carried one hop further into the creep's room, which is
+                // what the walk is read off (`pricedOffField`). Both are the
+                // census's, so both ride this table; the ranking price's own
+                // far field is the tick's and rides the table below.
+                let fieldOver (chain: string list) =
+                    held.PerCensus
+                    |> Seq.filter (fun entry ->
+                        let filed, _, _, _, _, _, _ = entry.Key
+                        filed = chain)
+                    |> Seq.map (fun entry -> entry.Value)
+                    |> Seq.exactlyOne
 
                 let first = snapshot () |> ofViewRecalling (WalkTable()) held
 
@@ -473,10 +523,11 @@ let crossRoomTests =
 
                 Expect.equal
                     held.PerCensus.Count
-                    1
-                    "and leaves the far field in the table it was handed"
+                    2
+                    "and leaves the far field in the table it was handed, beside its carry into the creep's room"
 
-                let flooded = flood ()
+                let flooded = fieldOver [ "W1N2" ]
+                let carried = fieldOver [ "W1N1"; "W1N2" ]
 
                 Expect.equal
                     (travelCost first "w" (Harvest "src-out"))
@@ -485,7 +536,7 @@ let crossRoomTests =
 
                 Expect.equal
                     held.PerCensus.Count
-                    1
+                    2
                     "and adds nothing here: a field that prices traffic is not signed by the census"
 
                 Expect.equal held.ThisTick.Count 1 "it goes to the tick's own table instead"
@@ -497,11 +548,12 @@ let crossRoomTests =
                     (Some 18)
                     "the recalled field prices the same walk"
 
-                Expect.equal held.PerCensus.Count 1 "no second entry under the same key"
+                Expect.equal held.PerCensus.Count 2 "no second entry under the same keys"
 
                 Expect.isTrue
-                    (obj.ReferenceEquals(flood (), flooded))
-                    "the second Atlas read the first's field rather than running its own"
+                    (obj.ReferenceEquals(fieldOver [ "W1N2" ], flooded)
+                     && obj.ReferenceEquals(fieldOver [ "W1N1"; "W1N2" ], carried))
+                    "the second Atlas read the first's fields rather than running its own"
 
                 // The other half of the seam, the tick the census moves: a
                 // table with nothing in it is flooded into, and prices the
@@ -514,7 +566,7 @@ let crossRoomTests =
                     (Some 18)
                     "an empty table is flooded into, and prices the walk identically"
 
-                Expect.equal fresh.PerCensus.Count 1 "the field it ran is left in it"
+                Expect.equal fresh.PerCensus.Count 2 "the fields it ran are left in it"
             }
 
             test "the traffic-aware far field is recalled for as long as the crowd stands still" {
@@ -1685,10 +1737,14 @@ let multiHopTests =
                     (Some 67)
                     "the premise: the home body is priced over both borders"
 
+                // Three entries and not two: the fold's own halves — the far
+                // room's field and it carried one hop — and the walk's own
+                // reading, that field carried once more into the home room
+                // (`pricedOffField`), each filed under its own chain.
                 Expect.equal
                     (chains ())
-                    [ [ "W1N3" ]; [ "W1N2"; "W1N3" ] ]
-                    "and the fold's own halves are both filed: the far room's field, and it carried one hop"
+                    [ [ "W1N3" ]; [ "W1N2"; "W1N3" ]; [ "W1N1"; "W1N2"; "W1N3" ] ]
+                    "and every suffix of the chain is filed: the far room's field, it carried one hop, and it carried home"
 
                 Expect.equal
                     (walkTicks atlas "mid" (Harvest "src-out"))
@@ -1697,8 +1753,8 @@ let multiHopTests =
 
                 Expect.equal
                     (chains ())
-                    [ [ "W1N3" ]; [ "W1N2"; "W1N3" ] ]
-                    "off the entry the first chain left, which is what sharing a suffix means"
+                    [ [ "W1N3" ]; [ "W1N2"; "W1N3" ]; [ "W1N1"; "W1N2"; "W1N3" ] ]
+                    "off the entry the first chain left — the transit body's whole chain is the home body's suffix, so it floods nothing"
             }
 
             test "a creep standing in the transit room prices the hop it has left" {
