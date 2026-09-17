@@ -706,6 +706,63 @@ function clusterTiles(grid, spawnPos, count, taken, reserved, rcl) {
 // `blocked` carries the cluster's obstacle tiles: a trunk that ran through
 // a standing extension would be a road no creep can walk either, and the
 // lane lattice the cluster leaves is what it weaves along instead.
+// Which of a room's four edges faces another room, off the names alone. The
+// season's map is the standard grid — W15S29 is one row south of W15S28, whose
+// own west neighbour is W16S28 — so the comparison is arithmetic and needs no
+// map call. Written here rather than taken from `Atlas` because the harness
+// builds its world before the bundle is loaded.
+const roomCoords = (name) => {
+  const parsed = /^([WE])(\d+)([NS])(\d+)$/.exec(name);
+  if (!parsed) throw new Error(`room name ${name} is not on the standard grid`);
+  return {
+    x: parsed[1] === "W" ? -Number(parsed[2]) - 1 : Number(parsed[2]),
+    y: parsed[3] === "N" ? -Number(parsed[4]) - 1 : Number(parsed[4]),
+  };
+};
+
+// The tile a body crossing from `toward` into this room steps onto, and the one
+// the road leading to `to` therefore starts at: the walkable tile on the
+// home-facing edge from which the walk to `to` is shortest.
+//
+// Derived, for the reason the rest of this file's furniture is (#144): the live
+// outposts carry 19 and 18 roads apiece and the harness carried none, and a
+// hand-listed tile would be a number with nothing behind it. What is behind
+// this one is that the colony paves what it walks, and what it walks into an
+// outpost is the shortest leg from the edge it enters by (ADR 0035's Seam).
+function entryTile(grid, toward, to, blocked) {
+  const here = roomCoords(grid.name);
+  const other = roomCoords(toward);
+  const edge =
+    other.y > here.y
+      ? { along: "x", at: 48 }
+      : other.y < here.y
+        ? { along: "x", at: 1 }
+        : other.x > here.x
+          ? { along: "y", at: 48 }
+          : { along: "y", at: 1 };
+  let best = null;
+  for (let i = 1; i <= 48; i++) {
+    const tile =
+      edge.along === "x"
+        ? { room: grid.name, x: i, y: edge.at }
+        : { room: grid.name, x: edge.at, y: i };
+    if (isWall(grid, tile)) continue;
+    let legs;
+    try {
+      legs = route(grid, tile, to, blocked).length;
+    } catch {
+      continue; // walled off from the target: not a tile any walk uses
+    }
+    if (!best || legs < best.legs) best = { tile, legs };
+  }
+  if (!best) {
+    throw new Error(
+      `${grid.name}: no walkable tile on the edge facing ${toward} reaches ${keyOf(to)}`,
+    );
+  }
+  return best.tile;
+}
+
 function route(grid, from, to, blocked) {
   const cameFrom = new Map([[keyOf(from), null]]);
   let frontier = [from];
@@ -1809,6 +1866,15 @@ function furnishHome({
   prefix,
   register,
   structure,
+  // The rooms this colony works out of this one, as room names. Its trunks are
+  // paved out to the edge facing each of them (#370): the live W15S28 carries
+  // **144** roads against the 36 this function paved from its containers alone,
+  // and the difference is the legs the colony wears walking to its outposts and
+  // down the errand chain, which is what a road is for. Empty by default — a
+  // scenario that names no neighbour is one whose colony walks nowhere, and
+  // paving toward a room it never enters would be furniture measured for its
+  // own sake.
+  towards = [],
   // Where the source containers stand: "derive" places each on the
   // nearest free tile to its source, which is what a scenario with no
   // live room to copy has to do, or an array of tiles for a room whose
@@ -1954,8 +2020,28 @@ function furnishHome({
   );
   const roadTiles = [];
   if (rcl >= BOOTSTRAP_LEVEL) {
-    for (const container of containers) {
-      for (const tile of route(capture, spawnPos, container.pos, blocked)) {
+    const legs = [
+      ...containers.map((container) => container.pos),
+      // The controller: an upgrader walks to it every tick of its life, and
+      // the live 144 roads are largely what that leg and the ones out to the
+      // neighbours wear. Paved to the tile *beside* it and not onto it, since
+      // a controller is a tile no creep stands on — the leg ends where the
+      // Layout's own Work Area puts the body.
+      //
+      // Not the deposit, though a miner walks there too: its container is
+      // placed later, by a rule that requires one of the deposit's own Seats,
+      // and a road paved here first takes that tile — the harness says so
+      // itself, in the refusal `Facts.ourMineralContainerPairs` is guarded by.
+      // The leg belongs to whoever places that container, and paving it here
+      // reorders two derivations to buy a dozen roads.
+      nearestFree(capture, capture.controller.pos, blocked),
+      // One leg per worked neighbour, ending on the tile a body leaves this
+      // room by — `entryTile` read from this side, so the same derivation
+      // serves both ends of a crossing.
+      ...towards.map((room) => entryTile(capture, room, spawnPos, blocked)),
+    ];
+    for (const end of legs) {
+      for (const tile of route(capture, spawnPos, end, blocked)) {
         if (taken.has(keyOf(tile))) continue;
         claim(tile);
         roadTiles.push(tile);
@@ -2070,7 +2156,7 @@ const geometryOf = (furnished) => ({
 // off the flag here, because `--raided` is one raid and this function
 // furnishes every outpost of the world — a raid in each would be profiling
 // the invasion nobody has ever seen.
-function furnishOutpost(capture, register, structure, raided = false) {
+function furnishOutpost(capture, register, structure, raided = false, homeRoom = undefined) {
   const sources = registerSources(capture, register);
   // The outpost's own deposit (ADR 0057 decision 1). Nothing out here plans
   // an extractor — the Layout plans the home room alone — but the projection
@@ -2146,19 +2232,49 @@ function furnishOutpost(capture, register, structure, raided = false) {
       }),
     );
   }
+  // The paved leg (#370): the live outposts carry 19 and 18 roads apiece and
+  // this function furnished none, while the projection reads every structure in
+  // every room it sees, every tick.
+  //
+  // The same rule the home room's trunks come off — pave what the colony walks
+  // — applied to what it walks out here: from the tile a body crossing in from
+  // home steps onto, to each standing container. The entry tile is derived by
+  // `entryTile` rather than listed, and the leg is a real route over the room's
+  // own rocks, so the count is the room's and not a number chosen to match.
+  //
+  // Only when the caller says which room is home. A scenario that does not name
+  // one gets the old bare outpost, because the edge a body enters by is the
+  // whole derivation and guessing it would pave a leg nothing walks.
+  const roads = [];
+  if (homeRoom) {
+    const paved = new Set();
+    for (const container of containers) {
+      const from = entryTile(capture, homeRoom, container.pos, occupied);
+      for (const tile of route(capture, from, container.pos, occupied)) {
+        const key = keyOf(tile);
+        if (paved.has(key) || occupied.has(key)) continue;
+        paved.add(key);
+        roads.push(
+          structure(`${capture.name}-road-${roads.length}`, "road", tile, {}),
+        );
+      }
+    }
+  }
+
   return {
     capture,
     sources,
     containers,
     hostiles,
     occupied,
+    roads,
     room: stubRoom({
       name: capture.name,
       controller,
       findTables: {
         105: sources,
         108: [],
-        107: containers,
+        107: [...containers, ...roads],
         114: [],
         115: [],
         103: hostiles,
@@ -2200,6 +2316,7 @@ function buildOutpostWorld() {
 
   // --- the home room, furnished on its own terrain -----------------------
   const furnished = furnishHome({
+    towards: OUTPOST_ROOMS,
     capture: home,
     spawnPos: HOME_SPAWN,
     spawnName: "Spawn1",
@@ -2241,7 +2358,7 @@ function buildOutpostWorld() {
   // would price a tick this colony has never had while hiding which room's
   // Reach the ms belong to.
   const outpostRooms = outposts.map((capture, i) =>
-    furnishOutpost(capture, register, structure, RAIDED && i === 0),
+    furnishOutpost(capture, register, structure, RAIDED && i === 0, HOME_ROOM),
   );
   const raid = raidOf(outpostRooms);
 
@@ -2648,6 +2765,9 @@ function buildPairWorld() {
   );
 
   const mother = furnishHome({
+    // Its own outposts and the room it is raising: the ferry's legs are roads
+    // too (ADR 0052).
+    towards: [...OUTPOST_ROOMS.filter((name) => name !== CHILD_ROOM), CHILD_ROOM],
     capture: motherCapture,
     spawnPos: HOME_SPAWN,
     spawnName: "Spawn1",
@@ -2671,7 +2791,7 @@ function buildPairWorld() {
   // scenario's first is — what it adds here is a raid in a tick that runs
   // two colonies, where only one of them can see the room it is in.
   const outpostRooms = outposts.map((capture, i) =>
-    furnishOutpost(capture, register, structure, RAIDED && i === 0),
+    furnishOutpost(capture, register, structure, RAIDED && i === 0, HOME_ROOM),
   );
   const raid = raidOf(outpostRooms);
 
@@ -3159,6 +3279,10 @@ function buildReactorWorld() {
   }
 
   const home = furnishHome({
+    // Both declared outposts and the errand chain's first room: the couriers'
+    // road out of here is the same road the reservers walk, and the live
+    // W15S28's 144 roads are mostly these legs.
+    towards: ["W15S27", "W15S29", "W15S26"],
     capture,
     spawnPos: REACTOR_SPAWN,
     spawnName: REACTOR_SPAWN_NAME,
@@ -3266,7 +3390,13 @@ function buildReactorWorld() {
   // and a band on its source. Through `furnishOutpost`, which is what the
   // `outpost` and `pair` scenarios stand their neighbours with — a second
   // hand-written room record here would be free to drift from those two.
-  const second = furnishOutpost(loadCapture("W15S29"), register, structure);
+  const second = furnishOutpost(
+    loadCapture("W15S29"),
+    register,
+    structure,
+    false,
+    capture.name,
+  );
 
   // The Source Keeper room the chain crosses, furnished as a room this colony
   // can *see* rather than as a terrain layer it walks over (#370).
