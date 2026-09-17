@@ -5253,6 +5253,54 @@ if (unprojected.length) {
   }
 }
 
+// The observe leaves the bundle wrote, fingerprinted: `src/App`'s wire
+// codecs have no test of their own (#294), and this line is what a report
+// diff across two builds compares them on. Every leaf but the CPU line is
+// deterministic in a frozen world — the log's verdicts, the raid episodes,
+// the positions, the assignments — so a changed fingerprint is a changed
+// leaf, whatever wrote it. The CPU line carries milliseconds and is
+// fingerprinted on its tick numbers alone.
+{
+  const { createHash } = await import("node:crypto");
+  // Keys sorted at every level: a leaf written whole and one mutated in place
+  // hold the same entries in a different insertion order, and the readers
+  // address entries by name and never by position.
+  const canonical = (value) =>
+    Array.isArray(value)
+      ? value.map(canonical)
+      : value && typeof value === "object"
+        ? Object.fromEntries(
+            Object.keys(value)
+              .sort()
+              .map((key) => [key, canonical(value[key])]),
+          )
+        : value;
+  const fingerprint = (value) =>
+    createHash("sha256")
+      .update(JSON.stringify(canonical(value ?? null)))
+      .digest("hex")
+      .slice(0, 16);
+  if (process.env.FABOT_DUMP_OBSERVE) {
+    writeFileSync(
+      process.env.FABOT_DUMP_OBSERVE,
+      JSON.stringify(canonical(globalThis.Memory?.fabot ?? null), null, 1),
+    );
+  }
+  const observe = globalThis.Memory?.fabot?.observe ?? {};
+  const leaves = [
+    ["assignments", globalThis.Memory?.fabot?.assignments],
+    ["creeps", observe.creeps],
+    ["colonies", observe.colonies],
+    ["positions", observe.positions],
+    ["reactor", observe.reactor],
+    ["cpu ticks", (observe.cpu?.ticks ?? []).map((row) => row.t)],
+  ];
+  console.log(
+    "\nMemory leaves (Memory.fabot.*), fingerprinted: " +
+      leaves.map(([name, value]) => `${name} ${fingerprint(value)}`).join("  "),
+  );
+}
+
 console.log(
   `\nraw profile: ${path.relative(process.cwd(), profilePath)} (open in Chrome DevTools / speedscope)`,
 );

@@ -669,9 +669,81 @@ let load () : ObserveState =
 
 /// Write the folded state back under `Memory.fabot.observe.creeps`,
 /// leaving the rest of the observe subtree alone — unless the subtree
-/// itself is not an object, in which case the bad state is replaced.
+/// itself is not an object, in which case the bad state is replaced. The
+/// whole log, every creep; what `saveChanged` below falls back to.
 let save (state: ObserveState) =
     state |> Map.toSeq |> hashOf encodeCreepLog |> writeObserveLeaf "creeps"
+
+/// Whether the leaf holds a log at all — an object under
+/// `Memory.fabot.observe.creeps`. Asked by the shell before it trusts the log
+/// it holds on the heap, for the CPU line's reason (`cpuLineStands`): a leaf
+/// somebody removed is a log discarded on purpose, and it restarts from this
+/// tick as it always did rather than being written back whole off the heap.
+let observeLogStands () : bool =
+    let creeps = observeLeaf "creeps"
+
+    not (isNull creeps)
+    && jsTypeof creeps = "object"
+    && not (JS.Constructors.Array.isArray creeps)
+
+/// Whether a creep's timeline is the one already written: the same entries —
+/// by reference, which is what `Observe.step` keeps when a tick appends
+/// nothing — and the same three cursors. A creep the fold handed back
+/// unchanged is one whose row in the leaf is already right.
+let private sameLog (a: CreepLog) (b: CreepLog) : bool =
+    obj.ReferenceEquals(a.Entries, b.Entries)
+    && a.LastTask = b.LastTask
+    && a.LastScoring = b.LastScoring
+    && a.LastMove = b.LastMove
+
+/// Write the creeps whose timeline moved this tick and no other, and drop the
+/// ones the fold pruned (#370): the leaf's own object is what `save` wrote a
+/// tick ago, so a creep whose log the fold handed back unchanged already has
+/// its row, and only the changed rows are encoded. The stored shape is the one
+/// `save` writes, key for key, so `observe.mjs` and `load` read what they
+/// always read.
+///
+/// Why: the log is the largest leaf in Memory — a hundred kilobytes over
+/// fifty creeps — and it was decoded whole and encoded whole every tick to
+/// move a few creeps' cursors: 1.5 ms of a live tick, read by the probe that
+/// measured it (#370), most of it standing bodies whose story had not moved.
+///
+/// `prior` is the state the fold was handed, which is what the leaf holds when
+/// the shell keeps the log on the heap and wrote it whole on its first tick.
+/// The leaf is taken at its word only when it agrees with that prior by its
+/// key count — the handshake `appendCpu` makes on tick numbers — and a leaf
+/// that is not an object, is an array, or holds another number of creeps is
+/// written whole as `save` does. What the handshake cannot see, and is
+/// accepted: a row somebody hand-edited under a creep the fold leaves
+/// unchanged stays as edited until that creep's story moves, and a tick whose
+/// Memory the engine did not commit leaves that tick's entries out of the leaf
+/// for the creeps that then stay quiet.
+let saveChanged (prior: ObserveState) (state: ObserveState) =
+    let creeps = observeLeaf "creeps"
+
+    if
+        isNull creeps
+        || jsTypeof creeps <> "object"
+        || JS.Constructors.Array.isArray creeps
+        || (JS.Constructors.Object.keys creeps).Count <> Map.count prior
+    then
+        save state
+    else
+        for KeyValue(name, log) in state do
+            let unchanged =
+                match Map.tryFind name prior with
+                | Some before -> sameLog before log
+                | None -> false
+
+            if not unchanged then
+                creeps?(name) <- encodeCreepLog log
+
+        // Off the leaf's own keys and not the prior's, so a row the load
+        // could not restate — in the leaf, in no state — is dropped as the
+        // whole write dropped it, rather than kept for ever.
+        for name in JS.Constructors.Object.keys creeps do
+            if not (Map.containsKey name state) then
+                emitJsStatement (creeps, name) "delete $0[$1]"
 
 let private reactorOwnerName =
     function

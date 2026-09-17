@@ -77,6 +77,13 @@ let mutable private cpuLine: Observe.CpuState option = None
 // every tick used to.
 let private joins = JoinTable()
 
+// The Transition log (ADR 0009), carried across ticks on the heap for the CPU
+// line's reason and on the same terms: read off Memory only when the heap
+// holds none or the leaf is gone, folded on the heap, and written back one
+// changed creep at a time (`ObserveMemory.saveChanged`). It was the largest
+// leaf in Memory, decoded and re-encoded whole every tick (#370).
+let mutable private observeLog: Observe.ObserveState option = None
+
 // Exported as `loop` on the bundled `main` module; the engine calls it every tick.
 let loop () =
     // The engine's counter is already running when `loop` is entered, and this
@@ -348,14 +355,33 @@ let loop () =
     // by creep name, and the tick's Verdicts are every colony's in colony
     // order — one fold over the union, so a creep adopted this tick continues
     // the timeline its caster started.
-    ObserveMemory.load ()
-    |> Observe.fold
-        Observe.capPerCreep
-        Game.time
-        living
-        ((decisions |> List.collect (fun (_, _, decision, _) -> decision.Verdicts))
-         @ moveVerdicts)
-    |> ObserveMemory.save
+    let priorLog =
+        if not (ObserveMemory.observeLogStands ()) then
+            Map.empty
+        else
+            match observeLog with
+            | Some log -> log
+            | None -> ObserveMemory.load ()
+
+    let log =
+        Observe.fold
+            Observe.capPerCreep
+            Game.time
+            living
+            ((decisions |> List.collect (fun (_, _, decision, _) -> decision.Verdicts))
+             @ moveVerdicts)
+            priorLog
+
+    // The tick after a global reset writes the log whole, for the CPU line's
+    // reason: the rows standing after an upload are another bundle's, a row
+    // this one cannot restate was dropped by `load`, and only a whole write
+    // normalises the leaf to what this bundle reads. Every tick after it
+    // writes the changed creeps alone.
+    match observeLog with
+    | Some _ -> ObserveMemory.saveChanged priorLog log
+    | None -> ObserveMemory.save log
+
+    observeLog <- Some log
 
     for colony, view, decision, _ in decisions do
         // The Raid log's own channel (ADR 0028): colony-level and episodic,
