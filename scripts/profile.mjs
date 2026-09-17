@@ -3512,6 +3512,55 @@ function buildReactorWorld() {
   stations.miner = mine ? stationsOn(home.room, capture, [mine.seat]) : [];
   stations.courier = stationsIn(transitRoom, transitCapture, [{ x: 25, y: 25 }]);
 
+  // The crew that stands *out* in the worked rooms (#370), which is where the
+  // live colony's bodies actually are. Read off the season server this tick:
+  // W15S27 holds an anchor, a courier and a reserver; W15S29 an anchor and a
+  // reserver; only six of twelve stand at home. This harness stood ten of
+  // thirteen at home, and four rounds of measurement have now shown that a
+  // room without a body in it asks `decide` almost nothing — so the fleet's
+  // distribution is the dimension left, not the furniture in the rooms.
+  //
+  // Stood on each outpost's own source Post, appended after the home seats for
+  // `stations.reserver`'s reason: the row's seat at home stays, so a world that
+  // hires more anchors than there are outposts still reports a body in the
+  // wrong room rather than throwing.
+  // Only the declared outpost's rock, not the transit room's. W15S27's Post is
+  // already held in this world — the harness refuses the second claim on it,
+  // and that refusal is right: the transit room is furnished as a room bodies
+  // *cross*, with no container and no reservation, so an anchor stood there
+  // would be mining a rock this colony does not work. The live anchor in that
+  // room is W15S27's own outpost crew, which this scenario models as the
+  // crossing and not as the mine.
+  // Beside the rock and not on it: `stationsOn` stands a body on the tile it is
+  // handed, and a rock's own tile is one no creep occupies.
+  const secondPost = nearestFree(
+    second.capture,
+    second.sources[0].pos,
+    second.occupied,
+  );
+  stations.anchor = [
+    ...stationsOn(second.room, second.capture, [secondPost]),
+    ...(stations.anchor ?? []),
+  ];
+  // And the far-end haulers beside them: the live rooms each carry one body
+  // moving rock out, and the haul is what `Facts.haulDemand` prices.
+  // And a far-end hauler beside one of them, where a container stands to haul
+  // from. `LIVE_CONTAINERS` carries one for the rooms the server has already
+  // built one in, so this is conditional rather than assumed: a hauler stood in
+  // a room with no container would be a body with no round trip.
+  stations.hauler = [
+    ...(second.containers.length > 0
+      ? stationsOn(second.room, second.capture, [
+          nearestFree(
+            second.capture,
+            second.containers[0].pos,
+            new Set([...second.occupied, keyOf(secondPost)]),
+          ),
+        ])
+      : []),
+    ...(stations.hauler ?? []),
+  ];
+
   // The spare lane the census perturbation walks: the unpaved ground between
   // each pair of the room's containers in turn, the `outpost` scenario's own
   // rule. Container to container and not Post to Post — at RCL6 the room's
@@ -3622,6 +3671,10 @@ function buildReactorWorld() {
       [capture.name, homeClaimed],
       [transitCapture.name, new Set(transitSources.map((source) => keyOf(source.pos)))],
       [errandCapture.name, errandOccupied],
+      // W15S29's own occupied set, so the crew standing out there (#370) is
+      // checked against the room's furniture the way the home room's is.
+      [second.capture.name, second.occupied],
+      [keeperCapture.name, keeperOccupied],
     ]),
     colonies: [capture.name],
     homeRooms: [home.room],
