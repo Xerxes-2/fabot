@@ -465,7 +465,7 @@ let observerCpuTests =
                 // `colonies` for each colony's `decide` and `rooms` for each
                 // room's `snapshot`; a row from a bundle that measured neither
                 // carries neither key.
-                for key in [ "colonies"; "rooms" ] do
+                for key in [ "colonies"; "rooms"; "projects" ] do
                     Expect.isTrue
                         (script.Contains $"attributedBy(\"{key}\")" || script.Contains $"\"{key}\",")
                         $"`observe.mjs cpu` reads `{key}` off a row: the sub-object `saveCpu` writes that split into"
@@ -485,7 +485,7 @@ let observerCpuTests =
                     phases.Success
                     "`observe.mjs` still declares its phase columns in one list"
 
-                for key in [ "colonies"; "rooms" ] do
+                for key in [ "colonies"; "rooms"; "projects" ] do
                     Expect.isFalse
                         (phases.Groups.[1].Value.Contains key)
                         $"and the per-{key} split is not one of them: it decodes on its own, so an older row keeps its phases"

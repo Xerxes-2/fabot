@@ -141,17 +141,32 @@ let loop () =
     // it holds, its own bank and controller, and the explicit little it may
     // borrow of a child's. `ColonyView.ofWorld` owns every rule, and that half
     // of the shell boundary is under test (`ViewTests`, ADR 0052 decision 8).
+    // The boundary the first projection is differenced against, and the list
+    // the rest are: what stands between the last room and here is the world's
+    // own tail — the sightings, the creep list, the Raid logs — and leaving it
+    // as a named remainder is the same choice `decide`'s remainder gets.
+    let atProjects = Game.cpu.getUsed ()
+    let mutable projectedAt = []
+
     let views =
         colonies
         |> List.map (fun colony ->
-            colony,
-            ColonyView.ofWorld
-                Tuning.defaults
-                Colony.declared
-                (gateOf colony.Home)
-                holders
-                world
-                colony)
+            let view =
+                ColonyView.ofWorld
+                    Tuning.defaults
+                    Colony.declared
+                    (gateOf colony.Home)
+                    holders
+                    world
+                    colony
+
+            // The counter after each colony's projection, exactly as `decide`
+            // reads it after each colony's decision (#370): the `snapshot`
+            // column turned out to be mostly *this* — 7.63 ms of it stood after
+            // the last room was swept, and the projections are what stands
+            // there. Ours to cut, unlike the engine's `find` sweeps.
+            projectedAt <- (colony.Home, Game.cpu.getUsed ()) :: projectedAt
+            colony, view)
 
     // The projection boundary, and the Raid logs' reads ride in this phase
     // rather than the prelude: the two are one act — the gate decides which
@@ -438,6 +453,8 @@ let loop () =
             // game, and `World` is a Core type (#370).
             RoomSnapshots = World.roomCosts
             AtRooms = World.roomsBegan
+            AtProjects = atProjects
+            ColonyProjects = List.rev projectedAt
         }
 
     // The CPU line stays one flat leaf keyed by tick: it records the whole

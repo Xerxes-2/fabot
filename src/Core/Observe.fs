@@ -1297,6 +1297,13 @@ type CpuReadings =
         /// than the phase, and the difference is readable the way `decide`'s
         /// remainder is (ADR 0041: measured, not budgeted).
         AtRooms: float
+        /// The boundary before the first colony's projection, and the readings
+        /// after each of them. `snapshot` is not the engine's sweep alone: the
+        /// four projections stand inside that column too, and on the first
+        /// window that could see it they were the larger part — 7.63 ms of a
+        /// 14.9 ms phase stood after the last room was swept (#370).
+        AtProjects: float
+        ColonyProjects: (string * float) list
     }
 
 /// One tick's cost, split at the loop's phase boundaries: the engine's prelude
@@ -1360,6 +1367,8 @@ type CpuSample =
         /// that could only subtract `head + tail` together could not tell
         /// which of the two to go after (#370).
         SweepHead: float
+        /// Each colony's projection, differenced the way its decision is.
+        Projects: (string * float) list
     }
 
 /// The whole persisted CPU line: oldest first, capped, exactly as the
@@ -1443,6 +1452,15 @@ let foldCpu (cap: int) (tick: int) (readings: CpuReadings) (prior: CpuState) : C
         |> fst
         |> List.rev
 
+    let projects =
+        readings.ColonyProjects
+        |> List.fold
+            (fun (spent, at) (home, reading) ->
+                (home, toMicrosecond (reading - at)) :: spent, reading)
+            ([], readings.AtProjects)
+        |> fst
+        |> List.rev
+
     {
         Ticks =
             prior.Ticks
@@ -1454,6 +1472,7 @@ let foldCpu (cap: int) (tick: int) (readings: CpuReadings) (prior: CpuState) : C
                     Colonies = colonies
                     Rooms = swept
                     SweepHead = toMicrosecond (readings.AtRooms - readings.AtEntry)
+                    Projects = projects
                 }
             ]
             |> trim cap

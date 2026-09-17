@@ -1653,20 +1653,34 @@ if (command === "console") {
           Object.values(row.rooms ?? {}).reduce((total, one) => total + one, 0),
         );
         const mean = (xs) => xs.reduce((total, one) => total + one, 0) / xs.length;
+        const projected = headed.map((row) =>
+          Object.values(row.projects ?? {}).reduce((total, one) => total + one, 0),
+        );
         const tails = headed.map(
-          (row, i) => (row.snapshot ?? 0) - row.head - sweeps[i],
+          (row, i) => (row.snapshot ?? 0) - row.head - sweeps[i] - projected[i],
         );
         console.log(
           `snapshot split over ${headed.length} row${headed.length === 1 ? "" : "s"}: ` +
             `head ${mean(heads).toFixed(2)} ms  rooms ${mean(sweeps).toFixed(2)}  ` +
-            `tail ${mean(tails).toFixed(2)}`,
+            `projections ${mean(projected).toFixed(2)}  rest ${mean(tails).toFixed(2)}`,
         );
         console.log(
           "  head is the visible rooms enumerated and every creep grouped by where it stands; " +
-            "tail is the sightings merge. Head is read off the row, tail is what the column has " +
-            "left over — so a negative tail means the phase gained work this reading cannot see",
+            "the rest is the world's tail between the last room and the first projection — the " +
+            "sightings, the creep list, the Raid logs. Head, rooms and projections are read off " +
+            "the row and the rest is what the column has left over, so a negative rest means the " +
+            "phase gained work this reading cannot see",
         );
       }
+
+      report(
+        "projects",
+        "colony",
+        "project",
+        "the projections stand inside the `snapshot` column, after the last room is swept: this " +
+          "is a colony's cut of the world (ADR 0047), and unlike the sweeps beside it, it is our " +
+          "own code rather than the engine's",
+      );
 
       report(
         "rooms",

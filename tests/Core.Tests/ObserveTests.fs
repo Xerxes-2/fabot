@@ -2813,6 +2813,8 @@ let private costing (ms: float) =
         ColonyDecides = []
         RoomSnapshots = []
         AtRooms = 0.0
+        AtProjects = 0.0
+        ColonyProjects = []
     }
 
 [<Tests>]
@@ -2902,6 +2904,8 @@ let cpuTests =
                                 [ "W12S28", 27.3; "W13S28", 38.1; "W11S29", 45.0; "W15S28", 55.9 ]
                             RoomSnapshots = []
                             AtRooms = 0.0
+                            AtProjects = 0.0
+                            ColonyProjects = []
                         }
 
                 Expect.equal
@@ -2964,6 +2968,8 @@ let cpuTests =
                             Replans = 0
                             ColonyDecides = []
                             AtRooms = 4.0
+                            AtProjects = 0.0
+                            ColonyProjects = []
                             RoomSnapshots = [ "W15S28", 9.0; "W15S27", 12.5; "W15S26", 18.0 ]
                         }
 
@@ -3026,6 +3032,8 @@ let cpuTests =
                             ColonyDecides = []
                             RoomSnapshots = []
                             AtRooms = 0.0
+                            AtProjects = 0.0
+                            ColonyProjects = []
                         }
 
                 Expect.equal
@@ -3076,6 +3084,8 @@ let cpuTests =
                             ColonyDecides = []
                             RoomSnapshots = []
                             AtRooms = 0.0
+                            AtProjects = 0.0
+                            ColonyProjects = []
                         }
 
                 Expect.equal
@@ -3127,6 +3137,7 @@ let cpuTests =
                                     Colonies = []
                                     Rooms = []
                                     SweepHead = 0.0
+                                    Projects = []
                                 }
                             ]
                     }

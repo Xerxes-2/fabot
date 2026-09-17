@@ -1195,6 +1195,7 @@ let loadCpu () : CpuState =
                                 Phases = decodeCpuPhases raw
                                 Colonies = decodeCpuSplit raw "colonies"
                                 Rooms = decodeCpuSplit raw "rooms"
+                                Projects = decodeCpuSplit raw "projects"
                                 // A bare number and not a group, so it decodes
                                 // on its own: a row from a bundle that did not
                                 // measure the head reads 0.0, which is what a
@@ -1255,6 +1256,7 @@ let saveCpu (state: CpuState) =
 
             writeSplit "colonies" sample.Colonies
             writeSplit "rooms" sample.Rooms
+            writeSplit "projects" sample.Projects
 
             if sample.SweepHead > 0.0 then
                 o?head <- sample.SweepHead
