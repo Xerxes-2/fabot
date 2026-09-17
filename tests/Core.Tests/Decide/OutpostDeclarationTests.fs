@@ -1601,8 +1601,8 @@ let outpostTests =
                 Expect.equal
                     (Colony.outpostsOf Colony.declared "W15S28"
                      |> List.map (fun outpost -> outpost.RoomName))
-                    [ "W15S27"; "W15S29" ]
-                    "the third colony works the room its errand crosses and the one the survey called its best"
+                    [ "W15S27" ]
+                    "the third colony works the room its errand crosses, and only that one: W15S29 was declared and withdrawn on 2026-09-17 after one invader killed four bodies in it (#369)"
 
                 // And the fourth colony's, declared the day after its spawn
                 // stood (`w12s29-outpost.md`): 81 ticks of haul, the cheapest

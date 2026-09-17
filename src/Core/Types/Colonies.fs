@@ -1103,7 +1103,28 @@ module Colony =
                 // marginal cost is a third of what it was, because the far
                 // field it adds is now held across ticks and shares its
                 // suffix with the chains already priced.
-                Outposts = [ Outpost.w15s27; Outpost.w15s29 ]
+                //
+                // **And W15S29 came back out the same day**, after it ate four
+                // of this colony's bodies: anchor-516370 and reserver-517630 at
+                // t517,880-517,964, reserver-518659 at t518,726 and
+                // reserver-519082 at t519,150 — all at range 1 in W15S29, all
+                // to **one** invader of 1 ATTACK and 1 RANGED_ATTACK. W15S28
+                // fell from 12 living to 3, its cluster to 1,300 of 8,300, and
+                // with its reserver row empty the resident re-claimer at the
+                // Reactor went with it, which shuts the courier programme and
+                // stops the season scoring.
+                //
+                // The room is not the problem and neither is the price: #366
+                // now remembers a raid through the blind ticks and sends the
+                // guard in, but its memory is `Tuning.ThreatMemory` = 300 ticks
+                // and an invader that loiters for its whole 1,500-tick life
+                // outlasts it — the memory expires, the room reads clear
+                // because nobody can see it, and the next unarmed body walks in.
+                // Re-declare when a raid that outlives the memory is handled:
+                // either the memory is refreshed by the room staying unvisited,
+                // or the guard stands in it until something looks and finds it
+                // clear (#369).
+                Outposts = [ Outpost.w15s27 ]
                 // And the one errand there is (ADR 0060 decision 1): the
                 // sector Reactor in W15S25, three crossings out by W15S27 and
                 // the Source Keeper room W15S26. This colony declares it
