@@ -1353,6 +1353,13 @@ type CpuSample =
         /// Kept off `CpuPhases` for `Colonies`' reason, and decoded apart from
         /// it for the same one.
         Rooms: (string * float) list
+        /// What the sweep spent **before** its first room: the visible rooms
+        /// enumerated, every creep grouped by where it stands, the
+        /// declarations read. Carried as its own number because the first live
+        /// window put it at 1.9 ms — more than any single room — and a reader
+        /// that could only subtract `head + tail` together could not tell
+        /// which of the two to go after (#370).
+        SweepHead: float
     }
 
 /// The whole persisted CPU line: oldest first, capped, exactly as the
@@ -1446,6 +1453,7 @@ let foldCpu (cap: int) (tick: int) (readings: CpuReadings) (prior: CpuState) : C
                     Phases = Some phases
                     Colonies = colonies
                     Rooms = swept
+                    SweepHead = toMicrosecond (readings.AtRooms - readings.AtEntry)
                 }
             ]
             |> trim cap

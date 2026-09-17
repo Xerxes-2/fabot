@@ -1641,6 +1641,33 @@ if (command === "console") {
         console.log("  " + footer);
       };
 
+      // The head beside the rooms, and the tail by subtraction: the row carries
+      // `head` because the head is one number the writer knows exactly, while
+      // the tail is whatever the phase has left after the last room — so one is
+      // read and the other is derived, and the line says which is which.
+      const headed = split.filter((row) => typeof row.head === "number");
+
+      if (headed.length) {
+        const heads = headed.map((row) => row.head);
+        const sweeps = headed.map((row) =>
+          Object.values(row.rooms ?? {}).reduce((total, one) => total + one, 0),
+        );
+        const mean = (xs) => xs.reduce((total, one) => total + one, 0) / xs.length;
+        const tails = headed.map(
+          (row, i) => (row.snapshot ?? 0) - row.head - sweeps[i],
+        );
+        console.log(
+          `snapshot split over ${headed.length} row${headed.length === 1 ? "" : "s"}: ` +
+            `head ${mean(heads).toFixed(2)} ms  rooms ${mean(sweeps).toFixed(2)}  ` +
+            `tail ${mean(tails).toFixed(2)}`,
+        );
+        console.log(
+          "  head is the visible rooms enumerated and every creep grouped by where it stands; " +
+            "tail is the sightings merge. Head is read off the row, tail is what the column has " +
+            "left over — so a negative tail means the phase gained work this reading cannot see",
+        );
+      }
+
       report(
         "rooms",
         "room",

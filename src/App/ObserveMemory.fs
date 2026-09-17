@@ -1195,6 +1195,17 @@ let loadCpu () : CpuState =
                                 Phases = decodeCpuPhases raw
                                 Colonies = decodeCpuSplit raw "colonies"
                                 Rooms = decodeCpuSplit raw "rooms"
+                                // A bare number and not a group, so it decodes
+                                // on its own: a row from a bundle that did not
+                                // measure the head reads 0.0, which is what a
+                                // sweep with no head would also read — and the
+                                // two are told apart by whether `rooms` is
+                                // there at all.
+                                SweepHead =
+                                    if jsTypeof raw?head = "number" then
+                                        unbox<float> raw?head
+                                    else
+                                        0.0
                             }
                     else
                         None)
@@ -1244,6 +1255,9 @@ let saveCpu (state: CpuState) =
 
             writeSplit "colonies" sample.Colonies
             writeSplit "rooms" sample.Rooms
+
+            if sample.SweepHead > 0.0 then
+                o?head <- sample.SweepHead
 
             o)
         |> List.toArray

@@ -2986,6 +2986,16 @@ let cpuTests =
                     (state.Ticks |> List.collect (fun sample -> sample.Rooms) |> List.sumBy snd)
                     14.0
                     "the rooms sum to the sweep, and the sweep is less than the phase"
+
+                // And the head is carried rather than left to be inferred: 4.0
+                // - 3.0. A reader handed only `snapshot` and the rooms could
+                // subtract head and tail *together* and would not know which of
+                // the two to go after — and on the first live window the head
+                // alone was 1.9 ms, more than any single room.
+                Expect.equal
+                    (state.Ticks |> List.map (fun sample -> sample.SweepHead))
+                    [ 1.0 ]
+                    "the head is the sweep's start less the prelude's reading"
             }
 
             test "the readings are differenced into phases, the entry alone" {
@@ -3116,6 +3126,7 @@ let cpuTests =
                                     Phases = None
                                     Colonies = []
                                     Rooms = []
+                                    SweepHead = 0.0
                                 }
                             ]
                     }
