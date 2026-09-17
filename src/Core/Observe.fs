@@ -1284,6 +1284,13 @@ type CpuReadings =
         /// Cumulative like the rest and differenced by `foldCpu`: the shell
         /// reads the counter at each colony's boundary and knows nothing else.
         ColonyDecides: (string * float) list
+        /// The same trick one phase earlier: the counter as each room's facts
+        /// finished, in sweep order, so `snapshot` can be attributed to the
+        /// rooms it swept. `snapshot` is a fifth of the live tick and the
+        /// harness cannot price one millisecond of it — its rooms are stubs
+        /// whose `find` hands back a ready array — so the split is the only
+        /// reading about that phase the two can be compared on (#370).
+        RoomSnapshots: (string * float) list
     }
 
 /// One tick's cost, split at the loop's phase boundaries: the engine's prelude
@@ -1337,6 +1344,9 @@ type CpuSample =
         /// unmeasured, and the window this is meant to compare against is the
         /// hundred rows standing when the change lands.
         Colonies: (string * float) list
+        /// Kept off `CpuPhases` for `Colonies`' reason, and decoded apart from
+        /// it for the same one.
+        Rooms: (string * float) list
     }
 
 /// The whole persisted CPU line: oldest first, capped, exactly as the
@@ -1409,6 +1419,17 @@ let foldCpu (cap: int) (tick: int) (readings: CpuReadings) (prior: CpuState) : C
         |> fst
         |> List.rev
 
+    // The snapshot's rooms, differenced against the phase's own start — which
+    // is the prelude's reading, `AtEntry`, because nothing runs between them.
+    let swept =
+        readings.RoomSnapshots
+        |> List.fold
+            (fun (spent, at) (room, reading) ->
+                (room, toMicrosecond (reading - at)) :: spent, reading)
+            ([], readings.AtEntry)
+        |> fst
+        |> List.rev
+
     {
         Ticks =
             prior.Ticks
@@ -1418,6 +1439,7 @@ let foldCpu (cap: int) (tick: int) (readings: CpuReadings) (prior: CpuState) : C
                     Ms = toMicrosecond readings.AtExecute
                     Phases = Some phases
                     Colonies = colonies
+                    Rooms = swept
                 }
             ]
             |> trim cap

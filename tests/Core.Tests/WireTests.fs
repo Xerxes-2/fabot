@@ -456,12 +456,19 @@ let observerCpuTests =
     testList
         "the observer reads the CPU line's per-colony split"
         [
-            test "the reader knows the key `saveCpu` writes the split under" {
+            test "the reader knows the keys `saveCpu` writes the splits under" {
                 let script = Observer.script.Value
 
-                Expect.isTrue
-                    (script.Contains "row.colonies")
-                    "`observe.mjs cpu` reads `colonies` off a row: the sub-object `saveCpu` writes each colony's `decide` into, absent on a row from a bundle that did not measure it"
+                // Two of them, and the reader takes the key as an argument
+                // rather than spelling `row.colonies` inline, so what can be
+                // checked is that both spellings reach it. `saveCpu` writes
+                // `colonies` for each colony's `decide` and `rooms` for each
+                // room's `snapshot`; a row from a bundle that measured neither
+                // carries neither key.
+                for key in [ "colonies"; "rooms" ] do
+                    Expect.isTrue
+                        (script.Contains $"attributedBy(\"{key}\")" || script.Contains $"\"{key}\",")
+                        $"`observe.mjs cpu` reads `{key}` off a row: the sub-object `saveCpu` writes that split into"
             }
 
             test "the split is not folded into the all-six-or-none phase group" {
@@ -478,8 +485,9 @@ let observerCpuTests =
                     phases.Success
                     "`observe.mjs` still declares its phase columns in one list"
 
-                Expect.isFalse
-                    (phases.Groups.[1].Value.Contains "colonies")
-                    "and the per-colony split is not one of them: it decodes on its own, so an older row keeps its phases"
+                for key in [ "colonies"; "rooms" ] do
+                    Expect.isFalse
+                        (phases.Groups.[1].Value.Contains key)
+                        $"and the per-{key} split is not one of them: it decodes on its own, so an older row keeps its phases"
             }
         ]

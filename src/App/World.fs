@@ -762,6 +762,24 @@ let private worldRooms (maxHops: int) (colonies: Colony list) (seen: string list
 /// bot reads `Game`. The declaration is handed in rather than read off the
 /// constant (ADR 0041), so a harness or a test can hand this function a world
 /// of its own.
+/// The CPU counter as each room's facts finished, in the order they were swept,
+/// for the tick's own readings to difference (ADR 0041). Heap-only and
+/// overwritten every tick, like the plan memos and the sightings in `Main`: a
+/// reading is about the tick it was taken in and means nothing carried over.
+///
+/// Held here rather than returned beside the `World` because the world is a
+/// Core type and a measurement of the shell is not a fact about the game. The
+/// shell reads the counter and subtracts; nothing in `Core` learns that rooms
+/// have a price.
+///
+/// Why it exists: `snapshot` is 21% of the live tick and the harness cannot
+/// measure a single millisecond of it — its rooms are stubs whose `find`
+/// answers a pre-built array, while the live phase pays the engine for eleven
+/// sweeps of real objects per room (#370). A per-room split is the one reading
+/// that is comparable between the two, because it is a count of our own calls
+/// and not a price the engine sets.
+let mutable roomCosts: (string * float) list = []
+
 let ofGame (maxHops: int) (colonies: Colony list) (lastPositions: Map<string, RoomPos>) : World =
     let spawns = objectValues<ISpawn> Game.spawns
 
@@ -823,16 +841,26 @@ let ofGame (maxHops: int) (colonies: Colony list) (lastPositions: Map<string, Ro
     // for (#151).
     let seen = objectEntries Game.rooms |> Array.map fst |> Array.toList
 
+    let mutable costs = []
+
     let rooms =
         worldRooms maxHops colonies seen
         |> List.map (fun roomName ->
-            roomName,
-            factsOf
-                ours
-                (Map.tryFind roomName spawnsByRoom |> Option.defaultValue [])
-                (inRoom standingByRoom roomName)
-                (inRoom castingByRoom roomName)
-                roomName)
+            let facts =
+                factsOf
+                    ours
+                    (Map.tryFind roomName spawnsByRoom |> Option.defaultValue [])
+                    (inRoom standingByRoom roomName)
+                    (inRoom castingByRoom roomName)
+                    roomName
+
+            // Read after the room's facts and not before, so the list is the
+            // same cumulative shape the phase boundaries are: one counter per
+            // room in sweep order, differenced by `foldCpu`.
+            costs <- (roomName, Game.cpu.getUsed ()) :: costs
+            roomName, facts)
+
+    roomCosts <- List.rev costs
 
     {
         Time = Game.time

@@ -433,6 +433,10 @@ let loop () =
             Bucket = Game.cpu.bucket
             Replans = replans
             ColonyDecides = decisions |> List.map (fun (colony, _, _, at) -> colony.Home, at)
+            // Read off `World`'s own heap slot rather than threaded through the
+            // world record: a measurement of the shell is not a fact about the
+            // game, and `World` is a Core type (#370).
+            RoomSnapshots = World.roomCosts
         }
 
     // The CPU line stays one flat leaf keyed by tick: it records the whole

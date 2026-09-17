@@ -1608,7 +1608,49 @@ if (command === "console") {
       // window of four rows as a window of a hundred, and the deployed bundle
       // predating this reading is the ordinary case for the first hundred ticks
       // after every upload.
-      const attributed = split.filter((row) => row.colonies && Object.keys(row.colonies).length);
+      // One reader for both splits, because they are the same shape under two
+      // keys: the colonies' share of `decide` and the rooms' share of
+      // `snapshot` (#370). Written once rather than twice for the reason the
+      // writer gives — a second copy is where the two drift apart.
+      const attributedBy = (key) =>
+        split.filter((row) => row[key] && Object.keys(row[key]).length);
+      const report = (key, label, phase, footer) => {
+        const rows = attributedBy(key);
+        if (rows.length === 0) {
+          console.log(
+            `no row says which ${label} spent \`${phase}\`: the deployed bundle predates the ` +
+              `per-${label} reading, or nothing has been ${phase === "decide" ? "decided" : "swept"} since it landed`,
+          );
+          return;
+        }
+        const names = [...new Set(rows.flatMap((row) => Object.keys(row[key])))];
+        console.log(
+          `${phase} by ${label} over ${rows.length} attributed row${rows.length === 1 ? "" : "s"}` +
+            `${rows.length < split.length ? ` (of ${split.length} split)` : ""}:`,
+        );
+        for (const name of names) {
+          const ms = rows
+            .filter((row) => typeof row[key][name] === "number")
+            .map((row) => row[key][name]);
+          const mean = ms.reduce((total, one) => total + one, 0) / ms.length;
+          console.log(
+            `  ${name}  mean ${mean.toFixed(2)} ms  max ${Math.max(...ms).toFixed(2)}  ` +
+              `over ${ms.length} tick${ms.length === 1 ? "" : "s"}`,
+          );
+        }
+        console.log("  " + footer);
+      };
+
+      report(
+        "rooms",
+        "room",
+        "snapshot",
+        "a room appears here once however many colonies project it: the world holds one set of " +
+          "facts per room (ADR 0052 decision 1), so this is the price of the sweep and not of the " +
+          "projections that read it",
+      );
+
+      const attributed = attributedBy("colonies");
 
       if (attributed.length === 0) {
         console.log(

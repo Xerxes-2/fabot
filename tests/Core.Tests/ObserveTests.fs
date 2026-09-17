@@ -2811,6 +2811,7 @@ let private costing (ms: float) =
         Bucket = 10_000
         Replans = 0
         ColonyDecides = []
+        RoomSnapshots = []
     }
 
 [<Tests>]
@@ -2898,6 +2899,7 @@ let cpuTests =
                             Replans = 0
                             ColonyDecides =
                                 [ "W12S28", 27.3; "W13S28", 38.1; "W11S29", 45.0; "W15S28", 55.9 ]
+                            RoomSnapshots = []
                         }
 
                 Expect.equal
@@ -2934,6 +2936,50 @@ let cpuTests =
                     "no reading, no attribution — and the row is still in the window the trigger is read off"
             }
 
+
+            test "the snapshot's rooms are differenced from the prelude" {
+                // The rooms' counterpart to the colonies' split, and it starts
+                // one boundary earlier: `snapshot` begins where the prelude's
+                // reading was taken, because nothing runs between them. A
+                // reader that differenced the first room against `AtSnapshot`
+                // would price it against the *end* of its own phase and report
+                // a negative millisecond — which is the shape of mistake the
+                // colonies' split could not make, since `AtSnapshot` really is
+                // the boundary before the first colony.
+                let state =
+                    CpuState.empty
+                    |> foldCpu
+                        capCpuTicks
+                        100
+                        {
+                            AtEntry = 3.0
+                            AtSnapshot = 18.0
+                            AtDecide = 50.0
+                            AtSave = 54.0
+                            AtExecute = 60.0
+                            Intents = 40
+                            Bucket = 10_000
+                            Replans = 0
+                            ColonyDecides = []
+                            RoomSnapshots = [ "W15S28", 9.0; "W15S27", 12.5; "W15S26", 18.0 ]
+                        }
+
+                Expect.equal
+                    (state.Ticks |> List.map (fun sample -> sample.Rooms))
+                    [ [ "W15S28", 6.0; "W15S27", 3.5; "W15S26", 5.5 ] ]
+                    "each room against the room swept before it, the first against `AtEntry`"
+
+                // And the three of them account for the whole phase, which is
+                // the property that makes the split worth having: 18.0 - 3.0 is
+                // 15.0, and 6.0 + 3.5 + 5.5 is 15.0. Unlike `decide`, nothing
+                // runs between the rooms, so a remainder here would mean the
+                // sweep does something this reading cannot see.
+                Expect.equal
+                    (state.Ticks |> List.collect (fun sample -> sample.Rooms) |> List.sumBy snd)
+                    15.0
+                    "the rooms sum to the phase: the sweep is all the phase is"
+            }
+
             test "the readings are differenced into phases, the entry alone" {
                 // The shape of a live tick the day the split was built: an
                 // engine prelude already spent before `loop` runs, then the
@@ -2960,6 +3006,7 @@ let cpuTests =
                             Bucket = 9_872
                             Replans = 0
                             ColonyDecides = []
+                            RoomSnapshots = []
                         }
 
                 Expect.equal
@@ -3008,6 +3055,7 @@ let cpuTests =
                             Bucket = 4_213
                             Replans = 2
                             ColonyDecides = []
+                            RoomSnapshots = []
                         }
 
                 Expect.equal
@@ -3057,6 +3105,7 @@ let cpuTests =
                                     Ms = 6.1
                                     Phases = None
                                     Colonies = []
+                                    Rooms = []
                                 }
                             ]
                     }

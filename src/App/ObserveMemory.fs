@@ -1092,15 +1092,20 @@ let private cpuPhaseFields: (string * (CpuPhases -> obj)) list =
 /// entry must be a number — a key whose value is not says the writer and the
 /// reader disagree about the shape, and half a split would price one colony
 /// against a boundary nobody read.
-let private decodeCpuColonies (raw: obj) : (string * float) list =
-    let colonies = raw?colonies
+/// A sub-object of numbers off a CPU row, or the empty list when the row has
+/// none. Shared by the two splits that hang beside the phases — the colonies'
+/// `decide` and the rooms' `snapshot` — because they are the same shape read
+/// from two keys, and a second copy of this would be the next place the two
+/// drift apart.
+let private decodeCpuSplit (raw: obj) (key: string) : (string * float) list =
+    let split = raw?(key)
 
-    if jsTypeof colonies <> "object" || isNull colonies then
+    if jsTypeof split <> "object" || isNull split then
         []
     else
-        JS.Constructors.Object.keys colonies
-        |> Seq.filter (fun home -> jsTypeof colonies?(home) = "number")
-        |> Seq.map (fun home -> home, unbox<float> colonies?(home))
+        JS.Constructors.Object.keys split
+        |> Seq.filter (fun name -> jsTypeof split?(name) = "number")
+        |> Seq.map (fun name -> name, unbox<float> split?(name))
         |> List.ofSeq
 
 /// The phase split off one CPU row, or `None` when the row carries none.
@@ -1188,7 +1193,8 @@ let loadCpu () : CpuState =
                                 Tick = unbox<int> raw?t
                                 Ms = unbox<float> raw?ms
                                 Phases = decodeCpuPhases raw
-                                Colonies = decodeCpuColonies raw
+                                Colonies = decodeCpuSplit raw "colonies"
+                                Rooms = decodeCpuSplit raw "rooms"
                             }
                     else
                         None)
@@ -1219,14 +1225,25 @@ let saveCpu (state: CpuState) =
             // One sub-object rather than a key per colony, so a home room's
             // name can never collide with a phase's (#370) — and so the group
             // is absent as a whole on a row that has none, which is what
-            // `decodeCpuColonies` reads as "nobody measured this".
-            if not (List.isEmpty sample.Colonies) then
-                let colonies = createEmpty<obj>
+            // `decodeCpuSplit` reads as "nobody measured this".
+            //
+            // Two of them now, and they are written the same way for the same
+            // reasons: the colonies' share of `decide` and the rooms' share of
+            // `snapshot`. Separate keys rather than one table of names, because
+            // a home room appears in **both** — W15S28 is a colony that decides
+            // and a room that is swept — and one table would have to choose
+            // which of its two prices to keep.
+            let writeSplit key rows =
+                if not (List.isEmpty rows) then
+                    let split = createEmpty<obj>
 
-                for home, ms in sample.Colonies do
-                    colonies?(home) <- ms
+                    for name, ms in rows do
+                        split?(name) <- ms
 
-                o?colonies <- colonies
+                    o?(key) <- split
+
+            writeSplit "colonies" sample.Colonies
+            writeSplit "rooms" sample.Rooms
 
             o)
         |> List.toArray
