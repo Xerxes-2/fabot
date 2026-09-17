@@ -2812,6 +2812,7 @@ let private costing (ms: float) =
         Replans = 0
         ColonyDecides = []
         RoomSnapshots = []
+        AtRooms = 0.0
     }
 
 [<Tests>]
@@ -2900,6 +2901,7 @@ let cpuTests =
                             ColonyDecides =
                                 [ "W12S28", 27.3; "W13S28", 38.1; "W11S29", 45.0; "W15S28", 55.9 ]
                             RoomSnapshots = []
+                            AtRooms = 0.0
                         }
 
                 Expect.equal
@@ -2961,23 +2963,29 @@ let cpuTests =
                             Bucket = 10_000
                             Replans = 0
                             ColonyDecides = []
+                            AtRooms = 4.0
                             RoomSnapshots = [ "W15S28", 9.0; "W15S27", 12.5; "W15S26", 18.0 ]
                         }
 
                 Expect.equal
                     (state.Ticks |> List.map (fun sample -> sample.Rooms))
-                    [ [ "W15S28", 6.0; "W15S27", 3.5; "W15S26", 5.5 ] ]
-                    "each room against the room swept before it, the first against `AtEntry`"
+                    [ [ "W15S28", 5.0; "W15S27", 3.5; "W15S26", 5.5 ] ]
+                    "each room against the room swept before it, the first against `AtRooms`"
 
-                // And the three of them account for the whole phase, which is
-                // the property that makes the split worth having: 18.0 - 3.0 is
-                // 15.0, and 6.0 + 3.5 + 5.5 is 15.0. Unlike `decide`, nothing
-                // runs between the rooms, so a remainder here would mean the
-                // sweep does something this reading cannot see.
+                // And they sum to **less** than the phase, on purpose: 18.0 -
+                // 3.0 is 15.0 while 5.0 + 3.5 + 5.5 is 14.0, and the missing
+                // 1.0 is the head the sweep does before the first room —
+                // enumerating `Game.rooms`, grouping every creep by the room it
+                // stands in, reading the declarations. Charging that head to
+                // whichever room happened to be swept first is what this
+                // reading did on its first live window: it priced W11S28, an
+                // outpost with one rock, at 2.35 ms against the four-spawn home
+                // room beside it at 1.23. The remainder is left readable rather
+                // than folded into a room, exactly as `decide`'s is.
                 Expect.equal
                     (state.Ticks |> List.collect (fun sample -> sample.Rooms) |> List.sumBy snd)
-                    15.0
-                    "the rooms sum to the phase: the sweep is all the phase is"
+                    14.0
+                    "the rooms sum to the sweep, and the sweep is less than the phase"
             }
 
             test "the readings are differenced into phases, the entry alone" {
@@ -3007,6 +3015,7 @@ let cpuTests =
                             Replans = 0
                             ColonyDecides = []
                             RoomSnapshots = []
+                            AtRooms = 0.0
                         }
 
                 Expect.equal
@@ -3056,6 +3065,7 @@ let cpuTests =
                             Replans = 2
                             ColonyDecides = []
                             RoomSnapshots = []
+                            AtRooms = 0.0
                         }
 
                 Expect.equal

@@ -780,6 +780,15 @@ let private worldRooms (maxHops: int) (colonies: Colony list) (seen: string list
 /// and not a price the engine sets.
 let mutable roomCosts: (string * float) list = []
 
+/// The counter as the room sweep **began**, which is what the first room is
+/// differenced against. Not `AtEntry`: the phase does work before the first
+/// room — it enumerates `Game.rooms`, groups every creep by the room it stands
+/// in, and reads the declarations — and charging that to whichever room happens
+/// to be swept first is how this reading first lied about itself. It said
+/// W11S28, an outpost with one rock, cost 2.35 ms while the four-spawn home
+/// room beside it cost 1.23 (#370).
+let mutable roomsBegan: float = 0.0
+
 let ofGame (maxHops: int) (colonies: Colony list) (lastPositions: Map<string, RoomPos>) : World =
     let spawns = objectValues<ISpawn> Game.spawns
 
@@ -842,6 +851,7 @@ let ofGame (maxHops: int) (colonies: Colony list) (lastPositions: Map<string, Ro
     let seen = objectEntries Game.rooms |> Array.map fst |> Array.toList
 
     let mutable costs = []
+    roomsBegan <- Game.cpu.getUsed ()
 
     let rooms =
         worldRooms maxHops colonies seen

@@ -1647,7 +1647,10 @@ if (command === "console") {
         "snapshot",
         "a room appears here once however many colonies project it: the world holds one set of " +
           "facts per room (ADR 0052 decision 1), so this is the price of the sweep and not of the " +
-          "projections that read it",
+          "projections that read it. The rooms sum to less than the `snapshot` column by the " +
+          "sweep's head and tail — enumerating the visible rooms, grouping every creep by where " +
+          "it stands, and merging the sightings — which is left readable here rather than " +
+          "charged to whichever room happens to be swept first",
       );
 
       const attributed = attributedBy("colonies");

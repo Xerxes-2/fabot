@@ -437,6 +437,7 @@ let loop () =
             // world record: a measurement of the shell is not a fact about the
             // game, and `World` is a Core type (#370).
             RoomSnapshots = World.roomCosts
+            AtRooms = World.roomsBegan
         }
 
     // The CPU line stays one flat leaf keyed by tick: it records the whole

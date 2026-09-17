@@ -1291,6 +1291,12 @@ type CpuReadings =
         /// whose `find` hands back a ready array — so the split is the only
         /// reading about that phase the two can be compared on (#370).
         RoomSnapshots: (string * float) list
+        /// The counter as the sweep began. The rooms are differenced against
+        /// this and not against `AtEntry`, because the phase does work before
+        /// the first room and after the last — so the rooms sum to **less**
+        /// than the phase, and the difference is readable the way `decide`'s
+        /// remainder is (ADR 0041: measured, not budgeted).
+        AtRooms: float
     }
 
 /// One tick's cost, split at the loop's phase boundaries: the engine's prelude
@@ -1426,7 +1432,7 @@ let foldCpu (cap: int) (tick: int) (readings: CpuReadings) (prior: CpuState) : C
         |> List.fold
             (fun (spent, at) (room, reading) ->
                 (room, toMicrosecond (reading - at)) :: spent, reading)
-            ([], readings.AtEntry)
+            ([], readings.AtRooms)
         |> fst
         |> List.rev
 
