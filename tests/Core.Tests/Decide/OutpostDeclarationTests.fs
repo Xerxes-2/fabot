@@ -1510,8 +1510,8 @@ let outpostTests =
                 Expect.equal
                     (Colony.outpostsOf Colony.declared "W13S28"
                      |> List.map (fun outpost -> outpost.RoomName))
-                    [ "W13S29" ]
-                    "and the second colony works its south outpost alone: W11S29's Claim landed on 2026-09-17 and the room left this list the same day (#352, W14S28 withdrawn by hand before it)"
+                    [ "W13S29"; "W14S28" ]
+                    "and the second colony works its south outpost and, again since 2026-09-18, its west one: W14S28 was withdrawn by hand while W11S29 was also in this list, and came back once #352 had taken W11S29 out and the haul demand had fallen to 2,790 over two haulers"
 
                 // What the removal cost while it was overdue, kept as a number
                 // because the argument for the removal is a haul bill (#352):
@@ -1546,20 +1546,22 @@ let outpostTests =
                          |> List.exists (fun outpost -> outpost.RoomName = "W15S28")))
                     "the third colony's room is nobody's outpost now that it is ours"
 
-                // And with the west outpost withdrawn, this is the
-                // assertion that has something to prove: the room between
-                // home and the nursery is in the projection on the
-                // *bootstrap* half's own account (ADR 0058), where until
-                // 2026-09-10 it was there only because a declaration
-                // happened to name it.
+                // The room between home and the nursery is in the projection
+                // on the *bootstrap* half's own account (ADR 0058), where until
+                // 2026-09-10 it was there only because a declaration happened
+                // to name it. That is what this assertion had to prove while
+                // W14S28 was withdrawn; with the declaration back it proves
+                // only the order, so the standing proof of the bootstrap
+                // account is the `roomsProjected` assertion below, which passes
+                // an empty outpost list.
                 Expect.equal
                     (Colony.roomsProjected
                         (Colony.outpostsOf Colony.declared "W13S28")
                         (Colony.errandsOf Colony.declared "W13S28")
                         [ "W15S28" ]
                         "W13S28")
-                    [ "W13S28"; "W13S29"; "W15S28"; "W14S28" ]
-                    "the home, its one outpost, the child two hops out and the transit room on the way to it"
+                    [ "W13S28"; "W13S29"; "W14S28"; "W15S28" ]
+                    "the home, its two outposts and the child two hops out — W14S28 moving up the list is the declaration coming back, since a declared room is projected before the transit rooms a bootstrap half brings"
 
                 // Three rooms left this scan set with W11S29's declaration
                 // (#352) — the nursery itself, W12S29 and W11S28, plus
@@ -1583,8 +1585,8 @@ let outpostTests =
                     [
                         "W13S28"
                         "W13S29"
-                        "W15S28"
                         "W14S28"
+                        "W15S28"
                         "W11S29"
                         "W12S28"
                         "W12S29"
@@ -1601,8 +1603,8 @@ let outpostTests =
                 Expect.equal
                     (Colony.outpostsOf Colony.declared "W15S28"
                      |> List.map (fun outpost -> outpost.RoomName))
-                    [ "W15S27" ]
-                    "the third colony works the room its errand crosses, and only that one: W15S29 was declared and withdrawn on 2026-09-17 after one invader killed four bodies in it (#369)"
+                    [ "W15S27"; "W15S29" ]
+                    "the third colony works the room its errand crosses and the one declared for its own sake: W15S29 was withdrawn on 2026-09-17 after one invader killed four bodies in it, and re-declared on 2026-09-18 once the raid memory stopped expiring while nobody looked (#369) and this colony's fleet was back at ten of eleven with delivery restarted"
 
                 // And the fourth colony's, declared the day after its spawn
                 // stood (`w12s29-outpost.md`): 81 ticks of haul, the cheapest

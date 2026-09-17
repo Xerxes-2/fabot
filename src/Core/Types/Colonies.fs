@@ -374,6 +374,25 @@ module Outpost =
     /// warm — a declaration of its own rather than a room seen in passing,
     /// which is what it had become the day W15S28 was claimed. The ids and
     /// tiles are the engine's, read the day it was declared.
+    ///
+    /// **Withdrawn by hand 2026-09-16, re-declared 2026-09-18.** What withdrew
+    /// it was never the room: it stood in the list while W11S29 was also in it,
+    /// three crossings out and mined by its own colony at the same time, and
+    /// the two together took this colony's haul demand from 2,780 over two
+    /// haulers to 4,810 over four. #352 took W11S29 out and the demand fell
+    /// back to 2,790 over two, which is the colony this declaration re-enters:
+    /// nine of ten living, no row with a gap, the terminal at (14,10) built and
+    /// shipping. Re-read the day it came back — one source at (6,8), no Source
+    /// Keeper lair, no invader core, controller unreserved at (22,15), and the
+    /// terrain layer still in the world as the transit room to W15S28, so the
+    /// tick this adds is W12S29's +0.7 ms and not the +1.5..2.0 of a room
+    /// nobody has walked (ADR 0041's trigger is still firing).
+    ///
+    /// It also carries a **Thorium mineral at (2,29)**, which this declaration
+    /// does nothing about and which wants its own issue: a deposit three
+    /// crossings from a terminal that already ships is a different programme
+    /// from an outpost's source, and pretending one declaration buys both is
+    /// how W15S29 ate four bodies.
     let w14s28: Outpost =
         {
             RoomName = "W14S28"
@@ -1058,8 +1077,13 @@ module Colony =
                 // colony ran one on the same rock, and this colony's demand
                 // went 2,780 over two haulers to 5,760 over four. That is the
                 // shape that took W14S28 from 2,790 to 4,810 and had it
-                // withdrawn by hand the day it was declared.
-                Outposts = [ Outpost.w13s29 ]
+                // withdrawn by hand the day it was declared. W14S28 is back in
+                // the list below, and what changed is that half: W11S29 left
+                // this colony in #352 and the demand went back to 2,790 over
+                // two haulers, so the room is being added to a colony that has
+                // the seat for it rather than beside another colony's anchor on
+                // the same rock.
+                Outposts = [ Outpost.w13s29; Outpost.w14s28 ]
                 // Five crossings to the Reactor, so this colony declares no
                 // errand either — and the 22,000 Thorium it banks is ore
                 // nothing here can deliver, which ADR 0060 decision 3 files as
@@ -1116,15 +1140,24 @@ module Colony =
                 //
                 // The room is not the problem and neither is the price: #366
                 // now remembers a raid through the blind ticks and sends the
-                // guard in, but its memory is `Tuning.ThreatMemory` = 300 ticks
-                // and an invader that loiters for its whole 1,500-tick life
-                // outlasts it — the memory expires, the room reads clear
-                // because nobody can see it, and the next unarmed body walks in.
-                // Re-declare when a raid that outlives the memory is handled:
-                // either the memory is refreshed by the room staying unvisited,
-                // or the guard stands in it until something looks and finds it
-                // clear (#369).
-                Outposts = [ Outpost.w15s27 ]
+                // guard in, but its memory was `Tuning.ThreatMemory` = 300
+                // ticks and an invader that loiters for its whole 1,500-tick
+                // life outlasted it — the memory expired, the room read clear
+                // because nobody could see it, and the next unarmed body walked
+                // in. Four of them: anchor-516370 and three reservers between
+                // t517,880 and t519,150, to one 1-ATTACK invader.
+                //
+                // Both conditions that withdrawal named are met, which is why
+                // W15S29 is back. The memory is now `Engine.creepLifetime` and
+                // a backstop rather than a schedule (#369): nothing expires it
+                // while nobody looks, and what ends it is a look that finds the
+                // room clear — the guard standing in it being that look. And
+                // this colony has its fleet back: ten of eleven living, the
+                // reserver row at two of two, delivery restarted at t529,889
+                // after nine thousand ticks dry, with the roads we laid in
+                // W15S29 still standing and its controller unreserved by
+                // anyone.
+                Outposts = [ Outpost.w15s27; Outpost.w15s29 ]
                 // And the one errand there is (ADR 0060 decision 1): the
                 // sector Reactor in W15S25, three crossings out by W15S27 and
                 // the Source Keeper room W15S26. This colony declares it
