@@ -3325,20 +3325,43 @@ let breachKindTests =
                     "one tick of margin over the lead time is a Reactor still reachable, and an alarm here would be answered by a courier that stands at the flag burning its 1,500-tick life"
             }
 
-            test "a courier alive silences the running-dry row, whatever the store reads" {
+            test
+                "a laden courier silences the running-dry row; a courier-shaped body alone does not" {
                 // The condition is not "the store is low", it is "the store is
-                // low **and nobody is walking**": a body already cast is the
-                // answer this alarm asks for, and a channel that kept crying
-                // through the walk would have the operator hire a second
-                // courier to stand beside the first.
+                // low **and no ore is moving**".
                 //
+                // The first version of this said "and no courier is alive", and
+                // #367 is what that cost: the delivery draw ranked below
+                // ordinary energy hauling, so a courier lived for 465 ticks
+                // hauling energy while the store fell 500 -> 0 and a
+                // 15,582-tick streak broke, and this channel reported `no
+                // breaches` the whole way down. A body of the right shape is
+                // not a delivery in progress.
+                //
+                // So what answers the alarm is ore **aboard** — a fact of the
+                // view (`CreepInfo.Thorium`) rather than an assignment, which
+                // keeps this channel out of the Matcher's business (ADR 0025)
+                // and out of reach of a body that is doing something else.
                 // Matched on the body's shape and never its name, so the alarm
                 // and the quota that hires cannot come to disagree about what a
                 // courier is.
                 let walking =
                     quiet |> erranding 10 |> courierAt "courier" 500 |> withCourierBody "courier"
 
-                Expect.equal (breachesOn 100 walking) [] "the delivery is already in the air"
+                Expect.equal (breachesOn 100 walking) [] "a load is genuinely in the air"
+
+                // The empty-handed courier is the live shape, and it must cry:
+                // it is either walking out to fetch a load, which costs a few
+                // ticks of false alarm, or it is doing something else entirely,
+                // which is the 465-tick case this exists for. An alarm whose
+                // whole value is arriving early errs this way.
+                let empty =
+                    quiet |> erranding 10 |> courierAt "courier" 0 |> withCourierBody "courier"
+
+                Expect.equal
+                    (breachesOn 100 empty)
+                    [ BreachKind.ReactorRunningDry, errandRoom, reactor, 10 ]
+                    "a courier carrying nothing is not an answer, whatever its body says"
 
                 Expect.equal
                     (breachesOn 100 (quiet |> erranding 10 |> courierAt "hauler" 500))

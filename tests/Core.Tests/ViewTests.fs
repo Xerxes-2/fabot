@@ -2130,7 +2130,7 @@ let errandTests =
                 Expect.equal
                     (courier |> Option.map (fun creep -> creep.Thorium))
                     (Some 500)
-                    "and the load aboard it reaches the view, which is what the draw gate subtracts"
+                    "and the load aboard it reaches the view, which is what the draw gate subtracts — and, since #367, what the running-dry alarm accepts as an answer instead of the body's mere existence"
             }
 
             test "the declared target is placed before any body of ours has stood there" {

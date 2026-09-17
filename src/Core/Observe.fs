@@ -1678,8 +1678,29 @@ let private breachesIn (view: ColonyView) : Breach list =
     // One store tick is one T: the Reactor burns exactly 1 a tick
     // (`docs/research/thorium-reactor.md`), so the store *is* the clock and no
     // rate has to be estimated.
+    // **A body of the right shape is not a delivery in progress** (#367). The
+    // first version of this alarm fell silent whenever a courier lived, on the
+    // premise that a courier alive means a load is coming. Live it was alive for
+    // 465 ticks hauling *energy*, because the delivery draw ranked below
+    // ordinary hauling: the store fell 500 -> 0, a 15,582-tick streak broke, and
+    // this channel said `no breaches` throughout. The rank is fixed; the premise
+    // was wrong on its own terms and is fixed here.
+    //
+    // What counts as an answer is **ore actually moving**: a courier-shaped body
+    // holding Thorium. That is a fact of the view (`CreepInfo.Thorium`) and not
+    // an assignment, so this channel stays out of the Matcher's business (ADR
+    // 0025) and cannot be told a delivery is under way by a body that is doing
+    // something else.
+    //
+    // The cost is a false alarm for the ticks between a courier being cast and
+    // its first load: it is walking to the Storage with an empty store, and this
+    // reads that as nobody answering. That direction is the correct one for an
+    // alarm whose whole value is arriving early (#361), and the row clears
+    // itself the tick the load is aboard.
+    let laden = couriers |> List.exists (fun courier -> courier.Thorium > 0)
+
     let runningDry =
-        if not (List.isEmpty couriers) then
+        if laden then
             []
         else
             reactors
