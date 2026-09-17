@@ -1643,6 +1643,28 @@ const SMALL_MELEE = [
   "move",
 ];
 
+// A Source Keeper, part for part, read off W15S26 at tick 531,900 — the room
+// the chain from W15S28 to the sector Reactor crosses (ADR 0060 decision 3).
+// Fifty-one parts and 5,000 hits: seventeen TOUGH, thirteen MOVE, then ATTACK
+// and RANGED_ATTACK alternating ten times each.
+//
+// Copied whole for `SMALL_MELEE`'s reason and one more. The parts are what the
+// projection carries verbatim (ADR 0028), and here they are also what the cost
+// being measured is made of: the RANGED_ATTACK sets the Reach at 3 plus
+// `Tuning.ReachMargin`, and the fifty-one-part body is what the Threat ring
+// subtraction runs over four times a tick in a room the couriers cross. A body
+// reduced to "something armed" would measure a room this bot does not have to
+// walk past (#370).
+const SOURCE_KEEPER = [
+  ...Array.from({ length: 17 }, () => "tough"),
+  ...Array.from({ length: 13 }, () => "move"),
+  ...Array.from({ length: 10 }, () => ["attack", "ranged_attack"]).flat(),
+];
+
+// The owner the engine's Source Keepers carry, spelled as the API returns it
+// rather than as a name this harness invented, for `INVADER_OWNER`'s reason.
+const KEEPER_OWNER = "Source Keeper";
+
 // The username the engine's NPC raiders carry. Read by the Raid log's
 // roster and by nothing that decides (ADR 0028), and spelled here for the
 // reason `COLONY_OWNER` is: a name the harness invented would be a name no
@@ -3222,6 +3244,69 @@ function buildReactorWorld() {
   // hand-written room record here would be free to drift from those two.
   const second = furnishOutpost(loadCapture("W15S29"), register, structure);
 
+  // The Source Keeper room the chain crosses, furnished as a room this colony
+  // can *see* rather than as a terrain layer it walks over (#370).
+  //
+  // The mask has always been priced here — `declaredTerrains` stands W15S26's
+  // rocks and `Keepers.centres` declares its centres, which is why the mask is
+  // 937 tiles in this scenario already, and deliberately so: the margin is
+  // known before the room is ever seen (`Keepers.fs`). What was never furnished
+  // is what a courier crossing the room actually looks at: three rocks, a
+  // mineral under an owner-less extractor, and four keepers standing on them.
+  //
+  // Each keeper is stood on the nearest free tile to a rock, sources first and
+  // the mineral last, which is not a guess — it is where the live four stand.
+  // Read at tick 531,900: 10,15 beside the source at 11,16, 5,34 beside 4,33,
+  // 40,35 beside 39,34, and 37,7 beside the mineral at 38,7. Derived rather
+  // than written down for #144's reason, and the derivation reproducing the
+  // engine's own arrangement is the evidence that it is the right one.
+  //
+  // No lairs. They are structures, and a capture carries furniture only by
+  // design (ADR 0036) — but more to the point, nothing in this bot reads a
+  // lair: the mask comes off the declaration, so a lair stood here would be
+  // furniture measured for its own sake.
+  const keeperCapture = loadCapture("W15S26");
+  const keeperSources = registerSources(keeperCapture, register);
+  const keeperMinerals = registerMinerals(keeperCapture, register);
+  const keeperOccupied = new Set(
+    [...keeperSources, ...keeperMinerals].map((rock) => keyOf(rock.pos)),
+  );
+  const keepers = [...keeperSources, ...keeperMinerals].map((rock, index) => {
+    const pos = nearestFree(keeperCapture, rock.pos, keeperOccupied);
+    keeperOccupied.add(keyOf(pos));
+    return register({
+      // The engine's own naming: `Keeper` and the lair's id. Kept because the
+      // Raid log's roster reads names (ADR 0028) and a name this file invented
+      // would be one no live report could be compared against.
+      id: `keeper-${index}`,
+      name: `Keeper${rock.id}`,
+      owner: { username: KEEPER_OWNER },
+      pos,
+      body: SOURCE_KEEPER.map((type) => ({ type })),
+      hits: 5000,
+      hitsMax: 5000,
+      // Ungated in the engine for a keeper: it is respawned by its lair rather
+      // than aged out, so a `ticksToLive` this file chose would be the one
+      // number here the live room does not carry.
+      ticksToLive: undefined,
+    });
+  });
+  const keeperRoom = stubRoom({
+    name: keeperCapture.name,
+    controller: undefined,
+    findTables: {
+      105: keeperSources,
+      108: [],
+      107: [],
+      114: [],
+      115: [],
+      103: keepers,
+      106: [],
+      116: keeperMinerals,
+      [FIND_REACTORS]: [],
+    },
+  });
+
   // What a body may not be stood on out there: the reactor's own tile — so
   // the re-claimer is resolved outward onto the ring it acts from rather than
   // under the thing it is acting on — and the room's rocks, which are
@@ -3358,13 +3443,14 @@ function buildReactorWorld() {
     creeps,
   });
 
-  const rooms = [home.room, transitRoom, errandRoom, second.room];
+  const rooms = [home.room, transitRoom, errandRoom, second.room, keeperRoom];
   return {
     terrains: new Map([
       [capture.name, capture.terrain],
       [transitCapture.name, transitCapture.terrain],
       [errandCapture.name, errandCapture.terrain],
       [second.capture.name, second.capture.terrain],
+      [keeperCapture.name, keeperCapture.terrain],
       ...declaredTerrains(rooms.map((room) => room.name)),
     ]),
     rooms,
