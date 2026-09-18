@@ -814,9 +814,10 @@ let planPool (view: ColonyView) atlas (tasks: Task list) : PooledTask list =
     let buffers = Atlas.controllerContainers atlas
 
     // The [[refill cluster]], off the one rule its three readers share
-    // (`RefillCluster.ofRefillables`, ADR 0054): `planTasks` pooled the
-    // spawn, this bounds it, and the Atlas lays its Work Area.
-    let cluster = RefillCluster.ofRefillables view.Refillables
+    // (`RefillCluster.ofRefillables`, ADR 0054) and now off the one *value*
+    // too: the Atlas laid it at construction, `planTasks` pooled the spawn off
+    // it, this bounds it, and the Atlas lays its Work Area off it.
+    let cluster = Atlas.cluster atlas
 
     // The [[ferry]]'s sinks, named by the one rule three readers share
     // (`ferryBuffers`): what a mother lends a bootstrapping child is

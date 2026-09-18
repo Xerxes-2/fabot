@@ -944,6 +944,12 @@ let private actionOn =
 /// whose target is the cluster's spawn is the whole ring's, and every other
 /// Refill — a tower's, the [[buffer]]'s, the [[storage]]'s, a [[ferry]] sink's
 /// — is the single structure's it always was.
+/// The colony's [[refill cluster]] as this tick's Atlas holds it — the one
+/// `RefillCluster.ofRefillables` laid at construction (ADR 0054). The
+/// Planner's Refill and the pool's bound read it here rather than laying it
+/// again: three builds of the same cluster a tick are one.
+let cluster (atlas: Atlas) : RefillCluster option = atlas.Cluster
+
 let private clusterOf (atlas: Atlas) (task: Task) : RefillCluster option =
     match task, atlas.Cluster with
     // The resource is not asked: a cluster is a ring of energy feeders and the

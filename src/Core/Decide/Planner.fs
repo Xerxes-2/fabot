@@ -420,7 +420,7 @@ let planTasks (view: ColonyView) atlas (threats: Threats) (held: HeldTaskFacts) 
     // colony's spawn and every extension of it — is pooled under the spawn's id
     // and stands while any member has room, so `task-gone` fires when the whole
     // ring is full instead of once per extension somebody else got to first.
-    let cluster = RefillCluster.ofRefillables view.Refillables
+    let cluster = Atlas.cluster atlas
 
     let clustered =
         cluster
