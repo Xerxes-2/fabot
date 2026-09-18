@@ -161,6 +161,20 @@ type Atlas =
             /// narrowed area per Task, built at most once per tick. Only
             /// Harvest narrows, so `posts` is derived once per source.
             HeavyAreas: System.Collections.Generic.Dictionary<Task, Set<RoomPos>>
+            /// The [[post]] census per room — the standing Posts with their
+            /// sites counted in — built at most once per tick. A pure function
+            /// of this tick's grids and kind census, and asked per rock, per
+            /// candidate and per row: `postsOf` alone was 5.8% of a `pair
+            /// --level 7` tick (#370, 2026-09-18), four set intersections over
+            /// a hundred tiles in the home room and three in an outpost,
+            /// re-derived on every ask. Keyed by room name (ADR 0041).
+            Posts: System.Collections.Generic.Dictionary<string, Set<Pos>>
+            /// The standing half of the census above: same key, same lifetime,
+            /// its own table because `standingPostsOf` asks for it alone.
+            StandingPosts: System.Collections.Generic.Dictionary<string, Set<Pos>>
+            /// The union of every source's Seats in a room, which both of the
+            /// above are cut from and the [[working ground]] reads on its own.
+            SeatUnions: System.Collections.Generic.Dictionary<string, Set<Pos>>
             /// The creeps whose bodies carry more Work parts than Move —
             /// ADR 0016's predicate, read from the body and never a name.
             /// Three readers ask it, so the arithmetic lives here once.
@@ -404,6 +418,9 @@ let ofViewRecalling (walks: WalkTable) (farFields: FarFieldMemo) (view: ColonyVi
         Walks = walks
         WorkAreas = System.Collections.Generic.Dictionary()
         HeavyAreas = System.Collections.Generic.Dictionary()
+        Posts = System.Collections.Generic.Dictionary()
+        StandingPosts = System.Collections.Generic.Dictionary()
+        SeatUnions = System.Collections.Generic.Dictionary()
         Heavy =
             view.Creeps
             |> List.filter (fun creep -> partCount creep.Body Work > partCount creep.Body Move)
@@ -1014,12 +1031,13 @@ let workArea (atlas: Atlas) (task: Task) : Set<RoomPos> = snd (areaOf atlas task
 /// union is intersected with an Upgrade area below, and two rooms' Seats
 /// unioned would meet it at a coordinate that is a Dual Seat in neither.
 let private seatUnionIn (atlas: Atlas) (room: string) : Set<Pos> =
-    let ground = groundOf atlas room
+    memoised atlas.SeatUnions room (fun () ->
+        let ground = groundOf atlas room
 
-    targetsOfKind atlas Source
-    |> List.choose (tileIn atlas room)
-    |> List.map (seatTiles ground)
-    |> List.fold Set.union Set.empty
+        targetsOfKind atlas Source
+        |> List.choose (tileIn atlas room)
+        |> List.map (seatTiles ground)
+        |> List.fold Set.union Set.empty)
 
 /// The **standable** ring of one room's projected sources, joined to that room:
 /// the [[guard]]'s Work Area on the ticks it has no [[threat]] to ring (#366).
@@ -1187,13 +1205,14 @@ let standsOnDualSeat (atlas: Atlas) (creep: string) : bool =
 /// is *worked* from: this is the switch that admits a source into the quotas,
 /// and a site throws none, producing nothing anybody hauls.
 let private standingPostsIn (atlas: Atlas) (room: string) : Set<Pos> =
-    let containerPosts =
-        Set.intersect (seatUnionIn atlas room) (containerTilesIn atlas room)
+    memoised atlas.StandingPosts room (fun () ->
+        let containerPosts =
+            Set.intersect (seatUnionIn atlas room) (containerTilesIn atlas room)
 
-    if room = atlas.Home then
-        Set.union containerPosts (dualSeatsIn atlas room)
-    else
-        containerPosts
+        if room = atlas.Home then
+            Set.union containerPosts (dualSeatsIn atlas room)
+        else
+            containerPosts)
 
 /// Seats carrying a container **construction site** — the Post a heavy body is
 /// hired for before the container it will dig into exists (amending ADR 0045
@@ -1211,7 +1230,8 @@ let private containerSitePostsIn (atlas: Atlas) (room: string) : Set<Pos> =
 /// 0024), and the only footing a Work-heavy body harvests from (ADR 0020).
 /// Total, room-local and derived fresh each tick.
 let postsIn (atlas: Atlas) (room: string) : Set<Pos> =
-    Set.union (standingPostsIn atlas room) (containerSitePostsIn atlas room)
+    memoised atlas.Posts room (fun () ->
+        Set.union (standingPostsIn atlas room) (containerSitePostsIn atlas room))
 
 /// Every projected room's Posts, counted: the Anchor row's quota (ADR 0012,
 /// widened to the outpost layer by ADR 0042). An outpost's Post is the same
