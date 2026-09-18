@@ -252,6 +252,26 @@ let private decodeCreepLog creep (raw: obj) : CreepLog =
 // One raid episode on the wire: the window, the roster as an array of rows
 // (the id is a field, so a roster reads in order), the closest approach
 // when one was measured, the losses, and the damage in hits (ADR 0034).
+/// A tile **with its room** as a wire object, and the read of one: the shape
+/// the Raid log's coordinates take (#204, #216 R3, #376), where the Layout's
+/// `tileObject` below leaves the room off on purpose. The episode is the
+/// colony's and names no room (ADR 0028), so every coordinate it carries
+/// says its own.
+let private roomPosObject (tile: RoomPos) =
+    let o = createEmpty<obj>
+    o?room <- tile.Room
+    o?x <- tile.X
+    o?y <- tile.Y
+    o
+
+let private roomPosOf (raw: obj) : RoomPos =
+    RoomPos.at
+        (string raw?room)
+        {
+            X = unbox<int> raw?x
+            Y = unbox<int> raw?y
+        }
+
 let private encodeEpisode (episode: RaidEpisode) =
     let o = createEmpty<obj>
     o?opened <- episode.Opened
@@ -275,14 +295,11 @@ let private encodeEpisode (episode: RaidEpisode) =
 
     match episode.Closest with
     | Some approach ->
-        let c = createEmpty<obj>
+        // The room the approach was measured in rides the tile (#204): the
+        // episode is the colony's and names none of its own (ADR 0028), so
+        // without it the coordinate would read as home's.
+        let c = roomPosObject approach.Pos
         c?range <- approach.Range
-        // The room the approach was measured in: the episode is the
-        // colony's and names none of its own (ADR 0028), so without this
-        // the tile would read as home's coordinates.
-        c?room <- approach.Pos.Room
-        c?x <- approach.Pos.X
-        c?y <- approach.Pos.Y
         c?t <- approach.Tick
         o?closest <- c
     | None -> ()
@@ -293,6 +310,14 @@ let private encodeEpisode (episode: RaidEpisode) =
             let d = createEmpty<obj>
             d?creep <- loss.Creep
             d?t <- loss.Tick
+
+            match loss.Where with
+            | Some tile ->
+                d?room <- tile.Room
+                d?x <- tile.X
+                d?y <- tile.Y
+            | None -> ()
+
             d)
         |> List.toArray
 
@@ -348,6 +373,9 @@ let private decodeEpisode (raw: obj) : RaidEpisode =
                 {
                     Creep = string d?creep
                     Tick = unbox<int> d?t
+                    // Absent on a row written before #376, and on a body the
+                    // projection never placed: both read as no tile.
+                    Where = if isNull d?room then None else Some(roomPosOf d)
                 })
             |> Array.toList
         // An episode written before the damage was recorded reads as zero
@@ -844,6 +872,15 @@ let loadRaids (home: string) : RaidState =
             // did before the record existed.
             Threatened = threatMapOf raids?threatened
             Living = raids?living |> unbox<string[]> |> Set.ofArray
+            // The tiles beside the names (#376), absent from a bundle that
+            // predates them: the first loss after a deploy carries no tile.
+            Placed =
+                if isNull raids?placed then
+                    Map.empty
+                else
+                    objectEntries raids?placed
+                    |> Array.map (fun (name, tile) -> name, roomPosOf tile)
+                    |> Map.ofArray
             // The damage baseline, absent from a bundle written
             // before it existed: an empty baseline charges the next
             // tick nothing, which is where a fresh episode starts.
@@ -873,6 +910,9 @@ let saveRaids (home: string) (state: RaidState) =
     // still worth a body — under the room's own key.
     raids?threatened <- state.Threatened |> Map.toSeq |> hashOf encodeThreat
     raids?living <- state.Living |> Set.toArray
+
+    raids?placed <- state.Placed |> Map.toSeq |> hashOf (roomPosObject >> box)
+
     raids?hits <- state.Hits |> Map.toSeq |> hashOf box
     writeColonyLeaf home "raids" raids
 

@@ -838,6 +838,43 @@ let approachTests =
                     [ None ]
                     "the same tile that measured range 2 at home measures nothing from the outpost"
             }
+            // #376: the approach is measured against armed hostiles alone. A
+            // `1 MOVE` scout on our creep's tile is not what separates a probe
+            // from a loss, and live it was such a scout at range 1 on the
+            // Reactor's ring that an episode named while an invader three
+            // rooms away did the killing.
+            test "an unarmed scout at range 1 is no approach; the armed raider further off is" {
+                let scout = raider "SCOUT" "odiodin" { X = 9; Y = 45 } [ Move ]
+
+                let scouted = RaidState.empty |> raidTick 10 { placed with Hostiles = [ scout ] }
+
+                Expect.equal
+                    (scouted.Episodes |> List.map (fun e -> e.Closest))
+                    [ None ]
+                    "the scout opens the episode and is on its roster, but measures no approach"
+
+                let both =
+                    RaidState.empty
+                    |> raidTick
+                        10
+                        { placed with
+                            Hostiles = scout :: squad
+                        }
+
+                Expect.equal
+                    (both.Episodes
+                     |> List.map (fun e -> e.Closest |> Option.map (fun c -> c.Range, c.Pos)))
+                    [
+                        Some(
+                            RoomPos.range
+                                (RoomPos.at raidRoom { X = 38; Y = 47 })
+                                (RoomPos.at raidRoom { X = 10; Y = 40 })
+                            |> Option.get,
+                            RoomPos.at raidRoom { X = 38; Y = 47 }
+                        )
+                    ]
+                    "with the armed raider beside it, the approach is the raider's own range and tile"
+            }
         ]
 
 [<Tests>]
@@ -864,8 +901,67 @@ let lossTests =
 
                 Expect.equal
                     (losses state)
-                    [ { Creep = "w2"; Tick = 10 } ]
+                    [
+                        {
+                            Creep = "w2"
+                            Tick = 10
+                            Where = None
+                        }
+                    ]
                     "the loss the Transition log prunes is the one this channel exists to keep"
+            }
+
+            // #376: the tile the body last stood on rides the loss, read off
+            // the prior tick's placement — the tick it is missing the
+            // projection no longer places it. The episode names no room (ADR
+            // 0028), so this is the only way a reader can tell which of the
+            // colony's rooms a body died in.
+            test "a loss carries the tile the body last stood on, and none when it was never placed" {
+                let withOurs names positions =
+                    { (raid squad) with
+                        Creeps = names |> List.map ours
+                        Spatial =
+                            { (raid squad).Spatial with
+                                Rooms =
+                                    Map.ofList
+                                        [
+                                            raidRoom,
+                                            { RoomLayer.empty with
+                                                CreepPositions = Map.ofList positions
+                                            }
+                                        ]
+                            }
+                    }
+
+                let state =
+                    RaidState.empty
+                    |> raidTick
+                        10
+                        (withOurs
+                            [ "w1"; "w2" ]
+                            [ "w1", { X = 9; Y = 44 }; "w2", { X = 12; Y = 41 } ])
+                    |> raidTick 11 (withOurs [ "w1" ] [ "w1", { X = 9; Y = 44 } ])
+
+                Expect.equal
+                    (losses state)
+                    [
+                        {
+                            Creep = "w2"
+                            Tick = 10
+                            Where = Some(RoomPos.at raidRoom { X = 12; Y = 41 })
+                        }
+                    ]
+                    "the loss names the tile w2 stood on the tick before it went missing"
+
+                let unplaced =
+                    RaidState.empty
+                    |> raidTick 10 (withOurs [ "w1"; "w2" ] [])
+                    |> raidTick 11 (withOurs [ "w1" ] [])
+
+                Expect.equal
+                    (losses unplaced |> List.map (fun loss -> loss.Where))
+                    [ None ]
+                    "a body the projection never placed is stamped with no tile (ADR 0004)"
             }
 
             test "the kill read on the first quiet tick is still the raid's" {
@@ -883,7 +979,13 @@ let lossTests =
 
                 Expect.equal
                     (losses state)
-                    [ { Creep = "w2"; Tick = 10 } ]
+                    [
+                        {
+                            Creep = "w2"
+                            Tick = 10
+                            Where = None
+                        }
+                    ]
                     "the reading lags the death by a tick, and the tick it lands on is the sighting"
             }
 
@@ -1020,7 +1122,13 @@ let lossTests =
 
                 Expect.equal
                     (losses killed)
-                    [ { Creep = "w2"; Tick = 10 } ]
+                    [
+                        {
+                            Creep = "w2"
+                            Tick = 10
+                            Where = None
+                        }
+                    ]
                     "and the same absence with the name gone from the world is the loss it always was"
             }
 

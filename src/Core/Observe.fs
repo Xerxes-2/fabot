@@ -227,8 +227,19 @@ type Approach = { Range: int; Pos: RoomPos; Tick: int }
 
 /// One owned creep gone while a hostile stood in the room, stamped at the
 /// tick it was last seen alive. Recorded here precisely because the
-/// Transition log's fold has already pruned it.
-type Loss = { Creep: string; Tick: int }
+/// Transition log's fold has already pruned it. **With the tile it last stood
+/// on** since #376: the episode is the colony's and names no room (ADR 0028),
+/// so a loss with no room of its own could not say which of the colony's
+/// rooms the body died in — live, 33 bodies killed in W15S27 read as an
+/// errand raid at the Reactor ring three rooms away, and an ADR that had fired
+/// correctly was read as broken. None when the projection never placed the
+/// body (ADR 0004), and for a row written before the tile was kept.
+type Loss =
+    {
+        Creep: string
+        Tick: int
+        Where: RoomPos option
+    }
 
 /// One raid: opened on the first tick any room the colony works and can see
 /// holds a hostile, kept open while hostiles keep appearing, closed by a quiet
@@ -515,6 +526,15 @@ type RaidState =
         /// against the world's living names: a creep another colony adopted
         /// leaves the baseline without dying.
         Living: Set<string>
+        /// The tile each of those bodies last stood on, kept on the same
+        /// condition — an open episode, and empty otherwise (#376): what a
+        /// loss is stamped with, read the tick after the body is gone, when
+        /// the projection no longer places it. Some forty bytes a body against
+        /// `Living`'s ten, so a sixty-body colony writes ~2.5KB a tick while
+        /// a raid is open and nothing while none is. Worked rooms only, as the
+        /// projection is (ADR 0041): a body that dies on a walk through a
+        /// transit room is stamped with no tile.
+        Placed: Map<string, RoomPos>
         /// The previous tick's hits per structure id across the Keep and the
         /// ramparts: the baseline this tick's damage is read against, carried
         /// as `Living` is — only while an episode is open — and only on a tick a
@@ -537,6 +557,7 @@ module RaidState =
             Holds = Map.empty
             Threatened = Map.empty
             Living = Set.empty
+            Placed = Map.empty
             Hits = Map.empty
         }
 
@@ -572,18 +593,26 @@ let private ourTilesIn (view: ColonyView) (room: string) : RoomPos list =
 /// tick of an open episode's quiet gap is one — so it answers before the owned
 /// set is built.
 let private approachAt (view: ColonyView) : Approach option =
-    if List.isEmpty view.Hostiles then
+    // **Armed hostiles alone** since #376: the approach is the number that
+    // separates a probe from a loss, and a `1 MOVE` scout standing on the
+    // Reactor's ring beside our re-claimer is neither. Live it was that scout,
+    // at range 1 in W15S25, that an episode named as its closest approach
+    // while an invader three rooms away killed 33 bodies, and the reading
+    // "an armed raid at the ring" followed. The scouts stay on the roster.
+    let armed = view.Hostiles |> List.filter Decide.Facts.isArmed
+
+    if List.isEmpty armed then
         None
     else
         let ours =
-            view.Hostiles
+            armed
             |> List.map (fun hostile -> hostile.Pos.Room)
             |> List.distinct
             |> List.map (fun room -> room, ourTilesIn view room)
             |> Map.ofList
 
         let measured =
-            view.Hostiles
+            armed
             |> List.collect (fun hostile ->
                 Map.tryFind hostile.Pos.Room ours
                 |> Option.defaultValue []
@@ -988,6 +1017,17 @@ let foldRaids (cap: int) (alive: Set<string>) (view: ColonyView) (prior: RaidSta
         |> List.map (fun creep -> creep.Name)
         |> Set.ofList
 
+    // Where each of ours stands this tick, over every room the projection
+    // places a body in (#376): the tile a loss is stamped with next tick.
+    let placedNow =
+        view.Spatial.Rooms
+        |> Map.toList
+        |> List.collect (fun (room, layer) ->
+            layer.CreepPositions
+            |> Map.toList
+            |> List.map (fun (name, pos) -> name, RoomPos.at room pos))
+        |> Map.ofList
+
     // The hostiles standing in the room the defences are in. Since #201 the
     // sweep behind `ColonyView.Hostiles` covers every room the colony works, so
     // "a hostile" and "a hostile where the Keep is" are two questions, and the
@@ -1043,6 +1083,7 @@ let foldRaids (cap: int) (alive: Set<string>) (view: ColonyView) (prior: RaidSta
                 {
                     Creep = name
                     Tick = episode.LastSeen
+                    Where = Map.tryFind name prior.Placed
                 })
 
     let episode =
@@ -1229,6 +1270,7 @@ let foldRaids (cap: int) (alive: Set<string>) (view: ColonyView) (prior: RaidSta
                 else
                     Map.remove room rooms)
         Living = if Option.isSome episode then surviving else Set.empty
+        Placed = if Option.isSome episode then placedNow else Map.empty
         // The damage baseline, carried on the same condition the damage is
         // charged on (#201): an open episode *and* a hostile in the room the
         // Keep stands in. A tick that carries none leaves the next one nothing

@@ -247,14 +247,16 @@ if (command === "console") {
   // The wire shape written by ObserveMemory.fs:
   //   { episodes: [{ opened, last, roster: [{ id, owner, body: { part: n } }],
   //                  closest?: { range, room, x, y, t },
-  //                  losses: [{ creep, t }],
+  //                  losses: [{ creep, t, room?, x?, y? }],
   //                  damage }],
   //     outposts: [{ room, opened, last, expiry, basis }],
   //     rivalHeld: { <room>: { since, lastLooked } },
-  //     living: [creep], hits: { <structure id>: hits } }
+  //     living: [creep], placed: { <creep>: { room, x, y } },
+  //     hits: { <structure id>: hits } }
   // Stored oldest first like the Transition log's ring, printed newest
-  // first. `closest` is simply absent when nothing of ours could be placed,
-  // and since #216 R3 it names the room the approach was measured in
+  // first. `closest` is simply absent when nothing of ours could be placed
+  // — or, since #376, when no *armed* hostile stood where anything of ours
+  // was — and since #216 R3 it names the room the approach was measured in
   // (#204): the episode is the colony's and names no room of its own (ADR
   // 0028), so a bare coordinate read as home's could not tell an
   // [[outpost]]'s raid from one at the door. An episode written before that
@@ -294,19 +296,36 @@ if (command === "console") {
           .join(" / ");
         console.log(`  ${r.owner}  ${r.id}  ${body}`);
       }
+      // Since #376 the approach is measured against **armed** hostiles alone,
+      // so an episode of scouts and keepers-at-a-distance has none; and a loss
+      // carries the tile the body last stood on, printed grouped by room so
+      // "8 reservers lost in W15S27" is a line and not an inference. A row
+      // written before #376 has no tile and groups under "room unknown".
       console.log(
         e.closest
-          ? `  closest approach: range ${e.closest.range} ` +
+          ? `  closest approach (armed): range ${e.closest.range} ` +
               `at ${e.closest.room ? `${e.closest.room} ` : ""}` +
               `(${e.closest.x},${e.closest.y}) on t${e.closest.t}`
-          : "  closest approach: nothing of ours could be placed",
+          : "  closest approach (armed): none — no armed hostile stood where anything of ours was placed",
       );
       const losses = e.losses ?? [];
-      console.log(
-        losses.length === 0
-          ? "  lost nothing"
-          : `  lost: ${losses.map((l) => `${l.creep} (t${l.t})`).join(", ")}`,
-      );
+      if (losses.length === 0) {
+        console.log("  lost nothing");
+      } else {
+        const byRoom = new Map();
+        for (const l of losses) {
+          const key = l.room ?? "room unknown";
+          if (!byRoom.has(key)) byRoom.set(key, []);
+          byRoom.get(key).push(l);
+        }
+        console.log(`  lost ${losses.length}:`);
+        for (const [room, rows] of byRoom) {
+          const line = rows
+            .map((l) => `${l.creep} (t${l.t}${l.room ? ` @${l.x},${l.y}` : ""})`)
+            .join(", ");
+          console.log(`    ${room}  ${rows.length}: ${line}`);
+        }
+      }
       console.log(`  damage: ${e.damage ?? 0} hits off the Keep and the ramparts`);
       console.log("");
     }
