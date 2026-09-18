@@ -590,6 +590,13 @@ let buildableTilesIn (atlas: Atlas) (room: string) : Pos list =
 let private targetsOfKind (atlas: Atlas) (kind: TargetKind) : string list =
     Map.tryFind kind atlas.KindIds |> Option.defaultValue []
 
+/// The ids of one kind, in id order — `SpatialInfo.idsOfKind`'s answer read
+/// off the census inverted once for the tick (`KindIds`) rather than walked
+/// again per ask. A reader holding an Atlas asks here: the walk is a
+/// `Map.toList` over the whole census per call, and the two pool readers that
+/// asked it six times a tick were 2.3% of a `pair --level 7` tick.
+let idsOfKind (atlas: Atlas) (kind: TargetKind) : string list = targetsOfKind atlas kind
+
 /// The tile an id stands on **in the named room**: None for an id the
 /// projection places in another room or does not place at all (ADR 0004). The
 /// room half is not a nicety — a `Pos` carries no room (ADR 0041), so every

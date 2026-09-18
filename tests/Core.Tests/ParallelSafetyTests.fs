@@ -3,7 +3,8 @@
 /// Expecto runs this suite's tests in parallel, and an `Atlas` is a
 /// single-threaded, per-tick value by construction: it memoises onto mutable
 /// `Dictionary` tables (`SeamWalks`, `Routes`, `FarFields`, `WorkAreas`,
-/// `HeavyAreas`, `Walks`) and hands out resumable `Flood`s that every reader
+/// `HeavyAreas`, `Walks`, `Posts` — examples, not a census; the probe below
+/// reads the record's fields) and hands out resumable `Flood`s that every reader
 /// pushes further out. Production never notices — the bundle is
 /// single-threaded JS — but a fixture that hands *one* Atlas to two tests is
 /// two threads writing one Dictionary, and what comes back is a wrong number

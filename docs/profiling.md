@@ -395,6 +395,14 @@ loss.** A closure per settled tile to shorten the flood's inner loop, a
 structure's tile once instead of three times — each replaced cheap repeated work
 with a cheap allocation *per element*, and the allocation won every time.
 
+The boundary of that rule is the **key**, and it was found by crossing it
+(2026-09-18): a `Dictionary<string, _>` lowers to a native JS `Map` and hashes
+the string for nothing, so the Atlas's two id-to-room joins as string-keyed
+dictionaries took 7% off a `pair --level 7` decide where the union-keyed census
+inversion below took nothing. A union or record key is hashed structurally
+through Fable's own `Dictionary` class and an F# `Map` compares it cheaper;
+a string key is the case the instinct was right about.
+
 What has worked instead, three times out of three: **not doing the work at
 all** (the safe set, the sighting's ids, the keeper mask's rebuild), or
 **doing it once across ticks rather than once per tick** (the far-field memo).
@@ -481,7 +489,18 @@ control flow around it, and the one change that *did* move it (#278's flat
   inclusive samples, all in the snapshot phase; whole tick 3.76–3.89 →
   3.43–3.60 ms, `decide` unmoved. A live probe (a throwaway build writing pop
   counts by call site and `save`-phase sub-timings to `Memory.__probe`)
-  attributed what is left; its table is on #370.
+  attributed what is left; its table is on #370. Then, same round: the Post
+  censuses (`Atlas.postsIn`, `standingPostsIn`, `seatUnionIn`) memoised per
+  room for the tick — `pair --level 7` per-colony `decide` 2.62–2.73 →
+  2.40–2.48 ms (three pairs, both orders, disjoint), `reactor --level 7`
+  2.56–2.60 → 2.42–2.50 (two pairs); the Atlas's two id-to-room joins as
+  string-keyed dictionaries — `pair` 2.63–2.75 → 2.46–2.56 (three pairs,
+  disjoint), `reactor` 2.54–2.57 → 2.43–2.51 (two pairs): the string key is
+  what makes lead 1's instinct right where the union key in § Refusals was
+  wrong; and the pool's two census walks read the inverted census
+  (`Atlas.idsOfKind`) — `pair` 2.63–2.69 → 2.59–2.62, spreads adjacent, under
+  the page's own bar and shipped on the reading that the same ids in the
+  same order cannot cost more than a walk of the census.
 
 The baseline moved with the world it measures, and older numbers do not
 compare with today's: #144 furnished the room and derived the fleet; #163

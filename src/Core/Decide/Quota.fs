@@ -182,7 +182,7 @@ let internal haulerDemandOf (view: ColonyView) atlas : int * HaulDemandRow list 
     // whose room it can price, leaves the list here rather than entering the sum
     // at some default rate.
     let sourceContainers =
-        SpatialInfo.idsOfKind view.Spatial (Structure BuiltKind.Container)
+        Atlas.idsOfKind atlas (Structure BuiltKind.Container)
         |> List.choose (SpatialInfo.placementOf view.Spatial)
         |> List.choose (fun container ->
             sourceContainerServes view container.Room (RoomPos.pos container)

@@ -447,7 +447,9 @@ let planTasks (view: ColonyView) atlas (threats: Threats) (held: HeldTaskFacts) 
     // The ids of one projected kind, in id order. The containers, the
     // Storage and the controllers are all pooled by the projection's kind
     // — never by position, never by name — so the rule is written once.
-    let idsOfKind kind = SpatialInfo.idsOfKind view.Spatial kind
+    // Off the Atlas's inverted census and not a walk of the view's: same ids,
+    // same order (`Atlas.idsOfKind`).
+    let idsOfKind kind = Atlas.idsOfKind atlas kind
 
     // The colony's own controller, and the controller of every child it is
     // still bootstrapping (ADR 0047 decision 4) — half of the one cross-colony
