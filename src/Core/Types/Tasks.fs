@@ -113,6 +113,16 @@ type Capacity =
         /// cap. A positive window releases the incumbent's slot early enough
         /// for the candidate to arrive with this much incumbent life left.
         Handover: int
+        /// An energy budget the holders' **loads** are counted against, where
+        /// every cap above counts holders (#374, ADR 0071): a candidate is
+        /// admitted while what the holders already carry falls short of it.
+        /// The [[refill cluster]]'s free energy, and nothing else: a ring that
+        /// can take a thousand admits a hauler carrying fifteen hundred and
+        /// nobody behind it, or twenty workers carrying fifty apiece — where a
+        /// count divided by one row's load admitted one body whatever it held
+        /// and turned a full courier away from a ring a fifty-energy worker
+        /// was holding. None for every other Task.
+        Budget: int option
     }
 
 [<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
@@ -125,6 +135,7 @@ module Capacity =
             Garrison = Set.empty
             Exempt = Set.empty
             Handover = 0
+            Budget = None
         }
 
     /// One crowd's cap written onto a Task.
@@ -152,6 +163,10 @@ module Capacity =
     /// handover window (#329).
     let handingOver ticks (capacity: Capacity) = { capacity with Handover = ticks }
 
+    /// A budget the holders' loads are counted against (#374): admitted while
+    /// what they carry together falls short of `energy`.
+    let budgeting energy (capacity: Capacity) = { capacity with Budget = Some energy }
+
     /// One number over every class: a Seat count, a store's stock divided
     /// by one load, one holder per controller.
     let total n =
@@ -168,7 +183,8 @@ module Capacity =
 
     /// Whether any cap at all is set — the question that decides whether
     /// the Matcher pays for a walk over the holders (ADR 0029).
-    let isBounded (capacity: Capacity) = not (Map.isEmpty capacity.Caps)
+    let isBounded (capacity: Capacity) =
+        not (Map.isEmpty capacity.Caps) || Option.isSome capacity.Budget
 
 /// One entry of this tick's Task pool: the Task, where it ranks and how many
 /// bodies it admits (ADR 0052 decision 6).

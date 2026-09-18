@@ -250,6 +250,102 @@ let stockDrawTests =
                     "and it is emptied first from the stock's own doorstep too"
             }
 
+            // #374 (ADR 0071): the one exception to the tier gap above. A
+            // colony whose bank cannot afford the hauler unit it would cast
+            // — the supply floor's own body (ADR 0050) — with room in its
+            // ring is **starved**, and there the stock's draw ranks with the
+            // flow's, so travel cost decides: the body on the Storage's
+            // doorstep draws the Storage, the body at the container draws
+            // the container. The 300 bank's `4C/2M` costs 300, so a bank at
+            // 100 with fifty of room in the spawn is starved and a full bank
+            // is not.
+            test
+                "a starved cluster lets the stock tie the flow, and travel cost sends the near body to the stock" {
+                let starved pos =
+                    { drawColony
+                          (Map.ofList [ "can-src", 500; "can-ctrl", 800; "sto-1", 500 ])
+                          (creepWith "h1" 0 100 [ Carry; Carry; Move ])
+                          pos with
+                        Bank = bank 100 300
+                        Refillables = [ refillable "spawn-1" 50 BuiltKind.Spawn ]
+                    }
+
+                Expect.equal
+                    (decideOn (starved { X = 16; Y = 10 })).Verdicts
+                    [
+                        Verdict.Matched(
+                            "h1",
+                            taskId (Withdraw("sto-1", Energy)),
+                            MatchFactor.TravelCost
+                        )
+                    ]
+                    "on the stock's doorstep, starved: the stock, and by travel cost — the ranks tie"
+
+                Expect.equal
+                    (decideOn (starved { X = 10; Y = 10 })).Verdicts
+                    [
+                        Verdict.Matched(
+                            "h1",
+                            taskId (Withdraw("can-src", Energy)),
+                            MatchFactor.TravelCost
+                        )
+                    ]
+                    "beside the container, starved: the flow, for the same reason"
+
+                let fed =
+                    { starved { X = 16; Y = 10 } with
+                        Bank = bank 300 300
+                    }
+
+                Expect.equal
+                    (decideOn fed).Verdicts
+                    [
+                        Verdict.Matched(
+                            "h1",
+                            taskId (Withdraw("can-src", Energy)),
+                            MatchFactor.Rank
+                        )
+                    ]
+                    "a bank that can afford its hauler is not starved: ADR 0023's gap stands and rank decides"
+            }
+
+            test
+                "the starved stock draw admits the loads the ring can take, not the loads the stock holds" {
+                // Two empty carriers on the Storage's doorstep, fifty of room
+                // in the ring and a 200 load: one draw on the stock, and the
+                // second body goes to the flow — #367's lesson read down the
+                // energy column, a lift to Feeding without a cap being every
+                // carrier in the colony draining the stock.
+                let colony =
+                    { drawColony
+                          (Map.ofList [ "can-src", 500; "can-ctrl", 800; "sto-1", 5_000 ])
+                          (creepWith "h1" 0 100 [ Carry; Carry; Move ])
+                          { X = 16; Y = 10 } with
+                        Bank = bank 100 300
+                        Refillables = [ refillable "spawn-1" 50 BuiltKind.Spawn ]
+                    }
+
+                let second = creepWith "h2" 0 100 [ Carry; Carry; Move ]
+
+                let both =
+                    { colony with
+                        Creeps = second :: colony.Creeps
+                        Spatial = colony.Spatial |> withCreepsAt [ "h2", { X = 15; Y = 10 } ]
+                    }
+
+                let { Assignments = assignments } = decideOn both
+
+                Expect.hasLength
+                    (holdersOf (Withdraw("sto-1", Energy)) assignments)
+                    1
+                    "fifty of room is one load's errand, whatever the stock holds"
+
+                Expect.hasLength
+                    (holdersOf (Withdraw("can-src", Energy)) assignments)
+                    1
+                    "and the other body hauls the flow"
+            }
+
             test "topping up from the stock outbids surplus work" {
                 // The tier's other neighbour: the stock is drawn on above
                 // everything the colony merely spends energy on, so a

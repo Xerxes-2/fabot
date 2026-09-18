@@ -819,6 +819,21 @@ let planPool (view: ColonyView) atlas (tasks: Task list) : PooledTask list =
     // it, this bounds it, and the Atlas lays its Work Area off it.
     let cluster = Atlas.cluster atlas
 
+    let isStorage id =
+        Map.tryFind id view.Spatial.TargetKinds = Some(Structure BuiltKind.Storage)
+
+    // What the ring can still take, and whether the colony is **starved** at
+    // it (#374, ADR 0071): room in the cluster, and a bank that cannot afford
+    // the [[hauler unit]] it would cast at its own capacity — the supply
+    // floor's own body (ADR 0050), read as an affordability rather than as a
+    // "can anything refill" question. Two readers below: the Storage draw's
+    // tier and its cap.
+    let clusterRoom = cluster |> Option.map RefillCluster.free |> Option.defaultValue 0
+
+    let clusterStarved =
+        clusterRoom > 0
+        && view.Bank.Available < bodyCost (bodyFor haulerPattern view.Bank.Capacity)
+
     // The [[ferry]]'s sinks, named by the one rule three readers share
     // (`ferryBuffers`): what a mother lends a bootstrapping child is
     // written down and bounded, so the Refill `planTasks` pooled for the
@@ -1099,15 +1114,27 @@ let planPool (view: ColonyView) atlas (tasks: Task list) : PooledTask list =
         // while the programme that walks it is actually open — with no resident
         // re-claimer and no errand there is no delivery for this rung to be
         // about, and the ore is plain stock again.
-        | Withdraw(storeId, Thorium) when
-            Map.tryFind storeId view.Spatial.TargetKinds = Some(Structure BuiltKind.Storage)
-            && Facts.courierProgrammeOpen view atlas
-            ->
+        | Withdraw(storeId, Thorium) when isStorage storeId && Facts.courierProgrammeOpen view atlas ->
             Feeding
         | Withdraw(_, Thorium) -> StockDraw
+        // **The stock feeds a starved cluster at the flow's own rank** (#374,
+        // ADR 0071): ADR 0023's tier gap stands — the Storage is stock and the
+        // flow is emptied first — with one exception, opened by the fact the
+        // supply floor reads (ADR 0050): the bank cannot afford the hauler
+        // unit it would cast. Below that line the spawn is not casting
+        // anything, the rows it wants stay unhired, and the flow that was to
+        // fill the ring is the flow those unhired rows would have carried, so
+        // the gap the tier was keeping is the loop the colony is stuck in.
+        // Live W15S28 stood at 1,214 of 2,000 with 234,360 in the Storage one
+        // tile from the ring, its carriers walking to W15S29 for 540. A tie
+        // with the containers and not a rank over them — travel cost then
+        // sends the body beside the Storage to the Storage and the body
+        // beside a container to the container — and capped in `capacityOf`
+        // at the loads the ring can take, so it is one body's errand and
+        // never the colony's.
         | Withdraw(storeId, Energy) ->
-            if Map.tryFind storeId view.Spatial.TargetKinds = Some(Structure BuiltKind.Storage) then
-                StockDraw
+            if isStorage storeId then
+                if clusterStarved then Feeding else StockDraw
             else
                 Feeding
         // **A Thorium pile ranks where the Thorium container does** (#311,
@@ -1567,11 +1594,18 @@ let planPool (view: ColonyView) atlas (tasks: Task list) : PooledTask list =
         // cadence and the row's quota is 1. Read through the same two facts the
         // tier is — the store is a Storage, the programme is open — so the cap
         // and the rank cannot come to disagree about which draw this is.
-        | Withdraw(storeId, Thorium) when
-            Map.tryFind storeId view.Spatial.TargetKinds = Some(Structure BuiltKind.Storage)
-            && Facts.courierProgrammeOpen view atlas
-            ->
+        | Withdraw(storeId, Thorium) when isStorage storeId && Facts.courierProgrammeOpen view atlas ->
             Capacity.total 1
+        // **The starved cluster's draw on the stock admits the loads the ring
+        // can take** (#374, ADR 0071), not the loads the Storage divides into:
+        // lifted to Feeding below it would otherwise be #367's hazard on the
+        // energy column — every empty carrier in the colony drawing on a
+        // 234,000 store — where what the lift is for is one body topping the
+        // ring up from the stock beside it while the rest go on hauling the
+        // flow. At least one, or the lift would be a rank on a Task nobody may
+        // hold.
+        | Withdraw(storeId, Energy) when clusterStarved && isStorage storeId ->
+            Capacity.total (max 1 (ceilDiv clusterRoom haulerLoad))
         | Withdraw(storeId, resource) ->
             let stock = SpatialInfo.heldIn view.Spatial resource storeId
 
@@ -1598,10 +1632,21 @@ let planPool (view: ColonyView) atlas (tasks: Task list) : PooledTask list =
         // gather every loaded body onto one ring and leave the [[buffer]] and
         // the [[storage]] unvisited. Divided by the [[hauler unit]]'s load and
         // never a candidate's own carry, and a `Total` with no per-class share.
+        //
+        // **A budget the holders' loads are counted against, since #374** (ADR
+        // 0071), and no longer a count of bodies: `ceil(free / one hauler
+        // load)` was one body for any ring under a load and a half of room —
+        // W15S28's whole 2,300 cluster above 35% full — and *which* body was
+        // whoever got there first, a worker carrying fifty from across the
+        // room as readily as the courier beside the Storage with 718 aboard.
+        // What the sentence above meant is what the budget says: a second
+        // body joins while what stands empty exceeds what the bodies already
+        // aimed at the ring are carrying. Still a number about the Task and
+        // not about the candidate — the ring's room — and the Matcher reads
+        // the holders' loads against it the way it reads their count against
+        // a cap.
         | Refill(spawnId, _) when cluster |> Option.exists (fun c -> c.Spawn = spawnId) ->
-            let free = cluster |> Option.map RefillCluster.free |> Option.defaultValue 0
-
-            Capacity.total (ceilDiv free haulerLoad)
+            Capacity.unbounded |> Capacity.budgeting clusterRoom
         // The lend, bounded (ADR 0052 decision 7): `Tuning.FerryLoads` bodies
         // at the child's buffer and no more, the same number the hauler row was
         // raised by, so a human retuning the lend retunes the hire with it. A

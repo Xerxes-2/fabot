@@ -31,6 +31,14 @@ let matchCreeps
     // and both are view facts that cannot move inside a tick.
     let lives = view.Creeps |> List.map (fun c -> c.Name, c.TicksToLive) |> Map.ofList
 
+    // What each body carries, for the one cap that is a number about loads
+    // and not about holders (#374): the [[refill cluster]]'s budget. Energy
+    // alone, because the ring takes nothing else.
+    let carried = view.Creeps |> List.map (fun c -> c.Name, c.Energy) |> Map.ofList
+
+    let carriedBy name =
+        Map.tryFind name carried |> Option.defaultValue 0
+
     let classes =
         view.Creeps
         |> List.map (fun c -> c.Name, bodyClassOf view.Tuning atlas c)
@@ -127,8 +135,9 @@ let matchCreeps
 
     // Holders against numbers, and nothing else (ADR 0052 decision 6): the
     // total the Task admits, the share each scope the candidate falls in
-    // admits, and the tiles whose standing bodies hold a slot without holding
-    // the Task. A candidate standing on an `Exempt` tile is outside all of it —
+    // admits, the tiles whose standing bodies hold a slot without holding the
+    // Task, and — since #374 — the energy budget the holders' loads are read
+    // against. A candidate standing on an `Exempt` tile is outside all of it —
     // the one body a budget that prices a commute never priced (#205).
     let hasCapacity (creep: CreepInfo) acc (pooled: PooledTask) (arrival: Lazy<int option>) =
         let capacity = pooled.Capacity
@@ -193,20 +202,33 @@ let matchCreeps
             // whose crowd the candidate's own class does not fall in is not its
             // cap — that is how a rule says "this number is about somebody
             // else's crowd" — and so is a class the Atlas cannot name.
-            capacity.Caps
-            |> Map.forall (fun scope limit ->
-                match scope with
-                // The one cap that refuses a class outright rather than counting
-                // it (ADR 0056): a `Fighters` number admits that many Fighters
-                // and no body of any other class, because the scopes above
-                // cannot spell "not a Fighter" — `Commuters` and `Generalists`
-                // both contain it — and a scope a class falls outside of means
-                // "somebody else's crowd", which is the opposite of a refusal.
-                | CapScope.Fighters -> cls = Some Fighter && counted scope < limit
-                | _ ->
-                    match cls with
-                    | Some c when appliesTo scope c -> counted scope < limit
-                    | _ -> true)
+            let capsHold =
+                capacity.Caps
+                |> Map.forall (fun scope limit ->
+                    match scope with
+                    // The one cap that refuses a class outright rather than counting
+                    // it (ADR 0056): a `Fighters` number admits that many Fighters
+                    // and no body of any other class, because the scopes above
+                    // cannot spell "not a Fighter" — `Commuters` and `Generalists`
+                    // both contain it — and a scope a class falls outside of means
+                    // "somebody else's crowd", which is the opposite of a refusal.
+                    | CapScope.Fighters -> cls = Some Fighter && counted scope < limit
+                    | _ ->
+                        match cls with
+                        | Some c when appliesTo scope c -> counted scope < limit
+                        | _ -> true)
+
+            // The budget is a number about **loads** (#374): the holders'
+            // carried energy together, against what the Task can still take.
+            // Strict, like every cap above — a ring with room for exactly
+            // what its holders carry admits nobody more — and read over the
+            // same arrival-counted holders, so a body still walking counts
+            // what it carries and a body that has poured counts nothing.
+            let budgetHolds =
+                capacity.Budget
+                |> Option.forall (fun budget -> (holders |> List.sumBy carriedBy) < budget)
+
+            capsHold && budgetHolds
 
     // The vision grace (#151): a Task leaves the pool for two opposite reasons
     // and its id alone cannot tell them apart — the target was destroyed, or

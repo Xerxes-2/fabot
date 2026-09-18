@@ -158,12 +158,17 @@ let refillClusterTests =
     testList
         "refill cluster"
         [
-            test "the cluster admits as many bodies as its free energy divides into loads" {
-                // ADR 0054's bound, pinned pairwise at the one line it can
-                // be wrong on: the 300 bank casts a `4C/2M` hauler, so one
-                // load is 200 — a hundred of room draws one body and three
-                // hundred draws two. Two loaded carriers standing on either
-                // side of the spawn, so nothing but the cap separates them.
+            test "the cluster admits bodies while its room exceeds what the holders carry" {
+                // ADR 0054's bound as #374 restated it (ADR 0071): a budget
+                // the holders' **loads** are counted against, not a count of
+                // bodies. Two carriers holding fifty apiece stand on either
+                // side of the spawn, so nothing but the budget separates
+                // them: a hundred of room takes both (the first holds
+                // nothing against it, the second finds fifty short of a
+                // hundred), forty takes one (fifty is not short of forty).
+                // Under the old `ceil(free / one load)` — a 200 load at this
+                // bank — a hundred of room admitted exactly one body whatever
+                // either carried.
                 let colony free =
                     clusterColony
                         (free, 0, 0)
@@ -178,8 +183,51 @@ let refillClusterTests =
 
                     holdersOf (Refill("spawn-1", Energy)) assignments
 
-                Expect.hasLength (holders 100) 1 "one load of room admits one body"
-                Expect.hasLength (holders 300) 2 "and two loads' worth admits the second"
+                Expect.hasLength
+                    (holders 40)
+                    1
+                    "forty of room: the first body's fifty already covers it"
+
+                Expect.hasLength
+                    (holders 100)
+                    2
+                    "a hundred of room: fifty short after the first, so the second joins"
+            }
+
+            test
+                "a full carrier joins a ring a light load is already aimed at, while the room covers both" {
+                // The live shape #374 was filed on: W15S28's ring at a
+                // thousand of room, a worker carrying fifty holding the one
+                // slot `ceil(1000 / 1500)` admitted, and the courier beside
+                // the Storage with a full store turned away capacity-full.
+                // Here the 300 bank's `4C/2M` carries 200: with the light
+                // body already holding, 200 of room admits the loaded one
+                // (fifty short of two hundred) and 50 of room does not.
+                let colony free =
+                    clusterColony
+                        (free, 0, 0)
+                        [
+                            creepWith "light" 50 150 [ Carry; Carry; Carry; Carry; Move; Move ]
+                            creepWith "full" 200 0 [ Carry; Carry; Carry; Carry; Move; Move ]
+                        ]
+                        [ "light", { X = 9; Y = 10 }; "full", { X = 11; Y = 10 } ]
+
+                let sticky = Map.ofList [ "light", taskId (Refill("spawn-1", Energy)) ]
+
+                let holders free =
+                    let { Assignments = assignments } = decideFrom sticky (colony free)
+
+                    holdersOf (Refill("spawn-1", Energy)) assignments |> List.sort
+
+                Expect.equal
+                    (holders 200)
+                    [ "full"; "light" ]
+                    "two hundred of room: the light holder's fifty leaves room, so the full body joins it"
+
+                Expect.equal
+                    (holders 50)
+                    [ "light" ]
+                    "fifty of room: the light holder's fifty covers it, and the full body is refused"
             }
 
             test "an extension filled while a body walks costs it a neighbour, not its Task" {
@@ -265,10 +313,10 @@ let refillClusterTests =
             }
 
             test "a load the ring no longer has room for is released capacity-full" {
-                // The price ADR 0054 records rather than removes. The cap
-                // is `ceil(free / one load)` and the ring's free energy
-                // only falls, so on the tick it crosses a load boundary one
-                // of the bodies aimed at the ring is released — and since
+                // The price ADR 0054 records rather than removes. The ring's
+                // free energy only falls, so on the tick it falls under what
+                // the bodies aimed at it carry (#374's budget, where ADR 0054
+                // read a count of loads) one of them is released — and since
                 // #230 it is the body **furthest** from the ring, not the
                 // one whose name sorts later. `h2` is standing beside the
                 // spawn with a full store and pours this tick; `h1` is seven
@@ -303,18 +351,20 @@ let refillClusterTests =
 
                     holdersOf (Refill("spawn-1", Energy)) assignments, verdicts
 
-                // Four hundred of room is two of the 300 bank's 200-energy
-                // loads, so both bodies keep what they hold.
+                // Four hundred of room against two bodies carrying fifty
+                // apiece: both keep what they hold (#374: the budget counts
+                // the loads, so it is a hundred against four hundred).
                 Expect.equal
                     (fst (outcome (300, 100, 0)))
                     [ "h1"; "h2" ]
-                    "two loads' worth of room holds two bodies"
+                    "room for both loads holds two bodies"
 
-                // One load poured into the ring, and the second body's load
-                // is one too many for what is left.
-                let holders, verdicts = outcome (200, 0, 0)
+                // The ring drained to forty: the body beside the spawn keeps
+                // its slot (nothing held against it), and the walker's fifty
+                // is not short of the forty left.
+                let holders, verdicts = outcome (40, 0, 0)
 
-                Expect.equal holders [ "h2" ] "one load's worth of room holds the body that arrived"
+                Expect.equal holders [ "h2" ] "room for one load holds the body that arrived"
 
                 Expect.contains
                     verdicts
