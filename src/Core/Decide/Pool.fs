@@ -822,6 +822,15 @@ let planPool (view: ColonyView) atlas (tasks: Task list) : PooledTask list =
     let isStorage id =
         Map.tryFind id view.Spatial.TargetKinds = Some(Structure BuiltKind.Storage)
 
+    // Whether an object stands in a room this colony declared an [[errand]] in
+    // (#378) — the Reactor's own room, where ore on the floor is the
+    // delivery's business and not the stock's.
+    let errandRooms = Facts.errandRooms view
+
+    let besideTheReactor id =
+        SpatialInfo.roomOf view.Spatial id
+        |> Option.exists (fun room -> Set.contains room errandRooms)
+
     // What the ring can still take, and whether the colony is **starved** at
     // it (#374, ADR 0071): room in the cluster, and a bank that cannot afford
     // the [[hauler unit]] it would cast at its own capacity — the supply
@@ -1116,6 +1125,21 @@ let planPool (view: ColonyView) atlas (tasks: Task list) : PooledTask list =
         // about, and the ore is plain stock again.
         | Withdraw(storeId, Thorium) when isStorage storeId && Facts.courierProgrammeOpen view atlas ->
             Feeding
+        // **Ore lying in the Reactor's own room is the delivery's, not stock**
+        // (#378, #367's finding one object over). A tombstone or a pile in a
+        // declared [[errand]] room is season score at the far end of the
+        // delivery's own walk, and ranked `StockDraw` it lost every
+        // travel-cost tie to the energy work at home — live at t559,469 a
+        // courier hauled a W15S27 container's energy while 500 T sat in a
+        // tombstone beside the Reactor, decaying. What it is worth is what
+        // the Storage's own draw is worth, so it ranks where that draw ranks;
+        // its sink is the Reactor five tiles away (`Planner.reactorRefills`),
+        // not the Storage three crossings back. Ore in a merely **crossed**
+        // room keeps `StockDraw` and its walk home: out there the nearest
+        // store really is the Storage, and the body rejoins the programme by
+        // banking it.
+        | Withdraw(storeId, Thorium) when besideTheReactor storeId -> Feeding
+        | Pickup(pileId, Thorium) when besideTheReactor pileId -> Feeding
         | Withdraw(_, Thorium) -> StockDraw
         // **The stock feeds a starved cluster at the flow's own rank** (#374,
         // ADR 0071): ADR 0023's tier gap stands — the Storage is stock and the
@@ -1606,6 +1630,12 @@ let planPool (view: ColonyView) atlas (tasks: Task list) : PooledTask list =
         // hold.
         | Withdraw(storeId, Energy) when clusterStarved && isStorage storeId ->
             Capacity.total (max 1 (ceilDiv clusterRoom haulerLoad))
+        // One body goes and fetches what is lying beside the Reactor (#378):
+        // the errand room is three crossings out, the ore is a finite
+        // remainder, and a crowd sent for it is a crowd taken off the economy
+        // for four hundred ticks apiece. Above the general Withdraw arm, which
+        // would otherwise divide a tombstone's holding into hauler loads.
+        | Withdraw(storeId, Thorium) when besideTheReactor storeId -> Capacity.total 1
         | Withdraw(storeId, resource) ->
             let stock = SpatialInfo.heldIn view.Spatial resource storeId
 
@@ -1620,6 +1650,7 @@ let planPool (view: ColonyView) atlas (tasks: Task list) : PooledTask list =
         // resource's map, so the pile that is 630 of Thorium admits the loads
         // 630 of Thorium divides into and the energy it holds none of admits
         // nobody.
+        | Pickup(pileId, Thorium) when besideTheReactor pileId -> Capacity.total 1
         | Pickup(pileId, resource) ->
             Capacity.total (ceilDiv (SpatialInfo.heldIn view.Spatial resource pileId) haulerLoad)
         // **The [[refill cluster]] is bounded by what it can still hold** (ADR

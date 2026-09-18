@@ -332,6 +332,18 @@ let internal applicable
         // than once per candidate per tick. An unpriceable walk does not
         // refuse (ADR 0004), and a colony with no errand declared has nothing
         // to forall over — which is every colony before this season.
+        // **The life a loaded leg costs, with the slack the gate leaves over
+        // it** (#378, `Tuning.DeliveryLifeMargin`). Written as the bare
+        // `walk * MineContactAgeing` this clause was an equality against a
+        // *priced* walk, and every difference between that price and the walk
+        // a body actually makes came out of a margin that was not there: live,
+        // `hauler-558190` drew with about two ticks over a 196-tick leg and
+        // died in the Reactor's room with the load aboard. The margin is what
+        // a flee, a keeper detour or a swamp step is paid out of.
+        let requiredLife walk =
+            walk * view.Tuning.MineContactAgeing * (100 + view.Tuning.DeliveryLifeMargin)
+            / 100
+
         let outlivesTheLoadedLeg =
             match SpatialInfo.placementOf view.Spatial storeId with
             | None -> true
@@ -342,7 +354,7 @@ let internal applicable
                 |> List.forall (fun errand ->
                     match Atlas.walkTicksFrom atlas loaded store (snd errand.Target) with
                     | None -> true
-                    | Some walk -> creep.TicksToLive >= walk * view.Tuning.MineContactAgeing)
+                    | Some walk -> creep.TicksToLive >= requiredLife walk)
 
         // **And no Work part on the delivery draw** (#373). Part arithmetic
         // and not a row (ADR 0006), and the same shape of clause as ADR
@@ -438,6 +450,21 @@ let internal applicable
         // The exact delivery load is its body/task marker, not the courier's
         // name: any light carrier may draw it, and once drawn it waits for the
         // Reactor rather than pouring it straight back into Storage.
+        //
+        //
+        // **A remainder is not that number and is not refused here** (#378).
+        // Widening this clause to "any ore, once the mine is out" was tried and
+        // taken back out: `oreStillComing` is false for every colony with no
+        // diggable deposit, so the widening refused the Storage to the last
+        // *mine* haul, to a body sweeping a crossed room's pile, and to the
+        // carrier walking an arriving consignment in from the terminal (#349) —
+        // the one sink `Planner.mineRefills` is written unconditionally to
+        // guarantee, and #262's stranded carrier all over again. What sends a
+        // remainder to the Reactor instead is the tier gap that was always
+        // going to decide it: the Reactor's Refill is Feeding and this one is
+        // Stock (ADR 0023), so the body prefers the Reactor while it can act on
+        // it and banks the ore when it cannot, which is the right answer to a
+        // full Reactor and to a body that has run out of leg.
         && (not storage || creep.Thorium <> view.Tuning.ReactorLoad)
     // The body gate on Build (#157, widened to every Build by #234), here for
     // the same reason ADR 0016's Withdraw gate is: the ladder lifts a site over
@@ -547,12 +574,19 @@ let private intentFor (view: ColonyView) atlas (creep: CreepInfo) task =
     // that is decision 4's.
     | Withdraw(storeId, resource) ->
         let amount =
+            // The one place a number is named, and since #378 it is the
+            // tick's own load rather than the constant: a whole
+            // `Tuning.ReactorLoad` while the mine still feeds the bank, the
+            // remainder when it does not. Zero means there is no delivery draw
+            // to spell an amount for, so the Withdraw is the ordinary one.
             if
                 resource = Thorium
                 && Map.tryFind storeId view.Spatial.TargetKinds = Some(Structure BuiltKind.Storage)
                 && view.Errands |> List.isEmpty |> not
             then
-                Some view.Tuning.ReactorLoad
+                match Facts.deliveryLoad view atlas with
+                | 0 -> None
+                | load -> Some load
             else
                 None
 

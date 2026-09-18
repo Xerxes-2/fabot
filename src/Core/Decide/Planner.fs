@@ -730,9 +730,19 @@ let planTasks (view: ColonyView) atlas (threats: Threats) (held: HeldTaskFacts) 
     // the same fact until applicability releases it empty.
     let deliveryOpen = courierProgrammeOpen view atlas
 
+    // **The load this tick's draw takes** (#378), which is a whole
+    // `Tuning.ReactorLoad` while the mine still feeds the bank and the
+    // remainder once it does not. Read once and used by all three of the rules
+    // below, because the amount the draw admits, the amount that marks a
+    // delivery in flight and the room the Reactor must have for it are one
+    // number: the old code wrote `Tuning.ReactorLoad` at each of the three, and
+    // a partial last load makes that spelling wrong in three places at once.
+    let loadNow = deliveryLoad view atlas
+
+    let stillComing = oreStillComing view atlas
+
     let deliveryInFlight =
-        view.Creeps
-        |> List.exists (fun creep -> creep.Thorium = view.Tuning.ReactorLoad)
+        view.Creeps |> List.exists (carryingADelivery view loadNow stillComing)
 
     // The draw is gated on the Reactor having room for the whole load (#354),
     // which is what meters supply against a store that burns 1 T a tick. A
@@ -742,10 +752,9 @@ let planTasks (view: ColonyView) atlas (threats: Threats) (held: HeldTaskFacts) 
     // the Reactor room's floor that way. Held work is untouched: the sink
     // below keeps a load already drawn, whatever the store has become.
     let deliveryWithdraws =
-        if deliveryOpen && reactorTakesALoad view then
+        if deliveryOpen && reactorTakesALoad view loadNow then
             storages
-            |> List.filter (fun id ->
-                SpatialInfo.heldIn view.Spatial Thorium id >= view.Tuning.ReactorLoad)
+            |> List.filter (fun id -> SpatialInfo.heldIn view.Spatial Thorium id >= loadNow)
             |> List.map (fun id -> Withdraw(id, Thorium))
         else
             []
@@ -758,8 +767,18 @@ let planTasks (view: ColonyView) atlas (threats: Threats) (held: HeldTaskFacts) 
             let owner = Map.tryFind reactorId view.Spatial.Owners
             let stored = SpatialInfo.heldIn view.Spatial Thorium reactorId
 
+            // **And ore already lying in the Reactor's own room opens it**
+            // (#378): a pile or a tombstone out there is score at the far end
+            // of the delivery's walk, and the body that picks it up is five
+            // tiles from the store it belongs in. Without this clause the only
+            // sink such a body had was the Storage three crossings back, so
+            // 500 T from a courier that died on the leg was carried home to be
+            // carried out again — if anything fetched it at all.
             if
-                (deliveryOpen || deliveryInFlight || Set.contains (taskId task) held.WithThorium)
+                (deliveryOpen
+                 || deliveryInFlight
+                 || oreBesideTheReactor view
+                 || Set.contains (taskId task) held.WithThorium)
                 && (owner = Some Ownership.Ours || owner = Some Ownership.Unowned)
                 && stored < Engine.reactorCapacity
             then

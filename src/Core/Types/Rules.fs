@@ -389,6 +389,19 @@ type Tuning =
         /// ageing waiting for room, and died holding ore. 915 T reached the
         /// Reactor room's floor that way (#354).
         ReactorLoad: int
+        /// The slack a delivery gate leaves over its own arithmetic, as a
+        /// percentage (#378). `Emitter.outlivesTheLoadedLeg` admits a body on
+        /// `TicksToLive >= walk * MineContactAgeing`, and written as that bare
+        /// equality it is a gate that fails on any difference between the walk
+        /// the Atlas prices and the walk the body makes: a [[flee]] (ADR 0033),
+        /// a [[keeper margin]] detour, one swamp step, a tick spent yielding.
+        /// Live, `hauler-558190` drew with about two ticks of margin over a
+        /// 196-tick leg and died in the Reactor's own room with 500 T aboard,
+        /// which is the whole cost of the missing slack: not a body, the ore.
+        /// A percentage rather than a fixed number of ticks because what it
+        /// insures against scales with the leg — a three-crossing delivery has
+        /// three borders to be pushed back from and a short haul has none.
+        DeliveryLifeMargin: int
         /// The energy a terminal is kept stocked with, to pay `send`'s fee out
         /// of (#349). Energy sitting in a terminal is energy out of the
         /// economy — it buys no body and upgrades no controller — so this is
@@ -614,6 +627,7 @@ module Tuning =
             MineContactAgeing = 3
             MineContactCliff = 1000
             ReactorLoad = 500
+            DeliveryLifeMargin = 25
             TerminalEnergy = 4_000
             BuildTicksPerLife = 300
             DeliveryInterval = 636

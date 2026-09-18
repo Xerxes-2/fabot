@@ -185,6 +185,16 @@ let private holds name task (colony: ColonyView) =
 /// `Tuning.ReactorLoad`. Read off the Atlas and not asserted: the clause is
 /// pinned to the walk the colony prices, not to a number that moves with the
 /// floor under it.
+/// The life the delivery draw asks of a body for a leg of this length (#378):
+/// three ticks a tick on the hot tile, plus `Tuning.DeliveryLifeMargin`. Read
+/// through the knob rather than written out, so the cases below pin the rule
+/// and not the number the knob happens to hold.
+let private lifeNeededFor leg =
+    leg
+    * Tuning.defaults.MineContactAgeing
+    * (100 + Tuning.defaults.DeliveryLifeMargin)
+    / 100
+
 let private loadedLegOf (creep: CreepInfo, colony: ColonyView) =
     let store =
         match SpatialInfo.placementOf colony.Spatial "sto-1" with
@@ -880,8 +890,7 @@ let courierTests =
                         taskId (Withdraw("sto-1", Thorium))
                     )
 
-                let needed =
-                    loadedLegOf (atStorage Engine.creepLifetime) * Tuning.defaults.MineContactAgeing
+                let needed = lifeNeededFor (loadedLegOf (atStorage Engine.creepLifetime))
 
                 Expect.isTrue
                     (draws (atStorage needed))
@@ -977,19 +986,247 @@ let courierTests =
                     emptyLeg
                     "the premise: loaded, this body is slower than the empty walk the gate used to read"
 
-                let ageing = Tuning.defaults.MineContactAgeing
-
                 Expect.isFalse
-                    (draws (atStorage (emptyLeg * ageing)))
-                    "the life that covered the empty walk three times over is refused: it does not cover the loaded one"
+                    (draws (atStorage (lifeNeededFor emptyLeg)))
+                    "the life that covered the empty walk is refused: it does not cover the loaded one"
 
                 Expect.isTrue
-                    (draws (atStorage (loadedLeg * ageing)))
-                    "the life that covers the loaded leg at the contact rate draws"
+                    (draws (atStorage (lifeNeededFor loadedLeg)))
+                    "the life that covers the loaded leg at the contact rate, with the margin, draws"
 
                 Expect.isFalse
-                    (draws (atStorage (loadedLeg * ageing - 1)))
+                    (draws (atStorage (lifeNeededFor loadedLeg - 1)))
                     "one tick short of it is refused"
+
+                // #378: the margin itself. `hauler-558190` drew live with
+                // about two ticks over a 196-tick leg and died in the
+                // Reactor's room with 500 T aboard, because the gate was the
+                // bare equality and the walk the body makes is not the walk
+                // the Atlas prices — a flee, a keeper detour, a swamp step.
+                Expect.isFalse
+                    (draws (atStorage (loadedLeg * Tuning.defaults.MineContactAgeing)))
+                    "exactly the loaded leg's own arithmetic, with no slack over it, is refused"
+            }
+
+            // #378, the three parts of the last load, on the fixture the
+            // delivery pair already uses.
+            //
+            // Live at t559,469 the Reactor ran down toward zero with **376 T**
+            // standing in W15S28's Storage, because `courierProgrammeOpen` and
+            // the draw both read `stock >= Tuning.ReactorLoad` and 376 is not
+            // 500. Every deposit we owned was mined out, so there was never
+            // going to be a fuller load: the gate could not say "this is the
+            // last of it" and the season's remainder was unreachable by
+            // construction.
+            test
+                "the last load is drawn whole once no more ore is coming, and the full-load gate stands while it is" {
+                let banked amount digging =
+                    let ready = deliveryColony (Some Ownership.Ours) |> paved
+
+                    { ready with
+                        Spatial =
+                            { ready.Spatial with
+                                Thorium =
+                                    ready.Spatial.Thorium
+                                    |> Map.add "sto-1" amount
+                                    |> Map.add "can-min" 0
+                                    |> Map.add "min-a" (if digging then 22_000 else 0)
+                            }
+                    }
+
+                let partial = Tuning.defaults.ReactorLoad - 124
+
+                Expect.isFalse
+                    (planTasksOn (banked partial true) noThreats
+                     |> List.contains (Withdraw("sto-1", Thorium)))
+                    "while the mine still feeds the bank, a part load buys no courier: the remainder is the front of a queue"
+
+                Expect.contains
+                    (planTasksOn (banked partial false) noThreats)
+                    (Withdraw("sto-1", Thorium))
+                    "with nothing left to dig, the remainder is all there will be and the draw opens on it"
+
+                let empty = courier "courier-last"
+
+                let atStorage = banked partial false |> withHomeCreep { X = 13; Y = 10 } empty
+
+                Expect.contains
+                    (emitOn atStorage [ empty.Name, Withdraw("sto-1", Thorium) ])
+                    (WithdrawFromStore(empty.Name, "sto-1", Thorium, Some partial))
+                    "and the Intent names the remainder, where it names the whole load when there is one"
+
+                Expect.contains
+                    (emitOn
+                        (banked Tuning.defaults.ReactorLoad false
+                         |> withHomeCreep { X = 13; Y = 10 } empty)
+                        [ empty.Name, Withdraw("sto-1", Thorium) ])
+                    (WithdrawFromStore(
+                        empty.Name,
+                        "sto-1",
+                        Thorium,
+                        Some Tuning.defaults.ReactorLoad
+                    ))
+                    "a whole load is still a whole load"
+            }
+
+            // #378's second part. A body holding the last load must have the
+            // Reactor as its sink, or the remainder is drawn and poured back
+            // into the store it came out of once a tick for ever: the marker
+            // that pools that sink is the exact `ReactorLoad`, which a
+            // remainder is not, so `Facts.carryingADelivery` carries the
+            // terminal state's own reading beside it.
+            //
+            // What *prefers* the Reactor is the tier gap and not a refusal
+            // (ADR 0023): the Reactor's Refill is Feeding and the Storage's is
+            // Stock. Refusing the Storage outright was tried and taken back
+            // out — it reached the last mine haul and an arriving
+            // consignment's carrier, which is #262's stranded body — so the
+            // Storage stays a sink for the tick the Reactor cannot be one.
+            test "a body holding the last load takes it to the Reactor, and may still bank it" {
+                let carrier = courier "courier-holding" |> carrying 376
+
+                let colony =
+                    let ready = deliveryColony (Some Ownership.Ours) |> paved
+
+                    { ready with
+                        Spatial =
+                            { ready.Spatial with
+                                Thorium =
+                                    ready.Spatial.Thorium
+                                    |> Map.add "sto-1" 0
+                                    |> Map.add "can-min" 0
+                                    |> Map.add "min-a" 0
+                            }
+                    }
+                    |> withHomeCreep { X = 13; Y = 10 } carrier
+
+                Expect.contains
+                    (planTasksOn colony noThreats)
+                    (Refill(reactor, Thorium))
+                    "the load is in flight by the only reading left: nothing is mining, so ore aboard is a delivery"
+
+                Expect.isTrue
+                    (colony |> holds carrier.Name (Refill(reactor, Thorium)))
+                    "and the body prefers it to the store it was drawn from, on the tier gap alone"
+
+                Expect.contains
+                    (planTasksOn colony noThreats)
+                    (Refill("sto-1", Thorium))
+                    "the Storage is still a sink: a body that cannot reach the Reactor banks the ore rather than standing on it"
+            }
+
+            // The regression the widened refusal would have caused, pinned so
+            // it cannot come back (#378, found by this change's spec review).
+            // `oreStillComing` is false for **every** colony with nothing left
+            // to dig, so a rule keyed on it alone reaches bodies that have
+            // nothing to do with the delivery: the hauler carrying the mine's
+            // last load home, a body sweeping a crossed room's pile, and the
+            // carrier walking an arriving consignment in from the terminal
+            // (#349). All three bank into the Storage, and `Planner.mineRefills`
+            // is written unconditionally so that they can.
+            test "a mined-out colony still banks ore too heavy for the Reactor" {
+                // The body is a carrier holding **more than one load** — the
+                // shape an arriving consignment's hauler has (#349), and the
+                // one the Reactor's own Refill turns away on
+                // `creep.Thorium <= ReactorLoad`. Its only sink is the
+                // Storage, so a rule that refuses the Storage to "a body
+                // holding ore in a mined-out colony" leaves it applicable to
+                // nothing at all.
+                let hauler =
+                    creepWith
+                        "hauler-arrival"
+                        0
+                        900
+                        (List.replicate 30 Carry @ List.replicate 15 Move)
+                    |> carrying (Tuning.defaults.ReactorLoad + 100)
+
+                let colony =
+                    let ready = deliveryColony (Some Ownership.Ours) |> paved
+
+                    { ready with
+                        Spatial =
+                            { ready.Spatial with
+                                Thorium =
+                                    ready.Spatial.Thorium
+                                    |> Map.add "sto-1" 0
+                                    |> Map.add "can-min" 0
+                                    |> Map.add "min-a" 0
+                            }
+                    }
+                    |> withHomeCreep { X = 13; Y = 10 } hauler
+
+                Expect.contains
+                    (planTasksOn colony noThreats)
+                    (Refill("sto-1", Thorium))
+                    "the sink the mine haul and the arrival haul both depend on is pooled whatever the mine has become"
+
+                Expect.isTrue
+                    (colony |> holds hauler.Name (Refill("sto-1", Thorium)))
+                    "and the body holds it: refusing this leaves an over-full carrier applicable to nothing (#262)"
+            }
+
+            // #378's third part, and #367's finding one object over. A
+            // tombstone beside the Reactor is season score at the far end of
+            // the delivery's own walk; ranked `StockDraw` it lost every
+            // travel-cost tie to the energy work at home, and live 500 T sat
+            // in `hauler-558190`'s tombstone in W15S25 decaying while a
+            // courier hauled a container's energy three rooms away.
+            test
+                "ore lying in the Reactor's room ranks with the delivery and its sink is the Reactor" {
+                let tombTile = { X = 26; Y = 45 }
+
+                let colony =
+                    let ready = deliveryColony (Some Ownership.Ours) |> paved
+                    let layer = SpatialInfo.layerOf ready.Spatial errandRoom
+
+                    { ready with
+                        Spatial =
+                            { ready.Spatial with
+                                TargetKinds =
+                                    Map.add "tomb-reactor" Tombstone ready.Spatial.TargetKinds
+                                Thorium =
+                                    ready.Spatial.Thorium
+                                    |> Map.add "tomb-reactor" Tuning.defaults.ReactorLoad
+                                    |> Map.add "sto-1" 0
+                                    |> Map.add "can-min" 0
+                                    |> Map.add "min-a" 0
+                            }
+                            |> withNeighbour
+                                errandRoom
+                                { layer with
+                                    TargetPositions =
+                                        Map.add "tomb-reactor" tombTile layer.TargetPositions
+                                }
+                    }
+
+                let draw = taskId (Withdraw("tomb-reactor", Thorium))
+
+                let pooled = poolOn colony |> List.tryFind (fun entry -> taskId entry.Task = draw)
+
+                match pooled with
+                | None ->
+                    failtest
+                        "the tombstone's ore is pooled, which is the premise every part of this rests on"
+                | Some entry ->
+                    Expect.isLessThan
+                        entry.Priority
+                        (priorityOfTier StockDraw)
+                        "it does not rank as stock: three rooms out, stock loses every tie to the energy at home"
+
+                    Expect.isLessThanOrEqual
+                        entry.Priority
+                        (priorityOfTier Feeding)
+                        "it ranks with the feeding work, which is where the delivery's own draw ranks (#367)"
+
+                    Expect.equal
+                        (Capacity.capOf CapScope.Everyone entry.Capacity)
+                        (Some 1)
+                        "and one body goes for it: the ore is a finite remainder three crossings away"
+
+                Expect.contains
+                    (planTasksOn colony noThreats)
+                    (Refill(reactor, Thorium))
+                    "the sink is the Reactor five tiles away, not the Storage three crossings back"
             }
 
             // #354's third clause, at the one end this fixture can show. The
@@ -1328,7 +1565,7 @@ let courierTests =
                     |> withHomeCreep { X = 13; Y = 10 } aged
 
                 let leg = loadedLegOf (atStorage Engine.creepLifetime)
-                let creep, colony = atStorage (leg * Tuning.defaults.MineContactAgeing - 1)
+                let creep, colony = atStorage (lifeNeededFor leg - 1)
 
                 Expect.isFalse
                     (colony |> holds creep.Name (Withdraw("sto-1", Thorium)))

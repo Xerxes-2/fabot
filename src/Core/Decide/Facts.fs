@@ -311,9 +311,13 @@ let internal ourDeposits (view: ColonyView) : string list =
 /// copies of one sentence are free to disagree about whose a room is, which is
 /// the failure mode that made the alarm silent through the incident it was
 /// built for.
+/// The rooms this colony has declared an [[errand]] in, as a set — the join
+/// four rules of the season's ore make, written once (#378).
+let internal errandRooms (view: ColonyView) : Set<string> =
+    view.Errands |> List.map (fun errand -> errand.RoomName) |> Set.ofList
+
 let private oursToSweep (view: ColonyView) (id: string) : bool =
-    let errandRooms =
-        view.Errands |> List.map (fun errand -> errand.RoomName) |> Set.ofList
+    let errandRooms = errandRooms view
 
     inARoomWeOwn view id
     || SpatialInfo.roomOf view.Spatial id
@@ -420,7 +424,7 @@ let internal ourThoriumTombstones (view: ColonyView) : string list =
 /// closed once in flight, and ore went on arriving at a full store and ending
 /// up on its floor. The unit test agreed with it because the fixture wrote the
 /// store where the gate looked — a projection shape `World` has never built.
-let internal reactorTakesALoad (view: ColonyView) : bool =
+let internal reactorTakesALoad (view: ColonyView) (load: int) : bool =
     let afloat = view.Creeps |> List.sumBy (fun creep -> creep.Thorium)
 
     view.Errands
@@ -430,7 +434,7 @@ let internal reactorTakesALoad (view: ColonyView) : bool =
         view.Reactors
         |> List.exists (fun reactor ->
             reactor.Id = reactorId
-            && reactor.Thorium + afloat + view.Tuning.ReactorLoad <= Engine.reactorCapacity))
+            && reactor.Thorium + afloat + load <= Engine.reactorCapacity))
 
 /// The **mineral [[container]]s** of this colony's own deposits, in deposit
 /// order (ADR 0057 decision 3): the built container standing on a deposit's
@@ -512,9 +516,12 @@ let internal depositIsDiggable (view: ColonyView) atlas (depositId: string) =
 /// standing** (#361). Ore in the bank scores exactly what ore in the ground
 /// scores; the mine decides only whether the bank is *refilled*.
 ///
-/// `hasLoad` is what makes that safe, and it is unchanged: the programme wants
-/// a whole `ReactorLoad` in a Storage before it hires anybody, so a closing
-/// programme now means an empty bank rather than an empty mine.
+/// `hasLoad` is what makes that safe: the programme wants ore in a Storage
+/// before it hires anybody, so a closing programme means an empty bank rather
+/// than an empty mine. Since #378 that is a whole `ReactorLoad` while more ore
+/// is coming and the **remainder** once it is not (`deliveryLoad`), which
+/// leaves the safety argument above intact and adds the case it could not
+/// express: a bank holding less than one load is still a bank holding ore.
 /// The energy standing in this colony's Storages — its **stock**, as against
 /// `ColonyView.Bank`'s spawn account (ADR 0023). Read by the worker row's
 /// backlog term (#364), which is paid out of the stock and not out of income:
@@ -534,15 +541,98 @@ let internal stockedEnergy (view: ColonyView) : int =
                 total)
         0
 
-let internal courierProgrammeOpen (view: ColonyView) atlas =
-    let hasLoad =
-        view.Spatial.TargetKinds
-        |> Map.exists (fun id kind ->
-            kind = Structure BuiltKind.Storage
-            && SpatialInfo.heldIn view.Spatial Thorium id >= view.Tuning.ReactorLoad)
+/// Whether more ore is still on its way to the [[storage]] (#378): a deposit
+/// of ours with an extractor over it and something left to dig, or ore already
+/// standing in a mineral [[container]] waiting for its haul. The question the
+/// last load turns on — while this is true the remainder in the Storage is the
+/// front of a queue, and while it is false the remainder is all there will ever
+/// be.
+let internal oreStillComing (view: ColonyView) atlas : bool =
+    ourDeposits view |> List.exists (depositIsDiggable view atlas)
+    || ourMineralContainers view
+       |> List.exists (fun id -> SpatialInfo.heldIn view.Spatial Thorium id > 0)
 
-    let errandRooms =
-        view.Errands |> List.map (fun errand -> errand.RoomName) |> Set.ofList
+/// The most ore any one [[storage]] of this colony banks — a **maximum** and
+/// not `stockedEnergy`'s sum beside it, because the draw this feeds is one
+/// body at one store and what it can take is what that store holds.
+let internal mostOreInAStorage (view: ColonyView) : int =
+    view.Spatial.TargetKinds
+    |> Map.fold
+        (fun most id kind ->
+            if kind = Structure BuiltKind.Storage then
+                max most (SpatialInfo.heldIn view.Spatial Thorium id)
+            else
+                most)
+        0
+
+/// **What the next delivery draw takes, and 0 when there is none to take**
+/// (#378). A whole `Tuning.ReactorLoad` while the mine still feeds the bank,
+/// and the **remainder** once it does not: the gate used to read
+/// `stock >= ReactorLoad` on both the programme and the draw, so the last
+/// partial load was unreachable by construction — live at t559,469 the Reactor
+/// ran down toward zero with 376 T standing in the Storage ten tiles from the
+/// courier, because 376 is not 500 and nothing in the programme could say
+/// "this is the last of it". The full-load gate is kept while ore is still
+/// coming, so a trickle passing through the Storage mid-mining never hires a
+/// courier for forty units; what opens the partial draw is precisely the fact
+/// that there will be no fuller one (`oreStillComing`).
+let internal deliveryLoad (view: ColonyView) atlas : int =
+    let banked = mostOreInAStorage view
+
+    if banked >= view.Tuning.ReactorLoad then
+        view.Tuning.ReactorLoad
+    elif banked > 0 && not (oreStillComing view atlas) then
+        banked
+    else
+        0
+
+/// Whether the ore a body holds is a **delivery's** — drawn for the Reactor
+/// and not hauled out of a mine (#378). The Planner pools the Reactor's sink
+/// off this and the Emitter refuses the Storage's off it, which is one
+/// question asked from both ends: what a body took is where it must put it
+/// down.
+///
+/// Three ways to be one, and the third is what the partial load needed. The
+/// **exact `ReactorLoad`** is the historical marker (ADR 0067) and still the
+/// common one: a body holding precisely the programme's load did not get it
+/// from a mineral container by accident. **This tick's own load** carries the
+/// same argument for a remainder. And in the terminal state — a colony that
+/// declared the errand, with nothing left to dig and nothing standing in a
+/// mineral container — **any** ore aboard is a delivery's: the draw empties
+/// the bank, so a remainder that was 376 on the tick it was taken is measured
+/// against a load of 0 on the tick after, and without this clause the
+/// Reactor's sink would stop being pooled for the body carrying it.
+///
+/// Read by the **Planner**, which pools a sink, and by nothing that refuses
+/// one: a permissive answer here costs an entry in the pool, where the same
+/// answer in the Emitter refused the Storage to the last mine haul, to a body
+/// sweeping a crossed room's pile and to the carrier walking an arriving
+/// consignment in from the terminal (#349) — #262's stranded body again.
+let internal carryingADelivery
+    (view: ColonyView)
+    (load: int)
+    (stillComing: bool)
+    (creep: CreepInfo)
+    =
+    creep.Thorium > 0
+    && (creep.Thorium = view.Tuning.ReactorLoad
+        || creep.Thorium = load
+        || (not stillComing && not (List.isEmpty view.Errands)))
+
+/// Whether ore is lying in a declared [[errand]] room — a pile or a tombstone
+/// beside the Reactor itself (#378). Season score at the far end of the
+/// delivery's own walk: a courier that dies loaded leaves 500 T five tiles from
+/// the store it was carrying it to, and until this fact existed the only sink
+/// such ore had was the Storage three crossings back the way it came.
+let internal oreBesideTheReactor (view: ColonyView) : bool =
+    ourThoriumTombstones view @ ourThoriumPiles view
+    |> List.exists (fun id ->
+        SpatialInfo.roomOf view.Spatial id
+        |> Option.exists (fun room -> Set.contains room (errandRooms view)))
+
+let internal courierProgrammeOpen (view: ColonyView) atlas =
+    let hasLoad = deliveryLoad view atlas > 0
+    let errandRooms = errandRooms view
 
     let hasResidentReclaimer =
         view.Creeps
