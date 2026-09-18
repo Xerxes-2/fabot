@@ -264,6 +264,20 @@ let internal applicable
         // and the miner's next dig bleeds onto the ground. The column is read
         // here all the same, because which stock a Withdraw is worth is a
         // question about its own resource on any tier it is ever ranked at.
+        // The clause reaches the **Storage's** Thorium draw alone: that is the
+        // delivery's intake, and the mine haul's — a container under the
+        // miner's feet — is a walk of a few tiles onto the same room's floor.
+        // **In a colony that has declared the errand** (#373): a consignor's
+        // Storage is drawn for its own terminal (#349), a leg of a few tiles
+        // with no crossing on it, and that draw is a Storage's Thorium too.
+        // The errand is what tells the two apart, and it is the same test the
+        // Intent's own 500-unit clause reads (`intentFor`); the programme's
+        // *open* half is the Pool's to ask, because the delivery draw is only
+        // pooled while it is.
+        let deliveryDraw =
+            Map.tryFind storeId view.Spatial.TargetKinds = Some(Structure BuiltKind.Storage)
+            && not (List.isEmpty view.Errands)
+
         let stock = SpatialInfo.heldIn view.Spatial resource storeId
 
         let worthTheTrip =
@@ -287,7 +301,26 @@ let internal applicable
             // the tier — there is no intake below the Storage's — and a
             // disjunct that is right by an arithmetic coincidence two rows away
             // is the kind of thing a wider body silently breaks.
+            // **The column this is still for is the energy one** (#380). It
+            // was written as the rank comparison because the Storage's draw
+            // sat at `StockDraw` when #232 wrote it, and #367 then moved the
+            // *ore* half of that draw to `Feeding` — where `0 >= 5` is false
+            // and the escape quietly stopped applying to the one draw that
+            // needed it most. The comment above called that shot ("a disjunct
+            // that is right by an arithmetic coincidence two rows away is the
+            // kind of thing a wider body silently breaks") and it came true one
+            // ticket later: while the draw only ever opened at a whole
+            // `ReactorLoad` the two conditions coincided, and the tick #378
+            // made the last partial load drawable, 376 T stood in the Storage
+            // with the Reactor dry for 424 ticks and no body applicable to it.
             || pooled.Priority >= priorityOfTier StockDraw - tierRungs / 2
+            // So the ore half says it in its own words instead of borrowing a
+            // rank: **the delivery's draw is always worth the trip**, by the
+            // escape's own argument rather than by its arithmetic. What the
+            // line buys is a fall to a deeper intake and the Storage's ore has
+            // none — a body refused it stands idle while the Reactor burns
+            // down, which is the opposite of what refusing a trip is for.
+            || deliveryDraw
             || (buffer && standing)
 
         // **The Thorium arm is a different sentence** (ADR 0057 decision 3),
@@ -372,20 +405,6 @@ let internal applicable
         // tombstone draw keep the worker: those legs are a few tiles onto the
         // same floor, and the clause is read behind `deliveryDraw` alone.
         let carriesOnly = not (has Work)
-
-        // The clause reaches the **Storage's** Thorium draw alone: that is the
-        // delivery's intake, and the mine haul's — a container under the
-        // miner's feet — is a walk of a few tiles onto the same room's floor.
-        // **In a colony that has declared the errand** (#373): a consignor's
-        // Storage is drawn for its own terminal (#349), a leg of a few tiles
-        // with no crossing on it, and that draw is a Storage's Thorium too.
-        // The errand is what tells the two apart, and it is the same test the
-        // Intent's own 500-unit clause reads (`intentFor`); the programme's
-        // *open* half is the Pool's to ask, because the delivery draw is only
-        // pooled while it is.
-        let deliveryDraw =
-            Map.tryFind storeId view.Spatial.TargetKinds = Some(Structure BuiltKind.Storage)
-            && not (List.isEmpty view.Errands)
 
         match resource with
         | Thorium ->

@@ -1035,6 +1035,18 @@ let courierTests =
                     (WithdrawFromStore(empty.Name, "sto-1", Thorium, Some partial))
                     "and the Intent names the remainder, where it names the whole load when there is one"
 
+                // #380: a pooled Task nobody may hold is not a delivery. The
+                // remainder is under half this body's carry, so #232's
+                // worth-the-trip line refuses it unless the delivery draw is
+                // exempt — and the exemption used to be carried by a rank
+                // comparison that #367's tier lift silently falsified. Live
+                // that left 376 T in the Storage with the Reactor dry for 424
+                // ticks and no body applicable to the draw, while the pooling
+                // assertion above passed.
+                Expect.isTrue
+                    (atStorage |> holds empty.Name (Withdraw("sto-1", Thorium)))
+                    "and a body may actually hold it: the store is worth the trip because the ore has nowhere deeper to fall"
+
                 Expect.contains
                     (emitOn
                         (banked Tuning.defaults.ReactorLoad false
