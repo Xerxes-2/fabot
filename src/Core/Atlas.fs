@@ -3140,6 +3140,58 @@ let private castAlong
     | [ _ ] -> Array.create tileCount unreached
     | first :: _ -> foldChain atlas factor Walk (first, near) (hopsAlong chain)
 
+/// The table behind `castWalkTicks` and `walkTicksFrom`: every tile of
+/// `goalRoom` priced for one fatigue factor from the free neighbours of one
+/// home tile, memoised the way the spawn walks always were — on the tile, the
+/// factor and the goal room — so two bodies of one shape asking from one tile
+/// share it. That sharing is what lets the delivery draw's gate (#373) price
+/// its leg from the Storage for every candidate on every tick it is pooled:
+/// the key is the store's tile and the body's *loaded* shape, neither of which
+/// moves with the candidate, so the flood runs once per body shape and not
+/// once per candidate per tick. None when the goal room has no route from
+/// home; a tile with no free neighbour answers a table nobody reaches, which
+/// every reader turns into None (ADR 0004). A goal across a border is the
+/// minimum over the Seam band, the one join every cross-room price is read off
+/// (ADR 0030), through `castAlong` for the reason written there.
+let private castTable
+    (atlas: Atlas)
+    (factor: FatigueFactor)
+    (from: Pos)
+    (goalRoom: string)
+    : int[] option =
+    let near () =
+        memoised atlas.Walks (from, factor, atlas.Home) (fun () ->
+            let dist, _ =
+                walkFloodFromAll
+                    (weightsOf atlas atlas.Home)
+                    factor
+                    (adjacentWalkableIn atlas atlas.Home from)
+
+            dist)
+
+    if goalRoom = atlas.Home then
+        Some(near ())
+    else
+        match atlas.Walks.TryGetValue((from, factor, goalRoom)) with
+        | true, table -> Some table
+        | _ ->
+            match routes atlas atlas.Home goalRoom with
+            | [] -> None
+            | chains ->
+                // The cheapest chain per **tile**, which is the same choice
+                // the join makes and the shape a lead is answered in (#288):
+                // one table holds every goal in the room at once, so the
+                // minimum is taken elementwise rather than over one goal's
+                // price. A single chain reduces to the table it always was,
+                // untouched and uncopied.
+                let table =
+                    chains
+                    |> List.map (castAlong atlas factor (near ()))
+                    |> List.reduce (Array.map2 min)
+
+                atlas.Walks.[(from, factor, goalRoom)] <- table
+                Some table
+
 /// The walk in whole ticks a freshly cast body needs to stand on a tile (ADR
 /// 0026) — the half of a lead that is paid after the spawner is done. Keyed on
 /// a body rather than a creep name, because the body has not been cast yet and
@@ -3164,55 +3216,39 @@ let castWalkTicks
     (spawnTile: Pos)
     (target: RoomPos)
     : int option =
-    let factor = emptyFactorOf body
-    let spawn = spawnTile
-    let goalRoom = target.Room
-    let goal = RoomPos.pos target
-
-    let arrival (table: int[]) =
-        match table.[indexOf goal] with
+    castTable atlas (emptyFactorOf body) spawnTile target.Room
+    |> Option.bind (fun table ->
+        match table.[indexOf (RoomPos.pos target)] with
         | d when d = unreached -> None
-        | d -> Some d
+        | d -> Some d)
 
-    // The near leg, and the whole of a home-room lead: the flood out of the
-    // tiles beside the spawner, over the colony's own room's weights,
-    // recalled from the plan memo while the census holds (ADR 0032).
-    let near () =
-        memoised atlas.Walks (spawn, factor, atlas.Home) (fun () ->
-            let dist, _ =
-                walkFloodFromAll
-                    (weightsOf atlas atlas.Home)
-                    factor
-                    (adjacentWalkableIn atlas atlas.Home spawn)
-
-            dist)
-
-    if goalRoom = atlas.Home then
-        arrival (near ())
+/// The walk in whole ticks a body of one fatigue factor makes from beside a
+/// home tile to beside a target (#373): the delivery's loaded leg, priced from
+/// the store the load is drawn at and for the body **as loaded**, rather than
+/// from wherever the candidate stands and for the body as it stands. The
+/// candidate stands empty when it asks — it has to, to draw — and an empty
+/// body is not the one that walks the leg (`Grid.factorCarrying`). Starts on
+/// the store's free neighbours, which is where a body that has just drawn is
+/// standing, and ends on the target's, which is where a Refill acts from; the
+/// two are what `haulRoundTripTicks` prices for the hauler quota, read one way.
+/// Traffic-blind and priced as a walk (ADR 0029), like every lead. None for a
+/// store outside the home room — the delivery draws from the home Storage and
+/// nothing else is this function's to price — and for a target no route
+/// reaches (ADR 0004): an unpriceable leg refuses nobody.
+let walkTicksFrom
+    (atlas: Atlas)
+    (factor: FatigueFactor)
+    (from: RoomPos)
+    (target: RoomPos)
+    : int option =
+    if from.Room <> atlas.Home then
+        None
     else
-        // Not `memoised`: a miss has to read the band first and answer
-        // absent without writing anything, which that shape cannot do — it
-        // fills every key it is asked with. The lookup still comes first, so
-        // the band is walked once per census rather than once per ask.
-        match atlas.Walks.TryGetValue((spawn, factor, goalRoom)) with
-        | true, table -> arrival table
-        | _ ->
-            match routes atlas atlas.Home goalRoom with
-            | [] -> None
-            | chains ->
-                // The cheapest chain per **tile**, which is the same choice
-                // the join makes and the shape a lead is answered in (#288):
-                // one table holds every goal in the room at once, so the
-                // minimum is taken elementwise rather than over one goal's
-                // price. A single chain reduces to the table it always was,
-                // untouched and uncopied.
-                let table =
-                    chains
-                    |> List.map (castAlong atlas factor (near ()))
-                    |> List.reduce (Array.map2 min)
-
-                atlas.Walks.[(spawn, factor, goalRoom)] <- table
-                arrival table
+        castTable atlas factor (RoomPos.pos from) target.Room
+        |> Option.bind (fun table ->
+            nearestReached
+                (reachedIn table)
+                (adjacentWalkableIn atlas target.Room (RoomPos.pos target)))
 
 /// Cheapest raw-terrain path for a trunk road (ADR 0011): plain 2, swamp
 /// `Tuning.TrunkSwampWeight` — no road discount and no occupancy surcharge, so

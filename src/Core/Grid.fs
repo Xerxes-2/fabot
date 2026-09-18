@@ -77,6 +77,28 @@ let internal fatigueFactorOf (creep: CreepInfo) : FatigueFactor =
         MoveParts = partCount creep.Body Move
     }
 
+/// The fatigue factor a living creep would have holding `load` units of one
+/// resource and nothing else (#373) — the body the delivery draw prices its
+/// loaded leg for. `fatigueFactorOf` above reads the body as it stands, and
+/// the body asking for that draw stands **empty**, because it has to be empty
+/// to draw; the leg it is asking about is walked loaded. The two factors are
+/// not one number with a load added: a courier's `20C 10M` is weightless empty
+/// and at parity under `Tuning.ReactorLoad` (10 loaded Carry against 10 Move),
+/// where a worker's `11W 12C 12M` is at parity empty and two ticks a tile
+/// loaded (21 against 12), so a gate priced off the empty factor let the
+/// worker through at half the walk it went on to make, and it died of ore
+/// ageing on the leg with the season's ore aboard. Public, unlike its
+/// neighbours, for the reason `Pool.bodyClassOf` and `bodyFor` are (ADR
+/// 0006): a body fact a test reads directly — the gate's test reads the leg
+/// through it, and one that re-derived the factor by hand would pin a number
+/// and not the rule.
+let factorCarrying (creep: CreepInfo) (load: int) : FatigueFactor =
+    fatigueFactorOf
+        { creep with
+            Energy = 0
+            Thorium = load
+        }
+
 /// The fatigue factor of a body list carrying nothing — the shape a body
 /// leaves the spawner in. Beside `fatigueFactorOf`, which reads a living
 /// creep; this one reads a body the projection carries no creep for: the

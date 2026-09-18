@@ -1184,6 +1184,53 @@ let reclaimerRelayTests =
                     // thing it bought.
                     Expect.equal loadedWalk (Some 159) "the loaded body clock over the real terrain"
 
+                    // #373, over the same captures: the leg as the delivery
+                    // draw's gate now prices it — from beside W15S28's Storage
+                    // at (17,29), for the body carrying `Tuning.ReactorLoad`,
+                    // to the Reactor's ring — for the courier and for the
+                    // `11W 12C 12M` worker that took two of its loads live.
+                    // The courier is at fatigue parity under 500 (10 loaded
+                    // Carry against 10 Move); the worker is 21 against 12,
+                    // two ticks a plain tile, and its **empty** walk is the
+                    // parity one — which is the number the gate used to read
+                    // for it, and half of what it went on to walk.
+                    let storage = RoomPos.at "W15S28" { X = 17; Y = 29 }
+                    let target = RoomPos.at "W15S25" { X = 44; Y = 6 }
+
+                    let worker =
+                        AtlasFixtures.creepWith
+                            "worker-route"
+                            0
+                            (List.replicate 11 Work
+                             @ List.replicate 12 Carry
+                             @ List.replicate 12 Move)
+
+                    let legOf (creep: CreepInfo) =
+                        walkTicksFrom
+                            atlas
+                            (Fabot.Core.Grid.factorCarrying creep Tuning.defaults.ReactorLoad)
+                            storage
+                            target
+
+                    Expect.equal
+                        (legOf courier)
+                        (Some 196)
+                        "the courier's loaded leg from the Storage: 588 ticks of life at the contact rate, inside a fresh 1,500"
+
+                    Expect.equal
+                        (legOf worker)
+                        (Some 385)
+                        "the worker's loaded leg from the same Storage: 1,155 of life at the contact rate — the dead worker drew with 920 left"
+
+                    Expect.equal
+                        (walkTicksFrom
+                            atlas
+                            (Fabot.Core.Grid.factorCarrying worker 0)
+                            storage
+                            target)
+                        (Some 196)
+                        "the worker's empty walk, which is what the gate read for it before #373: half the leg it went on to make"
+
                     // A `[Claim; Move]` body is one fatigue part against one
                     // Move, so it walks a plain tile in one tick and pays
                     // extra for a swamp. **160 ticks** against the ADR's 154

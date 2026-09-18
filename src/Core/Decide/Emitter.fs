@@ -315,23 +315,65 @@ let internal applicable
         // its own tile hot, so it decays at the same three-fold rate and
         // drops the ore as a pile that then bleeds at 1 T a tick.
         //
-        // Asked of the Reactor's own Refill, which is the leg this load is
-        // for, so the Atlas answers off the cross-room price the delivery
-        // pays anyway. An unpriceable walk does not refuse (ADR 0004), and a
-        // colony with no errand declared has nothing to forall over — which
-        // is every colony before this season.
+        // Priced **from the store, for the body as loaded** (#373), and not
+        // from where the candidate stands for the body as it stands. The
+        // candidate is empty when it asks — `emptyHanded` below is the gate —
+        // and an empty body is not the one that walks the leg: a worker's
+        // `11W 12C 12M` is at fatigue parity empty and two ticks a tile under
+        // `Tuning.ReactorLoad`, so read off the empty body this clause let one
+        // through at half the walk it went on to make, and it died of ore
+        // ageing in the Reactor's room with 500 T in its tombstone. The
+        // courier's `20C 10M` is the other way about — weightless empty, at
+        // parity loaded — which is why the number ADR 0067 sized the row
+        // against was right for it and for it alone. From the store, because
+        // that is where the loaded leg begins, and because the store's tile
+        // and the loaded shape are the same for every candidate, so the Atlas
+        // prices the leg once per body shape (`Atlas.walkTicksFrom`) rather
+        // than once per candidate per tick. An unpriceable walk does not
+        // refuse (ADR 0004), and a colony with no errand declared has nothing
+        // to forall over — which is every colony before this season.
         let outlivesTheLoadedLeg =
-            view.Errands
-            |> List.forall (fun errand ->
-                match Atlas.walkTicks atlas creep.Name (Refill(fst errand.Target, Thorium)) with
-                | None -> true
-                | Some walk -> creep.TicksToLive >= walk * view.Tuning.MineContactAgeing)
+            match SpatialInfo.placementOf view.Spatial storeId with
+            | None -> true
+            | Some store ->
+                let loaded = Grid.factorCarrying creep view.Tuning.ReactorLoad
+
+                view.Errands
+                |> List.forall (fun errand ->
+                    match Atlas.walkTicksFrom atlas loaded store (snd errand.Target) with
+                    | None -> true
+                    | Some walk -> creep.TicksToLive >= walk * view.Tuning.MineContactAgeing)
+
+        // **And no Work part on the delivery draw** (#373). Part arithmetic
+        // and not a row (ADR 0006), and the same shape of clause as ADR
+        // 0016's comparative gate read the other way round: a Work part is
+        // dead weight on a leg that is all carrying, it is what puts the body
+        // above parity at exactly the load the programme carries, and it is
+        // what the body was cast to spend at home. ADR 0067 sized the
+        // programme as one `[20 Carry; 10 Move]` body, and "one fixed body"
+        // was a row fact and never a gate: any empty light carrier of 500 or
+        // more could win this draw, and once #367 ranked it at the top of
+        // Feeding the empty workers refuelling beside the Storage did — two
+        // 500 T loads went out on worker bodies in one delivery slot, the
+        // courier hauling energy the while, and the second was still afloat
+        // while the Reactor burned down from 176. The mine haul and the
+        // tombstone draw keep the worker: those legs are a few tiles onto the
+        // same floor, and the clause is read behind `deliveryDraw` alone.
+        let carriesOnly = not (has Work)
 
         // The clause reaches the **Storage's** Thorium draw alone: that is the
         // delivery's intake, and the mine haul's — a container under the
         // miner's feet — is a walk of a few tiles onto the same room's floor.
+        // **In a colony that has declared the errand** (#373): a consignor's
+        // Storage is drawn for its own terminal (#349), a leg of a few tiles
+        // with no crossing on it, and that draw is a Storage's Thorium too.
+        // The errand is what tells the two apart, and it is the same test the
+        // Intent's own 500-unit clause reads (`intentFor`); the programme's
+        // *open* half is the Pool's to ask, because the delivery draw is only
+        // pooled while it is.
         let deliveryDraw =
             Map.tryFind storeId view.Spatial.TargetKinds = Some(Structure BuiltKind.Storage)
+            && not (List.isEmpty view.Errands)
 
         match resource with
         | Thorium ->
@@ -340,7 +382,7 @@ let internal applicable
             && worthTheTrip
             && not heavy
             && not standing
-            && (not deliveryDraw || outlivesTheLoadedLeg)
+            && (not deliveryDraw || (carriesOnly && outlivesTheLoadedLeg))
         | Energy ->
             has Carry
             && halfEmpty

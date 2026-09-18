@@ -180,6 +180,23 @@ let private assignedTask name (colony: ColonyView) =
 let private holds name task (colony: ColonyView) =
     assignedTask name colony = Some(taskId task)
 
+/// The delivery's loaded leg as the gate prices it (#373): from the Storage's
+/// free neighbours to the Reactor's ring, for this body carrying
+/// `Tuning.ReactorLoad`. Read off the Atlas and not asserted: the clause is
+/// pinned to the walk the colony prices, not to a number that moves with the
+/// floor under it.
+let private loadedLegOf (creep: CreepInfo, colony: ColonyView) =
+    let store =
+        match SpatialInfo.placementOf colony.Spatial "sto-1" with
+        | Some store -> store
+        | None -> failtest "the fixture places its Storage"
+
+    let loaded = Grid.factorCarrying creep Tuning.defaults.ReactorLoad
+
+    match Atlas.walkTicksFrom (Atlas.ofView colony) loaded store (snd reactorErrand.Target) with
+    | Some ticks -> ticks
+    | None -> failtest "the widened floor must price the delivery leg, or this case shows nothing"
+
 /// The `ClaimReactor` Intents one tick emits.
 let private reclaimIntents (colony: ColonyView) =
     let { Intents = intents } = decideOn colony
@@ -863,21 +880,8 @@ let courierTests =
                         taskId (Withdraw("sto-1", Thorium))
                     )
 
-                // Read off the Atlas, not asserted: the clause is pinned to the
-                // walk the colony prices, not to a number that moves with the
-                // floor under it.
-                let leg =
-                    let creep, colony = atStorage Engine.creepLifetime
-
-                    match
-                        Atlas.walkTicks (Atlas.ofView colony) creep.Name (Refill(reactor, Thorium))
-                    with
-                    | Some ticks -> ticks
-                    | None ->
-                        failtest
-                            "the widened floor must price the delivery leg, or this case shows nothing"
-
-                let needed = leg * Tuning.defaults.MineContactAgeing
+                let needed =
+                    loadedLegOf (atStorage Engine.creepLifetime) * Tuning.defaults.MineContactAgeing
 
                 Expect.isTrue
                     (draws (atStorage needed))
@@ -886,6 +890,106 @@ let courierTests =
                 Expect.isFalse
                     (draws (atStorage (needed - 1)))
                     "one tick short of it is refused: that load would be dropped short of the Reactor"
+            }
+
+            // #373. The gate reads parts and never a row (ADR 0006), so ADR
+            // 0067's "one fixed `[20 Carry; 10 Move]` body" was a row fact
+            // and not a gate: any empty light carrier of 500 or more carry
+            // passed every clause of the delivery draw, and once #367 ranked
+            // that draw at the top of Feeding the empty workers refuelling
+            // beside the Storage won it on rank — live W15S28, two 500 T
+            // loads out on `11W 12C 12M` bodies in one slot while the courier
+            // hauled energy. A Work part is dead weight on a leg that is all
+            // carrying, and it is what puts the body above fatigue parity at
+            // exactly the load the programme carries.
+            test
+                "the delivery draw refuses a body with a Work part, and the pure carrier beside it draws" {
+                let worker =
+                    creepWith
+                        "worker-fresh"
+                        0
+                        600
+                        (List.replicate 11 Work @ List.replicate 12 Carry @ List.replicate 12 Move)
+
+                let alone =
+                    deliveryColony (Some Ownership.Ours)
+                    |> paved
+                    |> withHomeCreep { X = 13; Y = 10 } worker
+
+                Expect.isFalse
+                    (alone |> holds worker.Name (Withdraw("sto-1", Thorium)))
+                    "a fresh, empty, 600-carry worker beside the Storage is refused the delivery draw: it has a Work part"
+
+                let carrier = courier "courier-fresh"
+                let both = alone |> withHomeCreep { X = 13; Y = 11 } carrier
+
+                Expect.isTrue
+                    (both |> holds carrier.Name (Withdraw("sto-1", Thorium)))
+                    "the pure carrier one tile further off draws it"
+
+                Expect.isFalse
+                    (both |> holds worker.Name (Withdraw("sto-1", Thorium)))
+                    "and the worker still does not"
+            }
+
+            // #373's second half. The TTL clause (#354) priced the loaded leg
+            // off the body **as it stands** when it asks — and it stands
+            // empty, because it has to be empty to draw. An empty body is not
+            // the one that walks the leg: a `10 Carry; 5 Move` body is
+            // weightless empty and two ticks a plain tile under a 500-unit
+            // load, so the old read let it through at half the walk it went
+            // on to make, and three ticks of life a tick on that walk is what
+            // killed the worker in W15S25. The leg is now priced from the
+            // Storage's own neighbours for the body carrying
+            // `Tuning.ReactorLoad` (`Atlas.walkTicksFrom`, `Grid.factorCarrying`).
+            test "the loaded leg is priced for the body as loaded, not as it stands empty" {
+                let atStorage life =
+                    let slow =
+                        { creepWith
+                              "carrier-slow"
+                              0
+                              500
+                              (List.replicate 10 Carry @ List.replicate 5 Move) with
+                            TicksToLive = life
+                        }
+
+                    slow,
+                    deliveryColony (Some Ownership.Ours)
+                    |> paved
+                    |> withHomeCreep { X = 13; Y = 10 } slow
+
+                let draws (creep: CreepInfo, colony) =
+                    colony |> holds creep.Name (Withdraw("sto-1", Thorium))
+
+                let emptyLeg =
+                    let creep, colony = atStorage Engine.creepLifetime
+
+                    match
+                        Atlas.walkTicks (Atlas.ofView colony) creep.Name (Refill(reactor, Thorium))
+                    with
+                    | Some ticks -> ticks
+                    | None -> failtest "the widened floor must price the empty walk too"
+
+                let loadedLeg = loadedLegOf (atStorage Engine.creepLifetime)
+
+                Expect.isGreaterThan
+                    loadedLeg
+                    emptyLeg
+                    "the premise: loaded, this body is slower than the empty walk the gate used to read"
+
+                let ageing = Tuning.defaults.MineContactAgeing
+
+                Expect.isFalse
+                    (draws (atStorage (emptyLeg * ageing)))
+                    "the life that covered the empty walk three times over is refused: it does not cover the loaded one"
+
+                Expect.isTrue
+                    (draws (atStorage (loadedLeg * ageing)))
+                    "the life that covers the loaded leg at the contact rate draws"
+
+                Expect.isFalse
+                    (draws (atStorage (loadedLeg * ageing - 1)))
+                    "one tick short of it is refused"
             }
 
             // #354's third clause, at the one end this fixture can show. The
@@ -1223,20 +1327,7 @@ let courierTests =
                     }
                     |> withHomeCreep { X = 13; Y = 10 } aged
 
-                // Read off the Atlas, as the Storage case above reads it: the
-                // clause is pinned to the walk the colony prices and not to a
-                // number that moves with the floor under it.
-                let leg =
-                    let creep, colony = atStorage Engine.creepLifetime
-
-                    match
-                        Atlas.walkTicks (Atlas.ofView colony) creep.Name (Refill(reactor, Thorium))
-                    with
-                    | Some ticks -> ticks
-                    | None ->
-                        failtest
-                            "the widened floor must price the delivery leg, or this case shows nothing"
-
+                let leg = loadedLegOf (atStorage Engine.creepLifetime)
                 let creep, colony = atStorage (leg * Tuning.defaults.MineContactAgeing - 1)
 
                 Expect.isFalse
@@ -1485,6 +1576,54 @@ let consignmentTests =
     testList
         "the consignment"
         [
+            // #373's Work-part clause is the **delivery** draw's: a consignor's
+            // Storage is drawn for its own terminal, a leg of a few tiles with
+            // no crossing on it, and it is a Storage's Thorium too. What tells
+            // the two apart in the Emitter is the errand — a consignor declares
+            // none — so the worker this colony has is still a body for the
+            // consign draw. Read off the verbose Scoring rather than the
+            // assignment, because the fixture pools a mine haul and the
+            // energy economy against it and which wins is not this case's
+            // claim; that the draw is *scored* for the worker, and not rejected
+            // at applicability, is.
+            test
+                "a consignor's Storage draw keeps the worker: the Work-part clause is the delivery draw's alone" {
+                let worker =
+                    creepWith
+                        "worker-consign"
+                        0
+                        600
+                        (List.replicate 11 Work @ List.replicate 12 Carry @ List.replicate 12 Move)
+
+                let scoredFor (colony: ColonyView) =
+                    let { Verdicts = verdicts } =
+                        decide colony Map.empty (Set.singleton worker.Name) None
+
+                    verdicts
+                    |> List.exists (function
+                        | Verdict.Scoring(name, rows) when name = worker.Name ->
+                            rows
+                            |> List.exists (function
+                                | Candidate.Scored(task, _, _, _) ->
+                                    task = taskId (Withdraw("sto-1", Thorium))
+                                | Candidate.Rejected _ -> false)
+                        | _ -> false)
+
+                Expect.isTrue
+                    (scoredFor (
+                        consigningColony 0 10_000 |> withHomeCreep { X = 13; Y = 10 } worker
+                    ))
+                    "in the consignor, the Storage's Thorium draw is scored for the worker"
+
+                Expect.isFalse
+                    (scoredFor (
+                        deliveryColony (Some Ownership.Ours)
+                        |> paved
+                        |> withHomeCreep { X = 13; Y = 10 } worker
+                    ))
+                    "in the colony that declared the errand, the same draw is rejected for the same body"
+            }
+
             test
                 "a declared consignee draws its bank towards the terminal, and the terminal takes it" {
                 let tasks = planTasksOn (consigningColony 0 10_000) noThreats
